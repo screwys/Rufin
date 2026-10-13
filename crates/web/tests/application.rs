@@ -902,7 +902,7 @@ async fn exercise_http_api(
     assert_eq!(metadata["favorite"], true);
     for include_current in [false, true] {
         let mut saved = settings.load();
-        saved.clear_queue_includes_current = include_current;
+        saved.player_display.clear_queue_includes_current = include_current;
         settings.save(&saved).unwrap();
         api(reqwest::Method::DELETE, "queue", Value::Null).await;
         tokio::time::timeout(Duration::from_secs(5), async {

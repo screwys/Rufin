@@ -19,7 +19,7 @@ impl Preferences {
         if self
             .settings
             .set_app_setting("private mode setting", enabled, |settings| {
-                &mut settings.private_mode
+                &mut settings.application.private_mode
             })
             .is_none()
         {
@@ -93,12 +93,18 @@ impl Preferences {
     }
 
     pub(super) fn set_home_blocks(self: &Rc<Self>, blocks: Vec<HomeBlockKind>) {
-        let previous = self.settings.current.borrow().home_blocks.clone();
+        let previous = self
+            .settings
+            .current
+            .borrow()
+            .application
+            .home_blocks
+            .clone();
         let added = blocks.iter().any(|block| !previous.contains(block));
         if self
             .settings
             .set_app_setting("home block settings", blocks, |settings| {
-                &mut settings.home_blocks
+                &mut settings.application.home_blocks
             })
             .is_none()
         {

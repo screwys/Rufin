@@ -68,6 +68,7 @@ impl Shell {
             .settings
             .current
             .borrow()
+            .application
             .activity_overview
             .startup_periods(&now);
         if periods.iter().all(Option::is_none) {
@@ -90,6 +91,7 @@ impl Shell {
                 .settings
                 .current
                 .borrow()
+                .application
                 .activity_overview
                 .startup_period(&now, &months);
             let Some(period) = period else {
@@ -99,7 +101,7 @@ impl Shell {
             shell
                 .settings
                 .update_app_settings("automatic activity overview", |settings| {
-                    let settings = &mut settings.activity_overview;
+                    let settings = &mut settings.application.activity_overview;
                     settings.mark_opened(period);
                     true
                 });
@@ -289,7 +291,13 @@ impl ActivityView {
             glib::Propagation::Proceed
         });
         view.root.add_controller(key);
-        let settings = shell.settings.current.borrow().activity_overview.clone();
+        let settings = shell
+            .settings
+            .current
+            .borrow()
+            .application
+            .activity_overview
+            .clone();
         background_image.set_sensitive(settings.dynamic_background);
         let image_setting = background_image.downgrade();
         dynamic_background.connect_active_notify(move |row| {
@@ -332,7 +340,7 @@ impl ActivityView {
                 shell
                     .settings
                     .update_app_settings("listening overview", |settings| {
-                        let settings = &mut settings.activity_overview;
+                        let settings = &mut settings.application.activity_overview;
                         let target = match index {
                             0 => &mut settings.autoplay_first_track,
                             1 => &mut settings.dynamic_background,
@@ -370,7 +378,8 @@ impl ActivityView {
             shell
                 .settings
                 .update_app_settings("listening overview", |settings| {
-                    settings.activity_overview.result_count = counts[row.selected() as usize];
+                    settings.application.activity_overview.result_count =
+                        counts[row.selected() as usize];
                     true
                 });
             view.apply_data();
@@ -632,6 +641,7 @@ impl ActivityView {
                             .settings
                             .current
                             .borrow()
+                            .application
                             .activity_overview
                             .autoplay_first_track
                         && let Some(uri) = top
@@ -657,7 +667,13 @@ impl ActivityView {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        let settings = shell.settings.current.borrow().activity_overview.clone();
+        let settings = shell
+            .settings
+            .current
+            .borrow()
+            .application
+            .activity_overview
+            .clone();
         self.apply_display_settings();
         let data = self.data.borrow();
         let Some(data) = data.as_ref() else {
@@ -716,7 +732,13 @@ impl ActivityView {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        let settings = shell.settings.current.borrow().activity_overview.clone();
+        let settings = shell
+            .settings
+            .current
+            .borrow()
+            .application
+            .activity_overview
+            .clone();
         if let Some(period) = self.selected_period() {
             let label = period_label(period);
             let args = [("period", label.as_str())];
@@ -752,7 +774,13 @@ impl ActivityView {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        let settings = shell.settings.current.borrow().activity_overview.clone();
+        let settings = shell
+            .settings
+            .current
+            .borrow()
+            .application
+            .activity_overview
+            .clone();
         self.background.set_visible(settings.dynamic_background);
         if settings.dynamic_background {
             let texture = self
@@ -774,7 +802,13 @@ impl ActivityView {
         let Some(data) = self.data.borrow().clone() else {
             return;
         };
-        let settings = shell.settings.current.borrow().activity_overview.clone();
+        let settings = shell
+            .settings
+            .current
+            .borrow()
+            .application
+            .activity_overview
+            .clone();
         let rgb = |color: gdk::RGBA| {
             [color.red(), color.green(), color.blue()]
                 .map(|channel| (channel * 255.0).round() as u8)

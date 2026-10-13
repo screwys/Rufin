@@ -88,9 +88,9 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
     add_window_action(shell, "toggle-private-mode", private_mode_accels, {
         let shell = Rc::clone(shell);
         move || {
-            let enabled = !shell.settings.current.borrow().private_mode;
+            let enabled = !shell.settings.current.borrow().application.private_mode;
             shell.preferences.set_private_mode(enabled);
-            if shell.settings.current.borrow().private_mode == enabled {
+            if shell.settings.current.borrow().application.private_mode == enabled {
                 shell
                     .control_feedback
                     .show_control_feedback_toast(if enabled {

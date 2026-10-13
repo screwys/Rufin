@@ -355,7 +355,14 @@ fn library_sources_page(
             },
         );
         downloads_group.add(&quality);
-        downloaded_badge.set_active(shell.settings.current.borrow().show_downloaded_badges);
+        downloaded_badge.set_active(
+            shell
+                .settings
+                .current
+                .borrow()
+                .application
+                .show_downloaded_badges,
+        );
         let downloaded_badge_shell = Rc::clone(shell);
         downloaded_badge.connect_active_notify(move |row| {
             downloaded_badge_shell

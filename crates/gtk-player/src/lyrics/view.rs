@@ -285,7 +285,7 @@ impl LyricsPane {
         let instrumental =
             matches_current && matches!(content, Some(CurrentLyricsContent::Instrumental));
         let available = document.is_some();
-        let (search_label, search_enabled) = if settings.private_mode {
+        let (search_label, search_enabled) = if settings.application.private_mode {
             (tr("Private mode is on"), false)
         } else if current_media.is_some() {
             (tr("Search lyrics"), true)
@@ -299,7 +299,7 @@ impl LyricsPane {
             &tr("Clear fetched lyrics for this track"),
             current_track.is_some_and(|track| {
                 settings.lyrics.can_suppress_auto_lyrics(
-                    settings.private_mode,
+                    settings.application.private_mode,
                     track,
                     if matches_current { origin } else { None },
                 )
@@ -331,7 +331,7 @@ impl LyricsPane {
         } else if loading && matches_current {
             LyricsPaneContent::Loading
         } else {
-            LyricsPaneContent::Empty(if settings.private_mode {
+            LyricsPaneContent::Empty(if settings.application.private_mode {
                 tr("Server lyrics are off in private mode")
             } else if !settings.lyrics.preferences.external_lyrics_enabled {
                 tr("External lyric lookup is off")

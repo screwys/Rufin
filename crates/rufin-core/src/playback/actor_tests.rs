@@ -3,6 +3,7 @@ use super::super::{
     state::tests::{IdleBackend, seeded},
 };
 use super::*;
+use crate::playback::{Placement, RadioPlayRequest};
 use playback::{
     BackendEvent, BackendFailure, PlaybackNotice, PlaybackSubscription, Provenance, RepeatMode,
 };
@@ -28,14 +29,25 @@ async fn canceled_queue_preparation_publishes_loading_completion() {
     )
     .unwrap();
     let mut updates = owner.updates.subscribe();
+    assert!(!updates.recv().await.unwrap().unwrap().view.queue_loading);
     for placement in [Placement::Now, Placement::End] {
-        let reservation = playback.reserve_materialization(placement).unwrap();
+        let (cancel, cancellation) = std::sync::mpsc::channel();
+        playback.downgrade().post(move |player, sample| {
+            player
+                .handle_command(
+                    Command::Radio(RadioPlayRequest {
+                        placement,
+                        seed: library::RadioSeed::Track("https://example.test/radio-seed".into()),
+                    }),
+                    sample,
+                )
+                .unwrap();
+            player.publish(sample);
+            cancellation.recv().unwrap();
+            player.shutdown(sample);
+        });
         assert!(updates.recv().await.unwrap().unwrap().view.queue_loading);
-        assert!(
-            playback
-                .cancel_materialization(reservation.id, placement)
-                .unwrap()
-        );
+        cancel.send(()).unwrap();
         assert!(!updates.recv().await.unwrap().unwrap().view.queue_loading);
     }
     playback.shutdown().unwrap();
@@ -169,8 +181,8 @@ async fn published_queue_snapshot(
 
 fn replace_queue(playback: &Playback, prefix: &str, count: usize) {
     playback
-        .play(PlayRequest::from_load(
-            library::QueueReadRequest::items(
+        .play(PlayRequest::from_input(
+            library::QueueLoad::items(
                 (0..count)
                     .map(|index| {
                         (
@@ -275,19 +287,22 @@ async fn persistence_coalesces_latest_queue_metadata() {
     let database = library::Database::open(directory.path().join("queue.sqlite3"))
         .await
         .unwrap();
-    let page = database
-        .read_queue(library::QueueReadRequest::media_uris(
+    let page = PlayRequest::from_input(
+        library::QueueLoad::media_uris(
             (1..=4).map(|key| format!("https://example.test/{key}")),
             library::QueueProvenance::Context {
                 context_id: "test".into(),
                 context_title: None,
                 source_rank: 0,
             },
-        ))
-        .await
-        .unwrap();
+        ),
+        Placement::Now,
+    )
+    .prepare(&database, false, 0)
+    .await
+    .unwrap();
     let mut sequence = Sequence::new();
-    sequence.add_page(page, library::QueueReorderTarget::End, true, None);
+    sequence.add_page(page, library::QueueReorderTarget::End, true);
     let mut pending = sequence.take_persistence().unwrap();
     sequence.set_repeat_mode(RepeatMode::All);
     sequence.set_progress_millis(42000);

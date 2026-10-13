@@ -16,8 +16,8 @@ use sources::SourceId;
 
 use super::{
     AccentPreference, ContextMenuSettings, LayoutSettings, LibraryListKey, LibraryListSettings,
-    LibraryListSettingsEntry, SidebarSettings, ThemePreference, default_library_list_settings,
-    sanitized_window_size,
+    LibraryListSettingsEntry, SettingsError, SettingsOwner, SidebarSettings, ThemePreference,
+    default_library_list_settings, sanitized_window_size,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -177,61 +177,116 @@ pub struct RecentSearchResult {
     pub artwork_binding: Option<Vec<u8>>,
 }
 
+macro_rules! preference_group {
+    ($(#[$record_attribute:meta])* $name:ident, $group:ident, { $( $(#[$attribute:meta])* $field:ident: $ty:ty = $default:expr $(=> $setter:ident)?; )* }) => {
+        #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+        $(#[$record_attribute])*
+        pub struct $name { $( $(#[$attribute])* pub $field: $ty, )* }
+        impl Default for $name {
+            fn default() -> Self { Self { $( $field: $default, )* } }
+        }
+        #[cfg_attr(feature = "bindings", uniffi::export)]
+        impl SettingsOwner {
+            $( $(pub fn $setter(&self, value: $ty) -> Result<(), SettingsError> {
+                self.update_preferences(move |ui| {
+                    ui.$group.$field = value;
+                    Ok(())
+                }).map_err(Into::into)
+            })? )*
+        }
+    };
+}
+
+preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] ApplicationPreferences, application, {
+    private_mode: bool = false => set_private_mode;
+    #[serde(default)]
+    cast_proxy_enabled: bool = false => set_cast_proxy_enabled;
+    #[serde(default = "default_true")]
+    external_metadata_enabled: bool = true => set_external_metadata_enabled;
+    #[serde(default)]
+    prefer_distinct_track_covers: bool = false => set_prefer_distinct_track_covers;
+    notifications_enabled: bool = false => set_notifications_enabled;
+    #[serde(default = "default_true")]
+    control_notifications_enabled: bool = true => set_control_notifications_enabled;
+    #[serde(default = "default_true")]
+    release_notifications_enabled: bool = true => set_release_notifications_enabled;
+    #[serde(default = "default_release_check_interval_hours")]
+    release_check_interval_hours: u32 = default_release_check_interval_hours() => set_release_check_interval_hours;
+    #[serde(default)]
+    reduce_motion: bool = false => set_reduce_motion;
+    #[serde(default = "default_true")]
+    show_downloaded_badges: bool = true => set_show_downloaded_badges;
+    #[serde(default = "default_true")]
+    new_playlist_current: bool = true => set_new_playlist_current;
+    #[serde(default = "default_auto_dj_refill_threshold")]
+    auto_dj_refill_threshold: u8 = DEFAULT_AUTO_DJ_REFILL_THRESHOLD => set_auto_dj_refill_threshold;
+    #[serde(default)]
+    external_site_links: ExternalSiteLinkSettings = ExternalSiteLinkSettings::default() => set_external_site_links;
+    #[serde(default)]
+    home_blocks: Vec<HomeBlockKind> = default_home_blocks() => set_home_blocks;
+    #[serde(default)]
+    context_menu: ContextMenuSettings = ContextMenuSettings::default() => set_context_menu;
+    #[serde(default)]
+    activity_overview: ActivityOverviewSettings = ActivityOverviewSettings::default();
+    #[serde(default)]
+    backup: crate::runtime::BackupSettings = crate::runtime::BackupSettings::default();
+    #[serde(default = "legacy_secret_storage_mode")]
+    secret_storage_mode: SecretStorageMode = SecretStorageMode::default();
+});
+
+preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] PlayerDisplayPreferences, player_display, {
+    #[serde(default)]
+    clear_queue_includes_current: bool = false => set_clear_queue_includes_current;
+    #[serde(default)]
+    fullscreen_dynamic_background: bool = false => set_fullscreen_dynamic_background;
+    #[serde(default = "default_lyrics_panel_visible")]
+    fullscreen_background_image: bool = true => set_fullscreen_background_image;
+    #[serde(default = "default_lyrics_panel_visible")]
+    fullscreen_lyrics_visible: bool = true => set_fullscreen_lyrics_visible;
+    #[serde(default = "default_lyrics_panel_visible")]
+    fullscreen_current_lyrics_line_visible: bool = true => set_fullscreen_current_lyrics_line_visible;
+    #[serde(default)]
+    fullscreen_visualizer_visible: bool = false => set_fullscreen_visualizer_visible;
+    #[serde(default)]
+    seekbar_waveform_enabled: bool = false => set_seekbar_waveform_enabled;
+});
+
+preference_group!(#[derive(Eq)] AppearancePreferences, appearance, {
+    theme_preference: ThemePreference = ThemePreference::System => set_theme;
+    #[serde(default)]
+    accent_preference: AccentPreference = AccentPreference::System => set_accent;
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    theme_accents: std::collections::BTreeMap<String, String> = Default::default();
+    #[serde(default = "default_language_preference")]
+    language: String = default_language_preference() => set_language;
+});
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Settings {
+    #[serde(flatten)]
+    pub appearance: AppearancePreferences,
+    #[serde(flatten)]
+    pub application: ApplicationPreferences,
+    #[serde(flatten)]
+    pub player_display: PlayerDisplayPreferences,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_search_results: Vec<RecentSearchResult>,
     #[serde(default)]
     pub web_controller: crate::settings::ControllerSettings,
     #[serde(default)]
-    pub backup: crate::runtime::BackupSettings,
-    #[serde(default)]
     pub layout: LayoutSettings,
     #[serde(default)]
     pub sidebar: SidebarSettings,
-    #[serde(default)]
-    pub context_menu: ContextMenuSettings,
-    pub theme_preference: ThemePreference,
-    #[serde(default)]
-    pub accent_preference: AccentPreference,
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub theme_accents: std::collections::BTreeMap<String, String>,
-    #[serde(default = "default_language_preference")]
-    pub language: String,
-    pub private_mode: bool,
-    #[serde(default)]
-    pub cast_proxy_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cast_network_interface: Option<String>,
-    pub notifications_enabled: bool,
-    #[serde(default = "default_true")]
-    pub control_notifications_enabled: bool,
-    #[serde(default = "default_true")]
-    pub release_notifications_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_notification_seen_version: Option<String>,
     #[serde(default)]
     pub automatic_updates_enabled: bool,
-    #[serde(default = "default_release_check_interval_hours")]
-    pub release_check_interval_hours: u32,
-    #[serde(default = "legacy_secret_storage_mode")]
-    pub secret_storage_mode: SecretStorageMode,
     #[serde(flatten)]
     pub lyrics: LyricsSettings,
-    #[serde(default = "default_true")]
-    pub external_metadata_enabled: bool,
-    #[serde(default)]
-    pub external_site_links: ExternalSiteLinkSettings,
-    #[serde(default = "default_true")]
-    pub new_playlist_current: bool,
-    #[serde(default)]
-    pub prefer_distinct_track_covers: bool,
-    #[serde(default = "default_true")]
-    pub show_downloaded_badges: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub downloads: Vec<SourceDownloadSettings>,
-    #[serde(default)]
-    pub seekbar_waveform_enabled: bool,
     #[serde(default)]
     pub show_bottom_bar_rating: bool,
     #[serde(default)]
@@ -252,16 +307,10 @@ pub struct Settings {
     pub shuffle_enabled: bool,
     #[serde(default)]
     pub repeat_mode: RepeatMode,
-    #[serde(default = "default_auto_dj_refill_threshold")]
-    pub auto_dj_refill_threshold: u8,
-    #[serde(default)]
-    pub clear_queue_includes_current: bool,
     #[serde(default)]
     pub playback: PlaybackSettings,
     #[serde(default)]
     pub random_play: RandomPlaySettings,
-    #[serde(default)]
-    pub home_blocks: Vec<HomeBlockKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_width: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -272,20 +321,6 @@ pub struct Settings {
     pub visualizer_panel_visible: bool,
     #[serde(default)]
     pub visualizer: super::visualizer::VisualizerSettings,
-    #[serde(default = "default_lyrics_panel_visible")]
-    pub fullscreen_lyrics_visible: bool,
-    #[serde(default = "default_lyrics_panel_visible")]
-    pub fullscreen_current_lyrics_line_visible: bool,
-    #[serde(default)]
-    pub fullscreen_visualizer_visible: bool,
-    #[serde(default)]
-    pub fullscreen_dynamic_background: bool,
-    #[serde(default = "default_lyrics_panel_visible")]
-    pub fullscreen_background_image: bool,
-    #[serde(default)]
-    pub reduce_motion: bool,
-    #[serde(default)]
-    pub activity_overview: ActivityOverviewSettings,
     #[serde(default)]
     pub queue_lyrics_height: Option<i32>,
     #[serde(default)]
@@ -297,33 +332,18 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            appearance: AppearancePreferences::default(),
+            application: ApplicationPreferences::default(),
+            player_display: PlayerDisplayPreferences::default(),
             recent_search_results: Vec::new(),
             web_controller: crate::settings::ControllerSettings::default(),
             layout: LayoutSettings::default(),
             sidebar: SidebarSettings::default(),
-            context_menu: ContextMenuSettings::default(),
-            theme_preference: ThemePreference::System,
-            accent_preference: AccentPreference::System,
-            theme_accents: Default::default(),
-            language: default_language_preference(),
-            private_mode: false,
-            cast_proxy_enabled: false,
             cast_network_interface: None,
-            notifications_enabled: false,
-            control_notifications_enabled: true,
-            release_notifications_enabled: true,
             release_notification_seen_version: None,
             automatic_updates_enabled: false,
-            release_check_interval_hours: default_release_check_interval_hours(),
-            secret_storage_mode: SecretStorageMode::default(),
             lyrics: LyricsSettings::default(),
-            external_metadata_enabled: true,
-            external_site_links: ExternalSiteLinkSettings::default(),
-            new_playlist_current: true,
-            prefer_distinct_track_covers: false,
-            show_downloaded_badges: true,
             downloads: Vec::new(),
-            seekbar_waveform_enabled: false,
             show_bottom_bar_rating: false,
             tray_enabled: false,
             keep_running_after_close: false,
@@ -334,24 +354,13 @@ impl Default for Settings {
             auto_dj_enabled: false,
             shuffle_enabled: false,
             repeat_mode: RepeatMode::Off,
-            auto_dj_refill_threshold: DEFAULT_AUTO_DJ_REFILL_THRESHOLD,
-            clear_queue_includes_current: false,
             playback: PlaybackSettings::default(),
             random_play: RandomPlaySettings::default(),
-            backup: crate::runtime::BackupSettings::default(),
-            home_blocks: default_home_blocks(),
             window_width: None,
             window_height: None,
             lyrics_panel_visible: true,
             visualizer_panel_visible: false,
             visualizer: super::visualizer::VisualizerSettings::default(),
-            fullscreen_lyrics_visible: true,
-            fullscreen_current_lyrics_line_visible: true,
-            fullscreen_visualizer_visible: false,
-            fullscreen_dynamic_background: false,
-            fullscreen_background_image: true,
-            reduce_motion: false,
-            activity_overview: ActivityOverviewSettings::default(),
             queue_lyrics_height: None,
             right_panel: super::right_panel::RightPanelSettings::default(),
             library_lists: default_library_list_settings(),
@@ -373,27 +382,28 @@ impl Settings {
     }
 
     pub fn allows_notifications(&self) -> bool {
-        self.notifications_enabled
+        self.application.notifications_enabled
     }
 
     pub fn shows_external_site_links(&self) -> bool {
-        self.external_site_links.enabled
+        self.application.external_site_links.enabled
     }
 
     pub fn allows_external_metadata_lookup(&self) -> bool {
-        self.external_metadata_enabled && !self.private_mode
+        self.application.external_metadata_enabled && !self.application.private_mode
     }
 
     pub fn sanitize(&mut self) {
         self.recent_search_results.truncate(20);
-        if ![1, 6, 12, 24].contains(&self.release_check_interval_hours) {
-            self.release_check_interval_hours = default_release_check_interval_hours();
+        if ![1, 6, 12, 24].contains(&self.application.release_check_interval_hours) {
+            self.application.release_check_interval_hours = default_release_check_interval_hours();
         }
         self.rich_presence.sanitize();
         self.playback.sanitize();
         self.random_play.sanitize();
         self.lyrics.sanitize();
-        self.auto_dj_refill_threshold = self
+        self.application.auto_dj_refill_threshold = self
+            .application
             .auto_dj_refill_threshold
             .clamp(MIN_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD);
         self.lastfm_api_key = self.lastfm_api_key.trim().to_string();
@@ -403,7 +413,7 @@ impl Settings {
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .map(str::to_string);
-        self.language = sanitize_language_preference(&self.language);
+        self.appearance.language = sanitize_language_preference(&self.appearance.language);
         self.release_notification_seen_version = self
             .release_notification_seen_version
             .as_deref()
@@ -413,7 +423,7 @@ impl Settings {
         self.layout.sanitize();
         self.sidebar.sanitize();
         self.right_panel.sanitize();
-        self.context_menu.sanitize();
+        self.application.context_menu.sanitize();
         if self.keep_running_after_close {
             self.tray_enabled = true;
         }
@@ -428,7 +438,7 @@ impl Settings {
             self.window_width = None;
             self.window_height = None;
         }
-        sanitize_home_blocks(&mut self.home_blocks);
+        sanitize_home_blocks(&mut self.application.home_blocks);
         migrate_library_lists(&mut self.library_lists);
         sanitize_downloads(&mut self.downloads);
     }
@@ -604,7 +614,10 @@ fn sanitize_downloads(downloads: &mut Vec<SourceDownloadSettings>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{RecentSearchKind, RecentSearchResult, Settings};
+    use super::{
+        ApplicationPreferences, PlayerDisplayPreferences, RecentSearchKind, RecentSearchResult,
+        Settings,
+    };
 
     #[test]
     fn recent_search_results_keep_exact_items_in_recency_order_and_round_trip() {
@@ -685,31 +698,34 @@ mod tests {
             old.as_object_mut().unwrap().remove(key);
         }
         let restored: Settings = serde_json::from_value(old).unwrap();
-        assert!(restored.fullscreen_lyrics_visible);
-        assert!(!restored.fullscreen_visualizer_visible);
-        assert!(!restored.fullscreen_dynamic_background);
+        assert!(restored.player_display.fullscreen_lyrics_visible);
+        assert!(!restored.player_display.fullscreen_visualizer_visible);
+        assert!(!restored.player_display.fullscreen_dynamic_background);
         for choice in 0..16 {
             let settings = Settings {
-                fullscreen_lyrics_visible: choice & 1 != 0,
-                fullscreen_visualizer_visible: choice & 2 != 0,
-                fullscreen_dynamic_background: choice & 4 != 0,
-                fullscreen_background_image: choice & 8 != 0,
+                player_display: PlayerDisplayPreferences {
+                    fullscreen_lyrics_visible: choice & 1 != 0,
+                    fullscreen_visualizer_visible: choice & 2 != 0,
+                    fullscreen_dynamic_background: choice & 4 != 0,
+                    fullscreen_background_image: choice & 8 != 0,
+                    ..Default::default()
+                },
                 ..Settings::default()
             };
             let restored: Settings =
                 serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
             assert_eq!(
                 (
-                    restored.fullscreen_lyrics_visible,
-                    restored.fullscreen_visualizer_visible,
-                    restored.fullscreen_dynamic_background,
-                    restored.fullscreen_background_image
+                    restored.player_display.fullscreen_lyrics_visible,
+                    restored.player_display.fullscreen_visualizer_visible,
+                    restored.player_display.fullscreen_dynamic_background,
+                    restored.player_display.fullscreen_background_image
                 ),
                 (
-                    settings.fullscreen_lyrics_visible,
-                    settings.fullscreen_visualizer_visible,
-                    settings.fullscreen_dynamic_background,
-                    settings.fullscreen_background_image
+                    settings.player_display.fullscreen_lyrics_visible,
+                    settings.player_display.fullscreen_visualizer_visible,
+                    settings.player_display.fullscreen_dynamic_background,
+                    settings.player_display.fullscreen_background_image
                 )
             );
         }
@@ -723,17 +739,20 @@ mod tests {
             .unwrap()
             .remove("release_check_interval_hours");
         let previous: Settings = serde_json::from_value(saved).unwrap();
-        assert_eq!(previous.release_check_interval_hours, 6);
+        assert_eq!(previous.application.release_check_interval_hours, 6);
 
         for hours in [1, 6, 12, 24] {
             let mut settings = Settings {
-                release_check_interval_hours: hours,
+                application: ApplicationPreferences {
+                    release_check_interval_hours: hours,
+                    ..Default::default()
+                },
                 ..Settings::default()
             };
             settings.sanitize();
             let saved = serde_json::to_vec(&settings).unwrap();
             let restored: Settings = serde_json::from_slice(&saved).unwrap();
-            assert_eq!(restored.release_check_interval_hours, hours);
+            assert_eq!(restored.application.release_check_interval_hours, hours);
         }
     }
 }

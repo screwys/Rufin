@@ -21,15 +21,6 @@ use playback::{
     qualified_play_threshold_millis,
 };
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct MaterializationId(u64);
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MaterializationReservation {
-    pub id: MaterializationId,
-    pub current_media_uri: Option<String>,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClockSample {
     pub monotonic_millis: u64,
@@ -62,15 +53,14 @@ pub struct AutoDjRequest {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    Radio(crate::playback::RadioPlayRequest),
+    Random(crate::playback::RandomPlayRequest),
     OperationFailed(String),
     ObserveExternal {
         output: PlaybackOutput,
         observation: ExternalPlayback,
     },
-    ApplyQueue {
-        load: library::QueueReadRequest,
-        placement: Placement,
-    },
+    ApplyQueue(crate::playback::PlayRequest),
     Activate(usize),
     ActivateOccurrence(u64),
     Remove(usize),
@@ -81,7 +71,7 @@ pub enum Command {
         target: crate::playback::QueueReorderTarget,
     },
     Insert {
-        input: library::QueueReadRequest,
+        input: library::QueueLoad,
         target: crate::playback::QueueReorderTarget,
     },
     MoveAfterCurrent(usize),
@@ -217,13 +207,8 @@ struct FailedRun {
 
 #[derive(Clone, Debug)]
 enum QueueCompletion {
-    Replace {
-        seed: Option<u64>,
-        random_start: bool,
-    },
-    Insert {
-        target: QueueReorderTarget,
-    },
+    Replace,
+    Insert { target: QueueReorderTarget },
 }
 
 pub(super) struct Player {
@@ -250,9 +235,7 @@ pub(super) struct Player {
     next_plan: Option<NextPlan>,
     restored_paused: bool,
     next_run_number: u64,
-    next_materialization_number: u64,
-    pending_replacement: Option<MaterializationId>,
-    pending_additive: HashMap<MaterializationId, Placement>,
+    candidate_tasks: HashMap<u64, (Placement, JoinHandle<()>)>,
     settings: PlaybackSettings,
     playback_output: PlaybackOutput,
     output_volume: f64,
@@ -306,9 +289,7 @@ impl Player {
             next_plan: None,
             restored_paused,
             next_run_number: 1,
-            next_materialization_number: 1,
-            pending_replacement: None,
-            pending_additive: HashMap::new(),
+            candidate_tasks: HashMap::new(),
             settings,
             playback_output,
             output_volume,
@@ -433,8 +414,7 @@ impl Player {
         self.swap_backend(backend)?;
         self.finish_current(RunEndReason::Replaced, sample);
         self.cancel_queue_read();
-        self.pending_replacement = None;
-        self.pending_additive.clear();
+        self.cancel_candidate_tasks(false);
         self.deferred_queue.clear();
         self.queue_loading = false;
         self.queue_transport = None;
@@ -538,8 +518,7 @@ impl Player {
             self.cancel_queue_read();
             self.queue_loading = false;
             self.deferred_queue.clear();
-            self.pending_replacement = None;
-            self.pending_additive.clear();
+            self.cancel_candidate_tasks(false);
             self.auto_dj_in_flight = None;
         }
         let queue_changed = sequence.is_some();
@@ -796,112 +775,140 @@ impl Player {
         self.auto_dj_enabled
     }
 
-    pub(super) fn reserve_materialization(
-        &mut self,
-        placement: Placement,
-    ) -> MaterializationReservation {
-        let was_loading = self.queue_loading();
-        let id = MaterializationId(self.next_materialization_number);
-        self.next_materialization_number = self.next_materialization_number.wrapping_add(1).max(1);
-        match placement {
-            Placement::Replace { .. } => {
-                self.pending_additive.clear();
-                self.pending_replacement = Some(id);
-                self.auto_dj_in_flight = None;
-                self.auto_dj_waiting_for_continuation = false;
-            }
-            Placement::AfterCurrent | Placement::End => {
-                self.pending_additive.insert(id, placement);
-            }
-        }
-        self.dirty |= self.queue_loading() != was_loading;
-        MaterializationReservation {
-            id,
-            current_media_uri: self
-                .sequence
-                .selected()
-                .map(|entry| entry.media_uri.clone()),
-        }
+    fn play_radio(&mut self, request: crate::playback::RadioPlayRequest) {
+        let owner = self.owner();
+        let database = owner.database.clone();
+        let source = owner
+            .source
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        let selected = source.upgrade().and_then(|owner| owner.selected_library());
+        self.start_candidates(request.placement, Provenance::Radio, async move {
+            crate::radio::radio_candidates(
+                &database,
+                source,
+                selected,
+                request.seed,
+                20,
+                &library::ReadCancellation::new(),
+            )
+            .await
+        });
     }
 
-    pub(super) fn apply_materialization(
-        &mut self,
-        id: MaterializationId,
-        load: library::QueueReadRequest,
-        placement: Placement,
-        sample: &ClockSample,
-    ) -> Result<bool, SequenceError> {
-        let accepted = match placement {
-            Placement::Replace { .. } => self.pending_replacement == Some(id),
-            Placement::AfterCurrent | Placement::End => {
-                self.pending_additive.get(&id) == Some(&placement)
-            }
+    fn play_random(&mut self, request: crate::playback::RandomPlayRequest) {
+        let owner = self.owner();
+        let Some(selected) = owner
+            .source_owner()
+            .and_then(|owner| owner.selected_library())
+        else {
+            return;
         };
-        if !accepted {
-            return Ok(false);
-        }
+        let database = owner.database.clone();
+        let excluded = self
+            .sequence
+            .selected()
+            .map(|entry| entry.media_uri.clone())
+            .into_iter()
+            .collect::<Vec<_>>();
+        self.start_candidates(request.placement, Provenance::Random, async move {
+            database
+                .random_candidates(
+                    selected.source_key,
+                    selected.music_folder_key,
+                    &request.criteria,
+                    &excluded,
+                    request.requested,
+                    &library::ReadCancellation::new(),
+                )
+                .await
+                .map_err(super::string_error)
+        });
+    }
+
+    fn start_candidates(
+        &mut self,
+        placement: Placement,
+        provenance: Provenance,
+        candidates: impl std::future::Future<Output = Result<Vec<String>, String>> + Send + 'static,
+    ) {
         if matches!(placement, Placement::Replace { .. }) {
-            self.pending_replacement = None;
-        } else {
-            self.pending_additive.remove(&id);
+            self.cancel_candidate_tasks(false);
+            self.auto_dj_in_flight = None;
+            self.auto_dj_waiting_for_continuation = false;
         }
-        self.apply_batch(load, placement, sample)?;
-        Ok(true)
-    }
-
-    pub(super) fn fail_materialization(
-        &mut self,
-        id: MaterializationId,
-        placement: Placement,
-        message: String,
-    ) -> bool {
-        let accepted = self.cancel_materialization(id, placement);
-        if accepted {
-            self.report_error(message);
-        }
-        accepted
-    }
-
-    pub(super) fn cancel_materialization(
-        &mut self,
-        id: MaterializationId,
-        placement: Placement,
-    ) -> bool {
         let was_loading = self.queue_loading();
-        let accepted = match placement {
-            Placement::Replace { .. } if self.pending_replacement == Some(id) => {
-                self.pending_replacement = None;
-                true
-            }
-            Placement::AfterCurrent | Placement::End
-                if self.pending_additive.get(&id) == Some(&placement) =>
-            {
-                self.pending_additive.remove(&id);
-                true
-            }
-            _ => false,
+        let id = self.next_queue_request;
+        self.next_queue_request = id.wrapping_add(1);
+        let playback = self.playback.clone();
+        let task = self.owner().runtime.spawn(async move {
+            let result = candidates.await;
+            playback.post(move |player, sample| {
+                if let Err(error) = player.complete_candidates(id, result, provenance, sample) {
+                    player.report_error(error.to_string());
+                }
+            });
+        });
+        self.candidate_tasks.insert(id, (placement, task));
+        self.dirty |= self.queue_loading() != was_loading;
+    }
+
+    fn complete_candidates(
+        &mut self,
+        id: u64,
+        result: Result<Vec<String>, String>,
+        provenance: Provenance,
+        sample: &ClockSample,
+    ) -> Result<(), SequenceError> {
+        let was_loading = self.queue_loading();
+        let Some((placement, _)) = self.candidate_tasks.remove(&id) else {
+            return Ok(());
         };
         self.dirty |= self.queue_loading() != was_loading;
-        accepted
+        match result {
+            Ok(candidates) if !candidates.is_empty() => self.apply_batch(
+                crate::playback::PlayRequest::from_input(
+                    library::QueueLoad::media_uris(candidates, provenance),
+                    placement,
+                ),
+                sample,
+            ),
+            Ok(_) => Ok(()),
+            Err(error) => Ok(self.report_error(error)),
+        }
+    }
+
+    fn cancel_candidate_tasks(&mut self, replacement_only: bool) {
+        let was_loading = self.queue_loading();
+        self.candidate_tasks.retain(|_, (placement, task)| {
+            if !replacement_only || matches!(placement, Placement::Replace { .. }) {
+                task.abort();
+                false
+            } else {
+                true
+            }
+        });
+        self.dirty |= self.queue_loading() != was_loading;
     }
 
     pub(super) fn play(
         &mut self,
-        mut request: crate::playback::PlayRequest,
+        request: crate::playback::PlayRequest,
         sample: &ClockSample,
     ) -> Result<(), SequenceError> {
-        request.shuffled_start &=
-            self.sequence.shuffle_enabled() && request.placement == Placement::Now;
-        if let Some((context, track_key, rank)) = request.activation_context()
+        if let Some((context, track_key, rank)) =
+            request.activation_context(self.sequence.shuffle_enabled())
             && self.activate_context(&context, track_key, rank, sample)
         {
             return Ok(());
         }
-        let placement = request.placement.with_anchor(request.load.anchor_index);
-        let reservation = self.reserve_materialization(placement);
-        let (load, placement) = request.into_load(super::random_u64());
-        self.apply_materialization(reservation.id, load, placement, sample)?;
-        Ok(())
+        if matches!(request.placement, Placement::Replace { .. }) {
+            self.cancel_candidate_tasks(false);
+            self.auto_dj_in_flight = None;
+            self.auto_dj_waiting_for_continuation = false;
+        }
+        self.apply_batch(request, sample)
     }
 
     pub(super) fn handle_command(
@@ -922,6 +929,8 @@ impl Player {
             return Ok(());
         }
         match command {
+            Command::Radio(request) => Ok(self.play_radio(request)),
+            Command::Random(request) => Ok(self.play_random(request)),
             Command::OperationFailed(message) => {
                 self.last_error = Some(message.clone());
                 Ok({
@@ -933,7 +942,7 @@ impl Player {
                 output,
                 observation,
             } => self.observe_external(output, observation, sample),
-            Command::ApplyQueue { load, placement } => self.apply_batch(load, placement, sample),
+            Command::ApplyQueue(request) => self.apply_batch(request, sample),
             Command::Activate(position) => Ok(self.activate(&position, sample)),
             Command::ActivateOccurrence(id) => Ok({
                 if let Some(position) = self.sequence.index_of(OccurrenceId(id)) {
@@ -1200,7 +1209,7 @@ impl Player {
         &mut self,
         seed_run: Option<RunId>,
         seed_media_uri: &str,
-        load: library::QueueReadRequest,
+        load: library::QueueLoad,
         sample: &ClockSample,
     ) -> Result<bool, SequenceError> {
         if self.external.is_some() {
@@ -1219,7 +1228,10 @@ impl Player {
             self.dirty = true;
             return Ok(true);
         }
-        self.apply_batch(load, Placement::End, sample)?;
+        self.apply_batch(
+            crate::playback::PlayRequest::from_input(load, Placement::End),
+            sample,
+        )?;
         Ok(true)
     }
 
@@ -1242,7 +1254,7 @@ impl Player {
         self.complete_auto_dj(
             seed_run,
             seed_media_uri,
-            library::QueueReadRequest::items(items),
+            library::QueueLoad::items(items),
             sample,
         )
     }
@@ -1271,65 +1283,50 @@ impl Player {
 
     fn apply_batch(
         &mut self,
-        mut load: library::QueueReadRequest,
-        placement: Placement,
+        request: crate::playback::PlayRequest,
         _sample: &ClockSample,
     ) -> Result<(), SequenceError> {
-        let replacing = matches!(placement, Placement::Replace { .. });
+        let replacing = matches!(request.placement, Placement::Replace { .. });
         let loading_changed = !self.queue_loading;
         self.queue_loading = true;
         if self.pending_queue.is_some() && !replacing {
-            self.deferred_queue
-                .push_back(Command::ApplyQueue { load, placement });
-            return Ok({
-                self.dirty |= loading_changed;
-            });
+            self.deferred_queue.push_back(Command::ApplyQueue(request));
+            self.dirty |= loading_changed;
+            return Ok(());
         }
         if replacing {
             self.deferred_queue.clear();
             self.queue_transport = None;
         }
-        let seed = (self.sequence.shuffle_enabled() || load.random_start.is_some())
-            .then(|| load.random_start.unwrap_or_else(super::random_u64));
-        let anchor = match placement {
-            Placement::Replace { anchor_index } => anchor_index,
-            _ => 0,
-        };
-        if load.random_start.is_some() {
-            load.anchor = None;
-        }
-        let target = match placement {
-            Placement::AfterCurrent => {
-                self.sequence
+        let completion = match request.placement {
+            Placement::Replace { .. } => QueueCompletion::Replace,
+            Placement::AfterCurrent => QueueCompletion::Insert {
+                target: self
+                    .sequence
                     .selected()
                     .map_or(QueueReorderTarget::End, |row| {
                         QueueReorderTarget::AfterOccurrence(
                             row.occurrence_id.expect("local queue entry"),
                         )
-                    })
-            }
-            _ => QueueReorderTarget::End,
-        };
-        load.anchor_index = anchor;
-        let random_start = load.random_start.is_some();
-        Ok(self.request_queue(
-            load,
-            if replacing {
-                QueueCompletion::Replace { seed, random_start }
-            } else {
-                QueueCompletion::Insert { target }
+                    }),
             },
-        ))
+            Placement::End => QueueCompletion::Insert {
+                target: QueueReorderTarget::End,
+            },
+        };
+        self.request_queue(request, completion);
+        Ok(())
     }
 
     pub(super) fn queue_loading(&self) -> bool {
-        self.queue_loading
-            || self.auto_dj_in_flight.is_some()
-            || self.pending_replacement.is_some()
-            || !self.pending_additive.is_empty()
+        self.queue_loading || self.auto_dj_in_flight.is_some() || !self.candidate_tasks.is_empty()
     }
 
-    fn request_queue(&mut self, request: library::QueueReadRequest, completion: QueueCompletion) {
+    fn request_queue(
+        &mut self,
+        request: crate::playback::PlayRequest,
+        completion: QueueCompletion,
+    ) {
         let id = self.next_queue_request;
         self.next_queue_request = id.wrapping_add(1);
         self.queue_loading = true;
@@ -1337,9 +1334,10 @@ impl Player {
         let owner = self.owner();
         let database = owner.database.clone();
         let playback = self.playback.clone();
+        let shuffled = self.sequence.shuffle_enabled();
         let task = owner.runtime.spawn(async move {
-            let result = database
-                .read_queue(request)
+            let result = request
+                .prepare(&database, shuffled, super::random_u64())
                 .await
                 .map_err(super::string_error);
             playback.post(move |player, sample| {
@@ -1401,10 +1399,7 @@ impl Player {
             Err(error) => self.report_error(error),
         }
         self.dirty = true;
-        if matches!(
-            self.pending_queue,
-            Some((_, QueueCompletion::Replace { .. }, _))
-        ) {
+        if matches!(self.pending_queue, Some((_, QueueCompletion::Replace, _))) {
             return;
         }
         if self.current_run.is_none()
@@ -1479,7 +1474,7 @@ impl Player {
     pub(super) fn complete_queue(
         &mut self,
         id: u64,
-        result: Result<library::QueueReadPage, String>,
+        result: Result<super::commands::QueueBatch, String>,
         sample: &ClockSample,
     ) -> Result<bool, SequenceError> {
         if !self.accepts_queue(id) {
@@ -1495,17 +1490,9 @@ impl Player {
                 self.dirty = true;
             }
             Ok(page) => match completion {
-                QueueCompletion::Replace { seed, random_start } => {
+                QueueCompletion::Replace => {
                     self.finish_queue_run(sample, RunEndReason::ManualSkip);
-                    self.sequence.add_page(
-                        page,
-                        QueueReorderTarget::End,
-                        true,
-                        if random_start { None } else { seed },
-                    );
-                    if random_start {
-                        self.sequence.random_start(seed.unwrap_or(0));
-                    }
+                    self.sequence.add_page(page, QueueReorderTarget::End, true);
                     self.restored_paused = false;
                     self.changed_queue(true, false, sample);
                 }
@@ -1513,7 +1500,7 @@ impl Player {
                     let advance =
                         self.auto_dj_waiting_for_continuation && self.current_run.is_none();
                     let had_current = self.sequence.selected_index().is_some();
-                    self.edit_queue(|sequence| sequence.add_page(page, target, false, None));
+                    self.edit_queue(|sequence| sequence.add_page(page, target, false));
                     if advance {
                         self.sequence.advance_index(false);
                         self.auto_dj_waiting_for_continuation = false;
@@ -1563,7 +1550,7 @@ impl Player {
         {
             return;
         }
-        self.pending_replacement = None;
+        self.cancel_candidate_tasks(true);
         self.restored_paused = false;
         self.dirty = true;
         if let Some(run) = self.current_run.as_ref() {
@@ -1628,9 +1615,9 @@ impl Player {
         self.edit_queue(|sequence| sequence.reorder(selection, target));
         self.changed_queue(false, false, sample)
     }
-    fn insert(&mut self, input: library::QueueReadRequest, target: &QueueReorderTarget) {
+    fn insert(&mut self, input: library::QueueLoad, target: &QueueReorderTarget) {
         self.request_queue(
-            input,
+            crate::playback::PlayRequest::from_input(input, Placement::End),
             QueueCompletion::Insert {
                 target: match target {
                     QueueReorderTarget::Before(i) => self
@@ -1770,7 +1757,7 @@ impl Player {
         if self.pending_queue.is_some() || self.pending_hydration.is_some() {
             self.queue_transport = Some(TransportStatus::Stopped);
         }
-        let Some(run) = self.current_run.as_ref() else {
+        let Some(run) = self.current_run.as_ref().map(|run| run.id) else {
             if !reset_position || (self.sequence.progress_millis() == 0 && !self.restored_paused) {
                 return;
             }
@@ -1781,9 +1768,9 @@ impl Player {
             self.dirty = true;
             return;
         };
-        self.pending_replacement = None;
+        self.cancel_candidate_tasks(true);
         self.dirty = true;
-        self.send_backend(BackendCommand::Stop { run: run.id });
+        self.send_backend(BackendCommand::Stop { run });
         self.finish_current(RunEndReason::Stopped, sample);
         if reset_position {
             self.sequence.set_progress_millis(0);
@@ -1792,8 +1779,7 @@ impl Player {
     }
 
     pub(super) fn shutdown(&mut self, sample: &ClockSample) {
-        self.pending_replacement = None;
-        self.pending_additive.clear();
+        self.cancel_candidate_tasks(false);
         self.auto_dj_in_flight = None;
         self.auto_dj_waiting_for_continuation = false;
         self.dirty = true;
@@ -1809,7 +1795,7 @@ impl Player {
         self.dirty = true;
         let old = self.current_run.as_ref().map(|run| run.id);
         let reserved = self.next_plan.clone();
-        self.pending_replacement = None;
+        self.cancel_candidate_tasks(true);
         if let Some(run) = old {
             self.send_backend(BackendCommand::Stop { run });
         }
@@ -1834,7 +1820,7 @@ impl Player {
         };
         self.restored_paused = false;
         self.dirty = true;
-        self.pending_replacement = None;
+        self.cancel_candidate_tasks(true);
         if let Some(run) = self.current_run.as_ref() {
             self.send_backend(BackendCommand::Stop { run: run.id });
         }
@@ -2865,6 +2851,7 @@ impl Player {
 
     pub(super) fn shutdown_backend(&mut self) -> Result<(), playback::BackendError> {
         self.cancel_queue_read();
+        self.cancel_candidate_tasks(false);
         if let Some(task) = self.pending_hydration.take() {
             task.abort();
         }
@@ -2878,6 +2865,7 @@ impl Player {
 impl Drop for Player {
     fn drop(&mut self) {
         self.cancel_queue_read();
+        self.cancel_candidate_tasks(false);
         if let Some(task) = self.pending_hydration.take() {
             task.abort();
         }

@@ -568,7 +568,7 @@ fn release_note_from_github_json(value: &serde_json::Value) -> Option<ReleaseNot
 }
 
 fn release_check_allowed(settings: &crate::settings::Settings) -> bool {
-    !settings.private_mode
+    !settings.application.private_mode
 }
 
 fn release_notification_due(
@@ -576,7 +576,7 @@ fn release_notification_due(
     latest: &str,
     current: &str,
 ) -> bool {
-    settings.release_notifications_enabled
+    settings.application.release_notifications_enabled
         && release_check_allowed(settings)
         && release_version_is_newer(latest, current)
         && settings.release_notification_seen_version.as_deref() != Some(latest)
@@ -783,7 +783,7 @@ mod tests {
             None
         );
         settings.automatic_updates_enabled = true;
-        settings.private_mode = true;
+        settings.application.private_mode = true;
         assert_eq!(
             automatic_update_target(&cache, &settings, true, "1.0.0", None),
             None
@@ -870,22 +870,25 @@ mod tests {
         settings.release_notification_seen_version = Some("2.0.0".to_string());
         assert!(!release_notification_due(&settings, "2.0.0", "1.9.0"));
         settings.release_notification_seen_version = None;
-        settings.release_notifications_enabled = false;
+        settings.application.release_notifications_enabled = false;
         assert!(!release_notification_due(&settings, "2.0.0", "1.9.0"));
-        settings.release_notifications_enabled = true;
-        settings.private_mode = true;
+        settings.application.release_notifications_enabled = true;
+        settings.application.private_mode = true;
         assert!(!release_notification_due(&settings, "2.0.0", "1.9.0"));
     }
 
     #[test]
     fn release_acquisition_is_gated_only_by_private_mode() {
         let mut settings = crate::settings::Settings {
-            release_notifications_enabled: false,
+            application: crate::settings::ApplicationPreferences {
+                release_notifications_enabled: false,
+                ..Default::default()
+            },
             ..crate::settings::Settings::default()
         };
 
         assert!(release_check_allowed(&settings));
-        settings.private_mode = true;
+        settings.application.private_mode = true;
         assert!(!release_check_allowed(&settings));
     }
 
@@ -895,7 +898,10 @@ mod tests {
             notes: vec![note("2.0.0")],
         };
         let mut settings = crate::settings::Settings {
-            release_notifications_enabled: false,
+            application: crate::settings::ApplicationPreferences {
+                release_notifications_enabled: false,
+                ..Default::default()
+            },
             ..crate::settings::Settings::default()
         };
 
@@ -907,7 +913,7 @@ mod tests {
             Some("2.0.0")
         );
 
-        settings.release_notifications_enabled = true;
+        settings.application.release_notifications_enabled = true;
         settings.release_notification_seen_version = Some("2.0.0".to_string());
         assert!(!release_notification_due(&settings, "2.0.0", "1.0.0"));
         assert_eq!(
@@ -1011,8 +1017,8 @@ mod tests {
         let settings = SettingsFile::open(path.clone()).expect("open settings");
         settings
             .update(|stored| {
-                stored.ui.private_mode = true;
-                stored.ui.notifications_enabled = true;
+                stored.ui.application.private_mode = true;
+                stored.ui.application.notifications_enabled = true;
                 Ok(())
             })
             .expect("prepare unrelated settings");
@@ -1024,8 +1030,8 @@ mod tests {
             reopened.ui.release_notification_seen_version.as_deref(),
             Some("2.0.0")
         );
-        assert!(reopened.ui.private_mode);
-        assert!(reopened.ui.notifications_enabled);
+        assert!(reopened.ui.application.private_mode);
+        assert!(reopened.ui.application.notifications_enabled);
     }
 
     #[test]

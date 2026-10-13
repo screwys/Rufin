@@ -310,7 +310,13 @@ impl Shell {
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         let (showcase_variation, explore_variation) = self.products.source.home_variations();
-        let blocks = self.settings.current.borrow().home_blocks.clone();
+        let blocks = self
+            .settings
+            .current
+            .borrow()
+            .application
+            .home_blocks
+            .clone();
         self.queue_prepared_route(
             selected,
             route,
@@ -343,7 +349,13 @@ impl Shell {
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         let (showcase_variation, explore_variation) = self.products.source.home_variations();
-        let blocks = self.settings.current.borrow().home_blocks.clone();
+        let blocks = self
+            .settings
+            .current
+            .borrow()
+            .application
+            .home_blocks
+            .clone();
         let (generation, cancellation) = self.begin_root_order_read();
         let task = self.products.runtime.spawn(async move {
             database

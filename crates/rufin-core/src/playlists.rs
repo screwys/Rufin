@@ -430,7 +430,7 @@ pub async fn create_playlist(
                     true,
                 );
                 if let Some(current) = current {
-                    stored.ui.new_playlist_current = current;
+                    stored.ui.application.new_playlist_current = current;
                 }
                 Ok(())
             })
@@ -548,7 +548,7 @@ async fn generate_artwork(
 ) -> Result<Option<Arc<sources::ImageBytes>>, String> {
     let stored = owner.shared.settings.load();
     let policy = artwork::ExternalPolicy::new(
-        stored.ui.external_metadata_enabled,
+        stored.ui.application.external_metadata_enabled,
         stored.ui.allows_external_metadata_lookup(),
         stored.ui.lastfm_api_key,
     );

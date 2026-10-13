@@ -363,43 +363,22 @@ pub enum QueueLoad {
     Captured(Arc<[QueueEntry]>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct QueueReadRequest {
-    pub input: QueueLoad,
-    pub context_title: Option<Arc<QueueContextTitle>>,
-    pub anchor_index: usize,
-    pub anchor: Option<(crate::TrackKey, Option<crate::PlaylistEntryKey>)>,
-    pub random_start: Option<u64>,
-    pub shuffled: Option<u64>,
-}
-
-impl QueueReadRequest {
+impl QueueLoad {
     pub fn songs(selection: crate::SongSelection) -> Self {
-        Self::new(QueueLoad::Songs(vec![(selection, QueueProvenance::Manual)]))
+        Self::Songs(vec![(selection, QueueProvenance::Manual)])
     }
     pub fn items(items: Vec<(QueueItem, QueueProvenance)>) -> Self {
-        Self::new(QueueLoad::Items(items))
+        Self::Items(items)
     }
     pub fn media_uris(uris: impl IntoIterator<Item = String>, provenance: QueueProvenance) -> Self {
-        Self::new(QueueLoad::Uris(uris.into_iter().collect(), provenance))
-    }
-    pub fn new(input: QueueLoad) -> Self {
-        Self {
-            input,
-            context_title: None,
-            anchor_index: 0,
-            anchor: None,
-            random_start: None,
-            shuffled: None,
-        }
+        Self::Uris(uris.into_iter().collect(), provenance)
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct QueueReadPage {
+pub struct QueueEntries {
     pub entries: Vec<QueueEntry>,
-    pub rows: Vec<Arc<QueueRow>>,
-    pub current_index: usize,
+    pub anchor_index: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -721,22 +700,21 @@ impl Database {
         transfer: &str,
         total: usize,
         current: usize,
-    ) -> LibraryResult<QueueReadRequest> {
+    ) -> LibraryResult<(QueueLoad, usize)> {
         let queue = self
             .prepare_queue_transfer(transfer, total, current)
             .await?;
         self.import_queue_transfer_metadata(transfer, total).await?;
-        Ok(QueueReadRequest {
-            input: QueueLoad::Captured(
+        Ok((
+            QueueLoad::Captured(
                 queue
                     .order
                     .iter()
                     .map(|index| queue.entries[*index as usize].clone())
                     .collect(),
             ),
-            anchor_index: queue.current_index.unwrap_or_default(),
-            ..QueueReadRequest::new(QueueLoad::Captured(Arc::from([])))
-        })
+            queue.current_index.unwrap_or_default(),
+        ))
     }
 
     pub async fn import_queue_transfer_metadata(
@@ -779,15 +757,11 @@ impl Database {
         Ok(keys)
     }
 
-    pub async fn read_queue(&self, request: QueueReadRequest) -> LibraryResult<QueueReadPage> {
-        let QueueReadRequest {
-            input,
-            context_title,
-            anchor_index,
-            anchor: selected,
-            random_start,
-            shuffled,
-        } = request;
+    pub async fn queue_entries(
+        &self,
+        input: QueueLoad,
+        selected: Option<(crate::TrackKey, Option<crate::PlaylistEntryKey>)>,
+    ) -> LibraryResult<QueueEntries> {
         let mut entries = Vec::new();
         let mut anchor = None;
         match input {
@@ -862,38 +836,9 @@ impl Database {
             }
             QueueLoad::Captured(captured) => entries.extend(captured.iter().cloned()),
         }
-        if let Some(title) = context_title {
-            for entry in &mut entries {
-                if let QueueProvenance::Context { context_title, .. } = &mut entry.provenance {
-                    *context_title = Some(title.clone());
-                }
-            }
-        }
-        if let Some(seed) = shuffled {
-            shuffle_order(&mut entries, seed);
-            anchor = Some(0);
-        }
-        let current_index = random_start
-            .filter(|_| !entries.is_empty())
-            .map(|seed| seed as usize % entries.len())
-            .unwrap_or_else(|| {
-                anchor
-                    .unwrap_or(anchor_index)
-                    .min(entries.len().saturating_sub(1))
-            });
-        let requested = entries
-            .get(current_index)
-            .cloned()
-            .map(|entry| (current_index, entry))
-            .into_iter()
-            .collect::<Vec<_>>();
-        let rows = self
-            .queue_rows_for_entries(&requested, &ReadCancellation::new())
-            .await?;
-        Ok(QueueReadPage {
+        Ok(QueueEntries {
             entries,
-            rows,
-            current_index,
+            anchor_index: anchor,
         })
     }
 

@@ -110,13 +110,20 @@ impl DownloadsState {
         image.set_visible(false);
     }
     pub fn set_download_badge_visible(&self, image: &gtk::Image, downloaded: bool) {
-        image.set_visible(self.settings.current.borrow().show_downloaded_badges && downloaded);
+        image.set_visible(
+            self.settings
+                .current
+                .borrow()
+                .application
+                .show_downloaded_badges
+                && downloaded,
+        );
     }
     pub fn set_downloaded_badges_visible(self: &Rc<Self>, visible: bool) {
         if self
             .settings
             .set_app_setting("downloaded badge setting", visible, |settings| {
-                &mut settings.show_downloaded_badges
+                &mut settings.application.show_downloaded_badges
             })
             .is_some()
         {

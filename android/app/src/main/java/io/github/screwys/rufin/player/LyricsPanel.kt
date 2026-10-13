@@ -96,7 +96,7 @@ internal fun LyricsActions(player: PlayerConnection) {
         PlayerIconButton("rufin-sliders-2-symbolic", "Customize display", { menu = true })
         DropdownMenu(menu, { menu = false }) {
             DropdownMenuItem(text = { Text(translate("Search lyrics")) }, onClick = { menu = false; search = true },
-                enabled = token != null && player.settings?.privateMode != true,
+                enabled = token != null && player.settings?.application?.privateMode != true,
                 leadingIcon = { RufinIcon("rufin-lyrics-search-symbolic", null) })
             DropdownMenuItem(text = { Text(translate("Edit Lyrics")) }, onClick = { menu = false; edit = true },
                 enabled = document != null && current?.writable == true,
@@ -402,7 +402,7 @@ private fun LyricsSearchSheet(player: PlayerConnection, token: CurrentMediaId, o
             Text(translate("Search Lyrics"), style = MaterialTheme.typography.titleLarge)
             OutlinedTextField(artist, { artist = it }, label = { Text(translate("Artist")) }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = settingsTextFieldColors())
             OutlinedTextField(title, { title = it }, label = { Text(translate("Song")) }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = settingsTextFieldColors())
-            Button({ player.searchLyrics(token, artist, title) }, enabled = player.lyricsToken == token && player.settings?.privateMode != true) { Text(translate("Search")) }
+            Button({ player.searchLyrics(token, artist, title) }, enabled = player.lyricsToken == token && player.settings?.application?.privateMode != true) { Text(translate("Search")) }
             if (matchingSearch && player.lyricsSearching) CircularProgressIndicator()
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
                 items(results.orEmpty(), key = { "${it.provider}:${it.id}" }) { hit ->

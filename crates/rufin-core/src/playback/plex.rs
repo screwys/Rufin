@@ -66,7 +66,9 @@ impl PlexPlayback {
                         repeat: queue.repeat_mode,
                         shuffled: queue.shuffled,
                         auto_dj: stored.auto_dj_enabled,
-                        auto_dj_refill_threshold: usize::from(stored.auto_dj_refill_threshold),
+                        auto_dj_refill_threshold: usize::from(
+                            stored.application.auto_dj_refill_threshold,
+                        ),
                         playback_rate: 1.0,
                         desired_playing: false,
                         listen: None,
@@ -79,10 +81,13 @@ impl PlexPlayback {
         let items = self.all_items(&timeline, &self.cancelled).await?;
         snapshot.queue.entries = self
             .database
-            .read_queue(library::QueueReadRequest::media_uris(
-                items.iter().map(|item| item.media_uri.clone()),
-                playback::Provenance::Manual,
-            ))
+            .queue_entries(
+                library::QueueLoad::media_uris(
+                    items.iter().map(|item| item.media_uri.clone()),
+                    playback::Provenance::Manual,
+                ),
+                None,
+            )
             .await
             .map_err(string_error)?
             .entries
@@ -199,16 +204,22 @@ impl PlexPlayback {
     }
     async fn insert(
         &self,
-        input: library::QueueReadRequest,
+        request: PlayRequest,
         target: Option<crate::playback::QueueReorderTarget>,
-        placement: crate::playback::QueuePlacement,
     ) -> Result<(), String> {
         self.current().await?;
-        let page = self
-            .database
-            .read_queue(input)
+        let placement = request.placement;
+        let shuffled = self
+            .playback
+            .projection()
+            .is_ok_and(|projection| projection.view.controls.shuffle_enabled);
+        let page = request
+            .prepare(&self.database, shuffled, random_u64())
             .await
             .map_err(string_error)?;
+        if page.entries.is_empty() {
+            return Ok(());
+        }
         let anchor = page.current_index;
         let keys = queue_keys(
             &self.database,
@@ -543,10 +554,13 @@ impl PlexPlayback {
     ) -> Result<library::QueueRestore, String> {
         let entries = self
             .database
-            .read_queue(library::QueueReadRequest::media_uris(
-                window.items.iter().map(|item| item.media_uri.clone()),
-                playback::Provenance::Manual,
-            ))
+            .queue_entries(
+                library::QueueLoad::media_uris(
+                    window.items.iter().map(|item| item.media_uri.clone()),
+                    playback::Provenance::Manual,
+                ),
+                None,
+            )
             .await
             .map_err(string_error)?
             .entries;
@@ -663,8 +677,11 @@ impl PlexPlayback {
                 }
             }
             Command::Insert { input, target } => {
-                self.insert(input, Some(target), crate::playback::QueuePlacement::Last)
-                    .await?
+                self.insert(
+                    PlayRequest::from_input(input, crate::playback::QueuePlacement::Last),
+                    Some(target),
+                )
+                .await?
             }
             Command::Clear { include_current } => {
                 let timeline = self.current().await?;
@@ -681,7 +698,7 @@ impl PlexPlayback {
                     .collect();
                 self.remove_items(queue, items).await?;
             }
-            Command::ApplyQueue { load, placement } => self.insert(load, None, placement).await?,
+            Command::ApplyQueue(request) => self.insert(request, None).await?,
             _ => return Ok(()),
         }
         Ok(())
@@ -1065,9 +1082,11 @@ impl PlaybackOwner {
                     return Ok(());
                 }
                 plex.insert(
-                    library::QueueReadRequest::media_uris(candidates, playback::Provenance::AutoDj),
+                    PlayRequest::from_input(
+                        library::QueueLoad::media_uris(candidates, playback::Provenance::AutoDj),
+                        crate::playback::QueuePlacement::Last,
+                    ),
                     None,
-                    crate::playback::QueuePlacement::Last,
                 )
                 .await
             }
@@ -1102,9 +1121,11 @@ impl PlaybackOwner {
                 .await?;
                 let _guard = plex.commands.lock().await;
                 plex.insert(
-                    library::QueueReadRequest::media_uris(candidates, playback::Provenance::Radio),
+                    PlayRequest::from_input(
+                        library::QueueLoad::media_uris(candidates, playback::Provenance::Radio),
+                        request.placement,
+                    ),
                     None,
-                    request.placement,
                 )
                 .await
             }
@@ -1143,9 +1164,11 @@ impl PlaybackOwner {
                     .map_err(string_error)?;
                 let _guard = plex.commands.lock().await;
                 plex.insert(
-                    library::QueueReadRequest::media_uris(candidates, playback::Provenance::Random),
+                    PlayRequest::from_input(
+                        library::QueueLoad::media_uris(candidates, playback::Provenance::Random),
+                        request.placement,
+                    ),
                     None,
-                    request.placement,
                 )
                 .await
             }
@@ -1480,10 +1503,13 @@ impl PlaybackOwner {
             let mut queue = plex.restore(&nearby, &timeline).await?;
             queue.entries = self
                 .database
-                .read_queue(library::QueueReadRequest::media_uris(
-                    window.items.iter().map(|item| item.media_uri.clone()),
-                    playback::Provenance::Manual,
-                ))
+                .queue_entries(
+                    library::QueueLoad::media_uris(
+                        window.items.iter().map(|item| item.media_uri.clone()),
+                        playback::Provenance::Manual,
+                    ),
+                    None,
+                )
                 .await
                 .map_err(string_error)?
                 .entries
@@ -1647,16 +1673,10 @@ impl PlaybackOwner {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let mut request = request.clone();
-        request.shuffled_start &= request.placement == crate::playback::QueuePlacement::Now
-            && plex
-                .playback
-                .projection()
-                .is_ok_and(|projection| projection.view.controls.shuffle_enabled);
-        let (input, placement) = request.into_load(super::random_u64());
+        let request = request.clone();
         self.runtime.spawn(async move {
             let _guard = plex.commands.lock().await;
-            if let Err(error) = plex.insert(input, None, placement).await {
+            if let Err(error) = plex.insert(request, None).await {
                 let _ = plex.playback.command(Command::OperationFailed(error));
             }
         });

@@ -336,9 +336,8 @@ mod tests {
                 .execute(writer.as_mut().unwrap()).await.unwrap();
         }
         let admitted = source
-            .read_queue(crate::QueueReadRequest {
-                anchor: None,
-                input: crate::QueueLoad::Items(
+            .queue_entries(
+                crate::QueueLoad::items(
                     (0..250)
                         .map(|_| {
                             (
@@ -354,11 +353,8 @@ mod tests {
                         })
                         .collect(),
                 ),
-                context_title: None,
-                anchor_index: 0,
-                random_start: None,
-                shuffled: None,
-            })
+                None,
+            )
             .await
             .unwrap();
         source

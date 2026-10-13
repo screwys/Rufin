@@ -525,7 +525,7 @@ fn primary_menu_sidebar_toggle_label(shell: &Shell) -> String {
 }
 
 fn primary_menu_private_mode_label(shell: &Shell) -> String {
-    if shell.settings.current.borrow().private_mode {
+    if shell.settings.current.borrow().application.private_mode {
         tr("Turn off private mode")
     } else {
         tr("Turn on private mode")

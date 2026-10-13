@@ -105,7 +105,7 @@ impl ApplicationAppearance {
 
     pub fn apply(&self, settings: &Settings) {
         if let Some(gtk_settings) = gtk::Settings::default() {
-            if settings.reduce_motion {
+            if settings.application.reduce_motion {
                 gtk_settings.set_gtk_enable_animations(false);
             } else {
                 gtk_settings.reset_property("gtk-enable-animations");
@@ -113,7 +113,7 @@ impl ApplicationAppearance {
         }
         let themes = self.themes.borrow();
         adw::StyleManager::default()
-            .set_color_scheme(color_scheme(&settings.theme_preference, &themes));
+            .set_color_scheme(color_scheme(&settings.appearance.theme_preference, &themes));
         self.override_provider
             .load_from_string(&appearance_override_css(settings, &themes));
     }
@@ -122,7 +122,9 @@ impl ApplicationAppearance {
         let themes = self.themes.borrow();
         let theme = theme.unwrap_or_else(|| &themes[usize::from(self.system_style.is_dark())]);
         let mut css = String::new();
-        if theme.accents.is_empty() && settings.accent_preference == AccentPreference::System {
+        if theme.accents.is_empty()
+            && settings.appearance.accent_preference == AccentPreference::System
+        {
             append_accent(
                 &mut css,
                 &self.system_style.accent_color_rgba().to_string(),
@@ -132,8 +134,12 @@ impl ApplicationAppearance {
         css.push_str(&palette_css(
             &themes,
             theme,
-            settings.theme_accents.get(&theme.id).map(String::as_str),
-            settings.accent_preference,
+            settings
+                .appearance
+                .theme_accents
+                .get(&theme.id)
+                .map(String::as_str),
+            settings.appearance.accent_preference,
         ));
         css
     }
@@ -182,11 +188,11 @@ fn append_accent(css: &mut String, color: &str, foreground: &str) {
 
 fn appearance_override_css(settings: &Settings, themes: &[Theme]) -> String {
     let mut css = String::from(":root {\n");
-    let theme = selected_theme(&settings.theme_preference, themes);
+    let theme = selected_theme(&settings.appearance.theme_preference, themes);
     if let Some(theme) = theme {
         // Light and Dark keep inheriting the system accent when no override is selected.
         if matches!(
-            settings.theme_preference,
+            settings.appearance.theme_preference,
             ThemePreference::Light | ThemePreference::Dark
         ) {
             for (key, value) in &theme.colors {
@@ -196,13 +202,21 @@ fn appearance_override_css(settings: &Settings, themes: &[Theme]) -> String {
             css.push_str(&palette_css(
                 themes,
                 theme,
-                settings.theme_accents.get(&theme.id).map(String::as_str),
-                settings.accent_preference,
+                settings
+                    .appearance
+                    .theme_accents
+                    .get(&theme.id)
+                    .map(String::as_str),
+                settings.appearance.accent_preference,
             ));
         }
     }
-    if (theme.is_none() || !matches!(settings.theme_preference, ThemePreference::Named(_)))
-        && let Some(color) = settings.accent_preference.color()
+    if (theme.is_none()
+        || !matches!(
+            settings.appearance.theme_preference,
+            ThemePreference::Named(_)
+        ))
+        && let Some(color) = settings.appearance.accent_preference.color()
     {
         append_accent(&mut css, color, "#ffffff");
     }
@@ -256,8 +270,11 @@ mod tests {
 
     fn css(theme: ThemePreference, accent: AccentPreference) -> String {
         let settings = Settings {
-            theme_preference: theme,
-            accent_preference: accent,
+            appearance: rufin_core::settings::AppearancePreferences {
+                theme_preference: theme,
+                accent_preference: accent,
+                ..Default::default()
+            },
             ..Settings::default()
         };
         appearance_override_css(&settings, &rufin_core::themes::builtins())

@@ -64,13 +64,16 @@ impl RufinPlayback {
         let restore = if changed {
             let mut page = self
                 .database
-                .read_queue(library::QueueReadRequest::items(
-                    state
-                        .rows
-                        .iter()
-                        .map(|row| (row.item.clone(), row.provenance.clone()))
-                        .collect(),
-                ))
+                .queue_entries(
+                    library::QueueLoad::items(
+                        state
+                            .rows
+                            .iter()
+                            .map(|row| (row.item.clone(), row.provenance.clone()))
+                            .collect(),
+                    ),
+                    None,
+                )
                 .await
                 .map_err(string_error)?;
             for (entry, row) in page.entries.iter_mut().zip(&state.rows) {
@@ -147,23 +150,26 @@ impl RufinPlayback {
 
     async fn input(
         &self,
-        input: library::QueueReadRequest,
-        placement: library::QueuePlacement,
+        request: PlayRequest,
         target: Option<library::QueueReorderTarget>,
     ) -> Result<(), String> {
-        let page = self
-            .database
-            .read_queue(input)
+        let placement = request.placement;
+        let shuffled = self
+            .playback
+            .projection()
+            .is_ok_and(|projection| projection.view.controls.shuffle_enabled);
+        let page = request
+            .prepare(&self.database, shuffled, random_u64())
             .await
             .map_err(string_error)?;
         if page.entries.is_empty() {
             return Ok(());
         }
+        let current_index = page.current_index;
         let queue = library::QueueRestore {
             order: (0..page.entries.len() as u32).collect(),
             entries: page.entries.into(),
-            rows: page.rows,
-            current_index: Some(page.current_index),
+            current_index: Some(current_index),
             ..Default::default()
         };
         let result = self
@@ -183,7 +189,9 @@ impl PlaybackOwner {
         });
         self.send(Command::SetAutoDj {
             enabled,
-            refill_threshold: usize::from(self.settings.load().ui.auto_dj_refill_threshold),
+            refill_threshold: usize::from(
+                self.settings.load().ui.application.auto_dj_refill_threshold,
+            ),
         });
     }
 
@@ -226,7 +234,9 @@ impl PlaybackOwner {
             repeat: view.controls.repeat_mode,
             shuffle: view.controls.shuffle_enabled,
             auto_dj: view.controls.auto_dj_enabled,
-            auto_dj_threshold: usize::from(self.settings.load().ui.auto_dj_refill_threshold),
+            auto_dj_threshold: usize::from(
+                self.settings.load().ui.application.auto_dj_refill_threshold,
+            ),
         })
     }
 
@@ -344,7 +354,9 @@ impl PlaybackOwner {
                 repeat: queue.repeat_mode,
                 shuffled: queue.shuffled,
                 auto_dj: settings.auto_dj_enabled,
-                auto_dj_refill_threshold: usize::from(settings.auto_dj_refill_threshold),
+                auto_dj_refill_threshold: usize::from(
+                    settings.application.auto_dj_refill_threshold,
+                ),
                 playback_rate: settings.playback.playback_rate,
                 desired_playing: false,
                 listen: None,
@@ -522,16 +534,10 @@ impl PlaybackOwner {
         let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let mut request = request.clone();
-        request.shuffled_start &= request.placement == library::QueuePlacement::Now
-            && receiver
-                .playback
-                .projection()
-                .is_ok_and(|projection| projection.view.controls.shuffle_enabled);
-        let (input, placement) = request.into_load(random_u64());
+        let request = request.clone();
         self.runtime.spawn(async move {
             let _command = receiver.commands.lock().await;
-            if let Err(error) = receiver.input(input, placement, None).await {
+            if let Err(error) = receiver.input(request, None).await {
                 let _ = receiver.playback.command(Command::OperationFailed(error));
             }
         });
@@ -563,11 +569,10 @@ impl PlaybackOwner {
                 let _command = receiver.commands.lock().await;
                 receiver
                     .input(
-                        library::QueueReadRequest::media_uris(
-                            candidates,
-                            playback::Provenance::Radio,
+                        PlayRequest::from_input(
+                            library::QueueLoad::media_uris(candidates, playback::Provenance::Radio),
+                            request.placement,
                         ),
-                        request.placement,
                         None,
                     )
                     .await
@@ -612,11 +617,13 @@ impl PlaybackOwner {
                 let _command = receiver.commands.lock().await;
                 receiver
                     .input(
-                        library::QueueReadRequest::media_uris(
-                            candidates,
-                            playback::Provenance::Random,
+                        PlayRequest::from_input(
+                            library::QueueLoad::media_uris(
+                                candidates,
+                                playback::Provenance::Random,
+                            ),
+                            request.placement,
                         ),
-                        request.placement,
                         None,
                     )
                     .await
@@ -637,7 +644,10 @@ impl PlaybackOwner {
             self.runtime.spawn(async move {
                 let _command = receiver.commands.lock().await;
                 if let Err(error) = receiver
-                    .input(input, library::QueuePlacement::End, Some(target))
+                    .input(
+                        PlayRequest::from_input(input, library::QueuePlacement::End),
+                        Some(target),
+                    )
                     .await
                 {
                     let _ = receiver.playback.command(Command::OperationFailed(error));

@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.settings
 
-import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferenceEdit
 import io.github.screwys.rufin.shared.backup.BackupFrequency
 
 import android.app.Activity
@@ -43,18 +42,18 @@ internal fun BackupSettingsPage(model: RufinConnection, preferences: Preferences
                 read -> context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 write -> context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             }
-            withContext(Dispatchers.IO) { preferences.nativeSettings().editApplicationPreferences(ApplicationPreferenceEdit.Backup(settings.copy(destinationUri = uri.toString()))) }
+            withContext(Dispatchers.IO) { preferences.nativeSettings().setBackupPreferences(settings.copy(destinationUri = uri.toString())) }
             preferences.refreshApplicationSettings()
         } }
     }
     SettingsPage {
         SettingsGroup(translate("Automatic Backups")) {
             SettingsSwitch(translate("Enable automatic backups"), settings.enabled) {
-                if (it) enable = true else preferences.changePreference(ApplicationPreferenceEdit.Backup(settings.copy(enabled = false)))
+                if (it) enable = true else preferences.changePreference { setBackupPreferences(settings.copy(enabled = false)) }
             }
             SettingsRow(translate("Backup Folder"), summary = destination ?: translate("Rufin data folder"), trailing = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (destination != null) IconButton({ preferences.changePreference(ApplicationPreferenceEdit.Backup(settings.copy(destinationUri = null))) }) {
+                    if (destination != null) IconButton({ preferences.changePreference { setBackupPreferences(settings.copy(destinationUri = null)) } }) {
                         io.github.screwys.rufin.ui.RufinIcon("rufin-view-refresh-symbolic", translate("Use Rufin data folder"), Modifier.size(20.dp))
                     }
                     OutlinedButton({ chooseFolder.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
@@ -63,17 +62,17 @@ internal fun BackupSettingsPage(model: RufinConnection, preferences: Preferences
                 }
             })
             SettingsNumber(translate("Number of backups"), settings.retentionCount.toDouble(), 1.0..4294967295.0) {
-                preferences.changePreference(ApplicationPreferenceEdit.Backup(settings.copy(retentionCount = (it as Number).toLong().toUInt())))
+                preferences.changePreference { setBackupPreferences(settings.copy(retentionCount = (it as Number).toLong().toUInt())) }
             }
             val frequency = schedule.frequency.takeUnless { it == BackupFrequency.OFF } ?: BackupFrequency.DAILY
             PreferenceChoice(translate("Schedule"), frequency.name, listOf("DAILY" to translate("Daily"), "WEEKLY" to translate("Weekly")),
-                select = { preferences.changePreference(ApplicationPreferenceEdit.Backup(settings.copy(schedule = schedule.copy(frequency = BackupFrequency.valueOf(it))))) })
+                select = { preferences.changePreference { setBackupPreferences(settings.copy(schedule = schedule.copy(frequency = BackupFrequency.valueOf(it)))) } })
             if (frequency == BackupFrequency.WEEKLY) PreferenceChoice(translate("Weekday"), schedule.weekday.toString(),
                 listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday").mapIndexed { index, day -> index.toString() to translate(day) },
-                select = { preferences.changePreference(ApplicationPreferenceEdit.Backup(settings.copy(schedule = schedule.copy(weekday = it.toUByte())))) })
+                select = { preferences.changePreference { setBackupPreferences(settings.copy(schedule = schedule.copy(weekday = it.toUByte()))) } })
             PreferenceChoice(translate("Hour"), schedule.hour.toString(),
-                (0..23).map { it.toString() to it.toString() }, select = { preferences.changePreference(ApplicationPreferenceEdit.Backup(settings.copy(schedule = schedule.copy(hour = it.toUByte())))) })
-            SettingsSwitch(translate("Encrypt backups"), settings.encrypt) { preferences.changePreference(ApplicationPreferenceEdit.Backup(settings.copy(encrypt = it))) }
+                (0..23).map { it.toString() to it.toString() }, select = { preferences.changePreference { setBackupPreferences(settings.copy(schedule = schedule.copy(hour = it.toUByte()))) } })
+            SettingsSwitch(translate("Encrypt backups"), settings.encrypt) { preferences.changePreference { setBackupPreferences(settings.copy(encrypt = it)) } }
             if (settings.encrypt) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text(translate("Password")) },
@@ -86,14 +85,14 @@ internal fun BackupSettingsPage(model: RufinConnection, preferences: Preferences
                 }
             }
         }
-        BackupContentsControls(settings.contents) { preferences.changePreference(ApplicationPreferenceEdit.Backup(settings.copy(contents = it))) }
+        BackupContentsControls(settings.contents) { preferences.changePreference { setBackupPreferences(settings.copy(contents = it)) } }
     }
     if (enable) BackupPasswordDialog(false, dismiss = { enable = false }) { passphrase ->
         enable = false
         model.runAction {
             if (passphrase != null) model.connectedService().runtime.value!!.getOrThrow().backups().use { it.saveSchedulePassword(passphrase) }
             val next = settings.copy(enabled = true, encrypt = passphrase != null)
-            withContext(Dispatchers.IO) { preferences.nativeSettings().editApplicationPreferences(ApplicationPreferenceEdit.Backup(next)) }
+            withContext(Dispatchers.IO) { preferences.nativeSettings().setBackupPreferences(next) }
             preferences.refreshApplicationSettings()
         }
     }

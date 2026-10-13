@@ -32,7 +32,13 @@ pub(super) fn wrap_general(
     let page_controls = controls.clone();
     navigation.connect_popped(move |_, _| page_controls.set_nested_page_visible(false));
 
-    let mut settings = shell.settings.current.borrow().activity_overview.clone();
+    let mut settings = shell
+        .settings
+        .current
+        .borrow()
+        .application
+        .activity_overview
+        .clone();
     for (toggle, rows, field) in [
         (
             &monthly_enabled,
@@ -64,7 +70,7 @@ pub(super) fn wrap_general(
                 shell
                     .settings
                     .update_app_settings("automatic activity overview", |settings| {
-                        *field(&mut settings.activity_overview) = row.is_active();
+                        *field(&mut settings.application.activity_overview) = row.is_active();
                         true
                     });
             }
@@ -87,7 +93,7 @@ pub(super) fn wrap_general(
                 shell
                     .settings
                     .update_app_settings("activity overview dates", |settings| {
-                        *field(&mut settings.activity_overview) = row.value() as u32;
+                        *field(&mut settings.application.activity_overview) = row.value() as u32;
                         true
                     });
             }

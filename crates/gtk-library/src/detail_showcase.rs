@@ -689,7 +689,7 @@ pub fn album_external_links(shell: &Rc<CatalogUi>, album: &AlbumRow) -> Option<g
     detail_external_links(
         shell,
         rufin_core::detail_links::album_external_links(
-            &settings.external_site_links,
+            &settings.application.external_site_links,
             source.as_ref(),
             album,
         ),
@@ -709,7 +709,7 @@ pub fn artist_external_links(
     detail_external_links(
         shell,
         rufin_core::detail_links::artist_external_links(
-            &settings.external_site_links,
+            &settings.application.external_site_links,
             source.as_ref(),
             artist,
         ),

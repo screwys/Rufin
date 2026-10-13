@@ -15,10 +15,7 @@ import io.github.screwys.rufin.core.AndroidPlaybackUpdate
 import io.github.screwys.rufin.core.AndroidPlayerMetadata
 import io.github.screwys.rufin.shared.rufin_core.PlayerPreferences
 import io.github.screwys.rufin.shared.rufin_core.PlayerPreferenceOptions
-import io.github.screwys.rufin.shared.rufin_core.PlayerPreferenceEdit
-import io.github.screwys.rufin.shared.rufin_core.VisualizerPreferenceEdit
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
-import io.github.screwys.rufin.shared.lyrics.LyricsPreferenceEdit
 import io.github.screwys.rufin.core.AndroidVisualizerDrawing
 import io.github.screwys.rufin.core.AndroidRgb
 import io.github.screwys.rufin.core.AndroidLyricsHighlight
@@ -268,16 +265,16 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         if (settingsOwner === current) settings = projected
     }
     fun refreshSettings() = action { changeSettings {} }
-    fun editPreferences(edit: PlayerPreferenceEdit) = action { changeSettings { it.editPlayerPreferences(edit) } }
+    fun editPreferences(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }
     fun equalizerEnabled(enabled: Boolean) = action { changeSettings { it.setEqualizerEnabled(enabled) } }
     fun equalizerPreset(preset: String) = action { changeSettings { it.selectEqualizerPreset(preset) } }
     fun equalizerBand(index: Int, value: Float) = action { changeSettings { it.setEqualizerBand(index.toULong(), value.toDouble()) } }
-    fun lyricsPreference(edit: LyricsPreferenceEdit) = action {
+    fun lyricsPreference(edit: SettingsOwner.() -> Unit) = action {
         val current = bridge ?: return@action
-        changeSettings { it.editLyricsPreferences(edit) }
+        changeSettings(edit)
         refreshLyrics(current)
     }
-    fun visualizerAppearance(edit: VisualizerPreferenceEdit) = action { changeSettings { it.editVisualizerPreferences(edit) } }
+    fun visualizerAppearance(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }
     fun visualizerFrameLimit(value: Int) = action { changeSettings { it.setVisualizerFrameLimit(value.toUInt()) } }
     fun visualizerPreset(slot: ULong, save: Boolean) = action { changeSettings { it.updateVisualizerPreset(slot, save) } }
     fun resetVisualizer() = action { changeSettings { it.resetVisualizerAppearance() } }

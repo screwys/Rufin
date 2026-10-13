@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.settings
 
-import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferenceEdit
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -26,7 +25,6 @@ import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.player.PlayerSettingsContent
 import io.github.screwys.rufin.player.PlayerSettingsPage
 import io.github.screwys.rufin.player.PlaybackPreferences
-import io.github.screwys.rufin.shared.lyrics.LyricsPreferenceEdit
 import io.github.screwys.rufin.sources.SourcesPage
 import kotlin.math.round
 
@@ -138,24 +136,24 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                 SettingsGroup(translate("App settings")) {
                     PreferenceChoice(translate("Update check interval"), state.releaseCheckIntervalHours.toString(),
                         listOf("1" to translate("1 hour"), "6" to translate("6 hours"), "12" to translate("12 hours"), "24" to translate("24 hours")),
-                        select = { preferences.changePreference(ApplicationPreferenceEdit.ReleaseCheckIntervalHours(it.toUInt())) })
+                        select = { preferences.changePreference { setReleaseCheckIntervalHours(it.toUInt()) } })
                     SettingsLink(null, translate("Listening overview")) { navigate(MoreDestination.OverviewSettings) }
                 }
                 SettingsGroup(translate("Notifications")) {
-                    SettingsSwitch(translate("Control notifications"), state.controlNotificationsEnabled) { preferences.changePreference(ApplicationPreferenceEdit.ControlNotificationsEnabled(it)) }
-                    SettingsSwitch(translate("Release notifications"), state.releaseNotificationsEnabled) { preferences.changePreference(ApplicationPreferenceEdit.ReleaseNotificationsEnabled(it)) }
+                    SettingsSwitch(translate("Control notifications"), state.controlNotificationsEnabled) { preferences.changePreference { setControlNotificationsEnabled(it) } }
+                    SettingsSwitch(translate("Release notifications"), state.releaseNotificationsEnabled) { preferences.changePreference { setReleaseNotificationsEnabled(it) } }
                 }
                 SettingsGroup(translate("Metadata")) {
-                    SettingsSwitch(translate("Prefer distinct track covers"), state.preferDistinctTrackCovers) { preferences.changePreference(ApplicationPreferenceEdit.PreferDistinctTrackCovers(it)) }
-                    SettingsSwitch(translate("External metadata lookup"), state.externalMetadataEnabled) { preferences.changePreference(ApplicationPreferenceEdit.ExternalMetadataEnabled(it)) }
-                    player.settings?.lyrics?.let { lyrics -> SettingsSwitch(translate("External lyrics lookup"), lyrics.externalLyricsEnabled) { player.lyricsPreference(LyricsPreferenceEdit.ExternalLyricsEnabled(it)) } }
+                    SettingsSwitch(translate("Prefer distinct track covers"), state.preferDistinctTrackCovers) { preferences.changePreference { setPreferDistinctTrackCovers(it) } }
+                    SettingsSwitch(translate("External metadata lookup"), state.externalMetadataEnabled) { preferences.changePreference { setExternalMetadataEnabled(it) } }
+                    player.settings?.lyrics?.let { lyrics -> SettingsSwitch(translate("External lyrics lookup"), lyrics.externalLyricsEnabled) { player.lyricsPreference { setExternalLyricsEnabled(it) } } }
                 }
                 val links = state.externalSiteLinks
                 SettingsGroup(translate("External site links")) {
-                    SettingsSwitch(translate("Show external site links"), links.enabled) { preferences.changePreference(ApplicationPreferenceEdit.ExternalSiteLinks(links.copy(enabled = it))) }
-                    SettingsSwitch("Last.fm", links.lastfm) { preferences.changePreference(ApplicationPreferenceEdit.ExternalSiteLinks(links.copy(lastfm = it))) }
-                    SettingsSwitch("MusicBrainz", links.musicbrainz) { preferences.changePreference(ApplicationPreferenceEdit.ExternalSiteLinks(links.copy(musicbrainz = it))) }
-                    SettingsSwitch(translate("Server"), links.server) { preferences.changePreference(ApplicationPreferenceEdit.ExternalSiteLinks(links.copy(server = it))) }
+                    SettingsSwitch(translate("Show external site links"), links.enabled) { preferences.changePreference { setExternalSiteLinks(links.copy(enabled = it)) } }
+                    SettingsSwitch("Last.fm", links.lastfm) { preferences.changePreference { setExternalSiteLinks(links.copy(lastfm = it)) } }
+                    SettingsSwitch("MusicBrainz", links.musicbrainz) { preferences.changePreference { setExternalSiteLinks(links.copy(musicbrainz = it)) } }
+                    SettingsSwitch(translate("Server"), links.server) { preferences.changePreference { setExternalSiteLinks(links.copy(server = it)) } }
                 }
                 BackupsPage(model, preferences, embedded = true, openSettings = { navigate(MoreDestination.BackupSettings) })
             }
@@ -175,8 +173,8 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
             }
             MoreDestination.Privacy -> {
                 SettingsGroup {
-                    SettingsSwitch(translate("Private mode"), state.privateMode) { preferences.changePreference(ApplicationPreferenceEdit.PrivateMode(it)) }
-                    SettingsSwitch(translate("Proxy casting through Rufin"), state.castProxyEnabled) { preferences.changePreference(ApplicationPreferenceEdit.CastProxyEnabled(it)) }
+                    SettingsSwitch(translate("Private mode"), state.privateMode) { preferences.changePreference { setPrivateMode(it) } }
+                    SettingsSwitch(translate("Proxy casting through Rufin"), state.castProxyEnabled) { preferences.changePreference { setCastProxyEnabled(it) } }
                     PreferenceChoice(translate("Secret storage"), if (state.secretStorageMode == io.github.screwys.rufin.shared.secrets.SecretStorageMode.SYSTEM_KEYRING) "system-keyring" else "config-file", listOf("system-keyring" to translate("System keyring"), "config-file" to translate("Legacy")), select = preferences::changeSecretStorage)
                 }
             }

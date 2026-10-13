@@ -382,10 +382,10 @@ fn present_fullscreen_settings(shell: &Rc<crate::PlayerUi>) {
     );
     let settings = shell.settings.current.borrow();
     let active = [
-        settings.fullscreen_lyrics_visible,
-        settings.fullscreen_visualizer_visible,
-        settings.fullscreen_dynamic_background,
-        settings.fullscreen_background_image,
+        settings.player_display.fullscreen_lyrics_visible,
+        settings.player_display.fullscreen_visualizer_visible,
+        settings.player_display.fullscreen_dynamic_background,
+        settings.player_display.fullscreen_background_image,
     ];
     drop(settings);
     let weak = Rc::downgrade(shell);
@@ -429,10 +429,10 @@ fn present_fullscreen_settings(shell: &Rc<crate::PlayerUi>) {
                 .settings
                 .update_app_settings("fullscreen display", |settings| {
                     let value = match index {
-                        0 => &mut settings.fullscreen_lyrics_visible,
-                        1 => &mut settings.fullscreen_visualizer_visible,
-                        2 => &mut settings.fullscreen_dynamic_background,
-                        _ => &mut settings.fullscreen_background_image,
+                        0 => &mut settings.player_display.fullscreen_lyrics_visible,
+                        1 => &mut settings.player_display.fullscreen_visualizer_visible,
+                        2 => &mut settings.player_display.fullscreen_dynamic_background,
+                        _ => &mut settings.player_display.fullscreen_background_image,
                     };
                     if *value == row.is_active() {
                         return false;
@@ -742,10 +742,12 @@ impl crate::PlayerUi {
                 .library_list(rufin_core::settings::LibraryListKey::FullscreenTracks)
                 .display,
         );
-        parts.lyrics_enabled.set(settings.fullscreen_lyrics_visible);
+        parts
+            .lyrics_enabled
+            .set(settings.player_display.fullscreen_lyrics_visible);
         parts
             .visualizer_enabled
-            .set(settings.fullscreen_visualizer_visible);
+            .set(settings.player_display.fullscreen_visualizer_visible);
         drop(settings);
         parts.apply_mode();
         self.apply_fullscreen_responsive_layout();
@@ -759,13 +761,13 @@ impl crate::PlayerUi {
             return;
         }
         let settings = self.settings.current.borrow();
-        let dynamic = settings.fullscreen_dynamic_background;
+        let dynamic = settings.player_display.fullscreen_dynamic_background;
         parts.background.set_visible(dynamic);
         if dynamic {
             parts.root.add_css_class("artwork-background");
             parts.background.update(
                 parts.cover.drag_paintable_source().paintable(),
-                settings.fullscreen_background_image,
+                settings.player_display.fullscreen_background_image,
             );
         } else {
             parts.root.remove_css_class("artwork-background");

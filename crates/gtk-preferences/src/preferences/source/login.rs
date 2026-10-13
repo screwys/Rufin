@@ -851,7 +851,7 @@ fn source_choice_selector(shell: &Rc<Preferences>, context: &SetupViewContext) -
     privacy.set_visible(context.onboarding);
     {
         let settings = shell.settings.current.borrow();
-        external_metadata.set_active(settings.external_metadata_enabled);
+        external_metadata.set_active(settings.application.external_metadata_enabled);
         external_lyrics.set_active(settings.lyrics.preferences.external_lyrics_enabled);
         discord_presence.set_active(settings.rich_presence.enabled);
     }

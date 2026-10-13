@@ -354,7 +354,7 @@ impl Shell {
         if self.desktop.tray.borrow().is_some() {
             return true;
         }
-        let private_mode = self.settings.current.borrow().private_mode;
+        let private_mode = self.settings.current.borrow().application.private_mode;
         let (tray, receiver) = match desktop_integration::Tray::start(private_mode) {
             Ok(started) => started,
             Err(error) => {
@@ -377,7 +377,7 @@ impl Shell {
     }
 
     pub(crate) fn refresh_tray_private_mode(&self) {
-        let private_mode = self.settings.current.borrow().private_mode;
+        let private_mode = self.settings.current.borrow().application.private_mode;
         if let Some(tray) = self.desktop.tray.borrow().as_ref() {
             tray.set_private_mode(private_mode);
         }
@@ -406,7 +406,7 @@ impl Shell {
                         shell.products.playback.next();
                     }
                     desktop_integration::TrayIntent::TogglePrivateMode => {
-                        let enabled = !shell.settings.current.borrow().private_mode;
+                        let enabled = !shell.settings.current.borrow().application.private_mode;
                         shell.preferences.set_private_mode(enabled);
                     }
                     desktop_integration::TrayIntent::Quit => {

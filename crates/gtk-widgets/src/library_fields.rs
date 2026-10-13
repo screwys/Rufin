@@ -147,31 +147,7 @@ impl TrackPresentation for QueuePageRow {
         }
     }
     fn field(&self, field: LibraryField) -> String {
-        match field {
-            LibraryField::AlbumArtist => self.album_display_artist.clone().unwrap_or_default(),
-            LibraryField::DiscNumber => self
-                .disc_number
-                .map(|value| value.to_string())
-                .unwrap_or_default(),
-            LibraryField::TrackNumber => optional_track_number(self.disc_number, self.track_number),
-            LibraryField::ReleaseDate => self.release_date.clone().unwrap_or_default(),
-            LibraryField::Bitrate
-            | LibraryField::SampleRate
-            | LibraryField::BitDepth
-            | LibraryField::Channels => audio_property_field(&self.audio_properties, field),
-            LibraryField::Format => self.source_format.clone().unwrap_or_default(),
-            LibraryField::FilePath => self.source_path.clone().unwrap_or_default(),
-            LibraryField::Source => self.source_name.clone().unwrap_or_default(),
-            LibraryField::Title | LibraryField::TitleMerged => self.title.clone(),
-            LibraryField::Artist => self.artist.clone(),
-            LibraryField::Album => self.album.clone(),
-            LibraryField::Year => optional_year(self.year),
-            LibraryField::Duration => {
-                crate::format_duration((self.duration_millis.max(0) / 1_000) as u32)
-            }
-            LibraryField::Favorite => favorite_text(self.favorite),
-            _ => String::new(),
-        }
+        rufin_core::settings::presentation::queue_field(self, field)
     }
 }
 

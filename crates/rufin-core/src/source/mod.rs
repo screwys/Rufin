@@ -2126,7 +2126,7 @@ impl SourceOwner {
         self.shared.cancel_acquisition();
         self.shared.runtime.spawn(async move {
             let previous = owner.shared.settings.load();
-            let changing = previous.ui.secret_storage_mode != mode;
+            let changing = previous.ui.application.secret_storage_mode != mode;
             let result = async {
                 if !changing {
                     return Ok(());
@@ -2152,7 +2152,7 @@ impl SourceOwner {
                     }
                     let scope = fresh_credential_ref()?.as_str().to_string();
                     settings.update(|stored| {
-                        stored.ui.secret_storage_mode = mode;
+                        stored.ui.application.secret_storage_mode = mode;
                         // Reset as confirmed in Preferences; never unlock the old keyring.
                         stored.secret_scope_id = scope;
                         stored.ui.lastfm_api_key.clear();
@@ -4318,7 +4318,7 @@ mod artwork_preparation_tests {
                 .shared
                 .settings
                 .update(|stored| {
-                    stored.ui.external_metadata_enabled = false;
+                    stored.ui.application.external_metadata_enabled = false;
                     Ok(())
                 })
                 .unwrap();

@@ -29,6 +29,7 @@ pub fn configure_context_menus_expander(
                 .settings
                 .current
                 .borrow()
+                .application
                 .context_menu
                 .is_visible(item),
         );
@@ -36,6 +37,7 @@ pub fn configure_context_menus_expander(
         row.connect_active_notify(move |row| {
             settings.update_app_settings("context menu setting", |settings| {
                 let Some(stored) = settings
+                    .application
                     .context_menu
                     .items
                     .iter_mut()
@@ -55,11 +57,19 @@ pub fn configure_context_menus_expander(
 
     let rating: adw::SwitchRow =
         gtk_widgets::ui_resource::object(builder, resource, "context_menu_rating_row");
-    rating.set_active(shell.settings.current.borrow().context_menu.rating_visible);
+    rating.set_active(
+        shell
+            .settings
+            .current
+            .borrow()
+            .application
+            .context_menu
+            .rating_visible,
+    );
     let settings = Rc::clone(&shell.settings);
     rating.connect_active_notify(move |row| {
         settings.set_app_setting("context menu rating setting", row.is_active(), |settings| {
-            &mut settings.context_menu.rating_visible
+            &mut settings.application.context_menu.rating_visible
         });
     });
     expander.add_row(&rating);

@@ -1484,17 +1484,14 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
     let smart = database.track_rows_by_uri(&uris, &cancel).await.unwrap();
     let captured = super::support::resolve_queue(
         database,
-        library::QueueReadRequest::media_uris(
-            Into::<std::sync::Arc<[String]>>::into(uris.clone())
-                .iter()
-                .cloned(),
+        library::QueueLoad::media_uris(
+            uris.clone(),
             library::QueueProvenance::Context {
                 context_id: "metadata-links".into(),
                 context_title: None,
                 source_rank: 0,
             },
-        )
-        .input,
+        ),
         0,
     )
     .await;

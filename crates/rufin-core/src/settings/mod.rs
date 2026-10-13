@@ -1,8 +1,8 @@
 mod activity;
 mod player;
 mod preferences;
-pub use player::{PlayerPreferenceEdit, PlayerPreferenceOptions, PlayerPreferences, SettingsError};
-pub use preferences::{ApplicationPreferenceEdit, ApplicationPreferences};
+pub use app::{AppearancePreferences, ApplicationPreferences, PlayerDisplayPreferences};
+pub use player::{PlayerPreferenceOptions, PlayerPreferences, SettingsError};
 pub mod app;
 mod connect;
 pub mod context_menu;
@@ -223,16 +223,19 @@ impl StoredSettings {
     }
 
     fn migrate_home_blocks(&mut self) {
-        if self.ui.home_blocks.is_empty() {
+        if self.ui.application.home_blocks.is_empty() {
             let home_sections = self
                 .legacy_home_sections
                 .take()
                 .filter(|sections| !sections.is_empty())
                 .unwrap_or_else(default_home_sections);
-            self.ui.home_blocks = Vec::with_capacity(home_sections.len() + 2);
-            self.ui.home_blocks.push(HomeBlockKind::Showcase);
+            self.ui.application.home_blocks = Vec::with_capacity(home_sections.len() + 2);
+            self.ui
+                .application
+                .home_blocks
+                .push(HomeBlockKind::Showcase);
             for section in home_sections {
-                self.ui.home_blocks.push(match section {
+                self.ui.application.home_blocks.push(match section {
                     HomeSectionKind::Explore => HomeBlockKind::Explore,
                     HomeSectionKind::MostPlayed => HomeBlockKind::MostPlayed,
                     HomeSectionKind::NewlyAdded => HomeBlockKind::NewlyAdded,
@@ -240,8 +243,13 @@ impl StoredSettings {
                     HomeSectionKind::RecentlyReleased => HomeBlockKind::RecentlyReleased,
                 });
             }
-            if !self.ui.home_blocks.contains(&HomeBlockKind::Genres) {
-                self.ui.home_blocks.push(HomeBlockKind::Genres);
+            if !self
+                .ui
+                .application
+                .home_blocks
+                .contains(&HomeBlockKind::Genres)
+            {
+                self.ui.application.home_blocks.push(HomeBlockKind::Genres);
             }
         } else {
             self.legacy_home_sections.take();
@@ -297,25 +305,6 @@ pub struct SettingsFile {
     ),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AppearancePreferences {
-    pub theme_preference: ThemePreference,
-    pub accent_preference: AccentPreference,
-    pub theme_accents: std::collections::BTreeMap<String, String>,
-    pub language: String,
-}
-
-impl From<&UiSettings> for AppearancePreferences {
-    fn from(settings: &UiSettings) -> Self {
-        Self {
-            theme_preference: settings.theme_preference.clone(),
-            accent_preference: settings.accent_preference,
-            theme_accents: settings.theme_accents.clone(),
-            language: settings.language.clone(),
-        }
-    }
-}
-
 impl SettingsFile {
     pub(crate) fn sidebar_changes(&self) -> tokio::sync::watch::Receiver<SidebarSettings> {
         self.sidebar.subscribe()
@@ -340,7 +329,7 @@ impl SettingsFile {
         let file = Self {
             revision: Default::default(),
             sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
-            appearance: tokio::sync::watch::channel(AppearancePreferences::from(&value.ui)).0,
+            appearance: tokio::sync::watch::channel(value.ui.appearance.clone()).0,
             web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
             config_dir: path
                 .parent()
@@ -373,7 +362,7 @@ impl SettingsFile {
             path: None,
             revision: Default::default(),
             sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
-            appearance: tokio::sync::watch::channel(AppearancePreferences::from(&value.ui)).0,
+            appearance: tokio::sync::watch::channel(value.ui.appearance.clone()).0,
             web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
             config_dir,
             value: Arc::new(Mutex::new(value)),
@@ -433,22 +422,23 @@ impl SettingsFile {
         let mut next = self.load();
         let output = operation(&mut next)?;
         next.migrate_defaults();
-        if next.ui.backup.schedule.frequency != backup::BackupFrequency::Off
-            && next.ui.backup.schedule.schedule_id.is_empty()
+        if next.ui.application.backup.schedule.frequency != backup::BackupFrequency::Off
+            && next.ui.application.backup.schedule.schedule_id.is_empty()
         {
-            next.ui.backup.schedule.schedule_id = random_identity("schedule-")?;
+            next.ui.application.backup.schedule.schedule_id = random_identity("schedule-")?;
         }
-        next.ui.backup.schedule.retention = 2;
-        if next.ui.backup.enabled
-            && next.ui.backup.schedule.frequency == backup::BackupFrequency::Off
+        next.ui.application.backup.schedule.retention = 2;
+        if next.ui.application.backup.enabled
+            && next.ui.application.backup.schedule.frequency == backup::BackupFrequency::Off
         {
-            next.ui.backup.schedule.frequency = backup::BackupFrequency::Daily;
-            if next.ui.backup.schedule.schedule_id.is_empty() {
-                next.ui.backup.schedule.schedule_id = random_identity("schedule-")?;
+            next.ui.application.backup.schedule.frequency = backup::BackupFrequency::Daily;
+            if next.ui.application.backup.schedule.schedule_id.is_empty() {
+                next.ui.application.backup.schedule.schedule_id = random_identity("schedule-")?;
             }
         }
-        next.ui.backup.schedule.hour = next.ui.backup.schedule.hour.min(23);
-        next.ui.backup.schedule.weekday = next.ui.backup.schedule.weekday.min(6);
+        next.ui.application.backup.schedule.hour = next.ui.application.backup.schedule.hour.min(23);
+        next.ui.application.backup.schedule.weekday =
+            next.ui.application.backup.schedule.weekday.min(6);
         if next
             == *self
                 .value
@@ -520,11 +510,11 @@ impl SettingsOwner {
     fn save_ui(&self, settings: &UiSettings) -> Result<UiSettings, String> {
         let previous = self.file.load();
         self.file.update(|stored| {
-            let secret_storage_mode = stored.ui.secret_storage_mode;
+            let secret_storage_mode = stored.ui.application.secret_storage_mode;
             let lastfm_api_key = stored.ui.lastfm_api_key.clone();
             stored.ui = settings.clone();
             // These settings are committed together with their credentials.
-            stored.ui.secret_storage_mode = secret_storage_mode;
+            stored.ui.application.secret_storage_mode = secret_storage_mode;
             stored.ui.lastfm_api_key = lastfm_api_key;
             Ok(())
         })?;
@@ -550,11 +540,10 @@ impl SettingsFile {
         self.revision
             .fetch_add(1, std::sync::atomic::Ordering::Release);
         self.appearance.send_if_modified(|current| {
-            let next = AppearancePreferences::from(&stored.ui);
-            if *current == next {
+            if *current == stored.ui.appearance {
                 return false;
             }
-            *current = next;
+            *current = stored.ui.appearance.clone();
             true
         });
         self.sidebar.send_if_modified(|current| {
@@ -756,7 +745,7 @@ impl SettingsOwner {
 pub(crate) fn platform_secret_store(file: &SettingsFile) -> Arc<dyn SecretStore> {
     let settings = file.load();
     let config_dir = file.config_dir();
-    match settings.ui.secret_storage_mode {
+    match settings.ui.application.secret_storage_mode {
         SecretStorageMode::ConfigFile => Arc::new(CachedSecretStore::new(Arc::new(
             ConfigSecretStore::with_scope(
                 config_dir.join("secrets.json"),
@@ -788,7 +777,7 @@ pub(crate) fn backup_password_store(
     settings: &StoredSettings,
     config_dir: &Path,
 ) -> Arc<dyn SecretStore> {
-    match settings.ui.secret_storage_mode {
+    match settings.ui.application.secret_storage_mode {
         SecretStorageMode::ConfigFile => Arc::new(ConfigSecretStore::with_scope(
             config_dir.join("backup-password.json"),
             settings.secret_scope_id.clone(),
@@ -1289,7 +1278,7 @@ mod tests {
         let next_writer = std::thread::spawn(move || {
             next_file.update(|stored| {
                 let previous_shuffle = stored.ui.shuffle_enabled;
-                stored.ui.private_mode = true;
+                stored.ui.application.private_mode = true;
                 Ok(previous_shuffle)
             })
         });
@@ -1301,7 +1290,7 @@ mod tests {
         assert_eq!(observed.unwrap(), initial);
         let committed = file.load();
         assert!(committed.ui.shuffle_enabled);
-        assert!(committed.ui.private_mode);
+        assert!(committed.ui.application.private_mode);
         assert_eq!(read_startup_settings(&path).unwrap(), committed);
     }
 
@@ -1378,24 +1367,27 @@ mod tests {
             path: Some(path.clone()),
             ..SettingsFile::memory_at(directory.path().to_path_buf())
         };
-        assert!(!file.load().ui.backup.enabled);
+        assert!(!file.load().ui.application.backup.enabled);
         file.update(|stored| {
-            stored.ui.backup.schedule.frequency = backup::BackupFrequency::Daily;
+            stored.ui.application.backup.schedule.frequency = backup::BackupFrequency::Daily;
             Ok(())
         })
         .unwrap();
-        let identity = file.load().ui.backup.schedule.schedule_id;
+        let identity = file.load().ui.application.backup.schedule.schedule_id;
         assert!(!identity.is_empty());
         file.update(|stored| {
-            stored.ui.backup.contents.saved_logins = true;
-            stored.ui.backup.schedule.retention = 0;
+            stored.ui.application.backup.contents.saved_logins = true;
+            stored.ui.application.backup.schedule.retention = 0;
             Ok(())
         })
         .unwrap();
         let restored = read_startup_settings(&path).unwrap();
-        assert_eq!(restored.ui.backup.schedule.schedule_id, identity);
-        assert_eq!(restored.ui.backup.schedule.retention, 2);
-        assert!(restored.ui.backup.contents.saved_logins);
+        assert_eq!(
+            restored.ui.application.backup.schedule.schedule_id,
+            identity
+        );
+        assert_eq!(restored.ui.application.backup.schedule.retention, 2);
+        assert!(restored.ui.application.backup.contents.saved_logins);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1545,43 +1537,10 @@ impl SettingsOwner {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
-    pub fn set_theme(&self, theme: ThemePreference) -> Result<(), SettingsError> {
-        self.restore(
-            move |stored| {
-                stored.ui.theme_preference = theme;
-                Ok(())
-            },
-            false,
-        )
-        .map_err(Into::into)
-    }
-
-    pub fn set_accent(&self, accent: AccentPreference) -> Result<(), SettingsError> {
-        self.restore(
-            move |stored| {
-                stored.ui.accent_preference = accent;
-                Ok(())
-            },
-            false,
-        )
-        .map_err(Into::into)
-    }
-
     pub fn set_theme_accent(&self, theme: String, accent: String) -> Result<(), SettingsError> {
         self.restore(
             move |stored| {
-                stored.ui.theme_accents.insert(theme, accent);
-                Ok(())
-            },
-            false,
-        )
-        .map_err(Into::into)
-    }
-
-    pub fn set_language(&self, language: String) -> Result<(), SettingsError> {
-        self.restore(
-            move |stored| {
-                stored.ui.language = localization::sanitize_language_preference(&language);
+                stored.ui.appearance.theme_accents.insert(theme, accent);
                 Ok(())
             },
             false,

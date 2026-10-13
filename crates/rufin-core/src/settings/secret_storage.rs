@@ -43,7 +43,7 @@ impl KeyringSecretStore {
         if stored.secret_scope_id != self.scope {
             return Err(SecretError::Backend("credential storage was reset".into()));
         }
-        let result = if stored.ui.secret_storage_mode == SecretStorageMode::ConfigFile {
+        let result = if stored.ui.application.secret_storage_mode == SecretStorageMode::ConfigFile {
             operation(&self.file)
         } else if self.unavailable.load(Ordering::Relaxed) {
             Ok(in_memory)
@@ -89,7 +89,7 @@ impl KeyringSecretStore {
                 if stored.secret_scope_id != self.scope {
                     return Err("credential storage was reset".into());
                 }
-                stored.ui.secret_storage_mode = SecretStorageMode::ConfigFile;
+                stored.ui.application.secret_storage_mode = SecretStorageMode::ConfigFile;
                 Ok(())
             })
             .map_err(SecretError::Config)
@@ -99,7 +99,8 @@ impl KeyringSecretStore {
 impl SecretStore for KeyringSecretStore {
     fn is_persistent(&self) -> bool {
         !self.unavailable.load(Ordering::Relaxed)
-            || self.settings.load().ui.secret_storage_mode == SecretStorageMode::ConfigFile
+            || self.settings.load().ui.application.secret_storage_mode
+                == SecretStorageMode::ConfigFile
     }
 
     fn save_secret(&self, key: &SecretKey, secret: &str) -> SecretResult<()> {

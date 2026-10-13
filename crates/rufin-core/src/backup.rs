@@ -80,7 +80,7 @@ impl BackupOwner {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 let Some(owner) = weak.upgrade() else { return };
-                let backup = owner.settings.load().ui.backup;
+                let backup = owner.settings.load().ui.application.backup;
                 if !backup.enabled || backup.schedule.due_at(now()).is_none() {
                     continue;
                 }
@@ -107,11 +107,13 @@ impl BackupOwner {
         contents: Option<backup::BackupContents>,
     ) -> Result<tempfile::TempPath, String> {
         let stored = self.settings.load();
-        if scheduled && stored.ui.backup.encrypt && passphrase.as_ref().is_none_or(|v| v.is_empty())
+        if scheduled
+            && stored.ui.application.backup.encrypt
+            && passphrase.as_ref().is_none_or(|v| v.is_empty())
         {
             return Err("A password is required for encrypted backups".into());
         }
-        let contents = contents.unwrap_or(stored.ui.backup.contents);
+        let contents = contents.unwrap_or(stored.ui.application.backup.contents);
         let logins = if contents.saved_logins {
             let owner = self.clone();
             let snapshot = stored.clone();
@@ -161,7 +163,8 @@ impl BackupOwner {
                 saved_logins: logins.as_deref(),
                 playlist_pins: pins.as_deref(),
                 passphrase: passphrase.as_deref(),
-                schedule_id: scheduled.then_some(stored.ui.backup.schedule.schedule_id.as_str()),
+                schedule_id: scheduled
+                    .then_some(stored.ui.application.backup.schedule.schedule_id.as_str()),
             },
         )
         .await
@@ -171,7 +174,7 @@ impl BackupOwner {
     }
     async fn scheduled(&self) -> Result<(), String> {
         let _lane = self.lane.lock().await;
-        let settings = self.settings.load().ui.backup;
+        let settings = self.settings.load().ui.application.backup;
         if !settings.enabled || settings.schedule.due_at(now()).is_none() {
             return Ok(());
         }
@@ -212,8 +215,10 @@ impl BackupOwner {
             });
             save_document_backup_receipts(&receipts_path, &receipts)?;
             self.settings.update(|stored| {
-                if stored.ui.backup.schedule.schedule_id == settings.schedule.schedule_id {
-                    stored.ui.backup.schedule.last_successful_at = Some(completed);
+                if stored.ui.application.backup.schedule.schedule_id
+                    == settings.schedule.schedule_id
+                {
+                    stored.ui.application.backup.schedule.last_successful_at = Some(completed);
                 }
                 Ok(())
             })?;
@@ -266,8 +271,8 @@ impl BackupOwner {
             )
             .map_err(|e| e.to_string())?;
         self.settings.update(|stored| {
-            if stored.ui.backup.schedule.schedule_id == settings.schedule.schedule_id {
-                stored.ui.backup.schedule.last_successful_at = Some(completed);
+            if stored.ui.application.backup.schedule.schedule_id == settings.schedule.schedule_id {
+                stored.ui.application.backup.schedule.last_successful_at = Some(completed);
             }
             Ok(())
         })?;
@@ -580,15 +585,18 @@ fn preserve_destination_settings(
     incoming: &mut StoredSettings,
 ) -> Result<(), String> {
     incoming.secret_scope_id = previous.secret_scope_id.clone();
-    incoming.ui.secret_storage_mode = previous.ui.secret_storage_mode;
+    incoming.ui.application.secret_storage_mode = previous.ui.application.secret_storage_mode;
     incoming.jellyfin_device_id = previous.jellyfin_device_id.clone();
     incoming.ui.downloads = previous.ui.downloads.clone();
     incoming.ui.sidebar.pins = previous.ui.sidebar.pins.clone();
     incoming.ui.sidebar.playlist_pin_imported_sources =
         previous.ui.sidebar.playlist_pin_imported_sources.clone();
-    incoming.ui.backup.destination_uri = previous.ui.backup.destination_uri.clone();
-    incoming.ui.backup.schedule.schedule_id = previous.ui.backup.schedule.schedule_id.clone();
-    incoming.ui.backup.schedule.last_successful_at = previous.ui.backup.schedule.last_successful_at;
+    incoming.ui.application.backup.destination_uri =
+        previous.ui.application.backup.destination_uri.clone();
+    incoming.ui.application.backup.schedule.schedule_id =
+        previous.ui.application.backup.schedule.schedule_id.clone();
+    incoming.ui.application.backup.schedule.last_successful_at =
+        previous.ui.application.backup.schedule.last_successful_at;
     for source in incoming.sources.connections_mut() {
         source.credential_ref = match previous
             .sources
@@ -915,7 +923,7 @@ mod tests {
         })
         .unwrap();
         let mut incoming = file.load();
-        incoming.ui.private_mode = true;
+        incoming.ui.application.private_mode = true;
         incoming.scrobbling.listenbrainz.enabled = false;
         let applied = Arc::new(Mutex::new(Vec::new()));
         let observed = Arc::clone(&applied);
@@ -925,7 +933,7 @@ mod tests {
         let settings_apply =
             (*SettingsOwner::new(file.clone(), secrets, move |_, current, credentials| {
                 observed.lock().unwrap().push((
-                    current.ui.private_mode,
+                    current.ui.application.private_mode,
                     current.scrobbling.listenbrainz.enabled,
                     credentials,
                 ));
@@ -956,13 +964,13 @@ mod tests {
             )
         });
         written.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert!(file.load().ui.private_mode);
+        assert!(file.load().ui.application.private_mode);
         assert!(!file.load().scrobbling.listenbrainz.enabled);
         assert_eq!(*applied.lock().unwrap(), vec![(true, false, false)]);
         settings_apply
             .restore(
                 |current| {
-                    current.ui.private_mode = false;
+                    current.ui.application.private_mode = false;
                     current.scrobbling.listenbrainz.enabled = true;
                     Ok(())
                 },
@@ -971,7 +979,7 @@ mod tests {
             .unwrap();
         resume.send(()).unwrap();
         assert!(restored.join().unwrap().is_empty());
-        assert!(!file.load().ui.private_mode);
+        assert!(!file.load().ui.application.private_mode);
         assert!(file.load().scrobbling.listenbrainz.enabled);
         assert_eq!(
             *applied.lock().unwrap(),
@@ -1027,7 +1035,7 @@ mod tests {
     fn setup_restore_retains_destination_namespace_and_exact_source_credentials() {
         let mut previous = StoredSettings::default();
         previous.secret_scope_id = "destination".into();
-        previous.ui.secret_storage_mode = SecretStorageMode::ConfigFile;
+        previous.ui.application.secret_storage_mode = SecretStorageMode::ConfigFile;
         previous.sources.configured = vec![source("exact", "destination-reference")];
         previous.scrobbling.lastfm.session_key = "destination-session".into();
         previous.ui.lastfm_api_key = "destination-api-key".into();
@@ -1044,7 +1052,7 @@ mod tests {
         preserve_destination_settings(&previous, &mut incoming).unwrap();
         assert_eq!(incoming.secret_scope_id, "destination");
         assert_eq!(
-            incoming.ui.secret_storage_mode,
+            incoming.ui.application.secret_storage_mode,
             SecretStorageMode::ConfigFile
         );
         assert_eq!(

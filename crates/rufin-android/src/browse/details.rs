@@ -204,7 +204,7 @@ impl AndroidBrowseQuery {
                 };
                 let configuration = library::source_entity_parts(&uri)
                     .and_then(|(source_id, _, _)| self.source.configuration(&source_id));
-                let link_settings = self.settings.load().external_site_links;
+                let link_settings = self.settings.load().application.external_site_links;
                 let local_folder_link = link_settings.enabled
                     && link_settings.server
                     && configuration

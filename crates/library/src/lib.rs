@@ -36,6 +36,7 @@ mod playlists;
 mod queue;
 pub use connect_media::ConnectMediaFile;
 mod radio;
+mod row;
 mod scan;
 mod scroll_sections;
 pub use scroll_sections::ScrollSection;
@@ -92,10 +93,9 @@ pub use playlists::{
     PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity, PlaylistRow, PlaylistSort,
 };
 pub use queue::{
-    QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntry, QueueItem, QueueLoad, QueueOrderUpdate,
-    QueuePageRow, QueuePlacement, QueueProvenance, QueueReadPage, QueueReadRequest,
-    QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow, QueueTransferPage, QueueUpdate,
-    shuffle_order,
+    QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntries, QueueEntry, QueueItem, QueueLoad,
+    QueueOrderUpdate, QueuePageRow, QueuePlacement, QueueProvenance, QueueReorderTarget,
+    QueueRepeatMode, QueueRestore, QueueRow, QueueTransferPage, QueueUpdate, shuffle_order,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use scan::{

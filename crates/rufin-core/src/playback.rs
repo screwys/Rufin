@@ -124,7 +124,7 @@ async fn save_pending_queue(
 }
 
 impl PlaybackOwner {
-    pub(crate) fn insert_load(&self, input: library::QueueReadRequest, target: QueueReorderTarget) {
+    pub(crate) fn insert_load(&self, input: library::QueueLoad, target: QueueReorderTarget) {
         self.send(Command::Insert { input, target });
     }
 
@@ -174,7 +174,7 @@ impl PlaybackOwner {
             monotonic_origin: Instant::now(),
             start_backend: Box::new(start_backend),
             cast: playback_cast::CastManager::new(
-                ui.cast_proxy_enabled,
+                ui.application.cast_proxy_enabled,
                 ui.cast_network_interface,
                 cast_artwork_path,
             ),
@@ -235,7 +235,7 @@ impl PlaybackOwner {
             random_identity(),
             stored.ui.playback,
             stored.ui.auto_dj_enabled,
-            usize::from(stored.ui.auto_dj_refill_threshold),
+            usize::from(stored.ui.application.auto_dj_refill_threshold),
             playback_output,
             backend,
             Arc::new(move || {
@@ -382,7 +382,7 @@ impl PlaybackOwner {
     }
 
     fn report_source(&self, report: playback::SourceReportFact) {
-        if external_source_reporting_enabled(self.settings.load().ui.private_mode)
+        if external_source_reporting_enabled(self.settings.load().ui.application.private_mode)
             && let Some((source_id, kind, _)) = library::source_entity_parts(&report.media_uri)
             && kind == "track"
         {
@@ -764,7 +764,7 @@ impl PlaybackOwner {
         }
     }
     pub fn insert(&self, input: library::SongSelection, target: QueueReorderTarget) {
-        self.insert_load(library::QueueReadRequest::songs(input), target);
+        self.insert_load(library::QueueLoad::songs(input), target);
     }
 }
 
@@ -831,19 +831,7 @@ impl PlaybackOwner {
         if self.random_plex(&request) {
             return;
         }
-        if let (Some(active), Some(selected)) = (
-            self.active(),
-            self.source_owner()
-                .and_then(|owner| owner.selected_library()),
-        ) {
-            let _ = crate::radio::play_random(
-                self.runtime.clone(),
-                Arc::clone(&self.database),
-                selected,
-                active,
-                request,
-            );
-        }
+        self.send(Command::Random(request));
     }
     pub fn play_radio(&self, request: RadioPlayRequest) {
         if self.radio_rufin(&request) {
@@ -852,18 +840,7 @@ impl PlaybackOwner {
         if self.radio_plex(&request) {
             return;
         }
-        if let Some(active) = self.active() {
-            let _ = crate::radio::play_radio(
-                self.runtime.clone(),
-                self.database.clone(),
-                self.source
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .clone(),
-                active,
-                request,
-            );
-        }
+        self.send(Command::Radio(request));
     }
 }
 
@@ -955,7 +932,7 @@ impl PlaybackOwner {
                 stored.ui.auto_dj_enabled = !stored.ui.auto_dj_enabled;
                 Ok((
                     stored.ui.auto_dj_enabled,
-                    stored.ui.auto_dj_refill_threshold,
+                    stored.ui.application.auto_dj_refill_threshold,
                 ))
             })
             .unwrap_or((false, 1));
@@ -1214,7 +1191,7 @@ fn cached_cast_artwork(
     let stored = settings.load();
     let binding = artwork::ArtworkBinding::opaque(media.artwork_binding.as_deref()?);
     let external = artwork::ExternalPolicy::new(
-        stored.ui.external_metadata_enabled,
+        stored.ui.application.external_metadata_enabled,
         stored.ui.allows_external_metadata_lookup(),
         stored.ui.lastfm_api_key,
     );

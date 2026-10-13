@@ -213,74 +213,75 @@ pub fn format_duration_units(seconds: u32) -> String {
     format!("{seconds}s")
 }
 
-pub fn track_field(track: &TrackRow, field: LibraryField) -> String {
-    match field {
-        LibraryField::Bitrate
-        | LibraryField::SampleRate
-        | LibraryField::BitDepth
-        | LibraryField::Channels => audio_property_field(&track.audio_properties, field),
-        LibraryField::Format => track.source_format.clone().unwrap_or_default(),
-        LibraryField::FilePath => track.source_path.clone().unwrap_or_default(),
-        LibraryField::Source => track.source_name.clone(),
-        LibraryField::Title | LibraryField::TitleMerged => track.title.clone(),
-        LibraryField::Artist => track.artist.clone(),
-        LibraryField::AlbumArtist => joined_credits(&track.album_artists),
-        LibraryField::Album => track.album.clone(),
-        LibraryField::Year => optional_year(track.year),
-        LibraryField::ReleaseDate => track.release_date.clone().unwrap_or_default(),
-        LibraryField::DateAdded => track.date_added.clone().unwrap_or_default(),
-        LibraryField::LastPlayed => display_unix_date(track.last_played),
-        LibraryField::PlayCount => count(track.play_count),
-        LibraryField::UserRating => stored_rating(track.rating),
-        LibraryField::Genre => track
-            .genres
-            .iter()
-            .map(|genre| genre.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
-        LibraryField::Bpm => track.bpm.map(|bpm| bpm.to_string()).unwrap_or_default(),
-        LibraryField::DiscNumber => track.disc_number.to_string(),
-        LibraryField::TrackNumber => {
-            optional_track_number(Some(track.disc_number), Some(track.track_number))
+macro_rules! song_field {
+    ($name:ident($row:ident: $ty:ty), catalog, {$($pattern:pat => $value:expr,)*}) => {
+        song_field! {
+            $name($row: $ty), {
+                LibraryField::DateAdded => $row.date_added.clone().unwrap_or_default(),
+                LibraryField::LastPlayed => display_unix_date($row.last_played),
+                LibraryField::PlayCount => count($row.play_count),
+                LibraryField::UserRating => stored_rating($row.rating),
+                LibraryField::Bpm => $row.bpm.map(|value| value.to_string()).unwrap_or_default(),
+                $($pattern => $value,)*
+            }
         }
-        LibraryField::Duration => format_duration((track.duration_millis.max(0) / 1_000) as u32),
-        LibraryField::Favorite => favorite_text(track.favorite),
-        _ => String::new(),
+    };
+    ($name:ident($row:ident: $ty:ty), {$($pattern:pat => $value:expr,)*}) => {
+        pub fn $name($row: &$ty, field: LibraryField) -> String {
+            match field {
+                LibraryField::Bitrate | LibraryField::SampleRate | LibraryField::BitDepth | LibraryField::Channels => audio_property_field(&$row.audio_properties, field),
+                LibraryField::Format => $row.source_format.clone().unwrap_or_default(),
+                LibraryField::FilePath => $row.source_path.clone().unwrap_or_default(),
+                LibraryField::Title | LibraryField::TitleMerged => $row.title.clone(),
+                LibraryField::Artist => $row.artist.clone(),
+                LibraryField::Album => $row.album.clone(),
+                LibraryField::Year => optional_year($row.year),
+                LibraryField::ReleaseDate => $row.release_date.clone().unwrap_or_default(),
+                LibraryField::Duration => format_duration(($row.duration_millis.max(0) / 1_000) as u32),
+                LibraryField::Favorite => favorite_text($row.favorite),
+                $($pattern => $value,)*
+                _ => String::new(),
+            }
+        }
+    };
+}
+
+song_field! {
+    track_field(track: TrackRow), catalog, {
+        LibraryField::Source => track.source_name.clone(),
+        LibraryField::AlbumArtist => joined_credits(&track.album_artists),
+        LibraryField::Genre => track.genres.iter().map(|genre| genre.name.as_str()).collect::<Vec<_>>().join(", "),
+        LibraryField::DiscNumber => track.disc_number.to_string(),
+        LibraryField::TrackNumber => optional_track_number(Some(track.disc_number), Some(track.track_number)),
     }
 }
 
-pub fn playlist_entry_field(entry: &library::PlaylistEntryRow, field: LibraryField) -> String {
-    match field {
-        LibraryField::Bitrate
-        | LibraryField::SampleRate
-        | LibraryField::BitDepth
-        | LibraryField::Channels => audio_property_field(&entry.audio_properties, field),
-        LibraryField::Format => entry.source_format.clone().unwrap_or_default(),
-        LibraryField::FilePath => entry.source_path.clone().unwrap_or_default(),
+song_field! {
+    playlist_entry_field(entry: library::PlaylistEntryRow), catalog, {
         LibraryField::Source => entry.source_name.clone().unwrap_or_default(),
-        LibraryField::Title | LibraryField::TitleMerged => entry.title.clone(),
-        LibraryField::Artist => entry.artist.clone(),
-        LibraryField::AlbumArtist => entry
-            .album_display_artist
-            .clone()
-            .unwrap_or_else(|| entry.artist.clone()),
-        LibraryField::Album => entry.album.clone(),
-        LibraryField::Year => optional_year(entry.year),
-        LibraryField::ReleaseDate => entry.release_date.clone().unwrap_or_default(),
-        LibraryField::DateAdded => entry.date_added.clone().unwrap_or_default(),
-        LibraryField::LastPlayed => display_unix_date(entry.last_played),
-        LibraryField::PlayCount => count(entry.play_count),
+        LibraryField::AlbumArtist => entry.album_display_artist.clone().unwrap_or_else(|| entry.artist.clone()),
         LibraryField::Genre => entry.genre.clone(),
-        LibraryField::Bpm => entry.bpm.map(|value| value.to_string()).unwrap_or_default(),
-        LibraryField::UserRating => stored_rating(entry.rating),
-        LibraryField::DiscNumber => entry
-            .disc_number
-            .map(|number| number.to_string())
-            .unwrap_or_default(),
+        LibraryField::DiscNumber => entry.disc_number.map(|number| number.to_string()).unwrap_or_default(),
         LibraryField::TrackNumber => optional_track_number(entry.disc_number, entry.track_number),
-        LibraryField::Duration => format_duration((entry.duration_millis.max(0) / 1_000) as u32),
-        LibraryField::Favorite => favorite_text(entry.favorite),
-        _ => String::new(),
+    }
+}
+
+song_field! {
+    history_field(row: library::HistoryRow), catalog, {
+        LibraryField::Source => row.source_name.clone().unwrap_or_default(),
+        LibraryField::AlbumArtist => row.album_display_artist.clone().unwrap_or_default(),
+        LibraryField::Genre => row.genre.clone(),
+        LibraryField::DiscNumber => row.disc_number.map(|number| number.to_string()).unwrap_or_default(),
+        LibraryField::TrackNumber => optional_track_number(row.disc_number, row.track_number),
+    }
+}
+
+song_field! {
+    queue_field(row: library::QueuePageRow), {
+        LibraryField::Source => row.source_name.clone().unwrap_or_default(),
+        LibraryField::AlbumArtist => row.album_display_artist.clone().unwrap_or_default(),
+        LibraryField::DiscNumber => row.disc_number.map(|number| number.to_string()).unwrap_or_default(),
+        LibraryField::TrackNumber => optional_track_number(row.disc_number, row.track_number),
     }
 }
 
@@ -348,36 +349,4 @@ pub fn joined_credits(credits: &[TrackArtistLink]) -> String {
         .filter(|name| !name.is_empty())
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-pub fn history_field(row: &library::HistoryRow, field: LibraryField) -> String {
-    match field {
-        LibraryField::Bitrate
-        | LibraryField::SampleRate
-        | LibraryField::BitDepth
-        | LibraryField::Channels => audio_property_field(&row.audio_properties, field),
-        LibraryField::Format => row.source_format.clone().unwrap_or_default(),
-        LibraryField::FilePath => row.source_path.clone().unwrap_or_default(),
-        LibraryField::Source => row.source_name.clone().unwrap_or_default(),
-        LibraryField::Title | LibraryField::TitleMerged => row.title.clone(),
-        LibraryField::Artist => row.artist.clone(),
-        LibraryField::Album => row.album.clone(),
-        LibraryField::AlbumArtist => row.album_display_artist.clone().unwrap_or_default(),
-        LibraryField::Year => optional_year(row.year),
-        LibraryField::ReleaseDate => row.release_date.clone().unwrap_or_default(),
-        LibraryField::DateAdded => row.date_added.clone().unwrap_or_default(),
-        LibraryField::LastPlayed => display_unix_date(row.last_played),
-        LibraryField::PlayCount => count(row.play_count),
-        LibraryField::Genre => row.genre.clone(),
-        LibraryField::Bpm => row.bpm.map(|value| value.to_string()).unwrap_or_default(),
-        LibraryField::UserRating => stored_rating(row.rating),
-        LibraryField::DiscNumber => row
-            .disc_number
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        LibraryField::TrackNumber => optional_track_number(row.disc_number, row.track_number),
-        LibraryField::Duration => format_duration((row.duration_millis.max(0) / 1_000) as u32),
-        LibraryField::Favorite => favorite_text(row.favorite),
-        _ => String::new(),
-    }
 }

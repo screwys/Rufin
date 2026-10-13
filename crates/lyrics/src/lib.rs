@@ -82,64 +82,56 @@ pub fn default_external_lyrics_providers() -> Vec<ExternalLyricsProvider> {
     ]
 }
 
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct UserPreferences {
-    pub external_lyrics_enabled: bool,
-    #[serde(default = "default_external_lyrics_providers")]
-    pub external_lyrics_providers: Vec<ExternalLyricsProvider>,
-    #[serde(default = "default_true")]
-    pub prefer_server_lyrics: bool,
-    #[serde(default)]
-    pub save_lyrics_to_source: bool,
-    #[serde(default, alias = "save_fetched_lyrics")]
-    pub save_lyrics_automatically: bool,
-    #[serde(default = "default_true")]
-    pub save_lyrics_as_sidecar: bool,
-    #[serde(default)]
-    pub prefer_translations: bool,
-    #[serde(default = "default_translation_language")]
-    pub preferred_translation_language: String,
-    #[serde(default)]
-    pub show_furigana: bool,
-    #[serde(default)]
-    pub show_romanization: bool,
-    #[serde(default)]
-    pub karaoke_mode: bool,
-    #[serde(default)]
-    pub lyrics_font_family: Option<String>,
-    #[serde(default)]
-    pub lyrics_font_size: Option<u16>,
-    #[serde(default)]
-    pub fullscreen_lyrics_font_family: Option<String>,
-    #[serde(default)]
-    pub fullscreen_lyrics_font_size: Option<u16>,
-    #[serde(default)]
-    pub lyrics_highlight_color: Option<String>,
+#[macro_export]
+macro_rules! lyrics_preference_fields {
+    ($callback:ident $(, $args:tt)*) => {
+        $callback! { [$($args)*]
+            external_lyrics_enabled: bool = true => set_external_lyrics_enabled;
+            #[serde(default = "default_external_lyrics_providers")]
+            external_lyrics_providers: Vec<ExternalLyricsProvider> = default_external_lyrics_providers() => set_external_lyrics_providers;
+            #[serde(default = "default_true")]
+            prefer_server_lyrics: bool = true => set_prefer_server_lyrics;
+            #[serde(default)]
+            save_lyrics_to_source: bool = false => set_save_lyrics_to_source;
+            #[serde(default, alias = "save_fetched_lyrics")]
+            save_lyrics_automatically: bool = false => set_save_lyrics_automatically;
+            #[serde(default = "default_true")]
+            save_lyrics_as_sidecar: bool = true => set_save_lyrics_as_sidecar;
+            #[serde(default)]
+            prefer_translations: bool = false => set_prefer_translations;
+            #[serde(default = "default_translation_language")]
+            preferred_translation_language: String = default_translation_language() => set_preferred_translation_language;
+            #[serde(default)]
+            show_furigana: bool = false => set_show_furigana;
+            #[serde(default)]
+            show_romanization: bool = false => set_show_romanization;
+            #[serde(default)]
+            karaoke_mode: bool = false => set_karaoke_mode;
+            #[serde(default)]
+            lyrics_font_family: Option<String> = None => set_lyrics_font_family;
+            #[serde(default)]
+            lyrics_font_size: Option<u16> = None => set_lyrics_font_size;
+            #[serde(default)]
+            fullscreen_lyrics_font_family: Option<String> = None => set_fullscreen_lyrics_font_family;
+            #[serde(default)]
+            fullscreen_lyrics_font_size: Option<u16> = None => set_fullscreen_lyrics_font_size;
+            #[serde(default)]
+            lyrics_highlight_color: Option<String> = None => set_lyrics_highlight_color;
+        }
+    };
 }
 
-impl Default for UserPreferences {
-    fn default() -> Self {
-        Self {
-            external_lyrics_enabled: true,
-            external_lyrics_providers: default_external_lyrics_providers(),
-            prefer_server_lyrics: true,
-            save_lyrics_to_source: false,
-            save_lyrics_automatically: false,
-            save_lyrics_as_sidecar: true,
-            prefer_translations: false,
-            preferred_translation_language: default_translation_language(),
-            show_furigana: false,
-            show_romanization: false,
-            karaoke_mode: false,
-            lyrics_font_family: None,
-            lyrics_font_size: None,
-            fullscreen_lyrics_font_family: None,
-            fullscreen_lyrics_font_size: None,
-            lyrics_highlight_color: None,
+macro_rules! define_user_preferences {
+    ([] $( $(#[$attribute:meta])* $field:ident: $ty:ty = $default:expr => $setter:ident; )*) => {
+        #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+        #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+        pub struct UserPreferences { $( $(#[$attribute])* pub $field: $ty, )* }
+        impl Default for UserPreferences {
+            fn default() -> Self { Self { $( $field: $default, )* } }
         }
-    }
+    };
 }
+lyrics_preference_fields!(define_user_preferences);
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Settings {
@@ -157,68 +149,6 @@ impl Default for Settings {
             preferences: UserPreferences::default(),
             lyrics_provider_settings_version: LYRICS_PROVIDER_SETTINGS_VERSION,
             suppressed_auto_lyrics_track_ids: Vec::new(),
-        }
-    }
-}
-
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-#[derive(Clone, Debug)]
-pub enum LyricsPreferenceEdit {
-    ExternalLyricsEnabled { value: bool },
-    ExternalLyricsProviders { value: Vec<ExternalLyricsProvider> },
-    PreferServerLyrics { value: bool },
-    SaveLyricsToSource { value: bool },
-    SaveLyricsAutomatically { value: bool },
-    SaveLyricsAsSidecar { value: bool },
-    PreferTranslations { value: bool },
-    PreferredTranslationLanguage { value: String },
-    ShowFurigana { value: bool },
-    ShowRomanization { value: bool },
-    KaraokeMode { value: bool },
-    LyricsFontFamily { value: Option<String> },
-    LyricsFontSize { value: Option<u16> },
-    FullscreenLyricsFontFamily { value: Option<String> },
-    FullscreenLyricsFontSize { value: Option<u16> },
-    LyricsHighlightColor { value: Option<String> },
-}
-
-impl UserPreferences {
-    pub fn apply(&mut self, edit: LyricsPreferenceEdit) {
-        match edit {
-            LyricsPreferenceEdit::ExternalLyricsEnabled { value } => {
-                self.external_lyrics_enabled = value
-            }
-            LyricsPreferenceEdit::ExternalLyricsProviders { value } => {
-                self.external_lyrics_providers = value
-            }
-            LyricsPreferenceEdit::PreferServerLyrics { value } => self.prefer_server_lyrics = value,
-            LyricsPreferenceEdit::SaveLyricsToSource { value } => {
-                self.save_lyrics_to_source = value
-            }
-            LyricsPreferenceEdit::SaveLyricsAutomatically { value } => {
-                self.save_lyrics_automatically = value
-            }
-            LyricsPreferenceEdit::SaveLyricsAsSidecar { value } => {
-                self.save_lyrics_as_sidecar = value
-            }
-            LyricsPreferenceEdit::PreferTranslations { value } => self.prefer_translations = value,
-            LyricsPreferenceEdit::PreferredTranslationLanguage { value } => {
-                self.preferred_translation_language = value
-            }
-            LyricsPreferenceEdit::ShowFurigana { value } => self.show_furigana = value,
-            LyricsPreferenceEdit::ShowRomanization { value } => self.show_romanization = value,
-            LyricsPreferenceEdit::KaraokeMode { value } => self.karaoke_mode = value,
-            LyricsPreferenceEdit::LyricsFontFamily { value } => self.lyrics_font_family = value,
-            LyricsPreferenceEdit::LyricsFontSize { value } => self.lyrics_font_size = value,
-            LyricsPreferenceEdit::FullscreenLyricsFontFamily { value } => {
-                self.fullscreen_lyrics_font_family = value
-            }
-            LyricsPreferenceEdit::FullscreenLyricsFontSize { value } => {
-                self.fullscreen_lyrics_font_size = value
-            }
-            LyricsPreferenceEdit::LyricsHighlightColor { value } => {
-                self.lyrics_highlight_color = value
-            }
         }
     }
 }

@@ -67,5 +67,5 @@ pub(crate) fn present_queue_selection_context_menu(
             }
         }
     });
-    surface.popup(&shell.settings.current.borrow().context_menu);
+    surface.popup(&shell.settings.current.borrow().application.context_menu);
 }

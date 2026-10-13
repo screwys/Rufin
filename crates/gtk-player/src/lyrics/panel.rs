@@ -432,7 +432,7 @@ impl PlayerUi {
         let Some(media_id) = current_playback_media_id(self.selected_playback().as_deref()) else {
             return;
         };
-        if self.settings.current.borrow().private_mode {
+        if self.settings.current.borrow().application.private_mode {
             return;
         }
 

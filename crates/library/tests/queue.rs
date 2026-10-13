@@ -21,10 +21,8 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
     let fixture = fixture().await;
     let database = &fixture.database;
     let captured = database
-        .read_queue(library::QueueReadRequest {
-            anchor: None,
-            context_title: None,
-            input: library::QueueLoad::Items(
+        .queue_entries(
+            library::QueueLoad::items(
                 (0..205)
                     .map(|index| {
                         (
@@ -40,16 +38,13 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
                     })
                     .collect(),
             ),
-            anchor_index: 0,
-            random_start: None,
-            shuffled: None,
-        })
+            None,
+        )
         .await
         .unwrap();
     let queue = library::QueueRestore {
         order: (0..205u32).rev().collect(),
         entries: captured.entries.into(),
-        rows: captured.rows,
         current_index: Some(12),
         progress_millis: 42_000,
         repeat_mode: QueueRepeatMode::All,
@@ -454,17 +449,7 @@ async fn source_items(
     input: library::QueueLoad,
     seed: Option<u64>,
 ) -> Vec<QueueItem> {
-    let page = database
-        .read_queue(library::QueueReadRequest {
-            anchor: None,
-            context_title: None,
-            input: input,
-            anchor_index: 0,
-            random_start: None,
-            shuffled: None,
-        })
-        .await
-        .unwrap();
+    let page = database.queue_entries(input, None).await.unwrap();
     let mut entries = page.entries;
     if seed.is_some() {
         entries.reverse();
@@ -560,6 +545,7 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
         .import_playlist_file(std::io::Cursor::new(content), &file, None, |_| None)
         .await
         .unwrap();
+    let mut raw = connection(&fixture.path).await;
     for seed in [None, Some(71)] {
         let input = library::QueueLoad::Songs(vec![(
             library::SongQuery::new(library::SongScope::Playlist(imported.playlist)).selection(),
@@ -569,19 +555,22 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
                 source_rank: 0,
             },
         )]);
+        let selected_index = seed.unwrap_or(0) as usize;
+        let selected = sqlx::query_as::<_, (library::TrackKey, library::PlaylistEntryKey)>(
+            "SELECT track_key,playlist_entry_key FROM playlist_entries WHERE playlist_key=?1 AND position=?2",
+        )
+        .bind(imported.playlist)
+        .bind(selected_index as i64)
+        .fetch_one(&mut raw)
+        .await
+        .unwrap();
         let page = fixture
             .database
-            .read_queue(library::QueueReadRequest {
-                anchor: None,
-                input: input.clone(),
-                context_title: None,
-                anchor_index: 0,
-                random_start: None,
-                shuffled: None,
-            })
+            .queue_entries(input.clone(), Some((selected.0, Some(selected.1))))
             .await
             .unwrap();
         assert_eq!(page.entries.len(), 140);
+        assert_eq!(page.anchor_index, Some(selected_index));
         assert!(
             page.entries
                 .iter()
@@ -612,21 +601,14 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
     let fixture = fixture().await;
     let mut state = super::support::resolve_queue(
         &fixture.database,
-        library::QueueReadRequest::media_uris(
-            Into::<std::sync::Arc<[String]>>::into(
-                (0..500)
-                    .map(|i| format!("https://example.test/{i}"))
-                    .collect::<Vec<_>>(),
-            )
-            .iter()
-            .cloned(),
+        library::QueueLoad::media_uris(
+            (0..500).map(|i| format!("https://example.test/{i}")),
             library::QueueProvenance::Context {
                 context_id: "explicit".into(),
                 context_title: None,
                 source_rank: 0,
             },
-        )
-        .input,
+        ),
         120,
     )
     .await;
@@ -744,17 +726,13 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
     );
     let missing = fixture
         .database
-        .read_queue(library::QueueReadRequest {
-            anchor: None,
-            input: library::QueueLoad::Items(vec![(
+        .queue_entries(
+            library::QueueLoad::items(vec![(
                 QueueItem::direct(&missing_uri, "Missing", "", "", 0),
                 QueueProvenance::Legacy,
             )]),
-            context_title: None,
-            anchor_index: 0,
-            random_start: None,
-            shuffled: None,
-        })
+            None,
+        )
         .await
         .unwrap();
     entries[7].track_key = missing.entries[0].track_key;
@@ -785,17 +763,10 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         assert_eq!(source_members, [6, 7]);
         fixture
             .database
-            .read_queue(library::QueueReadRequest {
-                anchor: None,
-                context_title: None,
-                input: library::QueueLoad::Items(vec![(
-                    unavailable.clone(),
-                    QueueProvenance::Manual,
-                )]),
-                anchor_index: 0,
-                random_start: None,
-                shuffled: None,
-            })
+            .queue_entries(
+                library::QueueLoad::items(vec![(unavailable.clone(), QueueProvenance::Manual)]),
+                None,
+            )
             .await
             .unwrap();
         let retained: Vec<String> =
@@ -1026,10 +997,8 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
     for activation in 0..12 {
         let page = fixture
             .database
-            .read_queue(library::QueueReadRequest {
-                anchor: None,
-                context_title: None,
-                input: library::QueueLoad::Items(
+            .queue_entries(
+                library::QueueLoad::items(
                     (0..2)
                         .map(|index| {
                             (
@@ -1045,17 +1014,13 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
                         })
                         .collect(),
                 ),
-                anchor_index: 0,
-                random_start: None,
-                shuffled: None,
-            })
+                None,
+            )
             .await
             .unwrap();
-        assert_eq!(page.rows.len(), 1);
         latest = library::QueueRestore {
             entries: page.entries.into(),
             order: vec![0, 1].into(),
-            rows: page.rows,
             current_index: Some(0),
             ..Default::default()
         };
@@ -1173,20 +1138,27 @@ async fn installed_shuffled_source_keeps_its_exact_pending_order() {
 }
 
 #[tokio::test]
-async fn repeated_large_source_starts_resolve_only_the_selected_window() {
+async fn large_source_membership_keeps_metadata_reads_bounded() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
     sqlx::query("WITH RECURSIVE n(i) AS(VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<20000)
         INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis)
         SELECT ?1,'bulk-'||i,'https://example.test/bulk/'||i,'Bulk '||i,'bulk','','',printf('%06d',i),1000 FROM n")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
-    for activation in 0..6_u64 {
+    for activation in 0..6_usize {
+        let selected_index = (activation * 7919) % 20000;
+        let selected = sqlx::query_scalar::<_, library::TrackKey>(
+            "SELECT track_key FROM tracks WHERE source_key=?1 AND object_id=?2",
+        )
+        .bind(fixture.source)
+        .bind(format!("bulk-{}", selected_index + 1))
+        .fetch_one(&mut raw)
+        .await
+        .unwrap();
         let page = fixture
             .database
-            .read_queue(library::QueueReadRequest {
-                anchor: None,
-                context_title: None,
-                input: library::QueueLoad::Songs(vec![(
+            .queue_entries(
+                library::QueueLoad::Songs(vec![(
                     library::SongQuery {
                         filter: "bulk".into(),
                         sort: Some(TrackSort::Title),
@@ -1199,17 +1171,14 @@ async fn repeated_large_source_starts_resolve_only_the_selected_window() {
                         source_rank: 0,
                     },
                 )]),
-                anchor_index: 0,
-                random_start: Some(activation * 7919),
-                shuffled: None,
-            })
+                Some((selected, None)),
+            )
             .await
             .unwrap();
         assert_eq!(page.entries.len(), 20000);
-        assert_eq!(page.rows.len(), 1);
-        assert_eq!(page.rows[0].position, page.current_index);
+        assert_eq!(page.anchor_index, Some(selected_index));
         let mut order = (0..20000_u32).collect::<Vec<_>>();
-        order.rotate_left(page.current_index);
+        order.rotate_left(selected_index);
         let projection = fixture
             .database
             .queue_rows_for_entries(

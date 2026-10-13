@@ -595,8 +595,18 @@ pub async fn build(
                 shell.control_feedback.show_feedback_toast(error);
                 continue;
             }
-            let mode = shell.settings.persistence.load().secret_storage_mode;
-            shell.settings.current.borrow_mut().secret_storage_mode = mode;
+            let mode = shell
+                .settings
+                .persistence
+                .load()
+                .application
+                .secret_storage_mode;
+            shell
+                .settings
+                .current
+                .borrow_mut()
+                .application
+                .secret_storage_mode = mode;
             if let Some(row) = shell.preferences.state.secret_storage_row.upgrade() {
                 row.set_selected(match mode {
                     secrets::SecretStorageMode::ConfigFile => 0,

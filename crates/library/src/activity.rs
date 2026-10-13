@@ -24,41 +24,6 @@ const ACTIVITY_EXPORT_SELECT: &str = "SELECT listen_key,external_id,
                     musicbrainz_recording_id,musicbrainz_release_track_id,started_at,
                     local_period,listened_millis,skipped
              FROM listens";
-const HISTORY_ROW_COLUMNS: &str = concat!(
-    r#"
-             track.track_key,listen.media_uri,
-                    listen.track_title title,listen.artist_name artist,listen.album_title album,
-                    album.display_artist album_display_artist,
-                    listen.disc_number,listen.track_number,listen.year,listen.release_date,
-                    listen.source_format,listen.musicbrainz_recording_id,
-                    listen.musicbrainz_release_track_id,
-                    listen.started_at last_played,
-                    listen.duration_millis,track.artwork_binding,
-                    COALESCE(track.audio_properties,'{}') audio_properties,date("#,
-    crate::tracks::added_at!("track"),
-    r#",'unixepoch') date_added,track.bpm,track.source_path,
-                    (SELECT display_name FROM sources WHERE source_key=track.source_key) source_name,
-                    (SELECT COALESCE(group_concat(name, ', '),'') FROM (
-                       SELECT genre.name FROM track_genres credit JOIN genres genre USING(genre_key)
-                       WHERE credit.track_key=track.track_key ORDER BY credit.position
-                    )) genre,
-                    COALESCE((SELECT baseline.play_count FROM legacy_activity baseline
-                              WHERE baseline.source_id=(SELECT object_id FROM sources WHERE source_key=track.source_key)
-                                AND baseline.track_object_id=track.object_id
-                                AND baseline.period='lifetime' AND baseline.item_kind='track'),0)
-                      +(SELECT count(*) FROM listens accepted WHERE accepted.media_uri=listen.media_uri) play_count,
-                    COALESCE((SELECT state.favorite FROM user_media_state state
-                              WHERE state.media_uri=listen.media_uri),
-                             (SELECT track.source_favorite FROM tracks track
-                              WHERE track.media_uri=listen.media_uri),0) favorite,
-                    COALESCE((SELECT state.rating FROM user_media_state state
-                              WHERE state.media_uri=listen.media_uri),
-                             (SELECT track.source_rating FROM tracks track
-                              WHERE track.media_uri=listen.media_uri))/10 rating,
-                    EXISTS(SELECT 1 FROM local_access_files access
-                           WHERE access.media_uri=listen.media_uri AND access.origin='download') is_downloaded
-"#
-);
 const HISTORY_ROW_FROM: &str = "FROM selected listen
              LEFT JOIN tracks track USING(media_uri)
              LEFT JOIN albums album ON album.album_key=track.album_key";
@@ -102,40 +67,50 @@ pub struct ActivityImportReport {
     pub skipped: u64,
 }
 
-#[derive(Clone, Debug, FromRow, PartialEq)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct HistoryRow {
-    pub track_key: TrackKey,
-    pub audio_properties: crate::AudioProperties,
-    pub source_path: Option<String>,
-    pub source_name: Option<String>,
-    pub media_uri: String,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub album_media_uri: Option<String>,
-    #[sqlx(json)]
-    pub artists: Vec<crate::TrackArtistLink>,
-    #[sqlx(json)]
-    pub album_artists: Vec<crate::TrackArtistLink>,
-    pub album_display_artist: Option<String>,
-    pub artwork_binding: Option<Vec<u8>>,
-    pub duration_millis: i64,
-    pub disc_number: Option<i64>,
-    pub track_number: Option<i64>,
-    pub year: Option<i64>,
-    pub release_date: Option<String>,
-    pub date_added: Option<String>,
-    pub bpm: Option<i64>,
-    pub genre: String,
-    pub play_count: i64,
-    pub source_format: Option<String>,
-    pub musicbrainz_recording_id: Option<String>,
-    pub musicbrainz_release_track_id: Option<String>,
-    pub last_played: Option<i64>,
-    pub favorite: bool,
-    pub rating: Option<i64>,
-    pub is_downloaded: bool,
+crate::row::row_projection! {
+    #[derive(Clone, Debug, FromRow, PartialEq)]
+    #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+    pub struct HistoryRow {
+        pub track_key: TrackKey = "track.track_key",
+        pub audio_properties: crate::AudioProperties = "COALESCE(track.audio_properties,'{}')",
+        pub source_path: Option<String> = "track.source_path",
+        pub source_name: Option<String> = "(SELECT display_name FROM sources WHERE source_key=track.source_key)",
+        pub media_uri: String = "listen.media_uri",
+        pub title: String = "listen.track_title",
+        pub artist: String = "listen.artist_name",
+        pub album: String = "listen.album_title",
+        pub album_media_uri: Option<String> = "album.media_uri",
+        #[sqlx(json)]
+        pub artists: Vec<crate::TrackArtistLink> = crate::tracks::TRACK_ARTISTS,
+        #[sqlx(json)]
+        pub album_artists: Vec<crate::TrackArtistLink> = crate::tracks::TRACK_ALBUM_ARTISTS,
+        pub album_display_artist: Option<String> = "album.display_artist",
+        pub artwork_binding: Option<Vec<u8>> = "track.artwork_binding",
+        pub duration_millis: i64 = "listen.duration_millis",
+        pub disc_number: Option<i64> = "listen.disc_number",
+        pub track_number: Option<i64> = "listen.track_number",
+        pub year: Option<i64> = "listen.year",
+        pub release_date: Option<String> = "listen.release_date",
+        pub date_added: Option<String> = concat!("date(", crate::tracks::added_at!("track"), ",'unixepoch')"),
+        pub bpm: Option<i64> = "track.bpm",
+        pub genre: String = "(SELECT COALESCE(group_concat(name, ', '),'') FROM (
+            SELECT genre.name FROM track_genres credit JOIN genres genre USING(genre_key)
+            WHERE credit.track_key=track.track_key ORDER BY credit.position))",
+        pub play_count: i64 = "COALESCE((SELECT baseline.play_count FROM legacy_activity baseline
+            WHERE baseline.source_id=(SELECT object_id FROM sources WHERE source_key=track.source_key)
+                AND baseline.track_object_id=track.object_id
+                AND baseline.period='lifetime' AND baseline.item_kind='track'),0)
+            +(SELECT count(*) FROM listens accepted WHERE accepted.media_uri=listen.media_uri)",
+        pub source_format: Option<String> = "listen.source_format",
+        pub musicbrainz_recording_id: Option<String> = "listen.musicbrainz_recording_id",
+        pub musicbrainz_release_track_id: Option<String> = "listen.musicbrainz_release_track_id",
+        pub last_played: Option<i64> = "listen.started_at",
+        pub favorite: bool = "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=listen.media_uri),
+            (SELECT track.source_favorite FROM tracks track WHERE track.media_uri=listen.media_uri),0)",
+        pub rating: Option<i64> = "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=listen.media_uri),
+            (SELECT track.source_rating FROM tracks track WHERE track.media_uri=listen.media_uri))/10",
+        pub is_downloaded: bool = "EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=listen.media_uri AND access.origin='download')",
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -356,8 +331,8 @@ impl Database {
                     SELECT recent.listen_key FROM listens recent WHERE recent.media_uri=target.media_uri
                     ORDER BY recent.started_at DESC,recent.listen_key DESC LIMIT 1
                   )
-             ) SELECT {} {HISTORY_ROW_COLUMNS} {HISTORY_ROW_FROM} ORDER BY listen.ordinal",
-            crate::tracks::TRACK_LINK_COLUMNS,
+             ) SELECT {} {HISTORY_ROW_FROM} ORDER BY listen.ordinal",
+            HistoryRow::columns(),
         );
         Ok(
             sqlx::query_as::<_, HistoryRow>(sqlx::AssertSqlSafe(sql.as_str()))
@@ -985,10 +960,7 @@ pub(crate) async fn load_history_page(
     let second_parameter = first_parameter + 1;
     let sql = format!(
         "{} LIMIT ?{first_parameter} OFFSET ?{second_parameter}",
-        query.select(&format!(
-            "{} {HISTORY_ROW_COLUMNS}",
-            crate::tracks::TRACK_LINK_COLUMNS
-        ))
+        query.select(HistoryRow::columns())
     );
     Ok(
         sqlx::query_as_with::<_, HistoryRow, _>(sqlx::AssertSqlSafe(sql), query.arguments.clone())

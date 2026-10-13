@@ -344,7 +344,7 @@ pub fn current_artwork(
         let request =
             artwork::ArtworkRequest::original(artwork::ArtworkBinding::opaque(&binding), 512)
                 .with_external(artwork::ExternalPolicy::new(
-                    stored.ui.external_metadata_enabled,
+                    stored.ui.application.external_metadata_enabled,
                     stored.ui.allows_external_metadata_lookup(),
                     stored.ui.lastfm_api_key,
                 ));

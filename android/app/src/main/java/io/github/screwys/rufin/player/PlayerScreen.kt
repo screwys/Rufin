@@ -87,12 +87,12 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     var navigation by remember { mutableStateOf<String?>(null) }
     val lyricsScroll = rememberLazyListState()
     val application = player.settings
-    val lyricsEnabled = application?.fullscreenLyricsVisible != false
-    val currentLineEnabled = application?.fullscreenCurrentLyricsLineVisible != false
-    val visualizerEnabled = application?.fullscreenVisualizerVisible == true
-    val combined = lyricsEnabled && visualizerEnabled && application?.rightPanelCombined == true
+    val lyricsEnabled = application?.display?.fullscreenLyricsVisible != false
+    val currentLineEnabled = application?.display?.fullscreenCurrentLyricsLineVisible != false
+    val visualizerEnabled = application?.display?.fullscreenVisualizerVisible == true
+    val combined = lyricsEnabled && visualizerEnabled && application?.rightPanel?.combined == true
     val background by animateColorAsState(
-        if (application?.fullscreenDynamicBackground == true)
+        if (application?.display?.fullscreenDynamicBackground == true)
             lerp(MaterialTheme.colorScheme.surface, player.artwork?.color ?: MaterialTheme.colorScheme.surface, .12f)
         else MaterialTheme.colorScheme.surface, tween(if (reduceMotion) 0 else 320), label = "fullPlayerColor")
     val verticalOffset = remember { Animatable(0f) }
@@ -134,7 +134,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
             }, onDragCancel = { scope.launch { trackOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) } })
         }, color = background, contentColor = MaterialTheme.colorScheme.onSurface) {
         Box(Modifier.fillMaxSize()) {
-            if (application?.fullscreenBackgroundImage == true) player.artwork?.let { artwork ->
+            if (application?.display?.fullscreenBackgroundImage == true) player.artwork?.let { artwork ->
                 Image(artwork.bitmap.asImageBitmap(), null, Modifier.matchParentSize().blur(48.dp).alpha(.12f), contentScale = ContentScale.Crop)
             }
             AnimatedContent(surface, Modifier.fillMaxSize(), transitionSpec = {

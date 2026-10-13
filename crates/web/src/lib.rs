@@ -386,7 +386,11 @@ fn queue_drop_target(
 async fn queue_clear(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {
     let products = &products;
     let queue = products.playback.clone();
-    let include_current = products.settings.load().clear_queue_includes_current;
+    let include_current = products
+        .settings
+        .load()
+        .player_display
+        .clear_queue_includes_current;
     tokio::task::spawn_blocking(move || queue.clear(include_current))
         .await
         .map_err(internal)?;

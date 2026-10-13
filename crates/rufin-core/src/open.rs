@@ -145,8 +145,8 @@ pub async fn files(
     if items.is_empty() {
         return Err(localization::tr("No playable entries were found"));
     }
-    queue.play_selection(crate::playback::PlayRequest::from_load(
-        library::QueueReadRequest::items(items),
+    queue.play_selection(crate::playback::PlayRequest::from_input(
+        library::QueueLoad::items(items),
         crate::playback::QueuePlacement::Now,
     ));
     Ok(())

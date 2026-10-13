@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.settings
 
-import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferenceEdit
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,7 +25,7 @@ internal fun LibrarySettingsPage(model: RufinConnection, preferences: Preference
         SourcesPage(model, addSource, editSource, embedded = true)
         SettingsGroup(translate("Downloads")) {
             SettingsSwitch(translate("Show downloaded badge"), state.showDownloadedBadges) {
-                preferences.changePreference(ApplicationPreferenceEdit.ShowDownloadedBadges(it))
+                preferences.changePreference { setShowDownloadedBadges(it) }
             }
         }
     }

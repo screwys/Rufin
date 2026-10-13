@@ -42,12 +42,12 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
                 .unwrap()
                 .unwrap();
             assert!(!inputs.temporary_store);
-            assert_eq!(inputs.settings.load().private_mode, reopening);
+            assert_eq!(inputs.settings.load().application.private_mode, reopening);
             let settings = inputs.settings.clone();
             runtime
                 .block_on(runtime.spawn_blocking(move || {
                     let mut saved = settings.load();
-                    saved.private_mode = true;
+                    saved.application.private_mode = true;
                     settings.save(&saved).unwrap();
                 }))
                 .unwrap();

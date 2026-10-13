@@ -159,7 +159,7 @@ impl AndroidLibrary {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(error)?
                 .as_secs() as i64,
-            blocks: settings.home_blocks,
+            blocks: settings.application.home_blocks,
         }))
     }
 }

@@ -156,7 +156,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
 pub(super) fn appearance_data(products: &ProductHandles) -> Value {
     let settings = products.settings.load();
     let colors = products.appearance.borrow();
-    let theme = match settings.theme_preference {
+    let theme = match settings.appearance.theme_preference {
         rufin_core::settings::ThemePreference::System => "System",
         rufin_core::settings::ThemePreference::Light => "Light",
         rufin_core::settings::ThemePreference::Dark => "Dark",
@@ -165,7 +165,7 @@ pub(super) fn appearance_data(products: &ProductHandles) -> Value {
             .map(String::as_str)
             .unwrap_or("System"),
     };
-    json!({"theme":theme,"accent":settings.accent_preference,"colors":*colors})
+    json!({"theme":theme,"accent":settings.appearance.accent_preference,"colors":*colors})
 }
 
 async fn appearance(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {
@@ -241,7 +241,7 @@ pub(super) async fn home_data(
         parameters.get("folder").map(String::as_str),
     )
     .await?;
-    let mut blocks = products.settings.load().home_blocks;
+    let mut blocks = products.settings.load().application.home_blocks;
     if let Some(block) = parameters.get("block") {
         let selected: HomeBlockKind =
             serde_json::from_value(Value::String(block.clone())).map_err(bad_request)?;

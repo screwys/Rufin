@@ -11,18 +11,21 @@ async fn replace_queue(
     replacement: usize,
     count: usize,
 ) {
-    let page = database
-        .read_queue(library::QueueReadRequest::media_uris(
+    let page = crate::playback::PlayRequest::from_input(
+        library::QueueLoad::media_uris(
             (0..count).map(|index| format!("https://example.test/{replacement}/{index}")),
             library::QueueProvenance::Context {
                 context_id: format!("replacement-{replacement}").into(),
                 context_title: None,
                 source_rank: 0,
             },
-        ))
-        .await
-        .unwrap();
-    sequence.add_page(page, library::QueueReorderTarget::End, true, None);
+        ),
+        library::QueuePlacement::Now,
+    )
+    .prepare(database, false, 0)
+    .await
+    .unwrap();
+    sequence.add_page(page, library::QueueReorderTarget::End, true);
 }
 
 fn assert_restored_state(restored: &QueueRestore, expected: &QueueRestore) {
@@ -179,23 +182,26 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
 
     let mut failed = None;
     let later = database
-        .read_queue(library::QueueReadRequest::media_uris(
-            ["failed", "later"].map(|suffix| format!("https://example.test/{suffix}")),
-            playback::Provenance::Manual,
-        ))
+        .queue_entries(
+            library::QueueLoad::media_uris(
+                ["failed", "later"].map(|suffix| format!("https://example.test/{suffix}")),
+                playback::Provenance::Manual,
+            ),
+            None,
+        )
         .await
         .unwrap();
     database.clone().close().await.unwrap();
     for (index, entry) in later.entries.into_iter().enumerate() {
         sequence.add_page(
-            library::QueueReadPage {
+            super::commands::QueueBatch {
                 entries: vec![entry],
                 rows: Vec::new(),
                 current_index: 0,
+                shuffle: None,
             },
             library::QueueReorderTarget::End,
             false,
-            None,
         );
         enqueue_queue_save(&pending, &sender, sequence.take_persistence().unwrap());
         if index == 0 {

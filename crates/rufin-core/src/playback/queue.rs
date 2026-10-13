@@ -359,23 +359,11 @@ impl Sequence {
         self.save_order(None, Some(start..self.total()));
         self.changed(true);
     }
-    pub(super) fn random_start(&mut self, seed: u64) {
-        self.shuffle_enabled = true;
-        if let Some(selected) = self.selected_index {
-            self.order.swap(0, selected);
-            library::shuffle_order(&mut self.order[1..], seed);
-        }
-        self.selected_index = (!self.order.is_empty()).then_some(0);
-        self.trim_rows();
-        self.save_order(None, Some(0..self.total()));
-        self.changed(true);
-    }
     pub(super) fn add_page(
         &mut self,
-        page: library::QueueReadPage,
+        page: super::commands::QueueBatch,
         target: QueueReorderTarget,
         replacing: bool,
-        seed: Option<u64>,
     ) {
         if page.entries.is_empty() && !replacing {
             return;
@@ -391,7 +379,7 @@ impl Sequence {
             });
             self.selected_index = None;
             self.progress_millis = 0;
-            self.shuffle_enabled = false;
+            self.shuffle_enabled = page.shuffle.is_some();
         }
         let (target_id, after) = self.target(&target);
         let at = self.target_position(&self.order, target_id, after);
@@ -422,12 +410,26 @@ impl Sequence {
         if self.selected_index.is_none() && !self.order.is_empty() {
             self.selected_index = Some(if replacing { page.current_index } else { at });
         }
+        if replacing && let Some(shuffle) = page.shuffle {
+            match shuffle {
+                super::commands::QueueShuffle::AfterSelected(seed) => {
+                    let start = self.selected_index.map_or(0, |index| index + 1);
+                    library::shuffle_order(&mut self.order[start..], seed);
+                }
+                super::commands::QueueShuffle::FromSelected(seed) => {
+                    if let Some(selected) = self.selected_index {
+                        self.order.swap(0, selected);
+                        library::shuffle_order(&mut self.order[1..], seed);
+                        self.selected_index = Some(0);
+                    }
+                }
+            }
+        }
         self.rows
             .extend(page.rows.into_iter().filter_map(|mut row| {
                 let id = *ids.get(row.position)?;
                 let row_mut = Arc::make_mut(&mut row);
                 row_mut.occurrence_id = Some(id.0);
-                row_mut.position += at;
                 Some(row)
             }));
         self.trim_rows();
@@ -436,9 +438,6 @@ impl Sequence {
             Some(at..self.total()),
         );
         self.changed(true);
-        if replacing && let Some(seed) = seed {
-            self.shuffle(true, seed);
-        }
     }
     fn target(&self, target: &QueueReorderTarget) -> (Option<OccurrenceId>, bool) {
         match target {
@@ -726,7 +725,7 @@ mod tests {
     use super::*;
     use ::playback::QueueItem;
 
-    fn page(start: usize, count: usize) -> library::QueueReadPage {
+    fn page(start: usize, count: usize) -> super::super::commands::QueueBatch {
         let entries = (start..start + count)
             .map(|i| library::QueueEntry {
                 received_from_connect: false,
@@ -755,15 +754,16 @@ mod tests {
                 })
             })
             .collect();
-        library::QueueReadPage {
+        super::super::commands::QueueBatch {
             entries,
             rows,
             current_index: 0,
+            shuffle: None,
         }
     }
     fn sequence(count: usize) -> Sequence {
         let mut s = Sequence::new();
-        s.add_page(page(0, count), QueueReorderTarget::End, true, None);
+        s.add_page(page(0, count), QueueReorderTarget::End, true);
         s.take_persistence();
         s
     }
@@ -852,7 +852,7 @@ mod tests {
     #[test]
     fn additions_edits_duplicates_and_restore_keep_selected_entry() {
         let mut s = sequence(101);
-        s.add_page(page(1000, 1), QueueReorderTarget::End, false, None);
+        s.add_page(page(1000, 1), QueueReorderTarget::End, false);
         assert_eq!(
             s.entry_at(100).unwrap().track_key,
             library::TrackKey::from_raw(51)
@@ -876,7 +876,6 @@ mod tests {
             page(2000, 1),
             QueueReorderTarget::AfterOccurrence(current_id.0),
             false,
-            None,
         );
         assert_eq!(
             s.entry_at(4).unwrap().track_key,
@@ -909,7 +908,7 @@ mod tests {
             Some(&current)
         );
         let next_id = s.next_id();
-        s.add_page(page(0, 2), QueueReorderTarget::End, true, None);
+        s.add_page(page(0, 2), QueueReorderTarget::End, true);
         assert!(s.order.iter().all(|id| id.0 >= next_id));
     }
 }

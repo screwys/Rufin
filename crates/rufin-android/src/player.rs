@@ -319,7 +319,7 @@ impl AndroidPlayer {
                 state.writable = self.products.lyrics.current_writable(media_id);
                 state.clearable = media.as_ref().is_some_and(|media| {
                     settings.can_suppress_auto_lyrics(
-                        stored.private_mode,
+                        stored.application.private_mode,
                         &media.media_uri,
                         *origin,
                     )
@@ -559,7 +559,7 @@ impl AndroidPlayer {
         let request =
             artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&identity), size, size)
                 .with_external(artwork::ExternalPolicy::new(
-                    stored.external_metadata_enabled,
+                    stored.application.external_metadata_enabled,
                     stored.allows_external_metadata_lookup(),
                     stored.lastfm_api_key,
                 ));

@@ -153,15 +153,11 @@ pub struct TrackArtistLink {
     pub name: String,
 }
 
-// Included only in bounded row projections, with track and album already joined by identity.
-pub(crate) const TRACK_LINK_COLUMNS: &str = "
-    album.media_uri album_media_uri,
-    (SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position)
-       FROM track_artists credit JOIN artists artist USING(artist_key)
-       WHERE credit.track_key=track.track_key) artists,
-    (SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position)
-       FROM album_artists credit JOIN artists artist USING(artist_key)
-       WHERE credit.album_key=track.album_key) album_artists,";
+// Included only in bounded rows, with track and album joined by identity.
+pub(crate) const TRACK_ARTISTS: &str = "(SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position)
+    FROM track_artists credit JOIN artists artist USING(artist_key) WHERE credit.track_key=track.track_key)";
+pub(crate) const TRACK_ALBUM_ARTISTS: &str = "(SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position)
+    FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=track.album_key)";
 
 #[derive(Clone, Debug, FromRow, PartialEq, serde::Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
@@ -201,55 +197,59 @@ uniffi::custom_type!(LoudnessAnalysisKey, Vec<u8>, {
     try_lift: |value| value.try_into().map_err(|_| uniffi::deps::anyhow::anyhow!("Loudness key must contain 32 bytes")),
 });
 
-#[derive(Clone, Debug, PartialEq, FromRow)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct TrackRow {
-    pub audio_properties: AudioProperties,
-    pub source_path: Option<String>,
-    pub source_name: String,
-    pub track_key: TrackKey,
-    pub source_key: Option<SourceKey>,
-    pub source_id: Option<String>,
-    pub object_id: Option<String>,
-    pub album_key: Option<AlbumKey>,
-    pub album_media_uri: Option<String>,
-    pub title: String,
-    pub album: String,
-    pub artist: String,
-    pub album_display_artist: Option<String>,
-    pub duration_millis: i64,
-    pub disc_number: i64,
-    pub track_number: i64,
-    pub year: Option<i64>,
-    pub release_date: Option<String>,
-    pub date_added: Option<String>,
-    pub media_uri: String,
-    pub source_format: Option<String>,
-    pub comment: Option<String>,
-    pub bpm: Option<i64>,
-    pub musicbrainz_recording_id: Option<String>,
-    pub musicbrainz_release_track_id: Option<String>,
-    pub cue_path: Option<String>,
-    pub cue_start_millis: Option<i64>,
-    pub cue_end_millis: Option<i64>,
-    #[sqlx(try_from = "Vec<u8>")]
-    pub loudness_analysis_key: LoudnessAnalysisKey,
-    pub artwork_binding: Option<Vec<u8>>,
-    pub favorite: bool,
-    pub rating: Option<i64>,
-    pub last_played: Option<i64>,
-    pub play_count: i64,
-    pub skip_count: i64,
-    pub is_downloaded: bool,
-    pub musicbrainz_album_id: Option<String>,
-    pub musicbrainz_release_group_id: Option<String>,
-    pub primary_artist_musicbrainz_id: Option<String>,
-    #[sqlx(json)]
-    pub artists: Vec<TrackArtistLink>,
-    #[sqlx(json)]
-    pub album_artists: Vec<TrackArtistLink>,
-    #[sqlx(json)]
-    pub genres: Vec<TrackGenreLink>,
+crate::row::row_projection! {
+    #[derive(Clone, Debug, PartialEq, FromRow)]
+    #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+    pub struct TrackRow {
+        pub audio_properties: AudioProperties = "track.audio_properties",
+        pub source_path: Option<String> = "track.source_path",
+        pub source_name: String = "COALESCE(source.display_name,'')",
+        pub track_key: TrackKey = "track.track_key",
+        pub source_key: Option<SourceKey> = "track.source_key",
+        pub source_id: Option<String> = "source.object_id",
+        pub object_id: Option<String> = "track.object_id",
+        pub album_key: Option<AlbumKey> = "track.album_key",
+        pub album_media_uri: Option<String> = "album.media_uri",
+        pub title: String = "COALESCE(track.title,track.media_uri)",
+        pub album: String = "COALESCE(track.display_album,'')",
+        pub artist: String = "COALESCE(track.display_artist,'')",
+        pub album_display_artist: Option<String> = "COALESCE(album.display_artist,track.album_display_artist)",
+        pub duration_millis: i64 = "COALESCE(track.duration_millis,0)",
+        pub disc_number: i64 = "COALESCE(track.disc_number,0)",
+        pub track_number: i64 = "COALESCE(track.track_number,0)",
+        pub year: Option<i64> = "track.year",
+        pub release_date: Option<String> = "track.release_date",
+        pub date_added: Option<String> = concat!("date(", added_at!("track"), ",'unixepoch')"),
+        pub media_uri: String = "track.media_uri",
+        pub source_format: Option<String> = "track.source_format",
+        pub comment: Option<String> = "track.comment",
+        pub bpm: Option<i64> = "track.bpm",
+        pub musicbrainz_recording_id: Option<String> = "track.musicbrainz_recording_id",
+        pub musicbrainz_release_track_id: Option<String> = "track.musicbrainz_release_track_id",
+        pub cue_path: Option<String> = "track.cue_path",
+        pub cue_start_millis: Option<i64> = "track.cue_start_millis",
+        pub cue_end_millis: Option<i64> = "track.cue_end_millis",
+        #[sqlx(try_from = "Vec<u8>")]
+        pub loudness_analysis_key: LoudnessAnalysisKey = "track.loudness_analysis_key",
+        pub artwork_binding: Option<Vec<u8>> = "track.artwork_binding",
+        pub favorite: bool = "COALESCE((SELECT favorite FROM user_media_state WHERE media_uri=track.media_uri),track.source_favorite,0)",
+        pub rating: Option<i64> = "COALESCE((SELECT rating FROM user_media_state WHERE media_uri=track.media_uri),track.source_rating)/10",
+        pub last_played: Option<i64> = displayed_stat("last_played"),
+        pub play_count: i64 = displayed_stat("play_count"),
+        pub skip_count: i64 = displayed_stat("skip_count"),
+        pub is_downloaded: bool = "EXISTS(SELECT 1 FROM local_access_files WHERE media_uri=track.media_uri AND origin='download')",
+        pub musicbrainz_album_id: Option<String> = "COALESCE(album.musicbrainz_release_id,track.musicbrainz_album_id)",
+        pub musicbrainz_release_group_id: Option<String> = "COALESCE(album.musicbrainz_release_group_id,track.musicbrainz_release_group_id)",
+        pub primary_artist_musicbrainz_id: Option<String> = "COALESCE((SELECT artist.musicbrainz_artist_id FROM track_artists credit JOIN artists artist USING(artist_key) WHERE credit.track_key=track.track_key ORDER BY credit.position LIMIT 1),
+            (SELECT artist.musicbrainz_artist_id FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=track.album_key ORDER BY credit.position LIMIT 1),track.primary_artist_musicbrainz_id)",
+        #[sqlx(json)]
+        pub artists: Vec<TrackArtistLink> = TRACK_ARTISTS,
+        #[sqlx(json)]
+        pub album_artists: Vec<TrackArtistLink> = TRACK_ALBUM_ARTISTS,
+        #[sqlx(json)]
+        pub genres: Vec<TrackGenreLink> = "(SELECT json_group_array(json_object('genre_key',genre.genre_key,'name',genre.name) ORDER BY relation.position)
+            FROM track_genres relation JOIN genres genre USING(genre_key) WHERE relation.track_key=track.track_key)",
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -508,50 +508,71 @@ pub(crate) async fn load_track_rows(
     if keys.is_empty() {
         return Ok(Vec::new());
     }
-    let sql = format!("WITH requested AS (SELECT value track_key,key position FROM json_each(?1))
-        SELECT {links} track.track_key,track.source_key,source.object_id source_id,track.object_id,track.album_key,
-        COALESCE(track.title,track.media_uri) title,COALESCE(track.display_album,'') album,COALESCE(track.display_artist,'') artist,
-        COALESCE(album.display_artist,track.album_display_artist) album_display_artist,
-        COALESCE(track.duration_millis,0) duration_millis,COALESCE(track.disc_number,0) disc_number,COALESCE(track.track_number,0) track_number,
-        track.year,track.release_date,date({added},'unixepoch') date_added,track.media_uri,
-        track.audio_properties,track.source_format,track.source_path,COALESCE(source.display_name,'') source_name,track.comment,track.bpm,
-        track.musicbrainz_recording_id,track.musicbrainz_release_track_id,track.cue_path,track.cue_start_millis,track.cue_end_millis,
-        track.loudness_analysis_key,track.artwork_binding,
-        COALESCE((SELECT favorite FROM user_media_state WHERE media_uri=track.media_uri),track.source_favorite,0) favorite,
-        COALESCE((SELECT rating FROM user_media_state WHERE media_uri=track.media_uri),track.source_rating)/10 rating,
-        {plays} play_count,{skips} skip_count,{last} last_played,
-        EXISTS(SELECT 1 FROM local_access_files WHERE media_uri=track.media_uri AND origin='download') is_downloaded,
-        COALESCE(album.musicbrainz_release_id,track.musicbrainz_album_id) musicbrainz_album_id,
-        COALESCE(album.musicbrainz_release_group_id,track.musicbrainz_release_group_id) musicbrainz_release_group_id,
-        COALESCE((SELECT artist.musicbrainz_artist_id FROM track_artists credit JOIN artists artist USING(artist_key) WHERE credit.track_key=track.track_key ORDER BY credit.position LIMIT 1),
-            (SELECT artist.musicbrainz_artist_id FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=track.album_key ORDER BY credit.position LIMIT 1),track.primary_artist_musicbrainz_id) primary_artist_musicbrainz_id,
-        (SELECT json_group_array(json_object('genre_key',genre.genre_key,'name',genre.name) ORDER BY relation.position) FROM track_genres relation JOIN genres genre USING(genre_key) WHERE relation.track_key=track.track_key) genres
-        FROM requested JOIN tracks track USING(track_key) LEFT JOIN sources source USING(source_key) LEFT JOIN albums album USING(album_key) ORDER BY requested.position",
-        links=TRACK_LINK_COLUMNS,added=added_at!("track"),plays=displayed_stat("play_count"),skips=displayed_stat("skip_count"),last=displayed_stat("last_played"));
+    let sql = format!(
+        "WITH requested AS (SELECT value track_key,key position FROM json_each(?1))
+        SELECT {} FROM requested JOIN tracks track USING(track_key)
+        LEFT JOIN sources source USING(source_key) LEFT JOIN albums album USING(album_key)
+        ORDER BY requested.position",
+        TrackRow::columns()
+    );
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(serde_json::to_string(keys)?)
         .fetch_all(connection)
         .await?)
 }
 
-#[derive(Default)]
-pub(crate) struct SongMetadata<'a> {
-    pub title: Option<&'a str>,
-    pub artist: Option<&'a str>,
-    pub album: Option<&'a str>,
-    pub album_display_artist: Option<&'a str>,
-    pub duration_millis: Option<i64>,
-    pub disc_number: Option<i64>,
-    pub track_number: Option<i64>,
-    pub year: Option<i64>,
-    pub release_date: Option<&'a str>,
-    pub source_format: Option<&'a str>,
-    pub audio_properties: Option<&'a AudioProperties>,
-    pub musicbrainz_recording_id: Option<&'a str>,
-    pub musicbrainz_release_track_id: Option<&'a str>,
-    pub musicbrainz_album_id: Option<&'a str>,
-    pub musicbrainz_release_group_id: Option<&'a str>,
-    pub primary_artist_musicbrainz_id: Option<&'a str>,
+// Facts carried by playlists, queues and listens fill gaps in a song's catalog row.
+macro_rules! song_metadata {
+    ($lifetime:lifetime; $($field:ident: $ty:ty => $column:ident,)*) => {
+        #[derive(Default)]
+        pub(crate) struct SongMetadata<$lifetime> {
+            $(pub $field: $ty,)*
+            pub audio_properties: Option<&$lifetime AudioProperties>,
+        }
+
+        impl SongMetadata<'_> {
+            async fn write(self, connection: &mut SqliteConnection, uri: &str,
+                source: Option<SourceKey>, object: Option<String>) -> LibraryResult<Option<TrackKey>>
+            {
+                static SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+                    let columns = ["source_key", "object_id", $(stringify!($column),)*];
+                    let parameters = columns.iter().enumerate().map(|(index, column)| format!("?{} AS {column}", index + 3)).collect::<Vec<_>>();
+                    let assignments = columns.iter().map(|column| format!("{column}=COALESCE(tracks.{column},excluded.{column})")).collect::<Vec<_>>();
+                    let changed = columns.iter().map(|column| format!("(tracks.{column} IS NULL AND excluded.{column} IS NOT NULL)")).collect::<Vec<_>>();
+                    format!("WITH incoming AS (SELECT ?1 AS media_uri,?2 AS audio_properties,{})
+                        INSERT INTO tracks(media_uri,indexed,audio_properties,{})
+                        SELECT media_uri,0,COALESCE(audio_properties,'{{}}'),{} FROM incoming WHERE true
+                        ON CONFLICT(media_uri) DO UPDATE SET {},
+                        audio_properties=CASE WHEN tracks.indexed=0 AND ?2 IS NOT NULL THEN excluded.audio_properties ELSE tracks.audio_properties END
+                        WHERE (tracks.indexed=0 AND ?2 IS NOT NULL AND tracks.audio_properties IS NOT excluded.audio_properties)
+                           OR {} RETURNING track_key", parameters.join(","), columns.join(","), columns.join(","), assignments.join(","), changed.join(" OR "))
+                });
+                Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(SQL.as_str()))
+                    .bind(uri).bind(self.audio_properties.map(serde_json::to_string).transpose()?)
+                    .bind(source).bind(object)$(.bind(self.$field))*
+                    .fetch_optional(connection).await?)
+            }
+        }
+    };
+}
+
+song_metadata! {
+    'a;
+    title: Option<&'a str> => title,
+    artist: Option<&'a str> => display_artist,
+    album: Option<&'a str> => display_album,
+    album_display_artist: Option<&'a str> => album_display_artist,
+    duration_millis: Option<i64> => duration_millis,
+    disc_number: Option<i64> => disc_number,
+    track_number: Option<i64> => track_number,
+    year: Option<i64> => year,
+    release_date: Option<&'a str> => release_date,
+    source_format: Option<&'a str> => source_format,
+    musicbrainz_recording_id: Option<&'a str> => musicbrainz_recording_id,
+    musicbrainz_release_track_id: Option<&'a str> => musicbrainz_release_track_id,
+    musicbrainz_album_id: Option<&'a str> => musicbrainz_album_id,
+    musicbrainz_release_group_id: Option<&'a str> => musicbrainz_release_group_id,
+    primary_artist_musicbrainz_id: Option<&'a str> => primary_artist_musicbrainz_id,
 }
 
 pub(crate) async fn remember_song(
@@ -587,18 +608,7 @@ pub(crate) async fn remember_song(
             None
         };
     let uri = known_uri.as_deref().unwrap_or(uri);
-    let key = sqlx::query_scalar::<_,TrackKey>("INSERT INTO tracks(media_uri,source_key,object_id,indexed,title,display_artist,display_album,album_display_artist,duration_millis,disc_number,track_number,year,release_date,source_format,musicbrainz_recording_id,musicbrainz_release_track_id,musicbrainz_album_id,musicbrainz_release_group_id,primary_artist_musicbrainz_id,audio_properties)
-        VALUES(?1,?2,?3,0,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,COALESCE(?19,'{}'))
-        ON CONFLICT(media_uri) DO UPDATE SET
-        source_key=COALESCE(tracks.source_key,excluded.source_key),object_id=COALESCE(tracks.object_id,excluded.object_id),
-        title=COALESCE(tracks.title,excluded.title),display_artist=COALESCE(tracks.display_artist,excluded.display_artist),display_album=COALESCE(tracks.display_album,excluded.display_album),
-        album_display_artist=COALESCE(tracks.album_display_artist,excluded.album_display_artist),duration_millis=COALESCE(tracks.duration_millis,excluded.duration_millis),
-        disc_number=COALESCE(tracks.disc_number,excluded.disc_number),track_number=COALESCE(tracks.track_number,excluded.track_number),year=COALESCE(tracks.year,excluded.year),release_date=COALESCE(tracks.release_date,excluded.release_date),
-        audio_properties=CASE WHEN tracks.indexed=0 AND ?19 IS NOT NULL THEN excluded.audio_properties ELSE tracks.audio_properties END,
-        source_format=COALESCE(tracks.source_format,excluded.source_format),musicbrainz_recording_id=COALESCE(tracks.musicbrainz_recording_id,excluded.musicbrainz_recording_id),musicbrainz_release_track_id=COALESCE(tracks.musicbrainz_release_track_id,excluded.musicbrainz_release_track_id),
-        musicbrainz_album_id=COALESCE(tracks.musicbrainz_album_id,excluded.musicbrainz_album_id),musicbrainz_release_group_id=COALESCE(tracks.musicbrainz_release_group_id,excluded.musicbrainz_release_group_id),primary_artist_musicbrainz_id=COALESCE(tracks.primary_artist_musicbrainz_id,excluded.primary_artist_musicbrainz_id)
-        WHERE (tracks.indexed=0 AND ?19 IS NOT NULL AND tracks.audio_properties IS NOT excluded.audio_properties) OR (tracks.source_key IS NULL AND excluded.source_key IS NOT NULL) OR (tracks.object_id IS NULL AND excluded.object_id IS NOT NULL) OR (tracks.title IS NULL AND excluded.title IS NOT NULL) OR (tracks.display_artist IS NULL AND excluded.display_artist IS NOT NULL) OR (tracks.display_album IS NULL AND excluded.display_album IS NOT NULL) OR (tracks.album_display_artist IS NULL AND excluded.album_display_artist IS NOT NULL) OR (tracks.duration_millis IS NULL AND excluded.duration_millis IS NOT NULL) OR (tracks.disc_number IS NULL AND excluded.disc_number IS NOT NULL) OR (tracks.track_number IS NULL AND excluded.track_number IS NOT NULL) OR (tracks.year IS NULL AND excluded.year IS NOT NULL) OR (tracks.release_date IS NULL AND excluded.release_date IS NOT NULL) OR (tracks.source_format IS NULL AND excluded.source_format IS NOT NULL) OR (tracks.musicbrainz_recording_id IS NULL AND excluded.musicbrainz_recording_id IS NOT NULL) OR (tracks.musicbrainz_release_track_id IS NULL AND excluded.musicbrainz_release_track_id IS NOT NULL) OR (tracks.musicbrainz_album_id IS NULL AND excluded.musicbrainz_album_id IS NOT NULL) OR (tracks.musicbrainz_release_group_id IS NULL AND excluded.musicbrainz_release_group_id IS NOT NULL) OR (tracks.primary_artist_musicbrainz_id IS NULL AND excluded.primary_artist_musicbrainz_id IS NOT NULL) RETURNING track_key")
-        .bind(uri).bind(source).bind(object).bind(facts.title).bind(facts.artist).bind(facts.album).bind(facts.album_display_artist).bind(facts.duration_millis).bind(facts.disc_number).bind(facts.track_number).bind(facts.year).bind(facts.release_date).bind(facts.source_format).bind(facts.musicbrainz_recording_id).bind(facts.musicbrainz_release_track_id).bind(facts.musicbrainz_album_id).bind(facts.musicbrainz_release_group_id).bind(facts.primary_artist_musicbrainz_id).bind(facts.audio_properties.map(serde_json::to_string).transpose()?).fetch_optional(&mut *connection).await?;
+    let key = facts.write(connection, uri, source, object).await?;
     let Some(key) = key else {
         return Ok(
             sqlx::query_scalar("SELECT track_key FROM tracks WHERE media_uri=?1")

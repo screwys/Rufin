@@ -49,7 +49,12 @@ impl CatalogUi {
         let current_album = Rc::new(RefCell::new(album.clone()));
         let context_id = format!("album:{album_id}");
         let applied_external_link_settings = Rc::new(RefCell::new(
-            self.settings.current.borrow().external_site_links.clone(),
+            self.settings
+                .current
+                .borrow()
+                .application
+                .external_site_links
+                .clone(),
         ));
 
         let wrapper = detail_route_wrapper(22);
@@ -207,8 +212,13 @@ impl CatalogUi {
                 let Some(shell) = shell.upgrade() else {
                     return;
                 };
-                let external_link_settings =
-                    shell.settings.current.borrow().external_site_links.clone();
+                let external_link_settings = shell
+                    .settings
+                    .current
+                    .borrow()
+                    .application
+                    .external_site_links
+                    .clone();
                 if *applied_external_link_settings.borrow() != external_link_settings {
                     showcase.replace_external_links(album_external_links(&shell, &album.borrow()));
                     applied_external_link_settings.replace(external_link_settings);

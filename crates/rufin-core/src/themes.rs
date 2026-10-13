@@ -80,7 +80,7 @@ pub fn controller_colors(
     settings: &crate::settings::Settings,
     directory: &Path,
 ) -> BTreeMap<String, String> {
-    let crate::settings::ThemePreference::Named(id) = &settings.theme_preference else {
+    let crate::settings::ThemePreference::Named(id) = &settings.appearance.theme_preference else {
         return BTreeMap::new();
     };
     let mut themes = builtins();
@@ -97,8 +97,8 @@ pub fn controller_colors(
     theme_colors(
         theme,
         &themes,
-        settings.accent_preference,
-        &settings.theme_accents,
+        settings.appearance.accent_preference,
+        &settings.appearance.theme_accents,
     )
 }
 

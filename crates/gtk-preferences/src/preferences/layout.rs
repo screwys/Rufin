@@ -10,7 +10,13 @@ pub fn populate_home_block_rows(
         }
     }
 
-    let visible_blocks = shell.settings.current.borrow().home_blocks.clone();
+    let visible_blocks = shell
+        .settings
+        .current
+        .borrow()
+        .application
+        .home_blocks
+        .clone();
     let ordered_blocks = home_block_row_order(&visible_blocks);
     for (position, block) in ordered_blocks.into_iter().enumerate() {
         let active = visible_blocks.contains(&block);
@@ -21,7 +27,13 @@ pub fn populate_home_block_rows(
         let visible_expander = expander.downgrade();
         let visible_rows = Rc::clone(rows);
         let on_visible = move |requested| {
-            let mut blocks = visible_shell.settings.current.borrow().home_blocks.clone();
+            let mut blocks = visible_shell
+                .settings
+                .current
+                .borrow()
+                .application
+                .home_blocks
+                .clone();
             if requested == blocks.contains(&block) {
                 return;
             }
@@ -41,7 +53,13 @@ pub fn populate_home_block_rows(
         let move_expander = expander.downgrade();
         let move_rows = Rc::clone(rows);
         let on_move = move |delta: isize| {
-            let mut blocks = move_shell.settings.current.borrow().home_blocks.clone();
+            let mut blocks = move_shell
+                .settings
+                .current
+                .borrow()
+                .application
+                .home_blocks
+                .clone();
             let Some(index) = blocks.iter().position(|candidate| *candidate == block) else {
                 return;
             };
@@ -71,7 +89,13 @@ pub fn populate_home_block_rows(
             else {
                 return false;
             };
-            let mut blocks = drop_shell.settings.current.borrow().home_blocks.clone();
+            let mut blocks = drop_shell
+                .settings
+                .current
+                .borrow()
+                .application
+                .home_blocks
+                .clone();
             if !reorder_home_blocks(&mut blocks, source_block, block, after) {
                 return false;
             }

@@ -12,7 +12,9 @@ pub(super) fn bind(shell: &Rc<Preferences>, builder: &gtk::Builder, resource: &s
     standard_accent.set_selected(
         AccentPreference::ALL
             .iter()
-            .position(|accent| *accent == shell.settings.current.borrow().accent_preference)
+            .position(|accent| {
+                *accent == shell.settings.current.borrow().appearance.accent_preference
+            })
             .unwrap_or_default() as u32,
     );
     let weak = Rc::downgrade(shell);
@@ -25,7 +27,7 @@ pub(super) fn bind(shell: &Rc<Preferences>, builder: &gtk::Builder, resource: &s
             shell
                 .settings
                 .set_app_setting("accent setting", *accent, |settings| {
-                    &mut settings.accent_preference
+                    &mut settings.appearance.accent_preference
                 })
         {
             shell.appearance.apply(&settings);
@@ -161,7 +163,8 @@ fn populate(
         if group.is_none() {
             group = Some(select.clone());
         }
-        select.set_active(shell.settings.current.borrow().theme_preference == preference);
+        select
+            .set_active(shell.settings.current.borrow().appearance.theme_preference == preference);
         let weak = Rc::downgrade(shell);
         let selection = preference.clone();
         select.connect_toggled(move |button| {
@@ -173,7 +176,7 @@ fn populate(
                 shell
                     .settings
                     .set_app_setting("theme setting", selection.clone(), |settings| {
-                        &mut settings.theme_preference
+                        &mut settings.appearance.theme_preference
                     })
             {
                 shell.appearance.apply(&settings);
@@ -241,6 +244,7 @@ fn populate(
                         .settings
                         .current
                         .borrow()
+                        .appearance
                         .theme_accents
                         .get(&theme.id)
                         .map(String::as_str),
@@ -265,10 +269,12 @@ fn populate(
                     shell
                         .settings
                         .update_app_settings("theme accent setting", |settings| {
-                            let changed = settings.theme_preference != preference
-                                || settings.theme_accents.get(&theme.id) != Some(&accent.name);
-                            settings.theme_preference = preference.clone();
+                            let changed = settings.appearance.theme_preference != preference
+                                || settings.appearance.theme_accents.get(&theme.id)
+                                    != Some(&accent.name);
+                            settings.appearance.theme_preference = preference.clone();
                             settings
+                                .appearance
                                 .theme_accents
                                 .insert(theme.id.clone(), accent.name.clone());
                             changed

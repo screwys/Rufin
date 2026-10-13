@@ -1,8 +1,6 @@
 use crate::PlayerUi;
 use adw::prelude::*;
-use rufin_core::settings::visualizer::{
-    VisualizerAppearance, VisualizerPreferenceEdit, VisualizerPreset, VisualizerStyle,
-};
+use rufin_core::settings::visualizer::{VisualizerAppearance, VisualizerPreset, VisualizerStyle};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -155,9 +153,7 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
             weak_shell.upgrade(),
             VisualizerStyle::ALL.get(row.selected() as usize),
         ) {
-            update_appearance(&shell, |appearance| {
-                appearance.apply(VisualizerPreferenceEdit::Style { value: *style })
-            });
+            update_appearance(&shell, |appearance| appearance.style = *style);
         }
     });
     macro_rules! slider {
@@ -171,22 +167,20 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
                 }
                 if let Some(shell) = shell.upgrade() {
                     update_appearance(&shell, |appearance| {
-                        appearance.apply(VisualizerPreferenceEdit::$field {
-                            value: row.value() / $scale,
-                        })
+                        appearance.$field = row.value() / $scale
                     });
                 }
             });
         }};
     }
-    slider!(spacing, Spacing, 1.0);
-    slider!(opacity, Opacity, 100.0);
-    slider!(sidebar_opacity, SidebarLyricsOpacity, 100.0);
-    slider!(fullscreen_opacity, FullscreenLyricsOpacity, 100.0);
-    slider!(rise, Rise, 100.0);
-    slider!(fall, Fall, 100.0);
-    slider!(peak_hold, PeakHold, 1.0);
-    slider!(peak_fall, PeakFall, 100.0);
+    slider!(spacing, spacing, 1.0);
+    slider!(opacity, opacity, 100.0);
+    slider!(sidebar_opacity, sidebar_lyrics_opacity, 100.0);
+    slider!(fullscreen_opacity, fullscreen_lyrics_opacity, 100.0);
+    slider!(rise, rise, 100.0);
+    slider!(fall, fall, 100.0);
+    slider!(peak_hold, peak_hold, 1.0);
+    slider!(peak_fall, peak_fall, 100.0);
 
     let weak_shell = Rc::downgrade(shell);
     let changing = Rc::clone(&syncing);
@@ -205,9 +199,7 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
                 shell.views.visualizer.sidebar_area.color(),
             ))
         };
-        update_appearance(&shell, |appearance| {
-            appearance.apply(VisualizerPreferenceEdit::Colors { value: colors })
-        });
+        update_appearance(&shell, |appearance| appearance.colors = colors);
         refresh_colors();
     });
     for (index, (button, swatch)) in [
@@ -278,9 +270,7 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         }
         if let Some(shell) = weak_shell.upgrade() {
             update_appearance(&shell, |appearance| {
-                appearance.apply(VisualizerPreferenceEdit::Peaks {
-                    value: row.enables_expansion(),
-                })
+                appearance.peaks = row.enables_expansion()
             });
         }
     });

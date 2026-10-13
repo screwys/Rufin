@@ -42,7 +42,9 @@ fn main() -> ExitCode {
         None => false,
     };
     let settings = app::startup_settings(&paths::roots());
-    if let Some(result) = restart_with_language(&settings.load().ui.language, updated_restart) {
+    if let Some(result) =
+        restart_with_language(&settings.load().ui.appearance.language, updated_restart)
+    {
         return result;
     }
     if headless {
@@ -77,7 +79,7 @@ fn main() -> ExitCode {
             Arc::new(move |settings, projection| {
                 discord.update(
                     settings.rich_presence.clone(),
-                    !settings.private_mode,
+                    !settings.application.private_mode,
                     &settings.lastfm_api_key,
                     projection.map(|p| &p.view),
                 )

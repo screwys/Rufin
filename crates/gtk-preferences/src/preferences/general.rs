@@ -486,26 +486,26 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
         f64::from(MAX_AUTO_DJ_REFILL_THRESHOLD),
     );
     refill.set_increments(1.0, 10.0);
-    refill.set_value(f64::from(app_settings.auto_dj_refill_threshold));
+    refill.set_value(f64::from(app_settings.application.auto_dj_refill_threshold));
     let refill_shell = Rc::clone(shell);
     refill.connect_value_changed(move |spin| {
         let threshold = spin.value().round() as u8;
         refill_shell
             .settings
             .set_app_setting("Auto DJ setting", threshold, |settings| {
-                &mut settings.auto_dj_refill_threshold
+                &mut settings.application.auto_dj_refill_threshold
             });
     });
     refill_row.set_activatable_widget(Some(&refill));
     transition_group.add(&refill_row);
 
-    clear_queue_row.set_active(app_settings.clear_queue_includes_current);
+    clear_queue_row.set_active(app_settings.player_display.clear_queue_includes_current);
     let clear_queue_shell = Rc::clone(shell);
     clear_queue_row.connect_active_notify(move |row| {
         clear_queue_shell.settings.set_app_setting(
             "clear queue setting",
             row.is_active(),
-            |settings| &mut settings.clear_queue_includes_current,
+            |settings| &mut settings.player_display.clear_queue_includes_current,
         );
     });
     transition_group.add(&clear_queue_row);
@@ -737,26 +737,33 @@ pub fn appearance_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
     });
 
     super::themes::bind(shell, &builder, resource);
-    reduce_motion.set_active(shell.settings.current.borrow().reduce_motion);
+    reduce_motion.set_active(shell.settings.current.borrow().application.reduce_motion);
     let motion_shell = Rc::clone(shell);
     reduce_motion.connect_active_notify(move |row| {
         if let Some(settings) =
             motion_shell
                 .settings
                 .set_app_setting("reduced motion", row.is_active(), |settings| {
-                    &mut settings.reduce_motion
+                    &mut settings.application.reduce_motion
                 })
         {
             motion_shell.appearance.apply(&settings);
         }
     });
-    waveform_row.set_active(shell.settings.current.borrow().seekbar_waveform_enabled);
+    waveform_row.set_active(
+        shell
+            .settings
+            .current
+            .borrow()
+            .player_display
+            .seekbar_waveform_enabled,
+    );
     let waveform_shell = Rc::clone(shell);
     waveform_row.connect_active_notify(move |row| {
         if waveform_shell
             .settings
             .set_app_setting("seekbar waveform setting", row.is_active(), |settings| {
-                &mut settings.seekbar_waveform_enabled
+                &mut settings.player_display.seekbar_waveform_enabled
             })
             .is_some()
         {

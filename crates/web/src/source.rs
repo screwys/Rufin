@@ -89,7 +89,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
         json!({
             "selected": configured.selected_source_id,
             "library": selected.as_ref().and_then(|source|source.music_folder_object_id.clone()),
-            "new_playlist_current": products.settings.load().new_playlist_current,
+            "new_playlist_current": products.settings.load().application.new_playlist_current,
             "libraries": selected.as_ref().map(|source|source.music_folders.iter().map(|folder|json!({"id":folder.object_id,"name":folder.name})).collect::<Vec<_>>()).unwrap_or_default(),
             "sources": configured.sources.iter().map(|s| json!({"id":s.id,"name":s.name,"kind":s.kind,"supports_playlist_public":s.supports_playlist_public})).collect::<Vec<_>>()
         }),

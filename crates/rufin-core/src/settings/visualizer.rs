@@ -50,79 +50,38 @@ impl VisualizerStyle {
     ];
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct VisualizerAppearance {
-    pub style: VisualizerStyle,
-    /// None follows the application's accent. Custom gradients store their two endpoints.
-    pub colors: Option<VisualizerColors>,
-    pub spacing: f64,
-    pub opacity: f64,
-    pub sidebar_lyrics_opacity: f64,
-    pub fullscreen_lyrics_opacity: f64,
-    pub rise: f64,
-    pub fall: f64,
-    pub peaks: bool,
-    pub peak_hold: f64,
-    pub peak_fall: f64,
-}
-
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-#[derive(Clone, Debug)]
-pub enum VisualizerPreferenceEdit {
-    Style { value: VisualizerStyle },
-    Colors { value: Option<VisualizerColors> },
-    Spacing { value: f64 },
-    Opacity { value: f64 },
-    SidebarLyricsOpacity { value: f64 },
-    FullscreenLyricsOpacity { value: f64 },
-    Rise { value: f64 },
-    Fall { value: f64 },
-    Peaks { value: bool },
-    PeakHold { value: f64 },
-    PeakFall { value: f64 },
-}
-
-impl VisualizerAppearance {
-    pub fn apply(&mut self, edit: VisualizerPreferenceEdit) {
-        match edit {
-            VisualizerPreferenceEdit::Style { value } => self.style = value,
-            VisualizerPreferenceEdit::Colors { value } => self.colors = value,
-            VisualizerPreferenceEdit::Spacing { value } => self.spacing = value,
-            VisualizerPreferenceEdit::Opacity { value } => self.opacity = value,
-            VisualizerPreferenceEdit::SidebarLyricsOpacity { value } => {
-                self.sidebar_lyrics_opacity = value
-            }
-            VisualizerPreferenceEdit::FullscreenLyricsOpacity { value } => {
-                self.fullscreen_lyrics_opacity = value
-            }
-            VisualizerPreferenceEdit::Rise { value } => self.rise = value,
-            VisualizerPreferenceEdit::Fall { value } => self.fall = value,
-            VisualizerPreferenceEdit::Peaks { value } => self.peaks = value,
-            VisualizerPreferenceEdit::PeakHold { value } => self.peak_hold = value,
-            VisualizerPreferenceEdit::PeakFall { value } => self.peak_fall = value,
+macro_rules! visualizer_preference_fields {
+    ($callback:ident $(, $args:tt)*) => {
+        $callback! { [$($args)*]
+            style: VisualizerStyle = VisualizerStyle::Rounded => set_visualizer_style;
+            /// None follows the application's accent. Custom gradients store their two endpoints.
+            colors: Option<VisualizerColors> = None => set_visualizer_colors;
+            spacing: f64 = 1.0 => set_visualizer_spacing;
+            opacity: f64 = 1.0 => set_visualizer_opacity;
+            sidebar_lyrics_opacity: f64 = 0.48 => set_visualizer_sidebar_lyrics_opacity;
+            fullscreen_lyrics_opacity: f64 = 0.25 => set_visualizer_fullscreen_lyrics_opacity;
+            rise: f64 = 0.72 => set_visualizer_rise;
+            fall: f64 = 0.16 => set_visualizer_fall;
+            peaks: bool = false => set_visualizer_peaks;
+            peak_hold: f64 = 0.5 => set_visualizer_peak_hold;
+            peak_fall: f64 = 0.6 => set_visualizer_peak_fall;
         }
-    }
+    };
 }
 
-impl Default for VisualizerAppearance {
-    fn default() -> Self {
-        Self {
-            style: VisualizerStyle::Rounded,
-            colors: None,
-            spacing: 1.0,
-            opacity: 1.0,
-            sidebar_lyrics_opacity: 0.48,
-            fullscreen_lyrics_opacity: 0.25,
-            rise: 0.72,
-            fall: 0.16,
-            peaks: false,
-            peak_hold: 0.5,
-            peak_fall: 0.6,
+macro_rules! define_visualizer_appearance {
+    ([] $( $(#[$attribute:meta])* $field:ident: $ty:ty = $default:expr => $setter:ident; )*) => {
+        #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+        #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+        #[serde(default)]
+        pub struct VisualizerAppearance { $( $(#[$attribute])* pub $field: $ty, )* }
+        impl Default for VisualizerAppearance {
+            fn default() -> Self { Self { $( $field: $default, )* } }
         }
-    }
+    };
 }
+visualizer_preference_fields!(define_visualizer_appearance);
+pub(super) use visualizer_preference_fields;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]

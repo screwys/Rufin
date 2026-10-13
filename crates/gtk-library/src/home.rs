@@ -193,7 +193,13 @@ impl HomeRouteProjection {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        let blocks = shell.settings.current.borrow().home_blocks.clone();
+        let blocks = shell
+            .settings
+            .current
+            .borrow()
+            .application
+            .home_blocks
+            .clone();
         let previous = self.home.replace(home.clone());
         if previous.showcase != home.showcase
             && blocks.contains(&HomeBlockKind::Showcase)
@@ -328,7 +334,13 @@ impl HomeRouteProjection {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        let blocks = shell.settings.current.borrow().home_blocks.clone();
+        let blocks = shell
+            .settings
+            .current
+            .borrow()
+            .application
+            .home_blocks
+            .clone();
         if *self.applied_blocks.borrow() != blocks {
             self.apply_block_settings();
         }
@@ -338,7 +350,13 @@ impl HomeRouteProjection {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        let blocks = shell.settings.current.borrow().home_blocks.clone();
+        let blocks = shell
+            .settings
+            .current
+            .borrow()
+            .application
+            .home_blocks
+            .clone();
         let showcase = self.slots.get(&HomeBlockKind::Showcase).filter(|_| {
             blocks.contains(&HomeBlockKind::Showcase) && slot_has_content(&self.provider_slot)
         });

@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.settings
 
-import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferenceEdit
 import io.github.screwys.rufin.shared.library.HomeBlockKind
 
 import androidx.compose.runtime.*
@@ -15,8 +14,8 @@ internal fun HomeSettingsPage(preferences: PreferencesConnection, embedded: Bool
     SettingsPage(embedded = embedded) {
         SettingsGroup(translate("Home Blocks")) {
             SettingsReorderRows(order.map { id -> SettingsReorderItem(id, names.first { it.first == id }.second, id in enabled, id in enabled) },
-                onReorder = { next, _, _, _ -> preferences.changePreference(ApplicationPreferenceEdit.HomeBlocks(next.filter { it in enabled }.map(HomeBlockKind::valueOf))) },
-                onToggle = { id, on -> preferences.changePreference(ApplicationPreferenceEdit.HomeBlocks((if (on) enabled + id else enabled - id).map(HomeBlockKind::valueOf))) })
+                onReorder = { next, _, _, _ -> preferences.changePreference { setHomeBlocks(next.filter { it in enabled }.map(HomeBlockKind::valueOf)) } },
+                onToggle = { id, on -> preferences.changePreference { setHomeBlocks((if (on) enabled + id else enabled - id).map(HomeBlockKind::valueOf)) } })
         }
     }
 }

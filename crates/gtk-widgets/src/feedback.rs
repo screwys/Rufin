@@ -18,7 +18,13 @@ impl ControlFeedbackState {
 }
 impl ControlFeedbackState {
     pub fn show_control_feedback_toast(&self, title: String) {
-        if !self.settings.current.borrow().control_notifications_enabled {
+        if !self
+            .settings
+            .current
+            .borrow()
+            .application
+            .control_notifications_enabled
+        {
             return;
         }
         self.show_feedback_toast(title);

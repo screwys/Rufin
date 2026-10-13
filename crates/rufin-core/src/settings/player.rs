@@ -1,6 +1,6 @@
 use super::{
     SettingsOwner,
-    visualizer::{self, PreferenceIndex, VisualizerPreferenceEdit},
+    visualizer::{self, PreferenceIndex},
 };
 use playback::{
     LoudnessNormalization, LoudnessNormalizationScope, PlaybackSettings, PlaybackTransitionMode,
@@ -23,18 +23,12 @@ impl From<String> for SettingsError {
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 #[derive(Clone, Debug)]
 pub struct PlayerPreferences {
-    pub private_mode: bool,
+    pub application: super::ApplicationPreferences,
     pub playback: PlaybackSettings,
     pub lyrics: lyrics::UserPreferences,
     pub visualizer: visualizer::VisualizerSettings,
-    pub clear_queue_includes_current: bool,
-    pub fullscreen_dynamic_background: bool,
-    pub fullscreen_background_image: bool,
-    pub fullscreen_lyrics_visible: bool,
-    pub fullscreen_current_lyrics_line_visible: bool,
-    pub fullscreen_visualizer_visible: bool,
-    pub right_panel_combined: bool,
-    pub seekbar_waveform_enabled: bool,
+    pub display: super::PlayerDisplayPreferences,
+    pub right_panel: super::right_panel::RightPanelSettings,
 }
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
@@ -43,31 +37,6 @@ pub struct PlayerPreferenceOptions {
     pub equalizer_presets: Vec<String>,
     pub lyrics_scroll_pause_millis: u64,
     pub visualizer_stale_micros: u64,
-}
-
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-#[derive(Clone, Debug)]
-pub enum PlayerPreferenceEdit {
-    TransitionMode { value: PlaybackTransitionMode },
-    CrossfadeSeconds { value: u8 },
-    SkipSameAlbumCrossfade { value: bool },
-    AudioFadeOnStatusChange { value: bool },
-    LoudnessNormalization { value: LoudnessNormalization },
-    LoudnessNormalizationScope { value: LoudnessNormalizationScope },
-    EbuR128TargetLufs { value: f64 },
-    WriteEbuR128Tags { value: bool },
-    StreamQuality { value: StreamQuality },
-    PlaybackRate { value: f64 },
-    PreservePitch { value: bool },
-    VolumeScale { value: VolumeScale },
-    ClearQueueIncludesCurrent { value: bool },
-    FullscreenDynamicBackground { value: bool },
-    FullscreenBackgroundImage { value: bool },
-    FullscreenLyricsVisible { value: bool },
-    FullscreenCurrentLyricsLineVisible { value: bool },
-    FullscreenVisualizerVisible { value: bool },
-    RightPanelCombined { value: bool },
-    SeekbarWaveformEnabled { value: bool },
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
@@ -85,18 +54,12 @@ impl SettingsOwner {
         let mut visualizer = ui.visualizer.clone();
         visualizer.selected_preset = Some(visualizer.selected_preset());
         PlayerPreferences {
-            private_mode: ui.private_mode,
+            application: ui.application.clone(),
             playback,
             lyrics: ui.lyrics.preferences.clone(),
             visualizer,
-            clear_queue_includes_current: ui.clear_queue_includes_current,
-            fullscreen_dynamic_background: ui.fullscreen_dynamic_background,
-            fullscreen_background_image: ui.fullscreen_background_image,
-            fullscreen_lyrics_visible: ui.fullscreen_lyrics_visible,
-            fullscreen_current_lyrics_line_visible: ui.fullscreen_current_lyrics_line_visible,
-            fullscreen_visualizer_visible: ui.fullscreen_visualizer_visible,
-            right_panel_combined: ui.right_panel.combined,
-            seekbar_waveform_enabled: ui.seekbar_waveform_enabled,
+            display: ui.player_display.clone(),
+            right_panel: ui.right_panel.clone(),
         }
     }
 
@@ -114,64 +77,17 @@ impl SettingsOwner {
         }
     }
 
-    pub fn edit_player_preferences(&self, edit: PlayerPreferenceEdit) -> Result<(), SettingsError> {
+    pub fn set_volume_scale(&self, value: VolumeScale) -> Result<(), SettingsError> {
         self.update_preferences(move |ui| {
-            match edit {
-                PlayerPreferenceEdit::TransitionMode { value } => {
-                    ui.playback.transition_mode = value
-                }
-                PlayerPreferenceEdit::CrossfadeSeconds { value } => {
-                    ui.playback.crossfade_seconds = value
-                }
-                PlayerPreferenceEdit::SkipSameAlbumCrossfade { value } => {
-                    ui.playback.skip_same_album_crossfade = value
-                }
-                PlayerPreferenceEdit::AudioFadeOnStatusChange { value } => {
-                    ui.playback.audio_fade_on_status_change = value
-                }
-                PlayerPreferenceEdit::LoudnessNormalization { value } => {
-                    ui.playback.loudness_normalization = value
-                }
-                PlayerPreferenceEdit::LoudnessNormalizationScope { value } => {
-                    ui.playback.loudness_normalization_scope = value
-                }
-                PlayerPreferenceEdit::EbuR128TargetLufs { value } => {
-                    ui.playback.ebu_r128_target_lufs = value
-                }
-                PlayerPreferenceEdit::WriteEbuR128Tags { value } => {
-                    ui.playback.write_ebu_r128_tags = value
-                }
-                PlayerPreferenceEdit::StreamQuality { value } => ui.playback.stream_quality = value,
-                PlayerPreferenceEdit::PlaybackRate { value } => ui.playback.playback_rate = value,
-                PlayerPreferenceEdit::PreservePitch { value } => ui.playback.preserve_pitch = value,
-                PlayerPreferenceEdit::VolumeScale { value } => {
-                    ui.playback.set_volume_scale_preserving_gain(value)
-                }
-                PlayerPreferenceEdit::ClearQueueIncludesCurrent { value } => {
-                    ui.clear_queue_includes_current = value
-                }
-                PlayerPreferenceEdit::FullscreenDynamicBackground { value } => {
-                    ui.fullscreen_dynamic_background = value
-                }
-                PlayerPreferenceEdit::FullscreenBackgroundImage { value } => {
-                    ui.fullscreen_background_image = value
-                }
-                PlayerPreferenceEdit::FullscreenLyricsVisible { value } => {
-                    ui.fullscreen_lyrics_visible = value
-                }
-                PlayerPreferenceEdit::FullscreenCurrentLyricsLineVisible { value } => {
-                    ui.fullscreen_current_lyrics_line_visible = value
-                }
-                PlayerPreferenceEdit::FullscreenVisualizerVisible { value } => {
-                    ui.fullscreen_visualizer_visible = value
-                }
-                PlayerPreferenceEdit::RightPanelCombined { value } => {
-                    ui.right_panel.combined = value
-                }
-                PlayerPreferenceEdit::SeekbarWaveformEnabled { value } => {
-                    ui.seekbar_waveform_enabled = value
-                }
-            }
+            ui.playback.set_volume_scale_preserving_gain(value);
+            Ok(())
+        })
+        .map_err(Into::into)
+    }
+
+    pub fn set_right_panel_combined(&self, value: bool) -> Result<(), SettingsError> {
+        self.update_preferences(move |ui| {
+            ui.right_panel.combined = value;
             Ok(())
         })
         .map_err(Into::into)
@@ -214,17 +130,6 @@ impl SettingsOwner {
         .map_err(Into::into)
     }
 
-    pub fn edit_lyrics_preferences(
-        &self,
-        edit: lyrics::LyricsPreferenceEdit,
-    ) -> Result<(), SettingsError> {
-        self.update_preferences(move |ui| {
-            ui.lyrics.preferences.apply(edit);
-            Ok(())
-        })
-        .map_err(Into::into)
-    }
-
     pub fn set_visualizer_appearance(
         &self,
         value: visualizer::VisualizerAppearance,
@@ -237,18 +142,6 @@ impl SettingsOwner {
             },
             false,
         )
-        .map_err(Into::into)
-    }
-
-    pub fn edit_visualizer_preferences(
-        &self,
-        edit: VisualizerPreferenceEdit,
-    ) -> Result<(), SettingsError> {
-        self.update_preferences(move |ui| {
-            ui.visualizer.selected_preset = Some(ui.visualizer.selected_preset());
-            ui.visualizer.appearance.apply(edit);
-            Ok(())
-        })
         .map_err(Into::into)
     }
 
@@ -299,3 +192,39 @@ impl SettingsOwner {
         self.set_visualizer_appearance(Default::default())
     }
 }
+
+macro_rules! preference_target {
+    ($ui:ident ($($path:ident).+)) => { $ui.$($path).+ };
+}
+
+macro_rules! native_preference_setters {
+    ([$ui:ident $path:tt $before:block]
+        $( $(#[$attribute:meta])* $field:ident: $ty:ty = $default:expr $(=> $setter:ident)?; )*) => {
+        #[cfg_attr(feature = "bindings", uniffi::export)]
+        impl SettingsOwner {
+            $($(pub fn $setter(&self, value: $ty) -> Result<(), SettingsError> {
+                self.update_preferences(move |$ui| {
+                    $before;
+                    (preference_target!($ui $path)).$field = value;
+                    Ok(())
+                }).map_err(Into::into)
+            })?)*
+        }
+    };
+    ([$($args:tt)*] direct { $($direct:tt)* } migrated { $($migrated:tt)* }) => {
+        native_preference_setters! { [$($args)*] $($direct)* $($migrated)* }
+    };
+}
+
+use lyrics::ExternalLyricsProvider;
+use visualizer::{VisualizerColors, VisualizerStyle};
+playback::playback_preference_fields!(native_preference_setters, ui, (playback), {});
+lyrics::lyrics_preference_fields!(native_preference_setters, ui, (lyrics.preferences), {});
+visualizer::visualizer_preference_fields!(
+    native_preference_setters,
+    ui,
+    (visualizer.appearance),
+    {
+        ui.visualizer.selected_preset = Some(ui.visualizer.selected_preset());
+    }
+);

@@ -9,23 +9,6 @@ use crate::{
     source_entity_uri,
 };
 
-// Album records can arrive from several files. Track supplied fields without copying their values.
-const YEAR: i64 = 1;
-const RELEASE_DATE: i64 = 2;
-const DATE_ADDED: i64 = 4;
-const RELEASE_ID: i64 = 8;
-const RELEASE_GROUP_ID: i64 = 16;
-const COMPILATION_TRUE: i64 = 32;
-const COMPILATION_FALSE: i64 = 64;
-const RATING: i64 = 128;
-
-pub(super) const ALBUM_SUPPLIED: &str = "
-    (album.year IS NOT NULL)*1 | (album.release_date IS NOT NULL)*2 |
-    (album.date_added IS NOT NULL)*4 | (album.musicbrainz_release_id IS NOT NULL)*8 |
-    (album.musicbrainz_release_group_id IS NOT NULL)*16 |
-    COALESCE(album.is_compilation=1,0)*32 | COALESCE(album.is_compilation=0,0)*64 |
-    (album.source_rating IS NOT NULL)*128";
-
 impl Scan {
     pub async fn write_tracks(
         &mut self,
@@ -231,76 +214,21 @@ impl Scan {
             input.artwork_binding.as_deref().unwrap_or_default(),
         ])?;
         let first = self.observe("album", object_id).await?;
-        let supplied = i64::from(input.year.is_some()) * YEAR
-            | i64::from(input.release_date.is_some()) * RELEASE_DATE
-            | i64::from(input.date_added.is_some()) * DATE_ADDED
-            | i64::from(input.musicbrainz_release_id.is_some()) * RELEASE_ID
-            | i64::from(input.musicbrainz_release_group_id.is_some()) * RELEASE_GROUP_ID
-            | i64::from(input.is_compilation == Some(true)) * COMPILATION_TRUE
-            | i64::from(input.is_compilation == Some(false)) * COMPILATION_FALSE
-            | i64::from(rating.is_some()) * RATING;
-        let changed = self.execute_result(
-            sqlx::query(
-                "INSERT INTO albums(
-                    source_key,object_id,media_uri,title,normalized_title,display_artist,sort_text,
-                    year,release_date,date_added,musicbrainz_release_id,musicbrainz_release_group_id,
-                    is_compilation,first_seen_at)
-                 SELECT ?14,?1,?2,
-                    CASE WHEN ?15 THEN ?3 ELSE previous.title END,
-                    CASE WHEN ?15 THEN ?4 ELSE previous.normalized_title END,
-                    CASE WHEN ?15 THEN ?5 ELSE previous.display_artist END,
-                    CASE WHEN ?15 THEN ?6 ELSE previous.sort_text END,
-                    CASE WHEN seen.supplied & 1=0 THEN COALESCE(?7,previous.year) ELSE previous.year END,
-                    CASE WHEN seen.supplied & 2=0 THEN COALESCE(?8,previous.release_date) ELSE previous.release_date END,
-                    CASE WHEN seen.supplied & 4=0 THEN COALESCE(?9,previous.date_added) ELSE previous.date_added END,
-                    CASE WHEN seen.supplied & 8=0 THEN COALESCE(?10,previous.musicbrainz_release_id) ELSE previous.musicbrainz_release_id END,
-                    CASE WHEN seen.supplied & 16=0 THEN COALESCE(?11,previous.musicbrainz_release_group_id) ELSE previous.musicbrainz_release_group_id END,
-                    CASE WHEN previous.album_key IS NULL THEN ?12 ELSE previous.is_compilation END,
-                    COALESCE(previous.first_seen_at,?13)
-                 FROM (SELECT 1) LEFT JOIN albums previous
-                    ON previous.source_key=?14 AND previous.object_id=?1
-                 JOIN temp.scan_seen seen ON seen.kind='album' AND seen.object_id=?1 WHERE true
-                 ON CONFLICT(source_key,object_id) DO UPDATE SET
-                    media_uri=excluded.media_uri,title=excluded.title,
-                    normalized_title=excluded.normalized_title,display_artist=excluded.display_artist,
-                    sort_text=excluded.sort_text,year=excluded.year,release_date=excluded.release_date,
-                    date_added=excluded.date_added,musicbrainz_release_id=excluded.musicbrainz_release_id,
-                    musicbrainz_release_group_id=excluded.musicbrainz_release_group_id,
-                    is_compilation=excluded.is_compilation,first_seen_at=excluded.first_seen_at
-                 WHERE (albums.media_uri,albums.title,albums.normalized_title,albums.display_artist,
-                    albums.sort_text,albums.year,albums.release_date,albums.date_added,
-                    albums.musicbrainz_release_id,albums.musicbrainz_release_group_id,
-                    albums.is_compilation,albums.first_seen_at)
-                 IS NOT (excluded.media_uri,excluded.title,excluded.normalized_title,excluded.display_artist,
-                    excluded.sort_text,excluded.year,excluded.release_date,excluded.date_added,
-                    excluded.musicbrainz_release_id,excluded.musicbrainz_release_group_id,
-                    excluded.is_compilation,excluded.first_seen_at)",
-            )
-            .bind(object_id)
-            .bind(media_uri)
-            .bind(input.title.as_str())
-            .bind(normalized_title)
-            .bind(input.display_artist.as_str())
-            .bind(input.sort_text.as_str())
-            .bind(input.year)
-            .bind(input.release_date.as_deref())
-            .bind(input.date_added.as_deref())
-            .bind(input.musicbrainz_release_id.as_deref())
-            .bind(input.musicbrainz_release_group_id.as_deref())
-            .bind(input.is_compilation)
-            .bind(input.first_seen_at)
-            .bind(self.source)
-            .bind(first),
-        ).await?.rows_affected() > 0;
+        let supplied = input.supplied(rating);
+        let changed = self
+            .execute_result(input.write_query(self.source, media_uri, normalized_title, first))
+            .await?
+            .rows_affected()
+            > 0;
         self.changes.metadata |= changed;
         self.changes.user_data |= self.execute_result(sqlx::query(
             "UPDATE albums AS album SET source_favorite=COALESCE(?2,album.source_favorite),
-                source_rating=CASE WHEN seen.supplied & 128=0 THEN COALESCE(?3,album.source_rating) ELSE album.source_rating END
+                source_rating=CASE WHEN seen.supplied & ?5=0 THEN COALESCE(?3,album.source_rating) ELSE album.source_rating END
              FROM temp.scan_seen seen
              WHERE album.source_key=?4 AND album.object_id=?1 AND seen.kind='album' AND seen.object_id=?1
                AND ((?2 IS NOT NULL AND album.source_favorite IS NOT ?2)
-                 OR (seen.supplied & 128=0 AND ?3 IS NOT NULL AND album.source_rating IS NOT ?3))")
-            .bind(object_id).bind(input.favorite).bind(rating).bind(self.source))
+                 OR (seen.supplied & ?5=0 AND ?3 IS NOT NULL AND album.source_rating IS NOT ?3))")
+            .bind(object_id).bind(input.favorite).bind(rating).bind(self.source).bind(AlbumInput::RATING))
             .await?.rows_affected() > 0;
         self.execute(sqlx::query("UPDATE temp.scan_seen SET supplied=supplied | ?2 WHERE kind='album' AND object_id=?1")
             .bind(object_id).bind(supplied)).await?;
@@ -404,80 +332,16 @@ impl Scan {
             .await?
             .rows_affected()
             > 0;
-        let changed = self.execute_result(
-            sqlx::query(
-                "INSERT INTO tracks(
-                    source_key,object_id,album_key,title,normalized_search,display_album,display_artist,
-                    sort_text,duration_millis,disc_number,track_number,year,release_date,date_added,
-                    media_uri,source_path,source_format,comment,bpm,musicbrainz_recording_id,
-                    musicbrainz_release_track_id,cue_path,cue_start_millis,cue_end_millis,
-                    first_seen_at,source_loudness_analysis_key,
-                    loudness_analysis_key,audio_properties)
-                 SELECT ?27,?1,(SELECT album_key FROM albums WHERE source_key=?27 AND object_id=?2),
-                    ?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,
-                    ?21,?22,?23,
-                    COALESCE(previous.first_seen_at,?24),?25,
-                    COALESCE((SELECT access.loudness_analysis_key FROM local_access_files access
-                        WHERE access.media_uri=?14
-                        ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,
-                            access.local_access_file_key LIMIT 1),?25),?26
-                 FROM (SELECT 1) LEFT JOIN tracks previous
-                    ON previous.media_uri=?14 WHERE true
-                 ON CONFLICT(media_uri) DO UPDATE SET
-                    source_key=excluded.source_key,object_id=excluded.object_id,indexed=1,album_key=excluded.album_key,title=excluded.title,normalized_search=excluded.normalized_search,
-                    display_album=excluded.display_album,display_artist=excluded.display_artist,
-                    sort_text=excluded.sort_text,duration_millis=excluded.duration_millis,
-                    disc_number=excluded.disc_number,track_number=excluded.track_number,year=excluded.year,
-                    release_date=excluded.release_date,date_added=excluded.date_added,media_uri=excluded.media_uri,
-                    source_path=excluded.source_path,source_format=excluded.source_format,audio_properties=excluded.audio_properties,
-                    comment=excluded.comment,bpm=excluded.bpm,musicbrainz_recording_id=excluded.musicbrainz_recording_id,
-                    musicbrainz_release_track_id=excluded.musicbrainz_release_track_id,cue_path=excluded.cue_path,
-                    cue_start_millis=excluded.cue_start_millis,cue_end_millis=excluded.cue_end_millis,
-                    first_seen_at=excluded.first_seen_at,source_loudness_analysis_key=excluded.source_loudness_analysis_key,
-                    loudness_analysis_key=excluded.loudness_analysis_key
-                 WHERE (tracks.source_key,tracks.object_id,tracks.indexed,tracks.album_key,tracks.title,tracks.normalized_search,tracks.display_album,tracks.display_artist,
-                    tracks.sort_text,tracks.duration_millis,tracks.disc_number,tracks.track_number,tracks.year,
-                    tracks.release_date,tracks.date_added,tracks.media_uri,tracks.source_path,tracks.source_format,
-                    tracks.audio_properties,tracks.comment,tracks.bpm,tracks.musicbrainz_recording_id,
-                    tracks.musicbrainz_release_track_id,tracks.cue_path,tracks.cue_start_millis,tracks.cue_end_millis,
-                    tracks.first_seen_at,tracks.source_loudness_analysis_key,
-                    tracks.loudness_analysis_key)
-                 IS NOT (excluded.source_key,excluded.object_id,1,excluded.album_key,excluded.title,excluded.normalized_search,excluded.display_album,excluded.display_artist,
-                    excluded.sort_text,excluded.duration_millis,excluded.disc_number,excluded.track_number,excluded.year,
-                    excluded.release_date,excluded.date_added,excluded.media_uri,excluded.source_path,excluded.source_format,
-                    excluded.audio_properties,excluded.comment,excluded.bpm,excluded.musicbrainz_recording_id,
-                    excluded.musicbrainz_release_track_id,excluded.cue_path,excluded.cue_start_millis,excluded.cue_end_millis,
-                    excluded.first_seen_at,excluded.source_loudness_analysis_key,
-                    excluded.loudness_analysis_key)",
-            )
-            .bind(object_id)
-            .bind(album_object_id)
-            .bind(title)
-            .bind(normalized_search)
-            .bind(display_album)
-            .bind(display_artist)
-            .bind(input.sort_text.as_str())
-            .bind(input.duration_millis)
-            .bind(input.disc_number)
-            .bind(input.track_number)
-            .bind(input.year)
-            .bind(input.release_date.as_deref())
-            .bind(input.date_added.as_deref())
-            .bind(&media_uri)
-            .bind(input.source_path.as_deref())
-            .bind(input.source_format.as_deref())
-            .bind(comment)
-            .bind(input.bpm)
-            .bind(input.musicbrainz_recording_id.as_deref())
-            .bind(input.musicbrainz_release_track_id.as_deref())
-            .bind(input.cue_path.as_deref())
-            .bind(input.cue_start_millis)
-            .bind(input.cue_end_millis)
-            .bind(input.first_seen_at)
-            .bind(input.loudness_analysis_key.as_slice())
-            .bind(audio_properties)
-            .bind(self.source),
-        ).await?.rows_affected() > 0;
+        let changed = self
+            .execute_result(input.write_query(
+                self.source,
+                &media_uri,
+                normalized_search,
+                audio_properties,
+            ))
+            .await?
+            .rows_affected()
+            > 0;
         self.changes.metadata |= changed;
         self.changes.tracks_added |= !existed && changed;
         self.changes.user_data |= self.execute_result(sqlx::query(
@@ -620,25 +484,11 @@ impl Scan {
             input.artwork_binding.as_deref().unwrap_or_default(),
         ])?;
         let first = self.observe("artist", object_id).await?;
-        let changed = self.execute_result(sqlx::query(
-            "INSERT INTO artists(source_key,object_id,media_uri,name,normalized_name,sort_text,
-                musicbrainz_artist_id)
-             SELECT ?7,?1,?2,
-                CASE WHEN ?5 IS NULL AND previous.normalized_name=?4 THEN previous.name ELSE ?3 END,
-                ?4,COALESCE(?5,previous.sort_text,?4),
-                CASE WHEN ?5 IS NOT NULL THEN ?6 ELSE COALESCE(?6,previous.musicbrainz_artist_id) END
-             FROM (SELECT 1) LEFT JOIN artists previous
-                ON previous.source_key=?7 AND previous.object_id=?1 WHERE true
-             ON CONFLICT(source_key,object_id) DO UPDATE SET
-                media_uri=excluded.media_uri,name=excluded.name,normalized_name=excluded.normalized_name,
-                sort_text=excluded.sort_text,musicbrainz_artist_id=excluded.musicbrainz_artist_id
-             WHERE (artists.media_uri,artists.name,artists.normalized_name,artists.sort_text,
-                artists.musicbrainz_artist_id)
-             IS NOT (excluded.media_uri,excluded.name,excluded.normalized_name,excluded.sort_text,
-                excluded.musicbrainz_artist_id)")
-            .bind(object_id).bind(media_uri).bind(input.name.as_str()).bind(normalized_name).bind(sort_text)
-            .bind(input.musicbrainz_artist_id.as_deref()).bind(self.source))
-            .await?.rows_affected() > 0;
+        let changed = self
+            .execute_result(input.write_query(self.source, media_uri, normalized_name))
+            .await?
+            .rows_affected()
+            > 0;
         self.changes.metadata |= changed;
         self.changes.user_data |= self
             .execute_result(
@@ -708,18 +558,11 @@ impl Scan {
             input.artwork_binding.as_deref().unwrap_or_default(),
         ])?;
         let first = self.observe("genre", object_id).await?;
-        let changed = self.execute_result(sqlx::query(
-            "INSERT INTO genres(source_key,object_id,name,normalized_name,sort_text)
-             SELECT ?5,?1,CASE WHEN ?4 IS NULL AND previous.normalized_name=?3 THEN previous.name ELSE ?2 END,
-                ?3,COALESCE(?4,previous.sort_text,?3)
-             FROM (SELECT 1) LEFT JOIN genres previous
-                ON previous.source_key=?5 AND previous.object_id=?1 WHERE true
-             ON CONFLICT(source_key,object_id) DO UPDATE SET
-                name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text
-             WHERE (genres.name,genres.normalized_name,genres.sort_text)
-                IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text)")
-            .bind(object_id).bind(input.name.as_str()).bind(normalized_name).bind(input.sort_text.as_deref()).bind(self.source))
-            .await?.rows_affected() > 0;
+        let changed = self
+            .execute_result(input.write_query(self.source, normalized_name))
+            .await?
+            .rows_affected()
+            > 0;
         self.changes.metadata |= changed;
         self.remember_artwork("genre", object_id, input.artwork_binding.as_deref(), first)
             .await
@@ -807,31 +650,19 @@ pub(super) async fn finish_albums(
     connection: &mut sqlx::SqliteConnection,
     source: i64,
 ) -> LibraryResult<(bool, bool)> {
-    let metadata = sqlx::query(
-        "UPDATE albums AS album SET
-            year=CASE WHEN seen.supplied & 1 THEN album.year END,
-            release_date=CASE WHEN seen.supplied & 2 THEN album.release_date END,
-            date_added=CASE WHEN seen.supplied & 4 THEN album.date_added END,
-            musicbrainz_release_id=CASE WHEN seen.supplied & 8 THEN album.musicbrainz_release_id END,
-            musicbrainz_release_group_id=CASE WHEN seen.supplied & 16 THEN album.musicbrainz_release_group_id END,
-            is_compilation=CASE WHEN seen.supplied & 32 THEN 1 WHEN seen.supplied & 64 THEN 0 END
-         FROM temp.scan_seen seen
-         WHERE album.source_key=?1 AND seen.kind='album' AND seen.object_id=album.object_id AND seen.written
-           AND (album.year,album.release_date,album.date_added,album.musicbrainz_release_id,
-                album.musicbrainz_release_group_id,album.is_compilation)
-           IS NOT (CASE WHEN seen.supplied & 1 THEN album.year END,
-                CASE WHEN seen.supplied & 2 THEN album.release_date END,
-                CASE WHEN seen.supplied & 4 THEN album.date_added END,
-                CASE WHEN seen.supplied & 8 THEN album.musicbrainz_release_id END,
-                CASE WHEN seen.supplied & 16 THEN album.musicbrainz_release_group_id END,
-                CASE WHEN seen.supplied & 32 THEN 1 WHEN seen.supplied & 64 THEN 0 END)")
-        .bind(source).execute(&mut *connection).await?.rows_affected() > 0;
+    let metadata = sqlx::query(sqlx::AssertSqlSafe(AlbumInput::finish_sql()))
+        .bind(source)
+        .execute(&mut *connection)
+        .await?
+        .rows_affected()
+        > 0;
     let user_data = sqlx::query(
         "UPDATE albums AS album SET source_rating=NULL FROM temp.scan_seen seen
          WHERE album.source_key=?1 AND seen.kind='album' AND seen.object_id=album.object_id
-           AND seen.written AND seen.supplied & 128=0 AND album.source_rating IS NOT NULL",
+           AND seen.written AND seen.supplied & ?2=0 AND album.source_rating IS NOT NULL",
     )
     .bind(source)
+    .bind(AlbumInput::RATING)
     .execute(connection)
     .await?
     .rows_affected()

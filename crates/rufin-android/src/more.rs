@@ -25,7 +25,7 @@ impl AndroidMore {
         &self,
     ) -> Result<Option<library::CalendarActivityPeriod>, AndroidError> {
         let today = glib::DateTime::now_local().map_err(error)?;
-        let settings = self.settings.load().activity_overview;
+        let settings = self.settings.load().application.activity_overview;
         if settings.startup_periods(&today).iter().all(Option::is_none) {
             return Ok(None);
         }
@@ -42,7 +42,7 @@ impl AndroidMore {
         accent: u32,
     ) -> Result<Vec<u8>, AndroidError> {
         let database = self.database.clone();
-        let settings = self.settings.load().activity_overview;
+        let settings = self.settings.load().application.activity_overview;
         let artwork = self.artwork.clone();
         let rgb = |color: u32| [(color >> 16) as u8, (color >> 8) as u8, color as u8];
         let appearance = rufin_core::activity::ReportAppearance {

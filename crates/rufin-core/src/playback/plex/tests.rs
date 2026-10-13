@@ -71,19 +71,22 @@ async fn plex_queue_admission_retains_duplicates_and_rejects_mixed_sources() {
     let source = sources::SourceId::new("plex-test");
     let uri = library::source_entity_uri(&source, "track", "plex:track:42");
     let entries = database
-        .read_queue(library::QueueReadRequest::media_uris(
-            vec![
-                uri.clone(),
-                uri.clone(),
-                uri,
-                library::source_entity_uri(
-                    &sources::SourceId::new("another-profile"),
-                    "track",
-                    "plex:track:42",
-                ),
-            ],
-            playback::Provenance::Manual,
-        ))
+        .queue_entries(
+            library::QueueLoad::media_uris(
+                vec![
+                    uri.clone(),
+                    uri.clone(),
+                    uri,
+                    library::source_entity_uri(
+                        &sources::SourceId::new("another-profile"),
+                        "track",
+                        "plex:track:42",
+                    ),
+                ],
+                playback::Provenance::Manual,
+            ),
+            None,
+        )
         .await
         .unwrap()
         .entries;

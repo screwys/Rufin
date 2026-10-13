@@ -123,7 +123,7 @@ impl Preferences {
         if self
             .settings
             .set_app_setting("metadata setting", enabled, |settings| {
-                &mut settings.external_metadata_enabled
+                &mut settings.application.external_metadata_enabled
             })
             .is_some()
         {
@@ -937,7 +937,7 @@ fn general_page(
     language_row.set_model(Some(&language_model));
     language_row.set_selected(language_option_index(
         language_options.as_ref(),
-        &settings.language,
+        &settings.appearance.language,
     ));
     let language_shell = Rc::clone(shell);
     language_row.connect_selected_notify(move |row| {
@@ -947,7 +947,7 @@ fn general_page(
         language_shell.settings.set_app_setting(
             "language setting",
             option.id.clone(),
-            |settings| &mut settings.language,
+            |settings| &mut settings.appearance.language,
         );
     });
 
@@ -1032,7 +1032,7 @@ fn general_page(
     release_check_interval_row.set_selected(
         intervals
             .iter()
-            .position(|hours| *hours == settings.release_check_interval_hours)
+            .position(|hours| *hours == settings.application.release_check_interval_hours)
             .unwrap_or(1) as u32,
     );
     let interval_shell = Rc::downgrade(shell);
@@ -1046,7 +1046,7 @@ fn general_page(
         if shell
             .settings
             .set_app_setting("release check interval", hours, |settings| {
-                &mut settings.release_check_interval_hours
+                &mut settings.application.release_check_interval_hours
             })
             .is_some()
         {
@@ -1054,23 +1054,23 @@ fn general_page(
         }
     });
 
-    control_notifications_row.set_active(settings.control_notifications_enabled);
+    control_notifications_row.set_active(settings.application.control_notifications_enabled);
     let control_notifications_shell = Rc::clone(shell);
     control_notifications_row.connect_active_notify(move |row| {
         control_notifications_shell.settings.set_app_setting(
             "control notification setting",
             row.is_active(),
-            |settings| &mut settings.control_notifications_enabled,
+            |settings| &mut settings.application.control_notifications_enabled,
         );
     });
-    notifications_row.set_active(settings.notifications_enabled);
+    notifications_row.set_active(settings.application.notifications_enabled);
     let notifications_shell = Rc::clone(shell);
     notifications_row.connect_active_notify(move |row| {
         let enabled = row.is_active();
         if notifications_shell
             .settings
             .set_app_setting("notification setting", enabled, |settings| {
-                &mut settings.notifications_enabled
+                &mut settings.application.notifications_enabled
             })
             .is_some()
             && !enabled
@@ -1078,22 +1078,22 @@ fn general_page(
             (notifications_shell.effects)(crate::Effect::WithdrawNotification);
         }
     });
-    release_notifications_row.set_active(settings.release_notifications_enabled);
+    release_notifications_row.set_active(settings.application.release_notifications_enabled);
     let release_notifications_shell = Rc::clone(shell);
     release_notifications_row.connect_active_notify(move |row| {
         release_notifications_shell.settings.set_app_setting(
             "release notification setting",
             row.is_active(),
-            |settings| &mut settings.release_notifications_enabled,
+            |settings| &mut settings.application.release_notifications_enabled,
         );
     });
-    prefer_distinct_track_covers_row.set_active(settings.prefer_distinct_track_covers);
+    prefer_distinct_track_covers_row.set_active(settings.application.prefer_distinct_track_covers);
     let distinct_track_covers_shell = Rc::clone(shell);
     prefer_distinct_track_covers_row.connect_active_notify(move |row| {
         if distinct_track_covers_shell
             .settings
             .set_app_setting("track cover setting", row.is_active(), |settings| {
-                &mut settings.prefer_distinct_track_covers
+                &mut settings.application.prefer_distinct_track_covers
             })
             .is_some()
         {
@@ -1110,7 +1110,7 @@ fn general_page(
         }
     });
 
-    external_metadata_row.set_active(settings.external_metadata_enabled);
+    external_metadata_row.set_active(settings.application.external_metadata_enabled);
     let metadata_shell = Rc::clone(shell);
     external_metadata_row.connect_active_notify(move |row| {
         metadata_shell.set_external_metadata_enabled(row.is_active());
@@ -1124,7 +1124,7 @@ fn general_page(
         }
     });
 
-    let external_links = settings.external_site_links.clone();
+    let external_links = settings.application.external_site_links.clone();
     external_links_row.set_active(external_links.enabled);
     lastfm_links_row.set_active(external_links.lastfm);
     lastfm_links_row.set_sensitive(external_links.enabled);
@@ -1144,7 +1144,7 @@ fn general_page(
         if external_links_shell
             .settings
             .set_app_setting("external site links setting", enabled, |settings| {
-                &mut settings.external_site_links.enabled
+                &mut settings.application.external_site_links.enabled
             })
             .is_some()
         {
@@ -1156,7 +1156,7 @@ fn general_page(
         if lastfm_links_shell
             .settings
             .set_app_setting("Last.fm site links setting", row.is_active(), |settings| {
-                &mut settings.external_site_links.lastfm
+                &mut settings.application.external_site_links.lastfm
             })
             .is_some()
         {
@@ -1170,7 +1170,7 @@ fn general_page(
             .set_app_setting(
                 "MusicBrainz site links setting",
                 row.is_active(),
-                |settings| &mut settings.external_site_links.musicbrainz,
+                |settings| &mut settings.application.external_site_links.musicbrainz,
             )
             .is_some()
         {
@@ -1182,7 +1182,7 @@ fn general_page(
         if server_links_shell
             .settings
             .set_app_setting("server site links setting", row.is_active(), |settings| {
-                &mut settings.external_site_links.server
+                &mut settings.application.external_site_links.server
             })
             .is_some()
         {
@@ -1251,18 +1251,18 @@ fn general_page(
             |settings| &mut settings.rich_presence.show_as_listening,
         );
     });
-    private_row.set_active(settings.private_mode);
+    private_row.set_active(settings.application.private_mode);
     let private_shell = Rc::clone(shell);
     private_row.connect_active_notify(move |row| {
         private_shell.set_private_mode(row.is_active());
     });
-    cast_proxy_row.set_active(settings.cast_proxy_enabled);
+    cast_proxy_row.set_active(settings.application.cast_proxy_enabled);
     let cast_proxy_shell = Rc::clone(shell);
     cast_proxy_row.connect_active_notify(move |row| {
         cast_proxy_shell.settings.set_app_setting(
             "cast proxy setting",
             row.is_active(),
-            |settings| &mut settings.cast_proxy_enabled,
+            |settings| &mut settings.application.cast_proxy_enabled,
         );
     });
     let cast_network_dropdown = casting_network_dropdown(&shell.player_ui, 220);
@@ -1279,7 +1279,9 @@ fn general_page(
         .state
         .secret_storage_row
         .set(Some(&secret_storage_row));
-    secret_storage_row.set_selected(secret_storage_mode_index(settings.secret_storage_mode));
+    secret_storage_row.set_selected(secret_storage_mode_index(
+        settings.application.secret_storage_mode,
+    ));
     let secret_storage_shell = Rc::clone(shell);
     let secret_storage_guard = Rc::new(Cell::new(false));
     let secret_storage_guard_for_row = Rc::clone(&secret_storage_guard);
@@ -1293,7 +1295,7 @@ fn general_page(
             .settings
             .current
             .borrow()
-            .secret_storage_mode;
+            .application.secret_storage_mode;
         if mode == previous_mode {
             return;
         }

@@ -2,21 +2,14 @@
 
 use std::sync::{Arc, Weak};
 
-use crate::playback::{Placement, RadioPlayRequest, RandomPlayRequest};
+use crate::playback::RandomPlayRequest;
 use library::{Database, RadioSeed, ReadCancellation, SourceKey};
 use playback::Provenance;
 use sources::{Source, SourceRadioSeed};
-use tracing::warn;
 
-use crate::playback::{
-    actor::Playback,
-    random_u64,
-    state::{AutoDjRequest, MaterializationReservation},
-};
+use crate::playback::{actor::Playback, random_u64, state::AutoDjRequest};
 use crate::runtime::SelectedLibrary;
 use crate::source::SourceOwner;
-
-const MANUAL_RADIO_COUNT: usize = 20;
 
 pub fn random_play_request(
     settings: &crate::settings::RandomPlaySettings,
@@ -61,8 +54,8 @@ pub async fn queue_random(
     if order.is_empty() {
         return Ok(true);
     }
-    queue.play_selection(crate::playback::PlayRequest::from_load(
-        library::QueueReadRequest::media_uris(order, Provenance::Random),
+    queue.play_selection(crate::playback::PlayRequest::from_input(
+        library::QueueLoad::media_uris(order, Provenance::Random),
         request.placement,
     ));
     Ok(false)
@@ -110,76 +103,6 @@ pub(crate) fn request_auto_dj(
             }
         }
     });
-}
-
-pub(crate) fn play_radio(
-    runtime: tokio::runtime::Handle,
-    database: Arc<Database>,
-    source_owner: Weak<SourceOwner>,
-    playback: Playback,
-    request: RadioPlayRequest,
-) -> Option<tokio::task::JoinHandle<()>> {
-    let placement = request.placement;
-    let selected = source_owner
-        .upgrade()
-        .and_then(|owner| owner.selected_library());
-    let reservation = playback.reserve_materialization(placement).ok()?;
-    Some(runtime.spawn(async move {
-        let candidates = radio_candidates(
-            &database,
-            source_owner,
-            selected,
-            request.seed,
-            MANUAL_RADIO_COUNT,
-            &ReadCancellation::new(),
-        )
-        .await;
-        complete_materialization(
-            playback,
-            reservation,
-            placement,
-            candidates,
-            Provenance::Radio,
-        )
-        .await;
-    }))
-}
-
-pub(crate) fn play_random(
-    runtime: tokio::runtime::Handle,
-    database: Arc<Database>,
-    selected: SelectedLibrary,
-    playback: Playback,
-    request: RandomPlayRequest,
-) -> Option<tokio::task::JoinHandle<()>> {
-    let placement = request.placement;
-    let reservation = playback.reserve_materialization(placement).ok()?;
-    Some(runtime.spawn(async move {
-        let excluded = reservation
-            .current_media_uri
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
-        let candidates = database
-            .random_candidates(
-                selected.source_key,
-                selected.music_folder_key,
-                &request.criteria,
-                &excluded,
-                request.requested,
-                &ReadCancellation::new(),
-            )
-            .await
-            .map_err(|error| error.to_string());
-        complete_materialization(
-            playback,
-            reservation,
-            placement,
-            candidates,
-            Provenance::Random,
-        )
-        .await;
-    }))
 }
 
 pub(crate) async fn radio_candidates(
@@ -264,29 +187,5 @@ fn source_seed(
         RadioSeed::Artist(_) | RadioSeed::AlbumArtist(_) => object_id.map(SourceRadioSeed::Artist),
         RadioSeed::Genre(_) => object_id.map(SourceRadioSeed::Genre),
         RadioSeed::Playlist(_) => object_id.map(SourceRadioSeed::Playlist),
-    }
-}
-
-async fn complete_materialization(
-    playback: Playback,
-    reservation: MaterializationReservation,
-    placement: Placement,
-    candidates: Result<Vec<String>, String>,
-    provenance: Provenance,
-) {
-    match candidates {
-        Ok(candidates) if !candidates.is_empty() => {
-            let batch = library::QueueReadRequest::media_uris(candidates, provenance);
-            if let Err(error) = playback.complete_materialization(reservation.id, batch, placement)
-            {
-                warn!(%error, "could not complete queue materialization");
-            }
-        }
-        Ok(_) => {
-            let _ = playback.cancel_materialization(reservation.id, placement);
-        }
-        Err(error) => {
-            let _ = playback.fail_materialization(reservation.id, placement, error);
-        }
     }
 }

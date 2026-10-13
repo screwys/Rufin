@@ -616,7 +616,7 @@ mod tests {
             )
             .unwrap();
         let stored = file.load();
-        assert!(stored.ui.private_mode);
+        assert!(stored.ui.application.private_mode);
         assert_eq!(
             stored.sources.configured[0]
                 .credential_ref
@@ -652,7 +652,7 @@ mod tests {
                     local_access: None,
                     enable_half_stars: false,
                 });
-                stored.ui.private_mode = true;
+                stored.ui.application.private_mode = true;
                 stored.ui.playback.audio_output = Some("sender-device".into());
                 stored.ui.playback.stream_quality = StreamQuality::MaxBitrateKbps(128);
                 Ok(())
@@ -702,7 +702,7 @@ mod tests {
             .apply_connect_records(&records, &secrets)
             .unwrap();
         let value = receiver.load();
-        assert!(value.ui.private_mode);
+        assert!(value.ui.application.private_mode);
         assert_eq!(
             value.ui.playback.audio_output.as_deref(),
             Some("receiver-device")

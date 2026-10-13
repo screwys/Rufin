@@ -196,56 +196,63 @@ pub enum AlbumReleaseClass {
     Other,
 }
 
-#[derive(Clone, Debug, PartialEq, FromRow)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct AlbumRow {
-    pub album_key: AlbumKey,
-    pub source_key: SourceKey,
-    pub object_id: String,
-    pub media_uri: String,
-    pub title: String,
-    pub display_artist: String,
-    pub year: Option<i64>,
-    pub release_date: Option<String>,
-    pub date_added: Option<String>,
-    pub musicbrainz_release_id: Option<String>,
-    pub musicbrainz_release_group_id: Option<String>,
-    pub is_compilation: Option<bool>,
-    pub release_lookup_identity: Option<String>,
-    pub artwork_binding: Option<Vec<u8>>,
-    pub favorite: bool,
-    pub rating: Option<i64>,
-    pub play_count: i64,
-    pub last_played: Option<i64>,
-    pub track_count: i64,
-    pub duration_millis: i64,
-    pub downloaded_count: i64,
-    #[sqlx(json)]
-    pub album_artists: Vec<AlbumArtistLink>,
-    #[sqlx(json)]
-    pub genres: Vec<AlbumGenreLink>,
-    #[sqlx(json)]
-    pub release_types: Vec<String>,
+crate::row::row_projection! {
+    #[derive(Clone, Debug, PartialEq, FromRow)]
+    #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+    pub struct AlbumRow {
+        pub album_key: AlbumKey = "album.album_key",
+        pub source_key: SourceKey = "album.source_key",
+        pub object_id: String = "album.object_id",
+        pub media_uri: String = "album.media_uri",
+        pub title: String = "album.title",
+        pub display_artist: String = "album.display_artist",
+        pub year: Option<i64> = "album.year",
+        pub release_date: Option<String> = "album.release_date",
+        pub date_added: Option<String> = concat!("date(", crate::tracks::added_at!("album"), ",'unixepoch')"),
+        pub musicbrainz_release_id: Option<String> = "album.musicbrainz_release_id",
+        pub musicbrainz_release_group_id: Option<String> = "album.musicbrainz_release_group_id",
+        pub is_compilation: Option<bool> = "album.is_compilation",
+        pub release_lookup_identity: Option<String> = "album.release_lookup_identity",
+        pub artwork_binding: Option<Vec<u8>> = "album.artwork_binding",
+        pub favorite: bool = "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)",
+        pub rating: Option<i64> = "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_rating)/10",
+        pub play_count: i64 = collection_stat("album", "play_count", ""),
+        pub last_played: Option<i64> = collection_stat("album", "last_played", ""),
+        pub track_count: i64 = "album.track_count",
+        pub duration_millis: i64 = "album.duration_millis",
+        pub downloaded_count: i64 = "album.downloaded_count",
+        #[sqlx(json)]
+        pub album_artists: Vec<AlbumArtistLink> = "(SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY relation.position)
+            FROM album_artists relation JOIN artists artist USING(artist_key) WHERE relation.album_key=album.album_key)",
+        #[sqlx(json)]
+        pub genres: Vec<AlbumGenreLink> = "(SELECT json_group_array(json_object('genre_key',genre.genre_key,'name',genre.name) ORDER BY relation.position)
+            FROM album_genres relation JOIN genres genre USING(genre_key) WHERE relation.album_key=album.album_key)",
+        #[sqlx(json)]
+        pub release_types: Vec<String> = "(SELECT json_group_array(relation.release_type ORDER BY relation.position)
+            FROM album_release_types relation WHERE relation.album_key=album.album_key)",
+    }
 }
 
-#[derive(Clone, Debug, FromRow, PartialEq)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct ArtistRow {
-    pub artist_key: ArtistKey,
-    pub source_key: SourceKey,
-    pub object_id: String,
-    pub media_uri: String,
-    pub name: String,
-    pub musicbrainz_artist_id: Option<String>,
-    pub artwork_binding: Option<Vec<u8>>,
-    pub favorite: bool,
-    pub rating: Option<i64>,
-    pub play_count: i64,
-    pub last_played: Option<i64>,
-    pub album_count: i64,
-    pub track_count: i64,
-    pub duration_millis: i64,
-    pub downloaded_count: i64,
+crate::row::row_projection! {
+    #[derive(Clone, Debug, FromRow, PartialEq)]
+    #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+    pub struct ArtistRow {
+        pub artist_key: ArtistKey = "artist.artist_key",
+        pub source_key: SourceKey = "artist.source_key",
+        pub object_id: String = "artist.object_id",
+        pub media_uri: String = "artist.media_uri",
+        pub name: String = "artist.name",
+        pub musicbrainz_artist_id: Option<String> = "artist.musicbrainz_artist_id",
+        pub artwork_binding: Option<Vec<u8>> = "artist.artwork_binding",
+        pub favorite: bool = "COALESCE((SELECT favorite FROM user_media_state WHERE media_uri=artist.media_uri),artist.source_favorite)",
+        pub rating: Option<i64> = "COALESCE((SELECT rating FROM user_media_state WHERE media_uri=artist.media_uri),artist.source_rating)/10",
+        pub play_count: i64 = collection_stat("artist", "play_count", "{role}"),
+        pub last_played: Option<i64> = collection_stat("artist", "last_played", "{role}"),
+        pub album_count: i64 = "artist.{role}album_count",
+        pub track_count: i64 = "artist.{role}track_count",
+        pub duration_millis: i64 = "artist.{role}duration_millis",
+        pub downloaded_count: i64 = "artist.{role}downloaded_count",
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, FromRow)]
@@ -1064,15 +1071,13 @@ pub(crate) async fn load_artist_rows(
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);
     });
-    let role = if album_artist { "album_artist_" } else { "" };
-    query.push(format!(")
-        SELECT artist.artist_key,artist.source_key,artist.object_id,artist.media_uri,artist.name,
-          artist.musicbrainz_artist_id,artist.artwork_binding,
-          COALESCE((SELECT favorite FROM user_media_state WHERE media_uri=artist.media_uri),artist.source_favorite) favorite,
-          COALESCE((SELECT rating FROM user_media_state WHERE media_uri=artist.media_uri),artist.source_rating)/10 rating,
-          {} play_count,{} last_played,artist.{role}album_count album_count,artist.{role}track_count track_count,artist.{role}duration_millis duration_millis,artist.{role}downloaded_count downloaded_count
-        FROM requested JOIN artists artist USING(artist_key)
-        WHERE artist.source_key=", collection_stat("artist","play_count",role), collection_stat("artist","last_played",role)));
+    static COLUMNS: std::sync::LazyLock<[String; 2]> = std::sync::LazyLock::new(|| {
+        ["", "album_artist_"].map(|role| ArtistRow::columns().replace("{role}", role))
+    });
+    query
+        .push(") SELECT ")
+        .push(&COLUMNS[usize::from(album_artist)])
+        .push(" FROM requested JOIN artists artist USING(artist_key) WHERE artist.source_key=");
     query.push_bind(source).push(" ORDER BY requested.position");
     Ok(query
         .build_query_as::<ArtistRow>()
@@ -1128,29 +1133,12 @@ pub(crate) async fn load_album_rows(
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);
     });
-    query.push("      ) SELECT album.album_key,album.source_key,album.object_id,album.media_uri,album.title,
-          album.display_artist,album.year,album.release_date,date(").push(crate::tracks::added_at!("album")).push(",'unixepoch') date_added,
-          album.musicbrainz_release_id,album.musicbrainz_release_group_id,album.is_compilation,
-          album.release_lookup_identity,album.artwork_binding,
-          COALESCE((SELECT state.favorite FROM user_media_state state
-                    WHERE state.media_uri=album.media_uri),album.source_favorite) favorite,
-          COALESCE((SELECT state.rating FROM user_media_state state
-                    WHERE state.media_uri=album.media_uri),album.source_rating)/10 rating,
-          ").push(collection_stat("album","play_count","")).push(" play_count,
-          ").push(collection_stat("album","last_played","")).push(" last_played,
-          album.track_count,
-          album.duration_millis,
-          album.downloaded_count,
-          (SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY relation.position)
-           FROM album_artists relation JOIN artists artist USING(artist_key)
-           WHERE relation.album_key=album.album_key) album_artists,
-          (SELECT json_group_array(json_object('genre_key',genre.genre_key,'name',genre.name) ORDER BY relation.position)
-           FROM album_genres relation JOIN genres genre USING(genre_key)
-           WHERE relation.album_key=album.album_key) genres,
-          (SELECT json_group_array(relation.release_type ORDER BY relation.position)
-           FROM album_release_types relation WHERE relation.album_key=album.album_key) release_types
-        FROM requested JOIN albums album USING(album_key)
-        WHERE album.source_key=").push_bind(source).push(" ORDER BY requested.position");
+    query
+        .push(") SELECT ")
+        .push(AlbumRow::columns())
+        .push(" FROM requested JOIN albums album USING(album_key) WHERE album.source_key=")
+        .push_bind(source)
+        .push(" ORDER BY requested.position");
     Ok(query
         .build_query_as::<AlbumRow>()
         .persistent(false)

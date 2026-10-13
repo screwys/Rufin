@@ -167,43 +167,47 @@ pub struct PlaylistEditEntry {
     pub position: usize,
 }
 
-#[derive(Clone, Debug, FromRow, PartialEq)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct PlaylistEntryRow {
-    pub track_key: crate::TrackKey,
-    pub audio_properties: crate::AudioProperties,
-    pub source_path: Option<String>,
-    pub source_name: Option<String>,
-    pub playlist_entry_key: PlaylistEntryKey,
-    pub position: i64,
-    pub media_uri: String,
-    pub source_id: Option<String>,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub album_media_uri: Option<String>,
-    #[sqlx(json)]
-    pub artists: Vec<crate::TrackArtistLink>,
-    #[sqlx(json)]
-    pub album_artists: Vec<crate::TrackArtistLink>,
-    pub album_display_artist: Option<String>,
-    pub artwork_binding: Option<Vec<u8>>,
-    pub duration_millis: i64,
-    pub disc_number: Option<i64>,
-    pub track_number: Option<i64>,
-    pub year: Option<i64>,
-    pub release_date: Option<String>,
-    pub date_added: Option<String>,
-    pub bpm: Option<i64>,
-    pub genre: String,
-    pub play_count: i64,
-    pub last_played: Option<i64>,
-    pub source_format: Option<String>,
-    pub musicbrainz_recording_id: Option<String>,
-    pub musicbrainz_release_track_id: Option<String>,
-    pub favorite: bool,
-    pub rating: Option<i64>,
-    pub is_downloaded: bool,
+crate::row::row_projection! {
+    #[derive(Clone, Debug, FromRow, PartialEq)]
+    #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+    pub struct PlaylistEntryRow {
+        pub track_key: crate::TrackKey = "entry.track_key",
+        pub audio_properties: crate::AudioProperties = "COALESCE(track.audio_properties,'{}')",
+        pub source_path: Option<String> = "track.source_path",
+        pub source_name: Option<String> = "source.display_name",
+        pub playlist_entry_key: PlaylistEntryKey = "entry.playlist_entry_key",
+        pub position: i64 = "entry.position",
+        pub media_uri: String = "track.media_uri",
+        pub source_id: Option<String> = "source.object_id",
+        pub title: String = "COALESCE(track.title,'')",
+        pub artist: String = "COALESCE(track.display_artist,'')",
+        pub album: String = "COALESCE(track.display_album,'')",
+        pub album_media_uri: Option<String> = "album.media_uri",
+        #[sqlx(json)]
+        pub artists: Vec<crate::TrackArtistLink> = crate::tracks::TRACK_ARTISTS,
+        #[sqlx(json)]
+        pub album_artists: Vec<crate::TrackArtistLink> = crate::tracks::TRACK_ALBUM_ARTISTS,
+        pub album_display_artist: Option<String> = "COALESCE(album.display_artist,track.album_display_artist)",
+        pub artwork_binding: Option<Vec<u8>> = "track.artwork_binding",
+        pub duration_millis: i64 = "COALESCE(track.duration_millis,0)",
+        pub disc_number: Option<i64> = "track.disc_number",
+        pub track_number: Option<i64> = "track.track_number",
+        pub year: Option<i64> = "track.year",
+        pub release_date: Option<String> = "track.release_date",
+        pub date_added: Option<String> = concat!("date(", crate::tracks::added_at!("track"), ",'unixepoch')"),
+        pub bpm: Option<i64> = "track.bpm",
+        pub genre: String = "(SELECT COALESCE(group_concat(name, ', '),'') FROM (
+            SELECT genre.name FROM track_genres credit JOIN genres genre USING(genre_key)
+            WHERE credit.track_key=track.track_key ORDER BY credit.position))",
+        pub play_count: i64 = crate::tracks::displayed_stat("play_count"),
+        pub last_played: Option<i64> = crate::tracks::displayed_stat("last_played"),
+        pub source_format: Option<String> = "track.source_format",
+        pub musicbrainz_recording_id: Option<String> = "track.musicbrainz_recording_id",
+        pub musicbrainz_release_track_id: Option<String> = "track.musicbrainz_release_track_id",
+        pub favorite: bool = "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite,0)",
+        pub rating: Option<i64> = "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_rating)/10",
+        pub is_downloaded: bool = "EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download')",
+    }
 }
 
 #[derive(Clone)]
@@ -1071,34 +1075,13 @@ pub(crate) async fn load_playlist_entry_rows(
         return Ok(Vec::new());
     }
     let mut query = playlist_entries_query(keys);
-    query.push(crate::tracks::TRACK_LINK_COLUMNS);
-    query.push(format!(concat!("entry.track_key,entry.playlist_entry_key,track.media_uri,entry.position,source.object_id source_id,
-                      COALESCE(track.title,'') title,
-                      COALESCE(track.display_artist,'') artist,
-                      COALESCE(track.display_album,'') album,
-                      COALESCE(album.display_artist,track.album_display_artist) album_display_artist,
-                      track.artwork_binding,COALESCE(track.duration_millis,0) duration_millis,
-                      track.disc_number disc_number,
-                      track.track_number track_number,
-                      track.year year,
-                      track.release_date release_date,
-                      COALESCE(track.audio_properties,'{{}}') audio_properties,date(", crate::tracks::added_at!("track"), ",'unixepoch') date_added,track.bpm,track.source_path,source.display_name source_name,
-                      (SELECT COALESCE(group_concat(name, ', '),'') FROM (
-                         SELECT genre.name FROM track_genres credit JOIN genres genre USING(genre_key)
-                         WHERE credit.track_key=track.track_key ORDER BY credit.position
-                      )) genre,
-                      {plays} play_count,{last} last_played,
-                      track.source_format source_format,
-                      track.musicbrainz_recording_id musicbrainz_recording_id,
-                      track.musicbrainz_release_track_id musicbrainz_release_track_id,
-                      COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite,0) favorite,
-                      COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_rating)/10 rating,
-                      EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') is_downloaded
-               FROM entries entry
-               JOIN tracks track USING(track_key)
-               LEFT JOIN sources source ON source.source_key=track.source_key
-               LEFT JOIN albums album ON album.album_key=track.album_key
-               ORDER BY entry.ordinal"), plays=crate::tracks::displayed_stat("play_count"), last=crate::tracks::displayed_stat("last_played")));
+    query.push(PlaylistEntryRow::columns()).push(
+        " FROM entries entry
+        JOIN tracks track USING(track_key)
+        LEFT JOIN sources source ON source.source_key=track.source_key
+        LEFT JOIN albums album ON album.album_key=track.album_key
+        ORDER BY entry.ordinal",
+    );
     query
         .build_query_as::<PlaylistEntryRow>()
         .persistent(false)

@@ -47,7 +47,12 @@ pub fn schedule_periodic_release_checks(shell: &Rc<Preferences>) {
     if let Some(source) = shell.state.release_check_source.borrow_mut().take() {
         source.remove();
     }
-    let hours = shell.settings.current.borrow().release_check_interval_hours;
+    let hours = shell
+        .settings
+        .current
+        .borrow()
+        .application
+        .release_check_interval_hours;
     let weak_shell = Rc::downgrade(shell);
     let source =
         glib::timeout_add_local(Duration::from_secs(u64::from(hours) * 60 * 60), move || {

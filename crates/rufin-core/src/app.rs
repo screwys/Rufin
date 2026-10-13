@@ -74,7 +74,7 @@ where
             Err(error) => Err(error),
     }.map_err(string_error)?;
     let library = Arc::new(database);
-    library.set_distinct_track_covers(stored.ui.prefer_distinct_track_covers);
+    library.set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers);
     for configured in &stored.sources.configured {
         if let Err(error) = library
             .reconcile_source(
@@ -93,7 +93,7 @@ where
     let scrobbling_library = library.as_ref().clone();
     let scrobbling_runtime = runtime.clone();
     let scrobbling_settings = stored.scrobbling_runtime_settings();
-    let private_mode = stored.ui.private_mode;
+    let private_mode = stored.ui.application.private_mode;
     let scrobbler = Arc::new(
         runtime
             .spawn_blocking(move || {
@@ -165,14 +165,14 @@ where
         runtime.clone(),
         waveform_events,
         paths.playback_dir(),
-        stored.ui.seekbar_waveform_enabled,
+        stored.ui.player_display.seekbar_waveform_enabled,
     );
     let lyrics = crate::lyrics::LyricsService::new(
         library.as_ref().clone(),
         Arc::clone(&source),
         runtime.clone(),
         stored.ui.lyrics.clone(),
-        stored.ui.private_mode,
+        stored.ui.application.private_mode,
         lyrics_events,
         paths.data_dir().join("japanese-readings"),
     );
@@ -218,45 +218,58 @@ where
         settings.clone(),
         Arc::clone(&secrets),
         move |previous, current, credentials_changed| {
-            if previous.ui.prefer_distinct_track_covers != current.ui.prefer_distinct_track_covers {
-                settings_library.set_distinct_track_covers(current.ui.prefer_distinct_track_covers);
+            if previous.ui.application.prefer_distinct_track_covers
+                != current.ui.application.prefer_distinct_track_covers
+            {
+                settings_library
+                    .set_distinct_track_covers(current.ui.application.prefer_distinct_track_covers);
             }
             if previous.ui.rich_presence != current.ui.rich_presence
-                || previous.ui.private_mode != current.ui.private_mode
+                || previous.ui.application.private_mode != current.ui.application.private_mode
                 || previous.ui.lastfm_api_key != current.ui.lastfm_api_key
             {
                 settings_committed(&current.ui);
             }
-            if previous.ui.seekbar_waveform_enabled != current.ui.seekbar_waveform_enabled {
-                settings_playback.waveform_setting_changed(current.ui.seekbar_waveform_enabled);
+            if previous.ui.player_display.seekbar_waveform_enabled
+                != current.ui.player_display.seekbar_waveform_enabled
+            {
+                settings_playback
+                    .waveform_setting_changed(current.ui.player_display.seekbar_waveform_enabled);
             }
             if previous.ui.playback != current.ui.playback {
                 settings_playback.playback_settings_changed(current.ui.playback.clone());
             }
-            if previous.ui.cast_proxy_enabled != current.ui.cast_proxy_enabled {
-                settings_playback.cast_proxy_setting_changed(current.ui.cast_proxy_enabled);
+            if previous.ui.application.cast_proxy_enabled
+                != current.ui.application.cast_proxy_enabled
+            {
+                settings_playback
+                    .cast_proxy_setting_changed(current.ui.application.cast_proxy_enabled);
             }
             if previous.ui.cast_network_interface != current.ui.cast_network_interface {
                 settings_playback
                     .cast_network_setting_changed(current.ui.cast_network_interface.clone());
             }
-            if previous.ui.auto_dj_refill_threshold != current.ui.auto_dj_refill_threshold {
+            if previous.ui.application.auto_dj_refill_threshold
+                != current.ui.application.auto_dj_refill_threshold
+            {
                 settings_playback.auto_dj_threshold_changed(
                     current.ui.auto_dj_enabled,
-                    current.ui.auto_dj_refill_threshold,
+                    current.ui.application.auto_dj_refill_threshold,
                 );
             }
-            if previous.ui.private_mode != current.ui.private_mode
+            if previous.ui.application.private_mode != current.ui.application.private_mode
                 || previous.scrobbling != current.scrobbling
                 || credentials_changed
             {
                 settings_scrobbling.settings_changed(credentials_changed);
             }
             if previous.ui.lyrics != current.ui.lyrics
-                || previous.ui.private_mode != current.ui.private_mode
+                || previous.ui.application.private_mode != current.ui.application.private_mode
             {
-                settings_lyrics
-                    .settings_changed(current.ui.lyrics.clone(), current.ui.private_mode);
+                settings_lyrics.settings_changed(
+                    current.ui.lyrics.clone(),
+                    current.ui.application.private_mode,
+                );
             }
             if previous.ui.downloads != current.ui.downloads {
                 settings_downloads.settings_changed(current.ui.downloads.clone());

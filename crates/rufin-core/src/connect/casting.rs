@@ -179,7 +179,7 @@ impl ConnectOwner {
                     .stage_continuation_page(&transfer, &page)
                     .await?;
             }
-            let input = self
+            let (input, anchor_index) = self
                 .database
                 .queue_from_transfer(&transfer, header.total, header.current)
                 .await
@@ -187,8 +187,10 @@ impl ConnectOwner {
             let playback = Arc::clone(&self.playback);
             tokio::task::spawn_blocking(move || match target {
                 Some(target) => playback.insert_load(input, target),
-                None => playback
-                    .play_selection(crate::playback::PlayRequest::from_load(input, placement)),
+                None => playback.play_selection(
+                    crate::playback::PlayRequest::from_input(input, placement)
+                        .with_anchor_index(anchor_index),
+                ),
             })
             .await
             .map_err(error)?;

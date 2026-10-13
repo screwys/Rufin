@@ -1060,7 +1060,12 @@ fn queue_overlay_empty_label(
 
 impl crate::PlayerUi {
     pub fn clear_queue(&self) {
-        let include_current = self.settings.current.borrow().clear_queue_includes_current;
+        let include_current = self
+            .settings
+            .current
+            .borrow()
+            .player_display
+            .clear_queue_includes_current;
         self.playback_owner.clear(include_current);
     }
 

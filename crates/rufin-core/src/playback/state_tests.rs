@@ -37,12 +37,13 @@ pub(in crate::playback) async fn seeded(
     let database = library::Database::open(directory.path().join("queue.sqlite3"))
         .await
         .unwrap();
-    let page = database
-        .read_queue(library::QueueReadRequest::items(items))
-        .await
-        .unwrap();
+    let page =
+        crate::playback::PlayRequest::from_input(library::QueueLoad::items(items), Placement::Now)
+            .prepare(&database, false, 0)
+            .await
+            .unwrap();
     let mut sequence = Sequence::new();
-    sequence.add_page(page, library::QueueReorderTarget::End, true, None);
+    sequence.add_page(page, library::QueueReorderTarget::End, true);
     if let Some(request) = sequence.read_request() {
         let items = database
             .queue_rows_for_entries(
@@ -703,14 +704,14 @@ async fn loaded_advancement_reuses_positions_without_a_store_read() {
     };
     session
         .handle_command(
-            Command::ApplyQueue {
-                load: library::QueueReadRequest::items(
+            Command::ApplyQueue(crate::playback::PlayRequest::from_input(
+                library::QueueLoad::items(
                     (0..240)
                         .map(|index| batch_item(index, Provenance::Manual))
                         .collect(),
                 ),
-                placement: Placement::Now,
-            },
+                Placement::Now,
+            )),
             &sample,
         )
         .unwrap();
@@ -754,10 +755,10 @@ async fn failed_queue_replacement_keeps_the_existing_run_and_can_be_retried() {
     let before = session.view().queue_window;
     session
         .handle_command(
-            Command::ApplyQueue {
-                load: library::QueueReadRequest::items(vec![batch_item(10, Provenance::Manual)]),
-                placement: Placement::Now,
-            },
+            Command::ApplyQueue(crate::playback::PlayRequest::from_input(
+                library::QueueLoad::items(vec![batch_item(10, Provenance::Manual)]),
+                Placement::Now,
+            )),
             &sample,
         )
         .unwrap();
@@ -777,10 +778,10 @@ async fn failed_queue_replacement_keeps_the_existing_run_and_can_be_retried() {
     assert!(!session.view().queue_loading);
     session
         .handle_command(
-            Command::ApplyQueue {
-                load: library::QueueReadRequest::items(vec![batch_item(20, Provenance::Manual)]),
-                placement: Placement::Now,
-            },
+            Command::ApplyQueue(crate::playback::PlayRequest::from_input(
+                library::QueueLoad::items(vec![batch_item(20, Provenance::Manual)]),
+                Placement::Now,
+            )),
             &sample,
         )
         .unwrap();
@@ -870,7 +871,7 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
     };
     let mut first = None;
     for identity in ["first", "latest"] {
-        let input = library::QueueReadRequest::items(vec![(
+        let input = library::QueueLoad::items(vec![(
             QueueItem::direct(
                 format!("https://example.test/{identity}"),
                 identity,
@@ -882,17 +883,20 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
         )]);
         session
             .handle_command(
-                Command::ApplyQueue {
-                    load: input.clone(),
-                    placement: Placement::Now,
-                },
+                Command::ApplyQueue(crate::playback::PlayRequest::from_input(
+                    input.clone(),
+                    Placement::Now,
+                )),
                 &sample,
             )
             .unwrap();
         if identity == "first" {
             first = Some((
                 session.pending_queue.as_ref().unwrap().0,
-                database.read_queue(input).await.unwrap(),
+                crate::playback::PlayRequest::from_input(input, Placement::Now)
+                    .prepare(&database, false, 0)
+                    .await
+                    .unwrap(),
             ));
         }
     }
@@ -907,14 +911,14 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
 
     session
         .handle_command(
-            Command::ApplyQueue {
-                load: library::QueueReadRequest::items(
+            Command::ApplyQueue(crate::playback::PlayRequest::from_input(
+                library::QueueLoad::items(
                     (0..240)
                         .map(|index| batch_item(index, Provenance::Manual))
                         .collect(),
                 ),
-                placement: Placement::Now,
-            },
+                Placement::Now,
+            )),
             &sample,
         )
         .unwrap();
@@ -946,10 +950,10 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
         .unwrap();
     session
         .handle_command(
-            Command::ApplyQueue {
-                load: library::QueueReadRequest::items(vec![batch_item(999, Provenance::Manual)]),
-                placement: Placement::Now,
-            },
+            Command::ApplyQueue(crate::playback::PlayRequest::from_input(
+                library::QueueLoad::items(vec![batch_item(999, Provenance::Manual)]),
+                Placement::Now,
+            )),
             &sample,
         )
         .unwrap();
@@ -1162,10 +1166,10 @@ async fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
     ));
     session
         .handle_command(
-            Command::ApplyQueue {
-                load: library::QueueReadRequest::items(vec![batch_item(10, Provenance::Manual)]),
-                placement: Placement::End,
-            },
+            Command::ApplyQueue(crate::playback::PlayRequest::from_input(
+                library::QueueLoad::items(vec![batch_item(10, Provenance::Manual)]),
+                Placement::End,
+            )),
             &sample,
         )
         .unwrap();
@@ -1332,18 +1336,14 @@ async fn shuffled_batches_keep_placement_and_global_shuffle() {
                         )
                     })
                     .collect::<Vec<_>>();
-                let request = crate::playback::PlayRequest::from_load(
-                    library::QueueReadRequest::items(items),
+                let request = crate::playback::PlayRequest::from_input(
+                    library::QueueLoad::items(items),
                     placement,
                 )
                 .with_anchor_index(count as usize - 1)
                 .shuffled(true);
-                assert!(request.activation_context().is_none());
-                let (batch, placement) = request.into_load(42);
-                let reservation = session.reserve_materialization(placement);
-                session
-                    .apply_materialization(reservation.id, batch, placement, &sample)
-                    .unwrap();
+                assert!(request.activation_context(global_shuffle).is_none());
+                session.apply_batch(request, &sample).unwrap();
                 finish_queue(&mut session, &inbox, &sample).await;
                 let after = session.sequence().snapshot();
                 assert_eq!(after.shuffled, global_shuffle);
@@ -1456,12 +1456,11 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
             };
             let request = request(input, anchor, Placement::Now, collection_start && shuffled)
                 .with_context("collection".into());
-            assert_eq!(request.activation_context().is_none(), collection_start);
-            let (batch, placement) = request.into_load(2);
-            let reservation = session.reserve_materialization(placement);
-            session
-                .apply_materialization(reservation.id, batch, placement, &sample)
-                .unwrap();
+            assert_eq!(
+                request.activation_context(shuffled).is_none(),
+                collection_start
+            );
+            session.apply_batch(request, &sample).unwrap();
             let random_start = collection_start && shuffled;
             finish_queue(&mut session, &inbox, &sample).await;
             assert_eq!(session.position_millis(), 0);
@@ -1873,7 +1872,7 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
             .complete_auto_dj(
                 None,
                 &session.sequence.selected().unwrap().media_uri.clone(),
-                library::QueueReadRequest::items(vec![batch_item(9, Provenance::AutoDj)]),
+                library::QueueLoad::items(vec![batch_item(9, Provenance::AutoDj)]),
                 &sample
             )
             .unwrap(),
@@ -2204,8 +2203,10 @@ async fn pause_and_stop_during_queue_preparation_apply_to_the_requested_track() 
         };
         session
             .apply_batch(
-                library::QueueReadRequest::items(vec![batch_item(99, Provenance::Manual)]),
-                Placement::Now,
+                crate::playback::PlayRequest::from_input(
+                    library::QueueLoad::items(vec![batch_item(99, Provenance::Manual)]),
+                    Placement::Now,
+                ),
                 &sample,
             )
             .unwrap();
@@ -2245,20 +2246,17 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
         .await
         .unwrap()
         .unwrap();
-    let page = db
-        .read_queue(
-            crate::playback::PlayRequest::ordered(
-                library::SongQuery::new(library::SongScope::Playlist(key)).selection(),
-                0,
-                Placement::Now,
-                false,
-            )
-            .with_context("source".into())
-            .load,
-        )
-        .await
-        .unwrap();
-    sequence.add_page(page, QueueReorderTarget::End, true, None);
+    let page = crate::playback::PlayRequest::ordered(
+        library::SongQuery::new(library::SongScope::Playlist(key)).selection(),
+        0,
+        Placement::Now,
+        false,
+    )
+    .with_context("source".into())
+    .prepare(&db, false, 0)
+    .await
+    .unwrap();
+    sequence.add_page(page, QueueReorderTarget::End, true);
     let mut session = Player::new(
         sequence,
         "repeat",

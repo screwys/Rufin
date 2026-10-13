@@ -1,7 +1,6 @@
 package io.github.screwys.rufin.settings
 
 import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferences
-import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferenceEdit
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.shared.rufin_core.ThemePreference
 import io.github.screwys.rufin.shared.rufin_core.AccentPreference
@@ -125,8 +124,8 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
         applicationSettings = settings?.applicationPreferences()
         applicationSettings?.let { connection.more.setReleaseCheckInterval(it.releaseCheckIntervalHours.toLong()) }
     }
-    fun changePreference(edit: ApplicationPreferenceEdit) = connection.runAction {
-        withContext(Dispatchers.IO) { settings?.editApplicationPreferences(edit) }
+    fun changePreference(edit: SettingsOwner.() -> Unit) = connection.runAction {
+        withContext(Dispatchers.IO) { settings?.edit() }
         refreshSettings()
     }
     fun nativeSettings(): SettingsOwner = checkNotNull(settings)

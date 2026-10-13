@@ -457,7 +457,7 @@ async fn artwork(
     let external = {
         let settings = products.settings.load();
         artwork::ExternalPolicy::new(
-            settings.external_metadata_enabled,
+            settings.application.external_metadata_enabled,
             settings.allows_external_metadata_lookup(),
             settings.lastfm_api_key.clone(),
         )

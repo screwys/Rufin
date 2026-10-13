@@ -1,7 +1,6 @@
 package io.github.screwys.rufin.player
 
-import io.github.screwys.rufin.shared.rufin_core.ApplicationPreferenceEdit
-
+import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.PagerTabIndicator
 import io.github.screwys.rufin.settings.PreferenceChoice
@@ -44,10 +43,7 @@ import io.github.screwys.rufin.shared.playback.LoudnessNormalization
 import io.github.screwys.rufin.shared.playback.LoudnessNormalizationScope
 import io.github.screwys.rufin.shared.playback.VolumeScale
 import io.github.screwys.rufin.shared.playback.StreamQuality
-import io.github.screwys.rufin.shared.lyrics.LyricsPreferenceEdit
 import io.github.screwys.rufin.shared.lyrics.ExternalLyricsProvider
-import io.github.screwys.rufin.shared.rufin_core.PlayerPreferenceEdit
-import io.github.screwys.rufin.shared.rufin_core.VisualizerPreferenceEdit
 import io.github.screwys.rufin.shared.rufin_core.VisualizerStyle
 import io.github.screwys.rufin.settings.SettingsNumber
 import io.github.screwys.rufin.core.translate
@@ -109,24 +105,24 @@ internal fun PlaybackPreferences(player: PlayerConnection, preferences: Preferen
     val state = player.settings ?: return
     val playback = state.playback
     var confirmEbu by remember { mutableStateOf(false) }
-    fun change(edit: PlayerPreferenceEdit) { player.editPreferences(edit) }
+    fun change(edit: SettingsOwner.() -> Unit) { player.editPreferences(edit) }
     SettingsGroup {
         PreferenceChoice(translate("Transition mode"), playback.transitionMode.name,
             listOf(PlaybackTransitionMode.GAPLESS.name to translate("Gapless"), PlaybackTransitionMode.CROSSFADE.name to translate("Crossfade")),
-            select = { change(PlayerPreferenceEdit.TransitionMode(PlaybackTransitionMode.valueOf(it))) })
+            select = { change { setTransitionMode(PlaybackTransitionMode.valueOf(it)) } })
         if (playback.transitionMode == PlaybackTransitionMode.CROSSFADE) SettingsSliderNumber(translate("Crossfade duration"), playback.crossfadeSeconds.toDouble(), 1.0..30.0, 1.0, integer = true, unit = "s") {
-            change(PlayerPreferenceEdit.CrossfadeSeconds((it as Number).toInt().toUByte()))
+            change { setCrossfadeSeconds((it as Number).toInt().toUByte()) }
         }
-        PreferenceSwitch("Skip same-album crossfade", playback.skipSameAlbumCrossfade) { change(PlayerPreferenceEdit.SkipSameAlbumCrossfade(it)) }
-        PreferenceSwitch("Audio fade on play/pause", playback.audioFadeOnStatusChange) { change(PlayerPreferenceEdit.AudioFadeOnStatusChange(it)) }
-        SettingsSliderNumber(translate("Playback speed"), playback.playbackRate, .5..2.0, .05, unit = "×") { change(PlayerPreferenceEdit.PlaybackRate((it as Number).toDouble())) }
-        PreferenceSwitch("Preserve pitch", playback.preservePitch) { change(PlayerPreferenceEdit.PreservePitch(it)) }
+        PreferenceSwitch("Skip same-album crossfade", playback.skipSameAlbumCrossfade) { change { setSkipSameAlbumCrossfade(it) } }
+        PreferenceSwitch("Audio fade on play/pause", playback.audioFadeOnStatusChange) { change { setAudioFadeOnStatusChange(it) } }
+        SettingsSliderNumber(translate("Playback speed"), playback.playbackRate, .5..2.0, .05, unit = "×") { change { setPlaybackRate((it as Number).toDouble()) } }
+        PreferenceSwitch("Preserve pitch", playback.preservePitch) { change { setPreservePitch(it) } }
         PreferenceChoice(translate("Volume scale"), playback.volumeScale.name,
             listOf(VolumeScale.PERCEPTUAL.name to translate("Perceptual"), VolumeScale.LINEAR.name to translate("Linear")),
-            select = { change(PlayerPreferenceEdit.VolumeScale(VolumeScale.valueOf(it))) })
-        PreferenceSwitch("Clearing queue also clears the current song", state.clearQueueIncludesCurrent) { change(PlayerPreferenceEdit.ClearQueueIncludesCurrent(it)) }
+            select = { change { setVolumeScale(VolumeScale.valueOf(it)) } })
+        PreferenceSwitch("Clearing queue also clears the current song", state.display.clearQueueIncludesCurrent) { change { setClearQueueIncludesCurrent(it) } }
         if (output != null) preferences?.applicationSettings?.let { application ->
-            SettingsNumber(translate("Auto DJ refill threshold"), application.autoDjRefillThreshold.toDouble(), 1.0..10.0) { preferences.changePreference(ApplicationPreferenceEdit.AutoDjRefillThreshold((it as Number).toInt().toUByte())) }
+            SettingsNumber(translate("Auto DJ refill threshold"), application.autoDjRefillThreshold.toDouble(), 1.0..10.0) { preferences.changePreference { setAutoDjRefillThreshold((it as Number).toInt().toUByte()) } }
         }
     }
     if (output != null) SettingsGroup(translate("Audio")) {
@@ -135,31 +131,31 @@ internal fun PlaybackPreferences(player: PlayerConnection, preferences: Preferen
             listOf(LoudnessNormalization.OFF.name to translate("Off"), LoudnessNormalization.REPLAY_GAIN.name to "ReplayGain", LoudnessNormalization.EBU_R128.name to "EBU R128"), select = {
                 val mode = LoudnessNormalization.valueOf(it)
                 if (mode == LoudnessNormalization.EBU_R128 && playback.loudnessNormalization != mode) confirmEbu = true
-                else change(PlayerPreferenceEdit.LoudnessNormalization(mode))
+                else change { setLoudnessNormalization(mode) }
             })
         PreferenceChoice(translate("Normalization scope"), playback.loudnessNormalizationScope.name,
             listOf(LoudnessNormalizationScope.TRACK.name to translate("Track"), LoudnessNormalizationScope.ALBUM.name to translate("Album")),
-            select = { change(PlayerPreferenceEdit.LoudnessNormalizationScope(LoudnessNormalizationScope.valueOf(it))) })
-        SettingsNumber(translate("Target loudness"), playback.ebuR128TargetLufs, -48.0..0.0, false) { change(PlayerPreferenceEdit.EbuR128TargetLufs((it as Number).toDouble())) }
-        PreferenceSwitch("Write EBU R128 tags to files", playback.writeEbuR128Tags) { change(PlayerPreferenceEdit.WriteEbuR128Tags(it)) }
+            select = { change { setLoudnessNormalizationScope(LoudnessNormalizationScope.valueOf(it)) } })
+        SettingsNumber(translate("Target loudness"), playback.ebuR128TargetLufs, -48.0..0.0, false) { change { setEbuR128TargetLufs((it as Number).toDouble()) } }
+        PreferenceSwitch("Write EBU R128 tags to files", playback.writeEbuR128Tags) { change { setWriteEbuR128Tags(it) } }
         val bitrate = (playback.streamQuality as? StreamQuality.MaxBitrateKbps)?.v1?.toString() ?: "original"
         PreferenceChoice(translate("Stream quality"), bitrate,
             listOf("original" to translate("Original")) + listOf(320, 256, 192, 128).map { it.toString() to "$it kbps" },
-            select = { change(PlayerPreferenceEdit.StreamQuality(if (it == "original") StreamQuality.Original else StreamQuality.MaxBitrateKbps(it.toUInt()))) })
+            select = { change { setStreamQuality(if (it == "original") StreamQuality.Original else StreamQuality.MaxBitrateKbps(it.toUInt())) } })
     }
     SettingsGroup {
-        PreferenceSwitch("Show lyrics", state.fullscreenLyricsVisible) { change(PlayerPreferenceEdit.FullscreenLyricsVisible(it)) }
-        PreferenceSwitch("Show visualizer", state.fullscreenVisualizerVisible) { change(PlayerPreferenceEdit.FullscreenVisualizerVisible(it)) }
-        PreferenceSwitch("Show current lyrics line", state.fullscreenCurrentLyricsLineVisible) { change(PlayerPreferenceEdit.FullscreenCurrentLyricsLineVisible(it)) }
-        PreferenceSwitch("Combine lyrics and visualizer", state.rightPanelCombined) { change(PlayerPreferenceEdit.RightPanelCombined(it)) }
-        PreferenceSwitch("Dynamic background", state.fullscreenDynamicBackground) { change(PlayerPreferenceEdit.FullscreenDynamicBackground(it)) }
-        PreferenceSwitch("Enable background image", state.fullscreenBackgroundImage) { change(PlayerPreferenceEdit.FullscreenBackgroundImage(it)) }
-        PreferenceSwitch("Waveform seekbar", state.seekbarWaveformEnabled) { change(PlayerPreferenceEdit.SeekbarWaveformEnabled(it)) }
+        PreferenceSwitch("Show lyrics", state.display.fullscreenLyricsVisible) { change { setFullscreenLyricsVisible(it) } }
+        PreferenceSwitch("Show visualizer", state.display.fullscreenVisualizerVisible) { change { setFullscreenVisualizerVisible(it) } }
+        PreferenceSwitch("Show current lyrics line", state.display.fullscreenCurrentLyricsLineVisible) { change { setFullscreenCurrentLyricsLineVisible(it) } }
+        PreferenceSwitch("Combine lyrics and visualizer", state.rightPanel.combined) { change { setRightPanelCombined(it) } }
+        PreferenceSwitch("Dynamic background", state.display.fullscreenDynamicBackground) { change { setFullscreenDynamicBackground(it) } }
+        PreferenceSwitch("Enable background image", state.display.fullscreenBackgroundImage) { change { setFullscreenBackgroundImage(it) } }
+        PreferenceSwitch("Waveform seekbar", state.display.seekbarWaveformEnabled) { change { setSeekbarWaveformEnabled(it) } }
     }
     if (confirmEbu) AlertDialog(onDismissRequest = { confirmEbu = false },
         title = { Text(translate("Enable EBU R128 Analysis?")) },
         text = { Text(translate("Rufin will calculate the missing EBU R128 metadata for the whole library. This can use significant CPU, battery, and network bandwidth for a long time.")) },
-        confirmButton = { TextButton({ confirmEbu = false; change(PlayerPreferenceEdit.LoudnessNormalization(LoudnessNormalization.EBU_R128)) }) { Text(translate("Enable")) } },
+        confirmButton = { TextButton({ confirmEbu = false; change { setLoudnessNormalization(LoudnessNormalization.EBU_R128) } }) { Text(translate("Enable")) } },
         dismissButton = { TextButton({ confirmEbu = false }) { Text(translate("Cancel")) } })
 }
 
@@ -233,14 +229,14 @@ private fun LyricsSettings(player: PlayerConnection) {
     val lyrics = settings.lyrics
     var highlightEdit by remember { mutableStateOf(false) }
     val accent = MaterialTheme.colorScheme.primary
-    fun change(edit: LyricsPreferenceEdit) { player.lyricsPreference(edit) }
+    fun change(edit: SettingsOwner.() -> Unit) { player.lyricsPreference(edit) }
     SettingsGroup(translate("Sources")) {
-    PreferenceSwitch("External lyrics lookup", lyrics.externalLyricsEnabled) { change(LyricsPreferenceEdit.ExternalLyricsEnabled(it)) }
-    PreferenceSwitch("Prefer server lyrics", lyrics.preferServerLyrics) { change(LyricsPreferenceEdit.PreferServerLyrics(it)) }
+    PreferenceSwitch("External lyrics lookup", lyrics.externalLyricsEnabled) { change { setExternalLyricsEnabled(it) } }
+    PreferenceSwitch("Prefer server lyrics", lyrics.preferServerLyrics) { change { setPreferServerLyrics(it) } }
     }
     SettingsGroup(translate("Lyrics storage")) {
-    PreferenceSwitch("Saves lyrics to your source", lyrics.saveLyricsToSource) { change(LyricsPreferenceEdit.SaveLyricsToSource(it)) }
-    PreferenceSwitch("Save lyrics automatically", lyrics.saveLyricsAutomatically) { change(LyricsPreferenceEdit.SaveLyricsAutomatically(it)) }
+    PreferenceSwitch("Saves lyrics to your source", lyrics.saveLyricsToSource) { change { setSaveLyricsToSource(it) } }
+    PreferenceSwitch("Save lyrics automatically", lyrics.saveLyricsAutomatically) { change { setSaveLyricsAutomatically(it) } }
     val order = lyrics.externalLyricsProviders
     SettingsReorderRows(ExternalLyricsProvider.entries.sortedBy { order.indexOf(it).let { index -> if (index < 0) Int.MAX_VALUE else index } }
         .map { SettingsReorderItem(it.name, when (it) {
@@ -249,17 +245,17 @@ private fun LyricsSettings(player: PlayerConnection) {
             ExternalLyricsProvider.GENIUS -> "Genius"
             ExternalLyricsProvider.SIMP_MUSIC -> "SimpMusic"
         }, it in order, it in order) },
-        onReorder = { next, _, _, _ -> change(LyricsPreferenceEdit.ExternalLyricsProviders(next.map(ExternalLyricsProvider::valueOf).filter { it in order })) },
-        onToggle = { id, enabled -> val provider = ExternalLyricsProvider.valueOf(id); change(LyricsPreferenceEdit.ExternalLyricsProviders(if (enabled) order + provider else order - provider)) })
+        onReorder = { next, _, _, _ -> change { setExternalLyricsProviders(next.map(ExternalLyricsProvider::valueOf).filter { it in order }) } },
+        onToggle = { id, enabled -> val provider = ExternalLyricsProvider.valueOf(id); change { setExternalLyricsProviders(if (enabled) order + provider else order - provider) } })
     PreferenceChoice(translate("Lyrics storage"), if (lyrics.saveLyricsAsSidecar) "sidecar" else "embedded",
         listOf("sidecar" to translate("Save in folder"), "embedded" to translate("Embed in track")),
-        select = { change(LyricsPreferenceEdit.SaveLyricsAsSidecar(it == "sidecar")) })
+        select = { change { setSaveLyricsAsSidecar(it == "sidecar") } })
     }
     SettingsGroup(translate("Language and readings")) {
-    PreferenceSwitch("Prefer translations", lyrics.preferTranslations) { change(LyricsPreferenceEdit.PreferTranslations(it)) }
-    PreferenceText("Translation language", lyrics.preferredTranslationLanguage) { change(LyricsPreferenceEdit.PreferredTranslationLanguage(it)) }
-    PreferenceSwitch("Furigana", lyrics.showFurigana) { change(LyricsPreferenceEdit.ShowFurigana(it)) }
-    PreferenceSwitch("Romaji", lyrics.showRomanization) { change(LyricsPreferenceEdit.ShowRomanization(it)) }
+    PreferenceSwitch("Prefer translations", lyrics.preferTranslations) { change { setPreferTranslations(it) } }
+    PreferenceText("Translation language", lyrics.preferredTranslationLanguage) { change { setPreferredTranslationLanguage(it) } }
+    PreferenceSwitch("Furigana", lyrics.showFurigana) { change { setShowFurigana(it) } }
+    PreferenceSwitch("Romaji", lyrics.showRomanization) { change { setShowRomanization(it) } }
     }
     player.dictionaryState?.let { state ->
         when (state) {
@@ -269,26 +265,26 @@ private fun LyricsSettings(player: PlayerConnection) {
         }
     }
     SettingsGroup(translate("Karaoke Playback")) {
-    PreferenceSwitch("Karaoke mode", lyrics.karaokeMode) { change(LyricsPreferenceEdit.KaraokeMode(it)) }
+    PreferenceSwitch("Karaoke mode", lyrics.karaokeMode) { change { setKaraokeMode(it) } }
     val highlightColor = lyrics.lyricsHighlightColor?.let(::playerLyricsColor) ?: accent
     ColorSetting("Karaoke highlight color", highlightColor) { highlightEdit = true }
     }
     SettingsGroup(translate("Typography")) {
     PreferenceText("Font family", lyrics.fullscreenLyricsFontFamily.orEmpty()) {
-        change(LyricsPreferenceEdit.FullscreenLyricsFontFamily(it.ifBlank { null }))
+        change { setFullscreenLyricsFontFamily(it.ifBlank { null }) }
     }
     PreferenceSlider("Font size (px)", (lyrics.fullscreenLyricsFontSize?.toFloat() ?: 19f), 12f..28f, 15) {
-        change(LyricsPreferenceEdit.FullscreenLyricsFontSize(it.toInt().toUShort()))
+        change { setFullscreenLyricsFontSize(it.toInt().toUShort()) }
     }
     }
     SettingsGroup(translate("Sidebar")) {
-    PreferenceText("Font family", lyrics.lyricsFontFamily.orEmpty()) { change(LyricsPreferenceEdit.LyricsFontFamily(it.ifBlank { null })) }
-    PreferenceSlider("Font size (px)", (lyrics.lyricsFontSize?.toFloat() ?: 19f), 12f..28f, 15) { change(LyricsPreferenceEdit.LyricsFontSize(it.toInt().toUShort())) }
+    PreferenceText("Font family", lyrics.lyricsFontFamily.orEmpty()) { change { setLyricsFontFamily(it.ifBlank { null }) } }
+    PreferenceSlider("Font size (px)", (lyrics.lyricsFontSize?.toFloat() ?: 19f), 12f..28f, 15) { change { setLyricsFontSize(it.toInt().toUShort()) } }
     }
     if (highlightEdit) PlayerColorDialog("Karaoke highlight color",
         lyrics.lyricsHighlightColor?.let(::playerLyricsColor) ?: accent,
         { highlightEdit = false }) { color ->
-        change(LyricsPreferenceEdit.LyricsHighlightColor(String.format(Locale.ROOT, "#%02x%02x%02x", (color.red * 255).toInt(), (color.green * 255).toInt(), (color.blue * 255).toInt())))
+        change { setLyricsHighlightColor(String.format(Locale.ROOT, "#%02x%02x%02x", (color.red * 255).toInt(), (color.green * 255).toInt(), (color.blue * 255).toInt())) }
         highlightEdit = false
     }
 }
@@ -308,7 +304,7 @@ private fun VisualizerSettings(player: PlayerConnection) {
     val visualizer = settings.visualizer
     val appearance = visualizer.appearance
     val context = LocalContext.current
-    fun change(edit: VisualizerPreferenceEdit) { player.visualizerAppearance(edit) }
+    fun change(edit: SettingsOwner.() -> Unit) { player.visualizerAppearance(edit) }
     val slot = visualizer.selectedPreset?.toInt() ?: 0
     var colorEdit by remember { mutableStateOf<Int?>(null) }
     SettingsGroup {
@@ -338,13 +334,13 @@ private fun VisualizerSettings(player: PlayerConnection) {
         VisualizerStyle.MIRRORED -> "Mirrored bars"
         VisualizerStyle.CIRCULAR -> "Circular spectrum"
     }) },
-        select = { change(VisualizerPreferenceEdit.Style(VisualizerStyle.valueOf(it))) })
+        select = { change { setVisualizerStyle(VisualizerStyle.valueOf(it)) } })
     val accent = MaterialTheme.colorScheme.primary
     PreferenceSwitch("Use accent color", (appearance.colors == null)) { enabled ->
-        if (enabled) change(VisualizerPreferenceEdit.Colors(null))
+        if (enabled) change { setVisualizerColors(null) }
         else {
             player.bridge?.defaultVisualizerColors(io.github.screwys.rufin.core.AndroidRgb(accent.red, accent.green, accent.blue))?.let { colors ->
-                change(VisualizerPreferenceEdit.Colors(colors.map { listOf(it.red, it.green, it.blue) }))
+                change { setVisualizerColors(colors.map { listOf(it.red, it.green, it.blue) }) }
             }
         }
     }
@@ -356,22 +352,22 @@ private fun VisualizerSettings(player: PlayerConnection) {
                 Color(color[0], color[1], color[2])) { colorEdit = index }
         }
     }
-    PreferenceSlider("Bar spacing (px)", appearance.spacing.toFloat(), 0f..12f, 23) { change(VisualizerPreferenceEdit.Spacing(it.toDouble())) }
-    PreferenceSlider("Opacity (%)", (appearance.opacity * 100).toFloat(), 0f..100f, 99) { change(VisualizerPreferenceEdit.Opacity(it / 100.0)) }
+    PreferenceSlider("Bar spacing (px)", appearance.spacing.toFloat(), 0f..12f, 23) { change { setVisualizerSpacing(it.toDouble()) } }
+    PreferenceSlider("Opacity (%)", (appearance.opacity * 100).toFloat(), 0f..100f, 99) { change { setVisualizerOpacity(it / 100.0) } }
     PreferenceSlider("Frame rate limit", visualizer.fpsLimit.toFloat(), 1f..180f, 178) {
         player.visualizerFrameLimit(it.toInt())
     }
     }
     SettingsGroup(translate("Motion")) {
-    PreferenceSlider("Rise speed (%)", (appearance.rise * 100).toFloat(), 1f..100f, 98) { change(VisualizerPreferenceEdit.Rise(it / 100.0)) }
-    PreferenceSlider("Fall speed (%)", (appearance.fall * 100).toFloat(), 1f..100f, 98) { change(VisualizerPreferenceEdit.Fall(it / 100.0)) }
-    PreferenceSwitch("Show peak markers", appearance.peaks) { change(VisualizerPreferenceEdit.Peaks(it)) }
-    PreferenceSlider("Peak hold (seconds)", appearance.peakHold.toFloat(), 0f..5f, 49) { change(VisualizerPreferenceEdit.PeakHold(it.toDouble())) }
-    PreferenceSlider("Peak fall speed (% per second)", (appearance.peakFall * 100).toFloat(), 1f..200f, 198) { change(VisualizerPreferenceEdit.PeakFall(it / 100.0)) }
+    PreferenceSlider("Rise speed (%)", (appearance.rise * 100).toFloat(), 1f..100f, 98) { change { setVisualizerRise(it / 100.0) } }
+    PreferenceSlider("Fall speed (%)", (appearance.fall * 100).toFloat(), 1f..100f, 98) { change { setVisualizerFall(it / 100.0) } }
+    PreferenceSwitch("Show peak markers", appearance.peaks) { change { setVisualizerPeaks(it) } }
+    PreferenceSlider("Peak hold (seconds)", appearance.peakHold.toFloat(), 0f..5f, 49) { change { setVisualizerPeakHold(it.toDouble()) } }
+    PreferenceSlider("Peak fall speed (% per second)", (appearance.peakFall * 100).toFloat(), 1f..200f, 198) { change { setVisualizerPeakFall(it / 100.0) } }
     }
     SettingsGroup(translate("Lyrics background opacity")) {
-        PreferenceSlider("Fullscreen", (appearance.fullscreenLyricsOpacity * 100).toFloat(), 0f..100f, 99) { change(VisualizerPreferenceEdit.FullscreenLyricsOpacity(it / 100.0)) }
-        PreferenceSlider("Sidebar", (appearance.sidebarLyricsOpacity * 100).toFloat(), 0f..100f, 99) { change(VisualizerPreferenceEdit.SidebarLyricsOpacity(it / 100.0)) }
+        PreferenceSlider("Fullscreen", (appearance.fullscreenLyricsOpacity * 100).toFloat(), 0f..100f, 99) { change { setVisualizerFullscreenLyricsOpacity(it / 100.0) } }
+        PreferenceSlider("Sidebar", (appearance.sidebarLyricsOpacity * 100).toFloat(), 0f..100f, 99) { change { setVisualizerSidebarLyricsOpacity(it / 100.0) } }
     }
     SettingsGroup {
         SettingsRow(translate("Reset appearance"),
@@ -384,7 +380,7 @@ private fun VisualizerSettings(player: PlayerConnection) {
             { colorEdit = null }) { selected ->
             val colors = appearance.colors!!.toMutableList()
             colors[endpoint] = listOf(selected.red, selected.green, selected.blue)
-            change(VisualizerPreferenceEdit.Colors(colors)); colorEdit = null
+            change { setVisualizerColors(colors) }; colorEdit = null
         }
     }
 }

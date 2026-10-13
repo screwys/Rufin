@@ -131,130 +131,107 @@ impl EqualizerSettings {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct PlaybackSettings {
-    pub transition_mode: PlaybackTransitionMode,
-    pub crossfade_seconds: u8,
-    pub skip_same_album_crossfade: bool,
-    pub audio_fade_on_status_change: bool,
-    pub loudness_normalization: LoudnessNormalization,
-    pub loudness_normalization_scope: LoudnessNormalizationScope,
-    pub ebu_r128_target_lufs: f64,
-    pub write_ebu_r128_tags: bool,
-    pub stream_quality: StreamQuality,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub audio_output: Option<String>,
-    pub equalizer: EqualizerSettings,
-    pub playback_rate: f64,
-    pub preserve_pitch: bool,
-    pub volume: f64,
-    pub volume_scale: VolumeScale,
-    pub muted: bool,
-}
-
-#[derive(Deserialize)]
-struct SavedPlaybackSettings {
-    #[serde(default)]
-    transition_mode: PlaybackTransitionMode,
-    #[serde(default = "default_crossfade_seconds")]
-    crossfade_seconds: u8,
-    #[serde(default)]
-    skip_same_album_crossfade: bool,
-    #[serde(default = "default_true")]
-    audio_fade_on_status_change: bool,
-    #[serde(default)]
-    loudness_normalization: Option<String>,
-    #[serde(default)]
-    loudness_normalization_scope: Option<LoudnessNormalizationScope>,
-    #[serde(default)]
-    ebu_r128_target_lufs: Option<f64>,
-    #[serde(default)]
-    write_ebu_r128_tags: bool,
-    #[serde(default, rename = "replay_gain")]
-    legacy_replay_gain: Option<LoudnessNormalizationScope>,
-    #[serde(default)]
-    stream_quality: StreamQuality,
-    #[serde(default)]
-    audio_output: Option<String>,
-    #[serde(default)]
-    equalizer: EqualizerSettings,
-    #[serde(default = "default_playback_rate")]
-    playback_rate: f64,
-    #[serde(default = "default_true")]
-    preserve_pitch: bool,
-    #[serde(default = "default_volume")]
-    volume: f64,
-    #[serde(default)]
-    volume_scale: Option<VolumeScale>,
-    #[serde(default)]
-    muted: bool,
-}
-
-impl<'de> Deserialize<'de> for PlaybackSettings {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let saved = SavedPlaybackSettings::deserialize(deserializer)?;
-        let legacy_gain = sanitize_volume(saved.volume);
-        let (volume, volume_scale) = match saved.volume_scale {
-            Some(scale) => (saved.volume, scale),
-            None => (
-                VolumeScale::Perceptual.position_for_gain(legacy_gain),
-                VolumeScale::Perceptual,
-            ),
-        };
-        let (loudness_normalization, loudness_normalization_scope) = restore_loudness_settings(
-            saved.loudness_normalization.as_deref(),
-            saved.loudness_normalization_scope,
-            saved.legacy_replay_gain,
-        );
-        Ok(Self {
-            transition_mode: saved.transition_mode,
-            crossfade_seconds: saved.crossfade_seconds,
-            skip_same_album_crossfade: saved.skip_same_album_crossfade,
-            audio_fade_on_status_change: saved.audio_fade_on_status_change,
-            loudness_normalization,
-            loudness_normalization_scope,
-            ebu_r128_target_lufs: saved
-                .ebu_r128_target_lufs
-                .unwrap_or(DEFAULT_EBU_R128_TARGET_LUFS),
-            write_ebu_r128_tags: saved.write_ebu_r128_tags,
-            stream_quality: saved.stream_quality,
-            audio_output: saved.audio_output,
-            equalizer: saved.equalizer,
-            playback_rate: saved.playback_rate,
-            preserve_pitch: saved.preserve_pitch,
-            volume,
-            volume_scale,
-            muted: saved.muted,
-        })
-    }
-}
-
-impl Default for PlaybackSettings {
-    fn default() -> Self {
-        Self {
-            transition_mode: PlaybackTransitionMode::Gapless,
-            crossfade_seconds: default_crossfade_seconds(),
-            skip_same_album_crossfade: false,
-            audio_fade_on_status_change: true,
-            loudness_normalization: LoudnessNormalization::ReplayGain,
-            loudness_normalization_scope: LoudnessNormalizationScope::Album,
-            ebu_r128_target_lufs: DEFAULT_EBU_R128_TARGET_LUFS,
-            write_ebu_r128_tags: false,
-            stream_quality: StreamQuality::Original,
-            audio_output: None,
-            equalizer: EqualizerSettings::default(),
-            playback_rate: DEFAULT_PLAYBACK_RATE,
-            preserve_pitch: true,
-            volume: default_volume(),
-            volume_scale: VolumeScale::Perceptual,
-            muted: false,
+#[macro_export]
+macro_rules! playback_preference_fields {
+    ($callback:ident $(, $args:tt)*) => {
+        $callback! { [$($args)*]
+            direct {
+                #[serde(default)]
+                transition_mode: PlaybackTransitionMode = PlaybackTransitionMode::Gapless => set_transition_mode;
+                #[serde(default = "default_crossfade_seconds")]
+                crossfade_seconds: u8 = default_crossfade_seconds() => set_crossfade_seconds;
+                #[serde(default)]
+                skip_same_album_crossfade: bool = false => set_skip_same_album_crossfade;
+                #[serde(default = "default_true")]
+                audio_fade_on_status_change: bool = true => set_audio_fade_on_status_change;
+                #[serde(default)]
+                write_ebu_r128_tags: bool = false => set_write_ebu_r128_tags;
+                #[serde(default)]
+                stream_quality: StreamQuality = StreamQuality::Original => set_stream_quality;
+                #[serde(default, skip_serializing_if = "Option::is_none")]
+                audio_output: Option<String> = None;
+                #[serde(default)]
+                equalizer: EqualizerSettings = EqualizerSettings::default();
+                #[serde(default = "default_playback_rate")]
+                playback_rate: f64 = DEFAULT_PLAYBACK_RATE => set_playback_rate;
+                #[serde(default = "default_true")]
+                preserve_pitch: bool = true => set_preserve_pitch;
+                #[serde(default)]
+                muted: bool = false;
+            }
+            migrated {
+                loudness_normalization: LoudnessNormalization = LoudnessNormalization::ReplayGain => set_loudness_normalization;
+                loudness_normalization_scope: LoudnessNormalizationScope = LoudnessNormalizationScope::Album => set_loudness_normalization_scope;
+                ebu_r128_target_lufs: f64 = DEFAULT_EBU_R128_TARGET_LUFS => set_ebu_r128_target_lufs;
+                volume: f64 = default_volume();
+                volume_scale: VolumeScale = VolumeScale::Perceptual;
+            }
         }
-    }
+    };
 }
+
+macro_rules! define_playback_preferences {
+    ([] direct { $( $(#[$attribute:meta])* $field:ident: $ty:ty = $default:expr $(=> $setter:ident)?; )* }
+        migrated { $( $legacy:ident: $legacy_ty:ty = $legacy_default:expr $(=> $legacy_setter:ident)?; )* }) => {
+        #[derive(Clone, Debug, PartialEq, Serialize)]
+        #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+        pub struct PlaybackSettings {
+            $($(#[$attribute])* pub $field: $ty,)*
+            $(pub $legacy: $legacy_ty,)*
+        }
+
+        #[derive(Deserialize)]
+        struct SavedPlaybackSettings {
+            $($(#[$attribute])* $field: $ty,)*
+            #[serde(default)]
+            loudness_normalization: Option<String>,
+            #[serde(default)]
+            loudness_normalization_scope: Option<LoudnessNormalizationScope>,
+            #[serde(default)]
+            ebu_r128_target_lufs: Option<f64>,
+            #[serde(default, rename = "replay_gain")]
+            legacy_replay_gain: Option<LoudnessNormalizationScope>,
+            #[serde(default = "default_volume")]
+            volume: f64,
+            #[serde(default)]
+            volume_scale: Option<VolumeScale>,
+        }
+
+        impl<'de> Deserialize<'de> for PlaybackSettings {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where D: serde::Deserializer<'de> {
+                let saved = SavedPlaybackSettings::deserialize(deserializer)?;
+                let (volume, volume_scale) = match saved.volume_scale {
+                    Some(scale) => (saved.volume, scale),
+                    None => (
+                        VolumeScale::Perceptual.position_for_gain(sanitize_volume(saved.volume)),
+                        VolumeScale::Perceptual,
+                    ),
+                };
+                let (loudness_normalization, loudness_normalization_scope) = restore_loudness_settings(
+                    saved.loudness_normalization.as_deref(),
+                    saved.loudness_normalization_scope,
+                    saved.legacy_replay_gain,
+                );
+                Ok(Self {
+                    $($field: saved.$field,)*
+                    loudness_normalization,
+                    loudness_normalization_scope,
+                    ebu_r128_target_lufs: saved.ebu_r128_target_lufs.unwrap_or(DEFAULT_EBU_R128_TARGET_LUFS),
+                    volume,
+                    volume_scale,
+                })
+            }
+        }
+
+        impl Default for PlaybackSettings {
+            fn default() -> Self {
+                Self { $($field: $default,)* $($legacy: $legacy_default,)* }
+            }
+        }
+    };
+}
+playback_preference_fields!(define_playback_preferences);
 
 impl PlaybackSettings {
     pub fn set_volume_scale_preserving_gain(&mut self, volume_scale: VolumeScale) {

@@ -35,19 +35,15 @@ pub async fn persist_queue(
 ) {
     let _ = source;
     let captured = database
-        .read_queue(library::QueueReadRequest {
-            anchor: None,
-            context_title: None,
-            input: library::QueueLoad::Items(
+        .queue_entries(
+            library::QueueLoad::items(
                 occurrences
                     .iter()
                     .map(|row| (row.item.clone(), row.provenance.clone()))
                     .collect(),
             ),
-            anchor_index: current.unwrap_or(0),
-            random_start: None,
-            shuffled: None,
-        })
+            None,
+        )
         .await
         .expect("capture Queue metadata");
     let state = library::QueueRestore {
@@ -294,19 +290,9 @@ pub async fn resolve_queue(
     input: library::QueueLoad,
     anchor_index: usize,
 ) -> library::QueueRestore {
-    let mut page = database
-        .read_queue(library::QueueReadRequest {
-            anchor: None,
-            context_title: None,
-            input: input,
-            anchor_index,
-            random_start: None,
-            shuffled: None,
-        })
-        .await
-        .unwrap();
-    let start = page.current_index.saturating_sub(10);
-    page.rows = database
+    let page = database.queue_entries(input, None).await.unwrap();
+    let start = anchor_index.saturating_sub(10);
+    let rows = database
         .queue_rows_for_entries(
             &page
                 .entries
@@ -321,10 +307,10 @@ pub async fn resolve_queue(
         .await
         .unwrap();
     library::QueueRestore {
-        current_index: (!page.entries.is_empty()).then_some(page.current_index),
+        current_index: (!page.entries.is_empty()).then_some(anchor_index),
         order: (0..page.entries.len() as u32).collect(),
         entries: page.entries.into(),
-        rows: page.rows,
+        rows,
         ..Default::default()
     }
 }

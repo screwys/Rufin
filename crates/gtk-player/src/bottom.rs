@@ -1109,7 +1109,12 @@ impl crate::PlayerUi {
             f64::from(displayed_seconds.min(duration_seconds)) / f64::from(duration_seconds)
         };
         controls.waveform.set_position_fraction(position_fraction);
-        let waveform_enabled = self.settings.current.borrow().seekbar_waveform_enabled;
+        let waveform_enabled = self
+            .settings
+            .current
+            .borrow()
+            .player_display
+            .seekbar_waveform_enabled;
         let waveform = self.waveform().unwrap_or_default();
         let current_media_id = current.map(|media| &media.id);
         let waveform_matches = waveform_enabled

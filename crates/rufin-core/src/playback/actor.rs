@@ -8,12 +8,9 @@ use std::time::Duration;
 use super::{
     PlaybackOwner,
     queue::{Sequence, SequenceError},
-    state::{
-        ClockSample, Command, ExternalPlayback, MaterializationId, MaterializationReservation,
-        Player,
-    },
+    state::{ClockSample, Command, ExternalPlayback, Player},
 };
-use crate::playback::{Placement, PlayRequest};
+use crate::playback::PlayRequest;
 use playback::{
     PlaybackBackend, PlaybackOutput, PlaybackProjection, PlaybackSettings, PreparedStream,
     QueueItem, RunId,
@@ -240,37 +237,6 @@ impl Playback {
         backend: Box<dyn PlaybackBackend>,
     ) -> PlaybackResult<()> {
         self.request(move |player, _| player.adopt_local(queue, stream, playing, backend))
-    }
-    pub(crate) fn reserve_materialization(
-        &self,
-        placement: Placement,
-    ) -> PlaybackResult<MaterializationReservation> {
-        self.request(move |player, _| Ok(player.reserve_materialization(placement)))
-    }
-    pub(crate) fn complete_materialization(
-        &self,
-        id: MaterializationId,
-        batch: library::QueueReadRequest,
-        placement: Placement,
-    ) -> PlaybackResult<bool> {
-        self.request(move |player, sample| {
-            Ok(player.apply_materialization(id, batch, placement, sample)?)
-        })
-    }
-    pub(crate) fn fail_materialization(
-        &self,
-        id: MaterializationId,
-        placement: Placement,
-        message: String,
-    ) -> PlaybackResult<bool> {
-        self.request(move |player, _| Ok(player.fail_materialization(id, placement, message)))
-    }
-    pub(crate) fn cancel_materialization(
-        &self,
-        id: MaterializationId,
-        placement: Placement,
-    ) -> PlaybackResult<bool> {
-        self.request(move |player, _| Ok(player.cancel_materialization(id, placement)))
     }
     pub(crate) fn complete_auto_dj_candidates(
         &self,

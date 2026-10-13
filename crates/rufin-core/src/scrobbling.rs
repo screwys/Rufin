@@ -71,7 +71,7 @@ impl ScrobblingOwner {
         let stored = self.settings.load();
         if let Err(error) = self.scrobbler.update_preferences(
             &stored.scrobbling_runtime_settings(),
-            stored.ui.private_mode,
+            stored.ui.application.private_mode,
         ) {
             warn!(%error, "could not update external scrobbling settings");
         }
