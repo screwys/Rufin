@@ -1378,7 +1378,7 @@ mod tests {
         let mut scan = Scan::begin(&source, "server", "Server", "server", None)
             .await
             .unwrap();
-        scan.write_album(&crate::AlbumInput {
+        scan.write_albums(&[&crate::AlbumInput {
             object_id: "album".into(),
             title: "Album".into(),
             display_artist: "Artist".into(),
@@ -1386,16 +1386,16 @@ mod tests {
             artwork_binding: Some(art.to_vec()),
             favorite: Some(false),
             ..Default::default()
-        })
+        }])
         .await
         .unwrap();
-        scan.write_artist(&crate::ArtistInput {
+        scan.write_artists(&[&crate::ArtistInput {
             object_id: "artist".into(),
             name: "Artist".into(),
             sort_text: Some("artist".into()),
             artwork_binding: Some(art.to_vec()),
             ..Default::default()
-        })
+        }])
         .await
         .unwrap();
         scan.write_tracks(&[(

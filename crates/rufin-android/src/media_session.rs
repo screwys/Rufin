@@ -27,7 +27,7 @@ pub struct AndroidPlaybackSubscription {
 
 struct PlaybackChanges {
     playback: playback::PlaybackSubscription,
-    catalog: tokio::sync::watch::Receiver<()>,
+    catalog: tokio::sync::watch::Receiver<Option<rufin_core::runtime::CatalogChange>>,
     intents: tokio::sync::watch::Receiver<u64>,
     current_facts: Option<(String, bool)>,
 }

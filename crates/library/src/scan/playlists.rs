@@ -48,17 +48,18 @@ impl Scan {
         let object_id = input.object_id.as_str();
         let normalized_name = input.name.to_lowercase();
         self.require_id("playlist", object_id)?;
-        let first = self.observe("playlist", object_id).await?;
+        let first = self
+            .observe_entities("playlist", &[object_id])
+            .await?
+            .contains(object_id);
         self.changes.playlists |= self.execute_result(sqlx::query("INSERT INTO playlists(source_key,owner,object_id,name,normalized_name,sort_text,position)
             VALUES(?1,'source',?2,?3,?4,?5,(SELECT COALESCE(max(position)+1,0) FROM playlists))
             ON CONFLICT(source_key,object_id) DO UPDATE SET owner='source',indexed=1,name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text
             WHERE (owner,indexed,name,normalized_name,sort_text) IS NOT ('source',1,excluded.name,excluded.normalized_name,excluded.sort_text)")
             .bind(self.source).bind(object_id).bind(&input.name).bind(normalized_name).bind(&input.sort_text)).await?.rows_affected()>0;
-        self.remember_artwork(
+        self.remember_artworks(
             "playlist",
-            object_id,
-            input.artwork_binding.as_deref(),
-            first,
+            &[(object_id, input.artwork_binding.as_deref(), first)],
         )
         .await?;
         if input.writable.is_some() || input.metadata_writable.is_some() {

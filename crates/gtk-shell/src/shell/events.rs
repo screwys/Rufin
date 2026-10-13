@@ -128,7 +128,14 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
             configured,
             selected,
         } => {
+            let added = matches!(
+                *shell.source.operation.borrow(),
+                SourceOperation::Adding { .. }
+            );
             apply_selected_source(shell, configured, selected);
+            if added {
+                shell.preferences.complete_add_server_dialog();
+            }
         }
         SourceEvent::Operation(operation) => apply_source_operation(shell, operation),
         SourceEvent::ArtworkPreparation {
@@ -420,7 +427,6 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
     let previous_operation = shell.source.operation.borrow().clone();
     let previously_blocked = previous_operation.blocks_library();
     let started_blocking = source_operation_started_blocking(&previous_operation, &operation);
-    let completed_add = source_add_completed(&previous_operation, &operation);
     *shell.source.operation.borrow_mut() = operation.clone();
     if operation.blocks_library() {
         shell.source.artwork_preparation_revision.set(None);
@@ -457,9 +463,6 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
             }
         }
         SourceOperation::Idle => {
-            if completed_add {
-                shell.preferences.complete_add_server_dialog();
-            }
             shell.preferences.update_add_server_dialog();
             if shell.selected_library().is_some() && !shell.startup.route_revealed.get() {
                 shell.schedule_startup_route_reveal();
@@ -638,10 +641,6 @@ fn source_progress_fraction(progress: &SourceProgress) -> f64 {
 
 fn source_operation_started_blocking(previous: &SourceOperation, next: &SourceOperation) -> bool {
     !previous.blocks_library() && next.blocks_library()
-}
-
-fn source_add_completed(previous: &SourceOperation, next: &SourceOperation) -> bool {
-    matches!(previous, SourceOperation::Adding { .. }) && matches!(next, SourceOperation::Idle)
 }
 
 fn apply_source_discovery(shell: &Rc<Shell>, update: DiscoveryUpdate) {
@@ -984,8 +983,8 @@ mod tests {
 
     use super::{
         bottom_player_can_update_position_only, media_controls_static_state_changed,
-        queue_panel_refresh_needed, source_add_completed, source_operation_started_blocking,
-        source_progress_fraction, unavailable_local_folder_for_path,
+        queue_panel_refresh_needed, source_operation_started_blocking, source_progress_fraction,
+        unavailable_local_folder_for_path,
     };
     use rufin_core::runtime::source::{
         LocalFolder, SourceOperation, SourceProgress, SourceProgressStage,
@@ -1018,19 +1017,6 @@ mod tests {
                 total: None,
             },
         }
-    }
-
-    #[test]
-    fn a_failed_add_keeps_its_retry_form_until_an_add_reaches_idle() {
-        assert!(!source_add_completed(
-            &adding(),
-            &SourceOperation::Failed {
-                source_id: None,
-                message: "Connection failed".to_string(),
-                add_form: true,
-            }
-        ));
-        assert!(source_add_completed(&adding(), &SourceOperation::Idle));
     }
 
     #[test]

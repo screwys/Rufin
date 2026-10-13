@@ -312,22 +312,25 @@ mod tests {
         let mut scan = Scan::begin(&database, "plex", "Plex", "plex", None)
             .await
             .unwrap();
-        for item in artists.iter().chain(&albums).chain(&tracks) {
-            for record in records(scan.source_id(), item).unwrap() {
-                scan.write_record(&record).await.unwrap();
-            }
-        }
+        let page = artists
+            .iter()
+            .chain(&albums)
+            .chain(&tracks)
+            .flat_map(|item| records(scan.source_id(), item).unwrap())
+            .collect::<Vec<_>>();
+        scan.write_records(&page).await.unwrap();
         scan.finish().await.unwrap();
         let publication = updates.try_recv().expect("catalog update");
         assert!(publication.metadata);
         for refresh in [false, true] {
             if refresh {
                 let mut scan = Scan::begin_items(&database, "plex").await.unwrap();
-                for item in albums.iter().chain(&tracks) {
-                    for record in records(scan.source_id(), item).unwrap() {
-                        scan.write_record(&record).await.unwrap();
-                    }
-                }
+                let page = albums
+                    .iter()
+                    .chain(&tracks)
+                    .flat_map(|item| records(scan.source_id(), item).unwrap())
+                    .collect::<Vec<_>>();
+                scan.write_records(&page).await.unwrap();
                 scan.finish().await.unwrap();
             }
             let (_, _, rows) = library::CollectionQuery {

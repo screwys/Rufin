@@ -4,19 +4,33 @@ use super::{LocalArtworkCandidate, Scan};
 use crate::{ArtistArtworkBinding, LibraryError, LibraryResult};
 
 impl Scan {
-    pub(super) async fn remember_artwork(
+    pub(super) async fn remember_artworks(
         &mut self,
         kind: &str,
-        id: &str,
-        binding: Option<&[u8]>,
-        first: bool,
+        rows: &[(&str, Option<&[u8]>, bool)],
     ) -> LibraryResult<()> {
-        self.execute(sqlx::query(
-            "INSERT INTO temp.scan_artwork(kind,object_id,source,binding) VALUES(?1,?2,?3,?3)
-             ON CONFLICT(kind,object_id) DO UPDATE SET
-                source=CASE WHEN ?4 THEN excluded.source ELSE COALESCE(excluded.source,scan_artwork.source) END,
-                binding=CASE WHEN ?4 THEN excluded.binding ELSE COALESCE(excluded.binding,scan_artwork.binding) END",
-        ).bind(kind).bind(id).bind(binding).bind(first)).await
+        for page in rows.chunks(128) {
+            let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+                "WITH input(kind,object_id,binding,first) AS (",
+            );
+            query.push_values(page, |mut row, (id, binding, first)| {
+                row.push_bind(kind)
+                    .push_bind(*id)
+                    .push_bind(*binding)
+                    .push_bind(*first);
+            });
+            query.push(
+                ") INSERT INTO temp.scan_artwork(kind,object_id,source,binding)
+                SELECT kind,object_id,binding,binding FROM input WHERE true
+                ON CONFLICT(kind,object_id) DO UPDATE SET
+                  source=CASE WHEN (SELECT first FROM input WHERE object_id=excluded.object_id)
+                    THEN excluded.source ELSE COALESCE(excluded.source,scan_artwork.source) END,
+                  binding=CASE WHEN (SELECT first FROM input WHERE object_id=excluded.object_id)
+                    THEN excluded.binding ELSE COALESCE(excluded.binding,scan_artwork.binding) END",
+            );
+            self.execute(query.build()).await?;
+        }
+        Ok(())
     }
 
     pub async fn clear_local_artwork_candidates(&mut self) -> LibraryResult<()> {
@@ -181,22 +195,33 @@ impl Scan {
             .bind(artist).bind(after).bind(self.source).bind(self.point_update).fetch_all(connection).await?)
     }
 
-    pub async fn write_local_artist_artwork(
+    pub async fn write_local_artist_artworks(
         &mut self,
-        artist: &str,
-        binding: &[u8],
+        rows: &[(&str, &[u8])],
     ) -> LibraryResult<()> {
-        self.remember_artwork("artist", artist, Some(binding), true)
-            .await
+        self.remember_artworks(
+            "artist",
+            &rows
+                .iter()
+                .map(|(id, binding)| (*id, Some(*binding), true))
+                .collect::<Vec<_>>(),
+        )
+        .await
     }
 
-    pub async fn record_artist_pictures(
-        &mut self,
-        path: &str,
-        pictures: &str,
-    ) -> LibraryResult<()> {
-        self.execute(sqlx::query("UPDATE local_files SET artist_pictures=?3 WHERE source_key=?1 AND path=?2 AND artist_pictures IS NOT ?3")
-            .bind(self.source).bind(path).bind(pictures)).await
+    pub async fn record_artist_pictures(&mut self, facts: &[(&str, &str)]) -> LibraryResult<()> {
+        for page in facts.chunks(128) {
+            let mut query =
+                sqlx::QueryBuilder::<sqlx::Sqlite>::new("WITH input(path,pictures) AS (");
+            query.push_values(page, |mut row, (path, pictures)| {
+                row.push_bind(*path).push_bind(*pictures);
+            });
+            query.push(") UPDATE local_files SET artist_pictures=input.pictures FROM input
+                WHERE local_files.source_key=").push_bind(self.source)
+                .push(" AND local_files.path=input.path AND local_files.artist_pictures IS NOT input.pictures");
+            self.execute(query.build()).await?;
+        }
+        Ok(())
     }
 
     pub async fn file_artwork_image_page(
@@ -239,17 +264,26 @@ impl Scan {
             .bind(self.source).bind(self.point_update).fetch_all(connection).await?)
     }
 
-    pub async fn write_local_artwork_candidate(
+    pub async fn write_local_artwork_candidates(
         &mut self,
         album: &str,
-        track: &str,
-        group_binding: Option<&[u8]>,
-        track_binding: Option<&[u8]>,
+        candidates: &[(&str, Option<&[u8]>, Option<&[u8]>)],
     ) -> LibraryResult<()> {
-        self.execute(sqlx::query("UPDATE temp.scan_artwork SET source=COALESCE(source,?2),binding=COALESCE(binding,?2) WHERE kind='album' AND object_id=?1")
-            .bind(album).bind(group_binding)).await?;
-        self.remember_artwork("track", track, track_binding, true)
-            .await
+        for page in candidates.chunks(128) {
+            if let Some(binding) = page.iter().find_map(|(_, group, _)| *group) {
+                self.execute(sqlx::query("UPDATE temp.scan_artwork SET source=COALESCE(source,?2),binding=COALESCE(binding,?2) WHERE kind='album' AND object_id=?1")
+                    .bind(album).bind(binding)).await?;
+            }
+            self.remember_artworks(
+                "track",
+                &page
+                    .iter()
+                    .map(|(track, _, binding)| (*track, *binding, true))
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     pub async fn local_artwork_directory_is_single_album(

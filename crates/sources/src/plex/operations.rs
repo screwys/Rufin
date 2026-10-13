@@ -248,9 +248,10 @@ impl PlexSource {
         };
         match self.metadata(object).await {
             Ok(metadata) => {
-                for record in item::records(scan.source_id(), &metadata)? {
-                    scan.write_record(&record).await?;
-                }
+                scan.write_records(
+                    &item::records(scan.source_id(), &metadata)?.collect::<Vec<_>>(),
+                )
+                .await?;
             }
             Err(error) => crate::source::optional_collection_error(error)?,
         }
@@ -278,12 +279,12 @@ impl PlexSource {
                 )
                 .await?;
             let entries = items(&response["MediaContainer"]["Metadata"]);
-            scan.begin_batch().await?;
+            let mut records = Vec::new();
             for entry in entries {
-                for record in item::records(scan.source_id(), entry)? {
-                    scan.write_record(&record).await?;
-                }
+                records.extend(item::records(scan.source_id(), entry)?);
             }
+            scan.begin_batch().await?;
+            scan.write_records(&records).await?;
             scan.finish_batch().await?;
             offset += entries.len();
             let total = field::<usize>(&response["MediaContainer"], "totalSize");
@@ -320,7 +321,7 @@ impl PlexSource {
         let source = scan.source();
         let result = async {
             let (mut tracks, mut albums, mut artists) = (Vec::new(), Vec::new(), Vec::new());
-            scan.begin_batch().await?;
+            let mut records = Vec::new();
             for hub in items(&response["MediaContainer"]["Hub"]) {
                 for entry in items(&hub["Metadata"]).iter().take(limit.min(100)) {
                     let Some(raw) = id(&entry["ratingKey"]) else {
@@ -332,11 +333,11 @@ impl PlexSource {
                         Some("artist") => artists.push(plex_id("artist", &raw)),
                         _ => continue,
                     }
-                    for record in item::records(scan.source_id(), entry)? {
-                        scan.write_record(&record).await?;
-                    }
+                    records.extend(item::records(scan.source_id(), entry)?);
                 }
             }
+            scan.begin_batch().await?;
+            scan.write_records(&records).await?;
             scan.finish_batch().await?;
             Ok((tracks, albums, artists))
         }

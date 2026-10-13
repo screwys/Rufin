@@ -322,11 +322,14 @@ class RufinService : MediaSessionService() {
         val uri = android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI.toString()
         if (!started.hasDocumentRoot(uri)) {
             started.addDocumentRoot(uri)
-        } else if (!alreadyGranted) {
+        } else {
             val source = started.source()
             val sources = source.subscribe()
             try {
-                sources.next().sources.firstOrNull { it.kind == "local" }?.let { source.refreshSource(it.id) }
+                val configured = sources.next()
+                configured.sources.firstOrNull { it.kind == "local" }?.let { local ->
+                    if (!alreadyGranted || configured.selectedSourceId != local.id) source.selectSource(local.id)
+                }
             } finally { sources.destroy(); source.destroy() }
         }
         true

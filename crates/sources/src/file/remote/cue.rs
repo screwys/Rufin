@@ -59,7 +59,7 @@ impl FileSource {
                         .await?
                 {
                     scan.begin_batch().await?;
-                    scan.retain_local_cue_path(&file.path).await?;
+                    scan.retain_local_cue_paths(&[&file.path]).await?;
                     for page in old.dependencies.chunks(128) {
                         scan.write_local_dependency_paths(page).await?;
                     }
@@ -159,31 +159,48 @@ impl FileSource {
                         };
                         self.locate_track(&mut backing, &backing_file);
                         let duration = backing.track.duration_millis as u64;
-                        for (position, cue) in entry.tracks.iter().enumerate() {
-                            let end = entry
-                                .tracks
-                                .get(position + 1)
-                                .map_or(duration, |next| next.index_start_ms);
-                            if cue.index_start_ms >= end || end > duration {
+                        for (chunk, cues) in entry.tracks.chunks(128).enumerate() {
+                            let mut tracks = Vec::with_capacity(cues.len());
+                            let parsed: SourceResult<bool> = (|| {
+                                for (position, cue) in cues.iter().enumerate() {
+                                    let end = entry
+                                        .tracks
+                                        .get(chunk * 128 + position + 1)
+                                        .map_or(duration, |next| next.index_start_ms);
+                                    if cue.index_start_ms >= end || end > duration {
+                                        return Ok(false);
+                                    }
+                                    // The relative CUE name supplies Local's album/tag fallbacks; URLs never become native paths.
+                                    let mut track = cue_track(
+                                        std::path::Path::new(&relative),
+                                        sheet.album_title.as_deref(),
+                                        sheet.album_performer.as_deref(),
+                                        cue,
+                                        end,
+                                        &backing,
+                                    );
+                                    track.track.object_id = format!("{prefix}:{}", cue.number);
+                                    track.track.cue_path = Some(file.path.clone());
+                                    tracks.push(track.into_inputs(scan.accepted_at())?);
+                                }
+                                Ok(true)
+                            })();
+                            scan.begin_batch().await?;
+                            scan.write_tracks(
+                                &tracks
+                                    .iter()
+                                    .map(|(album, track)| (track, Some(album)))
+                                    .collect::<Vec<_>>(),
+                            )
+                            .await?;
+                            scan.finish_batch().await?;
+                            for _ in tracks {
+                                completed += 1;
+                                progress(completed);
+                            }
+                            if !parsed? {
                                 return Ok(false);
                             }
-                            // The relative CUE name supplies Local's album/tag fallbacks; URLs never become native paths.
-                            let mut track = cue_track(
-                                std::path::Path::new(&relative),
-                                sheet.album_title.as_deref(),
-                                sheet.album_performer.as_deref(),
-                                cue,
-                                end,
-                                &backing,
-                            );
-                            track.track.object_id = format!("{prefix}:{}", cue.number);
-                            track.track.cue_path = Some(file.path.clone());
-                            scan.begin_batch().await?;
-                            let (album, track) = track.into_inputs(scan.accepted_at())?;
-                            scan.write_tracks(&[(&track, Some(&album))]).await?;
-                            scan.finish_batch().await?;
-                            completed += 1;
-                            progress(completed);
                         }
                         backing_file.state = LocalFileState::Accepted;
                         scan.write_local_files(&[(backing_file, vec![])]).await?;
@@ -199,7 +216,7 @@ impl FileSource {
                         tracing::warn!(%error, "could not read remote CUE album");
                         scan.clear_freshness();
                         if let Some(old) = old.or_else(|| renamed.first()) {
-                            scan.retain_local_cue_path(&old.path).await?;
+                            scan.retain_local_cue_paths(&[&old.path]).await?;
                             for page in old.dependencies.chunks(128) {
                                 scan.write_local_dependency_paths(page).await?;
                             }

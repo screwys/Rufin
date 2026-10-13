@@ -31,7 +31,8 @@ impl PlexSource {
                 name: Some(title.to_owned()),
                 ..Default::default()
             });
-            scan.write_record(&section_record).await?;
+            scan.write_records(std::slice::from_ref(&section_record))
+                .await?;
             for (kind, stage) in [
                 ("8", SourceReadStage::Artists),
                 ("9", SourceReadStage::Albums),
@@ -75,19 +76,13 @@ impl PlexSource {
                     } else {
                         Value::Null
                     };
-                    let mut tracks = Vec::new();
+                    let mut page_records = Vec::new();
                     let mut folder_tracks = Vec::new();
-                    scan.begin_batch().await?;
                     for item in items(&details["MediaContainer"]["Metadata"])
                         .iter()
                         .chain(rows)
                     {
-                        for record in records(scan.source_id(), item)? {
-                            match record {
-                                RecordInput::Track(track) => tracks.push(track),
-                                record => scan.write_record(&record).await?,
-                            }
-                        }
+                        page_records.extend(records(scan.source_id(), item)?);
                     }
                     for item in rows {
                         if kind == "10"
@@ -96,13 +91,8 @@ impl PlexSource {
                             folder_tracks.push(plex_id("track", &raw));
                         }
                     }
-                    scan.write_tracks(
-                        &tracks
-                            .iter()
-                            .map(|track| (track.as_ref(), None))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
+                    scan.begin_batch().await?;
+                    scan.write_records(&page_records).await?;
                     scan.write_track_folders(
                         &folder_tracks
                             .iter()
@@ -111,7 +101,8 @@ impl PlexSource {
                     )
                     .await?;
                     // The section response owns its display name, not a track's optional copy.
-                    scan.write_record(&section_record).await?;
+                    scan.write_records(std::slice::from_ref(&section_record))
+                        .await?;
                     scan.finish_batch().await?;
                     offset += rows.len();
                     progress(SourceReadProgress {
@@ -173,9 +164,8 @@ impl PlexSource {
                 let Some(raw) = id(&item["ratingKey"]) else {
                     continue;
                 };
-                for record in records(scan.source_id(), item)? {
-                    scan.write_record(&record).await?;
-                }
+                scan.write_records(&records(scan.source_id(), item)?.collect::<Vec<_>>())
+                    .await?;
                 self.stage_playlist_entries(scan, &plex_id("playlist", &raw))
                     .await?;
             }
@@ -206,6 +196,7 @@ impl PlexSource {
             let finished = page_finished(&page, offset, rows.len())?;
             scan.begin_batch().await?;
             let mut entries = Vec::with_capacity(rows.len());
+            let mut page_records = Vec::new();
             for item in rows {
                 if item["type"].as_str() != Some("track") {
                     continue;
@@ -215,14 +206,13 @@ impl PlexSource {
                 else {
                     continue;
                 };
-                for record in records(scan.source_id(), item)? {
-                    scan.write_record(&record).await?;
-                }
+                page_records.extend(records(scan.source_id(), item)?);
                 entries.push(library::PlaylistEntryInput {
                     object_id: entry,
                     track_id: plex_id("track", &raw),
                 });
             }
+            scan.write_records(&page_records).await?;
             scan.write_playlist_page(playlist_id, offset, &entries, finished)
                 .await?;
             scan.finish_batch().await?;
@@ -239,47 +229,52 @@ impl PlexSource {
         upserts: Vec<String>,
         mut removals: Vec<String>,
     ) -> SourceResult<()> {
-        for raw in upserts {
-            let item = match self.metadata(&raw).await {
-                Ok(item) => item,
-                Err(SourceError::NotFound) => {
-                    removals.push(raw);
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
-            if item["type"] == "album" {
-                for record in records(scan.source_id(), &item)? {
-                    scan.write_record(&record).await?;
-                }
-                self.stage_collection_contents(
-                    scan,
-                    &crate::SourceCollection::Album(plex_id("album", raw_item_id(&raw))),
-                )
-                .await?;
-                continue;
-            }
-            if item["type"].as_str() == Some("track")
-                && let Some(album) = id(&item["parentRatingKey"])
-            {
-                match self.metadata(&album).await {
-                    Ok(album) => {
-                        for record in records(scan.source_id(), &album)? {
-                            scan.write_record(&record).await?;
+        for page in upserts.chunks(crate::source::LIVE_CHANGE_LIMIT) {
+            let mut page_records = Vec::new();
+            let result: SourceResult<()> = async {
+                for raw in page {
+                    let item = match self.metadata(raw).await {
+                        Ok(item) => item,
+                        Err(SourceError::NotFound) => {
+                            removals.push(raw.clone());
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                    };
+                    if item["type"] == "album" {
+                        page_records.extend(records(scan.source_id(), &item)?);
+                        scan.write_records(&std::mem::take(&mut page_records))
+                            .await?;
+                        self.stage_collection_contents(
+                            scan,
+                            &crate::SourceCollection::Album(plex_id("album", raw_item_id(raw))),
+                        )
+                        .await?;
+                        continue;
+                    }
+                    if item["type"].as_str() == Some("track")
+                        && let Some(album) = id(&item["parentRatingKey"])
+                    {
+                        match self.metadata(&album).await {
+                            Ok(album) => page_records.extend(records(scan.source_id(), &album)?),
+                            Err(error) => crate::source::optional_collection_error(error)?,
                         }
                     }
-                    Err(error) => crate::source::optional_collection_error(error)?,
+                    page_records.extend(records(scan.source_id(), &item)?);
+                    if item["type"].as_str() == Some("playlist")
+                        && let Some(raw) = id(&item["ratingKey"])
+                    {
+                        scan.write_records(&std::mem::take(&mut page_records))
+                            .await?;
+                        self.stage_playlist_entries(scan, &plex_id("playlist", &raw))
+                            .await?;
+                    }
                 }
+                Ok(())
             }
-            for record in records(scan.source_id(), &item)? {
-                scan.write_record(&record).await?;
-            }
-            if item["type"].as_str() == Some("playlist")
-                && let Some(raw) = id(&item["ratingKey"])
-            {
-                self.stage_playlist_entries(scan, &plex_id("playlist", &raw))
-                    .await?;
-            }
+            .await;
+            scan.write_records(&page_records).await?;
+            result?;
         }
         for raw in removals {
             scan.remove_track(&plex_id("track", raw_item_id(&raw)))
@@ -349,15 +344,15 @@ impl PlexSource {
             };
             let section_id = format!("plex:{section}:{identifier}");
             let mut entries = Vec::new();
+            let mut page_records = Vec::new();
             scan.begin_batch().await?;
             for (position, item) in items(&hub["Metadata"]).iter().take(24).enumerate() {
                 if let Some(entry) = home_entry(position, item) {
-                    for record in records(scan.source_id(), item)? {
-                        scan.write_record(&record).await?;
-                    }
+                    page_records.extend(records(scan.source_id(), item)?);
                     entries.push(entry);
                 }
             }
+            scan.write_records(&page_records).await?;
             scan.replace_home_section(&section_id, hub["title"].as_str(), &entries)
                 .await?;
             scan.finish_batch().await?;
@@ -380,15 +375,15 @@ impl PlexSource {
                     }
                 };
                 let mut entries = Vec::new();
+                let mut page_records = Vec::new();
                 scan.begin_batch().await?;
                 for (position, item) in candidates.iter().enumerate() {
                     if let Some(entry) = home_entry(position, item) {
-                        for record in records(scan.source_id(), item)? {
-                            scan.write_record(&record).await?;
-                        }
+                        page_records.extend(records(scan.source_id(), item)?);
                         entries.push(entry);
                     }
                 }
+                scan.write_records(&page_records).await?;
                 scan.replace_home_section(&mix_section, station["title"].as_str(), &entries)
                     .await?;
                 scan.finish_batch().await?;

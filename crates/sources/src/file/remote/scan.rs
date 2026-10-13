@@ -356,6 +356,7 @@ impl FileSource {
             .buffered(workers.len());
             let mut accepted = Vec::new();
             let mut observations = Vec::new();
+            let mut unreadable = Vec::new();
             let result: SourceResult<()> = async {
                 while let Some((mut file, reusable, parsed)) = files.next().await {
                     if cancelled() {
@@ -429,8 +430,7 @@ impl FileSource {
                             file.state = LocalFileState::Unreadable;
                             scan.clear_freshness();
                             if let Some(old) = prior {
-                                scan.retain_local_media_paths(std::slice::from_ref(&old.path))
-                                    .await?;
+                                unreadable.push(old.path.clone());
                             }
                             observations.push((file, vec![]));
                         }
@@ -441,6 +441,7 @@ impl FileSource {
             .await;
             if !observations.is_empty() {
                 scan.begin_batch().await?;
+                scan.retain_local_media_paths(&unreadable).await?;
                 scan.write_tracks(
                     &accepted
                         .iter()

@@ -258,36 +258,35 @@ impl SubsonicSource {
                 offset = offset.checked_add(page_len).ok_or_else(|| {
                     SourceError::Other(format!("Navidrome {endpoint} offset overflowed"))
                 })?;
-                let mut tracks = Vec::new();
-                scan.begin_batch().await?;
+                let mut records = Vec::new();
                 for item in page {
                     let Some(raw_id) = id(&item["id"]) else {
                         continue;
                     };
                     match kind {
                         Album => {
-                            scan.write_album(&album_from_navidrome(
+                            records.push(library::RecordInput::Album(album_from_navidrome(
                                 self,
                                 scan.source_id(),
                                 &raw_id,
                                 &item,
-                            )?)
-                            .await?
+                            )?));
                         }
-                        Track => tracks.push(track_from_navidrome(self, &raw_id, &item)),
+                        Track => records.push(library::RecordInput::Track(Box::new(
+                            track_from_navidrome(self, &raw_id, &item),
+                        ))),
                         Artist => {
-                            scan.write_artist(&artist_from_navidrome(
+                            records.push(library::RecordInput::Artist(artist_from_navidrome(
                                 self,
                                 scan.source_id(),
                                 &raw_id,
                                 &item,
-                            )?)
-                            .await?
+                            )?));
                         }
                     }
                 }
-                scan.write_tracks(&tracks.iter().map(|track| (track, None)).collect::<Vec<_>>())
-                    .await?;
+                scan.begin_batch().await?;
+                scan.write_records(&records).await?;
                 scan.finish_batch().await?;
                 progress(SourceReadProgress {
                     stage,
@@ -1186,13 +1185,13 @@ mod tests {
         let mut scan = library::Scan::begin(&database, "source", "Source", "source", None)
             .await
             .unwrap();
-        scan.write_folder(&library::FolderInput {
+        scan.write_folders(&[&library::FolderInput {
             object_id: "navidrome:music-folder:1".to_string(),
             name: Some("Folder".to_string()),
             sort_text: Some("folder".to_string()),
             artwork_binding: None,
             ..Default::default()
-        })
+        }])
         .await
         .unwrap();
         source
@@ -1434,13 +1433,13 @@ mod tests {
                 .await
                 .expect("Navidrome Scan");
         scan.begin_batch().await.expect("Folder batch");
-        scan.write_folder(&library::FolderInput {
+        scan.write_folders(&[&library::FolderInput {
             object_id: "navidrome:music-folder:1".to_string(),
             name: Some("Music".to_string()),
             sort_text: Some("music".to_string()),
             artwork_binding: None,
             ..Default::default()
-        })
+        }])
         .await
         .expect("Music Folder");
         scan.finish_batch().await.expect("finish Folder batch");

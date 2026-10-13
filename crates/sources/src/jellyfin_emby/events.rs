@@ -369,17 +369,15 @@ mod tests {
                     .await
                     .unwrap();
             for (id, name) in [("3272", "AG! Calling"), ("other", "Another Album")] {
-                scan.write_album(
-                    &album_from_item(
-                        kind,
-                        scan.source_id(),
-                        &serde_json::json!({"Id":id,"Name":name}),
-                    )
-                    .unwrap()
-                    .unwrap(),
+                scan.write_albums(&[&album_from_item(
+                    kind,
+                    scan.source_id(),
+                    &serde_json::json!({"Id":id,"Name":name}),
                 )
-                .await
-                .unwrap();
+                .unwrap()
+                .unwrap()])
+                    .await
+                    .unwrap();
             }
             scan.write_tracks(&[(
                 &track_from_item(
@@ -601,9 +599,17 @@ mod tests {
                 library::Scan::begin(&database, "source", kind.name(), kind.source_kind(), None)
                     .await
                     .unwrap();
-            full.write_album(&album_from_item(kind, full.source_id(), &serde_json::json!({
-                "Id":"other","Name":"Album","Type":"MusicAlbum","UserData":{"IsFavorite":true}
-            })).unwrap().unwrap()).await.unwrap();
+            full.write_albums(&[&album_from_item(
+                kind,
+                full.source_id(),
+                &serde_json::json!({
+                    "Id":"other","Name":"Album","Type":"MusicAlbum","UserData":{"IsFavorite":true}
+                }),
+            )
+            .unwrap()
+            .unwrap()])
+                .await
+                .unwrap();
             full.finish().await.unwrap();
             let update = updates.try_recv().expect("catalog update");
             assert!(!update.changed());

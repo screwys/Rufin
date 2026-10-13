@@ -1187,7 +1187,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     let mut scan = library::Scan::begin_items(&fixture.database, "source")
         .await
         .unwrap();
-    scan.write_album(&library::AlbumInput {
+    scan.write_albums(&[&library::AlbumInput {
         object_id: "album-a".into(),
         title: "Album A".into(),
         display_artist: "Artist A".into(),
@@ -1199,7 +1199,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         is_compilation: Some(true),
         favorite: Some(false),
         ..Default::default()
-    })
+    }])
     .await
     .unwrap();
     scan.write_album_relations(
@@ -1672,7 +1672,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         )
         .await
         .unwrap();
-        scan.write_album(&library::AlbumInput {
+        scan.write_albums(&[&library::AlbumInput {
             object_id: "album-a".into(),
             title: "Edited Album".into(),
             display_artist: "Artist A".into(),
@@ -1681,7 +1681,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
             is_compilation: Some(true),
             favorite: Some(false),
             ..Default::default()
-        })
+        }])
         .await
         .expect("refresh Album metadata");
         scan.write_album_relations(
@@ -1691,13 +1691,13 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         )
         .await
         .unwrap();
-        scan.write_artist(&library::ArtistInput {
+        scan.write_artists(&[&library::ArtistInput {
             object_id: "artist-a".into(),
             name: "Edited Artist".into(),
             sort_text: Some("edited artist".into()),
             favorite: Some(false),
             ..Default::default()
-        })
+        }])
         .await
         .expect("refresh Artist metadata");
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();

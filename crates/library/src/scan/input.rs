@@ -47,22 +47,25 @@ macro_rules! record_input {
         }
 
         impl $name {
-            pub(super) fn write_query<$lifetime>(&$lifetime self, $($argument: $argument_type),*)
-                -> sqlx::query::Query<$lifetime, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>
+            pub(super) fn write_rows<$lifetime>(rows: impl IntoIterator<Item = (&$lifetime Self, $($argument_type),*)>)
+                -> sqlx::QueryBuilder<sqlx::Sqlite>
             {
-                static SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-                    let parameters = [$(stringify!($field),)* $(stringify!($parameter),)*]
-                        .iter().enumerate().map(|(index, field)| format!("?{} AS {field}", index + 1)).collect::<Vec<_>>();
+                static SQL: std::sync::LazyLock<(String, String)> = std::sync::LazyLock::new(|| {
+                    let parameters = [$(stringify!($field),)* $(stringify!($parameter),)*];
                     let fields = [
                         $((record_input!(@column $field $(, $column)?), record_input!(@value $field $(, $value)?)),)*
                         $((stringify!($derived), $derived_value.to_string()),)*
                     ];
-                    format!("WITH incoming AS (SELECT {}) {}", parameters.join(","), upsert_sql($table, $conflict, &fields, $from))
+                    (format!("WITH incoming({}) AS (", parameters.join(",")),
+                     format!(") {}", upsert_sql($table, $conflict, &fields, $from)))
                 });
-                let $input = self;
-                sqlx::query(sqlx::AssertSqlSafe(SQL.as_str()))
-                    $(.bind(record_input!(@binding $input, $field $(, $binding)?)))*
-                    $(.bind($parameter))*
+                let mut query = sqlx::QueryBuilder::new(&SQL.0);
+                query.push_values(rows, |mut row, ($input, $($argument),*)| {
+                    $(row.push_bind(record_input!(@binding $input, $field $(, $binding)?));)*
+                    $(row.push_bind($parameter);)*
+                });
+                query.push(&SQL.1);
+                query
             }
         }
     };
@@ -75,7 +78,7 @@ macro_rules! record_input {
 }
 
 record_input! {
-    TrackInput<'a>(input; source: i64, canonical_uri: &'a str, normalized_search: String, audio_properties: String);
+    TrackInput<'a>(input; source: i64, canonical_uri: &'a str, normalized_search: &'a str, audio_properties: &'a str);
     context { source, normalized_search, }
     table "tracks", conflict "media_uri", from "FROM incoming LEFT JOIN tracks previous ON previous.media_uri=incoming.media_uri WHERE true";
     fields {
@@ -163,6 +166,18 @@ macro_rules! album_input {
 
         impl AlbumInput {
             pub(super) const RATING: i64 = $rating;
+
+            pub(super) fn merge(&mut self, later: &Self) {
+                $(if self.$field.is_none() { self.$field.clone_from(&later.$field); })*
+                self.first_seen_at = self.first_seen_at.or(later.first_seen_at);
+                self.favorite = later.favorite.or(self.favorite);
+                self.rating = self.rating.filter(|rating| (0..=10).contains(rating))
+                    .or(later.rating.filter(|rating| (0..=10).contains(rating)));
+                if later.artwork_binding.is_some() {
+                    self.artwork_binding.clone_from(&later.artwork_binding);
+                }
+            }
+
 
             pub(super) fn supplied(&self, rating: Option<i64>) -> i64 {
                 $(i64::from(self.$field.is_some()) * $bit |)*

@@ -934,7 +934,10 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                     changed = lyrics.changed() => { changed.ok()?; json!({"lyrics":media::lyrics_json(&lyrics.borrow_and_update(), &settings.load().lyrics)}) },
                     changed = appearance.changed() => { changed.ok()?; json!({"appearance":*appearance.borrow_and_update()}) },
                     changed = sidebar.changed() => { changed.ok()?; json!({"pins_changed":true}) },
-                    changed = catalog.changed() => { changed.ok()?; json!({"pins_changed":true}) },
+                    changed = catalog.changed() => {
+                        changed.ok()?;
+                        json!({"catalog_acquired": matches!(*catalog.borrow_and_update(), Some(rufin_core::runtime::CatalogChange::Acquired)), "pins_changed":true})
+                    },
                 }
             };
             Some((

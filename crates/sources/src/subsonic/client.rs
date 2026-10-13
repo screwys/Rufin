@@ -62,10 +62,12 @@ impl SubsonicSource {
             let mut observed = std::collections::HashSet::new();
             match kind {
                 "album" => {
-                    for album in self.read_albums(scan.source_id(), &values).await? {
-                        let id = album.object_id.clone();
+                    let albums = self.read_albums(scan.source_id(), &values).await?;
+                    scan.write_albums(&albums.iter().collect::<Vec<_>>())
+                        .await?;
+                    for album in albums {
+                        let id = album.object_id;
                         observed.insert(id.clone());
-                        scan.write_album(&album).await?;
                         if self.has_navidrome_library() {
                             match self
                                 .get_json("getAlbum", &[("id", raw_item_id(&id).to_string())])
@@ -105,18 +107,18 @@ impl SubsonicSource {
                         }
                     }
                     scan.begin_batch().await?;
-                    for track in tracks {
-                        scan.write_tracks(&[(&track, None)]).await?;
-                    }
+                    scan.write_tracks(
+                        &tracks.iter().map(|track| (track, None)).collect::<Vec<_>>(),
+                    )
+                    .await?;
                     scan.finish_batch().await?;
                 }
                 _ => {
                     let artists = self.read_artists(scan.source_id(), &values).await?;
                     scan.begin_batch().await?;
-                    for artist in artists {
-                        observed.insert(artist.object_id.clone());
-                        scan.write_artist(&artist).await?;
-                    }
+                    observed.extend(artists.iter().map(|artist| artist.object_id.clone()));
+                    scan.write_artists(&artists.iter().collect::<Vec<_>>())
+                        .await?;
                     scan.finish_batch().await?;
                 }
             }
@@ -281,18 +283,18 @@ impl SubsonicSource {
             let mut artist_ids = Vec::new();
             let mut album_ids = Vec::new();
             let mut track_ids = Vec::new();
-            for artist in artists.into_iter().take(limit.clamp(1, 100)) {
-                artist_ids.push(artist.object_id.clone());
-                scan.write_artist(&artist).await?;
-            }
-            for album in albums.into_iter().take(limit.clamp(1, 100)) {
-                album_ids.push(album.object_id.clone());
-                scan.write_album(&album).await?;
-            }
-            for track in tracks.into_iter().take(limit.clamp(1, 100)) {
-                track_ids.push(track.object_id.clone());
-                scan.write_tracks(&[(&track, None)]).await?;
-            }
+            let artists = &artists[..artists.len().min(limit.clamp(1, 100))];
+            artist_ids.extend(artists.iter().map(|artist| artist.object_id.clone()));
+            scan.write_artists(&artists.iter().collect::<Vec<_>>())
+                .await?;
+            let albums = &albums[..albums.len().min(limit.clamp(1, 100))];
+            album_ids.extend(albums.iter().map(|album| album.object_id.clone()));
+            scan.write_albums(&albums.iter().collect::<Vec<_>>())
+                .await?;
+            let tracks = &tracks[..tracks.len().min(limit.clamp(1, 100))];
+            track_ids.extend(tracks.iter().map(|track| track.object_id.clone()));
+            scan.write_tracks(&tracks.iter().map(|track| (track, None)).collect::<Vec<_>>())
+                .await?;
             scan.finish_batch().await?;
             Ok((track_ids, album_ids, artist_ids))
         }
@@ -340,14 +342,11 @@ impl SubsonicSource {
             if let Value::Object(detail) = body["album"].take() {
                 album.as_object_mut().expect("album summary").extend(detail);
             }
-            for metadata in self
+            let metadata = self
                 .read_albums(scan.source_id(), std::slice::from_ref(&album))
-                .await?
-            {
-                scan.begin_batch().await?;
-                scan.write_album(&metadata).await?;
-                scan.finish_batch().await?;
-            }
+                .await?;
+            scan.write_albums(&metadata.iter().collect::<Vec<_>>())
+                .await?;
             self.stage_album_tracks(scan, &self.id("album", &album_id), &album)
                 .await?;
         }
@@ -361,14 +360,15 @@ impl SubsonicSource {
         album: &Value,
     ) -> SourceResult<()> {
         for page in json::items(&album["song"]).chunks(100) {
-            let tracks = self.read_tracks(scan.source_id(), page).await?;
-            scan.begin_batch().await?;
-            for mut song in tracks {
+            let mut tracks = self.read_tracks(scan.source_id(), page).await?;
+            for song in &mut tracks {
                 if song.album_object_id.is_none() {
                     song.album_object_id = Some(album_id.to_string());
                 }
-                scan.write_tracks(&[(&song, None)]).await?;
             }
+            scan.begin_batch().await?;
+            scan.write_tracks(&tracks.iter().map(|track| (track, None)).collect::<Vec<_>>())
+                .await?;
             scan.finish_batch().await?;
         }
         scan.replace_album_membership(album_id).await?;
@@ -1876,7 +1876,7 @@ mod tests {
                     .await
                     .unwrap();
             if cached {
-                scan.write_album(&super::album_from_json(&source, source_id.as_str(), &serde_json::json!({"id":"album","name":"Nonmatching album","coverArt":"album-cover"})).unwrap().unwrap()).await.unwrap();
+                scan.write_albums(&[&super::album_from_json(&source, source_id.as_str(), &serde_json::json!({"id":"album","name":"Nonmatching album","coverArt":"album-cover"})).unwrap().unwrap()]).await.unwrap();
             }
             scan.finish().await.unwrap();
             let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();

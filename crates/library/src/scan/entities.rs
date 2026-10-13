@@ -44,11 +44,12 @@ impl Scan {
                     .collect::<Vec<_>>(),
             )
             .await?;
-        let mut written = 0;
-        let mut albums: HashMap<&str, &AlbumInput> = HashMap::new();
-        let mut artists: HashMap<&str, &ArtistInput> = HashMap::new();
-        let mut genres: HashMap<&str, &GenreInput> = HashMap::new();
-        let mut moods: HashMap<&str, &MoodInput> = HashMap::new();
+        let mut tracks = Vec::new();
+        let mut albums = Vec::new();
+        let mut artists = Vec::new();
+        let mut genres = Vec::new();
+        let mut moods = Vec::new();
+        let mut folders = HashMap::new();
         let mut album_artist_links = Vec::new();
         let mut album_genre_links = Vec::new();
         let mut release_type_links = Vec::new();
@@ -57,12 +58,19 @@ impl Scan {
         let mut track_mood_links = Vec::new();
         for &(track, album) in page {
             let track_id = track.object_id.as_str();
-            if let Some(album) = album
-                && albums.insert(album.object_id.as_str(), album) != Some(album)
-            {
-                self.write_album_row(album).await?;
+            if let Some(album) = album {
+                albums.push(album);
             }
-            written += usize::from(self.write_track_row(track, first.remove(track_id)).await?);
+            let (media_uri, normalized_search, audio_properties) = self.track_context(track)?;
+            if let Some(existed) = first.remove(track_id) {
+                tracks.push((
+                    track,
+                    media_uri,
+                    normalized_search,
+                    audio_properties,
+                    existed,
+                ));
+            }
             let album_relations = album.and_then(|album| album.relations.as_ref());
             let track_relations = track.relations.as_ref();
             let album_credits = album_relations
@@ -81,11 +89,7 @@ impl Scan {
                 .map(|relations| relations.album_artists.as_slice())
                 .unwrap_or_default();
             for credits in [album_credits, track_credits, track_album_credits] {
-                for artist in credits {
-                    if artists.insert(artist.object_id.as_str(), artist) != Some(artist) {
-                        self.write_artist(artist).await?;
-                    }
-                }
+                artists.extend(credits);
             }
             let album_genres = album_relations
                 .map(|relations| relations.genres.as_slice())
@@ -94,11 +98,7 @@ impl Scan {
                 .map(|relations| relations.genres.as_slice())
                 .unwrap_or_default();
             for entries in [album_genres, track_genres] {
-                for genre in entries {
-                    if genres.insert(genre.object_id.as_str(), genre) != Some(genre) {
-                        self.write_genre(genre).await?;
-                    }
-                }
+                genres.extend(entries);
             }
             if let Some(album) = album {
                 let album_id = album.object_id.as_str();
@@ -123,11 +123,7 @@ impl Scan {
                 }
             }
             if let Some(relations) = track_relations {
-                for mood in &relations.moods {
-                    if moods.insert(mood.object_id.as_str(), mood) != Some(mood) {
-                        self.write_mood(mood).await?;
-                    }
-                }
+                moods.extend(&relations.moods);
                 track_artist_links.extend(
                     relations
                         .artists
@@ -147,60 +143,313 @@ impl Scan {
                         .map(|mood| (track_id, mood.object_id.as_str())),
                 );
             }
-            self.write_track_folder_membership(track).await?;
+            if let Some(entries) = &track.folders {
+                folders.insert(track_id, entries);
+            }
         }
+        self.write_album_rows(&albums).await?;
+        self.write_artists(&artists).await?;
+        self.write_genres(&genres).await?;
+        self.write_moods(&moods).await?;
+        if !tracks.is_empty() {
+            let source = self.source;
+            let facts = || {
+                let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+                    "WITH input(source,object_id,media_uri,album_id,favorite,rating,play_count,skip_count,last_played,activity) AS (",
+                );
+                query.push_values(&tracks, |mut row, (track, uri, _, _, _)| {
+                    row.push_bind(source)
+                        .push_bind(&track.object_id)
+                        .push_bind(uri)
+                        .push_bind(&track.album_object_id)
+                        .push_bind(track.favorite)
+                        .push_bind(
+                            track
+                                .rating
+                                .filter(|rating| (0..=10).contains(rating))
+                                .map(|rating| rating * 10),
+                        )
+                        .push_bind(track.source_play_count)
+                        .push_bind(track.source_skip_count)
+                        .push_bind(track.source_last_played)
+                        .push_bind(
+                            track.source_play_count.is_some()
+                                || track.source_skip_count.is_some()
+                                || track.source_last_played.is_some(),
+                        );
+                });
+                query.push(") ");
+                query
+            };
+            let mut detach = facts();
+            detach.push("UPDATE tracks SET source_key=NULL,object_id=NULL,indexed=0 FROM input
+                WHERE tracks.source_key=input.source AND tracks.object_id=input.object_id AND tracks.media_uri<>input.media_uri");
+            self.changes.metadata |= self.execute_result(detach.build()).await?.rows_affected() > 0;
+            let mut metadata =
+                TrackInput::write_rows(tracks.iter().map(|(track, uri, search, audio, _)| {
+                    (
+                        *track,
+                        self.source,
+                        uri.as_str(),
+                        search.as_str(),
+                        audio.as_str(),
+                    )
+                }));
+            metadata.push(" RETURNING object_id");
+            let changed: Vec<String> = metadata
+                .build_query_scalar()
+                .fetch_all(
+                    self.batch_writer
+                        .as_mut()
+                        .unwrap()
+                        .as_mut()
+                        .ok_or(LibraryError::WriterUnavailable)?,
+                )
+                .await?;
+            self.changes.metadata |= !changed.is_empty();
+            self.changes.tracks_added |= tracks
+                .iter()
+                .any(|(track, _, _, _, existed)| !existed && changed.contains(&track.object_id));
+            let mut state = facts();
+            state.push("UPDATE tracks SET source_favorite=COALESCE(input.favorite,source_favorite),source_rating=input.rating,
+                source_play_count=CASE WHEN input.activity THEN input.play_count ELSE source_play_count END,
+                source_skip_count=CASE WHEN input.activity THEN input.skip_count ELSE source_skip_count END,
+                source_last_played=CASE WHEN input.activity THEN input.last_played ELSE source_last_played END
+                FROM input WHERE tracks.source_key=input.source AND tracks.object_id=input.object_id
+                  AND ((input.favorite IS NOT NULL AND source_favorite IS NOT input.favorite)
+                    OR source_rating IS NOT input.rating
+                    OR (input.activity AND (source_play_count,source_skip_count,source_last_played)
+                        IS NOT (input.play_count,input.skip_count,input.last_played)))");
+            self.changes.user_data |= self.execute_result(state.build()).await?.rows_affected() > 0;
+            let mut pending = facts();
+            pending.push("INSERT INTO temp.scan_track_albums(track_id,album_id)
+                SELECT object_id,album_id FROM input WHERE album_id IS NOT NULL
+                  AND NOT EXISTS(SELECT 1 FROM albums WHERE source_key=input.source AND object_id=input.album_id)
+                ON CONFLICT(track_id) DO UPDATE SET album_id=excluded.album_id");
+            self.execute(pending.build()).await?;
+            self.remember_artworks(
+                "track",
+                &tracks
+                    .iter()
+                    .map(|(track, _, _, _, _)| {
+                        (
+                            track.object_id.as_str(),
+                            track.artwork_binding.as_deref(),
+                            true,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
+        }
+        self.replace_track_folders(
+            &folders.keys().copied().collect::<Vec<_>>(),
+            &folders
+                .iter()
+                .flat_map(|(id, entries)| entries.iter().map(|folder| ScanLink::new(id, folder, 0)))
+                .collect::<Vec<_>>(),
+        )
+        .await?;
         self.write_source_loudness(&page.iter().map(|(track, _)| *track).collect::<Vec<_>>())
             .await?;
         self.write_album_relations(&album_artist_links, &album_genre_links, &release_type_links)
             .await?;
         self.write_track_relations(&track_artist_links, &track_genre_links, &track_mood_links)
             .await?;
-        Ok(written)
+        Ok(tracks.len())
     }
 
-    pub async fn write_record(&mut self, input: &RecordInput) -> LibraryResult<()> {
-        match input {
-            RecordInput::Track(input) => self
-                .write_tracks(&[(input.as_ref(), None)])
-                .await
-                .map(|_| ()),
-            RecordInput::Album(input) => self.write_album(input).await,
-            RecordInput::Artist(input) => self.write_artist(input).await,
-            RecordInput::Genre(input) => self.write_genre(input).await,
-            RecordInput::Folder(input) => self.write_folder(input).await,
-            RecordInput::Playlist(input) => self.write_playlist(input).await,
+    pub async fn write_records(&mut self, inputs: &[RecordInput]) -> LibraryResult<()> {
+        for page in inputs.chunks(128) {
+            let owns_batch = self.batch_writer.is_none();
+            if owns_batch {
+                self.begin_batch().await?;
+            }
+            let result = async {
+                let mut folders = Vec::new();
+                let mut albums = Vec::new();
+                let mut tracks = Vec::new();
+                let mut artists = Vec::new();
+                let mut genres = Vec::new();
+                let mut playlists = Vec::new();
+                for input in page {
+                    match input {
+                        RecordInput::Folder(input) => folders.push(input),
+                        RecordInput::Album(input) => albums.push(input),
+                        RecordInput::Track(input) => tracks.push((input.as_ref(), None)),
+                        RecordInput::Artist(input) => artists.push(input),
+                        RecordInput::Genre(input) => genres.push(input),
+                        RecordInput::Playlist(input) => playlists.push(input),
+                    }
+                }
+                self.write_folders(&folders).await?;
+                self.write_albums(&albums).await?;
+                self.write_tracks(&tracks).await?;
+                self.write_artists(&artists).await?;
+                self.write_genres(&genres).await?;
+                for playlist in playlists {
+                    self.write_playlist(playlist).await?;
+                }
+                Ok::<_, LibraryError>(())
+            }
+            .await;
+            if result.is_err() {
+                self.failed = true;
+            }
+            if owns_batch {
+                self.finish_batch().await?;
+            }
+            result?;
         }
+        Ok(())
     }
 
-    pub async fn write_album(&mut self, input: &AlbumInput) -> LibraryResult<()> {
-        self.write_album_row(input).await?;
-        let object_id = input.object_id.as_str();
-        if let Some(relations) = &input.relations {
-            let artists = if relations.album_artists.is_empty() {
-                &relations.artists
-            } else {
-                &relations.album_artists
+    pub async fn write_albums(&mut self, inputs: &[&AlbumInput]) -> LibraryResult<()> {
+        for page in inputs.chunks(128) {
+            self.write_album_rows(page).await?;
+            let mut artists = Vec::new();
+            let mut genres = Vec::new();
+            let mut artist_links = Vec::new();
+            let mut genre_links = Vec::new();
+            let mut release_types = Vec::new();
+            for input in page {
+                let id = input.object_id.as_str();
+                if let Some(relations) = &input.relations {
+                    let credits = if relations.album_artists.is_empty() {
+                        &relations.artists
+                    } else {
+                        &relations.album_artists
+                    };
+                    artists.extend(credits);
+                    genres.extend(&relations.genres);
+                    artist_links
+                        .extend(credits.iter().map(|artist| (id, artist.object_id.as_str())));
+                    genre_links.extend(
+                        relations
+                            .genres
+                            .iter()
+                            .map(|genre| (id, genre.object_id.as_str())),
+                    );
+                    release_types.extend(
+                        relations
+                            .release_types
+                            .iter()
+                            .map(|kind| (id, kind.as_str())),
+                    );
+                }
+            }
+            self.write_artists(&artists).await?;
+            self.write_genres(&genres).await?;
+            self.write_album_relations(&artist_links, &genre_links, &release_types)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn write_album_rows(&mut self, inputs: &[&AlbumInput]) -> LibraryResult<()> {
+        for page in inputs.chunks(128) {
+            let mut rows: Vec<AlbumInput> = Vec::new();
+            let mut positions = HashMap::new();
+            for input in page {
+                self.require_id("album", &input.object_id)?;
+                self.require_row_bytes(&[
+                    input.object_id.as_bytes(),
+                    input.title.as_bytes(),
+                    input.title.to_lowercase().as_bytes(),
+                    input.display_artist.as_bytes(),
+                    input.sort_text.as_bytes(),
+                    input.release_date.as_deref().unwrap_or_default().as_bytes(),
+                    input.date_added.as_deref().unwrap_or_default().as_bytes(),
+                    input
+                        .musicbrainz_release_id
+                        .as_deref()
+                        .unwrap_or_default()
+                        .as_bytes(),
+                    input
+                        .musicbrainz_release_group_id
+                        .as_deref()
+                        .unwrap_or_default()
+                        .as_bytes(),
+                    input.artwork_binding.as_deref().unwrap_or_default(),
+                ])?;
+                let (position, supplied) = positions
+                    .entry(input.object_id.as_str())
+                    .or_insert((rows.len(), 0));
+                *supplied |=
+                    input.supplied(input.rating.filter(|rating| (0..=10).contains(rating)));
+                let position = *position;
+                if position == rows.len() {
+                    rows.push((*input).clone());
+                } else {
+                    rows[position].merge(input);
+                }
+            }
+            let first = self
+                .observe_entities(
+                    "album",
+                    &rows
+                        .iter()
+                        .map(|row| row.object_id.as_str())
+                        .collect::<Vec<_>>(),
+                )
+                .await?;
+            let mut metadata = AlbumInput::write_rows(rows.iter().map(|input| {
+                (
+                    input,
+                    self.source,
+                    source_entity_uri(&SourceId::new(&self.source_id), "album", &input.object_id),
+                    input.title.to_lowercase(),
+                    first.contains(&input.object_id),
+                )
+            }));
+            self.changes.metadata |=
+                self.execute_result(metadata.build()).await?.rows_affected() > 0;
+            let source = self.source;
+            let facts = || {
+                let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+                    "WITH input(source,object_id,favorite,rating,supplied) AS (",
+                );
+                query.push_values(&rows, |mut row, input| {
+                    let rating = input
+                        .rating
+                        .filter(|rating| (0..=10).contains(rating))
+                        .map(|rating| rating * 10);
+                    row.push_bind(source)
+                        .push_bind(&input.object_id)
+                        .push_bind(input.favorite)
+                        .push_bind(rating)
+                        .push_bind(positions[input.object_id.as_str()].1);
+                });
+                query.push(") ");
+                query
             };
-            for artist in artists {
-                self.write_artist(artist).await?;
-            }
-            for genre in &relations.genres {
-                self.write_genre(genre).await?;
-            }
-            self.write_album_relations(
-                &artists
+            let mut state = facts();
+            state.push("UPDATE albums AS album SET source_favorite=COALESCE(input.favorite,album.source_favorite),
+                source_rating=CASE WHEN seen.supplied & ").push_bind(AlbumInput::RATING)
+                .push("=0 THEN COALESCE(input.rating,album.source_rating) ELSE album.source_rating END
+                FROM input JOIN temp.scan_seen seen ON seen.kind='album' AND seen.object_id=input.object_id
+                WHERE album.source_key=input.source AND album.object_id=input.object_id
+                  AND ((input.favorite IS NOT NULL AND album.source_favorite IS NOT input.favorite)
+                    OR (seen.supplied & ").push_bind(AlbumInput::RATING)
+                .push("=0 AND input.rating IS NOT NULL AND album.source_rating IS NOT input.rating))");
+            self.changes.user_data |= self.execute_result(state.build()).await?.rows_affected() > 0;
+            let mut supplied = facts();
+            supplied.push(
+                "UPDATE temp.scan_seen SET supplied=scan_seen.supplied | input.supplied
+                FROM input WHERE scan_seen.kind='album' AND scan_seen.object_id=input.object_id",
+            );
+            self.execute(supplied.build()).await?;
+            self.remember_artworks(
+                "album",
+                &rows
                     .iter()
-                    .map(|artist| (object_id, artist.object_id.as_str()))
-                    .collect::<Vec<_>>(),
-                &relations
-                    .genres
-                    .iter()
-                    .map(|genre| (object_id, genre.object_id.as_str()))
-                    .collect::<Vec<_>>(),
-                &relations
-                    .release_types
-                    .iter()
-                    .map(|release_type| (object_id, release_type.as_str()))
+                    .map(|input| {
+                        (
+                            input.object_id.as_str(),
+                            input.artwork_binding.as_deref(),
+                            first.contains(&input.object_id),
+                        )
+                    })
                     .collect::<Vec<_>>(),
             )
             .await?;
@@ -208,64 +457,7 @@ impl Scan {
         Ok(())
     }
 
-    async fn write_album_row(&mut self, input: &AlbumInput) -> LibraryResult<()> {
-        let object_id = input.object_id.as_str();
-        let normalized_title = input.title.to_lowercase();
-        self.require_id("album", object_id)?;
-        let media_uri = source_entity_uri(&SourceId::new(&self.source_id), "album", object_id);
-        let rating = input
-            .rating
-            .filter(|rating| (0..=10).contains(rating))
-            .map(|rating| rating * 10);
-        self.require_row_bytes(&[
-            object_id.as_bytes(),
-            input.title.as_bytes(),
-            normalized_title.as_bytes(),
-            input.display_artist.as_bytes(),
-            input.sort_text.as_bytes(),
-            input.release_date.as_deref().unwrap_or_default().as_bytes(),
-            input.date_added.as_deref().unwrap_or_default().as_bytes(),
-            input
-                .musicbrainz_release_id
-                .as_deref()
-                .unwrap_or_default()
-                .as_bytes(),
-            input
-                .musicbrainz_release_group_id
-                .as_deref()
-                .unwrap_or_default()
-                .as_bytes(),
-            input.artwork_binding.as_deref().unwrap_or_default(),
-        ])?;
-        let first = self.observe("album", object_id).await?;
-        let supplied = input.supplied(rating);
-        let changed = self
-            .execute_result(input.write_query(self.source, media_uri, normalized_title, first))
-            .await?
-            .rows_affected()
-            > 0;
-        self.changes.metadata |= changed;
-        self.changes.user_data |= self.execute_result(sqlx::query(
-            "UPDATE albums AS album SET source_favorite=COALESCE(?2,album.source_favorite),
-                source_rating=CASE WHEN seen.supplied & ?5=0 THEN COALESCE(?3,album.source_rating) ELSE album.source_rating END
-             FROM temp.scan_seen seen
-             WHERE album.source_key=?4 AND album.object_id=?1 AND seen.kind='album' AND seen.object_id=?1
-               AND ((?2 IS NOT NULL AND album.source_favorite IS NOT ?2)
-                 OR (seen.supplied & ?5=0 AND ?3 IS NOT NULL AND album.source_rating IS NOT ?3))")
-            .bind(object_id).bind(input.favorite).bind(rating).bind(self.source).bind(AlbumInput::RATING))
-            .await?.rows_affected() > 0;
-        self.execute(sqlx::query("UPDATE temp.scan_seen SET supplied=supplied | ?2 WHERE kind='album' AND object_id=?1")
-            .bind(object_id).bind(supplied)).await?;
-        self.remember_artwork("album", object_id, input.artwork_binding.as_deref(), first)
-            .await?;
-        Ok(())
-    }
-
-    async fn write_track_row(
-        &mut self,
-        input: &TrackInput,
-        first: Option<bool>,
-    ) -> LibraryResult<bool> {
+    fn track_context(&mut self, input: &TrackInput) -> LibraryResult<(String, String, String)> {
         let object_id = input.object_id.as_str();
         let album_object_id = input.album_object_id.as_deref();
         let title = input.title.as_str();
@@ -339,65 +531,7 @@ impl Scan {
             input.artwork_binding.as_deref().unwrap_or_default(),
             input.loudness_analysis_key.as_slice(),
         ])?;
-        let Some(existed) = first else {
-            return Ok(false);
-        };
-        let rating = input
-            .rating
-            .filter(|rating| (0..=10).contains(rating))
-            .map(|rating| rating * 10);
-        self.changes.metadata |= self
-            .execute_result(
-                sqlx::query(
-                    "UPDATE tracks SET source_key=NULL,object_id=NULL,indexed=0
-             WHERE source_key=?1 AND object_id=?2 AND media_uri<>?3",
-                )
-                .bind(self.source)
-                .bind(object_id)
-                .bind(&media_uri),
-            )
-            .await?
-            .rows_affected()
-            > 0;
-        let changed = self
-            .execute_result(input.write_query(
-                self.source,
-                &media_uri,
-                normalized_search,
-                audio_properties,
-            ))
-            .await?
-            .rows_affected()
-            > 0;
-        self.changes.metadata |= changed;
-        self.changes.tracks_added |= !existed && changed;
-        self.changes.user_data |= self.execute_result(sqlx::query(
-            "UPDATE tracks SET source_favorite=COALESCE(?2,source_favorite),source_rating=?3
-             WHERE source_key=?4 AND object_id=?1
-               AND ((?2 IS NOT NULL AND source_favorite IS NOT ?2) OR source_rating IS NOT ?3)")
-            .bind(object_id).bind(input.favorite).bind(rating).bind(self.source))
-            .await?.rows_affected() > 0;
-        if let Some(album) = album_object_id {
-            self.execute(sqlx::query(
-                "INSERT INTO temp.scan_track_albums(track_id,album_id)
-                 SELECT ?1,?2 WHERE NOT EXISTS(SELECT 1 FROM albums WHERE source_key=?3 AND object_id=?2)
-                 ON CONFLICT(track_id) DO UPDATE SET album_id=excluded.album_id")
-                .bind(object_id).bind(album).bind(self.source)).await?;
-        }
-        if input.source_play_count.is_some()
-            || input.source_skip_count.is_some()
-            || input.source_last_played.is_some()
-        {
-            self.changes.user_data |= self.execute_result(sqlx::query(
-                "UPDATE tracks SET source_play_count=?3,source_skip_count=?4,source_last_played=?5
-                 WHERE source_key=?1 AND object_id=?2
-                   AND (source_play_count,source_skip_count,source_last_played) IS NOT (?3,?4,?5)")
-                .bind(self.source).bind(object_id).bind(input.source_play_count)
-                .bind(input.source_skip_count).bind(input.source_last_played)).await?.rows_affected() > 0;
-        }
-        self.remember_artwork("track", object_id, input.artwork_binding.as_deref(), true)
-            .await?;
-        Ok(true)
+        Ok((media_uri, normalized_search, audio_properties))
     }
 
     async fn write_source_loudness(&mut self, inputs: &[&TrackInput]) -> LibraryResult<()> {
@@ -472,84 +606,134 @@ impl Scan {
         Ok(())
     }
 
-    async fn write_track_folder_membership(&mut self, input: &TrackInput) -> LibraryResult<()> {
-        if let Some(folders) = &input.folders {
-            self.replace_track_folders(
-                &input.object_id,
-                &folders
+    /// Full artist records supply their effective sort name, including the display-name fallback.
+    /// Sparse credits leave it absent so they retain the existing artist sort name.
+    pub async fn write_artists(&mut self, inputs: &[&ArtistInput]) -> LibraryResult<()> {
+        for page in inputs.chunks(128) {
+            let mut rows: Vec<ArtistInput> = Vec::new();
+            let mut positions = HashMap::new();
+            for input in page {
+                self.require_id("artist", &input.object_id)?;
+                self.require_row_bytes(&[
+                    input.object_id.as_bytes(),
+                    input.name.as_bytes(),
+                    input.name.to_lowercase().as_bytes(),
+                    input.sort_text.as_deref().unwrap_or_default().as_bytes(),
+                    input
+                        .musicbrainz_artist_id
+                        .as_deref()
+                        .unwrap_or_default()
+                        .as_bytes(),
+                    input.artwork_binding.as_deref().unwrap_or_default(),
+                ])?;
+                let position = *positions
+                    .entry(input.object_id.as_str())
+                    .or_insert(rows.len());
+                if position == rows.len() {
+                    rows.push((*input).clone());
+                } else {
+                    let row = &mut rows[position];
+                    if input.sort_text.is_some()
+                        || row.name.to_lowercase() != input.name.to_lowercase()
+                    {
+                        row.name.clone_from(&input.name);
+                    }
+                    if input.sort_text.is_some() {
+                        row.sort_text.clone_from(&input.sort_text);
+                        row.musicbrainz_artist_id
+                            .clone_from(&input.musicbrainz_artist_id);
+                        row.rating = input.rating;
+                    } else {
+                        if input.musicbrainz_artist_id.is_some() {
+                            row.musicbrainz_artist_id
+                                .clone_from(&input.musicbrainz_artist_id);
+                        }
+                        row.rating = input
+                            .rating
+                            .filter(|rating| (0..=10).contains(rating))
+                            .or(row.rating);
+                    }
+                    row.favorite = input.favorite.or(row.favorite);
+                    if input.artwork_binding.is_some() {
+                        row.artwork_binding.clone_from(&input.artwork_binding);
+                    }
+                }
+            }
+            let first = self
+                .observe_entities(
+                    "artist",
+                    &rows
+                        .iter()
+                        .map(|row| row.object_id.as_str())
+                        .collect::<Vec<_>>(),
+                )
+                .await?;
+            let mut metadata = ArtistInput::write_rows(rows.iter().map(|input| {
+                (
+                    input,
+                    self.source,
+                    source_entity_uri(&SourceId::new(&self.source_id), "artist", &input.object_id),
+                    input.name.to_lowercase(),
+                )
+            }));
+            self.changes.metadata |=
+                self.execute_result(metadata.build()).await?.rows_affected() > 0;
+            let source = self.source;
+            let facts = || {
+                let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+                    "WITH input(source,object_id,favorite,rating,full,first) AS (",
+                );
+                query.push_values(&rows, |mut row, input| {
+                    row.push_bind(source)
+                        .push_bind(&input.object_id)
+                        .push_bind(input.favorite)
+                        .push_bind(
+                            input
+                                .rating
+                                .filter(|rating| (0..=10).contains(rating))
+                                .map(|rating| rating * 10),
+                        )
+                        .push_bind(input.sort_text.is_some())
+                        .push_bind(first.contains(&input.object_id));
+                });
+                query.push(") ");
+                query
+            };
+            let mut state = facts();
+            state.push("UPDATE artists SET source_favorite=COALESCE(input.favorite,source_favorite),
+                source_rating=CASE WHEN input.full THEN input.rating ELSE COALESCE(input.rating,source_rating) END
+                FROM input WHERE artists.source_key=input.source AND artists.object_id=input.object_id
+                  AND ((input.favorite IS NOT NULL AND source_favorite IS NOT input.favorite)
+                    OR ((input.full OR input.rating IS NOT NULL) AND source_rating IS NOT input.rating))");
+            self.changes.user_data |= self.execute_result(state.build()).await?.rows_affected() > 0;
+            let mut unresolved = facts();
+            unresolved.push(
+                "INSERT OR IGNORE INTO temp.scan_unresolved_artists
+                SELECT object_id FROM input WHERE first AND favorite IS NULL",
+            );
+            self.execute(unresolved.build()).await?;
+            let mut resolved = facts();
+            resolved.push(
+                "DELETE FROM temp.scan_unresolved_artists WHERE object_id IN
+                (SELECT object_id FROM input WHERE favorite IS NOT NULL)",
+            );
+            self.execute(resolved.build()).await?;
+            self.remember_artworks(
+                "artist",
+                &rows
                     .iter()
-                    .map(|folder| ScanLink::new(&input.object_id, folder, 0))
+                    .map(|input| {
+                        (
+                            input.object_id.as_str(),
+                            input.artwork_binding.as_deref(),
+                            first.contains(&input.object_id),
+                        )
+                    })
                     .collect::<Vec<_>>(),
             )
             .await?;
         }
         Ok(())
-    }
-
-    /// Full artist records supply their effective sort name, including the display-name fallback.
-    /// Sparse credits leave it absent so they retain the existing artist sort name.
-    pub async fn write_artist(&mut self, input: &ArtistInput) -> LibraryResult<()> {
-        let object_id = input.object_id.as_str();
-        let sort_text = input.sort_text.as_deref();
-        let normalized_name = input.name.to_lowercase();
-        self.require_id("artist", object_id)?;
-        let media_uri = source_entity_uri(&SourceId::new(&self.source_id), "artist", object_id);
-        let rating = input
-            .rating
-            .filter(|rating| (0..=10).contains(rating))
-            .map(|rating| rating * 10);
-        self.require_row_bytes(&[
-            object_id.as_bytes(),
-            input.name.as_bytes(),
-            normalized_name.as_bytes(),
-            sort_text.unwrap_or_default().as_bytes(),
-            input
-                .musicbrainz_artist_id
-                .as_deref()
-                .unwrap_or_default()
-                .as_bytes(),
-            input.artwork_binding.as_deref().unwrap_or_default(),
-        ])?;
-        let first = self.observe("artist", object_id).await?;
-        let changed = self
-            .execute_result(input.write_query(self.source, media_uri, normalized_name))
-            .await?
-            .rows_affected()
-            > 0;
-        self.changes.metadata |= changed;
-        self.changes.user_data |= self
-            .execute_result(
-                sqlx::query(
-                    "UPDATE artists SET source_favorite=COALESCE(?2,source_favorite),
-                source_rating=CASE WHEN ?4 THEN ?3 ELSE COALESCE(?3,source_rating) END
-             WHERE source_key=?5 AND object_id=?1
-               AND ((?2 IS NOT NULL AND source_favorite IS NOT ?2)
-                 OR ((?4 OR ?3 IS NOT NULL) AND source_rating IS NOT ?3))",
-                )
-                .bind(object_id)
-                .bind(input.favorite)
-                .bind(rating)
-                .bind(sort_text.is_some())
-                .bind(self.source),
-            )
-            .await?
-            .rows_affected()
-            > 0;
-        if first && input.favorite.is_none() {
-            self.execute(
-                sqlx::query("INSERT OR IGNORE INTO temp.scan_unresolved_artists VALUES(?1)")
-                    .bind(object_id),
-            )
-            .await?;
-        } else if input.favorite.is_some() {
-            self.execute(
-                sqlx::query("DELETE FROM temp.scan_unresolved_artists WHERE object_id=?1")
-                    .bind(object_id),
-            )
-            .await?;
-        }
-        self.remember_artwork("artist", object_id, input.artwork_binding.as_deref(), first)
-            .await
     }
 
     /// Artist credits whose favorite state has not been supplied by an artist record.
@@ -573,101 +757,204 @@ impl Scan {
         Ok(rows)
     }
 
-    pub async fn write_genre(&mut self, input: &GenreInput) -> LibraryResult<()> {
-        let object_id = input.object_id.as_str();
-        let normalized_name = input.name.to_lowercase();
-        self.require_id("genre", object_id)?;
-        self.require_row_bytes(&[
-            object_id.as_bytes(),
-            input.name.as_bytes(),
-            normalized_name.as_bytes(),
-            input.sort_text.as_deref().unwrap_or_default().as_bytes(),
-            input.artwork_binding.as_deref().unwrap_or_default(),
-        ])?;
-        let first = self.observe("genre", object_id).await?;
-        let changed = self
-            .execute_result(input.write_query(self.source, normalized_name))
-            .await?
-            .rows_affected()
-            > 0;
-        self.changes.metadata |= changed;
-        self.remember_artwork("genre", object_id, input.artwork_binding.as_deref(), first)
-            .await
-    }
-
-    pub async fn write_mood(&mut self, input: &MoodInput) -> LibraryResult<()> {
-        let object_id = input.object_id.as_str();
-        let name = input.name.as_str();
-        let normalized_name = name.to_lowercase();
-        let sort_text = input.sort_text.as_str();
-        self.require_id("mood", object_id)?;
-        self.require_row_bytes(&[
-            object_id.as_bytes(),
-            name.as_bytes(),
-            normalized_name.as_bytes(),
-            sort_text.as_bytes(),
-        ])?;
-        self.observe("mood", object_id).await?;
-        self.changes.metadata |= self.execute_result(sqlx::query(
-            "INSERT INTO moods(source_key,object_id,name,normalized_name,sort_text) VALUES(?5,?1,?2,?3,?4)
-             ON CONFLICT(source_key,object_id) DO UPDATE SET
-                name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text
-             WHERE (moods.name,moods.normalized_name,moods.sort_text)
-                IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text)")
-            .bind(object_id).bind(name).bind(&normalized_name).bind(sort_text).bind(self.source))
-            .await?.rows_affected() > 0;
+    pub async fn write_genres(&mut self, inputs: &[&GenreInput]) -> LibraryResult<()> {
+        for page in inputs.chunks(128) {
+            let mut rows: Vec<GenreInput> = Vec::new();
+            let mut positions = HashMap::new();
+            for input in page {
+                self.require_id("genre", &input.object_id)?;
+                self.require_row_bytes(&[
+                    input.object_id.as_bytes(),
+                    input.name.as_bytes(),
+                    input.name.to_lowercase().as_bytes(),
+                    input.sort_text.as_deref().unwrap_or_default().as_bytes(),
+                    input.artwork_binding.as_deref().unwrap_or_default(),
+                ])?;
+                let position = *positions
+                    .entry(input.object_id.as_str())
+                    .or_insert(rows.len());
+                if position == rows.len() {
+                    rows.push((*input).clone());
+                } else {
+                    let row = &mut rows[position];
+                    if input.sort_text.is_some()
+                        || row.name.to_lowercase() != input.name.to_lowercase()
+                    {
+                        row.name.clone_from(&input.name);
+                    }
+                    if input.sort_text.is_some() {
+                        row.sort_text.clone_from(&input.sort_text);
+                    }
+                    if input.artwork_binding.is_some() {
+                        row.artwork_binding.clone_from(&input.artwork_binding);
+                    }
+                }
+            }
+            let first = self
+                .observe_entities(
+                    "genre",
+                    &rows
+                        .iter()
+                        .map(|row| row.object_id.as_str())
+                        .collect::<Vec<_>>(),
+                )
+                .await?;
+            let mut metadata = GenreInput::write_rows(
+                rows.iter()
+                    .map(|input| (input, self.source, input.name.to_lowercase())),
+            );
+            self.changes.metadata |=
+                self.execute_result(metadata.build()).await?.rows_affected() > 0;
+            self.remember_artworks(
+                "genre",
+                &rows
+                    .iter()
+                    .map(|input| {
+                        (
+                            input.object_id.as_str(),
+                            input.artwork_binding.as_deref(),
+                            first.contains(&input.object_id),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
+        }
         Ok(())
     }
 
-    pub async fn write_folder(&mut self, input: &FolderInput) -> LibraryResult<()> {
-        let object_id = input.object_id.as_str();
-        let Some(name) = input.name.as_deref() else {
-            return self.write_folder_reference(object_id).await;
-        };
-        let normalized_name = name.to_lowercase();
-        let sort_text = input.sort_text.as_deref().unwrap_or(&normalized_name);
-        let artwork_binding = input.artwork_binding.as_deref();
-        self.require_id("folder", object_id)?;
-        self.require_row_bytes(&[
-            object_id.as_bytes(),
-            name.as_bytes(),
-            normalized_name.as_bytes(),
-            sort_text.as_bytes(),
-            artwork_binding.unwrap_or_default(),
-        ])?;
-        let first = self.observe("folder", object_id).await?;
-        self.changes.metadata |= self.execute_result(sqlx::query(
-            "INSERT INTO folders(source_key,object_id,name,normalized_name,sort_text) VALUES(?5,?1,?2,?3,?4)
-             ON CONFLICT(source_key,object_id) DO UPDATE SET
+    pub async fn write_moods(&mut self, inputs: &[&MoodInput]) -> LibraryResult<()> {
+        for page in inputs.chunks(128) {
+            let mut rows = HashMap::new();
+            for input in page {
+                self.require_id("mood", &input.object_id)?;
+                self.require_row_bytes(&[
+                    input.object_id.as_bytes(),
+                    input.name.as_bytes(),
+                    input.name.to_lowercase().as_bytes(),
+                    input.sort_text.as_bytes(),
+                ])?;
+                rows.insert(input.object_id.as_str(), *input);
+            }
+            self.observe_entities("mood", &rows.keys().copied().collect::<Vec<_>>())
+                .await?;
+            let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+                "INSERT INTO moods(source_key,object_id,name,normalized_name,sort_text) ",
+            );
+            query.push_values(rows.values(), |mut row, input| {
+                row.push_bind(self.source)
+                    .push_bind(&input.object_id)
+                    .push_bind(&input.name)
+                    .push_bind(input.name.to_lowercase())
+                    .push_bind(&input.sort_text);
+            });
+            query.push(" ON CONFLICT(source_key,object_id) DO UPDATE SET
                 name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text
-             WHERE (folders.name,folders.normalized_name,folders.sort_text)
-                IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text)")
-            .bind(object_id).bind(name).bind(&normalized_name).bind(sort_text).bind(self.source))
-            .await?.rows_affected() > 0;
-        self.remember_artwork("folder", object_id, artwork_binding, first)
-            .await
+                WHERE (moods.name,moods.normalized_name,moods.sort_text)
+                    IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text)");
+            self.changes.metadata |= self.execute_result(query.build()).await?.rows_affected() > 0;
+        }
+        Ok(())
     }
 
-    /// A membership reference must not replace the section's advertised display name.
-    async fn write_folder_reference(&mut self, object_id: &str) -> LibraryResult<()> {
-        self.require_id("folder", object_id)?;
-        self.execute(
-            sqlx::query("INSERT OR IGNORE INTO temp.scan_seen(kind,object_id,written) VALUES('folder',?1,0)")
-                .bind(object_id),
-        )
-        .await?;
-        self.changes.metadata |= self
-            .execute_result(
-                sqlx::query(
-                    "INSERT INTO folders(source_key,object_id,name,normalized_name,sort_text)
-             VALUES(?1,?2,?2,?2,?2) ON CONFLICT(source_key,object_id) DO UPDATE SET indexed=1 WHERE indexed=0",
+    pub async fn write_folders(&mut self, inputs: &[&FolderInput]) -> LibraryResult<()> {
+        for page in inputs.chunks(128) {
+            let mut rows: Vec<FolderInput> = Vec::new();
+            let mut positions = HashMap::new();
+            for input in page {
+                self.require_id("folder", &input.object_id)?;
+                if let Some(name) = &input.name {
+                    let normalized_name = name.to_lowercase();
+                    self.require_row_bytes(&[
+                        input.object_id.as_bytes(),
+                        name.as_bytes(),
+                        normalized_name.as_bytes(),
+                        input
+                            .sort_text
+                            .as_deref()
+                            .unwrap_or(&normalized_name)
+                            .as_bytes(),
+                        input.artwork_binding.as_deref().unwrap_or_default(),
+                    ])?;
+                }
+                let position = *positions
+                    .entry(input.object_id.as_str())
+                    .or_insert(rows.len());
+                if position == rows.len() {
+                    rows.push((*input).clone());
+                } else if input.name.is_some() {
+                    let row = &mut rows[position];
+                    if row.name.is_none() {
+                        row.artwork_binding = None;
+                    }
+                    row.name.clone_from(&input.name);
+                    row.sort_text.clone_from(&input.sort_text);
+                    if input.artwork_binding.is_some() {
+                        row.artwork_binding.clone_from(&input.artwork_binding);
+                    }
+                }
+            }
+            let first = self
+                .observe_entities(
+                    "folder",
+                    &rows
+                        .iter()
+                        .filter(|row| row.name.is_some())
+                        .map(|row| row.object_id.as_str())
+                        .collect::<Vec<_>>(),
                 )
-                .bind(self.source)
-                .bind(object_id),
+                .await?;
+            let mut references = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+                "INSERT OR IGNORE INTO temp.scan_seen(kind,object_id,written) ",
+            );
+            references.push_values(&rows, |mut row, input| {
+                row.push_bind("folder")
+                    .push_bind(&input.object_id)
+                    .push_bind(false);
+            });
+            self.execute(references.build()).await?;
+            let mut metadata = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+                "WITH input(source,object_id,name,normalized_name,sort_text) AS (",
+            );
+            metadata.push_values(&rows, |mut row, input| {
+                let normalized = input
+                    .name
+                    .as_deref()
+                    .unwrap_or(&input.object_id)
+                    .to_lowercase();
+                row.push_bind(self.source)
+                    .push_bind(&input.object_id)
+                    .push_bind(&input.name)
+                    .push_bind(normalized.clone())
+                    .push_bind(input.sort_text.clone().unwrap_or(normalized));
+            });
+            metadata.push(") INSERT INTO folders(source_key,object_id,name,normalized_name,sort_text)
+                SELECT source,object_id,COALESCE(name,object_id),CASE WHEN name IS NULL THEN object_id ELSE normalized_name END,
+                    CASE WHEN name IS NULL THEN object_id ELSE sort_text END FROM input WHERE true
+                ON CONFLICT(source_key,object_id) DO UPDATE SET indexed=1,
+                    name=CASE WHEN (SELECT name FROM input WHERE object_id=excluded.object_id) IS NULL THEN folders.name ELSE excluded.name END,
+                    normalized_name=CASE WHEN (SELECT name FROM input WHERE object_id=excluded.object_id) IS NULL THEN folders.normalized_name ELSE excluded.normalized_name END,
+                    sort_text=CASE WHEN (SELECT name FROM input WHERE object_id=excluded.object_id) IS NULL THEN folders.sort_text ELSE excluded.sort_text END
+                WHERE folders.indexed=0 OR ((SELECT name FROM input WHERE object_id=excluded.object_id) IS NOT NULL
+                    AND (folders.name,folders.normalized_name,folders.sort_text) IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text))");
+            self.changes.metadata |=
+                self.execute_result(metadata.build()).await?.rows_affected() > 0;
+            self.remember_artworks(
+                "folder",
+                &rows
+                    .iter()
+                    .filter(|input| input.name.is_some())
+                    .map(|input| {
+                        (
+                            input.object_id.as_str(),
+                            input.artwork_binding.as_deref(),
+                            first.contains(&input.object_id),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
             )
-            .await?
-            .rows_affected()
-            > 0;
+            .await?;
+        }
         Ok(())
     }
 }

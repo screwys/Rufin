@@ -110,7 +110,6 @@ function renderSources(configured) {
 let previousOperation = "";
 
 function showSourceProgress(value) {
-  const refreshed = previousOperation === "refreshing";
   const active = ["adding", "switching", "refreshing"].includes(value.state);
   $("source-progress").hidden = !active;
   if (active) {
@@ -147,8 +146,9 @@ function showSourceProgress(value) {
     previousOperation !== "idle"
   )
     run(async () => {
+      const source = state.source, library = state.selectedLibrary;
       updateSources(await api("/sources"));
-      if (route !== "home" || !refreshed) await loadView();
+      if (state.source !== source || state.selectedLibrary !== library) await loadView();
     });
   previousOperation = value.state;
 }

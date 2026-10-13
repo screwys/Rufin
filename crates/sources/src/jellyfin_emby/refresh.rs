@@ -48,109 +48,155 @@ impl JellyfinEmbySource {
         upserts: Vec<String>,
         mut removals: Vec<String>,
     ) -> SourceResult<()> {
-        for raw_id in upserts {
-            let mut url = self.item_url(&raw_id)?;
-            url.query_pairs_mut()
-                .append_pair("UserId", &self.user_id)
-                .append_pair("Fields", MIXED_ITEM_FIELDS);
-            let item = match self.get_json::<Value>(url).await {
-                Ok(item) => item,
-                Err(SourceError::NotFound) => {
-                    removals.push(raw_id);
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
-            if id(&item["Id"]).is_none() {
-                continue;
-            }
-            let item_type = field::<String>(&item, "Type").unwrap_or_default();
-            if item_type.eq_ignore_ascii_case("Audio") {
-                let album_id = id(&item["AlbumId"]);
-                let track = track_from_item(self.kind, scan.source_id(), &item)?;
-                drop(item);
-                if let Some(album_id) = album_id {
-                    let mut album_url = self.item_url(&album_id)?;
-                    album_url
-                        .query_pairs_mut()
+        for page in upserts.chunks(crate::source::LIVE_CHANGE_LIMIT) {
+            let mut records = Vec::new();
+            let mut track_folders = std::collections::HashMap::new();
+            let result: SourceResult<()> = async {
+                for raw_id in page {
+                    let mut url = self.item_url(raw_id)?;
+                    url.query_pairs_mut()
                         .append_pair("UserId", &self.user_id)
-                        .append_pair("Fields", ALBUM_FIELDS);
-                    match self.get_json::<Value>(album_url).await {
-                        Ok(album) => {
-                            let mapped = album_from_item(self.kind, scan.source_id(), &album)?;
-                            drop(album);
-                            if let Some(mapped) = mapped {
-                                scan.write_album(&mapped).await?;
+                        .append_pair("Fields", MIXED_ITEM_FIELDS);
+                    let item = match self.get_json::<Value>(url).await {
+                        Ok(item) => item,
+                        Err(SourceError::NotFound) => {
+                            removals.push(raw_id.clone());
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                    };
+                    if id(&item["Id"]).is_none() {
+                        continue;
+                    }
+                    let item_type = field::<String>(&item, "Type").unwrap_or_default();
+                    if item_type.eq_ignore_ascii_case("Audio") {
+                        let album_id = id(&item["AlbumId"]);
+                        let track = track_from_item(self.kind, scan.source_id(), &item)?;
+                        drop(item);
+                        if let Some(album_id) = album_id {
+                            let mut album_url = self.item_url(&album_id)?;
+                            album_url
+                                .query_pairs_mut()
+                                .append_pair("UserId", &self.user_id)
+                                .append_pair("Fields", ALBUM_FIELDS);
+                            match self.get_json::<Value>(album_url).await {
+                                Ok(album) => {
+                                    if let Some(album) =
+                                        album_from_item(self.kind, scan.source_id(), &album)?
+                                    {
+                                        records.push(library::RecordInput::Album(album));
+                                    }
+                                }
+                                Err(error) => crate::source::optional_collection_error(error)?,
                             }
                         }
-                        Err(error) => crate::source::optional_collection_error(error)?,
+                        if let Some(folders) =
+                            match self.item_folders(scan.source_id(), raw_id).await {
+                                Ok(folders) => folders,
+                                Err(error) => {
+                                    if let Some(track) = track {
+                                        records.push(library::RecordInput::Track(Box::new(track)));
+                                    }
+                                    return Err(error);
+                                }
+                            }
+                        {
+                            track_folders.insert(
+                                self.kind.object_id("track", raw_id),
+                                folders
+                                    .iter()
+                                    .map(|folder| folder.object_id.clone())
+                                    .collect::<Vec<_>>(),
+                            );
+                            records.extend(folders.into_iter().map(library::RecordInput::Folder));
+                        }
+                        if let Some(track) = track {
+                            records.push(library::RecordInput::Track(Box::new(track)));
+                        }
+                    } else if item_type.eq_ignore_ascii_case("MusicAlbum") {
+                        if let Some(album) = album_from_item(self.kind, scan.source_id(), &item)? {
+                            records.push(library::RecordInput::Album(album));
+                        }
+                        drop(item);
+                        scan.write_records(&std::mem::take(&mut records)).await?;
+                        let track_folders = std::mem::take(&mut track_folders);
+                        scan.replace_track_folders(
+                            &track_folders.keys().map(String::as_str).collect::<Vec<_>>(),
+                            &track_folders
+                                .iter()
+                                .flat_map(|(track, folders)| {
+                                    folders.iter().enumerate().map(move |(position, folder)| {
+                                        library::ScanLink::new(track, folder, position as i64)
+                                    })
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                        .await?;
+                        self.stage_collection_contents(
+                            scan,
+                            &crate::SourceCollection::Album(self.kind.object_id("album", raw_id)),
+                        )
+                        .await?;
+                    } else if item_type.eq_ignore_ascii_case("MusicArtist") {
+                        if let Some(artist) = artist_from_item(self.kind, scan.source_id(), &item)?
+                        {
+                            records.push(library::RecordInput::Artist(artist));
+                        }
+                    } else if item_type.eq_ignore_ascii_case("MusicGenre") {
+                        if let Some(genre) = genre_from_item(self.kind, scan.source_id(), &item)? {
+                            records.push(library::RecordInput::Genre(genre));
+                        }
+                    } else if item_type.eq_ignore_ascii_case("Playlist") {
+                        let Some(playlist) = playlist_from_item(self.kind, &item) else {
+                            continue;
+                        };
+                        drop(item);
+                        let artwork = playlist
+                            .image_ref
+                            .as_ref()
+                            .map(|image| crate::native_artwork_binding(scan.source_id(), image))
+                            .transpose()?;
+                        records.push(library::RecordInput::Playlist(library::PlaylistInput {
+                            object_id: playlist.id.to_string(),
+                            name: playlist.name.to_string(),
+                            sort_text: playlist.name.to_lowercase(),
+                            artwork_binding: artwork,
+                            ..Default::default()
+                        }));
+                        scan.write_records(&std::mem::take(&mut records)).await?;
+                        let track_folders = std::mem::take(&mut track_folders);
+                        scan.replace_track_folders(
+                            &track_folders.keys().map(String::as_str).collect::<Vec<_>>(),
+                            &track_folders
+                                .iter()
+                                .flat_map(|(track, folders)| {
+                                    folders.iter().enumerate().map(move |(position, folder)| {
+                                        library::ScanLink::new(track, folder, position as i64)
+                                    })
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                        .await?;
+                        self.stage_playlist_entries(scan, &playlist.id).await?;
                     }
                 }
-                scan.begin_batch().await?;
-                if let Some(mapped) = track {
-                    scan.write_tracks(&[(&mapped, None)]).await?;
-                }
-                scan.finish_batch().await?;
-                if let Some(folders) = self.stage_item_folders(scan, &raw_id).await? {
-                    let track = self.kind.object_id("track", &raw_id);
-                    scan.replace_track_folders(
-                        &track,
-                        &folders
-                            .iter()
-                            .map(|(id, position)| library::ScanLink::new(&track, id, *position))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
-                }
-            } else if item_type.eq_ignore_ascii_case("MusicAlbum") {
-                let album = album_from_item(self.kind, scan.source_id(), &item)?;
-                drop(item);
-                if let Some(album) = album {
-                    scan.write_album(&album).await?;
-                }
-                self.stage_collection_contents(
-                    scan,
-                    &crate::SourceCollection::Album(self.kind.object_id("album", &raw_id)),
-                )
-                .await?;
-            } else if item_type.eq_ignore_ascii_case("MusicArtist") {
-                let artist = artist_from_item(self.kind, scan.source_id(), &item)?;
-                drop(item);
-                scan.begin_batch().await?;
-                if let Some(mapped) = artist {
-                    scan.write_artist(&mapped).await?;
-                }
-                scan.finish_batch().await?;
-            } else if item_type.eq_ignore_ascii_case("MusicGenre") {
-                let genre = genre_from_item(self.kind, scan.source_id(), &item)?;
-                drop(item);
-                scan.begin_batch().await?;
-                if let Some(mapped) = genre {
-                    scan.write_genre(&mapped).await?;
-                }
-                scan.finish_batch().await?;
-            } else if item_type.eq_ignore_ascii_case("Playlist") {
-                let Some(playlist) = playlist_from_item(self.kind, &item) else {
-                    continue;
-                };
-                drop(item);
-                let artwork = playlist
-                    .image_ref
-                    .as_ref()
-                    .map(|image| crate::native_artwork_binding(scan.source_id(), image))
-                    .transpose()?;
-                scan.begin_batch().await?;
-                scan.write_playlist(&library::PlaylistInput {
-                    object_id: (&playlist.id).to_string(),
-                    name: (&playlist.name).to_string(),
-                    sort_text: (&playlist.name.to_lowercase()).to_string(),
-                    artwork_binding: (artwork.as_deref()).map(|value| value.to_vec()),
-                    ..Default::default()
-                })
-                .await?;
-                scan.finish_batch().await?;
-                self.stage_playlist_entries(scan, &playlist.id).await?;
+                Ok(())
             }
+            .await;
+            scan.write_records(&records).await?;
+            scan.replace_track_folders(
+                &track_folders.keys().map(String::as_str).collect::<Vec<_>>(),
+                &track_folders
+                    .iter()
+                    .flat_map(|(track, folders)| {
+                        folders.iter().enumerate().map(move |(position, folder)| {
+                            library::ScanLink::new(track, folder, position as i64)
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
+            result?;
         }
         scan.begin_batch().await?;
         for raw_id in removals {
@@ -169,11 +215,11 @@ impl JellyfinEmbySource {
         Ok(())
     }
 
-    pub(super) async fn stage_item_folders(
+    pub(super) async fn item_folders(
         &self,
-        scan: &mut Scan,
+        source_id: &str,
         raw_item_id: &str,
-    ) -> SourceResult<Option<Vec<(String, i64)>>> {
+    ) -> SourceResult<Option<Vec<library::FolderInput>>> {
         let mut url = endpoint(&self.base_url, &format!("Items/{raw_item_id}/Ancestors"))?;
         url.query_pairs_mut().append_pair("UserId", &self.user_id);
         let ancestors = match self.get_json::<Vec<Value>>(url).await {
@@ -183,17 +229,12 @@ impl JellyfinEmbySource {
                 return Ok(None);
             }
         };
-        scan.begin_batch().await?;
         let mut folders = Vec::new();
-        for (position, folder) in ancestors
-            .into_iter()
-            .filter(|item| {
-                item["CollectionType"]
-                    .as_str()
-                    .is_some_and(|kind| kind.eq_ignore_ascii_case("music"))
-            })
-            .enumerate()
-        {
+        for folder in ancestors.into_iter().filter(|item| {
+            item["CollectionType"]
+                .as_str()
+                .is_some_and(|kind| kind.eq_ignore_ascii_case("music"))
+        }) {
             let Some(name) = field::<String>(&folder, "Name") else {
                 continue;
             };
@@ -208,19 +249,16 @@ impl JellyfinEmbySource {
                 &folder["ImageTags"],
             )
             .as_ref()
-            .map(|image| crate::native_artwork_binding(scan.source_id(), image))
+            .map(|image| crate::native_artwork_binding(source_id, image))
             .transpose()?;
-            scan.write_folder(&library::FolderInput {
+            folders.push(library::FolderInput {
                 object_id: (&folder_id).to_string(),
                 name: Some((&name).to_string()),
                 sort_text: Some((&name.to_lowercase()).to_string()),
                 artwork_binding: (artwork.as_deref()).map(|value| value.to_vec()),
                 ..Default::default()
-            })
-            .await?;
-            folders.push((folder_id, position as i64));
+            });
         }
-        scan.finish_batch().await?;
         Ok(Some(folders))
     }
 
@@ -239,11 +277,12 @@ impl JellyfinEmbySource {
             let count = items(&page["Items"]).len();
             let finished = pages.advance(count, field(&page, "TotalRecordCount"))?;
             scan.begin_batch().await?;
-            for item in items(&page["Items"]) {
-                if let Some(mapped) = album_from_item(self.kind, scan.source_id(), item)? {
-                    scan.write_album(&mapped).await?;
-                }
-            }
+            let albums = items(&page["Items"])
+                .iter()
+                .filter_map(|item| album_from_item(self.kind, scan.source_id(), item).transpose())
+                .collect::<library::LibraryResult<Vec<_>>>()?;
+            scan.write_albums(&albums.iter().collect::<Vec<_>>())
+                .await?;
             scan.finish_batch().await?;
             progress(stage(
                 SourceReadStage::Albums,
@@ -298,11 +337,14 @@ impl JellyfinEmbySource {
                 let count = items(&page["Items"]).len();
                 let finished = pages.advance(count, field(&page, "TotalRecordCount"))?;
                 scan.begin_batch().await?;
-                for item in items(&page["Items"]) {
-                    if let Some(mapped) = artist_from_item(self.kind, scan.source_id(), item)? {
-                        scan.write_artist(&mapped).await?;
-                    }
-                }
+                let artists = items(&page["Items"])
+                    .iter()
+                    .filter_map(|item| {
+                        artist_from_item(self.kind, scan.source_id(), item).transpose()
+                    })
+                    .collect::<library::LibraryResult<Vec<_>>>()?;
+                scan.write_artists(&artists.iter().collect::<Vec<_>>())
+                    .await?;
                 scan.finish_batch().await?;
                 progress(stage(
                     SourceReadStage::Artists,
@@ -321,24 +363,32 @@ impl JellyfinEmbySource {
             if missing.is_empty() {
                 break;
             }
-            for id in missing {
-                check_cancelled(cancelled)?;
-                let mut url = self.item_url(raw_item_id(&id))?;
-                url.query_pairs_mut()
-                    .append_pair("UserId", &self.user_id)
-                    .append_pair("Fields", MIXED_ITEM_FIELDS);
-                let mut artist = self.get_json::<Value>(url).await?;
-                if crate::remote_json::id(&artist["Id"]).is_none() {
-                    if let Some(fields) = artist.as_object_mut() {
-                        fields.insert("Id".into(), Value::String(raw_item_id(&id).to_string()));
-                    } else {
-                        artist = serde_json::json!({"Id":raw_item_id(&id)});
+            let mut artists = Vec::with_capacity(missing.len());
+            let result: SourceResult<()> = async {
+                for id in missing {
+                    check_cancelled(cancelled)?;
+                    let mut url = self.item_url(raw_item_id(&id))?;
+                    url.query_pairs_mut()
+                        .append_pair("UserId", &self.user_id)
+                        .append_pair("Fields", MIXED_ITEM_FIELDS);
+                    let mut artist = self.get_json::<Value>(url).await?;
+                    if crate::remote_json::id(&artist["Id"]).is_none() {
+                        if let Some(fields) = artist.as_object_mut() {
+                            fields.insert("Id".into(), Value::String(raw_item_id(&id).to_string()));
+                        } else {
+                            artist = serde_json::json!({"Id":raw_item_id(&id)});
+                        }
+                    }
+                    if let Some(mapped) = artist_from_item(self.kind, scan.source_id(), &artist)? {
+                        artists.push(mapped);
                     }
                 }
-                if let Some(mapped) = artist_from_item(self.kind, scan.source_id(), &artist)? {
-                    scan.write_artist(&mapped).await?;
-                }
+                Ok(())
             }
+            .await;
+            scan.write_artists(&artists.iter().collect::<Vec<_>>())
+                .await?;
+            result?;
         }
 
         let mut pages = PageState::default();
@@ -365,11 +415,12 @@ impl JellyfinEmbySource {
                 }
             };
             scan.begin_batch().await?;
-            for item in items(&page["Items"]) {
-                if let Some(mapped) = genre_from_item(self.kind, scan.source_id(), item)? {
-                    scan.write_genre(&mapped).await?;
-                }
-            }
+            let genres = items(&page["Items"])
+                .iter()
+                .filter_map(|item| genre_from_item(self.kind, scan.source_id(), item).transpose())
+                .collect::<library::LibraryResult<Vec<_>>>()?;
+            scan.write_genres(&genres.iter().collect::<Vec<_>>())
+                .await?;
             scan.finish_batch().await?;
             progress(stage(
                 SourceReadStage::Genres,
@@ -418,18 +469,18 @@ impl JellyfinEmbySource {
                 .as_ref()
                 .map(|image| crate::native_artwork_binding(scan.source_id(), image))
                 .transpose()?;
-            scan.write_folder(&library::FolderInput {
+            folders.push(library::FolderInput {
                 object_id: (&folder_id).to_string(),
                 name: Some((&name).to_string()),
                 sort_text: Some((&name.to_lowercase()).to_string()),
                 artwork_binding: (artwork.as_deref()).map(|value| value.to_vec()),
                 ..Default::default()
-            })
-            .await?;
-            folders.push(folder_id);
+            });
         }
+        scan.write_folders(&folders.iter().collect::<Vec<_>>())
+            .await?;
         scan.finish_batch().await?;
-        Ok(folders)
+        Ok(folders.into_iter().map(|folder| folder.object_id).collect())
     }
 
     async fn stage_music_folder_memberships(
@@ -789,28 +840,26 @@ mod tests {
             .await
             .unwrap();
         previous
-            .write_album(
-                &super::album_from_item(
-                    crate::ServerKind::Jellyfin,
-                    previous.source_id(),
-                    &serde_json::from_value(
-                        serde_json::json!({"Id":"album","Name":"Album","Type":"MusicAlbum"}),
-                    )
-                    .unwrap(),
+            .write_albums(&[&super::album_from_item(
+                crate::ServerKind::Jellyfin,
+                previous.source_id(),
+                &serde_json::from_value(
+                    serde_json::json!({"Id":"album","Name":"Album","Type":"MusicAlbum"}),
                 )
-                .unwrap()
                 .unwrap(),
             )
+            .unwrap()
+            .unwrap()])
             .await
             .unwrap();
         previous.write_tracks(&[(&super::track_from_item(crate::ServerKind::Jellyfin, previous.source_id(), &serde_json::from_value(serde_json::json!({"Id":"removed","Name":"Removed","Type":"Audio","AlbumId":"album"})).unwrap()).unwrap().unwrap(), None)]).await.unwrap();
         previous
-            .write_genre(&library::GenreInput {
+            .write_genres(&[&library::GenreInput {
                 object_id: "cached-genre".into(),
                 name: "Cached".into(),
                 sort_text: Some("cached".into()),
                 ..Default::default()
-            })
+            }])
             .await
             .unwrap();
         previous

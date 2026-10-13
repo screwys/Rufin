@@ -46,12 +46,33 @@ impl Scan {
 
     pub async fn replace_track_folders(
         &mut self,
-        object_id: &str,
+        object_ids: &[&str],
         links: &[ScanLink<'_>],
     ) -> LibraryResult<()> {
-        self.write_removal("track-folders", object_id).await?;
-        self.execute(sqlx::query("DELETE FROM temp.scan_relation_seen WHERE kind='track_folders' AND owner_key=(SELECT track_key FROM tracks WHERE source_key=?1 AND object_id=?2)")
-            .bind(self.source).bind(object_id)).await?;
+        for page in object_ids.chunks(128) {
+            for object_id in page {
+                self.require_id("track", object_id)?;
+            }
+            let ids = serde_json::to_string(page)?;
+            self.execute(
+                sqlx::query(
+                    "INSERT OR IGNORE INTO temp.scan_removals
+                SELECT 'track-folders',value FROM json_each(?1)",
+                )
+                .bind(&ids),
+            )
+            .await?;
+            self.execute(
+                sqlx::query(
+                    "DELETE FROM temp.scan_relation_seen WHERE kind='track_folders'
+                AND owner_key IN (SELECT track_key FROM tracks WHERE source_key=?1
+                    AND object_id IN (SELECT value FROM json_each(?2)))",
+                )
+                .bind(self.source)
+                .bind(ids),
+            )
+            .await?;
+        }
         self.write_track_folders(links).await
     }
 

@@ -2216,7 +2216,7 @@ impl Source {
                 } else if let Some(cue) = &track.cue_path {
                     scan.as_mut()
                         .unwrap()
-                        .retain_local_cue_path(cue)
+                        .retain_local_cue_paths(&[cue])
                         .await
                         .map_err(metadata_database_error)?;
                 } else {
@@ -2612,17 +2612,29 @@ impl Source {
                     after = page.last().map(|(key, _)| *key);
                     page.into_iter().map(|(_, uri)| uri).collect()
                 };
-                for uri in uris {
-                    let track = database
-                        .track_row_by_uri(&uri, &library::ReadCancellation::new())
-                        .await?
-                        .ok_or(SourceError::NotFound)?;
-                    if let Some(cue) = &track.cue_path {
-                        scan.retain_local_cue_path(cue).await?;
-                    } else if let Some((_, path)) = scan.local_track_file(&uri).await? {
-                        scan.retain_local_media_paths(&[path]).await?;
+                let mut media_paths = Vec::new();
+                let mut cue_paths = std::collections::HashSet::new();
+                let result: SourceResult<()> = async {
+                    for uri in uris {
+                        let track = database
+                            .track_row_by_uri(&uri, &library::ReadCancellation::new())
+                            .await?
+                            .ok_or(SourceError::NotFound)?;
+                        if let Some(cue) = &track.cue_path {
+                            cue_paths.insert(cue.clone());
+                        } else if let Some((_, path)) = scan.local_track_file(&uri).await? {
+                            media_paths.push(path);
+                        }
                     }
+                    Ok(())
                 }
+                .await;
+                scan.retain_local_cue_paths(
+                    &cue_paths.iter().map(String::as_str).collect::<Vec<_>>(),
+                )
+                .await?;
+                scan.retain_local_media_paths(&media_paths).await?;
+                result?;
                 if is_track {
                     break;
                 }
@@ -3272,6 +3284,7 @@ impl Source {
     pub fn start_selected_feed(
         self: &Arc<Self>,
         runtime: &tokio::runtime::Handle,
+        mut initial_scan_pending: bool,
     ) -> Option<Arc<SelectedFeed>> {
         if matches!(&self.implementation, Implementation::Local(local) if local.roots().is_empty())
         {
@@ -3329,6 +3342,9 @@ impl Source {
                 let task = runtime.spawn(async move {
                     let ready_feed = Arc::clone(&producer);
                     let mut ready = move || {
+                        if std::mem::take(&mut initial_scan_pending) {
+                            return !ready_feed.cancelled.load(Ordering::Acquire);
+                        }
                         ready_feed
                             .submit(SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost))
                     };
@@ -4119,7 +4135,7 @@ mod refresh_laws {
         }, Some("token".into()), Some("device".into())).unwrap());
         let weak = Arc::downgrade(&source);
         let feed = source
-            .start_selected_feed(&tokio::runtime::Handle::current())
+            .start_selected_feed(&tokio::runtime::Handle::current(), false)
             .unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(2), pending)
             .await

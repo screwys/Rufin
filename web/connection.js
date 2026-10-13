@@ -163,6 +163,10 @@ async function connect() {
       if (value.lyrics) showLyrics(value.lyrics);
       if (value.appearance) applyColors(value.appearance);
       if (value.pins_changed) run(refreshPins);
+      if (value.catalog_acquired) run(async () => {
+        updateSources(await api("/sources"));
+        await loadView();
+      });
     },
     session.signal,
   );

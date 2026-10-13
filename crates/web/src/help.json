@@ -48,7 +48,7 @@
       "block": "Explore | MostPlayed | NewlyAdded | RecentlyPlayed | RecentlyReleased"
     },
     "GET /api/appearance": "The app's theme and colors.",
-    "POST /api/sources": "Add a source and scan its music. See source_setup for examples. Returns the source ID when finished.",
+    "POST /api/sources": "Connect, save and select a source, then scan its music in the background. Returns the source ID after selection. Follow /api/sources/events for scan progress. See source_setup for examples.",
     "PATCH /api/sources": "Change source settings. See source_update for examples.",
     "POST /api/sources/local": {
       "paths": ["/path/to/music"]
@@ -163,7 +163,7 @@
     "POST /api/queue/next": {
       "position": 0
     },
-    "GET /api/events": "Follow playback, source progress and lyrics together on one connection.",
+    "GET /api/events": "Follow playback, source progress, catalog changes and lyrics together on one connection.",
     "GET /api/artists?source=...": "Browse artists. Use offset, limit (up to 128), q, sort, descending, favorites and album_artists.",
     "GET /api/artists/tracks?id=...": "Browse an artist’s tracks, up to 256 at a time. Use q, sort, descending and album_artists.",
     "GET /api/genres/tracks?id=...": "Browse tracks in a genre. Use q, sort, descending, offset and limit. To filter by library folder, include source and folder.",

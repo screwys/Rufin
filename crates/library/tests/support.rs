@@ -80,7 +80,7 @@ pub async fn fixture() -> Fixture {
         ("album-a", "Album A", "Artist A", "album a", "2024-01-02"),
         ("album-b", "Album B", "Artist B", "album b", "2023-01-02"),
     ] {
-        scan.write_album(&library::AlbumInput {
+        scan.write_albums(&[&library::AlbumInput {
             object_id: id.to_owned(),
             title: title.to_owned(),
             display_artist: artist.to_owned(),
@@ -99,42 +99,42 @@ pub async fn fixture() -> Fixture {
             is_compilation: Some(id == "album-a"),
             favorite: Some(false),
             ..Default::default()
-        })
+        }])
         .await
         .expect("stage Album");
     }
     for (id, name) in [("artist-a", "Artist A"), ("artist-b", "Artist B")] {
-        scan.write_artist(&library::ArtistInput {
+        scan.write_artists(&[&library::ArtistInput {
             object_id: id.to_owned(),
             name: name.to_owned(),
             sort_text: Some(name.to_lowercase()),
             favorite: Some(false),
             ..Default::default()
-        })
+        }])
         .await
         .expect("stage Artist");
     }
-    scan.write_genre(&library::GenreInput {
+    scan.write_genres(&[&library::GenreInput {
         object_id: "genre".into(),
         name: "Rock".into(),
         sort_text: Some("rock".into()),
         ..Default::default()
-    })
+    }])
     .await
     .expect("stage Genre");
-    scan.write_mood(&library::MoodInput {
+    scan.write_moods(&[&library::MoodInput {
         object_id: "mood".into(),
         name: "Energetic".into(),
         sort_text: "energetic".into(),
-    })
+    }])
     .await
     .expect("stage Mood");
-    scan.write_folder(&library::FolderInput {
+    scan.write_folders(&[&library::FolderInput {
         object_id: "folder".into(),
         name: Some("Music".into()),
         sort_text: Some("music".into()),
         ..Default::default()
-    })
+    }])
     .await
     .expect("stage Folder");
     for (index, album, artist, title, favorite) in [

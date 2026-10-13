@@ -195,8 +195,40 @@ impl Scan {
         }
     }
 
-    async fn observe(&mut self, kind: &str, object_id: &str) -> LibraryResult<bool> {
-        let first = self.execute_result(sqlx::query("INSERT INTO temp.scan_seen(kind,object_id,written) VALUES(?1,?2,1) ON CONFLICT(kind,object_id) DO UPDATE SET written=1 WHERE written=0").bind(kind).bind(object_id)).await?.rows_affected()>0;
+    async fn observe_entities(
+        &mut self,
+        kind: &str,
+        object_ids: &[&str],
+    ) -> LibraryResult<std::collections::HashSet<String>> {
+        if self.failed {
+            return Err(LibraryError::ScanFailed);
+        }
+        if object_ids.is_empty() {
+            return Ok(std::collections::HashSet::new());
+        }
+        let ids = serde_json::to_string(object_ids)?;
+        let query = sqlx::query_scalar::<_, String>(
+            "INSERT INTO temp.scan_seen(kind,object_id,written)
+             SELECT ?1,value,1 FROM json_each(?2) WHERE true
+             ON CONFLICT(kind,object_id) DO UPDATE SET written=1 WHERE written=0
+             RETURNING object_id",
+        )
+        .bind(kind)
+        .bind(&ids);
+        let first = if let Some(writer) = &mut self.batch_writer {
+            query
+                .fetch_all(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+                .await
+        } else {
+            let mut writer = self.database.writer().await?;
+            query
+                .fetch_all(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+                .await
+        };
+        if first.is_err() {
+            self.failed = true;
+        }
+        let first = first?;
         let table = match kind {
             "album" => "albums",
             "artist" => "artists",
@@ -211,15 +243,24 @@ impl Scan {
         } else {
             ""
         };
-        let changed = self.execute_result(sqlx::query(sqlx::AssertSqlSafe(format!(
-            "UPDATE {table} SET indexed=1 WHERE source_key=?1 AND object_id=?2 AND indexed=0{owner}"
-        ))).bind(self.source).bind(object_id)).await?.rows_affected() > 0;
+        let changed = self
+            .execute_result(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "UPDATE {table} SET indexed=1 WHERE source_key=?1 AND indexed=0{owner}
+             AND object_id IN (SELECT value FROM json_each(?2))"
+                )))
+                .bind(self.source)
+                .bind(ids),
+            )
+            .await?
+            .rows_affected()
+            > 0;
         if kind == "playlist" {
             self.changes.playlists |= changed;
         } else {
             self.changes.metadata |= changed;
         }
-        Ok(first)
+        Ok(first.into_iter().collect())
     }
 
     async fn observe_tracks(
@@ -696,8 +737,16 @@ impl Scan {
         .await
     }
 
-    pub async fn retain_local_cue_path(&mut self, path: &str) -> LibraryResult<()> {
-        self.retain_local_tracks("track.cue_path=?2", path).await
+    pub async fn retain_local_cue_paths(&mut self, paths: &[&str]) -> LibraryResult<()> {
+        for page in paths.chunks(128) {
+            let paths = serde_json::to_string(page)?;
+            self.retain_local_tracks_where(
+                "track.cue_path IN (SELECT value FROM json_each(?2))",
+                Some(&paths),
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     pub async fn retain_connected_file_tracks(&mut self) -> LibraryResult<()> {
@@ -708,14 +757,6 @@ impl Scan {
             None,
         )
         .await
-    }
-
-    async fn retain_local_tracks(
-        &mut self,
-        predicate: &'static str,
-        value: &str,
-    ) -> LibraryResult<()> {
-        self.retain_local_tracks_where(predicate, Some(value)).await
     }
 
     async fn retain_local_tracks_where(
@@ -1210,21 +1251,21 @@ mod tests {
         let mut scan = Scan::begin(&database, "source", "Source", "source", None)
             .await
             .expect("next acquisition gets the released permit");
-        scan.write_genre(&GenreInput {
+        scan.write_genres(&[&GenreInput {
             object_id: "genre".into(),
             name: "Genre".into(),
             sort_text: Some("genre".into()),
             ..Default::default()
-        })
+        }])
         .await
         .expect("write before writer failure");
         database.fail_writer().await.expect("fail fixed writer");
         assert!(matches!(
-            scan.write_mood(&crate::MoodInput {
+            scan.write_moods(&[&crate::MoodInput {
                 object_id: "mood".into(),
                 name: "Mood".into(),
                 sort_text: "mood".into(),
-            })
+            }])
             .await,
             Err(LibraryError::WriterUnavailable)
         ));
@@ -1250,11 +1291,11 @@ mod tests {
             .expect("begin acquisition");
         scan.begin_batch().await.expect("begin bounded Scan batch");
         for number in 0..128 {
-            scan.write_mood(&crate::MoodInput {
+            scan.write_moods(&[&crate::MoodInput {
                 object_id: format!("mood-{number}"),
                 name: "Mood".into(),
                 sort_text: format!("mood-{number}"),
-            })
+            }])
             .await
             .expect("write one row in the bounded transaction");
         }

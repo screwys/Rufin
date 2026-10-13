@@ -341,7 +341,7 @@ impl FileSource {
         path: &str,
     ) -> Result<(), SourceMetadataError> {
         if let Some(cue) = &track.cue_path {
-            scan.retain_local_cue_path(cue).await
+            scan.retain_local_cue_paths(&[cue]).await
         } else {
             scan.retain_local_media_paths(&[path.to_string()]).await
         }

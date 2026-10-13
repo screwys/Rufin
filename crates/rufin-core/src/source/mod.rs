@@ -167,7 +167,7 @@ pub(crate) struct Shared {
     pub(crate) runtime: tokio::runtime::Handle,
     outputs: SourceOutputs,
     operation: tokio::sync::watch::Sender<SourceOperation>,
-    catalog_changed: tokio::sync::watch::Sender<()>,
+    catalog_changed: tokio::sync::watch::Sender<Option<CatalogChange>>,
     configuration_changed: tokio::sync::watch::Sender<()>,
     discovery: tokio::sync::watch::Sender<Option<DiscoveryUpdate>>,
     selected: Mutex<Option<SelectedLibrary>>,
@@ -252,9 +252,11 @@ impl Shared {
         ) {
             self.configuration_changed.send_replace(());
         }
-        if matches!(&event, SourceEvent::CatalogPublished(publication) if publication.change != CatalogChange::Home)
+        if let SourceEvent::CatalogPublished(publication) = &event
+            && publication.change != CatalogChange::Home
         {
-            self.catalog_changed.send_replace(());
+            self.catalog_changed
+                .send_replace(Some(publication.change.clone()));
         }
         let _ = self.outputs.events.send(event).await;
     }
@@ -362,7 +364,7 @@ impl SourceOwner {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_nanos() as i64);
         let shared = Arc::new(Shared {
-            catalog_changed: tokio::sync::watch::channel(()).0,
+            catalog_changed: tokio::sync::watch::channel(None).0,
             configuration_changed: tokio::sync::watch::channel(()).0,
             home_showcase_variation: home_variation,
             home_explore_variation: std::sync::atomic::AtomicI64::new(home_variation),
@@ -637,18 +639,12 @@ impl SourceOwner {
         &self,
         source_id: SourceId,
         cancelled: Arc<AtomicBool>,
+        refresh: bool,
     ) -> Result<(), String> {
         if cancelled.load(Ordering::Acquire) {
             return Ok(());
         }
         let configured = configured_source(&self.shared.settings.load().sources, &source_id)?;
-        let cached_start = self
-            .shared
-            .database
-            .cached_source(source_id.as_str(), &ReadCancellation::new())
-            .await
-            .map_err(string_error)?
-            .is_some_and(|source| source.catalog_complete);
         let publication = self
             .shared
             .database
@@ -659,6 +655,7 @@ impl SourceOwner {
             )
             .await
             .map_err(string_error)?;
+        let cached_start = publication.catalog_complete;
         self.install_selected(
             configured.clone(),
             None,
@@ -706,8 +703,8 @@ impl SourceOwner {
             {
                 owner.shared.warn_nonfatal(&error);
             }
-            owner.start_observer(selected.clone(), source.clone());
-            if !cached_start || configured.configuration.is_local() {
+            owner.start_observer(selected.clone(), source.clone(), refresh && !cached_start);
+            if refresh && (!cached_start || configured.configuration.is_local()) {
                 owner.spawn_serialized(move |owner| async move {
                     if !owner.shared.acquisition_is_current(&cancelled) {
                         return;
@@ -723,11 +720,18 @@ impl SourceOwner {
                             )
                             .await;
                     } else if configured.configuration.is_local() {
+                        let report =
+                            refreshing_progress(Arc::clone(&owner.shared), source_id.clone());
+                        let progress = |value| {
+                            if owner.shared.acquisition_is_current(&cancelled) {
+                                report(value);
+                            }
+                        };
                         let result = source
                             .catch_up_local(
                                 &owner.shared.database,
                                 selected.source_key,
-                                &|_| {},
+                                &progress,
                                 cancelled.clone(),
                             )
                             .await;
@@ -883,7 +887,7 @@ impl SourceOwner {
             .await;
         self.publish_operation(SourceOperation::Idle).await;
         if let Some(source) = source {
-            self.start_observer(selected, source);
+            self.start_observer(selected, source, true);
         }
         Ok(())
     }
@@ -918,8 +922,14 @@ impl SourceOwner {
         }
     }
 
-    fn start_observer(&self, selected: SelectedLibrary, source: Arc<Source>) {
-        let Some(observer) = source.start_selected_feed(&self.shared.runtime) else {
+    fn start_observer(
+        &self,
+        selected: SelectedLibrary,
+        source: Arc<Source>,
+        initial_scan_pending: bool,
+    ) {
+        let Some(observer) = source.start_selected_feed(&self.shared.runtime, initial_scan_pending)
+        else {
             return;
         };
         self.shared.cancel_observer();
@@ -1160,6 +1170,7 @@ impl SourceOwner {
                 .shared
                 .selected()
                 .is_some_and(|selected| selected.source_id == replacement.configuration.source_id);
+            let refresh = selected || replacement.configuration.is_local() || exclusions_changed;
             if selected {
                 self.install_selected(
                     replacement,
@@ -1168,6 +1179,8 @@ impl SourceOwner {
                     Arc::clone(&cancelled),
                 )
                 .await?;
+            }
+            if refresh {
                 let id = source.source_id().clone();
                 self.spawn_serialized(move |owner| async move {
                     if let Some(configuration) = owner.configuration(&id) {
@@ -1177,18 +1190,7 @@ impl SourceOwner {
                     }
                 });
             } else {
-                if replacement.configuration.is_local() || exclusions_changed {
-                    self.refresh_now(
-                        &replacement.configuration.source_id,
-                        &source,
-                        &replacement.configuration.name,
-                        Arc::clone(&cancelled),
-                        false,
-                    )
-                    .await?;
-                } else {
-                    self.publish_operation(SourceOperation::Idle).await;
-                }
+                self.publish_operation(SourceOperation::Idle).await;
             }
             Ok(())
         }
@@ -1290,13 +1292,9 @@ impl SourceOwner {
         if !update.changed() {
             return;
         }
-        let change = if update.metadata {
-            if update.inventory {
-                CatalogChange::Acquired
-            } else {
-                CatalogChange::Broad
-            }
-        } else if update.artwork || (update.playlists && update.home) {
+        let change = if update.inventory {
+            CatalogChange::Acquired
+        } else if update.metadata || update.artwork || (update.playlists && update.home) {
             CatalogChange::Broad
         } else if update.playlists {
             CatalogChange::Playlists(None)
@@ -1769,7 +1767,7 @@ impl SourceOwner {
         self.shared.operation.subscribe()
     }
 
-    pub fn catalog_changes(&self) -> tokio::sync::watch::Receiver<()> {
+    pub fn catalog_changes(&self) -> tokio::sync::watch::Receiver<Option<CatalogChange>> {
         self.shared.catalog_changed.subscribe()
     }
 
@@ -1907,7 +1905,7 @@ impl SourceOwner {
                     .map_err(string_error)?;
                 let (configuration, mut source, credential) = connected.into_parts();
                 if !owner.shared.acquisition_is_current(&cancelled) {
-                    return Ok(());
+                    return Err(SourceError::Cancelled.to_string());
                 }
                 let credential_ref = match reused_credential {
                     Some(reference) => Some(reference),
@@ -1924,7 +1922,8 @@ impl SourceOwner {
                     enable_half_stars: false,
                 };
                 owner.persist_connected_source(&configured, credential)?;
-                owner
+                persisted_source_id = Some(configuration.source_id.clone());
+                let source_state = owner
                     .shared
                     .database
                     .reconcile_source(
@@ -1936,48 +1935,6 @@ impl SourceOwner {
                     .map_err(string_error)?;
                 owner.bind_plex_login(&configured, &mut source)?;
                 let source = Arc::new(source);
-                persisted_source_id = Some(configuration.source_id.clone());
-                owner
-                    .shared
-                    .send(SourceEvent::Configured(
-                        owner
-                            .shared
-                            .configured_sources(owner.shared.selected().as_ref()),
-                    ))
-                    .await;
-                let shared = Arc::clone(&owner.shared);
-                let progress_acquisition = Arc::clone(&cancelled);
-                let progress = move |value| {
-                    if !shared.acquisition_is_current(&progress_acquisition) {
-                        return;
-                    }
-                    shared.publish_operation(SourceOperation::Adding {
-                        progress: source_progress(value),
-                    });
-                };
-                let outcome = source
-                    .manual_refresh(
-                        &owner.shared.database,
-                        &configuration.name,
-                        &progress,
-                        Arc::clone(&cancelled),
-                    )
-                    .await;
-                if !owner.shared.acquisition_is_current(&cancelled) {
-                    return Ok(());
-                }
-                let source_state = owner
-                    .shared
-                    .database
-                    .cached_source(configuration.source_id.as_str(), &ReadCancellation::new())
-                    .await
-                    .map_err(string_error)?;
-                let Some(source_state) = source_state else {
-                    return Err(outcome.err().map_or_else(
-                        || "The initial library scan did not complete".to_string(),
-                        |error| error.to_string(),
-                    ));
-                };
                 owner
                     .install_selected(
                         configured,
@@ -1986,33 +1943,40 @@ impl SourceOwner {
                         Arc::clone(&cancelled),
                     )
                     .await?;
-                outcome.map_err(string_error)?;
-                Ok(())
+                Ok((source, configuration.name))
             }
             .await;
             if !owner.shared.acquisition_is_current(&cancelled) {
                 let _ = sender.try_send(Err(SourceError::Cancelled.to_string()));
                 return;
             }
-            if let Err(error) = &result {
-                if let Some(selected) = owner.shared.selected()
-                    && let Some(source) = owner.cached_client(&selected.source_id)
-                {
-                    owner.start_observer(selected, source);
+            match result {
+                Ok((source, name)) => {
+                    let Some(selected) = owner.selected_library() else {
+                        let _ = sender.try_send(Err(SourceError::Cancelled.to_string()));
+                        return;
+                    };
+                    let _ = sender.try_send(Ok(selected));
+                    let _ = owner
+                        .refresh_now(source.source_id(), &source, &name, cancelled, false)
+                        .await;
                 }
-                owner
-                    .publish_operation(SourceOperation::Failed {
-                        source_id: persisted_source_id,
-                        message: error.clone(),
-                        add_form: true,
-                    })
-                    .await;
+                Err(error) => {
+                    if let Some(selected) = owner.shared.selected()
+                        && let Some(source) = owner.cached_client(&selected.source_id)
+                    {
+                        owner.start_observer(selected, source, false);
+                    }
+                    owner
+                        .publish_operation(SourceOperation::Failed {
+                            source_id: persisted_source_id,
+                            message: error.clone(),
+                            add_form: true,
+                        })
+                        .await;
+                    let _ = sender.try_send(Err(error));
+                }
             }
-            let _ = sender.try_send(result.and_then(|()| {
-                owner
-                    .selected_library()
-                    .ok_or_else(|| SourceError::Cancelled.to_string())
-            }));
         });
         receiver
     }
@@ -2080,7 +2044,7 @@ impl SourceOwner {
                 })
                 .await;
             let result = owner
-                .select_now(source_id.clone(), Arc::clone(&cancelled))
+                .select_now(source_id.clone(), Arc::clone(&cancelled), true)
                 .await;
             if cancelled.load(Ordering::Acquire) {
                 let _ = sender.try_send(Err(SourceError::Cancelled.to_string()));
@@ -2090,7 +2054,7 @@ impl SourceOwner {
                 if let Some(selected) = owner.shared.selected()
                     && let Some(source) = owner.cached_client(&selected.source_id)
                 {
-                    owner.start_observer(selected, source);
+                    owner.start_observer(selected, source, false);
                 }
                 owner
                     .publish_operation(SourceOperation::Failed {
@@ -2293,8 +2257,10 @@ impl SourceOwner {
                     )
                     .await?;
                 if owner.shared.selected().is_none() {
+                    let unchanged =
+                        owner.configuration(source.source_id()).as_ref() == Some(&configuration);
                     owner
-                        .select_now(source.source_id().clone(), cancelled)
+                        .select_now(source.source_id().clone(), cancelled, unchanged)
                         .await?;
                 }
                 Ok(())
@@ -2330,7 +2296,8 @@ impl SourceOwner {
         self.spawn_serialized(move |owner| async move {
             let result = async {
                 let source = owner.ensure_local_source().await?;
-                let mut roots = owner.document_roots()?;
+                let previous = owner.document_roots()?;
+                let mut roots = previous.clone();
                 for mut root in added {
                     if let Some(current) = roots.iter_mut().find(|current| current.uri == root.uri)
                     {
@@ -2340,6 +2307,7 @@ impl SourceOwner {
                         roots.push(root);
                     }
                 }
+                let unchanged = roots == previous;
                 owner
                     .edit_configured_source(
                         SourceSettingsChange::LocalDocuments {
@@ -2349,9 +2317,13 @@ impl SourceOwner {
                         Arc::clone(&cancelled),
                     )
                     .await?;
-                if owner.shared.selected().is_none() {
+                if owner
+                    .shared
+                    .selected()
+                    .is_none_or(|selected| selected.source_id != *source.source_id())
+                {
                     owner
-                        .select_now(source.source_id().clone(), cancelled)
+                        .select_now(source.source_id().clone(), cancelled, unchanged)
                         .await?;
                 }
                 Ok(())
@@ -2578,6 +2550,22 @@ impl SourceOwner {
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SourceOwner {
     pub async fn forget_source(&self, source_id: SourceId) -> sources::SourceResult<()> {
+        let selected = self
+            .shared
+            .selected()
+            .is_some_and(|selected| selected.source_id == source_id);
+        if selected
+            || matches!(
+                &*self.shared.operation.borrow(),
+                SourceOperation::Refreshing { source_id: active, .. } if active == &source_id
+            )
+        {
+            self.shared.cancel_acquisition();
+            self.shared.publish_operation(SourceOperation::Idle);
+        }
+        if selected {
+            self.shared.cancel_observer();
+        }
         let (sender, receiver) = async_channel::bounded(1);
         self.spawn_serialized(move |owner| async move {
             let stored = owner.shared.settings.load();
@@ -3964,12 +3952,12 @@ mod artwork_preparation_tests {
             let mut scan = library::Scan::begin_items(&database, source_id.as_str())
                 .await
                 .unwrap();
-            scan.write_artist(&library::ArtistInput {
+            scan.write_artists(&[&library::ArtistInput {
                 object_id: "artist".into(),
                 name: "Artist".into(),
                 artwork_binding: Some(binding.to_vec()),
                 ..Default::default()
-            })
+            }])
             .await
             .unwrap();
             scan.finish().await.unwrap();
@@ -4076,7 +4064,12 @@ mod artwork_preparation_tests {
             assert_eq!(refreshing, visible);
             assert_eq!(published, metadata || artwork);
         }
-        for (artwork, home) in [(false, true), (true, false)] {
+        for (artwork, home, inventory) in [
+            (false, true, false),
+            (true, false, false),
+            (false, false, true),
+            (true, false, true),
+        ] {
             owner
                 .catalog_updated(CatalogUpdate {
                     source_id: source_id.clone(),
@@ -4086,23 +4079,27 @@ mod artwork_preparation_tests {
                     playlists: true,
                     artwork,
                     home,
-                    inventory: false,
+                    inventory,
                     tracks_added: false,
                     song_rekeys: Arc::from([]),
                 })
                 .await;
-            assert!(matches!(
-                receiver.recv().await.unwrap(),
-                SourceEvent::CatalogPublished(CatalogPublication {
-                    change: CatalogChange::Broad,
-                    ..
-                })
-            ));
+            let SourceEvent::CatalogPublished(publication) = receiver.recv().await.unwrap() else {
+                panic!("scan changes publish catalog content");
+            };
+            assert_eq!(
+                publication.change,
+                if inventory {
+                    CatalogChange::Acquired
+                } else {
+                    CatalogChange::Broad
+                }
+            );
         }
     }
 
     #[tokio::test]
-    async fn adding_a_source_keeps_setup_progress_until_the_catalog_is_ready() {
+    async fn adding_a_source_connects_before_its_background_scan() {
         let directory = tempfile::tempdir().unwrap();
         let music = directory.path().join("music");
         std::fs::create_dir(&music).unwrap();
@@ -4134,28 +4131,45 @@ mod artwork_preparation_tests {
             },
         )
         .owner;
-        owner.configure_source(SourceSetup::Local { roots: vec![music] });
+        let mut connected = Some(owner.configure_source(SourceSetup::Local { roots: vec![music] }));
         tokio::time::timeout(Duration::from_secs(10), async {
             let mut scanned = false;
-            let mut selected = false;
+            let mut selected = None;
+            let mut refreshing = false;
             loop {
                 match receiver.recv().await.unwrap() {
                     SourceEvent::Operation(SourceOperation::Adding { progress }) => {
-                        scanned |= progress.stage == SourceProgressStage::Finalizing;
+                        assert_eq!(progress.stage, SourceProgressStage::Connecting);
+                        assert!(selected.is_none());
                     }
-                    SourceEvent::Selected { .. } => {
-                        assert!(scanned, "selection must follow the initial scan");
-                        selected = true;
+                    SourceEvent::Selected {
+                        selected: library, ..
+                    } => {
+                        assert!(!refreshing, "selection must precede the initial scan");
+                        selected = Some(library.source_id);
                     }
                     SourceEvent::Operation(SourceOperation::Idle) => {
-                        assert!(
-                            selected,
-                            "setup finishes after the ready catalog is selected"
-                        );
-                        break;
+                        assert!(selected.is_some());
+                        if refreshing {
+                            assert!(
+                                scanned,
+                                "the scan continues after its setup receiver closes"
+                            );
+                            break;
+                        }
                     }
-                    SourceEvent::Operation(SourceOperation::Refreshing { .. }) => {
-                        panic!("the initial scan belongs to setup, not background refresh");
+                    SourceEvent::Operation(SourceOperation::Refreshing {
+                        source_id,
+                        progress,
+                    }) => {
+                        assert_eq!(selected.as_ref(), Some(&source_id));
+                        if let Some(connected) = connected.take() {
+                            let library = connected.try_recv().unwrap().unwrap();
+                            assert_eq!(library.source_id, source_id);
+                            assert_eq!(owner.list_sources().selected_source_id, Some(source_id));
+                        }
+                        refreshing = true;
+                        scanned |= progress.stage == SourceProgressStage::Finalizing;
                     }
                     SourceEvent::Operation(SourceOperation::Failed { message, .. }) => {
                         panic!("{message}")
@@ -4201,14 +4215,14 @@ mod artwork_preparation_tests {
                 library::Scan::begin(&database, source_id.as_str(), "Music", "music", None)
                     .await
                     .unwrap();
-            scan.write_album(&library::AlbumInput {
+            scan.write_albums(&[&library::AlbumInput {
                 object_id: "album".into(),
                 title: "Cached Album".into(),
                 display_artist: "Artist".into(),
                 sort_text: "cached album".into(),
                 favorite: Some(false),
                 ..Default::default()
-            })
+            }])
             .await
             .unwrap();
             let source_key = scan.source();
@@ -4370,12 +4384,12 @@ mod artwork_preparation_tests {
                     .await
                     .unwrap();
             scan.incomplete();
-            scan.write_folder(&library::FolderInput {
+            scan.write_folders(&[&library::FolderInput {
                 object_id: "new-folder".into(),
                 name: Some("New Folder".into()),
                 sort_text: Some("new folder".into()),
                 ..Default::default()
-            })
+            }])
             .await
             .unwrap();
             scan.write_tracks(&[(
@@ -5036,7 +5050,7 @@ impl SourceOwner {
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct SourceCatalogSubscription {
-    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<()>>,
+    changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<Option<CatalogChange>>>,
 }
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SourceOwner {

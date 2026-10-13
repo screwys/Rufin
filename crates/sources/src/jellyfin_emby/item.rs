@@ -470,15 +470,15 @@ mod tests {
                 )
                 .unwrap(),
             );
-            scan.write_album(&mapped).await.unwrap();
+            scan.write_albums(&[&mapped]).await.unwrap();
         }
         scan.finish().await.unwrap();
         let mut scan = library::Scan::begin_items(&database, "emby").await.unwrap();
         for album in &albums {
-            scan.write_album(
-                &album_from_item(ServerKind::Emby, scan.source_id(), &album)
+            scan.write_albums(
+                &[&album_from_item(ServerKind::Emby, scan.source_id(), &album)
                     .unwrap()
-                    .unwrap(),
+                    .unwrap()],
             )
             .await
             .unwrap();

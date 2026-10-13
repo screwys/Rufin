@@ -45,7 +45,7 @@ async fn fixture() -> (tempfile::TempDir, Database) {
     )
     .await
     .unwrap();
-    scan.write_album(&library::AlbumInput {
+    scan.write_albums(&[&library::AlbumInput {
         object_id: "album".into(),
         title: "Album".into(),
         display_artist: "Artist".into(),
@@ -53,26 +53,26 @@ async fn fixture() -> (tempfile::TempDir, Database) {
         favorite: Some(true),
         rating: Some(8),
         ..Default::default()
-    })
+    }])
     .await
     .unwrap();
-    scan.write_artist(&library::ArtistInput {
+    scan.write_artists(&[&library::ArtistInput {
         object_id: "artist".into(),
         name: "Artist".into(),
         sort_text: Some("artist".into()),
         favorite: Some(true),
         rating: Some(8),
         ..Default::default()
-    })
+    }])
     .await
     .unwrap();
     track(&mut scan, Some(true), None).await;
-    scan.write_folder(&library::FolderInput {
+    scan.write_folders(&[&library::FolderInput {
         object_id: "folder".into(),
         name: Some("Folder".into()),
         sort_text: Some("folder".into()),
         ..Default::default()
-    })
+    }])
     .await
     .unwrap();
     scan.write_track_folders(&[ScanLink::new("track", "folder", 0)])
@@ -152,7 +152,7 @@ async fn point_metadata_preserves_folders_and_complete_memberships_can_clear_the
         let mut scan = Scan::begin_items(&database, "source").await.unwrap();
         track(&mut scan, None, None).await;
         if replace {
-            scan.replace_track_folders("track", &[]).await.unwrap();
+            scan.replace_track_folders(&["track"], &[]).await.unwrap();
             track(&mut scan, None, None).await;
         }
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
@@ -357,7 +357,7 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
     let mut scan = Scan::begin(&database, "source", "Source", "source", None)
         .await
         .unwrap();
-    scan.write_album(&library::AlbumInput {
+    scan.write_albums(&[&library::AlbumInput {
         object_id: "album".into(),
         title: "Album".into(),
         display_artist: "Artist".into(),
@@ -365,7 +365,7 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
         favorite: Some(true),
         rating: Some(8),
         ..Default::default()
-    })
+    }])
     .await
     .unwrap();
     scan.replace_home_section(

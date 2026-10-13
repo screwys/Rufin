@@ -590,7 +590,7 @@ async fn stage_exact_cue(
     )
     .await?;
     if retain {
-        scan.retain_local_cue_path(path.to_string_lossy().as_ref())
+        scan.retain_local_cue_paths(&[path.to_string_lossy().as_ref()])
             .await?;
     }
     persist_observations(
@@ -764,7 +764,7 @@ async fn stage_roots(
                 for page in dependencies.chunks(LOCAL_BATCH_SIZE) {
                     scan.write_local_dependency_paths(page).await?;
                 }
-                scan.retain_local_cue_path(&path_text).await?;
+                scan.retain_local_cue_paths(&[&path_text]).await?;
                 scan.finish_batch().await?;
                 continue;
             }

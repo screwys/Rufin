@@ -195,9 +195,8 @@ impl SubsonicSource {
             }
         };
         scan.begin_batch().await?;
-        for folder in &music_folders {
-            scan.write_folder(folder).await?;
-        }
+        scan.write_folders(&music_folders.iter().collect::<Vec<_>>())
+            .await?;
         scan.finish_batch().await?;
         check_cancelled(cancelled)?;
         if self.has_navidrome_library() {
@@ -233,9 +232,8 @@ impl SubsonicSource {
             }
         };
         scan.begin_batch().await?;
-        for genre in genres {
-            scan.write_genre(&genre).await?;
-        }
+        scan.write_genres(&genres.iter().collect::<Vec<_>>())
+            .await?;
         scan.finish_batch().await?;
 
         check_cancelled(cancelled)?;
@@ -275,11 +273,12 @@ impl SubsonicSource {
                 SourceError::Other("OpenSubsonic album offset overflowed".to_string())
             })?;
             scan.begin_batch().await?;
-            for value in page {
-                if let Some(album) = album_from_json(self, scan.source_id(), value)? {
-                    scan.write_album(&album).await?;
-                }
-            }
+            let albums = page
+                .iter()
+                .filter_map(|value| album_from_json(self, scan.source_id(), value).transpose())
+                .collect::<library::LibraryResult<Vec<_>>>()?;
+            scan.write_albums(&albums.iter().collect::<Vec<_>>())
+                .await?;
             scan.finish_batch().await?;
             progress(stage(SourceReadStage::Albums, offset));
             if page_len < ALBUM_REQUEST_SIZE {
@@ -463,11 +462,12 @@ impl SubsonicSource {
             offset += page.len();
             let finished = page.len() < ALBUM_REQUEST_SIZE;
             scan.begin_batch().await?;
-            for value in page {
-                if let Some(artist) = artist_from_json(self, scan.source_id(), value)? {
-                    scan.write_artist(&artist).await?;
-                }
-            }
+            let artists = page
+                .iter()
+                .filter_map(|value| artist_from_json(self, scan.source_id(), value).transpose())
+                .collect::<library::LibraryResult<Vec<_>>>()?;
+            scan.write_artists(&artists.iter().collect::<Vec<_>>())
+                .await?;
             scan.finish_batch().await?;
             progress(stage(SourceReadStage::Artists, offset));
             if finished {
@@ -790,28 +790,24 @@ mod tests {
         )
         .await
         .unwrap();
-        scan.write_album(
-            &super::album_from_json(
-                &source,
-                "source",
-                &serde_json::json!({"id":"album","name":"Album","userRating":4}),
-            )
-            .unwrap()
-            .unwrap(),
+        scan.write_albums(&[&super::album_from_json(
+            &source,
+            "source",
+            &serde_json::json!({"id":"album","name":"Album","userRating":4}),
         )
-        .await
-        .unwrap();
-        scan.write_artist(
-            &super::artist_from_json(
-                &source,
-                "source",
-                &serde_json::json!({"id":"artist","name":"Artist"}),
-            )
-            .unwrap()
-            .unwrap(),
+        .unwrap()
+        .unwrap()])
+            .await
+            .unwrap();
+        scan.write_artists(&[&super::artist_from_json(
+            &source,
+            "source",
+            &serde_json::json!({"id":"artist","name":"Artist"}),
         )
-        .await
-        .unwrap();
+        .unwrap()
+        .unwrap()])
+            .await
+            .unwrap();
         scan.write_tracks(&[(&super::track_from_json(&source, "source", &serde_json::json!({"id":"track","title":"Track","albumId":"album","comment":"Keep","duration":42,"userRating":4})).unwrap().unwrap(), None)]).await.unwrap();
         source.stage_favorites(&mut scan).await.unwrap();
         source
@@ -969,15 +965,13 @@ mod tests {
                 .await
                 .unwrap();
                 previous
-                    .write_album(
-                        &super::album_from_json(
-                            &source,
-                            "source",
-                            &serde_json::json!({"id":"album","name":"Album","artist":"Artist"}),
-                        )
-                        .unwrap()
-                        .unwrap(),
+                    .write_albums(&[&super::album_from_json(
+                        &source,
+                        "source",
+                        &serde_json::json!({"id":"album","name":"Album","artist":"Artist"}),
                     )
+                    .unwrap()
+                    .unwrap()])
                     .await
                     .unwrap();
                 previous.write_tracks(&[(&super::track_from_json(&source, "source", &serde_json::json!({"id":"removed","title":"Vanished","albumId":"album"})).unwrap()
@@ -985,12 +979,12 @@ mod tests {
                 .await
                 .unwrap();
                 previous
-                    .write_genre(&library::GenreInput {
+                    .write_genres(&[&library::GenreInput {
                         object_id: "cached-genre".into(),
                         name: "Cached".into(),
                         sort_text: Some("cached".into()),
                         ..Default::default()
-                    })
+                    }])
                     .await
                     .unwrap();
                 previous

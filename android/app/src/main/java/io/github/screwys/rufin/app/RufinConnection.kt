@@ -250,51 +250,20 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         connectedService().openUris(uris.map(Uri::toString))
     }
 
-    fun addFolder(uri: Uri, flags: Int) = addLocalSource { connected ->
+    fun addFolder(uri: Uri, flags: Int) = runAction {
         retainGrant(uri, flags)
-        connected.runtime.value!!.getOrThrow().addDocumentRoot(uri.toString())
+        connectedService().runtime.value!!.getOrThrow().addDocumentRoot(uri.toString())
     }
 
-    fun addMediaLibrary() = addLocalSource { it.addMediaLibrary() }
+    fun addMediaLibrary() = runAction { connectedService().addMediaLibrary() }
 
-    suspend fun addMediaLibraryForSetup(): Boolean {
-        val service = connectedService()
-        if (!service.addMediaLibrary()) return false
-        selectLocalSource(service)
-        return true
-    }
+    suspend fun addMediaLibraryForSetup(): Boolean = connectedService().addMediaLibrary()
 
     suspend fun addFolderForSetup(uri: Uri) {
         getApplication<Application>().contentResolver.takePersistableUriPermission(uri,
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         val service = connectedService()
         service.runtime.value!!.getOrThrow().addDocumentRoot(uri.toString())
-        selectLocalSource(service)
-    }
-
-    private suspend fun selectLocalSource(service: RufinService) {
-        val core = service.runtime.value!!.getOrThrow()
-        core.source().use { owner -> owner.subscribe().use { subscription ->
-            val state = subscription.next()
-            state.sources.firstOrNull { it.kind == "local" }?.let { local ->
-                if (state.selectedSourceId != local.id) core.source().use { it.selectSource(local.id) }
-            }
-        } }
-    }
-
-    private fun addLocalSource(add: suspend (RufinService) -> Unit) = runAction {
-        val connected = connectedService()
-        add(connected)
-        val core = connected.runtime.value!!.getOrThrow()
-        val owner = core.source()
-        val subscription = owner.subscribe()
-        try {
-            val state = subscription.next()
-            val local = state.sources.firstOrNull { it.kind == "local" }
-            if (local != null && state.selectedSourceId != local.id) {
-                core.source().use { it.selectSource(local.id) }
-            }
-        } finally { subscription.destroy(); owner.destroy() }
     }
 
     private fun retainGrant(uri: Uri, flags: Int) {

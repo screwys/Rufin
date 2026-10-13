@@ -196,13 +196,20 @@ impl FileSource {
                     break;
                 }
                 after = page.last().cloned();
-                for path in &page {
-                    match self.stat(&input, &self.relative(path)?).await {
-                        Ok(file) => scan.write_local_files(&[(file, vec![])]).await?,
-                        Err(SourceError::NotFound) => {}
-                        Err(error) => return Err(error),
+                let mut observations = Vec::new();
+                let result: SourceResult<()> = async {
+                    for path in &page {
+                        match self.stat(&input, &self.relative(path)?).await {
+                            Ok(file) => observations.push((file, vec![])),
+                            Err(SourceError::NotFound) => {}
+                            Err(error) => return Err(error),
+                        }
                     }
+                    Ok(())
                 }
+                .await;
+                scan.write_local_files(&observations).await?;
+                result?;
                 scan.remove_local_file_paths(&page).await?;
             }
             let mut after = None;

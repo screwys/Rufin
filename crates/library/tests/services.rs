@@ -407,7 +407,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         ("album-a", "Album A", "Artist A", "album a", "2024-01-02"),
         ("album-b", "Album B", "Artist B", "album b", "2023-01-02"),
     ] {
-        scan.write_album(&library::AlbumInput {
+        scan.write_albums(&[&library::AlbumInput {
             object_id: id.to_owned(),
             title: title.to_owned(),
             display_artist: artist.to_owned(),
@@ -418,7 +418,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             is_compilation: Some(id == "album-a"),
             favorite: Some(false),
             ..Default::default()
-        })
+        }])
         .await
         .expect("stage Album");
     }
