@@ -1732,7 +1732,10 @@ impl GstEngine {
                     relevant,
                     "GStreamer playback error"
                 );
-                if relevant && self.handle_transition_error(slot, &error) {
+                if relevant
+                    && (self.handle_gapless_preload_error(slot, error_message, &error)
+                        || self.handle_crossfade_next_error(slot, &error))
+                {
                     return;
                 }
                 if relevant {
@@ -1776,14 +1779,36 @@ impl GstEngine {
         );
     }
 
-    fn handle_transition_error(&mut self, slot: Slot, error: &str) -> bool {
-        self.handle_gapless_preload_error(slot, error)
-            || self.handle_crossfade_next_error(slot, error)
-    }
-
-    fn handle_gapless_preload_error(&mut self, slot: Slot, error: &str) -> bool {
+    fn handle_gapless_preload_error(
+        &mut self,
+        slot: Slot,
+        message: &gst::message::Error,
+        error: &str,
+    ) -> bool {
         if !self.is_active_slot(slot) {
             return false;
+        }
+        let Some(uri) = message
+            .details()
+            .and_then(|details| details.get::<&str>("uri").ok())
+        else {
+            return false;
+        };
+        {
+            let shared = lock_recover(&self.shared);
+            let gapless = lock_recover(self.pipeline_for_slot(slot).gapless().unwrap());
+            // A pending item alone cannot identify the failing stream, including repeat.
+            if shared
+                .current
+                .as_ref()
+                .is_none_or(|item| item.stream.uri() == uri)
+                || gapless
+                    .pending
+                    .as_ref()
+                    .is_none_or(|item| item.stream.uri() != uri)
+            {
+                return false;
+            }
         }
         let Some((current, pending)) = self.cancel_gapless_pending() else {
             return false;
@@ -4811,62 +4836,79 @@ mod tests {
     }
 
     #[test]
-    fn failed_uri_preload_ends_the_current_run_without_replaying_it() {
+    fn failed_uri_preload_does_not_claim_current_or_unattributed_errors() {
         ensure_gstreamer_initialized().expect("initialize GStreamer");
-        let events = Arc::new(Mutex::new(EventMailbox::default()));
-        let mut engine = GstEngine::new(Arc::clone(&events));
-        let current_run = RunId::new(1);
-        let current = PreparedRun {
-            run: current_run,
-            stream: ResolvedStream::new("https://music.example/current.flac").into(),
-        };
-        let settings = BackendAudioSettings {
-            audio_output: Some("fakesink".to_string()),
-            ..BackendAudioSettings::default()
-        };
-        engine
-            .start_pipeline(
-                Slot::Primary,
-                &current,
-                &settings,
-                settings.volume,
-                settings.muted,
-                DEFAULT_PLAYBACK_RATE,
-                gst::State::Null,
-            )
-            .expect("create inactive session");
-        let next = PreparedNext::new(
-            RunId::new(2),
-            ResolvedStream::new("https://music.example/next.flac"),
-            NextTransition::Gapless,
-        );
-        {
-            let mut shared = lock_recover(&engine.shared);
-            shared.current = Some(current);
-            lock_recover(engine.primary.gapless().unwrap()).pending = Some(next);
+        let current_uri = "https://music.example/current.flac";
+        let next_uri = "https://music.example/next.flac";
+        for (failed_uri, pending_uri, next_failed) in [
+            (Some(next_uri), next_uri, true),
+            (Some(current_uri), next_uri, false),
+            (Some(current_uri), current_uri, false),
+            (None, next_uri, false),
+        ] {
+            let events = Arc::new(Mutex::new(EventMailbox::default()));
+            let mut engine = GstEngine::new(Arc::clone(&events));
+            let current_run = RunId::new(1);
+            let current = PreparedRun {
+                run: current_run,
+                stream: ResolvedStream::new(current_uri).into(),
+            };
+            let settings = BackendAudioSettings {
+                audio_output: Some("fakesink".to_string()),
+                ..BackendAudioSettings::default()
+            };
+            let pipeline = engine
+                .start_pipeline(
+                    Slot::Primary,
+                    &current,
+                    &settings,
+                    settings.volume,
+                    settings.muted,
+                    DEFAULT_PLAYBACK_RATE,
+                    gst::State::Null,
+                )
+                .expect("create inactive session");
+            let next = PreparedNext::new(
+                RunId::new(2),
+                ResolvedStream::new(pending_uri),
+                NextTransition::Gapless,
+            );
+            {
+                let mut shared = lock_recover(&engine.shared);
+                shared.current = Some(current);
+                lock_recover(engine.primary.gapless().unwrap()).pending = Some(next);
+            }
+            let details = gst::Structure::builder("message-details")
+                .field_if_some("uri", failed_uri)
+                .build();
+            let message = gst::message::Error::builder(gst::ResourceError::Read, "stream failed")
+                .details(details)
+                .build();
+            engine.handle_message(Slot::Primary, pipeline, &message);
+
+            assert!(!engine.primary.has_session());
+            let events = lock_recover(&events).drain();
+            if next_failed {
+                assert!(matches!(
+                    events.as_slice(),
+                    [
+                        BackendEvent::NextPreparationFailed {
+                            current_run: failed_current,
+                            next_run: failed_next,
+                            ..
+                        },
+                        BackendEvent::Ended { run: ended_run }
+                    ] if *failed_current == current_run
+                        && *failed_next == RunId::new(2)
+                        && *ended_run == current_run
+                ));
+            } else {
+                assert!(matches!(
+                    events.as_slice(),
+                    [BackendEvent::Error { run, .. }] if *run == current_run
+                ));
+            }
         }
-
-        assert!(engine.handle_gapless_preload_error(Slot::Primary, "next stream failed"));
-
-        let shared = lock_recover(&engine.shared);
-        assert!(shared.current.is_none());
-        assert!(shared.next.is_none());
-        assert!(!engine.primary.has_session());
-        assert_eq!(shared.pipeline_id(Slot::Primary), None);
-        drop(shared);
-        assert!(matches!(
-            lock_recover(&events).drain().as_slice(),
-            [
-                BackendEvent::NextPreparationFailed {
-                    current_run: failed_current,
-                    next_run: failed_next,
-                    ..
-                },
-                BackendEvent::Ended { run: ended_run }
-            ] if *failed_current == current_run
-                && *failed_next == RunId::new(2)
-                && *ended_run == current_run
-        ));
     }
 
     #[test]

@@ -107,6 +107,7 @@ pub(crate) struct RouteViewport {
 
 struct MountedRouteEntry {
     route: Route,
+    load_failed: bool,
     view: MountedRoute,
     surface: RouteSurface,
     position_key: Option<RoutePositionKey>,
@@ -231,10 +232,12 @@ impl Shell {
                 Ok(Ok(rows)) => rows,
                 Ok(Err(error)) => {
                     warn!(%error, ?route, context, "failed to prepare route");
+                    shell.show_route_load_error(route, None, render_started);
                     return;
                 }
                 Err(error) => {
                     warn!(%error, ?route, context, "route preparation task failed");
+                    shell.show_route_load_error(route, None, render_started);
                     return;
                 }
             };
@@ -273,30 +276,23 @@ impl Shell {
         glib::spawn_future_local(async move {
             let result = task.await;
             let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(generation) {
+            if !shell.finish_root_order_read(generation)
+                || !route_is_current(&shell, &route, source)
+            {
                 return;
             }
             let prepared = match result {
-                Ok(Ok(prepared)) => Some(prepared),
+                Ok(Ok(prepared)) => prepared,
                 Ok(Err(error)) => {
                     warn!(%error, ?route, context, "failed to prepare route");
-                    None
+                    shell.show_route_load_error(route, Some(source_id), render_started);
+                    return;
                 }
                 Err(error) => {
                     warn!(%error, ?route, context, "route preparation task failed");
-                    None
+                    shell.show_route_load_error(route, Some(source_id), render_started);
+                    return;
                 }
-            };
-            if !route_is_current(&shell, &route, source) {
-                return;
-            }
-            let Some(prepared) = prepared else {
-                shell.replace_mounted_route(route, Some(source_id), render_started, |_| {
-                    MountedRoute::static_widget(gtk_library::route_layout::route_empty_view(
-                        localization::msgid("Nothing here yet"),
-                    ))
-                });
-                return;
             };
             shell.replace_mounted_route(route, Some(source_id), render_started, move |catalog| {
                 build(catalog, prepared, selected)
@@ -363,20 +359,32 @@ impl Shell {
         });
         let shell = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let Ok(Ok(home)) = task.await else { return };
+            let result = task.await;
             let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(generation) {
+            if !shell.finish_root_order_read(generation)
+                || !route_is_current(&shell, &Route::Home, source)
+            {
                 return;
             }
-            if !route_is_current(&shell, &Route::Home, source) {
-                return;
-            }
+            let home = match result {
+                Ok(Ok(home)) => home,
+                Ok(Err(error)) => {
+                    warn!(%error, "failed to refresh Home route");
+                    shell.show_route_load_error(Route::Home, Some(selected.source_id), None);
+                    return;
+                }
+                Err(error) => {
+                    warn!(%error, "Home refresh task failed");
+                    shell.show_route_load_error(Route::Home, Some(selected.source_id), None);
+                    return;
+                }
+            };
             let view = shell
                 .route_viewport
                 .mounted_route
                 .borrow()
                 .as_ref()
-                .filter(|entry| entry.route == Route::Home)
+                .filter(|entry| entry.route == Route::Home && !entry.load_failed)
                 .map(|entry| entry.view.clone());
             if let Some(view) = view {
                 view.apply_home_page(home);
@@ -537,7 +545,7 @@ impl Shell {
             .mounted_route
             .borrow()
             .as_ref()
-            .is_some_and(|entry| entry.route == route);
+            .is_some_and(|entry| entry.route == route && !entry.load_failed);
         if !force && mounted_current {
             self.cancel_root_order_read();
             let current = self.route_viewport.mounted_route.borrow();
@@ -1466,6 +1474,7 @@ impl Shell {
             .mounted_route
             .replace(Some(MountedRouteEntry {
                 route: route.clone(),
+                load_failed: false,
                 view: view.clone(),
                 surface: surface.clone(),
                 position_key,
@@ -1489,6 +1498,49 @@ impl Shell {
                     teardown_ms, model_ms, mount_ms, total_ms, "slow route render"
                 );
             }
+        }
+    }
+
+    fn show_route_load_error(
+        self: &Rc<Self>,
+        route: Route,
+        source_id: Option<SourceId>,
+        render_started: RouteTiming,
+    ) {
+        let resource = crate::ui_resource::ROUTE_ERROR_RESOURCE;
+        let builder = gtk_widgets::ui_resource::builder(resource);
+        gtk_widgets::objects!(builder, resource, {
+            root: gtk::Box,
+            message: gtk::Label,
+            refresh: gtk::Button,
+        });
+        let keep_content = self
+            .route_viewport
+            .mounted_route
+            .borrow()
+            .as_ref()
+            .is_some_and(|entry| {
+                entry.route == route && !entry.load_failed && entry.surface.is_ready()
+            });
+        if keep_content {
+            self.cancel_route_loading();
+            self.control_feedback
+                .show_feedback_toast(message.text().to_string());
+            return;
+        }
+        let shell = Rc::downgrade(self);
+        let reload: MountedRouteResume = Rc::new(move || {
+            if let Some(shell) = shell.upgrade() {
+                shell.replace_current_route_when_ready();
+            }
+        });
+        let clicked = Rc::clone(&reload);
+        refresh.connect_clicked(move |_| clicked());
+        self.replace_mounted_route(route, source_id, render_started, move |_| {
+            MountedRoute::static_widget(root.upcast()).with_catalog_refresh(reload)
+        });
+        if let Some(entry) = self.route_viewport.mounted_route.borrow_mut().as_mut() {
+            entry.load_failed = true;
         }
     }
 

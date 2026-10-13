@@ -10,6 +10,7 @@ pub(crate) const DIAGNOSTICS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell
 pub(crate) const DROP_IMPORT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/drop_import.ui";
 pub(crate) const CONTENT_CHROME_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/shell/content_chrome.ui";
+pub(crate) const ROUTE_ERROR_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/route_error.ui";
 pub(crate) const TOPBAR_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/topbar.ui";
 pub(crate) const SEARCH_POPOVER_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/shell/search_popover.ui";
@@ -25,6 +26,7 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     SHOWCASE_CSS_RESOURCE,
     ABOUT_RESOURCE,
     CONTENT_CHROME_RESOURCE,
+    ROUTE_ERROR_RESOURCE,
     DIAGNOSTICS_RESOURCE,
     DROP_IMPORT_RESOURCE,
     TOPBAR_RESOURCE,

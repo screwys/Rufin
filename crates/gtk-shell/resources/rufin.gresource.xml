@@ -10,6 +10,7 @@
     <file compressed="true">player/random_play.ui</file>
     <file compressed="true">shell/diagnostics.ui</file>
     <file compressed="true">shell/content_chrome.ui</file>
+    <file compressed="true">shell/route_error.ui</file>
     <file compressed="true">shell/navigation.ui</file>
     <file compressed="true">shell/topbar.ui</file>
     <file compressed="true">shell/search_popover.ui</file>

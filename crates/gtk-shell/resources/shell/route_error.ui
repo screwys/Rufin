@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <object class="GtkBox" id="root">
+    <property name="orientation">vertical</property>
+    <property name="spacing">12</property>
+    <property name="hexpand">true</property>
+    <property name="vexpand">true</property>
+    <property name="halign">center</property>
+    <property name="valign">center</property>
+    <style><class name="empty-state"/></style>
+    <child>
+      <object class="GtkLabel" id="message">
+        <property name="label" translatable="yes">Could not load page</property>
+        <property name="wrap">true</property>
+        <property name="justify">center</property>
+        <style><class name="muted"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="refresh">
+        <property name="label" translatable="yes">Refresh</property>
+        <property name="halign">center</property>
+        <style><class name="pill"/></style>
+      </object>
+    </child>
+  </object>
+</interface>
