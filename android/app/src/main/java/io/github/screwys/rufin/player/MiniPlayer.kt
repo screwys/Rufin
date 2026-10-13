@@ -141,7 +141,7 @@ private fun MiniProgress(player: PlayerConnection, duration: ULong, playing: Boo
     LinearProgressIndicator(
         progress = { ((if (interpolate) position else player.playback?.transport?.positionMillis ?: 0UL).toDouble() /
             duration.toDouble()).toFloat().coerceIn(0f, 1f) },
-        modifier = Modifier.fillMaxWidth().height(3.dp), color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.fillMaxWidth().height(3.dp).graphicsLayer(), color = MaterialTheme.colorScheme.primary,
         trackColor = Color.Transparent,
         drawStopIndicator = {},
     )

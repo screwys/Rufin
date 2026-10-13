@@ -2,6 +2,42 @@ use super::*;
 
 #[uniffi::export]
 impl AndroidBrowseQuery {
+    pub fn context_id(&self) -> String {
+        let context = match &self.route {
+            Route::AlbumDetail(uri) => format!("album:{uri}"),
+            Route::ArtistDetail(uri)
+            | Route::ArtistTracks(uri)
+            | Route::ArtistFavoriteTracks(uri)
+            | Route::ArtistDiscography(uri) => format!("artist:{uri}"),
+            Route::AlbumArtistDetail(uri)
+            | Route::AlbumArtistTracks(uri)
+            | Route::AlbumArtistFavoriteTracks(uri)
+            | Route::AlbumArtistDiscography(uri) => format!("album-artist:{uri}"),
+            Route::GenreDetail(key) => format!("genre:{key}"),
+            Route::MoodDetail(key) => format!("mood:{key}"),
+            Route::PlaylistDetail(key) => format!("playlist:{key}"),
+            Route::SmartPlaylistDetail(key) => format!("smart-playlist:{key}"),
+            _ => format!(
+                "android:{}",
+                serde_json::to_string(&self.route).expect("Route serialization")
+            ),
+        };
+        format!(
+            "{context}|query={}|source={}|folder={:?}|sort={:?}|descending={}|favorites={}|downloaded={}",
+            self.filter,
+            self.selected
+                .as_ref()
+                .map_or("rufin", |selected| selected.source_id.as_str()),
+            self.selected
+                .as_ref()
+                .and_then(|selected| selected.music_folder_key),
+            self.sort,
+            self.descending,
+            self.favorites(),
+            self.downloaded()
+        )
+    }
+
     pub fn home_section_title(&self, id: String) -> Option<String> {
         let block =
             serde_json::from_value::<library::HomeBlockKind>(serde_json::Value::String(id)).ok()?;
@@ -302,8 +338,7 @@ impl AndroidBrowseQuery {
                             album_media_uri.as_deref().unwrap_or_default(),
                             self.album_tracks.sort_key,
                             self.album_tracks.descending
-                        )
-                        .into(),
+                        ),
                     )
                 } else if let Some(query) = self.song_query().await.map_err(error)? {
                     let entry = if matches!(query.scope, SongScope::Playlist(_)) {
@@ -340,7 +375,7 @@ impl AndroidBrowseQuery {
                     rufin_core::playback::PlayRequest::captured(
                         selection, anchor, placement, false,
                     )
-                    .with_context(context)
+                    .with_context(context.into())
                     .with_anchor(track_key, entry)
                     .with_context_title(title)
                     .shuffled(shuffled),

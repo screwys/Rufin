@@ -483,7 +483,7 @@ internal fun PlaylistPickerSheet(model: RufinConnection, browse: BrowseConnectio
                 if (playlist == null) Spacer(Modifier.height(72.dp))
                 else {
                     val artwork = rememberArtwork(playlist.artworkIdentity, player, with(LocalDensity.current) { 50.dp.roundToPx() })
-                    ListItem(headlineContent = { BrowseTitle(playlist, player = player) },
+                    ListItem(headlineContent = { BrowseTitle(BrowseItem(playlist, index.toULong(), null), player = player) },
                         supportingContent = { Text(playlist.subtitle, maxLines = 1) },
                         leadingContent = { Artwork(artwork, Modifier.size(50.dp).clip(RoundedCornerShape(8.dp))) },
                         modifier = Modifier.clickable {
@@ -587,17 +587,19 @@ internal class BrowseChoiceSource(
     private val library: AndroidLibrary?, private val route: Route?, private val filter: String,
 ) : PagingSource<Int, AndroidBrowseRow>() {
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, AndroidBrowseRow> = try {
-        val offset = params.key ?: 0
-        if (library == null || route == null) LoadResult.Page(emptyList(), null, null)
-        else {
-            val query = library.browse(route, "tracks", filter, LibraryField.TITLE, false, false, false)
-            try {
-                val count = query.count().toInt()
-                val rows = query.page(offset.toULong(), params.loadSize.toUInt())
-                LoadResult.Page(rows, if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
-                    if (offset + rows.size >= count) null else offset + rows.size,
-                    itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))
-            } finally { query.destroy() }
+        withContext(Dispatchers.Default) {
+            val offset = params.key ?: 0
+            if (library == null || route == null) LoadResult.Page(emptyList(), null, null)
+            else {
+                val query = library.browse(route, "tracks", filter, LibraryField.TITLE, false, false, false)
+                try {
+                    val count = query.count().toInt()
+                    val rows = query.page(offset.toULong(), params.loadSize.toUInt())
+                    LoadResult.Page(rows, if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
+                        if (offset + rows.size >= count) null else offset + rows.size,
+                        itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))
+                } finally { query.destroy() }
+            }
         }
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (error: Exception) { LoadResult.Error(error) }

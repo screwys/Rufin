@@ -70,6 +70,7 @@ import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.core.AndroidScrollSection
 import io.github.screwys.rufin.core.AndroidSortField
+import io.github.screwys.rufin.core.AndroidBrowseItem
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collect
@@ -366,21 +367,27 @@ internal fun favoriteItem(model: io.github.screwys.rufin.app.RufinConnection, it
 }
 
 @Composable
-internal fun BrowseTitle(row: io.github.screwys.rufin.core.AndroidBrowseRow, modifier: Modifier = Modifier,
+internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
     maxLines: Int = 1, style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyLarge,
-    player: PlayerConnection? = null, marquee: Boolean = false, showDownloadBadge: Boolean = true) {
-    val playing by remember(row.kind, row.mediaUri, row.playbackContextId, player) { derivedStateOf {
-        player?.playback?.let { playback ->
-            playback.transport.desiredPlaying && if (row.kind == "track") playback.transport.current?.id?.mediaUri == row.mediaUri else {
+    player: PlayerConnection? = null, marquee: Boolean = false, showDownloadBadge: Boolean = true,
+    title: String = item.row.title) {
+    val row = item.row
+    val occurrence = row.item is AndroidBrowseItem.PlaylistEntry
+    val queryContext = remember(item.query, occurrence) { if (occurrence) item.query?.contextId() else null }
+    val playing by remember(row.kind, row.mediaUri, row.playbackContextId, occurrence, item.index, queryContext, player) { derivedStateOf {
+        player != null && player.playingMediaUri != null &&
+            if (row.kind == "track") {
+                player.playingMediaUri == row.mediaUri && (!occurrence ||
+                    queryContext != null && queryContext == player.currentContextId && item.index == player.currentSourceRank)
+            } else {
                 val target = row.playbackContextId
-                val context = player?.currentContextId
+                val context = player.currentContextId
                 target != null && context != null && (context == target || context.startsWith("$target|query="))
             }
-        } == true
     } }
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         if (playing) PlayingIndicator()
-        Text(row.title, Modifier.weight(1f, fill = false).then(if (marquee) Modifier.rufinMarquee() else Modifier),
+        Text(title, Modifier.weight(1f, fill = false).then(if (marquee) Modifier.rufinMarquee() else Modifier),
             maxLines = maxLines, overflow = TextOverflow.Ellipsis, style = style,
             color = if (playing) MaterialTheme.colorScheme.secondary else LocalContentColor.current)
         if (showDownloadBadge) io.github.screwys.rufin.ui.DownloadBadge(row)
@@ -466,7 +473,7 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
             Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
                 BrowseCover(item, artwork, Modifier.fillMaxSize())
             }
-            BrowseTitle(item.row, Modifier.fillMaxWidth().padding(top = 6.dp),
+            BrowseTitle(item, Modifier.fillMaxWidth().padding(top = 6.dp),
                 maxLines = if (marquee) 1 else 2, style = MaterialTheme.typography.titleSmall, player = player, marquee = marquee)
             val subtitle = listOf(item.row.subtitle, item.row.year?.takeIf { item.row.kind != "track" }?.toString().orEmpty())
                 .filter(String::isNotBlank).joinToString(" · ")
@@ -510,7 +517,7 @@ private fun HomeShowcase(item: BrowseItem, player: PlayerConnection, onActivate:
                             PlayerIconButton("rufin-audio-only-symbolic", "Play radio", { onRadio(item) }, Modifier.size(32.dp), iconSize = 16.dp)
                         }
                     }
-                    BrowseTitle(item.row, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleLarge, player = player, marquee = true)
+                    BrowseTitle(item, Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleLarge, marquee = true)
                     Text(item.row.subtitle, Modifier.rufinMarquee(), style = MaterialTheme.typography.bodyMedium, maxLines = 1)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         item.row.year?.let { SummaryFact("rufin-x-office-calendar-symbolic", "Year", it.toString()) }
@@ -554,7 +561,7 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         BrowseCover(item, artwork, Modifier.size(imageSize))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            BrowseTitle(item.row, player = player)
+            BrowseTitle(item, player = player)
             Text(item.row.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

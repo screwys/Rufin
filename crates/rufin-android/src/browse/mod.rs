@@ -295,31 +295,6 @@ impl AndroidBrowseQuery {
         Ok(self.query().await?.songs())
     }
 
-    fn context_id(&self) -> Arc<str> {
-        let context = match &self.route {
-            Route::AlbumDetail(uri) => format!("album:{uri}"),
-            Route::ArtistDetail(uri)
-            | Route::ArtistTracks(uri)
-            | Route::ArtistFavoriteTracks(uri)
-            | Route::ArtistDiscography(uri) => format!("artist:{uri}"),
-            Route::AlbumArtistDetail(uri)
-            | Route::AlbumArtistTracks(uri)
-            | Route::AlbumArtistFavoriteTracks(uri)
-            | Route::AlbumArtistDiscography(uri) => format!("album-artist:{uri}"),
-            Route::GenreDetail(key) => format!("genre:{key}"),
-            Route::MoodDetail(key) => format!("mood:{key}"),
-            Route::PlaylistDetail(key) => format!("playlist:{key}"),
-            Route::SmartPlaylistDetail(key) => format!("smart-playlist:{key}"),
-            _ => format!(
-                "android:{}",
-                serde_json::to_string(&self.route).expect("Route serialization")
-            ),
-        };
-        format!("{context}|query={}|source={}|folder={:?}|sort={:?}|descending={}|favorites={}|downloaded={}",
-            self.filter, self.selected.as_ref().map_or("rufin", |selected| selected.source_id.as_str()),
-            self.selected.as_ref().and_then(|selected| selected.music_folder_key), self.sort, self.descending, self.favorites(), self.downloaded()).into()
-    }
-
     fn downloaded(&self) -> bool {
         self.downloaded_only && self.supports_downloaded_filter()
     }

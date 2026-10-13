@@ -228,6 +228,12 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         LaunchedEffect(page) { page.observe() }
         route.id to page
     } }
+    val detailPages = browse.details.associateWith { location -> key(location) {
+        val lifetime = rememberCoroutineScope()
+        val page = remember(location) { BrowsePage(model, browse, location, location.options, lifetime) }
+        LaunchedEffect(page) { page.observe() }
+        page
+    } }
     val hasMedia by remember(player) { derivedStateOf { player.currentId?.mediaUri != null } }
     val density = LocalDensity.current
     val playerPadding = if (hasMedia) maxOf(52.dp, with(density) {
@@ -365,8 +371,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     if (browse.section == AppSection.Browse && !browse.detail) Column(Modifier.fillMaxSize()) {
                     if (browse.configuredRoutes.isNotEmpty()) BrowseRouteTabs(browse, routePosition) { id -> selectRoute(id) }
                     libraryTransition.Crossfade(Modifier.weight(1f).fillMaxWidth(), animationSpec = tween(if (reduceMotion) 0 else 180)) { routeId ->
-                        if (routeId != browse.rootId) Spacer(Modifier.fillMaxSize())
-                        else if (browse.library == null) {
+                        if (browse.library == null) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(Modifier.semantics { contentDescription = label("Loading...") })
                             }
@@ -398,13 +403,14 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                             (slideOutHorizontally(tween(if (reduceMotion) 0 else 220)) { -it * direction / 3 } + fadeOut(tween(if (reduceMotion) 0 else 120)))
                     }, label = "libraryDetail") { (depth, location) ->
                         if (location != null) detailState.SaveableStateProvider("$depth:${location.route}") {
+                            val page = remember(location) { detailPages[location] }
                             DisposableEffect(location) {
                                 onDispose { if (location !in browse.details) detailState.removeState("$depth:${location.route}") }
                             }
                             Surface(Modifier.fillMaxSize()) {
                             BrowsePageContent(model, browse, player, location, location.options,
                                 browse.section == AppSection.Browse && !fullPlayer && browse.details.lastOrNull() === location,
-                                { menu = it }, { playlist = it }, { scrolled = it })
+                                { menu = it }, { playlist = it }, { scrolled = it }, owner = page)
                             }
                         }
                     }
@@ -519,25 +525,6 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
         return
     }
     val summary = page.summary
-    val mainArtist = summary?.mode?.kind in listOf("ArtistDetail", "AlbumArtistDetail")
-    val favoritesPage = summary?.favoriteRoute?.takeIf { mainArtist }?.let { route ->
-        val childOptions = remember(route) { BrowseOptions() }
-        SideEffect { childOptions.filter = options.filter }
-        val childLocation = remember(route) { BrowseLocation(route, "Favorite tracks", "ArtistFavoriteTracks", childOptions, location.playbackTitle) }
-        val owner = remember(route) { BrowsePage(model, browse, childLocation, childOptions, scope, embedded = true) }
-        LaunchedEffect(owner) { owner.observe() }
-        owner
-    }
-    val releasePages = page.releaseGroups.filter { it.total > 0UL }.map { group ->
-        key(group.id) {
-            val childOptions = remember(group.route, group.id) { BrowseOptions().also { it.category = "albums" } }
-            SideEffect { childOptions.filter = options.filter }
-            val childLocation = remember(group.route, group.id) { BrowseLocation(group.route, group.title, "ArtistDiscography", childOptions, location.playbackTitle) }
-            val owner = remember(group.route, group.id) { BrowsePage(model, browse, childLocation, childOptions, scope, releaseGroupId = group.id, embedded = true) }
-            LaunchedEffect(owner) { owner.observe() }
-            group to owner
-        }
-    }
     val choices = when (location.kind) {
         "Favorites" -> browse.categories
         "artist" -> browse.categories.filter { it.id != "artists" }
@@ -557,7 +544,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
         if (location.kind in listOf("Folders", "folder")) FolderNavigation(model, browse, page)
         if (summary != null) {
             val context = androidx.compose.ui.platform.LocalContext.current
-            DetailContent(summary, page, player, favoritesPage, releasePages,
+            DetailContent(summary, page, player, page.favoritesPage, page.releasePages,
                 browse::open, onMenu, { item, placement, shuffled -> browse.play(item, placement, shuffled) }, browse::favorite,
                 onPlaylist, { route, title -> browse.openRoute(route, title, route.kind, summary.row.title) },
                 onLink = { link -> model.runAction {
@@ -601,7 +588,7 @@ private fun FolderNavigation(model: RufinConnection, browse: BrowseConnection, p
     var chooser by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         LazyRow(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-            itemsIndexed(page.breadcrumbs, key = { _, crumb -> crumb.route }) { index, crumb ->
+            itemsIndexed(page.breadcrumbs, key = { _, crumb -> crumb.route.toString() }) { index, crumb ->
                 if (index > 0) Text("/", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton({ browse.folderAncestor(crumb.route, crumb.title) }) { Text(crumb.title, maxLines = 1) }
             }

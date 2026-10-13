@@ -42,7 +42,7 @@ impl AndroidBrowseQuery {
         let selection = self.folder_selection().await?;
         let mut request =
             rufin_core::playback::PlayRequest::captured(selection, rank, placement, false)
-                .with_context(self.context_id())
+                .with_context(self.context_id().into())
                 .with_context_title(context_title)
                 .shuffled(shuffled);
         let key = match track_key {

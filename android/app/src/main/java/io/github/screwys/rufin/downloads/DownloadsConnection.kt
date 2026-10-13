@@ -53,10 +53,12 @@ internal class DownloadsConnection(private val model: RufinConnection, scope: Co
             prefetchDistance = 12, maxSize = 96, enablePlaceholders = false)) {
             object : PagingSource<Int, DownloadRow>() {
                 override suspend fun load(params: LoadParams<Int>): LoadResult<Int, DownloadRow> = try {
-                    val offset = params.key ?: 0
-                    val page = owner.queuePage(offset.toULong(), params.loadSize.toUInt())
-                    LoadResult.Page(page.jobs.map { job -> DownloadRow(job, page.previews.find { it.mediaUri == job.previewUris.firstOrNull() }) }, if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
-                        if (offset.toULong() + page.jobs.size.toULong() >= page.total) null else offset + page.jobs.size)
+                    withContext(Dispatchers.Default) {
+                        val offset = params.key ?: 0
+                        val page = owner.queuePage(offset.toULong(), params.loadSize.toUInt())
+                        LoadResult.Page(page.jobs.map { job -> DownloadRow(job, page.previews.find { it.mediaUri == job.previewUris.firstOrNull() }) }, if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
+                            if (offset.toULong() + page.jobs.size.toULong() >= page.total) null else offset + page.jobs.size)
+                    }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { LoadResult.Error(error) }
                 override fun getRefreshKey(state: PagingState<Int, DownloadRow>): Int? = state.anchorPosition?.let {

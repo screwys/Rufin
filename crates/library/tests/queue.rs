@@ -750,6 +750,10 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         assert_eq!(restored.repeat_mode, QueueRepeatMode::All);
         assert!(restored.shuffled);
         for restored in &restored.rows {
+            assert_eq!(
+                restored.source_rank(),
+                [Some(900), Some(2), Some(37), None, None, None, None, None][restored.position]
+            );
             if restored.media_uri == unavailable.media_uri {
                 assert_eq!(restored.item, unavailable);
             }

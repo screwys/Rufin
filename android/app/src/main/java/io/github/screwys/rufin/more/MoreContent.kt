@@ -76,7 +76,7 @@ internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnect
         val direction = if (targetState.second > initialState.second) 1 else -1
         (slideInHorizontally(tween(motionMillis)) { it * direction } + fadeIn(tween(motionMillis / 2))) togetherWith
             (slideOutHorizontally(tween(motionMillis)) { -it * direction / 3 } + fadeOut(tween(motionMillis / 2)))
-    }, label = "moreNavigation") { location ->
+    }, contentKey = { it.first }, label = "moreNavigation") { location ->
     val visible = location.first
     destinations.SaveableStateProvider(visible.name) {
     when (visible) {

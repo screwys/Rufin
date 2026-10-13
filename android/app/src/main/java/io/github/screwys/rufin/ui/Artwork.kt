@@ -146,8 +146,10 @@ internal class ArtworkCache {
         try {
             return load.mutex.withLock {
                 decoded.get(key)?.let { return@withLock it }
-                val encoded = player.artwork(identity.toByteArray(), pixels.toUInt()) ?: return@withLock null
-                val artwork = decodePlayerArtwork(encoded, pixels) ?: return@withLock null
+                val artwork = withContext(Dispatchers.Default) {
+                    val encoded = player.artwork(identity.toByteArray(), pixels.toUInt()) ?: return@withContext null
+                    decodePlayerArtwork(encoded, pixels)
+                } ?: return@withLock null
                 synchronized(decoded) {
                     if (key.revision != revision) null
                     else {

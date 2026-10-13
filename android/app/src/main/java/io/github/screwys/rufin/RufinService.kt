@@ -140,7 +140,9 @@ class RufinService : MediaSessionService() {
                     } }.distinctUntilChanged().collectLatest { key ->
                         val (identity, revision) = key ?: return@collectLatest
                         try {
-                            val artwork = artworkPlayer.artwork(identity.toByteArray(), 512u)
+                            val artwork = withContext(Dispatchers.Default) {
+                                artworkPlayer.artwork(identity.toByteArray(), 512u)
+                            }
                             nativePlayer.updateArtwork(identity, revision, artwork)
                         } catch (cancelled: CancellationException) {
                             throw cancelled

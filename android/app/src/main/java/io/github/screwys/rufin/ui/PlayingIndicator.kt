@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -25,7 +26,7 @@ internal fun PlayingIndicator() {
     }
     val color = MaterialTheme.colorScheme.secondary
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
-    Canvas(Modifier.size(13.dp, 12.dp)) {
+    Canvas(Modifier.size(13.dp, 12.dp).graphicsLayer()) {
         repeat(3) { index ->
             val phase = ((seconds + index * .3) / .9) % 2
             val progress = if (phase <= 1) phase else 2 - phase

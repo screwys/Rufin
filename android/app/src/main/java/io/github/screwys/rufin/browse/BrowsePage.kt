@@ -24,8 +24,13 @@ internal class BrowsePage(
     private val pins: Boolean = false,
     private val releaseGroupId: String? = null,
     private val embedded: Boolean = false,
+    private val parent: BrowsePage? = null,
 ) {
     var active by mutableStateOf(false)
+    var favoritesPage by mutableStateOf<BrowsePage?>(null)
+        private set
+    var releasePages by mutableStateOf<List<Pair<AndroidArtistReleaseGroup, BrowsePage>>>(emptyList())
+        private set
     var supportsFavoriteFilter by mutableStateOf(false)
         private set
     var supportsDownloadedFilter by mutableStateOf(false)
@@ -49,8 +54,6 @@ internal class BrowsePage(
     var summary by mutableStateOf<AndroidDetailSummary?>(null)
         private set
     var detailTrackFields by mutableStateOf<List<AndroidSortField>>(emptyList())
-        private set
-    var releaseGroups by mutableStateOf<List<AndroidArtistReleaseGroup>>(emptyList())
         private set
     var loading by mutableStateOf(true)
         private set
@@ -122,9 +125,9 @@ internal class BrowsePage(
             homeRows.firstOrNull { it.row.sectionId == id }?.row?.section) }
     }
 
-    suspend fun observe() = withContext(Dispatchers.IO) { coroutineScope {
+    suspend fun observe(): Unit = withContext(Dispatchers.IO) { coroutineScope {
         launch {
-            snapshotFlow { Triple(active || embedded || pins, browse.labelsVersion, currentQuery) }
+            snapshotFlow { Triple((parent?.active ?: active) || pins, browse.labelsVersion, currentQuery) }
                 .filter { it.first && it.third != null && it.second != capturedLabelsVersion }
                 .distinctUntilChangedBy { it.second }
                 .collectLatest { (_, labelsVersion, query) ->
@@ -134,7 +137,7 @@ internal class BrowsePage(
                     val display = query.displaySettings()
                     val trackFields = query.detailTrackFields()
                     val detail = if (summary != null) query.detailSummary() else null
-                    val groups = if (releaseGroups.isNotEmpty()) query.artistReleaseGroups() else emptyList()
+                    val groups = if (releasePages.isNotEmpty()) query.artistReleaseGroups() else emptyList()
                     val homeTitles = homeRows.map { it.row.sectionId }.distinct().associateWith(query::homeSectionTitle)
                     if (currentQuery !== query) return@collectLatest
                     Snapshot.withMutableSnapshot {
@@ -143,7 +146,9 @@ internal class BrowsePage(
                         capturedDisplay = display
                         detailTrackFields = trackFields
                         if (detail != null) summary = detail
-                        if (groups.isNotEmpty()) releaseGroups = groups
+                        if (groups.isNotEmpty()) releasePages = releasePages.map { (group, owner) ->
+                            groups.first { it.id == group.id } to owner
+                        }
                         homeRows = homeRows.map { item ->
                             homeTitles[item.row.sectionId]?.let { title -> item.copy(row = item.row.copy(section = title)) } ?: item
                         }
@@ -153,7 +158,7 @@ internal class BrowsePage(
                 }
         }
         snapshotFlow {
-            if (options.preparing || (!active && !embedded && !pins)) null else PageContext(browse.library, connection.sources?.selectedSourceId, connection.catalogRevision,
+            if (options.preparing || (!(parent?.active ?: active) && !pins)) null else PageContext(browse.library, connection.sources?.selectedSourceId, connection.catalogRevision,
                 location.route, options.category, options.filter, options.sort, options.descending, options.favoritesOnly, options.downloadedOnly,
                 revision, if (artistAlbums) browse.artistAlbumsRevision else 0,
                 if (options.downloadedOnly || browse.showDownloadedBadges) connection.downloads.state?.revision else null,
@@ -197,34 +202,46 @@ internal class BrowsePage(
                 Snapshot.withMutableSnapshot {
                     capturedLabelsVersion = labelsVersion
                     currentQuery = query
+                    scrollSections = emptyList()
                     supportsFavoriteFilter = favoriteFilter
                     supportsDownloadedFilter = downloadedFilter
                     sortFields = fields
                     capturedDisplay = display
                     summary = detail
                     detailTrackFields = trackFields
-                    releaseGroups = groups
                     breadcrumbs = crumbs
                     musicFolders = folders
                     homeRows = home
                 }
-                val viewportReady = CompletableDeferred<Unit>()
-                if (isHome) { viewportReady.complete(Unit); loading = false }
-                coroutineScope {
-                    Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
-                        maxSize = 192, enablePlaceholders = !pins,
-                        jumpThreshold = if (pins) PagingSource.LoadResult.Page.COUNT_UNDEFINED else 192)) {
-                        BrowsePagingSource(library, query, count, pins, display, location.playbackTitle) { success ->
-                            if (success && !viewportReady.isCompleted) {
-                                Snapshot.withMutableSnapshot {
-                                    scrollSections = emptyList()
-                                }
-                                viewportReady.complete(Unit)
-                            }
-                            loading = false
+                if (isHome) return@collectLatest
+                if (detail?.mode?.kind in listOf("ArtistDetail", "AlbumArtistDetail", "ArtistDiscography", "AlbumArtistDiscography")) {
+                    coroutineScope {
+                        val favorite = detail?.favoriteRoute?.takeIf {
+                            detail.mode.kind in listOf("ArtistDetail", "AlbumArtistDetail")
+                        }?.let { route ->
+                            val childOptions = BrowseOptions().also { it.filter = context.filter }
+                            val childLocation = BrowseLocation(route, "Favorite tracks", "ArtistFavoriteTracks", childOptions, location.playbackTitle)
+                            BrowsePage(connection, browse, childLocation, childOptions, this, embedded = true, parent = this@BrowsePage)
                         }
-                    }.flow.collect { data.value = it }
+                        val releases = groups.filter { it.total > 0UL }.map { group ->
+                            val childOptions = BrowseOptions().also { it.category = "albums"; it.filter = context.filter }
+                            val childLocation = BrowseLocation(group.route, group.title, "ArtistDiscography", childOptions, location.playbackTitle)
+                            group to BrowsePage(connection, browse, childLocation, childOptions, this,
+                                releaseGroupId = group.id, embedded = true, parent = this@BrowsePage)
+                        }
+                        Snapshot.withMutableSnapshot { favoritesPage = favorite; releasePages = releases; loading = false }
+                        favorite?.let { launch { it.observe() } }
+                        releases.forEach { (_, page) -> launch { page.observe() } }
+                        awaitCancellation()
+                    }
                 }
+                Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
+                    maxSize = 192, enablePlaceholders = !pins,
+                    jumpThreshold = if (pins) PagingSource.LoadResult.Page.COUNT_UNDEFINED else 192)) {
+                    BrowsePagingSource(library, query, count, pins, display, location.playbackTitle) {
+                        loading = false
+                    }
+                }.flow.collect { data.value = it }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { connection.runAction { throw error } }
             finally { loading = false }
@@ -239,22 +256,25 @@ private class BrowsePagingSource(
     private val pins: Boolean,
     private val display: AndroidBrowseDisplay?,
     private val contextTitle: String,
-    private val loaded: (Boolean) -> Unit,
+    private val loaded: () -> Unit,
 ) : PagingSource<Int, BrowseItem>() {
     override val jumpingSupported = true
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, BrowseItem> = try {
-        val offset = params.key ?: 0
-        val pinPage = if (pins) library.pins(offset.toULong(), params.loadSize.toUInt()) else null
-        val total = pinPage?.total?.toInt() ?: count ?: 0
-        val rows = pinPage?.rows ?: query!!.page(offset.toULong(), params.loadSize.toUInt())
-        loaded(true)
-        LoadResult.Page(rows.mapIndexed { index, row -> BrowseItem(row, (offset + index).toULong(), query, display, fromPins = pins, contextTitle = contextTitle) },
-            if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
-            if (pins) pinPage?.nextOffset?.toInt() else if (offset + rows.size >= total) null else offset + rows.size,
-            itemsBefore = if (pins) LoadResult.Page.COUNT_UNDEFINED else offset,
-            itemsAfter = if (pins) LoadResult.Page.COUNT_UNDEFINED else (total - offset - rows.size).coerceAtLeast(0))
+        val page = withContext(Dispatchers.Default) {
+            val offset = params.key ?: 0
+            val pinPage = if (pins) library.pins(offset.toULong(), params.loadSize.toUInt()) else null
+            val total = pinPage?.total?.toInt() ?: count ?: 0
+            val rows = pinPage?.rows ?: query!!.page(offset.toULong(), params.loadSize.toUInt())
+            LoadResult.Page(rows.mapIndexed { index, row -> BrowseItem(row, (offset + index).toULong(), query, display, fromPins = pins, contextTitle = contextTitle) },
+                if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
+                if (pins) pinPage?.nextOffset?.toInt() else if (offset + rows.size >= total) null else offset + rows.size,
+                itemsBefore = if (pins) LoadResult.Page.COUNT_UNDEFINED else offset,
+                itemsAfter = if (pins) LoadResult.Page.COUNT_UNDEFINED else (total - offset - rows.size).coerceAtLeast(0))
+        }
+        loaded()
+        page
     } catch (cancelled: CancellationException) { throw cancelled }
-    catch (error: Exception) { loaded(false); LoadResult.Error(error) }
+    catch (error: Exception) { loaded(); LoadResult.Error(error) }
 
     override fun getRefreshKey(state: PagingState<Int, BrowseItem>): Int? = state.anchorPosition?.let {
         (it - state.config.initialLoadSize / 2).coerceAtLeast(0)

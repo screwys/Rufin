@@ -123,11 +123,13 @@ internal class BrowseConnection(private val connection: RufinConnection, scope: 
                     }
                     searchLoading = true
                     try {
-                        val rows = context.library.search(context.text)
-                        val order = rows.filter { it.kind == "track" }.map { it.mediaUri }
-                        val capture = "search:${context.source}:${context.text}"
-                        searchRows = rows.mapIndexed { index, row ->
-                            BrowseItem(row, index.toULong(), null, searchOrder = order, searchContext = capture, contextTitle = context.text)
+                        searchRows = withContext(Dispatchers.Default) {
+                            val rows = context.library.search(context.text)
+                            val order = rows.filter { it.kind == "track" }.map { it.mediaUri }
+                            val capture = "search:${context.source}:${context.text}"
+                            rows.mapIndexed { index, row ->
+                                BrowseItem(row, index.toULong(), null, searchOrder = order, searchContext = capture, contextTitle = context.text)
+                            }
                         }
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (error: Exception) { connection.runAction { throw error } }

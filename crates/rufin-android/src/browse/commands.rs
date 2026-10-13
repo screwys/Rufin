@@ -291,7 +291,7 @@ impl AndroidLibrary {
                 placement,
                 true,
             )
-            .with_context(query.context_id())
+            .with_context(query.context_id().into())
             .with_context_title(context_title)
             .shuffled(shuffled),
         );

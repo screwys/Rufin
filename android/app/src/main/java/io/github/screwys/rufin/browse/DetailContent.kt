@@ -197,7 +197,7 @@ private fun DetailHeader(
                 summary.mode.kind.endsWith("FavoriteTracks") -> "Favorite tracks"
                 else -> "Tracks"
             }).uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-            BrowseTitle(item.row, maxLines = 1, style = MaterialTheme.typography.titleLarge, marquee = true, player = player)
+            BrowseTitle(item, maxLines = 1, style = MaterialTheme.typography.titleLarge, marquee = true)
             Text("${albumCountText(summary.albumCount)} / ${trackCountText(item.row.trackCount)}",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -228,7 +228,7 @@ private fun DetailHeader(
                         PlayerIconButton("rufin-audio-only-symbolic", "Play radio", { onRadio(item) }, Modifier.size(32.dp), iconSize = 16.dp)
                     }
                 }
-                BrowseTitle(item.row, maxLines = 1, style = MaterialTheme.typography.titleLarge, marquee = true, player = player)
+                BrowseTitle(item, maxLines = 1, style = MaterialTheme.typography.titleLarge, marquee = true)
                 if (item.row.kind == "album" && summary.artistText.isNotBlank()) {
                     val linkColor = MaterialTheme.colorScheme.onSurface
                     val credited = buildAnnotatedString {
@@ -361,13 +361,13 @@ internal fun DetailTrackRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (showImage) DetailCover(detailArtwork(item.row.artworkIdentity, player, imageSize), Modifier.size(imageSize))
                     Column(Modifier.weight(1f)) {
-                        BrowseTitle(item.row.copy(displayTitle = value), maxLines = 1, style = MaterialTheme.typography.bodyMedium, player = player)
+                        BrowseTitle(item, maxLines = 1, style = MaterialTheme.typography.bodyMedium, player = player, title = value)
                         Text(item.row.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                else -> if (field.id == LibraryField.TITLE) BrowseTitle(item.row.copy(displayTitle = value), detailColumn(field.id), maxLines = 2,
-                    style = MaterialTheme.typography.bodyMedium, player = player)
+                else -> if (field.id == LibraryField.TITLE) BrowseTitle(item, detailColumn(field.id), maxLines = 2,
+                    style = MaterialTheme.typography.bodyMedium, player = player, title = value)
                 else Text(value, detailColumn(field.id), maxLines = 2, overflow = TextOverflow.Ellipsis,
                     style = if (field.id == LibraryField.TITLE) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall)
             }
@@ -416,7 +416,7 @@ private fun DetailAlbumRow(item: BrowseItem, player: PlayerConnection, activate:
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         DetailCover(detailArtwork(item.row.artworkIdentity, player, imageSize), Modifier.size(imageSize))
         Column(Modifier.weight(1f)) {
-            BrowseTitle(item.row, style = MaterialTheme.typography.bodyMedium, player = player)
+            BrowseTitle(item, style = MaterialTheme.typography.bodyMedium, player = player)
             Text(item.row.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
             item.row.year?.let { Text(it.toString(), style = MaterialTheme.typography.bodySmall) }
         }

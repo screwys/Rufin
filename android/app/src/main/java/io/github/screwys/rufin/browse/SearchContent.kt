@@ -64,7 +64,7 @@ internal fun SearchContent(
             val artwork = rememberArtwork(item.row.artworkIdentity, player, pixels)
             BrowseSwipeActions(item, true) {
             ListItem(
-                headlineContent = { BrowseTitle(item.row, player = player) },
+                headlineContent = { BrowseTitle(item, player = player) },
                 supportingContent = {
                     Text(listOf(item.row.subtitle, translate(when (item.row.kind) {
                         "album" -> "Album"

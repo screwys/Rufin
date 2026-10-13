@@ -125,7 +125,7 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
                 reportLoading = true
                 reportError = null
                 try {
-                    val loaded = owner.activityOverview(period.year, period.month?.toUByte())
+                    val loaded = withContext(Dispatchers.Default) { owner.activityOverview(period.year, period.month?.toUByte()) }
                     report = loaded
                     reportPeriod = period
                     if (autoplay && preferences?.autoplayFirstTrack != false) {

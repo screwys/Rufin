@@ -1439,6 +1439,12 @@ impl QueueRow {
             _ => None,
         }
     }
+    pub fn source_rank(&self) -> Option<usize> {
+        match &self.provenance {
+            QueueProvenance::Context { source_rank, .. } => Some(*source_rank),
+            _ => None,
+        }
+    }
     pub fn context_title(&self) -> Option<String> {
         match &self.provenance {
             QueueProvenance::Context { context_title, .. } => context_title

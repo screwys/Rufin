@@ -68,8 +68,13 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         private set
     var currentContextId by mutableStateOf<String?>(null)
         private set
+    var currentSourceRank by mutableStateOf<ULong?>(null)
+        private set
     var currentContext by mutableStateOf<Triple<String?, String, String?>?>(null)
         private set
+    val playingMediaUri by derivedStateOf(structuralEqualityPolicy()) {
+        playback?.transport?.takeIf { it.desiredPlaying }?.current?.id?.mediaUri
+    }
     val currentId get() = playback?.transport?.current?.id
     private var displayedArtwork by mutableStateOf<Pair<List<Byte>, PlayerArtwork>?>(null)
     val artwork: PlayerArtwork? get() = displayedArtwork?.second
@@ -110,6 +115,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
             playback = null
             currentItem = null
             currentContextId = null
+            currentSourceRank = null
             currentContext = null
             displayedArtwork = null
             metadataLinks = null
@@ -192,6 +198,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                                 if (rowChanged) {
                                     currentItem = row?.item()
                                     currentContextId = row?.contextId()
+                                    currentSourceRank = row?.sourceRank()
                                     currentContext = row?.let { Triple(it.contextTitle(), it.contextKind(), it.contextCategory()) }
                                 }
                                 val identity = currentItem?.artworkBinding?.toList()
@@ -315,8 +322,12 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         }
         showFeedback(translate("Saved"))
     }
-    fun drawing(targets: List<Double>, width: Float, height: Float, frameNanos: Long, accent: AndroidRgb): AndroidVisualizerDrawing? =
-        bridge?.visualizerDrawing(targets, width.toDouble(), height.toDouble(), frameNanos.toULong(), accent)
+    suspend fun drawing(targets: List<Double>, width: Float, height: Float, frameNanos: Long, accent: AndroidRgb): AndroidVisualizerDrawing? {
+        val player = bridge ?: return null
+        return withContext(Dispatchers.Default) {
+            player.visualizerDrawing(targets, width.toDouble(), height.toDouble(), frameNanos.toULong(), accent)
+        }
+    }
 
     fun togglePlayback() = action { service?.let { if (playback?.transport?.desiredPlaying == true) it.pause() else it.play() } }
     fun next() {
@@ -360,7 +371,9 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         val current = playbackOwner ?: return@action
         withContext(Dispatchers.IO) { current.cycleRepeat() }
     }
-    suspend fun queuePage(offset: ULong, search: String = ""): PreparedQueuePage? = playbackOwner?.queuePage(offset, 80u, search)
+    suspend fun queuePage(offset: ULong, search: String = ""): PreparedQueuePage? = withContext(Dispatchers.Default) {
+        playbackOwner?.queuePage(offset, 80u, search)
+    }
     suspend fun createQueuePlaylist(name: String, sourceId: String?, public: Boolean?) {
         val source = sourceOwner ?: return
         val selection = playbackOwner?.selection() ?: return
