@@ -111,17 +111,10 @@ impl AndroidPreferences {
                 "release_notifications_enabled":ui.release_notifications_enabled,
                 "release_check_interval_hours":ui.release_check_interval_hours,
                 "activity_overview":ui.activity_overview, "backup":ui.backup,
-                "reduce_motion":ui.reduce_motion, "seekbar_waveform_enabled":ui.seekbar_waveform_enabled,
+                "reduce_motion":ui.reduce_motion,
                 "show_downloaded_badges":ui.show_downloaded_badges, "new_playlist_current":ui.new_playlist_current,
                 "auto_dj_refill_threshold":ui.auto_dj_refill_threshold,
-                "clear_queue_includes_current":ui.clear_queue_includes_current,
-                "external_site_links":ui.external_site_links, "external_lyrics_enabled":ui.lyrics.external_lyrics_enabled,
-                "playback":ui.playback, "fullscreen_dynamic_background":ui.fullscreen_dynamic_background,
-                "fullscreen_background_image":ui.fullscreen_background_image,
-                "fullscreen_lyrics_visible":ui.fullscreen_lyrics_visible,
-                "fullscreen_current_lyrics_line_visible":ui.fullscreen_current_lyrics_line_visible,
-                "fullscreen_visualizer_visible":ui.fullscreen_visualizer_visible,
-                "right_panel_combined":ui.right_panel.combined,
+                "external_site_links":ui.external_site_links,
                 "home_blocks":ui.home_blocks, "context_menu":ui.context_menu, "secret_storage_mode":ui.secret_storage_mode,
             }))
         }).await.map_err(error)?.map_err(error)
@@ -184,58 +177,17 @@ impl AndroidPreferences {
                         "backup.schedule.hour" => assign!(ui.backup.schedule.hour),
                         "backup.contents" => assign!(ui.backup.contents),
                         "reduce_motion" => assign!(ui.reduce_motion),
-                        "seekbar_waveform_enabled" => assign!(ui.seekbar_waveform_enabled),
                         "show_downloaded_badges" => assign!(ui.show_downloaded_badges),
                         "new_playlist_current" => assign!(ui.new_playlist_current),
                         "auto_dj_refill_threshold" => assign!(ui.auto_dj_refill_threshold),
-                        "clear_queue_includes_current" => assign!(ui.clear_queue_includes_current),
                         "external_site_links.enabled" => assign!(ui.external_site_links.enabled),
                         "external_site_links.lastfm" => assign!(ui.external_site_links.lastfm),
                         "external_site_links.musicbrainz" => {
                             assign!(ui.external_site_links.musicbrainz)
                         }
                         "external_site_links.server" => assign!(ui.external_site_links.server),
-                        "lyrics.external_lyrics_enabled" => {
-                            assign!(ui.lyrics.external_lyrics_enabled)
-                        }
-                        "playback.transition_mode" => assign!(ui.playback.transition_mode),
-                        "playback.crossfade_seconds" => assign!(ui.playback.crossfade_seconds),
-                        "playback.skip_same_album_crossfade" => {
-                            assign!(ui.playback.skip_same_album_crossfade)
-                        }
-                        "playback.audio_fade_on_status_change" => {
-                            assign!(ui.playback.audio_fade_on_status_change)
-                        }
-                        "playback.loudness_normalization" => {
-                            assign!(ui.playback.loudness_normalization)
-                        }
-                        "playback.loudness_normalization_scope" => {
-                            assign!(ui.playback.loudness_normalization_scope)
-                        }
-                        "playback.ebu_r128_target_lufs" => {
-                            assign!(ui.playback.ebu_r128_target_lufs)
-                        }
-                        "playback.write_ebu_r128_tags" => assign!(ui.playback.write_ebu_r128_tags),
-                        "playback.stream_quality" => assign!(ui.playback.stream_quality),
-                        "playback.playback_rate" => assign!(ui.playback.playback_rate),
-                        "playback.preserve_pitch" => assign!(ui.playback.preserve_pitch),
                         "home_blocks" => assign!(ui.home_blocks),
                         "context_menu" => assign!(ui.context_menu),
-                        "playback.volume_scale" => ui.playback.set_volume_scale_preserving_gain(
-                            serde_json::from_value(value).map_err(|error| error.to_string())?,
-                        ),
-                        "fullscreen_dynamic_background" => {
-                            assign!(ui.fullscreen_dynamic_background)
-                        }
-                        "fullscreen_background_image" => assign!(ui.fullscreen_background_image),
-                        "fullscreen_lyrics_visible" => assign!(ui.fullscreen_lyrics_visible),
-                        "fullscreen_current_lyrics_line_visible" => {
-                            assign!(ui.fullscreen_current_lyrics_line_visible)
-                        }
-                        "fullscreen_visualizer_visible" => {
-                            assign!(ui.fullscreen_visualizer_visible)
-                        }
-                        "right_panel_combined" => assign!(ui.right_panel.combined),
                         _ => return Err("Unknown preference".into()),
                     }
                     Ok(())

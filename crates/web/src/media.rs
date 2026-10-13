@@ -305,10 +305,10 @@ pub(super) fn lyrics_json(current: &CurrentLyrics, settings: &lyrics::Settings) 
             }) => {
                 let readings = document.lines.iter().map(|line| {
                     let supplied = lyrics::pronunciation_line_for(line, pronunciation.as_deref());
-                    let reading = if settings.show_furigana { supplied.and_then(|supplied|lyrics::japanese_reading_from_romanization(&line.text,&supplied.text)) } else { None };
-                    json!({"segments":reading.map(|reading|reading.segments.into_iter().map(|segment|json!({"surface":segment.surface,"furigana":segment.furigana})).collect::<Vec<_>>()),"romanization":if settings.show_romanization { supplied.map(|line|&line.text) } else { None }})
+                    let reading = if settings.preferences.show_furigana { supplied.and_then(|supplied|lyrics::japanese_reading_from_romanization(&line.text,&supplied.text)) } else { None };
+                    json!({"segments":reading.map(|reading|reading.segments.into_iter().map(|segment|json!({"surface":segment.surface,"furigana":segment.furigana})).collect::<Vec<_>>()),"romanization":if settings.preferences.show_romanization { supplied.map(|line|&line.text) } else { None }})
                 }).collect::<Vec<_>>();
-                json!({"state":"ready","document":document,"pronunciation":pronunciation,"readings":readings,"show_romanization":settings.show_romanization,"font_size":settings.lyrics_font_size.unwrap_or(19)})
+                json!({"state":"ready","document":document,"pronunciation":pronunciation,"readings":readings,"show_romanization":settings.preferences.show_romanization,"font_size":settings.preferences.lyrics_font_size.unwrap_or(19)})
             }
             None => json!({"state":"empty"}),
         },

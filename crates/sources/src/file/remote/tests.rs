@@ -661,7 +661,7 @@ async fn dav_recovers_an_unavailable_endpoint_and_keeps_namespace_on_address_edi
     };
     let credentials = FileCredentials {
         secret: "saved-password".into(),
-        headers: vec![("X-Access".into(), "retained-secret".into())],
+        headers: vec![("X-Access".into(), "retained-secret".into()).into()],
     };
     let configuration = settings
         .configuration(SourceId::new("dav:addresses"), "webdav", "Music".into())

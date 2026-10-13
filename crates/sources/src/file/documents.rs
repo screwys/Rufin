@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{SourceError, SourceResult};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct DocumentRoot {
     pub id: String,
     pub uri: String,
@@ -302,7 +303,7 @@ pub(crate) fn save_mapped_artwork(
         if let Some(current) = current {
             delete_document(&current.uri).map_err(|error| {
                 crate::SourceMetadataError::PartiallySaved {
-                    message: error.to_string(),
+                    reason: error.to_string(),
                 }
             })?;
         }

@@ -6,9 +6,9 @@
 -dontwarn java.awt.HeadlessException
 -dontwarn java.awt.Window
 -keepattributes RuntimeVisibleAnnotations
--keep class io.github.screwys.rufin.core.** extends com.sun.jna.Structure { *; }
--keep interface io.github.screwys.rufin.core.** extends com.sun.jna.Callback { *; }
--keepclassmembers class io.github.screwys.rufin.core.** implements com.sun.jna.Callback {
+-keep class io.github.screwys.rufin.** extends com.sun.jna.Structure { *; }
+-keep interface io.github.screwys.rufin.** extends com.sun.jna.Callback { *; }
+-keepclassmembers class io.github.screwys.rufin.** implements com.sun.jna.Callback {
     public *;
 }
 

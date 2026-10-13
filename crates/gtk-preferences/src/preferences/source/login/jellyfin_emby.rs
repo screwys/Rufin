@@ -1,13 +1,12 @@
 use super::*;
-use rufin_core::runtime::source::{
-    EmbyConnectLoginEvent, EmbyConnectLoginMethod, JellyfinQuickConnectEvent,
-};
+use rufin_core::runtime::source::EmbyConnectLoginMethod;
 
 struct Draft {
     manual: bool,
     username: String,
     password: String,
-    servers: Vec<sources::EmbyConnectServer>,
+    servers: Vec<SourceChoice>,
+    authorization: Option<Arc<SourceAuthorization>>,
     server: usize,
     name: String,
     use_instant_mix: bool,
@@ -31,6 +30,7 @@ impl Flow {
                 username: String::new(),
                 password: String::new(),
                 servers: Vec::new(),
+                authorization: None,
                 server: 0,
                 name: saved
                     .map(|s| s.credentials.source_name.clone())
@@ -160,7 +160,7 @@ impl Flow {
                 let names = state
                     .servers
                     .iter()
-                    .map(|s| s.name.clone())
+                    .map(|s| s.title.clone())
                     .collect::<Vec<_>>();
                 let selected = state.server;
                 let account_ready = !state.username.trim().is_empty() && !state.password.is_empty();
@@ -284,7 +284,7 @@ impl Flow {
             let name = {
                 let mut state = state.borrow_mut();
                 state.server = row.selected() as usize;
-                state.servers.get(state.server).map(|s| s.name.clone())
+                state.servers.get(state.server).map(|s| s.title.clone())
             };
             if let Some(name) = name
                 && let Some(row) = name_row.upgrade()
@@ -292,20 +292,22 @@ impl Flow {
                 row.set_text(&name);
             }
         });
-        let accept_servers: Rc<dyn Fn(Vec<sources::EmbyConnectServer>)> = {
+        let accept_servers: Rc<dyn Fn(Arc<SourceAuthorization>)> = {
             let state = self.draft.clone();
             let refresh = refresh.clone();
             let name = name.downgrade();
             let server = server.downgrade();
             let action = action.downgrade();
             let status = status.downgrade();
-            Rc::new(move |servers| {
+            Rc::new(move |authorization: Arc<SourceAuthorization>| {
+                let servers = authorization.choices();
                 let empty = servers.is_empty();
                 let single_server = servers.len() == 1;
-                let default_name = servers.first().map(|s| s.name.clone()).unwrap_or_default();
+                let default_name = servers.first().map(|s| s.title.clone()).unwrap_or_default();
                 {
                     let mut state = state.borrow_mut();
                     state.servers = servers;
+                    state.authorization = Some(authorization);
                     state.server = 0;
                     state.name = default_name.clone();
                 }
@@ -337,10 +339,15 @@ impl Flow {
         sign_in.connect_clicked(move |button| {
             cancel_password();
             let state = state.borrow();
-            let events = source.emby_connect_login(EmbyConnectLoginMethod::Password {
-                username: state.username.clone(),
-                password: state.password.clone(),
-            });
+            let events = SourceAuthorization::new(
+                source.clone(),
+                SourceAuthorizationMethod::Emby {
+                    method: EmbyConnectLoginMethod::Password {
+                        username: state.username.clone(),
+                        password: state.password.clone(),
+                    },
+                },
+            );
             drop(state);
             button.set_sensitive(false);
             if let Some(status) = login_status.upgrade() {
@@ -350,12 +357,11 @@ impl Flow {
             let (status, complete, update) =
                 (login_status.clone(), complete.clone(), update.clone());
             *task.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
-                match events.recv().await {
-                    Ok(Ok(EmbyConnectLoginEvent::Servers(servers))) => {
-                        complete(servers);
+                match events.next().await {
+                    Ok(SourceAuthorizationEvent::Ready { .. }) => {
+                        complete(events);
                         return;
                     }
-                    Ok(Err(error)) => show_error(&status, &error),
                     Err(error) => show_error(&status, &error.to_string()),
                     _ => {}
                 }
@@ -374,21 +380,27 @@ impl Flow {
             let source = source.clone();
             let complete = accept_servers.clone();
             let dialog = present_code_dialog(&parent, move |view| {
-                let events = source.emby_connect_login(EmbyConnectLoginMethod::Pin);
+                let events = SourceAuthorization::new(
+                    source.clone(),
+                    SourceAuthorizationMethod::Emby {
+                        method: EmbyConnectLoginMethod::Pin,
+                    },
+                );
                 let complete = complete.clone();
                 gtk::glib::spawn_future_local(async move {
-                    while let Ok(event) = events.recv().await {
-                        match event {
-                            Ok(EmbyConnectLoginEvent::Code { code, url }) => {
+                    loop {
+                        match events.next().await {
+                            Ok(SourceAuthorizationEvent::Code { code, url }) => {
                                 view.show_code(&code, &url)
                             }
-                            Ok(EmbyConnectLoginEvent::Servers(servers)) => {
+                            Ok(SourceAuthorizationEvent::Ready { .. }) => {
                                 view.close();
-                                complete(servers);
+                                complete(events);
                                 return;
                             }
+                            Ok(SourceAuthorizationEvent::OpenBrowser { .. }) => {}
                             Err(error) => {
-                                show_error(&view.status, &error);
+                                show_error(&view.status, &error.to_string());
                                 return;
                             }
                         }
@@ -415,39 +427,39 @@ impl Flow {
             let (source, local, state, id) =
                 (source.clone(), local.clone(), state.clone(), id.clone());
             let dialog = present_code_dialog(&parent, move |view| {
-                let events = source.jellyfin_quick_connect(address.clone(), trust);
-                let (source, local, state, id) =
-                    (source.clone(), local.clone(), state.clone(), id.clone());
+                let events = SourceAuthorization::new(
+                    source.clone(),
+                    SourceAuthorizationMethod::Jellyfin {
+                        url: address.clone(),
+                        trust_invalid_cert: trust,
+                    },
+                );
+                let (local, state, id) = (local.clone(), state.clone(), id.clone());
                 gtk::glib::spawn_future_local(async move {
-                    while let Ok(event) = events.recv().await {
-                        match event {
-                            Ok(JellyfinQuickConnectEvent::Code { code, url }) => {
+                    loop {
+                        match events.next().await {
+                            Ok(SourceAuthorizationEvent::Code { code, url }) => {
                                 view.show_code(&code, &url)
                             }
-                            Ok(JellyfinQuickConnectEvent::Authorized(login)) => {
-                                let source_name = optional_name(&local.borrow().name);
+                            Ok(SourceAuthorizationEvent::Ready { .. }) => {
+                                let name = local.borrow().name.clone();
                                 let use_instant_mix = state.borrow().use_instant_mix;
+                                gtk::glib::spawn_future_local(async move {
+                                    let _ = events
+                                        .finish(
+                                            name,
+                                            id,
+                                            false,
+                                            SourceAuthorizationInput::Jellyfin { use_instant_mix },
+                                        )
+                                        .await;
+                                });
                                 view.close();
-                                if let Some(source_id) = id {
-                                    source.update_source(
-                                        SourceSettingsChange::JellyfinQuickConnect {
-                                            source_id,
-                                            login,
-                                            source_name,
-                                            use_instant_mix,
-                                        },
-                                    );
-                                } else {
-                                    source.configure_source(SourceSetup::JellyfinQuickConnect {
-                                        login,
-                                        source_name,
-                                        use_instant_mix,
-                                    });
-                                }
                                 return;
                             }
+                            Ok(SourceAuthorizationEvent::OpenBrowser { .. }) => {}
                             Err(error) => {
-                                show_error(&view.status, &error);
+                                show_error(&view.status, &error.to_string());
                                 return;
                             }
                         }
@@ -470,25 +482,29 @@ impl Flow {
                 begin_connect_attempt(&status, button, &tr("Connecting to music server..."));
             }
             if !draft.manual
-                && let Some(server) = draft.servers.get(draft.server).cloned()
+                && let Some(authorization) = draft.authorization.clone()
             {
-                let source_name = optional_name(&draft.name);
-                if let Some(source_id) = source_id.clone() {
-                    let result = source.update_source(SourceSettingsChange::EmbyConnect {
-                        source_id,
-                        server,
-                        source_name,
-                        use_instant_mix,
-                    });
-                    drop(draft);
+                let name = draft.name.clone();
+                let input = SourceAuthorizationInput::Emby {
+                    server_index: draft.server as u32,
+                    use_instant_mix,
+                };
+                let id = source_id.clone();
+                drop(draft);
+                let result = async move {
+                    authorization
+                        .finish(name, id, false, input)
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                };
+                if source_id.is_some() {
                     if let Some(shell) = weak_shell.upgrade() {
                         complete_source_save(&shell, button, result);
                     }
                 } else {
-                    source.configure_source(SourceSetup::EmbyConnect {
-                        server,
-                        source_name,
-                        use_instant_mix,
+                    gtk::glib::spawn_future_local(async move {
+                        let _ = result.await;
                     });
                 }
             } else {
@@ -515,7 +531,12 @@ impl Flow {
                     });
                     drop(draft);
                     if let Some(shell) = weak_shell.upgrade() {
-                        complete_source_save(&shell, button, result);
+                        complete_source_save(&shell, button, async move {
+                            result
+                                .recv()
+                                .await
+                                .unwrap_or_else(|error| Err(error.to_string()))
+                        });
                     }
                 } else {
                     source.configure_source(SourceSetup::JellyfinEmby {

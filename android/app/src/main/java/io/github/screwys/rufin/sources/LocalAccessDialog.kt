@@ -18,7 +18,7 @@ import io.github.screwys.rufin.ui.ErrorNotice
 import io.github.screwys.rufin.ui.userMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import org.json.JSONObject
+import io.github.screwys.rufin.shared.rufin_core.SourceLocalAccess
 
 @Composable
 internal fun LocalAccessDialog(model: RufinConnection, sourceId: String, samplePath: String? = null,
@@ -39,15 +39,14 @@ internal fun LocalAccessDialog(model: RufinConnection, sourceId: String, sampleP
                 ?: error("Service is not connected")
             val setup = runtime.sourceSetup()
             bridge = setup
-            val summary = setup.localAccess(sourceId)?.let(::JSONObject)
-            summary?.optJSONObject("access")?.let { access ->
-                root = access.optString("root_path")
-                serverPrefix = access.optString("server_prefix", "").takeUnless { it == "null" }.orEmpty()
-                localPrefix = access.optString("local_prefix", "").takeUnless { it == "null" }.orEmpty()
+            val summary = setup.localAccess(sourceId)
+            summary?.access?.let { access ->
+                root = access.rootPath
+                serverPrefix = access.serverPrefix.orEmpty()
+                localPrefix = access.localPrefix.orEmpty()
                 configured = true
             }
-            if (samplePath == null) sample = summary?.optJSONObject("status")
-                ?.optString("sample_source_path", "")?.takeUnless { it == "null" }.orEmpty()
+            if (samplePath == null) sample = summary?.status?.sampleSourcePath.orEmpty()
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { failure = error.userMessage() }
         finally { working = false }
@@ -88,11 +87,9 @@ internal fun LocalAccessDialog(model: RufinConnection, sourceId: String, sampleP
                 working = true
                 failure = null
                 try {
-                    val form = JSONObject().put("source_id", sourceId).put("root_path", root)
-                        .put("server_prefix", serverPrefix.trim().ifEmpty { null })
-                        .put("local_prefix", localPrefix.trim().ifEmpty { null })
-                        .put("sample_source_path", sample.takeIf { it.isNotBlank() })
-                    bridge!!.saveLocalAccess(form.toString())
+                    val form = SourceLocalAccess(sourceId, root, serverPrefix.trim().ifEmpty { null },
+                        localPrefix.trim().ifEmpty { null }, sample.takeIf { it.isNotBlank() })
+                    bridge!!.saveLocalAccess(form)
                     onSaved()
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { failure = error.userMessage() }

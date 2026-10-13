@@ -4,6 +4,9 @@
 //! translation, and bounded Library updates. Rufin owns source lifecycle,
 //! artwork preparation, and publication of committed catalog changes.
 
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();
+
 #[cfg(test)]
 extern crate self as sources;
 
@@ -52,7 +55,7 @@ pub use file::playlist::{playlist_file_is_non_audio, playlist_file_revision};
 pub use file::remote::smb::list_smb_shares;
 pub use file::remote::webdav::nextcloud::authorize_nextcloud;
 pub use file::remote::{
-    FileAuthentication, FileCredentials, FileCredentialsEdit, FileSourceSettings,
+    FileAuthentication, FileCredentials, FileCredentialsEdit, FileHeader, FileSourceSettings,
 };
 pub use jellyfin_emby::{
     EmbyConnectLogin, EmbyConnectPin, EmbyConnectServer, JellyfinQuickConnect,

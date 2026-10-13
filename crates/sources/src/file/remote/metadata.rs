@@ -326,7 +326,7 @@ impl FileSource {
             }
         }
         .map_err(|error| SourceMetadataError::PartiallySaved {
-            message: format!("The previous artwork image could not be removed: {error}"),
+            reason: format!("The previous artwork image could not be removed: {error}"),
         })?;
         scan.remove_local_file_paths(&[self.location(current).map_err(metadata_error)?])
             .await

@@ -667,7 +667,7 @@ mod tests {
                 stored.ui.playback.audio_output = Some("receiver-device".into());
                 stored.ui.playback.stream_quality = StreamQuality::Original;
                 stored.ui.random_play.limit = 200;
-                stored.ui.lyrics.lyrics_font_family = Some("Custom font".into());
+                stored.ui.lyrics.preferences.lyrics_font_family = Some("Custom font".into());
                 stored.ui.queue_lyrics_height = Some(200);
                 Ok(())
             })
@@ -709,7 +709,7 @@ mod tests {
         );
         assert_eq!(value.ui.playback.stream_quality, StreamQuality::Original);
         assert_eq!(value.ui.random_play, RandomPlaySettings::default());
-        assert!(value.ui.lyrics.lyrics_font_family.is_none());
+        assert!(value.ui.lyrics.preferences.lyrics_font_family.is_none());
         assert!(value.ui.queue_lyrics_height.is_none());
         assert_eq!(value.jellyfin_device_id, device_identity);
         assert_eq!(

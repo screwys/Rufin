@@ -321,9 +321,9 @@ impl LyricsPane {
             LyricsPaneContent::Document {
                 lyrics,
                 pronunciation,
-                show_furigana: settings.lyrics.show_furigana,
-                show_romanization: settings.lyrics.show_romanization,
-                word_by_word_highlighting: settings.lyrics.karaoke_mode,
+                show_furigana: settings.lyrics.preferences.show_furigana,
+                show_romanization: settings.lyrics.preferences.show_romanization,
+                word_by_word_highlighting: settings.lyrics.preferences.karaoke_mode,
                 dictionary,
             }
         } else if instrumental {
@@ -333,7 +333,7 @@ impl LyricsPane {
         } else {
             LyricsPaneContent::Empty(if settings.private_mode {
                 tr("Server lyrics are off in private mode")
-            } else if !settings.lyrics.external_lyrics_enabled {
+            } else if !settings.lyrics.preferences.external_lyrics_enabled {
                 tr("External lyric lookup is off")
             } else {
                 tr("No lyrics")

@@ -66,17 +66,17 @@ impl crate::Settings {
 
     fn lyrics_plan(&self, private_mode: bool, track_id: &str) -> LyricsPlan {
         let external_enabled =
-            self.external_lyrics_enabled && !self.auto_lyrics_suppressed(track_id);
+            self.preferences.external_lyrics_enabled && !self.auto_lyrics_suppressed(track_id);
         let external_network = external_enabled && !private_mode;
         LyricsPlan {
             external_providers: external_enabled
-                .then(|| self.external_lyrics_providers.clone())
+                .then(|| self.preferences.external_lyrics_providers.clone())
                 .unwrap_or_default(),
             allow_external_fallback: external_network,
-            prefer_server: self.prefer_server_lyrics,
-            require_word_timing: self.karaoke_mode,
-            prefer_translations: self.prefer_translations,
-            preferred_translation_language: self.preferred_translation_language.clone(),
+            prefer_server: self.preferences.prefer_server_lyrics,
+            require_word_timing: self.preferences.karaoke_mode,
+            prefer_translations: self.preferences.prefer_translations,
+            preferred_translation_language: self.preferences.preferred_translation_language.clone(),
         }
     }
 
@@ -104,7 +104,9 @@ impl crate::Settings {
     ) -> bool {
         origin.is_some_and(|origin| {
             matches!(origin, LyricsOrigin::External(_))
-                && self.external_lyrics_network_allowed(private_mode)
+                && self
+                    .preferences
+                    .external_lyrics_network_allowed(private_mode)
                 && !self.auto_lyrics_suppressed(track_id)
         })
     }
@@ -685,18 +687,18 @@ pub async fn external_best_lyrics(
         return Ok(None);
     }
     order_external_results(&mut results, &lookup, providers);
-    let selection = crate::Settings {
+    let selection = crate::UserPreferences {
         karaoke_mode: require_word_timing,
         prefer_translations,
         preferred_translation_language: preferred_translation_language.to_string(),
-        ..crate::Settings::default()
+        ..crate::UserPreferences::default()
     };
     Ok(select_external_lyrics(results, &selection, has_existing_lyrics).await)
 }
 
 async fn select_external_lyrics(
     results: Vec<LyricsSearchResult>,
-    selection: &crate::Settings,
+    selection: &crate::UserPreferences,
     has_existing_lyrics: bool,
 ) -> Option<Lyrics> {
     let mut fallback = None;
@@ -1909,10 +1911,10 @@ mod tests {
         .unwrap();
         for karaoke_mode in [false, true] {
             for prefer_translations in [false, true] {
-                let selection = crate::Settings {
+                let selection = crate::UserPreferences {
                     karaoke_mode,
                     prefer_translations,
-                    ..crate::Settings::default()
+                    ..crate::UserPreferences::default()
                 };
                 for (title, instrumental) in
                     [("Hikaru nara", false), ("Hikaru nara -instrumental-", true)]
@@ -1947,9 +1949,9 @@ mod tests {
             ]"#,
         )
         .unwrap();
-        let selection = crate::Settings {
+        let selection = crate::UserPreferences {
             karaoke_mode: true,
-            ..crate::Settings::default()
+            ..crate::UserPreferences::default()
         };
         let lyrics = select_external_lyrics(candidates, &selection, false)
             .await
@@ -2176,7 +2178,7 @@ mod tests {
         .expect("NetEase response");
         let lyrics = lyrics_from_netease_response(response).expect("lyrics");
         let original = lyrics
-            .selected_document(&crate::Settings::default())
+            .selected_document(&crate::UserPreferences::default())
             .expect("original lyrics");
         let pronunciation = lyrics
             .pronunciation_for(original)

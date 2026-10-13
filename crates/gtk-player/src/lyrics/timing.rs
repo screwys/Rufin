@@ -41,7 +41,13 @@ impl PlayerUi {
         let Some(lyrics) = self.selected_lyrics() else {
             return;
         };
-        let karaoke = self.settings.current.borrow().lyrics.karaoke_mode;
+        let karaoke = self
+            .settings
+            .current
+            .borrow()
+            .lyrics
+            .preferences
+            .karaoke_mode;
         let Some(next_position_millis) = lyrics
             .timing
             .borrow()

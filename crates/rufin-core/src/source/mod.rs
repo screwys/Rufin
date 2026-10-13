@@ -1,4 +1,5 @@
 //! Source configuration, browsing selection, and source work.
+pub mod authorization;
 mod availability;
 mod download;
 pub mod folders;
@@ -1528,124 +1529,101 @@ impl SourceOwner {
         })
     }
 
-    pub fn nextcloud_login(
+    fn login_events<E: Send + 'static>(
         &self,
-        settings: sources::FileSourceSettings,
-        credentials: sources::FileCredentials,
-    ) -> Receiver<Result<crate::runtime::source::NextcloudLoginEvent, String>> {
-        use crate::runtime::source::NextcloudLoginEvent;
-        let (send, receive) = async_channel::bounded(2);
-        self.shared.runtime.spawn(async move {
-            let authorization = sources::authorize_nextcloud(settings, credentials, |url| {
-                let _ = send.try_send(Ok(NextcloudLoginEvent::OpenBrowser(url.to_string())));
-            });
-            tokio::select! {
-                _ = send.closed() => {},
-                result = authorization => {
-                    let _ = send.send(result.map(|(settings, credentials)| NextcloudLoginEvent::Authorized { settings, credentials }).map_err(string_error)).await;
-                }
-            }
-        });
-        receive
-    }
-
-    pub fn emby_connect_login(
-        &self,
-        method: crate::runtime::source::EmbyConnectLoginMethod,
-    ) -> Receiver<Result<crate::runtime::source::EmbyConnectLoginEvent, String>> {
-        use crate::runtime::source::{EmbyConnectLoginEvent, EmbyConnectLoginMethod};
+        method: authorization::SourceAuthorizationMethod,
+        project: impl Fn(authorization::LoginEvent) -> E + Send + Sync + 'static,
+    ) -> Receiver<Result<E, String>> {
+        use crate::runtime::source::{EmbyConnectLoginMethod, PlexLoginMethod};
+        use authorization::{Authorization, LoginEvent, SourceAuthorizationMethod};
         let (send, receive) = async_channel::bounded(2);
         let device_id = self.shared.settings.load().jellyfin_device_id;
         self.shared.runtime.spawn(async move {
             let authorization = async {
-                let login = match method {
-                    EmbyConnectLoginMethod::Password { username, password } => sources::EmbyConnectLogin::password(&username, &password).await?,
-                    EmbyConnectLoginMethod::Pin => {
-                        let pin = sources::EmbyConnectPin::start(device_id).await?;
-                        send.send(Ok(EmbyConnectLoginEvent::Code { code: pin.code.clone(), url: pin.approval_url().into() }))
-                            .await.map_err(|_| SourceError::Cancelled)?;
-                        loop {
-                            if let Some(login) = pin.poll().await? { break login; }
-                            tokio::time::sleep(Duration::from_secs(2)).await;
-                        }
+                Ok::<_, SourceError>(match method {
+                    SourceAuthorizationMethod::Nextcloud { settings, credentials } => {
+                        let (settings, credentials) = sources::authorize_nextcloud(settings, credentials, |url| {
+                            let _ = send.try_send(Ok(project(LoginEvent::OpenBrowser(url.to_owned()))));
+                        }).await?;
+                        Authorization::Files { settings, credentials }
                     }
-                };
-                login.servers().await
-            };
-            tokio::select! {
-                _ = send.closed() => {},
-                result = authorization => {
-                    let _ = send.send(result.map(EmbyConnectLoginEvent::Servers).map_err(string_error)).await;
-                }
-            }
-        });
-        receive
-    }
-
-    pub fn jellyfin_quick_connect(
-        &self,
-        server_url: String,
-        trust_invalid_cert: bool,
-    ) -> Receiver<Result<crate::runtime::source::JellyfinQuickConnectEvent, String>> {
-        use crate::runtime::source::JellyfinQuickConnectEvent;
-        let (send, receive) = async_channel::bounded(2);
-        let device_id = self.shared.settings.load().jellyfin_device_id;
-        self.shared.runtime.spawn(async move {
-            let authorization = async {
-                let quick = sources::JellyfinQuickConnect::start(server_url, trust_invalid_cert, device_id).await?;
-                send.send(Ok(JellyfinQuickConnectEvent::Code { code: quick.code.clone(), url: quick.approval_url.clone() }))
-                    .await.map_err(|_| SourceError::Cancelled)?;
-                loop {
-                    if let Some(login) = quick.poll().await? { break Ok::<_, SourceError>(login); }
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-            };
-            tokio::select! {
-                _ = send.closed() => {},
-                result = authorization => {
-                    let _ = send.send(result.map(JellyfinQuickConnectEvent::Authorized).map_err(string_error)).await;
-                }
-            }
-        });
-        receive
-    }
-
-    pub fn plex_login(
-        &self,
-        method: crate::runtime::source::PlexLoginMethod,
-    ) -> Receiver<Result<crate::runtime::source::PlexLoginEvent, String>> {
-        use crate::runtime::source::{PlexLoginEvent, PlexLoginMethod};
-        let (send, receive) = async_channel::bounded(2);
-        self.shared.runtime.spawn(async move {
-            let authorization = async {
-                let client_id = fresh_source_id().map_err(SourceError::Other)?.as_str().to_owned();
-                match method {
-                    PlexLoginMethod::Password { username, password, verification_code } => {
-                        sources::PlexLogin::password(client_id, &username, &password, verification_code.as_deref()).await
-                    }
-                    PlexLoginMethod::Browser => {
-                        let mut login = sources::PlexLogin::browser(client_id).await?;
-                        send.send(Ok(PlexLoginEvent::OpenBrowser(login.url().to_owned())))
-                            .await.map_err(|_| SourceError::Cancelled)?;
-                        let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
-                        loop {
-                            if let Some(login) = login.poll().await? { break Ok(login); }
-                            if tokio::time::Instant::now() >= deadline {
-                                break Err(SourceError::Auth("Plex browser login expired".into()));
+                    SourceAuthorizationMethod::Emby { method } => {
+                        let login = match method {
+                            EmbyConnectLoginMethod::Password { username, password } => sources::EmbyConnectLogin::password(&username, &password).await?,
+                            EmbyConnectLoginMethod::Pin => {
+                                let pin = sources::EmbyConnectPin::start(device_id).await?;
+                                send.send(Ok(project(LoginEvent::Code { code: pin.code.clone(), url: pin.approval_url().into() }))).await.map_err(|_| SourceError::Cancelled)?;
+                                loop {
+                                    if let Some(login) = pin.poll().await? { break login; }
+                                    tokio::time::sleep(Duration::from_secs(2)).await;
+                                }
                             }
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                        }
+                        };
+                        Authorization::Emby(login.servers().await?)
                     }
-                }
+                    SourceAuthorizationMethod::Jellyfin { url, trust_invalid_cert } => {
+                        let quick = sources::JellyfinQuickConnect::start(url, trust_invalid_cert, device_id).await?;
+                        send.send(Ok(project(LoginEvent::Code { code: quick.code.clone(), url: quick.approval_url.clone() }))).await.map_err(|_| SourceError::Cancelled)?;
+                        let login = loop {
+                            if let Some(login) = quick.poll().await? { break login; }
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                        };
+                        Authorization::Jellyfin(login)
+                    }
+                    SourceAuthorizationMethod::Plex { method } => {
+                        let client_id = fresh_source_id().map_err(SourceError::Other)?.as_str().to_owned();
+                        let login = match method {
+                            PlexLoginMethod::Password { username, password, verification_code } => sources::PlexLogin::password(client_id, &username, &password, verification_code.as_deref()).await?,
+                            PlexLoginMethod::Browser => {
+                                let mut login = sources::PlexLogin::browser(client_id).await?;
+                                send.send(Ok(project(LoginEvent::OpenBrowser(login.url().to_owned())))).await.map_err(|_| SourceError::Cancelled)?;
+                                let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+                                loop {
+                                    if let Some(login) = login.poll().await? { break login; }
+                                    if tokio::time::Instant::now() >= deadline { return Err(SourceError::Auth("Plex browser login expired".into())); }
+                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                }
+                            }
+                        };
+                        Authorization::Plex { login, profiles: Vec::new(), profile: None, servers: Vec::new() }
+                    }
+                })
             };
             tokio::select! {
                 _ = send.closed() => {},
-                result = authorization => {
-                    let _ = send.send(result.map(|login| PlexLoginEvent::Authorized(Box::new(login))).map_err(string_error)).await;
-                }
+                result = authorization => { let _ = send.send(result.map(|authorized| project(LoginEvent::Authorized(authorized))).map_err(string_error)).await; }
             }
         });
         receive
+    }
+
+    pub fn login(
+        &self,
+        method: authorization::SourceAuthorizationMethod,
+    ) -> Receiver<Result<crate::runtime::source::SourceLoginEvent, String>> {
+        use crate::runtime::source::SourceLoginEvent;
+        use authorization::{Authorization, LoginEvent};
+        self.login_events(method, |event| match event {
+            LoginEvent::Code { code, url } => SourceLoginEvent::Code { code, url },
+            LoginEvent::OpenBrowser(url) => SourceLoginEvent::OpenBrowser(url),
+            LoginEvent::Authorized(Authorization::Emby(servers)) => {
+                SourceLoginEvent::Servers(servers)
+            }
+            LoginEvent::Authorized(Authorization::Jellyfin(login)) => {
+                SourceLoginEvent::Jellyfin(login)
+            }
+            LoginEvent::Authorized(Authorization::Plex { login, .. }) => {
+                SourceLoginEvent::Plex(Box::new(login))
+            }
+            LoginEvent::Authorized(Authorization::Files {
+                settings,
+                credentials,
+            }) => SourceLoginEvent::Files {
+                settings,
+                credentials,
+            },
+            _ => unreachable!(),
+        })
     }
 
     pub fn plex_profiles(
@@ -1796,6 +1774,19 @@ impl SourceOwner {
             )
             .await
             .map_err(string_error)
+    }
+
+    pub fn selected_source_summary(&self) -> Option<(SourceId, String)> {
+        let source_id = self
+            .shared
+            .selected
+            .lock()
+            .unwrap()
+            .as_ref()?
+            .source_id
+            .clone();
+        let name = self.shared.settings.source_name(&source_id);
+        Some((source_id, name))
     }
 
     pub fn selected_library(&self) -> Option<SelectedLibrary> {
@@ -3489,75 +3480,53 @@ fn source_refresh_error_text(error: &SourceError) -> String {
 }
 
 fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource, String> {
+    let mut editable = EditableSource {
+        source: SourceSummary {
+            id: configuration.source_id.clone(),
+            kind: configuration.kind.clone(),
+            name: configuration.name.clone(),
+            transcoded_download_bitrate_limit_kbps: configuration
+                .transcoded_download_bitrate_limit_kbps(),
+            half_stars_enabled: matches!(configuration.kind.as_str(), "jellyfin" | "emby" | "plex"),
+            supports_playlist_public: configuration.supports_playlist_public(),
+        },
+        credentials: CredentialPreset {
+            source_name: configuration.name.clone(),
+            server_url: String::new(),
+            username: String::new(),
+            trust_invalid_cert: false,
+            open_subsonic_authentication: None,
+        },
+        plex_settings: None,
+        file_settings: None,
+        use_instant_mix: None,
+        emby_connect: false,
+    };
     match configuration.editable().map_err(string_error)? {
-        sources::EditableSource::Plex { settings, .. } => Ok(EditableSource {
-            file_settings: None,
-            source: SourceSummary {
-                id: configuration.source_id.clone(),
-                kind: configuration.kind.clone(),
-                name: configuration.name.clone(),
-                transcoded_download_bitrate_limit_kbps: configuration
-                    .transcoded_download_bitrate_limit_kbps(),
-                half_stars_enabled: true,
-                supports_playlist_public: configuration.supports_playlist_public(),
-            },
-            credentials: CredentialPreset {
-                source_name: settings.name.clone(),
-                server_url: settings.address_override.clone().unwrap_or_default(),
-                username: String::new(),
-                trust_invalid_cert: settings.trust_invalid_cert,
-                open_subsonic_authentication: None,
-            },
-            use_instant_mix: None,
-            emby_connect: false,
-            plex_settings: Some(settings),
-        }),
+        sources::EditableSource::Plex { settings, .. } => {
+            editable.credentials.server_url = settings.address_override.clone().unwrap_or_default();
+            editable.credentials.trust_invalid_cert = settings.trust_invalid_cert;
+            editable.plex_settings = Some(settings);
+        }
         sources::EditableSource::Credentials {
             credentials,
             use_instant_mix,
             emby_connect,
             ..
-        } => Ok(EditableSource {
-            plex_settings: None,
-            file_settings: None,
-            source: SourceSummary {
-                id: configuration.source_id.clone(),
-                kind: configuration.kind.clone(),
-                name: configuration.name.clone(),
-                transcoded_download_bitrate_limit_kbps: configuration
-                    .transcoded_download_bitrate_limit_kbps(),
-                half_stars_enabled: matches!(configuration.kind.as_str(), "jellyfin" | "emby"),
-                supports_playlist_public: configuration.supports_playlist_public(),
-            },
-            credentials,
-            use_instant_mix,
-            emby_connect,
-        }),
-        sources::EditableSource::Files { settings, .. } => Ok(EditableSource {
-            plex_settings: None,
-            source: SourceSummary {
-                id: configuration.source_id.clone(),
-                kind: configuration.kind.clone(),
-                name: configuration.name.clone(),
-                transcoded_download_bitrate_limit_kbps: None,
-                half_stars_enabled: false,
-                supports_playlist_public: configuration.supports_playlist_public(),
-            },
-            credentials: CredentialPreset {
-                source_name: configuration.name.clone(),
-                server_url: settings.url.clone(),
-                username: settings.username.clone(),
-                trust_invalid_cert: settings.trust_invalid_certificate,
-                open_subsonic_authentication: None,
-            },
-            use_instant_mix: None,
-            emby_connect: false,
-            file_settings: Some(settings),
-        }),
-        sources::EditableSource::Local { .. } => {
-            Err("Local folders are edited from the Local source panel".to_string())
+        } => {
+            editable.credentials = credentials;
+            editable.use_instant_mix = use_instant_mix;
+            editable.emby_connect = emby_connect;
         }
+        sources::EditableSource::Files { settings, .. } => {
+            editable.credentials.server_url = settings.url.clone();
+            editable.credentials.username = settings.username.clone();
+            editable.credentials.trust_invalid_cert = settings.trust_invalid_certificate;
+            editable.file_settings = Some(settings);
+        }
+        sources::EditableSource::Local { .. } => {}
     }
+    Ok(editable)
 }
 
 fn local_roots(configuration: &SourceConfiguration) -> Result<Vec<PathBuf>, String> {

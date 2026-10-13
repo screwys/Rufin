@@ -4,18 +4,17 @@ use std::{
 };
 
 use adw::prelude::*;
-use localization::{msgid, tr, trn_with};
+use localization::{tr, trn_with};
 use sources::SourceMetadataError;
 
 use gtk_widgets::field_layout::{compact_field_row_group, style_compact_field_row};
 use gtk_widgets::layout::large_popup_content_width;
-use rufin_core::source::SourceOwner;
 use std::sync::Arc;
 
 const EDITOR_WIDTH: i32 = 650;
 
 pub use rufin_core::metadata::MetadataDraft;
-use rufin_core::metadata::{MetadataEditor, MetadataItemId, identification_available};
+use rufin_core::metadata::MetadataEditor;
 
 mod artwork;
 
@@ -29,12 +28,11 @@ struct Editor {
     draft: Arc<MetadataDraft>,
     entries: Vec<MetadataEntry>,
     locked: Option<adw::SwitchRow>,
-    model: RefCell<MetadataEditor>,
+    model: Arc<MetadataEditor>,
     status: gtk::Label,
     identify: gtk::Button,
     save: gtk::Button,
     cancel: gtk::Button,
-    external_lookup_allowed: bool,
     busy: Cell<bool>,
     artwork: artwork::ArtworkEditor,
 }
@@ -51,12 +49,7 @@ pub fn metadata_error_dialog(message: &str) -> adw::Dialog {
     error_dialog
 }
 
-pub fn build_dialog(
-    source: &Arc<SourceOwner>,
-    item: MetadataItemId,
-    draft: MetadataDraft,
-    external_lookup_allowed: bool,
-) -> adw::Dialog {
+pub fn build_dialog(model: Arc<MetadataEditor>) -> adw::Dialog {
     let resource = crate::ui_resource::METADATA_DIALOG_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
@@ -86,9 +79,9 @@ pub fn build_dialog(
                 .set_follows_content_size(pages.visible_child_name().as_deref() == Some("artwork"));
         }
     });
-    let model = MetadataEditor::new(draft);
     let draft = Arc::clone(&model.draft);
-    identify.set_sensitive(draft.source_search || external_lookup_allowed);
+    let external_lookup_allowed = model.snapshot().external_lookup_allowed;
+    identify.set_sensitive(model.snapshot().can_identify);
     let mut entries = Vec::new();
     let mut locked = None;
     append_draft_fields(&model, &mut entries, &mut locked);
@@ -107,18 +100,17 @@ pub fn build_dialog(
         draft,
         entries,
         locked,
-        model: RefCell::new(model),
+        model,
         status,
         identify,
         save,
         cancel,
-        external_lookup_allowed,
         busy: Cell::new(false),
         artwork,
     });
     connect_editor_changes(&editor);
-    for row in &editor.entries {
-        refresh_identified_field(&editor, &row.field);
+    for presented in editor.model.snapshot().fields {
+        refresh_identified_field(&editor, &presented.field.key, presented.identified);
     }
     refresh_save_state(&editor);
     let editor_lifetime = RefCell::new(Some(Rc::clone(&editor)));
@@ -131,9 +123,9 @@ pub fn build_dialog(
             dialog.close();
         }
     });
-    connect_identify(source, item.clone(), &editor);
-    artwork::connect(source, &editor);
-    connect_save(source, item, &editor_dialog, &editor);
+    connect_identify(&editor);
+    artwork::connect(&editor);
+    connect_save(&editor_dialog, &editor);
     editor_dialog
 }
 
@@ -176,7 +168,9 @@ fn append_draft_fields(
     entries: &mut Vec<MetadataEntry>,
     locked: &mut Option<adw::SwitchRow>,
 ) {
-    for field in model.fields() {
+    let snapshot = model.snapshot();
+    for presented in snapshot.fields {
+        let field = presented.field;
         append_named_entry(
             entries,
             field.key.clone(),
@@ -199,7 +193,7 @@ fn append_draft_fields(
             );
         }
     }
-    append_lock(locked, model.locked(), model.writable("locked"));
+    append_lock(locked, snapshot.locked, snapshot.lock_writable);
 }
 
 fn append_named_entry(
@@ -248,17 +242,19 @@ fn append_lock(target: &mut Option<adw::SwitchRow>, value: Option<bool>, writabl
 fn connect_editor_changes(editor: &Rc<Editor>) {
     for row in editor.entries.iter() {
         let field = row.field.clone();
+        let writable = editor.writable(&field);
         let editor_changed = Rc::downgrade(editor);
         row.entry.connect_changed(move |entry| {
+            if !writable {
+                return;
+            }
             let Some(editor_changed) = editor_changed.upgrade() else {
                 return;
             };
             let text = entry.text().to_string();
-            let mut model = editor_changed.model.borrow_mut();
-            if model.text(&field) != text {
-                model.set_text(&field, text);
+            if let Err(error) = editor_changed.model.set_field(field.clone(), text) {
+                editor_changed.show_error(&error.to_string());
             }
-            drop(model);
             refresh_save_state(&editor_changed);
         });
         let field = row.field.clone();
@@ -267,7 +263,7 @@ fn connect_editor_changes(editor: &Rc<Editor>) {
             let Some(editor_undo) = editor_undo.upgrade() else {
                 return;
             };
-            if editor_undo.model.borrow_mut().undo_identified(&field) {
+            if editor_undo.model.undo_identified(field.clone()) {
                 refresh_editor_fields(&editor_undo);
                 refresh_save_state(&editor_undo);
             }
@@ -279,22 +275,24 @@ fn connect_editor_changes(editor: &Rc<Editor>) {
             let Some(editor) = editor.upgrade() else {
                 return;
             };
-            editor.model.borrow_mut().set_locked(locked.is_active());
+            if let Err(error) = editor.model.set_locked(locked.is_active()) {
+                editor.show_error(&error.to_string());
+            }
             refresh_save_state(&editor);
         });
     }
 }
 
 fn refresh_editor_fields(editor: &Editor) {
-    let fields = editor.model.borrow().fields();
-    for field in fields {
+    let fields = editor.model.snapshot().fields;
+    for presented in fields {
+        let field = presented.field;
         editor.entry(&field.key).set_text(&field.value);
-        refresh_identified_field(editor, &field.key);
+        refresh_identified_field(editor, &field.key, presented.identified);
     }
 }
 
-fn refresh_identified_field(editor: &Editor, field: &str) {
-    let identified = editor.model.borrow().is_identified(field);
+fn refresh_identified_field(editor: &Editor, field: &str, identified: bool) {
     let row = editor
         .entries
         .iter()
@@ -308,69 +306,38 @@ fn refresh_identified_field(editor: &Editor, field: &str) {
     }
 }
 fn refresh_save_state(editor: &Editor) {
-    editor.save.set_sensitive(
-        !editor.busy.get()
-            && !editor.artwork.pending()
-            && (editor.model.borrow().has_changes() || editor.artwork.edit().is_some()),
-    );
-    let model = editor.model.borrow();
-    editor.identify.set_sensitive(
-        !editor.busy.get()
-            && identification_available(
-                editor.draft.source_search,
-                editor.external_lookup_allowed,
-                editor.draft.kind,
-                &model.values(),
-            ),
-    );
+    let state = editor.model.snapshot();
+    let editable = !editor.busy.get() && state.committed.is_none();
+    editor
+        .save
+        .set_sensitive(editable && !editor.artwork.pending() && state.has_changes);
+    editor
+        .identify
+        .set_sensitive(editable && state.can_identify);
 }
 
-fn connect_identify(source: &Arc<SourceOwner>, item: MetadataItemId, editor: &Rc<Editor>) {
-    let source = Arc::downgrade(source);
+fn connect_identify(editor: &Rc<Editor>) {
     let identify = editor.identify.clone();
     let editor = Rc::downgrade(editor);
     identify.connect_clicked(move |_| {
-        let Some(source) = source.upgrade() else {
-            return;
-        };
         let Some(editor) = editor.upgrade() else {
             return;
         };
-        let values = editor.model.borrow().values();
-        if !identification_available(
-            editor.draft.source_search,
-            editor.external_lookup_allowed,
-            editor.draft.kind,
-            &values,
-        ) {
+        if !editor.model.snapshot().can_identify {
             return;
         }
         editor.set_busy(true, &tr("Identifying..."));
-        let receiver = rufin_core::metadata::identify_metadata(
-            &source,
-            item.media_uri().to_string(),
-            editor.draft.kind,
-            values,
-        );
+        let model = editor.model.clone();
         let editor = Rc::downgrade(&editor);
         gtk::glib::spawn_future_local(async move {
-            let response = receiver
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(tr(msgid("Metadata editing is no longer available"))));
+            let response = model.identify().await;
             let Some(editor) = editor.upgrade() else {
                 return;
             };
             match response {
-                Ok(Some(identified)) => {
-                    editor
-                        .model
-                        .borrow_mut()
-                        .apply_identified(identified.changes, identified.token);
-                    refresh_editor_fields(&editor);
-                }
-                Ok(None) => {}
-                Err(error) => editor.show_error(&error),
+                Ok(()) => refresh_editor_fields(&editor),
+                Err(SourceMetadataError::Write(message)) => editor.show_error(&message),
+                Err(error) => editor.show_error(&error.to_string()),
             }
             editor.set_busy(false, &tr("Identify"));
             refresh_save_state(&editor);
@@ -378,69 +345,37 @@ fn connect_identify(source: &Arc<SourceOwner>, item: MetadataItemId, editor: &Rc
     });
 }
 
-fn connect_save(
-    source: &Arc<SourceOwner>,
-    item: MetadataItemId,
-    dialog: &adw::Dialog,
-    editor: &Rc<Editor>,
-) {
-    let source = Arc::downgrade(source);
+fn connect_save(dialog: &adw::Dialog, editor: &Rc<Editor>) {
     let dialog = dialog.downgrade();
     let save = editor.save.clone();
     let editor = Rc::downgrade(editor);
     save.connect_clicked(move |_| {
-        let Some(source) = source.upgrade() else {
-            return;
-        };
         let Some(editor) = editor.upgrade() else {
             return;
         };
-        let edit = match editor.model.borrow().edit(editor.artwork.edit()) {
-            Ok(edit) => edit,
-            Err(error) => {
-                editor.show_error(&error);
-                return;
-            }
-        };
         editor.set_busy(true, &tr("Saving..."));
-        let revision = editor.draft.revision.clone();
-        let token = editor.model.borrow().token();
-        let receiver = rufin_core::metadata::write_reviewed_metadata(
-            &source,
-            item.media_uri().to_string(),
-            revision,
-            token,
-            edit,
-            editor.draft.artwork.binding.clone(),
-        );
+        let model = editor.model.clone();
         let editor = Rc::downgrade(&editor);
         let dialog = dialog.clone();
         gtk::glib::spawn_future_local(async move {
-            let response = receiver
-                .recv()
-                .await
-                .unwrap_or(Err(SourceMetadataError::Unavailable));
+            let response = model.save().await;
             let Some(editor) = editor.upgrade() else {
                 return;
             };
-            editor.model.borrow_mut().record_save_result(&response);
             match response {
                 Ok(()) => {
                     if let Some(dialog) = dialog.upgrade() {
                         dialog.force_close();
                     }
                 }
-                Err(
-                    error @ (SourceMetadataError::SavedRefreshFailed(_)
-                    | SourceMetadataError::PartiallySaved { .. }),
-                ) => {
-                    editor.show_error(&error.to_string());
-                    editor.finish_committed_save(editor.model.borrow().committed().unwrap());
-                }
                 Err(error) => {
                     editor.show_error(&error.to_string());
-                    editor.set_busy(false, &tr("Save"));
-                    refresh_save_state(&editor);
+                    if let Some(fully_saved) = editor.model.snapshot().committed {
+                        editor.finish_committed_save(fully_saved);
+                    } else {
+                        editor.set_busy(false, &tr("Save"));
+                        refresh_save_state(&editor);
+                    }
                 }
             }
         });
@@ -499,6 +434,9 @@ impl Editor {
         }
     }
     fn writable(&self, field: &str) -> bool {
-        self.model.borrow().writable(field)
+        self.draft
+            .fields
+            .iter()
+            .any(|candidate| candidate.key == field && candidate.writable)
     }
 }

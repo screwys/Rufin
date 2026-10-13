@@ -1,6 +1,7 @@
 use super::*;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct FileIntegration {
     pub id: SourceId,
     pub name: String,
@@ -9,6 +10,62 @@ pub struct FileIntegration {
 }
 
 impl SourceOwner {
+    pub async fn save_files(
+        &self,
+        source_id: Option<SourceId>,
+        smb: bool,
+        integration: bool,
+        name: String,
+        settings: sources::FileSourceSettings,
+        credentials: sources::FileCredentialsEdit,
+    ) -> Result<SourceId, String> {
+        if let Some(source_id) = source_id {
+            let input = SourceSettingsChange::Files {
+                source_id: source_id.clone(),
+                name,
+                settings,
+                credentials,
+            };
+            let result = if integration {
+                self.update_file_integration(input)
+            } else {
+                self.update_source(input)
+            };
+            result.recv().await.map_err(string_error)??;
+            Ok(source_id)
+        } else {
+            let credentials = sources::FileCredentials {
+                secret: credentials.secret.unwrap_or_default(),
+                headers: credentials.headers.unwrap_or_default(),
+            };
+            let input = if smb {
+                SourceSetup::Smb {
+                    name,
+                    settings,
+                    credentials,
+                }
+            } else {
+                SourceSetup::WebDav {
+                    name,
+                    settings,
+                    credentials,
+                }
+            };
+            if integration {
+                self.configure_file_integration(input)
+                    .recv()
+                    .await
+                    .map_err(string_error)?
+            } else {
+                self.configure_source(input)
+                    .recv()
+                    .await
+                    .map_err(string_error)?
+                    .map(|selected| selected.source_id)
+            }
+        }
+    }
+
     pub fn file_integrations(&self) -> Vec<FileIntegration> {
         let stored = self.shared.settings.load();
         stored

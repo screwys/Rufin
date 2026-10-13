@@ -1,0 +1,4 @@
+[bindings.kotlin]
+android = true
+package_name = "io.github.screwys.rufin.shared.rufin_core"
+cdylib_name = "rufin_android"

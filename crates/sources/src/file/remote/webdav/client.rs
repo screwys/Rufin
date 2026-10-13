@@ -16,9 +16,9 @@ use url::Url;
 use super::dav;
 use crate::{SourceError, SourceResult};
 
-pub(crate) fn custom_headers(values: &[(String, String)]) -> SourceResult<HeaderMap> {
+pub(crate) fn custom_headers(values: &[crate::FileHeader]) -> SourceResult<HeaderMap> {
     let mut headers = HeaderMap::new();
-    for (name, value) in values {
+    for crate::FileHeader { name, value } in values {
         headers.insert(
             HeaderName::from_bytes(name.as_bytes())
                 .map_err(|_| SourceError::InvalidConfig("Invalid HTTP header name".into()))?,

@@ -1,7 +1,30 @@
 use serde::{Deserialize, Serialize};
 
+pub type VisualizerColors = [[f32; 3]; 2];
+pub type PreferenceIndex = usize;
+
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(PreferenceIndex, u64, {
+    remote,
+    lower: |value| value as u64,
+    try_lift: |value| Ok(usize::try_from(value)?),
+});
+
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(VisualizerColors, Vec<Vec<f32>>, {
+    remote,
+    lower: |value| value.into_iter().map(Vec::from).collect(),
+    try_lift: |value| {
+        let colors = value.into_iter().map(|color| color.try_into()
+            .map_err(|_| uniffi::deps::anyhow::anyhow!("A color needs three components")))
+            .collect::<uniffi::Result<Vec<[f32; 3]>>>()?;
+        colors.try_into().map_err(|_| uniffi::deps::anyhow::anyhow!("A gradient needs two colors"))
+    },
+});
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum VisualizerStyle {
     Segmented,
     Solid,
@@ -29,10 +52,11 @@ impl VisualizerStyle {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct VisualizerAppearance {
     pub style: VisualizerStyle,
     /// None follows the application's accent. Custom gradients store their two endpoints.
-    pub colors: Option<[[f32; 3]; 2]>,
+    pub colors: Option<VisualizerColors>,
     pub spacing: f64,
     pub opacity: f64,
     pub sidebar_lyrics_opacity: f64,
@@ -42,6 +66,44 @@ pub struct VisualizerAppearance {
     pub peaks: bool,
     pub peak_hold: f64,
     pub peak_fall: f64,
+}
+
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+#[derive(Clone, Debug)]
+pub enum VisualizerPreferenceEdit {
+    Style { value: VisualizerStyle },
+    Colors { value: Option<VisualizerColors> },
+    Spacing { value: f64 },
+    Opacity { value: f64 },
+    SidebarLyricsOpacity { value: f64 },
+    FullscreenLyricsOpacity { value: f64 },
+    Rise { value: f64 },
+    Fall { value: f64 },
+    Peaks { value: bool },
+    PeakHold { value: f64 },
+    PeakFall { value: f64 },
+}
+
+impl VisualizerAppearance {
+    pub fn apply(&mut self, edit: VisualizerPreferenceEdit) {
+        match edit {
+            VisualizerPreferenceEdit::Style { value } => self.style = value,
+            VisualizerPreferenceEdit::Colors { value } => self.colors = value,
+            VisualizerPreferenceEdit::Spacing { value } => self.spacing = value,
+            VisualizerPreferenceEdit::Opacity { value } => self.opacity = value,
+            VisualizerPreferenceEdit::SidebarLyricsOpacity { value } => {
+                self.sidebar_lyrics_opacity = value
+            }
+            VisualizerPreferenceEdit::FullscreenLyricsOpacity { value } => {
+                self.fullscreen_lyrics_opacity = value
+            }
+            VisualizerPreferenceEdit::Rise { value } => self.rise = value,
+            VisualizerPreferenceEdit::Fall { value } => self.fall = value,
+            VisualizerPreferenceEdit::Peaks { value } => self.peaks = value,
+            VisualizerPreferenceEdit::PeakHold { value } => self.peak_hold = value,
+            VisualizerPreferenceEdit::PeakFall { value } => self.peak_fall = value,
+        }
+    }
 }
 
 impl Default for VisualizerAppearance {
@@ -63,6 +125,7 @@ impl Default for VisualizerAppearance {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct VisualizerPreset {
     pub appearance: VisualizerAppearance,
 }
@@ -102,11 +165,12 @@ impl VisualizerPreset {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct VisualizerSettings {
     pub fps_limit: u32,
     pub appearance: VisualizerAppearance,
     pub presets: Vec<VisualizerPreset>,
-    pub selected_preset: Option<usize>,
+    pub selected_preset: Option<PreferenceIndex>,
 }
 
 impl Default for VisualizerSettings {

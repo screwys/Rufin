@@ -379,6 +379,7 @@ impl LyricsService {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .settings
+                .preferences
                 .save_lyrics_as_sidecar;
             let writable = match service.source(&context).await {
                 Some(source) => {
@@ -393,7 +394,7 @@ impl LyricsService {
                     .state
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if state.settings.save_lyrics_as_sidecar != sidecar {
+                if state.settings.preferences.save_lyrics_as_sidecar != sidecar {
                     return;
                 }
                 let Some(current) = state.current.as_mut().filter(|current| current.key == key)
@@ -443,7 +444,8 @@ impl LyricsService {
                 )
             });
             let selection_changed = lyrics_selection_changed(&state.settings, &settings);
-            let karaoke_enabled = !state.settings.karaoke_mode && settings.karaoke_mode;
+            let karaoke_enabled =
+                !state.settings.preferences.karaoke_mode && settings.preferences.karaoke_mode;
             let acquisition_changed = current.as_ref().is_some_and(|(_, track_id, ..)| {
                 lyrics_acquisition_changed(&state.settings, &settings, track_id)
             });
@@ -973,16 +975,18 @@ impl LyricsService {
             else {
                 return None;
             };
-            if !state.settings.save_lyrics_to_source || !state.settings.save_lyrics_automatically {
+            if !state.settings.preferences.save_lyrics_to_source
+                || !state.settings.preferences.save_lyrics_automatically
+            {
                 return None;
             }
-            let Some(document) = lyrics.selected_document(&state.settings) else {
+            let Some(document) = lyrics.selected_document(&state.settings.preferences) else {
                 return None;
             };
             Some(LyricsWriteTarget {
                 context: current.context.clone(),
                 content: lyrics_to_lrc_text(document, 0),
-                sidecar: state.settings.save_lyrics_as_sidecar,
+                sidecar: state.settings.preferences.save_lyrics_as_sidecar,
             })
         }
     }
@@ -1146,9 +1150,10 @@ impl LyricsService {
             let event_media = current.context.media.id.clone();
             let allowed = state
                 .settings
+                .preferences
                 .external_lyrics_network_allowed(state.private_mode);
             let providers = if allowed {
-                state.settings.external_lyrics_providers.clone()
+                state.settings.preferences.external_lyrics_providers.clone()
             } else {
                 Vec::new()
             };
@@ -1258,12 +1263,12 @@ impl LyricsService {
             };
             let save_plan = plan.clone();
             let saved = tokio::task::spawn_blocking(move || {
-                let selection = Settings {
+                let selection = lyrics::UserPreferences {
                     prefer_translations: save_plan.prefers_translations(),
                     preferred_translation_language: save_plan
                         .preferred_translation_language()
                         .to_string(),
-                    ..Settings::default()
+                    ..lyrics::UserPreferences::default()
                 };
                 let Some(document) = bundle.selected_document(&selection) else {
                     return Ok(None);
@@ -1332,9 +1337,11 @@ impl LyricsService {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if !state
                 .settings
+                .preferences
                 .external_lyrics_network_allowed(state.private_mode)
                 || !state
                     .settings
+                    .preferences
                     .external_lyrics_providers
                     .contains(&result.provider)
             {
@@ -1434,7 +1441,7 @@ impl LyricsService {
             let plan = state
                 .settings
                 .configured_lyrics_plan(state.private_mode, &key.media_uri);
-            let sidecar = state.settings.save_lyrics_as_sidecar;
+            let sidecar = state.settings.preferences.save_lyrics_as_sidecar;
             cancel_current_work(&mut state);
             let request = self.next_request.fetch_add(1, Ordering::AcqRel);
             if let Some(current) = state.current.as_mut() {
@@ -1654,7 +1661,7 @@ fn current_event(current: &CurrentDocument) -> LyricsEvent {
 }
 
 fn apply_bundle(current: &mut CurrentDocument, settings: &Settings, bundle: Arc<LyricsBundle>) {
-    let selected = bundle.selected_document(settings);
+    let selected = bundle.selected_document(&settings.preferences);
     current.pronunciation = selected
         .and_then(|document| bundle.pronunciation_for(document))
         .map(|pronunciation| {
@@ -1676,11 +1683,11 @@ fn apply_bundle(current: &mut CurrentDocument, settings: &Settings, bundle: Arc<
     current.bundle = Some(bundle);
 }
 
-fn selection_settings(plan: &LyricsPlan) -> Settings {
-    Settings {
+fn selection_settings(plan: &LyricsPlan) -> lyrics::UserPreferences {
+    lyrics::UserPreferences {
         prefer_translations: plan.prefers_translations(),
         preferred_translation_language: plan.preferred_translation_language().to_string(),
-        ..Settings::default()
+        ..lyrics::UserPreferences::default()
     }
 }
 
@@ -1730,8 +1737,9 @@ fn cache_key_for_bundle(
 }
 
 fn lyrics_selection_changed(previous: &Settings, current: &Settings) -> bool {
-    previous.prefer_translations != current.prefer_translations
-        || previous.preferred_translation_language != current.preferred_translation_language
+    previous.preferences.prefer_translations != current.preferences.prefer_translations
+        || previous.preferences.preferred_translation_language
+            != current.preferences.preferred_translation_language
 }
 
 fn acquisition_order(prefer_server: bool) -> [LyricsAuthority; 2] {
@@ -1744,13 +1752,15 @@ fn acquisition_order(prefer_server: bool) -> [LyricsAuthority; 2] {
 
 fn lyrics_acquisition_changed(previous: &Settings, current: &Settings, track_id: &str) -> bool {
     let previous_external =
-        previous.external_lyrics_enabled && !previous.auto_lyrics_suppressed(track_id);
+        previous.preferences.external_lyrics_enabled && !previous.auto_lyrics_suppressed(track_id);
     let current_external =
-        current.external_lyrics_enabled && !current.auto_lyrics_suppressed(track_id);
+        current.preferences.external_lyrics_enabled && !current.auto_lyrics_suppressed(track_id);
     previous_external != current_external
         || (previous_external || current_external)
-            && (previous.prefer_server_lyrics != current.prefer_server_lyrics
-                || previous.external_lyrics_providers != current.external_lyrics_providers)
+            && (previous.preferences.prefer_server_lyrics
+                != current.preferences.prefer_server_lyrics
+                || previous.preferences.external_lyrics_providers
+                    != current.preferences.external_lyrics_providers)
 }
 
 fn cancel_current_work(state: &mut State) {
@@ -1933,7 +1943,11 @@ mod tests {
             source_owner,
             tokio::runtime::Handle::current(),
             Settings {
-                external_lyrics_enabled: false,
+                preferences: lyrics::UserPreferences {
+                    external_lyrics_enabled: false,
+                    ..lyrics::UserPreferences::default()
+                },
+
                 ..Settings::default()
             },
             false,
@@ -2013,7 +2027,11 @@ mod tests {
     #[test]
     fn karaoke_requires_word_timing_for_every_lyrics_origin() {
         let plan = Settings {
-            karaoke_mode: true,
+            preferences: lyrics::UserPreferences {
+                karaoke_mode: true,
+                ..lyrics::UserPreferences::default()
+            },
+
             ..Settings::default()
         }
         .automatic_lyrics_plan(false, "track");

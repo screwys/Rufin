@@ -48,7 +48,7 @@ import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.core.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.json.JSONObject
+import io.github.screwys.rufin.shared.lyrics.UserPreferences
 import kotlinx.coroutines.CancellationException
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.settings.settingsTextFieldColors
@@ -57,7 +57,7 @@ import io.github.screwys.rufin.settings.settingsTextFieldColors
 internal fun LyricsPanel(player: PlayerConnection, state: LazyListState) {
     val current = player.currentLyrics
     val document = current?.document
-    val preferences = player.settings?.lyrics?.let { remember(it) { JSONObject(it) } }
+    val preferences = player.settings?.lyrics
     Box(Modifier.fillMaxSize()) {
         when {
             current?.loading == true -> CircularProgressIndicator(Modifier.align(Alignment.Center))
@@ -72,7 +72,7 @@ internal fun LyricsPanel(player: PlayerConnection, state: LazyListState) {
 internal fun LyricsActions(player: PlayerConnection) {
     val current = player.currentLyrics
     val document = current?.document
-    val preferences = player.settings?.lyrics?.let { remember(it) { JSONObject(it) } }
+    val preferences = player.settings?.lyrics
     val token = player.lyricsToken
     var search by remember { mutableStateOf(false) }
     var edit by remember { mutableStateOf(false) }
@@ -97,7 +97,7 @@ internal fun LyricsActions(player: PlayerConnection) {
                 DropdownMenuItem(text = { Text(translate("Save Lyrics")) }, onClick = {
                     menu = false
                     val captured = token ?: return@DropdownMenuItem
-                    if (preferences?.optBoolean("save_lyrics_to_source") == true && current.writable) player.saveLyrics(captured)
+                    if (preferences?.saveLyricsToSource == true && current.writable) player.saveLyrics(captured)
                     else {
                         exportToken = captured
                         exportOffset = player.lyricsOffset
@@ -124,8 +124,8 @@ internal fun CurrentLyricsPreview(player: PlayerConnection) {
     val snapshot = current?.snapshot
     var active by remember(current?.mediaUri, current?.mediaRun, document) { mutableStateOf<Int?>(null) }
     var highlights by remember(current?.mediaUri, current?.mediaRun, document) { mutableStateOf<List<AndroidLyricsHighlight>>(emptyList()) }
-    val preferences = player.settings?.lyrics?.let { remember(it) { JSONObject(it) } }
-    val karaoke = preferences?.optBoolean("karaoke_mode") == true
+    val preferences = player.settings?.lyrics
+    val karaoke = preferences?.karaokeMode == true
     val reduceMotion = LocalReduceMotion.current
     LaunchedEffect(snapshot, document, player.lyricsOffset, karaoke) {
         if (snapshot == null || document == null) return@LaunchedEffect
@@ -138,8 +138,8 @@ internal fun CurrentLyricsPreview(player: PlayerConnection) {
         }
     }
     val normal = MaterialTheme.colorScheme.onSurface
-    val selected = if (preferences == null || preferences.isNull("lyrics_highlight_color")) MaterialTheme.colorScheme.primary
-        else playerLyricsColor(preferences.getString("lyrics_highlight_color"))
+    val selected = preferences?.lyricsHighlightColor?.let { playerLyricsColor(it) }
+        ?: MaterialTheme.colorScheme.primary
     val shadow = Shadow(MaterialTheme.colorScheme.background, Offset.Zero, 4f)
     val fontSize = MaterialTheme.typography.bodyLarge.fontSize.value.toInt()
     AnimatedContent(active, Modifier.fillMaxWidth(), transitionSpec = {
@@ -155,7 +155,7 @@ internal fun CurrentLyricsPreview(player: PlayerConnection) {
                     val cueHighlights = highlights.filter { part -> part.line.toInt() == index && part.cueLine.toInt() == cueIndex }
                     LyricsText(cueText(cueLine, cueHighlights, color, normal), cueLine.reading, preferences,
                         FontFamily.Default, fontSize, normal, false, shadow, cueHighlights, color, centered = false, maxLines = 1)
-                    if (karaoke && preferences?.optBoolean("show_romanization") == true) {
+                    if (karaoke && preferences?.showRomanization == true) {
                         cueLine.reading?.takeIf { reading -> reading.romanization.isNotBlank() }?.let { reading ->
                             Text(romanizationText(reading, cueHighlights, color, normal), maxLines = 1,
                                 fontSize = 12.sp, color = normal, style = MaterialTheme.typography.bodyMedium.copy(shadow = shadow))
@@ -163,7 +163,7 @@ internal fun CurrentLyricsPreview(player: PlayerConnection) {
                     }
                 } else LyricsText(AnnotatedString(it.text), it.reading, preferences, FontFamily.Default, fontSize, normal,
                     false, shadow, centered = false, maxLines = 1)
-                if (preferences?.optBoolean("show_romanization") == true &&
+                if (preferences?.showRomanization == true &&
                     (!karaoke || it.cueLines.none { cue -> cue.reading?.romanization?.isNotBlank() == true })) {
                     val romanization = it.pronunciation ?: it.reading?.romanization
                     if (!romanization.isNullOrBlank()) Text(romanization, maxLines = 1, fontSize = 12.sp, color = normal,
@@ -209,18 +209,18 @@ private fun LyricsOffsetControls(value: Long, enabled: Boolean = true, onApply: 
 
 @Composable
 private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsState, document: AndroidLyricsDocument,
-    preferences: JSONObject?, state: LazyListState,
+    preferences: UserPreferences?, state: LazyListState,
 ) {
     val snapshot = current.snapshot!!
     val scope = rememberCoroutineScope()
     var timing by remember(snapshot, document) { mutableStateOf<AndroidLyricsPosition?>(null) }
     var highlights by remember(snapshot, document) { mutableStateOf<List<AndroidLyricsHighlight>>(emptyList()) }
-    val karaoke = preferences?.optBoolean("karaoke_mode") == true
+    val karaoke = preferences?.karaokeMode == true
     val dragged by state.interactionSource.collectIsDraggedAsState()
     var pausedUntil by remember { mutableLongStateOf(0L) }
     var hadDrag by remember { mutableStateOf(false) }
     var followRevision by remember { mutableIntStateOf(0) }
-    val pauseMillis = player.settings?.lyricsScrollPauseMillis?.toLong() ?: 0L
+    val pauseMillis = player.preferenceOptions?.lyricsScrollPauseMillis?.toLong() ?: 0L
     val reduceMotion = LocalReduceMotion.current
     LaunchedEffect(dragged) {
         if (dragged) hadDrag = true
@@ -259,12 +259,11 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
             }
         }
     }
-    val fontName = if (preferences == null || preferences.isNull("fullscreen_lyrics_font_family")) null else preferences.getString("fullscreen_lyrics_font_family")
+    val fontName = preferences?.fullscreenLyricsFontFamily
     val family = remember(fontName) { fontName?.let { FontFamily(Typeface.create(it, Typeface.NORMAL)) } ?: FontFamily.Default }
-    val fontSize = if (preferences == null || preferences.isNull("fullscreen_lyrics_font_size")) 19 else preferences.getInt("fullscreen_lyrics_font_size")
+    val fontSize = preferences?.fullscreenLyricsFontSize?.toInt() ?: 19
     val fallbackColor = MaterialTheme.colorScheme.primary
-    val selectedColor = if (preferences == null || preferences.isNull("lyrics_highlight_color")) fallbackColor
-        else playerLyricsColor(preferences.getString("lyrics_highlight_color"))
+    val selectedColor = preferences?.lyricsHighlightColor?.let(::playerLyricsColor) ?: fallbackColor
     val normal = MaterialTheme.colorScheme.onSurfaceVariant
     val shadow = Shadow(MaterialTheme.colorScheme.background, Offset.Zero, 4f)
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -298,7 +297,7 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
                     val cueHighlights = highlights.filter { it.line.toInt() == index && it.cueLine.toInt() == cueIndex }
                     val text = cueText(cueLine, cueHighlights, voiceColor, color)
                     LyricsText(text, cueLine.reading, preferences, family, fontSize, color, lineActive, shadow, cueHighlights, voiceColor)
-                    if (karaoke && preferences?.optBoolean("show_romanization") == true) {
+                    if (karaoke && preferences?.showRomanization == true) {
                         cueLine.reading?.takeIf { it.romanization.isNotBlank() }?.let { reading ->
                             Text(romanizationText(reading, cueHighlights, voiceColor, color), Modifier.fillMaxWidth().padding(top = 6.dp),
                                 fontFamily = family, fontSize = (fontSize * .7f).sp, color = color, textAlign = TextAlign.Center,
@@ -306,7 +305,7 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
                         }
                     }
                 } else LyricsText(AnnotatedString(line.text), line.reading, preferences, family, fontSize, color, lineActive, shadow)
-                if (preferences?.optBoolean("show_romanization") == true &&
+                if (preferences?.showRomanization == true &&
                     (!karaoke || line.cueLines.none { it.reading?.romanization?.isNotBlank() == true })) {
                     val romanization = line.pronunciation ?: line.reading?.romanization
                     if (!romanization.isNullOrBlank()) Text(romanization, Modifier.padding(top = 6.dp), fontFamily = family,
@@ -321,12 +320,12 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LyricsText(text: AnnotatedString, reading: AndroidJapaneseReading?, preferences: JSONObject?,
+private fun LyricsText(text: AnnotatedString, reading: AndroidJapaneseReading?, preferences: UserPreferences?,
     family: FontFamily, size: Int, color: Color, active: Boolean, shadow: Shadow,
     highlights: List<AndroidLyricsHighlight> = emptyList(), highlightColor: Color = color,
     centered: Boolean = true, maxLines: Int = Int.MAX_VALUE,
 ) {
-    if (preferences?.optBoolean("show_furigana") == true && reading != null) {
+    if (preferences?.showFurigana == true && reading != null) {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp,
             if (centered) Alignment.CenterHorizontally else Alignment.Start), maxLines = maxLines) {
             var cursor = 0

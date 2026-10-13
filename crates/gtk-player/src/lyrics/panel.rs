@@ -125,7 +125,8 @@ impl PlayerUi {
     fn render_lyrics_contents(self: &Rc<Self>) {
         let local_readings_enabled = {
             let settings = self.settings.current.borrow();
-            settings.lyrics.show_furigana || settings.lyrics.show_romanization
+            settings.lyrics.preferences.show_furigana
+                || settings.lyrics.preferences.show_romanization
         };
         if !local_readings_enabled {
             release_japanese_reader();
@@ -152,8 +153,9 @@ impl PlayerUi {
         let settings = self.settings.current.borrow();
         let current_media = current_playback_media_id(self.selected_playback().as_deref());
         let current_track_id = current_playback_track_id(self.selected_playback().as_deref());
-        let dictionary_status = if (settings.lyrics.show_furigana
-            || settings.lyrics.show_romanization && self.visible_lyrics_pronunciation().is_none())
+        let dictionary_status = if (settings.lyrics.preferences.show_furigana
+            || settings.lyrics.preferences.show_romanization
+                && self.visible_lyrics_pronunciation().is_none())
             && self
                 .visible_lyrics()
                 .as_deref()
@@ -241,7 +243,12 @@ impl PlayerUi {
     }
 
     fn should_save_lyrics_to_source(&self, media_id: &playback::CurrentMediaId) -> bool {
-        self.settings.current.borrow().lyrics.save_lyrics_to_source
+        self.settings
+            .current
+            .borrow()
+            .lyrics
+            .preferences
+            .save_lyrics_to_source
             && self.lyrics_service.current_writable(media_id)
     }
 

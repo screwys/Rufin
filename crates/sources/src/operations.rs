@@ -5,6 +5,7 @@ use crate::{SourceEntityKind, SourceId};
 use localization::msgid;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum MetadataFieldKind {
     Text,
     Number,
@@ -14,6 +15,7 @@ pub enum MetadataFieldKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct MetadataField {
     pub key: String,
     pub label: String,
@@ -106,7 +108,10 @@ impl MetadataField {
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Error))]
 pub enum SourceMetadataError {
+    #[error("{0}")]
+    InvalidInput(String),
     #[error("metadata editing is unavailable")]
     Unavailable,
     #[error("metadata changed before it was saved")]
@@ -118,19 +123,32 @@ pub enum SourceMetadataError {
     },
     #[error("metadata was saved but its source refresh failed: {0}")]
     SavedRefreshFailed(String),
-    #[error("some changes were saved: {message}")]
-    PartiallySaved { message: String },
+    #[error("some changes were saved: {reason}")]
+    PartiallySaved { reason: String },
     #[error("metadata failed: {0}")]
     Write(String),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct ImageBytes {
     pub bytes: Vec<u8>,
     pub content_type: Option<String>,
 }
 
+#[cfg_attr(feature = "bindings", uniffi::export)]
+impl ImageBytes {
+    pub fn bytes(&self) -> Vec<u8> {
+        self.bytes.clone()
+    }
+
+    pub fn content_type(&self) -> Option<String> {
+        self.content_type.clone()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum ArtworkStorage {
     Embedded,
     #[default]
@@ -201,7 +219,7 @@ pub fn finish_metadata_save(
                 error => SourceMetadataError::SavedRefreshFailed(error.to_string()),
             });
         }
-        Err(SourceMetadataError::PartiallySaved { message }) => message,
+        Err(SourceMetadataError::PartiallySaved { reason }) => reason,
         Err(error) if saved => error.to_string(),
         Err(error) => return Err(error),
     };
@@ -209,7 +227,7 @@ pub fn finish_metadata_save(
         Ok(()) => message,
         Err(error) => format!("{message}. Source refresh also failed: {error}"),
     };
-    Err(SourceMetadataError::PartiallySaved { message })
+    Err(SourceMetadataError::PartiallySaved { reason: message })
 }
 
 pub fn artwork_file(binding: Option<&[u8]>) -> Option<String> {

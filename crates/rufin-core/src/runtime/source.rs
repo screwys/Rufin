@@ -4,11 +4,19 @@
 //! sees only form values, settings-derived summaries, and one operation state.
 
 use std::path::PathBuf;
+
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(PathBuf, String, {
+    remote,
+    lower: |path| path.to_string_lossy().into_owned(),
+    try_lift: |path| Ok(PathBuf::from(path)),
+});
 use std::sync::Arc;
 
 use sources::{CredentialPreset, SourceId};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct LocalAccessStatus {
     pub total_track_count: usize,
     pub matched_track_count: usize,
@@ -16,6 +24,7 @@ pub struct LocalAccessStatus {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct SourceSummary {
     pub id: SourceId,
     pub kind: String,
@@ -31,6 +40,7 @@ pub struct LocalFolder {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct SourceLocalAccess {
     pub source_id: SourceId,
     pub root_path: PathBuf,
@@ -40,6 +50,7 @@ pub struct SourceLocalAccess {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct SourceLocalAccessSummary {
     pub source_id: SourceId,
     pub access: Option<SourceLocalAccess>,
@@ -72,6 +83,7 @@ impl ConfiguredSources {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct EditableSource {
     pub plex_settings: Option<sources::PlexSettingsInput>,
     pub file_settings: Option<sources::FileSourceSettings>,
@@ -172,6 +184,7 @@ pub fn source_operation_text(operation: &SourceOperation) -> Option<String> {
 pub use sources::{DiscoveredServer, DiscoveryProvider};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum DiscoveryStatus {
     Idle,
     Searching,
@@ -189,9 +202,19 @@ pub struct DiscoveryUpdate {
 
 #[derive(serde::Serialize)]
 #[serde(tag = "event", content = "data", rename_all = "snake_case")]
-pub enum NextcloudLoginEvent {
+pub enum SourceLoginEvent {
+    Code {
+        code: String,
+        url: String,
+    },
     OpenBrowser(String),
-    Authorized {
+    Servers(Vec<sources::EmbyConnectServer>),
+    #[serde(rename = "authorized")]
+    Jellyfin(sources::JellyfinQuickConnectLogin),
+    #[serde(rename = "authorized")]
+    Plex(Box<sources::PlexLogin>),
+    #[serde(rename = "authorized")]
+    Files {
         settings: sources::FileSourceSettings,
         credentials: sources::FileCredentials,
     },
@@ -199,27 +222,15 @@ pub enum NextcloudLoginEvent {
 
 #[derive(serde::Deserialize)]
 #[serde(tag = "method", content = "data", rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum EmbyConnectLoginMethod {
     Password { username: String, password: String },
     Pin,
 }
 
-#[derive(serde::Serialize)]
-#[serde(tag = "event", content = "data", rename_all = "snake_case")]
-pub enum EmbyConnectLoginEvent {
-    Code { code: String, url: String },
-    Servers(Vec<sources::EmbyConnectServer>),
-}
-
-#[derive(serde::Serialize)]
-#[serde(tag = "event", content = "data", rename_all = "snake_case")]
-pub enum JellyfinQuickConnectEvent {
-    Code { code: String, url: String },
-    Authorized(sources::JellyfinQuickConnectLogin),
-}
-
 #[derive(serde::Deserialize)]
 #[serde(tag = "method", content = "data", rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum PlexLoginMethod {
     Browser,
     Password {
@@ -227,13 +238,6 @@ pub enum PlexLoginMethod {
         password: String,
         verification_code: Option<String>,
     },
-}
-
-#[derive(serde::Serialize)]
-#[serde(tag = "event", content = "data", rename_all = "snake_case")]
-pub enum PlexLoginEvent {
-    OpenBrowser(String),
-    Authorized(Box<sources::PlexLogin>),
 }
 
 pub enum PlaylistExport {

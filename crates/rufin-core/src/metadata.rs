@@ -3,7 +3,7 @@ mod editor;
 use crate::runtime::CatalogChange;
 use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
-pub use editor::{MetadataEditor, identification_available};
+pub use editor::{MetadataEditor, MetadataEditorSnapshot, MetadataFieldPresentation};
 use library::Database;
 pub use metadata_lookup::{ArtworkQuery, ArtworkResult};
 pub use sources::MetadataDraft;

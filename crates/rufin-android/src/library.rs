@@ -196,14 +196,9 @@ impl AndroidLibrarySubscription {
         configuration.borrow_and_update();
         catalog.borrow_and_update();
         let operation = operation.borrow_and_update().clone();
-        let configured = self.source.list_sources();
-        let selected = self.source.selected_library();
-        let source_id = selected.map(|source| source.source_id.to_string());
-        let name = configured
-            .sources
-            .iter()
-            .find(|source| Some(source.id.as_str()) == source_id.as_deref())
-            .map(|source| source.name.clone())
+        let selected = self.source.selected_source_summary();
+        let (source_id, source_name) = selected
+            .map(|(id, name)| (Some(id.to_string()), name))
             .unwrap_or_default();
         let busy = !matches!(
             operation,
@@ -218,7 +213,7 @@ impl AndroidLibrarySubscription {
         };
         Ok(AndroidLibraryState {
             source_id,
-            source_name: name,
+            source_name,
             revision: *revision,
             busy,
             status,

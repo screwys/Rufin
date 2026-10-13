@@ -207,7 +207,7 @@ fn appearance_override_css(settings: &Settings, themes: &[Theme]) -> String {
         append_accent(&mut css, color, "#ffffff");
     }
     let lyrics = &settings.lyrics;
-    if let Some(color) = lyrics.lyrics_highlight_color.as_deref() {
+    if let Some(color) = lyrics.preferences.lyrics_highlight_color.as_deref() {
         css.push_str("  --lyrics-highlight-color: ");
         css.push_str(color);
         css.push_str(";\n");
@@ -216,13 +216,13 @@ fn appearance_override_css(settings: &Settings, themes: &[Theme]) -> String {
     for (scope, family, size) in [
         (
             ".lyrics-sidebar",
-            &lyrics.lyrics_font_family,
-            lyrics.lyrics_font_size,
+            &lyrics.preferences.lyrics_font_family,
+            lyrics.preferences.lyrics_font_size,
         ),
         (
             ".lyrics-fullscreen",
-            &lyrics.fullscreen_lyrics_font_family,
-            lyrics.fullscreen_lyrics_font_size,
+            &lyrics.preferences.fullscreen_lyrics_font_family,
+            lyrics.preferences.fullscreen_lyrics_font_size,
         ),
     ] {
         let selectors = [

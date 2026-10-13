@@ -46,6 +46,7 @@ pub const EMBY_SOURCE_ID: &str = "emby";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum ServerKind {
     Jellyfin,
     Emby,

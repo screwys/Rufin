@@ -6,6 +6,10 @@ import java.io.ByteArrayOutputStream
 import androidx.compose.runtime.*
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
+import io.github.screwys.rufin.shared.rufin_core.MetadataEditor
+import io.github.screwys.rufin.shared.rufin_core.MetadataEditorSnapshot
+import io.github.screwys.rufin.shared.sources.ArtworkStorage
+import io.github.screwys.rufin.shared.metadata_lookup.ArtworkResult
 import io.github.screwys.rufin.ui.PlayerArtwork
 import io.github.screwys.rufin.ui.decodePlayerArtwork
 import kotlinx.coroutines.*
@@ -19,9 +23,9 @@ internal class MetadataConnection(
     private val scope: CoroutineScope, private val onSaved: () -> Unit,
 ) {
     private val resolver = context.applicationContext.contentResolver
-    var bridge by mutableStateOf<AndroidMetadataEditor?>(null)
+    var bridge by mutableStateOf<MetadataEditor?>(null)
         private set
-    var state by mutableStateOf<AndroidMetadataState?>(null)
+    var state by mutableStateOf<MetadataEditorSnapshot?>(null)
         private set
     var busy by mutableStateOf(false)
         private set
@@ -31,7 +35,7 @@ internal class MetadataConnection(
         private set
     var loadingArtwork by mutableStateOf(false)
         private set
-    var results by mutableStateOf<List<AndroidArtworkResult>?>(null)
+    var results by mutableStateOf<List<ArtworkResult>?>(null)
         private set
     var searching by mutableStateOf(false)
         private set
@@ -57,7 +61,7 @@ internal class MetadataConnection(
             refresh(editor)
             artworkTask = scope.launch {
                 loadingArtwork = true
-                try { editor.loadCurrentArtwork(); refresh(editor) }
+                try { editor.loadCurrentArtwork()?.destroy(); refresh(editor) }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { failure = error }
                 finally { loadingArtwork = false }
@@ -67,16 +71,15 @@ internal class MetadataConnection(
         finally { busy = false }
     }
 
-    private suspend fun refresh(editor: AndroidMetadataEditor) {
+    private suspend fun refresh(editor: MetadataEditor) {
         state = editor.snapshot()
         if (artworkRevision != state?.artworkRevision) {
             artworkRevision = state?.artworkRevision
-            val bytes = editor.artworkBytes()
-            artwork = bytes?.let { decodePlayerArtwork(it, 512) }
+            artwork = editor.artwork()?.use { decodePlayerArtwork(it.bytes(), 512) }
         }
     }
 
-    private fun change(action: (AndroidMetadataEditor) -> Unit) {
+    private fun change(action: (MetadataEditor) -> Unit) {
         val editor = bridge ?: return
         try { action(editor); state = editor.snapshot(); failure = null }
         catch (error: Exception) { failure = error }
@@ -85,9 +88,9 @@ internal class MetadataConnection(
     fun setField(id: String, value: String) = change { it.setField(id, value) }
     fun setLocked(value: Boolean) = change { it.setLocked(value) }
     fun undo(id: String) = change { it.undoIdentified(id) }
-    fun setStorage(value: AndroidArtworkStorage) = change { it.setArtworkStorage(value) }
+    fun setStorage(value: ArtworkStorage) = change { it.setArtworkStorage(value) }
 
-    private fun action(block: suspend (AndroidMetadataEditor) -> Unit) {
+    private fun action(block: suspend (MetadataEditor) -> Unit) {
         val editor = bridge ?: return
         scope.launch {
             busy = true
@@ -103,7 +106,7 @@ internal class MetadataConnection(
     fun save() = action { it.save(); onSaved() }
     fun removeArtwork() = action { it.removeArtwork() }
     fun useCurrentArtwork() = action { it.useCurrentArtwork() }
-    fun chooseArtwork(url: String) = action { it.chooseArtwork(url) }
+    fun chooseArtwork(url: String) = action { editor -> editor.downloadArtwork(url).use { editor.selectArtwork(it) } }
     fun importArtwork(uri: Uri) = action { editor ->
         val limit = state?.maxArtworkBytes?.toInt() ?: return@action
         val bytes = withContext(Dispatchers.IO) {
@@ -120,7 +123,7 @@ internal class MetadataConnection(
                 output.toByteArray()
             } ?: error(translate("Could not read artwork"))
         }
-        editor.importArtwork(bytes)
+        editor.prepareArtwork(bytes).use { editor.selectArtwork(it) }
     }
 
     fun search(artist: String, album: String) {

@@ -4,6 +4,8 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.viewModelScope
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
+import io.github.screwys.rufin.shared.rufin_core.*
+import io.github.screwys.rufin.shared.sources.*
 import kotlinx.coroutines.*
 import io.github.screwys.rufin.ui.userMessage
 
@@ -13,9 +15,10 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         private set
     private val scope = CoroutineScope(SupervisorJob(model.viewModelScope.coroutineContext[Job]) + Dispatchers.Main.immediate)
     private var bridge: AndroidSourceSetup? = null
-    private var auth: AndroidSourceAuthorization? = null
-    private var saved: AndroidSourceAuthorization? = null
+    private var auth: SourceAuthorization? = null
+    private var saved: SourceAuthorization? = null
     private var task: Job? = null
+    private var plexLan = emptyList<DiscoveredServer>()
     private var discoverySubscription: AndroidSourceDiscoverySubscription? = null
     var closed = false
         private set
@@ -29,11 +32,11 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         private set
     var discovery by mutableStateOf<AndroidSourceDiscovery?>(null)
         private set
-    var choices by mutableStateOf<List<AndroidSourceChoice>>(emptyList())
+    var choices by mutableStateOf<List<SourceChoice>>(emptyList())
         private set
-    var profiles by mutableStateOf<List<AndroidSourceChoice>>(emptyList())
+    var profiles by mutableStateOf<List<SourceChoice>>(emptyList())
         private set
-    var savedAccounts by mutableStateOf<List<AndroidSourceChoice>>(emptyList())
+    var savedAccounts by mutableStateOf<List<SourceChoice>>(emptyList())
         private set
     var selectedServer by mutableStateOf(0u)
     var selectedProfile by mutableStateOf(0u)
@@ -60,7 +63,11 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
                 val subscription = setup.subscribeDiscovery()
                 discoverySubscription = subscription
                 launch {
-                    try { while (isActive) discovery = subscription.next() }
+                    try { while (isActive) {
+                        val update = subscription.next()
+                        discovery = update
+                        if (update.provider == DiscoveryProvider.PLEX) plexLan = update.servers
+                    } }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (error: Exception) { failure = error.userMessage() }
                 }
@@ -93,7 +100,7 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         discovery = null
         if (kind == "plex") loadSavedAccounts()
     }
-    private fun replaceAuthorization(session: AndroidSourceAuthorization) {
+    private fun replaceAuthorization(session: SourceAuthorization) {
         auth?.let { it.cancel(); it.destroy() }
         auth = session
         code = null; browserUrl = null; authorized = false; choosingProfiles = false
@@ -106,37 +113,37 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         code = null; browserUrl = null; authorized = false; choosingProfiles = false
         choices = emptyList(); profiles = emptyList(); working = false
     }
-    private fun authorize(start: (AndroidSourceSetup) -> AndroidSourceAuthorization, openBrowser: (String) -> Unit) = run {
+    private fun authorize(method: SourceAuthorizationMethod, openBrowser: (String) -> Unit) = run {
         val setup = bridge ?: return@run
-        val session = withContext(Dispatchers.IO) { start(setup) }
+        val session = withContext(Dispatchers.IO) { setup.authorize(method) }
         replaceAuthorization(session)
         while (true) when (val event = session.next()) {
-            is AndroidSourceAuthorizationEvent.Code -> { code = event.code; browserUrl = event.url }
-            is AndroidSourceAuthorizationEvent.OpenBrowser -> { browserUrl = event.url; openBrowser(event.url) }
-            is AndroidSourceAuthorizationEvent.Ready -> {
+            is SourceAuthorizationEvent.Code -> { code = event.code; browserUrl = event.url }
+            is SourceAuthorizationEvent.OpenBrowser -> { browserUrl = event.url; openBrowser(event.url) }
+            is SourceAuthorizationEvent.Ready -> {
                 code = null
                 if (event.kind == "plex") {
                     profiles = session.plexProfiles(null); choosingProfiles = true
                 } else {
                     choices = withContext(Dispatchers.IO) { session.choices() }
-                    session.fileSettings()?.let { form.loadFileSettings(org.json.JSONObject(it)); form.secret = "" }
+                    session.fileSettings()?.let { form.loadFileSettings(it); form.secret = "" }
                     authorized = true
                 }
                 break
             }
         }
     }
-    fun quickConnect(openBrowser: (String) -> Unit) = authorize({ it.quickConnect(form.url, form.trustInvalidCertificate) }, openBrowser)
-    fun embyLogin(pin: Boolean, openBrowser: (String) -> Unit) = authorize({ it.embyLogin(if (pin) null else form.username, if (pin) null else form.secret) }, openBrowser)
-    fun plexLogin(browser: Boolean, openBrowser: (String) -> Unit) = authorize({
-        it.plexLogin(if (browser) null else form.username, if (browser) null else form.secret, form.verification.trim().takeIf(String::isNotEmpty))
-    }, openBrowser)
+    fun quickConnect(openBrowser: (String) -> Unit) = authorize(SourceAuthorizationMethod.Jellyfin(form.url, form.trustInvalidCertificate), openBrowser)
+    fun embyLogin(pin: Boolean, openBrowser: (String) -> Unit) = authorize(SourceAuthorizationMethod.Emby(if (pin) EmbyConnectLoginMethod.Pin else EmbyConnectLoginMethod.Password(form.username, form.secret)), openBrowser)
+    fun plexLogin(browser: Boolean, openBrowser: (String) -> Unit) = authorize(SourceAuthorizationMethod.Plex(
+        if (browser) PlexLoginMethod.Browser else PlexLoginMethod.Password(form.username, form.secret,
+            form.verification.trim().takeIf(String::isNotEmpty))), openBrowser)
     fun nextcloud(openBrowser: (String) -> Unit) {
-        val settings: String
-        val credentials: String
-        try { settings = form.fileSettings().toString(); credentials = form.fileCredentials().toString() }
+        val settings: FileSourceSettings
+        val credentials: FileCredentials
+        try { settings = form.fileSettings(); credentials = form.fileCredentials() }
         catch (error: Exception) { failure = error.userMessage(); return }
-        authorize({ it.nextcloudLogin(settings, credentials) }, openBrowser)
+        authorize(SourceAuthorizationMethod.Nextcloud(settings, credentials), openBrowser)
     }
     private fun loadSavedAccounts() = run {
         saved?.destroy()
@@ -150,12 +157,12 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
         profiles = session.plexProfiles(index); choosingProfiles = true
     }
     fun choosePlexProfile() = run {
-        choices = auth?.plexServers(selectedProfile, homePin.takeIf(String::isNotBlank)).orEmpty()
+        choices = auth?.plexServers(selectedProfile, homePin.takeIf(String::isNotBlank), plexLan).orEmpty()
         choosingProfiles = false; authorized = true; selectedServer = 0u
     }
     fun changePlexProfile() { authorized = false; choosingProfiles = true; choices = emptyList() }
     suspend fun discover() {
-        val provider = when (form.kind) { "jellyfin" -> AndroidSourceDiscoveryProvider.JELLYFIN; "emby" -> AndroidSourceDiscoveryProvider.EMBY; "plex" -> AndroidSourceDiscoveryProvider.PLEX; else -> return }
+        val provider = when (form.kind) { "jellyfin" -> DiscoveryProvider.JELLYFIN; "emby" -> DiscoveryProvider.EMBY; "plex" -> DiscoveryProvider.PLEX; else -> return }
         try {
             if (!model.connectedService().requestLocalNetworkAccess()) error(translate("Local network permission was denied"))
             bridge?.discover(provider)
@@ -164,15 +171,20 @@ internal class SourceSetupConnection(private val model: RufinConnection, val sou
     }
     fun smbShares() = run {
         if (!model.connectedService().requestLocalNetworkAccess()) error(translate("Local network permission was denied"))
-        choices = bridge?.smbShares(form.fileSettings().toString(), form.fileCredentials().toString()).orEmpty()
+        choices = bridge?.smbShares(form.fileSettings(), form.fileCredentials()).orEmpty()
     }
     fun submit(onSuccess: () -> Unit) = run {
         val session = auth
-        if (authorized && session != null) session.finish(form.name, selectedServer, form.instantMix,
-            form.url.trim().takeIf(String::isNotEmpty), form.trustInvalidCertificate, sourceId, form.integration,
-            if (form.kind == "webdav") form.fileSettings().toString() else null,
-            if (form.kind == "webdav") form.fileCredentials(editing = true).toString() else null)
-        else (bridge ?: error(translate("Source setup is unavailable"))).submit(form.submission(sourceId), sourceId != null, form.integration)
+        if (authorized && session != null) {
+            val input = when (form.kind) {
+                "jellyfin" -> SourceAuthorizationInput.Jellyfin(form.instantMix)
+                "emby" -> SourceAuthorizationInput.Emby(selectedServer, form.instantMix)
+                "plex" -> SourceAuthorizationInput.Plex(selectedServer, form.url.trim().takeIf(String::isNotEmpty), form.trustInvalidCertificate)
+                "webdav" -> SourceAuthorizationInput.Files(form.fileSettings(), form.fileCredentialsEdit())
+                else -> error(translate("Select Source"))
+            }
+            session.finish(form.name, sourceId, form.integration, input)
+        } else form.submit(bridge ?: error(translate("Source setup is unavailable")), sourceId)
         if (sourceId != null) {
             form.secret = ""
             auth?.destroy(); auth = null; authorized = false

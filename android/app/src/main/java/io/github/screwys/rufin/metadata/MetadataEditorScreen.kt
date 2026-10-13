@@ -24,6 +24,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
+import io.github.screwys.rufin.shared.rufin_core.MetadataEditorSnapshot
+import io.github.screwys.rufin.shared.sources.ArtworkStorage
+import io.github.screwys.rufin.shared.sources.MetadataFieldKind
+import io.github.screwys.rufin.shared.sources.SourceMetadataException
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.decodePlayerArtwork
@@ -75,7 +79,7 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
             }
         }
     }
-    (connection.failure as? AndroidMetadataException.LocalAccessRequired)?.let { failure ->
+    (connection.failure as? SourceMetadataException.LocalAccessRequired)?.let { failure ->
         io.github.screwys.rufin.sources.LocalAccessDialog(model, failure.sourceId, failure.sourcePath,
             onDismiss = onDismiss, onSaved = { connection.reload() })
     }
@@ -88,7 +92,7 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
 }
 
 @Composable
-private fun MetadataFields(connection: MetadataConnection, state: AndroidMetadataState, editable: Boolean) {
+private fun MetadataFields(connection: MetadataConnection, state: MetadataEditorSnapshot, editable: Boolean) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             if (state.trackCount > 1UL) Text(state.scopeSummary,
@@ -98,16 +102,17 @@ private fun MetadataFields(connection: MetadataConnection, state: AndroidMetadat
                 Spacer(Modifier.width(8.dp)); Text(translate("Identify"))
             }
         }
-        items(state.fields, key = { it.id }) { field ->
-            OutlinedTextField(value = field.value, onValueChange = { connection.setField(field.id, it) },
+        items(state.fields, key = { it.field.key }) { presented ->
+            val field = presented.field
+            OutlinedTextField(value = field.value, onValueChange = { connection.setField(field.key, it) },
                 modifier = Modifier.fillMaxWidth(), label = { Text(field.label) }, enabled = editable,
                 readOnly = !field.writable,
                 supportingText = if (field.mixed || !field.writable) ({ Text(if (field.mixed) translate("Multiple values") else translate("This source cannot edit this field")) }) else null,
-                trailingIcon = if (field.identified) ({ IconButton({ connection.undo(field.id) }, enabled = editable) {
+                trailingIcon = if (presented.identified) ({ IconButton({ connection.undo(field.key) }, enabled = editable) {
                     RufinIcon("rufin-edit-undo-symbolic", translate("Undo identified value")) } }) else null,
-                singleLine = field.kind == "Number" || field.kind == "Date",
-                keyboardOptions = KeyboardOptions(keyboardType = if (field.kind == "Number") KeyboardType.Decimal else KeyboardType.Text),
-                colors = if (field.identified) OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.primary)
+                singleLine = field.kind == MetadataFieldKind.NUMBER || field.kind == MetadataFieldKind.DATE,
+                keyboardOptions = KeyboardOptions(keyboardType = if (field.kind == MetadataFieldKind.NUMBER) KeyboardType.Decimal else KeyboardType.Text),
+                colors = if (presented.identified) OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.primary)
                     else OutlinedTextFieldDefaults.colors(),
             )
         }
@@ -123,7 +128,7 @@ private fun MetadataFields(connection: MetadataConnection, state: AndroidMetadat
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MetadataArtwork(connection: MetadataConnection, state: AndroidMetadataState, editable: Boolean, import: () -> Unit) {
+private fun MetadataArtwork(connection: MetadataConnection, state: MetadataEditorSnapshot, editable: Boolean, import: () -> Unit) {
     var artist by remember { mutableStateOf(state.searchArtist) }
     var album by remember { mutableStateOf(state.searchAlbum.orEmpty()) }
     val context = LocalContext.current
@@ -140,14 +145,14 @@ private fun MetadataArtwork(connection: MetadataConnection, state: AndroidMetada
                 TextButton(connection::useCurrentArtwork, enabled = editable && state.hasCurrentArtwork) { Text(translate("Use current artwork")) }
                 TextButton(connection::removeArtwork, enabled = editable && state.canRemoveArtwork) { Text(translate("Remove")) }
             }
-            if (state.artworkStorage != AndroidArtworkStorage.SERVER) {
+            if (state.artworkStorage != ArtworkStorage.SERVER && state.canEmbedArtwork) {
                 Text(translate("Artwork storage"), style = MaterialTheme.typography.titleSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(state.artworkStorage == AndroidArtworkStorage.EMBEDDED,
-                        { connection.setStorage(AndroidArtworkStorage.EMBEDDED) }, enabled = editable && state.canEmbedArtwork,
+                    FilterChip(state.artworkStorage == ArtworkStorage.EMBEDDED,
+                        { connection.setStorage(ArtworkStorage.EMBEDDED) }, enabled = editable,
                         label = { Text(translate("Embed in track")) })
-                    FilterChip(state.artworkStorage == AndroidArtworkStorage.FOLDER,
-                        { connection.setStorage(AndroidArtworkStorage.FOLDER) }, enabled = editable,
+                    FilterChip(state.artworkStorage == ArtworkStorage.FOLDER,
+                        { connection.setStorage(ArtworkStorage.FOLDER) }, enabled = editable,
                         label = { Text(translate("Save in folder")) })
                 }
             }
@@ -167,7 +172,7 @@ private fun MetadataArtwork(connection: MetadataConnection, state: AndroidMetada
             items(connection.results.orEmpty(), key = { it.imageUrl }) { result ->
                 val editor = connection.bridge
                 val image by produceState<io.github.screwys.rufin.ui.PlayerArtwork?>(null, editor, result.thumbnailUrl) {
-                    if (editor != null) try { value = decodePlayerArtwork(editor.imageBytes(result.thumbnailUrl), 128) }
+                    if (editor != null) try { value = editor.downloadArtwork(result.thumbnailUrl).use { decodePlayerArtwork(it.bytes(), 128) } }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { }
                 }
@@ -186,15 +191,17 @@ private fun MetadataArtwork(connection: MetadataConnection, state: AndroidMetada
 private fun MetadataFailure(error: Throwable, reload: () -> Unit, retry: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         val message = when (error) {
-            is AndroidMetadataException.Conflict -> translate("Metadata changed before it was saved. Reload it before trying again.")
-            is AndroidMetadataException.LocalAccessRequired -> translate("Local file access is required before these tags can be saved.") + "\n" + error.sourcePath
-            is AndroidMetadataException.SavedRefreshFailed -> translate("Metadata was saved, but refreshing the source failed.") + "\n" + error.reason
-            is AndroidMetadataException.PartiallySaved -> translate("Some changes were saved. Close this editor and reopen it to review the result.") + "\n" + error.reason
-            is AndroidMetadataException.Unavailable -> translate("Metadata editing is no longer available")
+            is SourceMetadataException.Conflict -> translate("Metadata changed before it was saved. Reload it before trying again.")
+            is SourceMetadataException.LocalAccessRequired -> translate("Local file access is required before these tags can be saved.") + "\n" + error.sourcePath
+            is SourceMetadataException.SavedRefreshFailed -> translate("Metadata was saved, but refreshing the source failed.") + "\n" + error.v1
+            is SourceMetadataException.PartiallySaved -> translate("Some changes were saved. Close this editor and reopen it to review the result.") + "\n" + error.reason
+            is SourceMetadataException.Unavailable -> translate("Metadata editing is no longer available")
+            is SourceMetadataException.InvalidInput -> error.v1
+            is SourceMetadataException.Write -> error.v1
             else -> error.message.orEmpty()
         }
         io.github.screwys.rufin.ui.ErrorNotice(message)
-        if (error is AndroidMetadataException.Conflict) TextButton(reload) { Text(translate("Reload")) }
-        if (error is AndroidMetadataException.Unavailable) TextButton(retry) { Text(translate("Retry")) }
+        if (error is SourceMetadataException.Conflict) TextButton(reload) { Text(translate("Reload")) }
+        if (error is SourceMetadataException.Unavailable) TextButton(retry) { Text(translate("Retry")) }
     }
 }

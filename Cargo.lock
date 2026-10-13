@@ -4953,6 +4953,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "uniffi",
  "url",
 ]
 
@@ -5346,6 +5347,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "uniffi",
  "wana_kana",
  "zip",
 ]
@@ -5514,6 +5516,7 @@ dependencies = [
  "serde_json",
  "sources",
  "tracing",
+ "uniffi",
 ]
 
 [[package]]
@@ -6915,6 +6918,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "uniffi",
 ]
 
 [[package]]
@@ -8101,6 +8105,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "uniffi",
  "url",
  "windows-updater",
 ]
@@ -9042,6 +9047,7 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util",
  "tracing",
+ "uniffi",
  "url",
  "walkdir",
  "winsafe",

@@ -1,12 +1,12 @@
 use super::*;
-use rufin_core::runtime::source::{PlexLoginEvent, PlexLoginMethod};
+use rufin_core::runtime::source::PlexLoginMethod;
 
 #[derive(Default)]
 struct Draft {
-    login: Option<sources::PlexLogin>,
-    profiles: Vec<sources::PlexProfile>,
+    authorization: Option<Arc<SourceAuthorization>>,
+    profiles: Vec<SourceChoice>,
     profile: usize,
-    servers: Option<Vec<sources::PlexServer>>,
+    servers: Option<Vec<SourceChoice>>,
     server: usize,
     name: String,
     address: String,
@@ -14,20 +14,30 @@ struct Draft {
 }
 
 impl Draft {
-    fn connection_input(&self) -> Option<sources::PlexSetupInput> {
-        let server = self.servers.as_ref()?.get(self.server)?.clone();
-        Some(sources::PlexSetupInput {
-            name: if self.name.trim().is_empty() {
-                server.name.clone()
-            } else {
-                self.name.trim().into()
-            },
-            login: self.login.clone()?,
-            profile_id: self.profiles.get(self.profile)?.id.clone(),
-            server,
+    fn connect(&self) {
+        let Some(authorization) = self.authorization.clone() else {
+            return;
+        };
+        let Some(server) = self
+            .servers
+            .as_ref()
+            .and_then(|servers| servers.get(self.server))
+        else {
+            return;
+        };
+        let name = if self.name.trim().is_empty() {
+            server.title.clone()
+        } else {
+            self.name.trim().into()
+        };
+        let input = SourceAuthorizationInput::Plex {
+            server_index: self.server as u32,
             address_override: optional_address(&self.address),
             trust_invalid_cert: self.trust_invalid_cert,
-        })
+        };
+        gtk::glib::spawn_future_local(async move {
+            let _ = authorization.finish(name, None, false, input).await;
+        });
     }
 }
 
@@ -73,7 +83,7 @@ impl SourceSetupFlow for PlexFlow {
             , saved_login: adw::ComboRow, saved_options: gtk::StringList, reuse_login: gtk::Button
         });
         let draft = self.draft.borrow();
-        let signed_in = draft.login.is_some();
+        let signed_in = draft.authorization.is_some();
         let choosing_server = draft.servers.is_some();
         account.set_visible(!signed_in);
         login_actions.set_visible(!signed_in);
@@ -97,7 +107,7 @@ impl SourceSetupFlow for PlexFlow {
             &draft
                 .profiles
                 .iter()
-                .map(|p| p.name.as_str())
+                .map(|p| p.title.as_str())
                 .collect::<Vec<_>>(),
         );
         profile.set_selected(draft.profile as u32);
@@ -111,7 +121,7 @@ impl SourceSetupFlow for PlexFlow {
             server_options.splice(
                 0,
                 0,
-                &servers.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+                &servers.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(),
             );
         }
         server.set_selected(draft.server as u32);
@@ -130,8 +140,8 @@ impl SourceSetupFlow for PlexFlow {
         });
 
         if !signed_in {
-            let saved = Rc::new(RefCell::new(Vec::<(String, sources::PlexLogin)>::new()));
-            let events = shell.products.source.plex_saved_logins();
+            let saved = Rc::new(RefCell::new(None::<Arc<SourceAuthorization>>));
+            let source = shell.products.source.clone();
             let (saved_row, options, reuse, values) = (
                 saved_login.downgrade(),
                 saved_options.downgrade(),
@@ -139,7 +149,8 @@ impl SourceSetupFlow for PlexFlow {
                 saved.clone(),
             );
             let listing = gtk::glib::spawn_future_local(async move {
-                if let Ok(Ok(logins)) = events.recv().await {
+                if let Ok(authorization) = SourceAuthorization::saved_plex(source).await {
+                    let logins = authorization.choices();
                     let available = !logins.is_empty();
                     if let Some(options) = options.upgrade() {
                         options.splice(
@@ -147,11 +158,11 @@ impl SourceSetupFlow for PlexFlow {
                             0,
                             &logins
                                 .iter()
-                                .map(|(name, _)| name.as_str())
+                                .map(|choice| choice.title.as_str())
                                 .collect::<Vec<_>>(),
                         );
                     }
-                    *values.borrow_mut() = logins;
+                    *values.borrow_mut() = Some(authorization);
                     if let Some(row) = saved_row.upgrade() {
                         row.set_visible(available);
                     }
@@ -163,20 +174,16 @@ impl SourceSetupFlow for PlexFlow {
             section.connect_unmap(move |_| listing.abort());
             let (row, status) = (saved_login.downgrade(), status.downgrade());
             let login_buttons = [password_login.downgrade(), browser_login.downgrade()];
-            let (source, state, weak_shell, tasks) = (
-                shell.products.source.clone(),
-                self.draft.clone(),
-                Rc::downgrade(shell),
-                tasks.clone(),
-            );
+            let (state, weak_shell, tasks) =
+                (self.draft.clone(), Rc::downgrade(shell), tasks.clone());
             reuse_login.connect_clicked(move |button| {
-                let login = row.upgrade().and_then(|row| {
-                    saved
-                        .borrow()
-                        .get(row.selected() as usize)
-                        .map(|(_, login)| login.clone())
-                });
-                let Some(login) = login else { return };
+                let Some((authorization, index)) = saved
+                    .borrow()
+                    .clone()
+                    .zip(row.upgrade().map(|row| row.selected()))
+                else {
+                    return;
+                };
                 for button in &login_buttons {
                     if let Some(button) = button.upgrade() {
                         button.set_sensitive(false);
@@ -185,7 +192,6 @@ impl SourceSetupFlow for PlexFlow {
                 if let Some(task) = tasks.borrow_mut().take() {
                     task.abort();
                 }
-                let events = source.plex_profiles(login);
                 if let Some(status) = status.upgrade() {
                     status.set_text(&tr("Connecting to music server..."));
                     status.set_visible(true);
@@ -201,21 +207,17 @@ impl SourceSetupFlow for PlexFlow {
                 }
                 let login_buttons = login_buttons.clone();
                 *tasks.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
-                    match events.recv().await {
-                        Ok(Ok((login, profiles))) => {
+                    match authorization.plex_profiles(Some(index)).await {
+                        Ok(profiles) => {
                             {
                                 let mut draft = state.borrow_mut();
-                                draft.login = Some(login);
+                                draft.authorization = Some(authorization);
                                 draft.profiles = profiles;
                             }
                             remount(&shell);
                         }
-                        result => {
-                            let error = match result {
-                                Ok(Err(error)) => error,
-                                Err(error) => error.to_string(),
-                                _ => unreachable!(),
-                            };
+                        Err(error) => {
+                            let error = error.to_string();
                             if let Some(status) = status.upgrade() {
                                 status.set_text(&error);
                                 status.set_visible(true);
@@ -277,10 +279,12 @@ impl SourceSetupFlow for PlexFlow {
                     status.set_text(&tr("Connecting to music server..."));
                     status.set_visible(true);
                 }
-                let events = source.plex_login(method);
-                let reuse_button = reuse_button.clone();
-                let (source, state, shell, status, password_button, browser_button) = (
+                let events = SourceAuthorization::new(
                     source.clone(),
+                    SourceAuthorizationMethod::Plex { method },
+                );
+                let reuse_button = reuse_button.clone();
+                let (state, shell, status, password_button, browser_button) = (
                     state.clone(),
                     shell.clone(),
                     status.clone(),
@@ -288,9 +292,9 @@ impl SourceSetupFlow for PlexFlow {
                     browser_button.clone(),
                 );
                 *tasks.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
-                    while let Ok(event) = events.recv().await {
-                        let result = match event {
-                            Ok(PlexLoginEvent::OpenBrowser(address)) => {
+                    loop {
+                        let result = match events.next().await {
+                            Ok(SourceAuthorizationEvent::OpenBrowser { url: address }) => {
                                 if let Some(status) = status.upgrade() {
                                     status.set_text(&tr("Complete sign-in in your browser"));
                                 }
@@ -301,22 +305,22 @@ impl SourceSetupFlow for PlexFlow {
                                 .await
                                 .map_err(|error| error.to_string())
                             }
-                            Ok(PlexLoginEvent::Authorized(login)) => {
-                                match source.plex_profiles(*login).recv().await {
-                                    Ok(Ok((login, profiles))) => {
+                            Ok(SourceAuthorizationEvent::Ready { .. }) => {
+                                match events.plex_profiles(None).await {
+                                    Ok(profiles) => {
                                         {
                                             let mut draft = state.borrow_mut();
-                                            draft.login = Some(login);
+                                            draft.authorization = Some(events.clone());
                                             draft.profiles = profiles;
                                         }
                                         remount(&shell);
                                         return;
                                     }
-                                    Ok(Err(error)) => Err(error),
                                     Err(error) => Err(error.to_string()),
                                 }
                             }
-                            Err(error) => Err(error),
+                            Ok(SourceAuthorizationEvent::Code { .. }) => Ok(()),
+                            Err(error) => Err(error.to_string()),
                         };
                         if let Err(error) = result {
                             if let Some(status) = status.upgrade() {
@@ -350,7 +354,6 @@ impl SourceSetupFlow for PlexFlow {
             }
         });
         let state = self.draft.clone();
-        let source = shell.products.source.clone();
         let weak_shell = Rc::downgrade(shell);
         let pin = pin.downgrade();
         let status_weak = status.downgrade();
@@ -359,11 +362,11 @@ impl SourceSetupFlow for PlexFlow {
             let input = {
                 let draft = state.borrow();
                 draft
-                    .login
+                    .authorization
                     .clone()
-                    .zip(draft.profiles.get(draft.profile).cloned())
+                    .map(|authorization| (authorization, draft.profile as u32))
             };
-            let Some((login, profile)) = input else {
+            let Some((authorization, profile)) = input else {
                 return;
             };
             let pin = pin
@@ -375,7 +378,6 @@ impl SourceSetupFlow for PlexFlow {
                 return;
             };
             let lan = shell.source.discovered_servers.borrow().clone();
-            let events = source.plex_servers(login, profile, pin, lan);
             button.set_sensitive(false);
             if let Some(fields) = profile_fields.upgrade() {
                 fields.set_sensitive(false);
@@ -391,29 +393,22 @@ impl SourceSetupFlow for PlexFlow {
                 status_weak.clone(),
             );
             let profile_fields = profile_fields.clone();
-            let source = source.clone();
             *tasks.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
-                match events.recv().await {
-                    Ok(Ok((login, servers))) => {
-                        let input = {
+                match authorization.plex_servers(profile, pin, lan).await {
+                    Ok(servers) => {
+                        let single_server = servers.len() == 1;
+                        {
                             let mut draft = state.borrow_mut();
-                            let single_server = servers.len() == 1;
-                            draft.login = Some(login);
                             draft.servers = Some(servers);
                             draft.server = 0;
-                            single_server.then(|| draft.connection_input()).flatten()
-                        };
+                        }
                         remount(&shell);
-                        if let Some(input) = input {
-                            source.configure_source(SourceSetup::Plex(input));
+                        if single_server {
+                            state.borrow().connect();
                         }
                     }
-                    result => {
-                        let error = match result {
-                            Ok(Err(error)) => error,
-                            Err(error) => error.to_string(),
-                            _ => unreachable!(),
-                        };
+                    Err(error) => {
+                        let error = error.to_string();
                         if let Some(status) = status.upgrade() {
                             status.set_text(&error);
                             status.set_visible(true);
@@ -448,20 +443,15 @@ impl SourceSetupFlow for PlexFlow {
             connect: connect.clone(),
             ready,
         });
-        let source = shell.products.source.clone();
         let state = self.draft.clone();
         let connect_status = status.clone();
         connect.connect_clicked(move |button| {
-            let input = state.borrow().connection_input();
-            let Some(input) = input else {
-                return;
-            };
             begin_connect_attempt(
                 &connect_status,
                 button,
                 &tr("Connecting to music server..."),
             );
-            source.configure_source(SourceSetup::Plex(input));
+            state.borrow().connect();
         });
         let state = self.draft.clone();
         let weak = Rc::downgrade(shell);

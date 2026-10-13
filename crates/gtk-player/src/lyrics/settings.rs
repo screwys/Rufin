@@ -1,32 +1,28 @@
 use crate::PlayerUi;
-use lyrics::ExternalLyricsProvider;
+use lyrics::{ExternalLyricsProvider, LyricsPreferenceEdit};
 use std::rc::Rc;
 impl PlayerUi {
-    pub fn set_external_lyrics_enabled(self: &Rc<Self>, enabled: bool) -> bool {
-        self.set_lyrics_setting("lyrics setting", false, enabled, |settings| {
-            &mut settings.external_lyrics_enabled
-        })
+    pub fn set_external_lyrics_enabled(self: &Rc<Self>, value: bool) -> bool {
+        self.set_lyrics_setting(
+            "lyrics setting",
+            false,
+            LyricsPreferenceEdit::ExternalLyricsEnabled { value },
+        )
     }
 
-    pub fn set_save_lyrics_to_source(self: &Rc<Self>, enabled: bool) -> bool {
-        self.update_lyrics_settings("save lyrics destination setting", false, |settings| {
-            if settings.save_lyrics_to_source == enabled {
-                return false;
-            }
-            settings.save_lyrics_to_source = enabled;
-            if !enabled {
-                settings.save_lyrics_automatically = false;
-            }
-            true
-        })
+    pub fn set_save_lyrics_to_source(self: &Rc<Self>, value: bool) -> bool {
+        self.set_lyrics_setting(
+            "save lyrics destination setting",
+            false,
+            LyricsPreferenceEdit::SaveLyricsToSource { value },
+        )
     }
 
-    pub fn set_save_lyrics_automatically(self: &Rc<Self>, enabled: bool) -> bool {
+    pub fn set_save_lyrics_automatically(self: &Rc<Self>, value: bool) -> bool {
         self.set_lyrics_setting(
             "automatic lyrics save setting",
             false,
-            enabled,
-            |settings| &mut settings.save_lyrics_automatically,
+            LyricsPreferenceEdit::SaveLyricsAutomatically { value },
         )
     }
 
@@ -76,11 +72,13 @@ impl PlayerUi {
         self: &Rc<Self>,
         warning_action: &'static str,
         rerender_lyrics: bool,
-        update: impl FnOnce(&mut lyrics::Settings) -> bool,
+        update: impl FnOnce(&mut lyrics::UserPreferences) -> bool,
     ) -> bool {
         let updated = self
             .settings
-            .update_app_settings(warning_action, |settings| update(&mut settings.lyrics))
+            .update_app_settings(warning_action, |settings| {
+                update(&mut settings.lyrics.preferences)
+            })
             .is_some();
         if !updated {
             return false;
@@ -91,23 +89,17 @@ impl PlayerUi {
         true
     }
 
-    pub fn set_lyrics_setting<T: PartialEq>(
+    pub fn set_lyrics_setting(
         self: &Rc<Self>,
         warning_action: &'static str,
         rerender_lyrics: bool,
-        value: T,
-        field: impl FnOnce(&mut lyrics::Settings) -> &mut T,
+        edit: LyricsPreferenceEdit,
     ) -> bool {
-        let updated = self
-            .settings
-            .set_app_setting(warning_action, value, |settings| {
-                field(&mut settings.lyrics)
-            })
-            .is_some();
-        if updated && rerender_lyrics {
-            self.render_lyrics_presentation();
-        }
-        updated
+        self.update_lyrics_settings(warning_action, rerender_lyrics, move |settings| {
+            let previous = settings.clone();
+            settings.apply(edit);
+            previous != *settings
+        })
     }
 }
 
@@ -187,7 +179,7 @@ fn build_lyrics_settings(
     appearance_changed: Rc<dyn Fn()>,
     fullscreen: bool,
 ) -> adw::PreferencesPage {
-    let settings = shell.settings.current.borrow().lyrics.clone();
+    let settings = shell.settings.current.borrow().lyrics.preferences.clone();
     let resource = crate::ui_resource::LYRICS_SETTINGS_RESOURCE;
     gtk_widgets::objects!(builder, resource, {
         page: adw::PreferencesPage,
@@ -221,8 +213,9 @@ fn build_lyrics_settings(
         prefer_server_shell.set_lyrics_setting(
             "lyrics search setting",
             false,
-            row.is_active(),
-            |settings| &mut settings.prefer_server_lyrics,
+            LyricsPreferenceEdit::PreferServerLyrics {
+                value: row.is_active(),
+            },
         );
     });
 
@@ -238,6 +231,7 @@ fn build_lyrics_settings(
             .current
             .borrow()
             .lyrics
+            .preferences
             .save_lyrics_automatically
         {
             automatic_shell.set_save_lyrics_automatically(false);
@@ -276,8 +270,9 @@ fn build_lyrics_settings(
         if storage_shell.set_lyrics_setting(
             "lyrics storage setting",
             false,
-            button.is_active(),
-            |settings| &mut settings.save_lyrics_as_sidecar,
+            LyricsPreferenceEdit::SaveLyricsAsSidecar {
+                value: button.is_active(),
+            },
         ) {
             storage_shell.lyrics_service.refresh_write_access();
         }
@@ -345,8 +340,9 @@ fn build_lyrics_settings(
         language_shell.set_lyrics_setting(
             "lyrics translation language",
             false,
-            language.id.clone(),
-            |settings| &mut settings.preferred_translation_language,
+            LyricsPreferenceEdit::PreferredTranslationLanguage {
+                value: language.id.clone(),
+            },
         );
     });
     let translations_shell = Rc::clone(shell);
@@ -355,8 +351,9 @@ fn build_lyrics_settings(
         if translations_shell.set_lyrics_setting(
             "lyrics translation setting",
             false,
-            row.is_active(),
-            |settings| &mut settings.prefer_translations,
+            LyricsPreferenceEdit::PreferTranslations {
+                value: row.is_active(),
+            },
         ) {
             translations_language_row.set_sensitive(row.is_active());
         }
@@ -368,8 +365,9 @@ fn build_lyrics_settings(
         furigana_shell.set_lyrics_setting(
             "lyrics furigana setting",
             true,
-            row.is_active(),
-            |settings| &mut settings.show_furigana,
+            LyricsPreferenceEdit::ShowFurigana {
+                value: row.is_active(),
+            },
         );
     });
 
@@ -379,8 +377,9 @@ fn build_lyrics_settings(
         romanization_shell.set_lyrics_setting(
             "lyrics Romaji setting",
             true,
-            row.is_active(),
-            |settings| &mut settings.show_romanization,
+            LyricsPreferenceEdit::ShowRomanization {
+                value: row.is_active(),
+            },
         );
     });
     karaoke.set_active(settings.karaoke_mode);
@@ -389,8 +388,9 @@ fn build_lyrics_settings(
         karaoke_shell.set_lyrics_setting(
             "lyrics karaoke setting",
             true,
-            row.is_active(),
-            |settings| &mut settings.karaoke_mode,
+            LyricsPreferenceEdit::KaraokeMode {
+                value: row.is_active(),
+            },
         );
     });
     let color_shell = Rc::clone(shell);
@@ -405,6 +405,7 @@ fn build_lyrics_settings(
             .current
             .borrow()
             .lyrics
+            .preferences
             .lyrics_highlight_color
             .as_deref()
             .and_then(|color| gtk::gdk::RGBA::parse(color).ok())
@@ -425,8 +426,9 @@ fn build_lyrics_settings(
                     && shell.set_lyrics_setting(
                         "lyrics highlight color",
                         true,
-                        Some(rgba_hex(&color)),
-                        |settings| &mut settings.lyrics_highlight_color,
+                        LyricsPreferenceEdit::LyricsHighlightColor {
+                            value: Some(rgba_hex(&color)),
+                        },
                     )
                 {
                     appearance_changed();
@@ -458,13 +460,12 @@ fn build_lyrics_settings(
             .checked_sub(1)
             .and_then(|index| selected_families.get(index as usize))
             .cloned();
-        if font_shell.set_lyrics_setting("lyrics font family", false, family, move |settings| {
-            if fullscreen {
-                &mut settings.fullscreen_lyrics_font_family
-            } else {
-                &mut settings.lyrics_font_family
-            }
-        }) {
+        let edit = if fullscreen {
+            LyricsPreferenceEdit::FullscreenLyricsFontFamily { value: family }
+        } else {
+            LyricsPreferenceEdit::LyricsFontFamily { value: family }
+        };
+        if font_shell.set_lyrics_setting("lyrics font family", false, edit) {
             font_appearance();
         }
     });
@@ -479,18 +480,13 @@ fn build_lyrics_settings(
     let size_shell = Rc::clone(shell);
     size.connect_value_notify(move |row| {
         let size = row.value().round() as u16;
-        if size_shell.set_lyrics_setting(
-            "lyrics font size",
-            false,
-            (size != 19).then_some(size),
-            move |settings| {
-                if fullscreen {
-                    &mut settings.fullscreen_lyrics_font_size
-                } else {
-                    &mut settings.lyrics_font_size
-                }
-            },
-        ) {
+        let value = (size != 19).then_some(size);
+        let edit = if fullscreen {
+            LyricsPreferenceEdit::FullscreenLyricsFontSize { value }
+        } else {
+            LyricsPreferenceEdit::LyricsFontSize { value }
+        };
+        if size_shell.set_lyrics_setting("lyrics font size", false, edit) {
             appearance_changed();
         }
     });
@@ -508,7 +504,7 @@ fn populate_provider_rows(
         }
     }
 
-    let settings = shell.settings.current.borrow().lyrics.clone();
+    let settings = shell.settings.current.borrow().lyrics.preferences.clone();
     let enabled = settings.external_lyrics_providers;
     let mut providers = enabled.clone();
     providers.extend(

@@ -27,42 +27,6 @@ pub struct AndroidPlayerMetadata {
 }
 
 #[derive(uniffi::Record)]
-pub struct AndroidPlayerChoice {
-    pub id: String,
-    pub title: String,
-}
-
-#[derive(uniffi::Record)]
-pub struct AndroidEqualizerPreset {
-    pub id: String,
-    pub title: String,
-    pub bands: Vec<f64>,
-}
-
-#[derive(Clone, uniffi::Record)]
-pub struct AndroidFullscreenSettings {
-    pub dynamic_background: bool,
-    pub background_image: bool,
-}
-
-#[derive(uniffi::Record)]
-pub struct AndroidPlayerSettings {
-    pub private_mode: bool,
-    pub equalizer: String,
-    pub equalizer_preset: String,
-    pub band_titles: Vec<String>,
-    pub equalizer_presets: Vec<AndroidEqualizerPreset>,
-    pub lyrics: String,
-    pub lyrics_providers: Vec<AndroidPlayerChoice>,
-    pub lyrics_scroll_pause_millis: u64,
-    pub visualizer: String,
-    pub visualizer_preset: u32,
-    pub visualizer_stale_micros: u64,
-    pub visualizer_styles: Vec<AndroidPlayerChoice>,
-    pub fullscreen: AndroidFullscreenSettings,
-}
-
-#[derive(uniffi::Record)]
 pub struct AndroidRgb {
     pub red: f32,
     pub green: f32,
@@ -390,10 +354,10 @@ fn reading_for(
     supplied: Option<&str>,
     settings: &lyrics::Settings,
 ) -> Option<lyrics::JapaneseReading> {
-    if !settings.show_furigana && !settings.show_romanization {
+    if !settings.preferences.show_furigana && !settings.preferences.show_romanization {
         return None;
     }
-    let reading = if settings.show_furigana {
+    let reading = if settings.preferences.show_furigana {
         supplied.and_then(|pronunciation| {
             lyrics::japanese_reading_from_romanization(text, pronunciation)
         })
@@ -404,8 +368,8 @@ fn reading_for(
         lyrics::japanese_reading_for_language_options(
             text,
             language,
-            settings.show_furigana,
-            settings.show_romanization,
+            settings.preferences.show_furigana,
+            settings.preferences.show_romanization,
         )
     })
 }
@@ -595,7 +559,7 @@ impl AndroidPlayer {
                 );
             }
         }
-        if !settings.show_furigana && !settings.show_romanization {
+        if !settings.preferences.show_furigana && !settings.preferences.show_romanization {
             lyrics::release_japanese_reader();
         }
         if let CurrentLyrics::Ready {
@@ -608,7 +572,9 @@ impl AndroidPlayer {
         } = current
         {
             let readings = document.is_japanese_for_readings();
-            if readings && (settings.show_furigana || settings.show_romanization) {
+            if readings
+                && (settings.preferences.show_furigana || settings.preferences.show_romanization)
+            {
                 if let lyrics::JapaneseDictionaryStatus::Ready(path) =
                     self.products.lyrics.japanese_dictionary(false)
                 {
@@ -616,7 +582,7 @@ impl AndroidPlayer {
                 }
             }
             if let Some(projected) = &mut state.document {
-                let mut reading_timings: Vec<Vec<_>> = if settings.karaoke_mode {
+                let mut reading_timings: Vec<Vec<_>> = if settings.preferences.karaoke_mode {
                     document.lines.iter().map(|_| Vec::new()).collect()
                 } else {
                     Vec::new()
@@ -648,7 +614,7 @@ impl AndroidPlayer {
                                 &settings,
                             );
                             if let Some(reading) = reading {
-                                if settings.karaoke_mode {
+                                if settings.preferences.karaoke_mode {
                                     let cues: Vec<_> = cue_line
                                         .cues
                                         .iter()
@@ -860,10 +826,7 @@ impl AndroidPlayer {
         Ok(())
     }
 
-    pub async fn clear_fetched_lyrics(
-        &self,
-        token: String,
-    ) -> Result<AndroidPlayerSettings, AndroidError> {
+    pub async fn clear_fetched_lyrics(&self, token: String) -> Result<(), AndroidError> {
         let media = self
             .products
             .playback
@@ -885,7 +848,7 @@ impl AndroidPlayer {
             })
             .await
             .map_err(error)??;
-        self.settings()
+        Ok(())
     }
 
     pub fn lyrics_text(&self, token: String, offset: i64) -> Result<String, AndroidError> {
@@ -988,230 +951,10 @@ impl AndroidPlayer {
             end_color: color(colors[1]),
         }
     }
-    pub fn settings(&self) -> Result<AndroidPlayerSettings, AndroidError> {
-        let stored = self.products.settings.load();
-        Ok(AndroidPlayerSettings {
-            private_mode: stored.private_mode,
-            equalizer: serde_json::to_string(&stored.playback.equalizer).map_err(error)?,
-            equalizer_preset: playback::equalizer_selected_preset(&stored.playback.equalizer),
-            band_titles: (0..playback::EQUALIZER_BAND_COUNT)
-                .map(playback::equalizer_band_title)
-                .collect(),
-            equalizer_presets: playback::equalizer_preset_names()
-                .into_iter()
-                .map(|id| AndroidEqualizerPreset {
-                    id: id.into(),
-                    title: localization::tr(id),
-                    bands: playback::equalizer_preset_bands(id),
-                })
-                .collect(),
-            lyrics: stored.lyrics.user_preferences().to_string(),
-            lyrics_providers: lyrics::ExternalLyricsProvider::all()
-                .into_iter()
-                .map(|provider| AndroidPlayerChoice {
-                    id: provider.key().into(),
-                    title: localization::tr(provider.title()),
-                })
-                .collect(),
-            lyrics_scroll_pause_millis: lyrics::LYRICS_USER_SCROLL_PAUSE_MS,
-            visualizer: serde_json::to_string(&stored.visualizer).map_err(error)?,
-            visualizer_preset: stored.visualizer.selected_preset() as u32,
-            visualizer_stale_micros: rufin_core::settings::visualizer::VISUALIZER_STALE_MICROS
-                as u64,
-            visualizer_styles: rufin_core::settings::visualizer::VisualizerStyle::ALL
-                .into_iter()
-                .map(|style| {
-                    let (id, title) = match style {
-                        rufin_core::settings::visualizer::VisualizerStyle::Segmented => {
-                            ("segmented", "Segmented bars")
-                        }
-                        rufin_core::settings::visualizer::VisualizerStyle::Solid => {
-                            ("solid", "Solid bars")
-                        }
-                        rufin_core::settings::visualizer::VisualizerStyle::Rounded => {
-                            ("rounded", "Rounded bars")
-                        }
-                        rufin_core::settings::visualizer::VisualizerStyle::Outline => {
-                            ("outline", "Outline bars")
-                        }
-                        rufin_core::settings::visualizer::VisualizerStyle::Line => {
-                            ("line", "Spectrum line")
-                        }
-                        rufin_core::settings::visualizer::VisualizerStyle::Filled => {
-                            ("filled", "Filled spectrum")
-                        }
-                        rufin_core::settings::visualizer::VisualizerStyle::Mirrored => {
-                            ("mirrored", "Mirrored bars")
-                        }
-                        rufin_core::settings::visualizer::VisualizerStyle::Circular => {
-                            ("circular", "Circular spectrum")
-                        }
-                    };
-                    AndroidPlayerChoice {
-                        id: id.into(),
-                        title: localization::tr(title),
-                    }
-                })
-                .collect(),
-            fullscreen: AndroidFullscreenSettings {
-                dynamic_background: stored.fullscreen_dynamic_background,
-                background_image: stored.fullscreen_background_image,
-            },
-        })
+    pub fn settings_owner(&self) -> Arc<rufin_core::settings::SettingsOwner> {
+        self.products.settings.clone()
     }
 
-    pub async fn equalizer_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<AndroidPlayerSettings, AndroidError> {
-        let settings = self.products.settings.clone();
-        self.products
-            .runtime
-            .spawn_blocking(move || settings.set_equalizer_enabled(enabled).map_err(error))
-            .await
-            .map_err(error)??;
-        self.settings()
-    }
-
-    pub async fn equalizer_preset(
-        &self,
-        preset: String,
-    ) -> Result<AndroidPlayerSettings, AndroidError> {
-        let settings = self.products.settings.clone();
-        self.products
-            .runtime
-            .spawn_blocking(move || settings.select_equalizer_preset(preset).map_err(error))
-            .await
-            .map_err(error)??;
-        self.settings()
-    }
-
-    pub async fn equalizer_band(
-        &self,
-        index: u32,
-        value: f64,
-    ) -> Result<AndroidPlayerSettings, AndroidError> {
-        let settings = self.products.settings.clone();
-        self.products
-            .runtime
-            .spawn_blocking(move || {
-                settings
-                    .set_equalizer_band(index as usize, value)
-                    .map_err(error)
-            })
-            .await
-            .map_err(error)??;
-        self.settings()
-    }
-
-    pub async fn lyrics_preference(
-        &self,
-        field: String,
-        value: String,
-    ) -> Result<AndroidPlayerSettings, AndroidError> {
-        let value = serde_json::from_str(&value).map_err(error)?;
-        let settings = self.products.settings.clone();
-        self.products
-            .runtime
-            .spawn_blocking(move || {
-                settings
-                    .set_player_lyrics_preference(field, value)
-                    .map_err(error)
-            })
-            .await
-            .map_err(error)??;
-        self.settings()
-    }
-
-    pub async fn visualizer_appearance_field(
-        &self,
-        field: String,
-        value: String,
-    ) -> Result<AndroidPlayerSettings, AndroidError> {
-        let value = serde_json::from_str(&value).map_err(error)?;
-        let settings = self.products.settings.clone();
-        self.products
-            .runtime
-            .spawn_blocking(move || {
-                settings
-                    .set_visualizer_appearance_field(field, value)
-                    .map_err(error)
-            })
-            .await
-            .map_err(error)??;
-        self.settings()
-    }
-
-    pub async fn visualizer_frame_limit(
-        &self,
-        value: u32,
-    ) -> Result<AndroidPlayerSettings, AndroidError> {
-        let settings = self.products.settings.clone();
-        self.products
-            .runtime
-            .spawn_blocking(move || settings.set_visualizer_frame_limit(value).map_err(error))
-            .await
-            .map_err(error)??;
-        self.settings()
-    }
-
-    pub async fn visualizer_preset(
-        &self,
-        slot: u32,
-        save: bool,
-    ) -> Result<AndroidPlayerSettings, AndroidError> {
-        let settings = self.products.settings.clone();
-        self.products
-            .runtime
-            .spawn_blocking(move || {
-                settings
-                    .update_visualizer_preset(slot as usize, save)
-                    .map_err(error)
-            })
-            .await
-            .map_err(error)??;
-        self.settings()
-    }
-
-    pub fn copy_visualizer_preset(&self) -> String {
-        rufin_core::settings::visualizer::VisualizerPreset {
-            appearance: self.products.settings.load().visualizer.appearance,
-        }
-        .to_json()
-    }
-
-    pub async fn reset_visualizer_appearance(&self) -> Result<AndroidPlayerSettings, AndroidError> {
-        let settings = self.products.settings.clone();
-        self.products
-            .runtime
-            .spawn_blocking(move || {
-                settings
-                    .set_visualizer_appearance(Default::default())
-                    .map_err(error)
-            })
-            .await
-            .map_err(error)??;
-        self.settings()
-    }
-
-    pub async fn paste_visualizer_preset(
-        &self,
-        text: String,
-    ) -> Result<AndroidPlayerSettings, AndroidError> {
-        let preset = rufin_core::settings::visualizer::VisualizerPreset::from_json(&text)
-            .ok_or_else(|| error(localization::tr("This isn't available")))?;
-        let settings = self.products.settings.clone();
-        self.products
-            .runtime
-            .spawn_blocking(move || {
-                settings
-                    .set_visualizer_appearance(preset.appearance)
-                    .map_err(error)
-            })
-            .await
-            .map_err(error)??;
-        self.settings()
-    }
     pub async fn outputs(&self) -> Result<AndroidOutputChoices, AndroidError> {
         let transport = self.products.playback.clone();
         let remotes = self

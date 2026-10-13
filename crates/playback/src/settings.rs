@@ -15,6 +15,7 @@ pub const MAX_AUTO_DJ_REFILL_THRESHOLD: u8 = 10;
 const PERCEPTUAL_DB_RANGE: f64 = 50.0;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum StreamQuality {
     #[default]
     Original,
@@ -31,6 +32,7 @@ impl StreamQuality {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum PlaybackTransitionMode {
     #[default]
     #[serde(alias = "Default")]
@@ -39,6 +41,7 @@ pub enum PlaybackTransitionMode {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum LoudnessNormalization {
     Off,
     #[default]
@@ -47,6 +50,7 @@ pub enum LoudnessNormalization {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum LoudnessNormalizationScope {
     Track,
     #[default]
@@ -54,6 +58,7 @@ pub enum LoudnessNormalizationScope {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum VolumeScale {
     #[default]
     Perceptual,
@@ -85,6 +90,7 @@ fn perceptual_gain_floor() -> f64 {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct EqualizerSettings {
     #[serde(default)]
     pub enabled: bool,
@@ -126,6 +132,7 @@ impl EqualizerSettings {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlaybackSettings {
     pub transition_mode: PlaybackTransitionMode,
     pub crossfade_seconds: u8,

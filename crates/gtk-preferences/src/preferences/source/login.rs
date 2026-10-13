@@ -3,9 +3,14 @@ pub use files::{bind_integrations, choose_integration};
 mod jellyfin_emby;
 mod plex;
 
+use rufin_core::source::authorization::{
+    SourceAuthorization, SourceAuthorizationEvent, SourceAuthorizationInput,
+    SourceAuthorizationMethod, SourceChoice,
+};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use adw::prelude::*;
 use rufin_core::runtime::source::{DiscoveryStatus, EditableSource, SourceHandle, SourceOperation};
@@ -612,7 +617,12 @@ fn credential_source_settings_group(
             authentication,
         );
         if let Some(shell) = weak_shell.upgrade() {
-            complete_source_save(&shell, button, result);
+            complete_source_save(&shell, button, async move {
+                result
+                    .recv()
+                    .await
+                    .unwrap_or_else(|error| Err(error.to_string()))
+            });
         }
     });
 
@@ -622,16 +632,13 @@ fn credential_source_settings_group(
 fn complete_source_save(
     shell: &Rc<Preferences>,
     button: &gtk::Button,
-    result: async_channel::Receiver<Result<(), String>>,
+    result: impl std::future::Future<Output = Result<(), String>> + 'static,
 ) {
     button.set_sensitive(false);
     let button = button.downgrade();
     let shell = Rc::downgrade(shell);
     gtk::glib::spawn_future_local(async move {
-        let result = result
-            .recv()
-            .await
-            .unwrap_or_else(|error| Err(error.to_string()));
+        let result = result.await;
         match result {
             Ok(()) => {
                 if let Some(button) = button.upgrade() {
@@ -872,7 +879,7 @@ fn source_choice_selector(shell: &Rc<Preferences>, context: &SetupViewContext) -
     {
         let settings = shell.settings.current.borrow();
         external_metadata.set_active(settings.external_metadata_enabled);
-        external_lyrics.set_active(settings.lyrics.external_lyrics_enabled);
+        external_lyrics.set_active(settings.lyrics.preferences.external_lyrics_enabled);
         discord_presence.set_active(settings.rich_presence.enabled);
     }
     let weak = Rc::downgrade(shell);

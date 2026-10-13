@@ -3,35 +3,24 @@ use adw::prelude::*;
 use gtk_editors::metadata::{build_dialog, metadata_error_dialog};
 use gtk_widgets::layout::large_popup_content_width;
 use localization::{msgid, tr};
-use rufin_core::metadata::MetadataItemId;
+use rufin_core::metadata::{MetadataEditor, MetadataItemId};
 use sources::SourceMetadataError;
 use std::{cell::Cell, rc::Rc};
 pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
-    let receiver = rufin_core::metadata::read_metadata(&shell.products.source, item.clone());
+    let source = shell.products.source.clone();
+    let selected = item.clone();
     if let Some(load) = shell.selected_ui.metadata_load.borrow_mut().take() {
         load.abort();
     }
     let weak_shell = Rc::downgrade(shell);
     let load = gtk::glib::spawn_future_local(async move {
-        let draft = receiver
-            .recv()
-            .await
-            .unwrap_or(Err(SourceMetadataError::Unavailable));
+        let editor = MetadataEditor::open(source, selected).await;
         let Some(shell) = weak_shell.upgrade() else {
             return;
         };
-        match draft {
-            Ok(draft) => {
-                let dialog = build_dialog(
-                    &shell.products.source,
-                    item,
-                    draft,
-                    shell
-                        .settings
-                        .current
-                        .borrow()
-                        .allows_external_metadata_lookup(),
-                );
+        match editor {
+            Ok(editor) => {
+                let dialog = build_dialog(editor);
                 shell.present_selected_dialog(&dialog);
             }
             Err(SourceMetadataError::LocalAccessRequired {

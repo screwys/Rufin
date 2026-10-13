@@ -1,6 +1,9 @@
 //! Rufin's SQLite-owned music library and its concrete persistence operations.
 //! Provider acquisition, playback transport, and presentation remain outside this crate.
 
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();
+
 mod activity;
 mod activity_overview;
 pub use activity_overview::{ActivityOverview, ActivityTotals};

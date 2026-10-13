@@ -1116,7 +1116,7 @@ fn general_page(
         metadata_shell.set_external_metadata_enabled(row.is_active());
     });
 
-    external_lyrics_row.set_active(settings.lyrics.external_lyrics_enabled);
+    external_lyrics_row.set_active(settings.lyrics.preferences.external_lyrics_enabled);
     let weak = Rc::downgrade(shell);
     external_lyrics_row.connect_active_notify(move |row| {
         if let Some(shell) = weak.upgrade() {

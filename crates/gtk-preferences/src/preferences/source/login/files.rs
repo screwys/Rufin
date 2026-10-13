@@ -3,6 +3,7 @@ use sources::{FileAuthentication, FileCredentials, FileCredentialsEdit, FileSour
 
 #[derive(Clone)]
 struct Draft {
+    authorization: Option<Arc<SourceAuthorization>>,
     name: String,
     settings: FileSourceSettings,
     secret: String,
@@ -35,9 +36,11 @@ impl Draft {
                 FileAuthentication::Anonymous => true,
                 FileAuthentication::Password => {
                     !self.settings.username.trim().is_empty()
-                        && (editing || !self.secret.is_empty())
+                        && (editing || self.authorization.is_some() || !self.secret.is_empty())
                 }
-                FileAuthentication::Bearer => editing || !self.secret.is_empty(),
+                FileAuthentication::Bearer => {
+                    editing || self.authorization.is_some() || !self.secret.is_empty()
+                }
             }
     }
 
@@ -57,6 +60,7 @@ impl Draft {
                 require_smb_encryption: false,
             });
         Self {
+            authorization: None,
             name: saved.map_or(String::new(), |saved| saved.source.name.clone()),
             folders: settings.folders.join("\n"),
             alternates: settings.alternate_urls.join("\n"),
@@ -65,6 +69,52 @@ impl Draft {
             secret: String::new(),
             headers: String::new(),
             replace_headers: saved.is_none(),
+        }
+    }
+
+    async fn save(
+        self,
+        source: SourceHandle,
+        source_id: Option<sources::SourceId>,
+        kind: &str,
+        integration: bool,
+    ) -> Result<sources::SourceId, String> {
+        let (settings, credentials) = self.input()?;
+        let name = if source_id.is_none() && self.name.trim().is_empty() {
+            gtk_widgets::source_labels::source_kind_title(kind)
+                .map(tr)
+                .unwrap_or_default()
+        } else {
+            self.name.trim().into()
+        };
+        let credentials = FileCredentialsEdit {
+            secret: (!credentials.secret.is_empty()).then_some(credentials.secret),
+            headers: self.replace_headers.then_some(credentials.headers),
+        };
+        if let Some(authorization) = self.authorization {
+            authorization
+                .finish(
+                    name,
+                    source_id,
+                    integration,
+                    SourceAuthorizationInput::Files {
+                        settings,
+                        credentials,
+                    },
+                )
+                .await
+                .map_err(|error| error.to_string())
+        } else {
+            source
+                .save_files(
+                    source_id,
+                    kind == "smb",
+                    integration,
+                    name,
+                    settings,
+                    credentials,
+                )
+                .await
         }
     }
 
@@ -94,7 +144,10 @@ impl Draft {
                 let (name, value) = line
                     .split_once(':')
                     .ok_or_else(|| tr("One Name: Value header per line"))?;
-                Ok((name.trim().to_string(), value.trim().to_string()))
+                Ok(sources::FileHeader {
+                    name: name.trim().into(),
+                    value: value.trim().into(),
+                })
             })
             .collect::<Result<_, String>>()?;
         Ok((
@@ -146,37 +199,25 @@ impl SourceSetupFlow for FileSetupFlow {
         let source = shell.products.source.clone();
         let draft = Rc::clone(&self.draft);
         let kind = self.presentation.kind;
-        let title = gtk_widgets::source_labels::source_kind_title(self.presentation.kind)
-            .expect("registered source presentation");
         form.connect.connect_clicked(move |button| {
-            let value = draft.borrow().clone();
-            match value.input() {
-                Ok((settings, credentials)) => {
-                    begin_connect_attempt(&status, button, &tr("Connecting to music server..."));
-                    let name = if value.name.trim().is_empty() {
-                        tr(title)
-                    } else {
-                        value.name.trim().into()
-                    };
-                    source.configure_source(if kind == "smb" {
-                        SourceSetup::Smb {
-                            name,
-                            settings,
-                            credentials,
-                        }
-                    } else {
-                        SourceSetup::WebDav {
-                            name,
-                            settings,
-                            credentials,
-                        }
-                    });
+            begin_connect_attempt(&status, button, &tr("Connecting to music server..."));
+            let (value, source, status, button) = (
+                draft.borrow().clone(),
+                source.clone(),
+                status.downgrade(),
+                button.downgrade(),
+            );
+            gtk::glib::spawn_future_local(async move {
+                if let Err(error) = value.save(source, None, kind, false).await {
+                    if let Some(status) = status.upgrade() {
+                        status.set_text(&error);
+                        status.set_visible(true);
+                    }
+                    if let Some(button) = button.upgrade() {
+                        button.set_sensitive(true);
+                    }
                 }
-                Err(error) => {
-                    status.set_text(&error);
-                    status.set_visible(true);
-                }
-            }
+            });
         });
         scroller.upcast()
     }
@@ -195,24 +236,24 @@ pub(super) fn settings_group(
     let source = shell.products.source.clone();
     let source_id = saved.source.id.clone();
     form.save.connect_clicked(move |_| {
-        let value = draft.borrow().clone();
-        match value.input() {
-            Ok((settings, credentials)) => {
-                source.update_source(SourceSettingsChange::Files {
-                    source_id: source_id.clone(),
-                    name: value.name.trim().into(),
-                    settings,
-                    credentials: FileCredentialsEdit {
-                        secret: (!credentials.secret.is_empty()).then_some(credentials.secret),
-                        headers: value.replace_headers.then_some(credentials.headers),
-                    },
-                });
+        let (value, source, id, status) = (
+            draft.borrow().clone(),
+            source.clone(),
+            source_id.clone(),
+            status.downgrade(),
+        );
+        let draft = draft.clone();
+        gtk::glib::spawn_future_local(async move {
+            match value.save(source, Some(id), presentation.kind, false).await {
+                Ok(_) => draft.borrow_mut().authorization = None,
+                Err(error) => {
+                    if let Some(status) = status.upgrade() {
+                        status.set_text(&error);
+                        status.set_visible(true);
+                    }
+                }
             }
-            Err(error) => {
-                status.set_text(&error);
-                status.set_visible(true);
-            }
-        }
+        });
     });
     Ok(form.section.upcast())
 }
@@ -389,14 +430,6 @@ pub fn present_integration(
     let dialog_weak = dialog.downgrade();
     button.connect_clicked(move |button| {
         let value = draft.borrow().clone();
-        let (settings, credentials) = match value.input() {
-            Ok(input) => input,
-            Err(error) => {
-                status.set_text(&error);
-                status.set_visible(true);
-                return;
-            }
-        };
         button.set_sensitive(false);
         let button = button.downgrade();
         let status = status.downgrade();
@@ -405,52 +438,9 @@ pub fn present_integration(
         let source = source.clone();
         let saved = saved.clone();
         gtk::glib::spawn_future_local(async move {
-            let result = if let Some(saved) = saved {
-                let id = saved.source.id;
-                source
-                    .update_file_integration(SourceSettingsChange::Files {
-                        source_id: id.clone(),
-                        name: value.name,
-                        settings,
-                        credentials: FileCredentialsEdit {
-                            secret: (!credentials.secret.is_empty()).then_some(credentials.secret),
-                            headers: value.replace_headers.then_some(credentials.headers),
-                        },
-                    })
-                    .recv()
-                    .await
-                    .map_err(|e| e.to_string())
-                    .and_then(|r| r)
-                    .map(|_| id)
-            } else {
-                let name = if value.name.trim().is_empty() {
-                    if kind == "smb" {
-                        tr("SMB / Samba")
-                    } else {
-                        tr("WebDAV")
-                    }
-                } else {
-                    value.name
-                };
-                source
-                    .configure_file_integration(if kind == "smb" {
-                        SourceSetup::Smb {
-                            name,
-                            settings,
-                            credentials,
-                        }
-                    } else {
-                        SourceSetup::WebDav {
-                            name,
-                            settings,
-                            credentials,
-                        }
-                    })
-                    .recv()
-                    .await
-                    .map_err(|e| e.to_string())
-                    .and_then(|r| r)
-            };
+            let result = value
+                .save(source, saved.map(|saved| saved.source.id), kind, true)
+                .await;
             match result {
                 Ok(id) => {
                     finished(id);
@@ -652,7 +642,8 @@ fn form(
     }
     let update = Rc::clone(&update_ready);
     password.connect_text_notify(move |_| update());
-    authentication.connect_selected_notify(move |_| update_ready());
+    let update = Rc::clone(&update_ready);
+    authentication.connect_selected_notify(move |_| update());
     let shares = Rc::new(RefCell::new(Vec::<String>::new()));
     let addresses = Rc::clone(&shares);
     let address_row = url.downgrade();
@@ -765,7 +756,15 @@ fn form(
         if let Some(task) = authorization.borrow_mut().take() {
             task.abort();
         }
-        let events = source.nextcloud_login(settings, credentials);
+        let events = SourceAuthorization::new(
+            source.clone(),
+            SourceAuthorizationMethod::Nextcloud {
+                settings,
+                credentials,
+            },
+        );
+        let state = state.clone();
+        let update_ready = update_ready.clone();
         let status = status.clone();
         if let Some(status) = status.upgrade() {
             status.set_text(&if music {
@@ -787,9 +786,9 @@ fn form(
             button.set_sensitive(false);
         }
         *authorization.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
-            while let Ok(event) = events.recv().await {
-                match event {
-                    Ok(rufin_core::runtime::source::NextcloudLoginEvent::OpenBrowser(address)) => {
+            loop {
+                match events.next().await {
+                    Ok(SourceAuthorizationEvent::OpenBrowser { url: address }) => {
                         if let Some(status) = status.upgrade() {
                             status.set_text(&tr("Complete sign-in in your browser"));
                             status.set_visible(true);
@@ -807,10 +806,9 @@ fn form(
                             break;
                         }
                     }
-                    Ok(rufin_core::runtime::source::NextcloudLoginEvent::Authorized {
-                        settings,
-                        credentials,
-                    }) => {
+                    Ok(SourceAuthorizationEvent::Ready { .. }) => {
+                        let settings = events.file_settings().expect("Authorized file settings");
+                        state.borrow_mut().authorization = Some(events.clone());
                         if let Some(row) = url.upgrade() {
                             row.set_text(&settings.url);
                         }
@@ -818,11 +816,12 @@ fn form(
                             row.set_text(&settings.username);
                         }
                         if let Some(row) = password.upgrade() {
-                            row.set_text(&credentials.secret);
+                            row.set_text("");
                         }
                         if let Some(row) = authentication.upgrade() {
                             row.set_selected(0);
                         }
+                        update_ready();
                         if editing {
                             if let Some(status) = status.upgrade() {
                                 status.set_text(&tr_with(
@@ -833,10 +832,12 @@ fn form(
                         } else if let Some(button) = connect_after_login.upgrade() {
                             button.emit_clicked();
                         }
+                        break;
                     }
+                    Ok(SourceAuthorizationEvent::Code { .. }) => {}
                     Err(error) => {
                         if let Some(status) = status.upgrade() {
-                            status.set_text(&error);
+                            status.set_text(&error.to_string());
                             status.set_visible(true);
                         }
                     }

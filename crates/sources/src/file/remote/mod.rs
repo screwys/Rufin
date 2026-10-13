@@ -26,17 +26,38 @@ pub(crate) mod webdav;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum FileAuthentication {
     Password,
     Anonymous,
     Bearer,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+#[serde(from = "(String, String)", into = "(String, String)")]
+pub struct FileHeader {
+    pub name: String,
+    pub value: String,
+}
+
+impl From<(String, String)> for FileHeader {
+    fn from((name, value): (String, String)) -> Self {
+        Self { name, value }
+    }
+}
+impl From<FileHeader> for (String, String) {
+    fn from(header: FileHeader) -> Self {
+        (header.name, header.value)
+    }
+}
+
 /// Header values and the password/token belong in the existing credential store.
 #[derive(Clone, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct FileCredentials {
     pub secret: String,
-    pub headers: Vec<(String, String)>,
+    pub headers: Vec<FileHeader>,
 }
 
 impl std::fmt::Debug for FileCredentials {
@@ -48,9 +69,10 @@ impl std::fmt::Debug for FileCredentials {
 }
 
 #[derive(Clone, Default, Eq, PartialEq, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct FileCredentialsEdit {
     pub secret: Option<String>,
-    pub headers: Option<Vec<(String, String)>>,
+    pub headers: Option<Vec<FileHeader>>,
 }
 
 impl std::fmt::Debug for FileCredentialsEdit {
@@ -125,6 +147,7 @@ pub(crate) async fn edit(
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct FileSourceSettings {
     pub url: String,
     pub alternate_urls: Vec<String>,

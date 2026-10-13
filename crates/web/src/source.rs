@@ -1,4 +1,5 @@
 use super::*;
+use rufin_core::source::authorization::SourceAuthorizationMethod;
 use sources::SourceSetup;
 
 pub(super) fn routes() -> Router<ProductHandles> {
@@ -260,7 +261,11 @@ async fn plex_login(
 ) -> Result<Response<Body>, Error> {
     let products = &products;
     let source = &products.source;
-    Ok(login_response(source.plex_login(body(request).await?)))
+    Ok(login_response(source.login(
+        SourceAuthorizationMethod::Plex {
+            method: body(request).await?,
+        },
+    )))
 }
 
 async fn emby_login(
@@ -269,9 +274,11 @@ async fn emby_login(
 ) -> Result<Response<Body>, Error> {
     let products = &products;
     let source = &products.source;
-    Ok(login_response(
-        source.emby_connect_login(body(request).await?),
-    ))
+    Ok(login_response(source.login(
+        SourceAuthorizationMethod::Emby {
+            method: body(request).await?,
+        },
+    )))
 }
 
 async fn jellyfin_login(
@@ -287,9 +294,11 @@ async fn jellyfin_login(
         trust_invalid_cert: bool,
     }
     let input: Input = body(request).await?;
-    Ok(login_response(source.jellyfin_quick_connect(
-        input.server_url,
-        input.trust_invalid_cert,
+    Ok(login_response(source.login(
+        SourceAuthorizationMethod::Jellyfin {
+            url: input.server_url,
+            trust_invalid_cert: input.trust_invalid_cert,
+        },
     )))
 }
 
@@ -300,9 +309,12 @@ async fn nextcloud_login(
     let products = &products;
     let source = &products.source;
     let input: Files = body(request).await?;
-    Ok(login_response(
-        source.nextcloud_login(input.settings, input.credentials),
-    ))
+    Ok(login_response(source.login(
+        SourceAuthorizationMethod::Nextcloud {
+            settings: input.settings,
+            credentials: input.credentials,
+        },
+    )))
 }
 
 async fn smb_shares(

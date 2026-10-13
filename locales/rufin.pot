@@ -3288,6 +3288,9 @@ msgstr ""
 msgid "Sign In with Password"
 msgstr ""
 
+msgid "Sign in to Plex first"
+msgstr ""
+
 msgid "Sign in with Nextcloud"
 msgstr ""
 

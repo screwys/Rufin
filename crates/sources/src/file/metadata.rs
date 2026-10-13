@@ -732,7 +732,7 @@ fn finish_artwork(
     commit_batch(prepared)?;
     for path in replaced {
         fs::remove_file(&path).map_err(|error| SourceMetadataError::PartiallySaved {
-            message: format!("The previous artwork image could not be removed: {error}"),
+            reason: format!("The previous artwork image could not be removed: {error}"),
         })?;
         if let Some(parent) = path.parent() {
             sync_parent(parent)?;
@@ -837,7 +837,7 @@ fn commit_batch(mut prepared: Vec<PreparedFile>) -> Result<(), SourceMetadataErr
     for file in &prepared {
         if let Some(parent) = file.target.parent() {
             sync_parent(parent).map_err(|error| SourceMetadataError::PartiallySaved {
-                message: format!("Saved files could not be synced: {error}"),
+                reason: format!("Saved files could not be synced: {error}"),
             })?;
         }
     }

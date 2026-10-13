@@ -86,13 +86,13 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     var configuration by remember { mutableStateOf<PlayerSettingsPage?>(null) }
     var navigation by remember { mutableStateOf<String?>(null) }
     val lyricsScroll = rememberLazyListState()
-    val application = preferences.applicationSettings
-    val lyricsEnabled = application?.optBoolean("fullscreen_lyrics_visible", true) != false
-    val currentLineEnabled = application?.optBoolean("fullscreen_current_lyrics_line_visible", true) != false
-    val visualizerEnabled = application?.optBoolean("fullscreen_visualizer_visible") == true
-    val combined = lyricsEnabled && visualizerEnabled && application?.optBoolean("right_panel_combined") == true
+    val application = player.settings
+    val lyricsEnabled = application?.fullscreenLyricsVisible != false
+    val currentLineEnabled = application?.fullscreenCurrentLyricsLineVisible != false
+    val visualizerEnabled = application?.fullscreenVisualizerVisible == true
+    val combined = lyricsEnabled && visualizerEnabled && application?.rightPanelCombined == true
     val background by animateColorAsState(
-        if (application?.optBoolean("fullscreen_dynamic_background") == true)
+        if (application?.fullscreenDynamicBackground == true)
             lerp(MaterialTheme.colorScheme.surface, player.artwork?.color ?: MaterialTheme.colorScheme.surface, .12f)
         else MaterialTheme.colorScheme.surface, tween(if (reduceMotion) 0 else 320), label = "fullPlayerColor")
     val verticalOffset = remember { Animatable(0f) }
@@ -134,7 +134,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
             }, onDragCancel = { scope.launch { trackOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) } })
         }, color = background, contentColor = MaterialTheme.colorScheme.onSurface) {
         Box(Modifier.fillMaxSize()) {
-            if (application?.optBoolean("fullscreen_background_image") == true) player.artwork?.let { artwork ->
+            if (application?.fullscreenBackgroundImage == true) player.artwork?.let { artwork ->
                 Image(artwork.bitmap.asImageBitmap(), null, Modifier.matchParentSize().blur(48.dp).alpha(.12f), contentScale = ContentScale.Crop)
             }
             AnimatedContent(surface, Modifier.fillMaxSize(), transitionSpec = {
@@ -184,7 +184,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                         Box(Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp, bottom = 20.dp)
                             .clipToBounds().graphicsLayer { translationX = trackOffset.value }) {
                             if (visible == PlayerSurface.VISUALIZER || combined) {
-                                val opacity = player.settings?.visualizer?.let { org.json.JSONObject(it).getJSONObject("appearance").getDouble("fullscreen_lyrics_opacity").toFloat() } ?: 1f
+                                val opacity = player.settings?.visualizer?.appearance?.fullscreenLyricsOpacity?.toFloat() ?: 1f
                                 VisualizerView(player, Modifier.matchParentSize(), if (combined) opacity else 1f)
                             }
                             if (visible == PlayerSurface.LYRICS) LyricsPanel(player, lyricsScroll)

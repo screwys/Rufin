@@ -23,6 +23,8 @@ import io.github.screwys.rufin.browse.BrowseConnection
 import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.player.PlayerSettingsContent
 import io.github.screwys.rufin.player.PlayerSettingsPage
+import io.github.screwys.rufin.player.PlaybackPreferences
+import io.github.screwys.rufin.shared.lyrics.LyricsPreferenceEdit
 import io.github.screwys.rufin.sources.SourcesPage
 import org.json.JSONObject
 import kotlin.math.round
@@ -122,11 +124,9 @@ private fun numberText(value: Double): String = java.math.BigDecimal.valueOf(val
 internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnection, preferences: PreferencesConnection,
     player: PlayerConnection, browse: BrowseConnection, output: () -> Unit, addSource: () -> Unit, editSource: (String) -> Unit,
     navigate: (MoreDestination) -> Unit) {
-    LaunchedEffect(destination) { preferences.refreshApplicationSettings() }
+    LaunchedEffect(destination) { preferences.refreshApplicationSettings(); player.refreshSettings() }
     val state = preferences.applicationSettings
     if (state == null) { Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { CircularProgressIndicator() }; return }
-    val playback = state.optJSONObject("playback") ?: JSONObject()
-    var confirmEbu by remember { mutableStateOf(false) }
     fun bool(key: String, value: Boolean) = preferences.changePreference(key, value)
     SettingsPage {
         when (destination) {
@@ -148,7 +148,7 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                 SettingsGroup(translate("Metadata")) {
                     SettingsSwitch(translate("Prefer distinct track covers"), state.optBoolean("prefer_distinct_track_covers")) { bool("prefer_distinct_track_covers", it) }
                     SettingsSwitch(translate("External metadata lookup"), state.optBoolean("external_metadata_enabled")) { bool("external_metadata_enabled", it) }
-                    SettingsSwitch(translate("External lyrics lookup"), state.optBoolean("external_lyrics_enabled")) { bool("lyrics.external_lyrics_enabled", it) }
+                    player.settings?.lyrics?.let { lyrics -> SettingsSwitch(translate("External lyrics lookup"), lyrics.externalLyricsEnabled) { player.lyricsPreference(LyricsPreferenceEdit.ExternalLyricsEnabled(it)) } }
                 }
                 val links = state.optJSONObject("external_site_links") ?: JSONObject()
                 SettingsGroup(translate("External site links")) {
@@ -160,36 +160,7 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                 BackupsPage(model, preferences, embedded = true, openSettings = { navigate(MoreDestination.BackupSettings) })
             }
             MoreDestination.Playback -> {
-                SettingsGroup(translate("Queue and transitions")) {
-                    SettingsSelection(translate("Transition mode"), playback.optString("transition_mode", "Gapless"),
-                        listOf("Gapless" to translate("Gapless"), "Crossfade" to translate("Crossfade")), select = { preferences.changePreference("playback.transition_mode", it) })
-                    if (playback.optString("transition_mode") == "Crossfade") SettingsSliderNumber(translate("Crossfade duration"), playback.optDouble("crossfade_seconds", 5.0), 1.0..30.0, 1.0, integer = true, unit = "s") { preferences.changePreference("playback.crossfade_seconds", it) }
-                    SettingsSwitch(translate("Skip same-album crossfade"), playback.optBoolean("skip_same_album_crossfade")) { bool("playback.skip_same_album_crossfade", it) }
-                    SettingsSwitch(translate("Audio fade on play/pause"), playback.optBoolean("audio_fade_on_status_change")) { bool("playback.audio_fade_on_status_change", it) }
-                    SettingsSwitch(translate("Clearing queue also clears the current song"), state.optBoolean("clear_queue_includes_current")) { bool("clear_queue_includes_current", it) }
-                    SettingsNumber(translate("Auto DJ refill threshold"), state.optDouble("auto_dj_refill_threshold", 1.0), 1.0..10.0) { preferences.changePreference("auto_dj_refill_threshold", it) }
-                }
-                SettingsGroup(translate("Audio")) {
-                    SettingsRow(translate("Audio output"), modifier = Modifier.clickable(onClick = output))
-                    PreferenceChoice(translate("Loudness normalization"), playback.optString("loudness_normalization", "ReplayGain"), listOf("Off" to translate("Off"), "ReplayGain" to "ReplayGain", "EbuR128" to "EBU R128"), select = {
-                        if (it == "EbuR128" && playback.optString("loudness_normalization") != "EbuR128") confirmEbu = true
-                        else preferences.changePreference("playback.loudness_normalization", it)
-                    })
-                    PreferenceChoice(translate("Normalization scope"), playback.optString("loudness_normalization_scope", "Album"), listOf("Track" to translate("Track"), "Album" to translate("Album")), select = { preferences.changePreference("playback.loudness_normalization_scope", it) })
-                    SettingsNumber(translate("Target loudness"), playback.optDouble("ebu_r128_target_lufs", -23.0), -48.0..0.0, false) { preferences.changePreference("playback.ebu_r128_target_lufs", it) }
-                    SettingsSwitch(translate("Write EBU R128 tags to files"), playback.optBoolean("write_ebu_r128_tags")) { bool("playback.write_ebu_r128_tags", it) }
-                    PreferenceChoice(translate("Volume scale"), playback.optString("volume_scale", "Perceptual"), listOf("Perceptual" to translate("Perceptual"), "Linear" to translate("Linear")), select = { preferences.changePreference("playback.volume_scale", it) })
-                    val bitrate = playback.optJSONObject("stream_quality")?.optInt("MaxBitrateKbps")?.toString() ?: "original"
-                    PreferenceChoice(translate("Stream quality"), bitrate,
-                        listOf("original" to translate("Original")) + listOf(320, 256, 192, 128).map { it.toString() to "$it kbps" },
-                        select = { preferences.changePreference("playback.stream_quality", if (it == "original") "Original" else JSONObject().put("MaxBitrateKbps", it.toInt())) })
-                    SettingsSliderNumber(translate("Playback speed"), playback.optDouble("playback_rate", 1.0), 0.5..2.0, .05, unit = "×") { preferences.changePreference("playback.playback_rate", it) }
-                }
-                SettingsGroup {
-                    SettingsSwitch(translate("Dynamic background"), state.optBoolean("fullscreen_dynamic_background")) { bool("fullscreen_dynamic_background", it) }
-                    SettingsSwitch(translate("Enable background image"), state.optBoolean("fullscreen_background_image")) { bool("fullscreen_background_image", it) }
-                    SettingsSwitch(translate("Waveform seekbar"), state.optBoolean("seekbar_waveform_enabled")) { bool("seekbar_waveform_enabled", it) }
-                }
+                PlaybackPreferences(player, preferences, output)
                 Text(translate("Equalizer"), style = MaterialTheme.typography.titleMedium)
                 PlayerSettingsContent(player, PlayerSettingsPage.EQUALIZER, embedded = true)
                 Text(translate("Lyrics"), style = MaterialTheme.typography.titleMedium)
@@ -212,11 +183,7 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
             else -> Unit
         }
     }
-    if (confirmEbu) AlertDialog(onDismissRequest = { confirmEbu = false },
-        title = { Text(translate("Enable EBU R128 Analysis?")) },
-        text = { Text(translate("Rufin will calculate the missing EBU R128 metadata for the whole library. This can use significant CPU, battery, and network bandwidth for a long time.")) },
-        confirmButton = { TextButton({ confirmEbu = false; preferences.changePreference("playback.loudness_normalization", "EbuR128") }) { Text(translate("Enable")) } },
-        dismissButton = { TextButton({ confirmEbu = false }) { Text(translate("Cancel")) } })
+
 }
 
 @OptIn(ExperimentalLayoutApi::class)

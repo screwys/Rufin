@@ -13,6 +13,7 @@ use tokio::time::{Instant, timeout_at};
 use tracing::instrument;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum DiscoveryProvider {
     Jellyfin,
     Emby,
@@ -20,6 +21,7 @@ pub enum DiscoveryProvider {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct DiscoveredServer {
     pub id: Option<String>,
     pub name: String,

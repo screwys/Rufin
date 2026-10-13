@@ -1,4 +1,7 @@
 //! Rufin application composition and concrete product operations.
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();
+
 pub mod activity;
 mod album_release;
 pub mod app;

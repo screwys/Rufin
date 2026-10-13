@@ -3,24 +3,10 @@ use rufin_core::runtime::SourceHandle;
 use crate::host::{AndroidError, error};
 
 #[derive(uniffi::Record)]
-pub struct AndroidSource {
-    pub id: String,
-    pub name: String,
-    pub kind: String,
-    pub supports_playlist_public: bool,
-}
-
-#[derive(uniffi::Record)]
-pub struct AndroidDocumentRoot {
-    pub uri: String,
-    pub name: String,
-}
-
-#[derive(uniffi::Record)]
 pub struct AndroidSourceState {
-    pub sources: Vec<AndroidSource>,
+    pub sources: Vec<rufin_core::runtime::source::SourceSummary>,
     pub selected_source_id: Option<String>,
-    pub document_roots: Vec<AndroidDocumentRoot>,
+    pub document_roots: Vec<sources::DocumentRoot>,
 }
 
 #[derive(uniffi::Object)]
@@ -54,24 +40,9 @@ impl AndroidSourceSubscription {
             Vec::new()
         };
         Ok(AndroidSourceState {
-            sources: state
-                .sources
-                .iter()
-                .map(|source| AndroidSource {
-                    id: source.id.to_string(),
-                    name: source.name.clone(),
-                    kind: source.kind.clone(),
-                    supports_playlist_public: source.supports_playlist_public,
-                })
-                .collect(),
+            sources: state.sources.to_vec(),
             selected_source_id: state.selected_source_id.map(|source| source.to_string()),
-            document_roots: roots
-                .into_iter()
-                .map(|root| AndroidDocumentRoot {
-                    uri: root.uri,
-                    name: root.name,
-                })
-                .collect(),
+            document_roots: roots,
         })
     }
 }

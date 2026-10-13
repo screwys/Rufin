@@ -1,3 +1,6 @@
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();
+
 mod cover;
 mod http;
 mod images;

@@ -1,3 +1,6 @@
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();
+
 use lindera::{dictionary::load_fs_dictionary, mode::Mode, segmenter::Segmenter};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -29,6 +32,7 @@ const fn msgid(message: &'static str) -> &'static str {
     message
 }
 
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ExternalLyricsProvider {
     #[serde(rename = "lrclib")]
@@ -78,8 +82,9 @@ pub fn default_external_lyrics_providers() -> Vec<ExternalLyricsProvider> {
     ]
 }
 
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct Settings {
+pub struct UserPreferences {
     pub external_lyrics_enabled: bool,
     #[serde(default = "default_external_lyrics_providers")]
     pub external_lyrics_providers: Vec<ExternalLyricsProvider>,
@@ -91,10 +96,6 @@ pub struct Settings {
     pub save_lyrics_automatically: bool,
     #[serde(default = "default_true")]
     pub save_lyrics_as_sidecar: bool,
-    #[serde(default)]
-    pub lyrics_provider_settings_version: u8,
-    #[serde(default)]
-    pub suppressed_auto_lyrics_track_ids: Vec<String>,
     #[serde(default)]
     pub prefer_translations: bool,
     #[serde(default = "default_translation_language")]
@@ -117,7 +118,7 @@ pub struct Settings {
     pub lyrics_highlight_color: Option<String>,
 }
 
-impl Default for Settings {
+impl Default for UserPreferences {
     fn default() -> Self {
         Self {
             external_lyrics_enabled: true,
@@ -126,8 +127,6 @@ impl Default for Settings {
             save_lyrics_to_source: false,
             save_lyrics_automatically: false,
             save_lyrics_as_sidecar: true,
-            lyrics_provider_settings_version: LYRICS_PROVIDER_SETTINGS_VERSION,
-            suppressed_auto_lyrics_track_ids: Vec::new(),
             prefer_translations: false,
             preferred_translation_language: default_translation_language(),
             show_furigana: false,
@@ -138,6 +137,88 @@ impl Default for Settings {
             fullscreen_lyrics_font_family: None,
             fullscreen_lyrics_font_size: None,
             lyrics_highlight_color: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Settings {
+    #[serde(flatten)]
+    pub preferences: UserPreferences,
+    #[serde(default)]
+    pub lyrics_provider_settings_version: u8,
+    #[serde(default)]
+    pub suppressed_auto_lyrics_track_ids: Vec<String>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            preferences: UserPreferences::default(),
+            lyrics_provider_settings_version: LYRICS_PROVIDER_SETTINGS_VERSION,
+            suppressed_auto_lyrics_track_ids: Vec::new(),
+        }
+    }
+}
+
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+#[derive(Clone, Debug)]
+pub enum LyricsPreferenceEdit {
+    ExternalLyricsEnabled { value: bool },
+    ExternalLyricsProviders { value: Vec<ExternalLyricsProvider> },
+    PreferServerLyrics { value: bool },
+    SaveLyricsToSource { value: bool },
+    SaveLyricsAutomatically { value: bool },
+    SaveLyricsAsSidecar { value: bool },
+    PreferTranslations { value: bool },
+    PreferredTranslationLanguage { value: String },
+    ShowFurigana { value: bool },
+    ShowRomanization { value: bool },
+    KaraokeMode { value: bool },
+    LyricsFontFamily { value: Option<String> },
+    LyricsFontSize { value: Option<u16> },
+    FullscreenLyricsFontFamily { value: Option<String> },
+    FullscreenLyricsFontSize { value: Option<u16> },
+    LyricsHighlightColor { value: Option<String> },
+}
+
+impl UserPreferences {
+    pub fn apply(&mut self, edit: LyricsPreferenceEdit) {
+        match edit {
+            LyricsPreferenceEdit::ExternalLyricsEnabled { value } => {
+                self.external_lyrics_enabled = value
+            }
+            LyricsPreferenceEdit::ExternalLyricsProviders { value } => {
+                self.external_lyrics_providers = value
+            }
+            LyricsPreferenceEdit::PreferServerLyrics { value } => self.prefer_server_lyrics = value,
+            LyricsPreferenceEdit::SaveLyricsToSource { value } => {
+                self.save_lyrics_to_source = value
+            }
+            LyricsPreferenceEdit::SaveLyricsAutomatically { value } => {
+                self.save_lyrics_automatically = value
+            }
+            LyricsPreferenceEdit::SaveLyricsAsSidecar { value } => {
+                self.save_lyrics_as_sidecar = value
+            }
+            LyricsPreferenceEdit::PreferTranslations { value } => self.prefer_translations = value,
+            LyricsPreferenceEdit::PreferredTranslationLanguage { value } => {
+                self.preferred_translation_language = value
+            }
+            LyricsPreferenceEdit::ShowFurigana { value } => self.show_furigana = value,
+            LyricsPreferenceEdit::ShowRomanization { value } => self.show_romanization = value,
+            LyricsPreferenceEdit::KaraokeMode { value } => self.karaoke_mode = value,
+            LyricsPreferenceEdit::LyricsFontFamily { value } => self.lyrics_font_family = value,
+            LyricsPreferenceEdit::LyricsFontSize { value } => self.lyrics_font_size = value,
+            LyricsPreferenceEdit::FullscreenLyricsFontFamily { value } => {
+                self.fullscreen_lyrics_font_family = value
+            }
+            LyricsPreferenceEdit::FullscreenLyricsFontSize { value } => {
+                self.fullscreen_lyrics_font_size = value
+            }
+            LyricsPreferenceEdit::LyricsHighlightColor { value } => {
+                self.lyrics_highlight_color = value
+            }
         }
     }
 }
@@ -154,44 +235,16 @@ pub fn pronunciation_line_for<'a>(
 }
 
 impl Settings {
-    pub fn user_preferences(&self) -> serde_json::Value {
-        serde_json::json!({
-            "external_lyrics_enabled": self.external_lyrics_enabled,
-            "external_lyrics_providers": self.external_lyrics_providers,
-            "prefer_server_lyrics": self.prefer_server_lyrics,
-            "save_lyrics_to_source": self.save_lyrics_to_source,
-            "save_lyrics_automatically": self.save_lyrics_automatically,
-            "save_lyrics_as_sidecar": self.save_lyrics_as_sidecar,
-            "prefer_translations": self.prefer_translations,
-            "preferred_translation_language": self.preferred_translation_language,
-            "show_furigana": self.show_furigana,
-            "show_romanization": self.show_romanization,
-            "karaoke_mode": self.karaoke_mode,
-            "lyrics_font_family": self.lyrics_font_family,
-            "lyrics_font_size": self.lyrics_font_size,
-            "fullscreen_lyrics_font_family": self.fullscreen_lyrics_font_family,
-            "fullscreen_lyrics_font_size": self.fullscreen_lyrics_font_size,
-            "lyrics_highlight_color": self.lyrics_highlight_color,
-        })
+    pub fn sanitize(&mut self) {
+        self.preferences.sanitize();
+        if self.lyrics_provider_settings_version < LYRICS_PROVIDER_SETTINGS_VERSION {
+            self.suppressed_auto_lyrics_track_ids.clear();
+            self.lyrics_provider_settings_version = LYRICS_PROVIDER_SETTINGS_VERSION;
+        }
     }
-    pub fn set_user_preference(
-        &mut self,
-        field: String,
-        value: serde_json::Value,
-    ) -> Result<(), serde_json::Error> {
-        let mut preferences = self.user_preferences();
-        preferences
-            .as_object_mut()
-            .expect("Lyrics preferences object")
-            .insert(field, value);
-        let mut next: Self = serde_json::from_value(preferences)?;
-        next.suppressed_auto_lyrics_track_ids =
-            std::mem::take(&mut self.suppressed_auto_lyrics_track_ids);
-        next.lyrics_provider_settings_version = self.lyrics_provider_settings_version;
-        *self = next;
-        Ok(())
-    }
+}
 
+impl UserPreferences {
     pub fn sanitize(&mut self) {
         if !self.save_lyrics_to_source {
             self.save_lyrics_automatically = false;
@@ -205,10 +258,6 @@ impl Settings {
                 true
             }
         });
-        if self.lyrics_provider_settings_version < LYRICS_PROVIDER_SETTINGS_VERSION {
-            self.suppressed_auto_lyrics_track_ids.clear();
-            self.lyrics_provider_settings_version = LYRICS_PROVIDER_SETTINGS_VERSION;
-        }
         self.preferred_translation_language =
             normalize_language_tag(&self.preferred_translation_language)
                 .unwrap_or_else(default_translation_language);
@@ -458,7 +507,7 @@ impl LyricsBundle {
         }
     }
 
-    pub fn selected_document(&self, settings: &Settings) -> Option<&LyricsDocument> {
+    pub fn selected_document(&self, settings: &UserPreferences) -> Option<&LyricsDocument> {
         let documents = self.documents();
         if settings.prefer_translations {
             let target = normalize_language_tag(&settings.preferred_translation_language);
@@ -501,7 +550,7 @@ impl LyricsBundle {
         })
     }
 
-    pub fn has_preferred_translation(&self, settings: &Settings) -> bool {
+    pub fn has_preferred_translation(&self, settings: &UserPreferences) -> bool {
         let target = normalize_language_tag(&settings.preferred_translation_language);
         self.documents().iter().any(|document| {
             document.role == LyricsRole::Translation
@@ -928,12 +977,12 @@ mod tests {
         .expect("settings");
         settings.sanitize();
 
-        assert!(!settings.external_lyrics_enabled);
-        assert!(!settings.karaoke_mode);
-        assert!(settings.prefer_server_lyrics);
-        assert!(settings.save_lyrics_as_sidecar);
+        assert!(!settings.preferences.external_lyrics_enabled);
+        assert!(!settings.preferences.karaoke_mode);
+        assert!(settings.preferences.prefer_server_lyrics);
+        assert!(settings.preferences.save_lyrics_as_sidecar);
         assert_eq!(
-            settings.external_lyrics_providers,
+            settings.preferences.external_lyrics_providers,
             vec![
                 ExternalLyricsProvider::Genius,
                 ExternalLyricsProvider::Lrclib
@@ -950,47 +999,57 @@ mod tests {
 
         settings.sanitize();
 
-        assert!(!settings.save_lyrics_to_source);
-        assert!(!settings.save_lyrics_automatically);
+        assert!(!settings.preferences.save_lyrics_to_source);
+        assert!(!settings.preferences.save_lyrics_automatically);
     }
 
     #[test]
     fn lyrics_appearance_settings_are_bounded_and_css_safe() {
         let mut settings = Settings {
-            lyrics_font_family: Some(format!("  {}  ", "x".repeat(200))),
-            lyrics_font_size: Some(100),
-            lyrics_highlight_color: Some("red; } * { color: red".to_string()),
+            preferences: UserPreferences {
+                lyrics_font_family: Some(format!("  {}  ", "x".repeat(200))),
+                lyrics_font_size: Some(100),
+                lyrics_highlight_color: Some("red; } * { color: red".to_string()),
+                ..UserPreferences::default()
+            },
             ..Settings::default()
         };
 
         settings.sanitize();
 
         assert_eq!(
-            settings.lyrics_font_family.as_deref().map(str::len),
+            settings
+                .preferences
+                .lyrics_font_family
+                .as_deref()
+                .map(str::len),
             Some(128)
         );
-        assert_eq!(settings.lyrics_font_size, Some(28));
-        assert_eq!(settings.lyrics_highlight_color, None);
+        assert_eq!(settings.preferences.lyrics_font_size, Some(28));
+        assert_eq!(settings.preferences.lyrics_highlight_color, None);
     }
 
     #[test]
     fn enabled_providers_can_be_reordered_by_drop_position() {
         let mut settings = Settings {
-            external_lyrics_providers: vec![
-                ExternalLyricsProvider::Lrclib,
-                ExternalLyricsProvider::Netease,
-                ExternalLyricsProvider::Genius,
-            ],
+            preferences: UserPreferences {
+                external_lyrics_providers: vec![
+                    ExternalLyricsProvider::Lrclib,
+                    ExternalLyricsProvider::Netease,
+                    ExternalLyricsProvider::Genius,
+                ],
+                ..UserPreferences::default()
+            },
             ..Settings::default()
         };
 
-        assert!(settings.reorder_external_lyrics_provider(
+        assert!(settings.preferences.reorder_external_lyrics_provider(
             ExternalLyricsProvider::Genius,
             ExternalLyricsProvider::Lrclib,
             false,
         ));
         assert_eq!(
-            settings.external_lyrics_providers,
+            settings.preferences.external_lyrics_providers,
             vec![
                 ExternalLyricsProvider::Genius,
                 ExternalLyricsProvider::Lrclib,
@@ -998,20 +1057,20 @@ mod tests {
             ]
         );
 
-        assert!(settings.reorder_external_lyrics_provider(
+        assert!(settings.preferences.reorder_external_lyrics_provider(
             ExternalLyricsProvider::Genius,
             ExternalLyricsProvider::Netease,
             true,
         ));
         assert_eq!(
-            settings.external_lyrics_providers,
+            settings.preferences.external_lyrics_providers,
             vec![
                 ExternalLyricsProvider::Lrclib,
                 ExternalLyricsProvider::Netease,
                 ExternalLyricsProvider::Genius,
             ]
         );
-        assert!(!settings.reorder_external_lyrics_provider(
+        assert!(!settings.preferences.reorder_external_lyrics_provider(
             ExternalLyricsProvider::SimpMusic,
             ExternalLyricsProvider::Lrclib,
             false,
@@ -1027,10 +1086,10 @@ mod tests {
             LyricsOrigin::Native,
             vec![original.clone(), french, english],
         );
-        let settings = Settings {
+        let settings = UserPreferences {
             prefer_translations: true,
             preferred_translation_language: "en-US".to_string(),
-            ..Settings::default()
+            ..UserPreferences::default()
         };
         assert_eq!(
             bundle

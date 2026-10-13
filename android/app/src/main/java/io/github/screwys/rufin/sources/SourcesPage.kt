@@ -14,6 +14,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
+import io.github.screwys.rufin.shared.rufin_core.FileIntegration
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SourceIcon
@@ -31,7 +32,7 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
     embedded: Boolean = false, connectionsOnly: Boolean = false) {
     val state = model.sources
     var bridge by remember { mutableStateOf<AndroidSourceSetup?>(null) }
-    var connections by remember { mutableStateOf<List<AndroidSourceFileConnection>>(emptyList()) }
+    var connections by remember { mutableStateOf<List<FileIntegration>>(emptyList()) }
     var remove by remember { mutableStateOf<Pair<String, String>?>(null) }
     var editingConnection by remember { mutableStateOf<String?>(null) }
     var addingConnection by remember { mutableStateOf(false) }

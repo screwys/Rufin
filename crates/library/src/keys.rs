@@ -10,6 +10,12 @@ use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode
 #[serde(transparent)]
 pub struct SourceId(String);
 
+#[cfg(feature = "bindings")]
+uniffi::custom_type!(SourceId, String, {
+    lower: |value| value.to_string(),
+    try_lift: |value| Ok(SourceId::new(value)),
+});
+
 impl SourceId {
     pub fn new(value: impl Into<String>) -> Self {
         let value = value.into();

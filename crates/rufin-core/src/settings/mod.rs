@@ -1,4 +1,6 @@
 mod activity;
+mod player;
+pub use player::{PlayerPreferenceEdit, PlayerPreferenceOptions, PlayerPreferences, SettingsError};
 pub mod app;
 mod connect;
 pub mod context_menu;
@@ -385,6 +387,18 @@ impl SettingsFile {
             .clone()
     }
 
+    pub(crate) fn source_name(&self, source_id: &sources::SourceId) -> String {
+        self.value
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .sources
+            .configured
+            .iter()
+            .find(|source| &source.configuration.source_id == source_id)
+            .map(|source| source.configuration.name.clone())
+            .unwrap_or_default()
+    }
+
     pub(crate) fn playback_stream_quality(&self) -> StreamQuality {
         self.value
             .lock()
@@ -470,6 +484,7 @@ impl SettingsFile {
     }
 }
 
+#[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 #[derive(Clone)]
 pub struct SettingsOwner {
     file: SettingsFile,
@@ -630,117 +645,10 @@ impl SettingsOwner {
         )
     }
 
-    pub fn set_equalizer_enabled(&self, enabled: bool) -> Result<(), String> {
-        self.restore(
-            move |stored| {
-                stored.ui.playback.equalizer.enabled = enabled;
-                Ok(())
-            },
-            false,
-        )
-    }
-
-    pub fn select_equalizer_preset(&self, preset: String) -> Result<(), String> {
-        self.update_preferences(move |ui| {
-            ui.playback.equalizer.select_preset(preset);
-            Ok(())
-        })
-    }
-
-    pub fn set_equalizer_band(&self, index: usize, value: f64) -> Result<(), String> {
-        self.update_preferences(move |ui| {
-            let equalizer = &mut ui.playback.equalizer;
-            let band = equalizer
-                .bands
-                .get_mut(index)
-                .ok_or_else(|| localization::tr("This isn't available"))?;
-            *band = value;
-            equalizer.mark_custom();
-            Ok(())
-        })
-    }
-
-    pub fn set_player_lyrics_preference(
-        &self,
-        field: String,
-        value: serde_json::Value,
-    ) -> Result<(), String> {
-        self.restore(
-            move |stored| {
-                stored
-                    .ui
-                    .lyrics
-                    .set_user_preference(field, value)
-                    .map_err(|error| error.to_string())
-            },
-            false,
-        )
-    }
-
     pub fn suppress_fetched_lyrics(&self, media_uri: String) -> Result<(), String> {
         self.restore(
             move |stored| {
                 stored.ui.lyrics.suppress_auto_lyrics(&media_uri);
-                Ok(())
-            },
-            false,
-        )
-    }
-
-    pub fn set_visualizer_appearance(
-        &self,
-        value: visualizer::VisualizerAppearance,
-    ) -> Result<(), String> {
-        self.restore(
-            move |stored| {
-                stored.ui.visualizer.selected_preset = Some(stored.ui.visualizer.selected_preset());
-                stored.ui.visualizer.appearance = value;
-                Ok(())
-            },
-            false,
-        )
-    }
-
-    pub fn set_visualizer_appearance_field(
-        &self,
-        field: String,
-        value: serde_json::Value,
-    ) -> Result<(), String> {
-        self.restore(
-            move |stored| {
-                let mut appearance = serde_json::to_value(&stored.ui.visualizer.appearance)
-                    .map_err(|error| error.to_string())?;
-                appearance
-                    .as_object_mut()
-                    .expect("Visualizer appearance object")
-                    .insert(field, value);
-                stored.ui.visualizer.selected_preset = Some(stored.ui.visualizer.selected_preset());
-                stored.ui.visualizer.appearance =
-                    serde_json::from_value(appearance).map_err(|error| error.to_string())?;
-                Ok(())
-            },
-            false,
-        )
-    }
-
-    pub fn set_visualizer_frame_limit(&self, value: u32) -> Result<(), String> {
-        self.restore(
-            move |stored| {
-                stored.ui.visualizer.fps_limit = value;
-                Ok(())
-            },
-            false,
-        )
-    }
-
-    pub fn update_visualizer_preset(&self, slot: usize, save: bool) -> Result<(), String> {
-        self.restore(
-            move |stored| {
-                if save {
-                    stored.ui.visualizer.save_preset(slot);
-                } else {
-                    stored.ui.visualizer.select_preset(slot);
-                }
                 Ok(())
             },
             false,

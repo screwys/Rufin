@@ -10,7 +10,11 @@ repository.workspace = true
 readme.workspace = true
 publish.workspace = true
 
+[features]
+bindings = ["dep:uniffi"]
+
 [dependencies]
+uniffi = { workspace = true, optional = true }
 sources.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 serde_json.workspace = true

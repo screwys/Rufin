@@ -17,7 +17,12 @@ import io.github.screwys.rufin.core.AndroidQueuePage
 import io.github.screwys.rufin.core.AndroidRepeatMode
 import io.github.screwys.rufin.core.AndroidOutput
 import io.github.screwys.rufin.core.AndroidOutputChoices
-import io.github.screwys.rufin.core.AndroidPlayerSettings
+import io.github.screwys.rufin.shared.rufin_core.PlayerPreferences
+import io.github.screwys.rufin.shared.rufin_core.PlayerPreferenceOptions
+import io.github.screwys.rufin.shared.rufin_core.PlayerPreferenceEdit
+import io.github.screwys.rufin.shared.rufin_core.VisualizerPreferenceEdit
+import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
+import io.github.screwys.rufin.shared.lyrics.LyricsPreferenceEdit
 import io.github.screwys.rufin.core.AndroidLyricsOperation
 import io.github.screwys.rufin.core.AndroidLyricsDocument
 import io.github.screwys.rufin.core.AndroidVisualizerDrawing
@@ -30,15 +35,17 @@ import io.github.screwys.rufin.core.translate
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import java.util.concurrent.Executors
-import org.json.JSONObject
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class PlayerConnection(private val connection: RufinConnection) {
     internal val model get() = connection
     internal val artworkCache = ArtworkCache()
     private val readings = Executors.newSingleThreadExecutor { Thread(it, "Rufin lyrics") }.asCoroutineDispatcher()
-    var settings by mutableStateOf<AndroidPlayerSettings?>(null)
+    var settings by mutableStateOf<PlayerPreferences?>(null)
         private set
+    var preferenceOptions by mutableStateOf<PlayerPreferenceOptions?>(null)
+        private set
+    private var settingsOwner: SettingsOwner? = null
     var lyricsOperation by mutableStateOf<AndroidLyricsOperation?>(null)
         private set
     var dictionaryState by mutableStateOf<String?>(null)
@@ -91,12 +98,15 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                 val runtime = result?.getOrNull() ?: return@collectLatest
                 val player = runtime.player()
                 bridge = player
+                val owner = player.settingsOwner()
+                settingsOwner = owner
                 outputChoices = null
                 val lyricSubscription = player.subscribeLyrics()
                 val visualizerSubscription = player.subscribeVisualizer()
                 val operations = player.subscribeLyricsOperations()
                 try {
-                    settings = withContext(Dispatchers.IO) { player.settings() }
+                    withContext(Dispatchers.IO) { owner.playerPreferenceOptions() }.let { preferenceOptions = it }
+                    settings = withContext(Dispatchers.IO) { owner.playerPreferences() }
                     coroutineScope {
                         launch { while (isActive) waveform = player.nextWaveform() }
                         launch {
@@ -177,7 +187,10 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                 } finally {
                     bridge = null
                     withContext(NonCancellable + readings) { player.releaseLyricsReader() }
+                    settingsOwner = null
+                    owner.destroy()
                     settings = null
+                    preferenceOptions = null
                     metadataLinks = null
                     waveform = null
                     lyricsOperation = null
@@ -195,27 +208,34 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     }
 
     private fun action(block: suspend () -> Unit) = connection.runAction(block)
-    private suspend fun changeSettings(change: suspend (AndroidPlayer) -> AndroidPlayerSettings) {
-        val current = bridge ?: return
-        val projected = change(current)
-        if (bridge === current) settings = projected
+    private suspend fun changeSettings(change: (SettingsOwner) -> Unit) {
+        val current = settingsOwner ?: return
+        val projected = withContext(Dispatchers.IO) {
+            change(current)
+            current.playerPreferences()
+        }
+        if (settingsOwner === current) settings = projected
     }
-    fun refreshSettings() = action { bridge?.let { settings = withContext(Dispatchers.IO) { it.settings() } } }
-    fun equalizerEnabled(enabled: Boolean) = action { changeSettings { it.equalizerEnabled(enabled) } }
-    fun equalizerPreset(preset: String) = action { changeSettings { it.equalizerPreset(preset) } }
-    fun equalizerBand(index: Int, value: Float) = action { changeSettings { it.equalizerBand(index.toUInt(), value.toDouble()) } }
-    fun lyricsPreference(field: String, value: Any?) = action {
+    fun refreshSettings() = action { changeSettings {} }
+    fun editPreferences(edit: PlayerPreferenceEdit) = action { changeSettings { it.editPlayerPreferences(edit) } }
+    fun equalizerEnabled(enabled: Boolean) = action { changeSettings { it.setEqualizerEnabled(enabled) } }
+    fun equalizerPreset(preset: String) = action { changeSettings { it.selectEqualizerPreset(preset) } }
+    fun equalizerBand(index: Int, value: Float) = action { changeSettings { it.setEqualizerBand(index.toULong(), value.toDouble()) } }
+    fun lyricsPreference(edit: LyricsPreferenceEdit) = action {
         val current = bridge ?: return@action
-        changeSettings { it.lyricsPreference(field, preferenceJson(value)) }
+        changeSettings { it.editLyricsPreferences(edit) }
         refreshLyrics(current)
     }
-    fun visualizerAppearance(field: String, value: Any?) = action {
-        changeSettings { it.visualizerAppearanceField(field, preferenceJson(value)) }
-    }
-    fun visualizerFrameLimit(value: Int) = action { changeSettings { it.visualizerFrameLimit(value.toUInt()) } }
-    fun visualizerPreset(slot: UInt, save: Boolean) = action { changeSettings { it.visualizerPreset(slot, save) } }
+    fun visualizerAppearance(edit: VisualizerPreferenceEdit) = action { changeSettings { it.editVisualizerPreferences(edit) } }
+    fun visualizerFrameLimit(value: Int) = action { changeSettings { it.setVisualizerFrameLimit(value.toUInt()) } }
+    fun visualizerPreset(slot: ULong, save: Boolean) = action { changeSettings { it.updateVisualizerPreset(slot, save) } }
     fun resetVisualizer() = action { changeSettings { it.resetVisualizerAppearance() } }
     fun pasteVisualizer(text: String) = action { changeSettings { it.pasteVisualizerPreset(text) } }
+    fun copyVisualizer(copy: (String) -> Unit) = action {
+        val current = settingsOwner ?: return@action
+        val text = withContext(Dispatchers.IO) { current.copyVisualizerPreset() }
+        copy(text)
+    }
     fun searchLyrics(token: String, artist: String, title: String) = action { bridge?.searchLyrics(token, artist, title) }
     fun previewLyrics(token: String, key: String) = action { bridge?.previewLyricsResult(token, key) }
     fun saveLyricsResult(token: String, key: String) = action { bridge?.saveLyricsResultToSource(token, key) }
@@ -223,7 +243,8 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     fun saveLyrics(token: String) = action { bridge?.saveLyricsToSource(token, lyricsOffset) }
     fun clearLyrics(token: String) = action {
         val current = bridge ?: return@action
-        changeSettings { it.clearFetchedLyrics(token) }
+        current.clearFetchedLyrics(token)
+        changeSettings {}
         refreshLyrics(current)
     }
     fun prepareDictionary() = action { bridge?.prepareLyricsDictionary(true) }
@@ -240,8 +261,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     fun drawing(targets: List<Double>, width: Float, height: Float, frameNanos: Long, accent: AndroidRgb): AndroidVisualizerDrawing? =
         bridge?.visualizerDrawing(targets, width.toDouble(), height.toDouble(), frameNanos.toULong(), accent)
 
-    private fun preferenceJson(value: Any?): String =
-        if (value is String) JSONObject.quote(value) else JSONObject.wrap(value ?: JSONObject.NULL).toString()
     fun togglePlayback() = action { service?.let { if (playback?.desiredPlaying == true) it.pause() else it.play() } }
     fun next() {
         if (connection.debugLogging) Log.d("Rufin", "Player next clicked run=${playback?.mediaRun}")

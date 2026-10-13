@@ -25,7 +25,6 @@ import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.sin
-import org.json.JSONObject
 
 @Composable
 internal fun VisualizerView(player: PlayerConnection, modifier: Modifier = Modifier, opacity: Float = 1f) {
@@ -33,8 +32,8 @@ internal fun VisualizerView(player: PlayerConnection, modifier: Modifier = Modif
     var drawing by remember { mutableStateOf<AndroidVisualizerDrawing?>(null) }
     val accent = MaterialTheme.colorScheme.primary
     val config = player.settings?.visualizer
-    val frameLimit = remember(config) { config?.let { JSONObject(it).getInt("fps_limit") } }
-    val staleNanos = (player.settings?.visualizerStaleMicros?.toLong() ?: 0L) * 1000
+    val frameLimit = config?.fpsLimit?.toInt()
+    val staleNanos = (player.preferenceOptions?.visualizerStaleMicros?.toLong() ?: 0L) * 1000
     LaunchedEffect(player.bridge, bounds, accent, frameLimit) {
         if (bounds.width == 0 || bounds.height == 0) return@LaunchedEffect
         val rgb = AndroidRgb(accent.red, accent.green, accent.blue)

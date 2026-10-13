@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import io.github.screwys.rufin.core.AndroidException
+import io.github.screwys.rufin.shared.rufin_core.SettingsException
+import io.github.screwys.rufin.shared.rufin_core.SourceAuthorizationException
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -24,6 +26,8 @@ internal val LocalFeedback = staticCompositionLocalOf<(String) -> Unit> { error(
 
 internal fun Throwable.userMessage(): String = when (this) {
     is AndroidException.Failure -> reason
+    is SettingsException.Message -> reason
+    is SourceAuthorizationException.Failed -> reason
     else -> message ?: toString()
 }
 

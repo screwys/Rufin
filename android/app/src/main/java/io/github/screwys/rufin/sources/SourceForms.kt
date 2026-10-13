@@ -15,6 +15,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.core.*
+import io.github.screwys.rufin.shared.sources.DiscoveryProvider
+import io.github.screwys.rufin.shared.rufin_core.DiscoveryStatus
+import io.github.screwys.rufin.shared.rufin_core.SourceChoice
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.settings.SettingsRow
 import io.github.screwys.rufin.settings.SettingsGroup
@@ -78,7 +81,7 @@ internal fun SourceOptions(title: String, choices: List<Pair<String, String>>, s
 }
 
 @Composable
-internal fun SourceChoices(choices: List<AndroidSourceChoice>, selected: UInt, choose: (UInt) -> Unit) {
+internal fun SourceChoices(choices: List<SourceChoice>, selected: UInt, choose: (UInt) -> Unit) {
     SettingsGroup {
     choices.forEach { choice ->
         SettingsRow(choice.title, summary = choice.address,
@@ -94,14 +97,14 @@ internal fun SourceDiscovery(setup: SourceSetupConnection) {
         if (setup.ready) setup.discover()
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    val expected = when (setup.form.kind) { "jellyfin" -> AndroidSourceDiscoveryProvider.JELLYFIN; "emby" -> AndroidSourceDiscoveryProvider.EMBY; else -> AndroidSourceDiscoveryProvider.PLEX }
+    val expected = when (setup.form.kind) { "jellyfin" -> DiscoveryProvider.JELLYFIN; "emby" -> DiscoveryProvider.EMBY; else -> DiscoveryProvider.PLEX }
     setup.discovery?.takeIf { it.provider == expected }?.let { discovery ->
-        if (discovery.phase == "searching") LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (discovery.phase == "empty") Text(translate("No Servers Found"), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        discovery.failure?.let { io.github.screwys.rufin.ui.ErrorNotice(it) }
+        if (discovery.status is DiscoveryStatus.Searching) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (discovery.status is DiscoveryStatus.Empty) Text(translate("No Servers Found"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        (discovery.status as? DiscoveryStatus.Failed)?.let { io.github.screwys.rufin.ui.ErrorNotice(it.v1) }
         discovery.servers.forEach { server ->
-            ListItem(headlineContent = { Text(server.title) }, supportingContent = { Text(server.address.orEmpty()) },
-                modifier = Modifier.clickable { setup.form.url = server.address.orEmpty() })
+            ListItem(headlineContent = { Text(server.name) }, supportingContent = { Text(server.address) },
+                modifier = Modifier.clickable { setup.form.url = server.address })
         }
     }
     }
