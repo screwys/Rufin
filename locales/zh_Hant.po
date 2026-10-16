@@ -3918,6 +3918,11 @@ msgid "Start playing automatically"
 msgstr ""
 
 #, fuzzy
+#| msgid "Search Again"
+msgid "Starting page"
+msgstr "重新搜尋"
+
+#, fuzzy
 #| msgid "Saving..."
 msgid "Starting..."
 msgstr "正在儲存..."

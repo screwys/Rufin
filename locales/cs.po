@@ -4008,6 +4008,11 @@ msgid "Start playing automatically"
 msgstr "Vyhledávání se spustí automaticky"
 
 #, fuzzy
+#| msgid "Search Again"
+msgid "Starting page"
+msgstr "Hledat znovu"
+
+#, fuzzy
 #| msgid "Saving..."
 msgid "Starting..."
 msgstr "Ukládání..."
