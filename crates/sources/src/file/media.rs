@@ -949,10 +949,8 @@ mod tests {
     #[test]
     fn executable_contents_are_not_local_audio() {
         let path = std::env::current_exe().expect("test executable");
-        assert!(matches!(
-            read_media(&mut Worker::default(), path, None),
-            MediaRead::Rejected
-        ));
+        let result = read_media(&mut Worker::default(), path, None);
+        assert!(matches!(result, MediaRead::Rejected), "{result:?}");
     }
 
     #[test]

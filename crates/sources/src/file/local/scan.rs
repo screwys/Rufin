@@ -34,8 +34,9 @@ pub(crate) async fn read_saved_file(
         .saved_file_observation(catalog.source, media_uri)
         .await?
         .ok_or(SourceError::NotFound)?;
-    let (mut track, cover, portraits) = media::read_saved_media(path, path.to_owned()).await?;
-    let saved_path = path.to_owned();
+    let path = normalize_observed_path(path);
+    let (mut track, cover, portraits) = media::read_saved_media(&path, path.clone()).await?;
+    let saved_path = path.clone();
     let (mut observation, revision, audio_revision) = tokio::task::spawn_blocking(move || {
         let observation = previous
             .map(|previous| {
