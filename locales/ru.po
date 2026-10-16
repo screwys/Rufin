@@ -3519,6 +3519,11 @@ msgstr "Запускать в свернутом виде"
 msgid "Start playing automatically"
 msgstr "Начинать воспроизведение автоматически"
 
+#, fuzzy
+#| msgid "Search in page"
+msgid "Starting page"
+msgstr "Поиск по странице"
+
 msgid "Starting..."
 msgstr "Запуск..."
 
