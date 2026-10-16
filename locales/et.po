@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-10-06 17:51+0000\n"
+"PO-Revision-Date: 2026-10-17 10:18+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Estonian <https://hosted.weblate.org/projects/rufin/app/et/>\n"
 "Language: et\n"
@@ -15,7 +15,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.10.1.dev0\n"
+"X-Generator: Weblate 2026.11.dev0\n"
 
 msgid ""
 "A Japanese dictionary is downloaded for furigana and romaji readings. This "
@@ -531,10 +531,8 @@ msgstr "Esitaja"
 msgid "Artists"
 msgstr "Esitajaid"
 
-#, fuzzy
-#| msgid "Artwork selected"
 msgid "Artwork cache cleared"
-msgstr "Kaanepilt on valitud"
+msgstr "Kaanepiltide puhver on tühjendatud"
 
 msgid "Artwork editing is no longer available"
 msgstr "Kaanepildi muutmine pole enam saadaval"
@@ -750,18 +748,14 @@ msgstr "Eemalda album"
 msgid "Clear artist"
 msgstr "Eemalda esitaja"
 
-#, fuzzy
-#| msgid "Search artwork"
 msgid "Clear artwork cache"
-msgstr "Otsi kaanepilte"
+msgstr "Tühjenda kaanepiltide puhver"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Kustuta see loo jaoks laaditud laulusõnad"
 
-#, fuzzy
-#| msgid "Clear Cache"
 msgid "Clear lyrics cache"
-msgstr "Kustuta vahemälu"
+msgstr "Kustuta laulusõnade vahemälu"
 
 msgid "Clear queue"
 msgstr "Tühjenda esitusjärjekord"
@@ -967,10 +961,8 @@ msgstr "Autoriõigused"
 msgid "Could not load listening overview"
 msgstr "Kuulamiste ülevaate laadimine ei õnnestunud"
 
-#, fuzzy
-#| msgid "Could not load this page"
 msgid "Could not load page"
-msgstr "Selle lehe laadimine ei õnnestunud"
+msgstr "Lehe laadimine ei õnnestunud"
 
 msgid "Could not load related tracks"
 msgstr "Seotud lugude laadimine ei õnnestunud"
@@ -1129,10 +1121,8 @@ msgstr "Seadme kutse"
 msgid "Device name"
 msgstr "Seadme nimi"
 
-#, fuzzy
-#| msgid "Device name"
 msgid "Device"
-msgstr "Seadme nimi"
+msgstr "Seade"
 
 msgid "Diagnostic log saved"
 msgstr "Diagnostikalogi on salvestatud"
@@ -1209,15 +1199,11 @@ msgstr "Allalaadimiste kaust"
 msgid "Download Queue"
 msgstr "Allalaadimise järjekord"
 
-#, fuzzy
-#| msgid "Upload artwork"
 msgid "Download artwork"
-msgstr "Laadi kaanepilt üles"
+msgstr "Laadi kaanepilt alla"
 
-#, fuzzy
-#| msgid "Downloads"
 msgid "Download lyrics"
-msgstr "Allalaadimised"
+msgstr "Laadi laulusõnad alla"
 
 msgid "Download quality"
 msgstr "Allalaadimiste kvaliteet"
@@ -1238,10 +1224,10 @@ msgid "Downloading Japanese dictionary..."
 msgstr "Jaapani keele sõnastik on allalaadimisel…"
 
 msgid "Downloading artwork... {count} checked"
-msgstr ""
+msgstr "Kaanepildid on allalaadimisel... {count} on kontrollitud"
 
 msgid "Downloading lyrics... {count} checked"
-msgstr ""
+msgstr "Laulusõnad on allalaadimisel... {count} on kontrollitud"
 
 msgid "Downloading"
 msgstr "Allalaadimisel"
@@ -1931,10 +1917,8 @@ msgstr "Helivaljuse normaliseerimine"
 msgid "Lyrics background opacity"
 msgstr "Laulusõnade tausta läbipaistmatus"
 
-#, fuzzy
-#| msgid "Lyrics loaded"
 msgid "Lyrics cache cleared"
-msgstr "Laulusõnad on laaditud"
+msgstr "Laulusõnade vahemälu on kustutatud"
 
 msgid "Lyrics loaded"
 msgstr "Laulusõnad on laaditud"
@@ -2172,10 +2156,8 @@ msgstr "Uus nutikas esitusloend"
 msgid "New download rule"
 msgstr "Uus allalaadimisreegel"
 
-#, fuzzy
-#| msgid "Image files"
 msgid "New file"
-msgstr "Pildifailid"
+msgstr "Uus fail"
 
 msgid "New release is available"
 msgstr "Rakenduse uus versioon on saadaval"
@@ -3387,10 +3369,8 @@ msgstr "Logi sisse veebibrauseris"
 msgid "Sign In with Password"
 msgstr "Logi sisse salasõnaga"
 
-#, fuzzy
-#| msgid "Sign in with Nextcloud"
 msgid "Sign in to Plex first"
-msgstr "Logi sisse Nextcloudiga"
+msgstr "Esmalt logi Plexi sisse"
 
 msgid "Sign in with Nextcloud"
 msgstr "Logi sisse Nextcloudiga"
@@ -3464,10 +3444,8 @@ msgstr "Järjestus"
 msgid "Source by position"
 msgstr "Allikas asukoha alusel"
 
-#, fuzzy
-#| msgid "Artwork editing is no longer available"
 msgid "Source is no longer available"
-msgstr "Kaanepildi muutmine pole enam saadaval"
+msgstr "Allikas pole enam saadaval"
 
 msgid "Source setup is unavailable"
 msgstr "Allika seadistus pole saadaval"
@@ -3493,10 +3471,8 @@ msgstr "Käivita minimeerituna"
 msgid "Start playing automatically"
 msgstr "Alusta esitust automaatselt"
 
-#, fuzzy
-#| msgid "Search in page"
 msgid "Starting page"
-msgstr "Otsi lehelt"
+msgstr "Avaleht"
 
 msgid "Starting..."
 msgstr "Käivitan…"
@@ -3590,7 +3566,7 @@ msgid "The API token was not accepted. Please connect again."
 msgstr "API tunnusluba polnud õige. Palun ühenda uuesti."
 
 msgid "The connection no longer exists"
-msgstr ""
+msgstr "Seda ühendust pole enam olemas"
 
 msgid "TheAudioDB album ID"
 msgstr "TheAudioDB albumi tunnus"
