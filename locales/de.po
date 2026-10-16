@@ -3518,6 +3518,11 @@ msgstr "Minimiert starten"
 msgid "Start playing automatically"
 msgstr "Automatisch mit der Wiedergabe beginnen"
 
+#, fuzzy
+#| msgid "Search in page"
+msgid "Starting page"
+msgstr "Auf der Seite suchen"
+
 msgid "Starting..."
 msgstr "Wird gestartet …"
 
