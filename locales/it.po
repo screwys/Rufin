@@ -155,13 +155,6 @@ msgstr ""
 "condividere gli URL con il renderer"
 
 msgid ""
-"Rufin started with fresh user state because the saved database could not be "
-"used. Your settings and saved logins are unchanged."
-msgstr ""
-"Rufin è stato inizializzato nuovamente perché il database non poteva essere "
-"utilizzato. Le tue impostazioni e i tuoi login salvati rimangono invariati."
-
-msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -522,6 +515,11 @@ msgstr "Artista"
 msgid "Artists"
 msgstr "Artisti"
 
+#, fuzzy
+#| msgid "Artwork"
+msgid "Artwork cache cleared"
+msgstr "Copertina"
+
 msgid "Artwork editing is no longer available"
 msgstr ""
 
@@ -748,8 +746,16 @@ msgstr "Rimuovi coda"
 msgid "Clear artist"
 msgstr "Rimuovi artista"
 
+msgid "Clear artwork cache"
+msgstr ""
+
 msgid "Clear fetched lyrics for this track"
 msgstr "Rimuovi il testo per questa traccia"
+
+#, fuzzy
+#| msgid "Clear artist"
+msgid "Clear lyrics cache"
+msgstr "Rimuovi artista"
 
 msgid "Clear queue"
 msgstr "Rimuovi coda"
@@ -985,6 +991,11 @@ msgstr "Copia"
 msgid "Could not load listening overview"
 msgstr "Non è stato possibile caricare questa pagina"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not load page"
+msgstr "Non è stato possibile caricare questa pagina"
+
 msgid "Could not load related tracks"
 msgstr "Non è stato possibile caricare le relative tracce"
 
@@ -1158,6 +1169,9 @@ msgstr ""
 msgid "Device name"
 msgstr ""
 
+msgid "Device"
+msgstr ""
+
 msgid "Diagnostic log saved"
 msgstr "Log di diagnostica salvati"
 
@@ -1239,6 +1253,16 @@ msgstr "Cartella di Download"
 msgid "Download Queue"
 msgstr "Coda di Download"
 
+#, fuzzy
+#| msgid "Download started"
+msgid "Download artwork"
+msgstr "Download iniziato"
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Download lyrics"
+msgstr "Scaricamenti"
+
 msgid "Download quality"
 msgstr "Qualità download"
 
@@ -1256,6 +1280,12 @@ msgstr "Scaricato"
 
 msgid "Downloading Japanese dictionary..."
 msgstr "Scaricando il dizionario giapponese..."
+
+msgid "Downloading artwork... {count} checked"
+msgstr ""
+
+msgid "Downloading lyrics... {count} checked"
+msgstr ""
 
 msgid "Downloading"
 msgstr "Scaricando"
@@ -1901,9 +1931,6 @@ msgstr ""
 msgid "Local file access is required before these tags can be saved."
 msgstr ""
 
-msgid "Local file mapping is no longer available"
-msgstr ""
-
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
@@ -1972,6 +1999,9 @@ msgstr ""
 #| msgid "Dynamic background"
 msgid "Lyrics background opacity"
 msgstr "Sfondo dinamico"
+
+msgid "Lyrics cache cleared"
+msgstr ""
 
 msgid "Lyrics loaded"
 msgstr ""
@@ -2209,6 +2239,11 @@ msgstr ""
 
 msgid "New download rule"
 msgstr ""
+
+#, fuzzy
+#| msgid "Change Profile"
+msgid "New file"
+msgstr "Cambia Profilo"
 
 #, fuzzy
 #| msgid "Artist unavailable"
@@ -3448,6 +3483,9 @@ msgstr ""
 msgid "Sign In with Password"
 msgstr ""
 
+msgid "Sign in to Plex first"
+msgstr ""
+
 msgid "Sign in with Nextcloud"
 msgstr ""
 
@@ -3524,6 +3562,11 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Artist unavailable"
+msgid "Source is no longer available"
+msgstr "Artista non disponibile"
+
+#, fuzzy
+#| msgid "Artist unavailable"
 msgid "Source setup is unavailable"
 msgstr "Artista non disponibile"
 
@@ -3564,6 +3607,9 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 
 msgid "Stream quality"
+msgstr ""
+
+msgid "Streaming"
 msgstr ""
 
 #, fuzzy
@@ -3641,6 +3687,9 @@ msgid "Text"
 msgstr ""
 
 msgid "The API token was not accepted. Please connect again."
+msgstr ""
+
+msgid "The connection no longer exists"
 msgstr ""
 
 msgid "TheAudioDB album ID"
@@ -4183,6 +4232,14 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid ""
+#~ "Rufin started with fresh user state because the saved database could not "
+#~ "be used. Your settings and saved logins are unchanged."
+#~ msgstr ""
+#~ "Rufin è stato inizializzato nuovamente perché il database non poteva "
+#~ "essere utilizzato. Le tue impostazioni e i tuoi login salvati rimangono "
+#~ "invariati."
 
 #~ msgid "Added to favorites"
 #~ msgstr "Aggiunto ai preferiti"
