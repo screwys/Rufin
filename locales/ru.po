@@ -175,14 +175,6 @@ msgstr ""
 "передавать URL-адреса провайдера устройству воспроизведения"
 
 msgid ""
-"Rufin started with fresh user state because the saved database could not be "
-"used. Your settings and saved logins are unchanged."
-msgstr ""
-"Rufin запустился с новыми настройками пользователя, так как сохраненную базу "
-"данных использовать не удалось. Ваши настройки и сохраненные данные для "
-"входа остались прежними."
-
-msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -545,6 +537,11 @@ msgstr "Исполнитель"
 msgid "Artists"
 msgstr "Исполнители"
 
+#, fuzzy
+#| msgid "Artwork selected"
+msgid "Artwork cache cleared"
+msgstr "Выбрана обложка"
+
 msgid "Artwork editing is no longer available"
 msgstr "Редактирование обложки больше не доступно"
 
@@ -762,8 +759,18 @@ msgstr "Очистить альбом"
 msgid "Clear artist"
 msgstr "Очистить исполнителя"
 
+#, fuzzy
+#| msgid "Search artwork"
+msgid "Clear artwork cache"
+msgstr "Поиск обложки"
+
 msgid "Clear fetched lyrics for this track"
 msgstr "Удалить загруженные тексты песен для этого трека"
+
+#, fuzzy
+#| msgid "Clear Cache"
+msgid "Clear lyrics cache"
+msgstr "Очистить Кэш"
 
 msgid "Clear queue"
 msgstr "Очистить очередь"
@@ -969,6 +976,11 @@ msgstr "Авторское право"
 msgid "Could not load listening overview"
 msgstr "Не удалось загрузить обзор прослушивания"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not load page"
+msgstr "Не удалось загрузить эту страницу"
+
 msgid "Could not load related tracks"
 msgstr "Не удалось загрузить похожие треки"
 
@@ -1126,6 +1138,11 @@ msgstr "Приглашение устройства"
 msgid "Device name"
 msgstr "Имя устройства"
 
+#, fuzzy
+#| msgid "Device name"
+msgid "Device"
+msgstr "Имя устройства"
+
 msgid "Diagnostic log saved"
 msgstr "Журнал диагностики сохранен"
 
@@ -1201,6 +1218,16 @@ msgstr "Локальная папка"
 msgid "Download Queue"
 msgstr "Очередь загрузок"
 
+#, fuzzy
+#| msgid "Upload artwork"
+msgid "Download artwork"
+msgstr "Загрузить обложку"
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Download lyrics"
+msgstr "Загрузки"
+
 msgid "Download quality"
 msgstr "Качество скачивания"
 
@@ -1218,6 +1245,12 @@ msgstr "Загружено"
 
 msgid "Downloading Japanese dictionary..."
 msgstr "Загрузка японского словаря..."
+
+msgid "Downloading artwork... {count} checked"
+msgstr ""
+
+msgid "Downloading lyrics... {count} checked"
+msgstr ""
 
 msgid "Downloading"
 msgstr "Загрузка"
@@ -1848,9 +1881,6 @@ msgstr "Доступ к локальным файлам настроен"
 msgid "Local file access is required before these tags can be saved."
 msgstr "Для сохранения этих тегов требуется доступ к локальным файлам."
 
-msgid "Local file mapping is no longer available"
-msgstr "Сопоставление локальных файлов больше не доступно"
-
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
@@ -1916,6 +1946,11 @@ msgstr "Нормализация громкости"
 
 msgid "Lyrics background opacity"
 msgstr "Прозрачность фона текста песни"
+
+#, fuzzy
+#| msgid "Lyrics loaded"
+msgid "Lyrics cache cleared"
+msgstr "Текст песни загружен"
 
 msgid "Lyrics loaded"
 msgstr "Текст песни загружен"
@@ -2151,6 +2186,11 @@ msgstr "Новый умный плейлист"
 
 msgid "New download rule"
 msgstr "Новое правило загрузки"
+
+#, fuzzy
+#| msgid "Image files"
+msgid "New file"
+msgstr "Файлы изображений"
 
 msgid "New release is available"
 msgstr "Доступна новая версия"
@@ -3373,6 +3413,11 @@ msgstr "Войти в браузере"
 msgid "Sign In with Password"
 msgstr "Войти с помощью пароля"
 
+#, fuzzy
+#| msgid "Sign in with Nextcloud"
+msgid "Sign in to Plex first"
+msgstr "Войти с помощью Nextcloud"
+
 msgid "Sign in with Nextcloud"
 msgstr "Войти с помощью Nextcloud"
 
@@ -3445,6 +3490,11 @@ msgstr "Сортировать"
 msgid "Source by position"
 msgstr "Источник по позиции"
 
+#, fuzzy
+#| msgid "Artwork editing is no longer available"
+msgid "Source is no longer available"
+msgstr "Редактирование обложки больше не доступно"
+
 msgid "Source setup is unavailable"
 msgstr "Настройка источника недоступна"
 
@@ -3487,6 +3537,11 @@ msgstr ""
 "файлах"
 
 msgid "Stream quality"
+msgstr "Качество потока"
+
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Streaming"
 msgstr "Качество потока"
 
 msgid "Studio"
@@ -3557,6 +3612,9 @@ msgstr "Текст"
 
 msgid "The API token was not accepted. Please connect again."
 msgstr "Токен API не был принят. Пожалуйста, повторите подключение."
+
+msgid "The connection no longer exists"
+msgstr ""
 
 msgid "TheAudioDB album ID"
 msgstr "Идентификатор альбома TheAudioDB"
@@ -4109,6 +4167,17 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
 
+#~ msgid ""
+#~ "Rufin started with fresh user state because the saved database could not "
+#~ "be used. Your settings and saved logins are unchanged."
+#~ msgstr ""
+#~ "Rufin запустился с новыми настройками пользователя, так как сохраненную "
+#~ "базу данных использовать не удалось. Ваши настройки и сохраненные данные "
+#~ "для входа остались прежними."
+
+#~ msgid "Local file mapping is no longer available"
+#~ msgstr "Сопоставление локальных файлов больше не доступно"
+
 #~ msgid "Added to favorites"
 #~ msgstr "Добавлено в избранное"
 
@@ -4431,9 +4500,6 @@ msgstr "Добро пожаловать в программу установки
 #~ msgid "Choose when the left sidebar uses compact navigation"
 #~ msgstr ""
 #~ "Выбрать, когда в левой боковой панели использовать компактную навигацию"
-
-#~ msgid "Clear Cache"
-#~ msgstr "Очистить Кэш"
 
 #~ msgid "Clear Cached Library"
 #~ msgstr "Очистить кэшированную библиотеку"

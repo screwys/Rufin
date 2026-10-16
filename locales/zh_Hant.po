@@ -129,11 +129,6 @@ msgid ""
 msgstr "透過此裝置路由伺服器媒體，而非將來源網址提供給渲染器"
 
 msgid ""
-"Rufin started with fresh user state because the saved database could not be "
-"used. Your settings and saved logins are unchanged."
-msgstr ""
-
-msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -499,6 +494,11 @@ msgid "Artists"
 msgstr "藝人"
 
 #, fuzzy
+#| msgid "No folder selected"
+msgid "Artwork cache cleared"
+msgstr "無資料夾被選擇"
+
+#, fuzzy
 #| msgid "Metadata editing is no longer available"
 msgid "Artwork editing is no longer available"
 msgstr "元資料已經不再能編輯"
@@ -755,8 +755,18 @@ msgstr "播放專輯"
 msgid "Clear artist"
 msgstr "播放藝人"
 
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Clear artwork cache"
+msgstr "搜尋歌詞"
+
 msgid "Clear fetched lyrics for this track"
 msgstr "清除此曲目已抓取的歌詞"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear lyrics cache"
+msgstr "搜尋歌詞"
 
 msgid "Clear queue"
 msgstr "清除播放佇列"
@@ -1014,6 +1024,11 @@ msgstr "無法載入此資料夾"
 
 #, fuzzy
 #| msgid "Couldn't load this folder"
+msgid "Could not load page"
+msgstr "無法載入此資料夾"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
 msgid "Could not load related tracks"
 msgstr "無法載入此資料夾"
 
@@ -1197,6 +1212,11 @@ msgstr ""
 msgid "Device name"
 msgstr "重新命名"
 
+#, fuzzy
+#| msgid "Rename"
+msgid "Device"
+msgstr "重新命名"
+
 msgid "Diagnostic log saved"
 msgstr "已儲存診斷記錄"
 
@@ -1286,6 +1306,16 @@ msgstr "下載資料夾"
 msgid "Download Queue"
 msgstr "下載佇列"
 
+#, fuzzy
+#| msgid "Download started"
+msgid "Download artwork"
+msgstr "已開始下載"
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Download lyrics"
+msgstr "下載"
+
 msgid "Download quality"
 msgstr "下載品質"
 
@@ -1302,6 +1332,12 @@ msgid "Downloaded"
 msgstr "已下載"
 
 msgid "Downloading Japanese dictionary..."
+msgstr ""
+
+msgid "Downloading artwork... {count} checked"
+msgstr ""
+
+msgid "Downloading lyrics... {count} checked"
 msgstr ""
 
 msgid "Downloading"
@@ -2008,9 +2044,6 @@ msgstr ""
 msgid "Local file access is required before these tags can be saved."
 msgstr ""
 
-msgid "Local file mapping is no longer available"
-msgstr ""
-
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
@@ -2080,6 +2113,11 @@ msgstr "響度正規化"
 
 msgid "Lyrics background opacity"
 msgstr ""
+
+#, fuzzy
+#| msgid "Lyrics loaded"
+msgid "Lyrics cache cleared"
+msgstr "歌詞已載入"
 
 msgid "Lyrics loaded"
 msgstr "歌詞已載入"
@@ -2339,6 +2377,11 @@ msgstr "新增智慧播放清單"
 
 msgid "New download rule"
 msgstr "新增下載規則"
+
+#, fuzzy
+#| msgid "Change Secret Storage"
+msgid "New file"
+msgstr "變更敏感存儲空間"
 
 #, fuzzy
 #| msgid "No network devices found"
@@ -3758,6 +3801,9 @@ msgstr ""
 msgid "Sign In with Password"
 msgstr ""
 
+msgid "Sign in to Plex first"
+msgstr ""
+
 msgid "Sign in with Nextcloud"
 msgstr ""
 
@@ -3837,6 +3883,11 @@ msgid "Source by position"
 msgstr "按位置瀏覽側邊欄"
 
 #, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Source is no longer available"
+msgstr "元資料已經不再能編輯"
+
+#, fuzzy
 #| msgid "Artist name"
 msgid "Source setup is unavailable"
 msgstr "藝人名稱"
@@ -3886,6 +3937,11 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 
 msgid "Stream quality"
+msgstr "串流品質"
+
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Streaming"
 msgstr "串流品質"
 
 #, fuzzy
@@ -3967,6 +4023,9 @@ msgid "Text"
 msgstr ""
 
 msgid "The API token was not accepted. Please connect again."
+msgstr ""
+
+msgid "The connection no longer exists"
 msgstr ""
 
 msgid "TheAudioDB album ID"

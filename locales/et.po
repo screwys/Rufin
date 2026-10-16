@@ -175,14 +175,6 @@ msgstr ""
 "pärit meedium läbi selle seadme"
 
 msgid ""
-"Rufin started with fresh user state because the saved database could not be "
-"used. Your settings and saved logins are unchanged."
-msgstr ""
-"Kuna salvestatud andmebaasi ei saanud kasutada, siis Rufin alustas "
-"kasutajaolekut puhtalt lehelt. Sinu seadistused ja salvestatud "
-"autentimisandmed on muutmata."
-
-msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -539,6 +531,11 @@ msgstr "Esitaja"
 msgid "Artists"
 msgstr "Esitajaid"
 
+#, fuzzy
+#| msgid "Artwork selected"
+msgid "Artwork cache cleared"
+msgstr "Kaanepilt on valitud"
+
 msgid "Artwork editing is no longer available"
 msgstr "Kaanepildi muutmine pole enam saadaval"
 
@@ -753,8 +750,18 @@ msgstr "Eemalda album"
 msgid "Clear artist"
 msgstr "Eemalda esitaja"
 
+#, fuzzy
+#| msgid "Search artwork"
+msgid "Clear artwork cache"
+msgstr "Otsi kaanepilte"
+
 msgid "Clear fetched lyrics for this track"
 msgstr "Kustuta see loo jaoks laaditud laulusõnad"
+
+#, fuzzy
+#| msgid "Clear Cache"
+msgid "Clear lyrics cache"
+msgstr "Kustuta vahemälu"
 
 msgid "Clear queue"
 msgstr "Tühjenda esitusjärjekord"
@@ -960,6 +967,11 @@ msgstr "Autoriõigused"
 msgid "Could not load listening overview"
 msgstr "Kuulamiste ülevaate laadimine ei õnnestunud"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not load page"
+msgstr "Selle lehe laadimine ei õnnestunud"
+
 msgid "Could not load related tracks"
 msgstr "Seotud lugude laadimine ei õnnestunud"
 
@@ -1117,6 +1129,11 @@ msgstr "Seadme kutse"
 msgid "Device name"
 msgstr "Seadme nimi"
 
+#, fuzzy
+#| msgid "Device name"
+msgid "Device"
+msgstr "Seadme nimi"
+
 msgid "Diagnostic log saved"
 msgstr "Diagnostikalogi on salvestatud"
 
@@ -1192,6 +1209,16 @@ msgstr "Allalaadimiste kaust"
 msgid "Download Queue"
 msgstr "Allalaadimise järjekord"
 
+#, fuzzy
+#| msgid "Upload artwork"
+msgid "Download artwork"
+msgstr "Laadi kaanepilt üles"
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Download lyrics"
+msgstr "Allalaadimised"
+
 msgid "Download quality"
 msgstr "Allalaadimiste kvaliteet"
 
@@ -1209,6 +1236,12 @@ msgstr "Allalaaditud"
 
 msgid "Downloading Japanese dictionary..."
 msgstr "Jaapani keele sõnastik on allalaadimisel…"
+
+msgid "Downloading artwork... {count} checked"
+msgstr ""
+
+msgid "Downloading lyrics... {count} checked"
+msgstr ""
 
 msgid "Downloading"
 msgstr "Allalaadimisel"
@@ -1838,9 +1871,6 @@ msgid "Local file access is required before these tags can be saved."
 msgstr ""
 "Enne nende siltide salvestamist on vajalik ligipääs kohalikele failidele."
 
-msgid "Local file mapping is no longer available"
-msgstr "Kohalike failide vastendus pole enam saadaval"
-
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] "Kohalik failivastendus: {matched} / {total} serveriasukoht vastab"
@@ -1900,6 +1930,11 @@ msgstr "Helivaljuse normaliseerimine"
 
 msgid "Lyrics background opacity"
 msgstr "Laulusõnade tausta läbipaistmatus"
+
+#, fuzzy
+#| msgid "Lyrics loaded"
+msgid "Lyrics cache cleared"
+msgstr "Laulusõnad on laaditud"
 
 msgid "Lyrics loaded"
 msgstr "Laulusõnad on laaditud"
@@ -2136,6 +2171,11 @@ msgstr "Uus nutikas esitusloend"
 
 msgid "New download rule"
 msgstr "Uus allalaadimisreegel"
+
+#, fuzzy
+#| msgid "Image files"
+msgid "New file"
+msgstr "Pildifailid"
 
 msgid "New release is available"
 msgstr "Rakenduse uus versioon on saadaval"
@@ -3347,6 +3387,11 @@ msgstr "Logi sisse veebibrauseris"
 msgid "Sign In with Password"
 msgstr "Logi sisse salasõnaga"
 
+#, fuzzy
+#| msgid "Sign in with Nextcloud"
+msgid "Sign in to Plex first"
+msgstr "Logi sisse Nextcloudiga"
+
 msgid "Sign in with Nextcloud"
 msgstr "Logi sisse Nextcloudiga"
 
@@ -3419,6 +3464,11 @@ msgstr "Järjestus"
 msgid "Source by position"
 msgstr "Allikas asukoha alusel"
 
+#, fuzzy
+#| msgid "Artwork editing is no longer available"
+msgid "Source is no longer available"
+msgstr "Kaanepildi muutmine pole enam saadaval"
+
 msgid "Source setup is unavailable"
 msgstr "Allika seadistus pole saadaval"
 
@@ -3461,6 +3511,9 @@ msgstr ""
 
 msgid "Stream quality"
 msgstr "Voogedastuse kvaliteet"
+
+msgid "Streaming"
+msgstr "Voogedastus"
 
 msgid "Studio"
 msgstr "Stuudio"
@@ -3530,6 +3583,9 @@ msgstr "Tekst"
 
 msgid "The API token was not accepted. Please connect again."
 msgstr "API tunnusluba polnud õige. Palun ühenda uuesti."
+
+msgid "The connection no longer exists"
+msgstr ""
 
 msgid "TheAudioDB album ID"
 msgstr "TheAudioDB albumi tunnus"
@@ -4073,6 +4129,17 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
+#~ msgid ""
+#~ "Rufin started with fresh user state because the saved database could not "
+#~ "be used. Your settings and saved logins are unchanged."
+#~ msgstr ""
+#~ "Kuna salvestatud andmebaasi ei saanud kasutada, siis Rufin alustas "
+#~ "kasutajaolekut puhtalt lehelt. Sinu seadistused ja salvestatud "
+#~ "autentimisandmed on muutmata."
+
+#~ msgid "Local file mapping is no longer available"
+#~ msgstr "Kohalike failide vastendus pole enam saadaval"
+
 #~ msgid "Added to favorites"
 #~ msgstr "Lisatud lemmikute hulka"
 
@@ -4338,9 +4405,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Choose the current page layout."
 #~ msgstr "Vali praegune lehe paigutus."
-
-#~ msgid "Clear Cache"
-#~ msgstr "Kustuta vahemälu"
 
 #~ msgid "Clear Cached Library"
 #~ msgstr "Kustuta meediakogu puhverdatud andmed"
@@ -4636,9 +4700,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Songs"
 #~ msgstr "Lood"
-
-#~ msgid "Streaming"
-#~ msgstr "Voogedastus"
 
 #~ msgid "Sync Status"
 #~ msgstr "Sünkroonimise olek"
