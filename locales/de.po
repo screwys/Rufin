@@ -177,14 +177,6 @@ msgstr ""
 "weiterzugeben"
 
 msgid ""
-"Rufin started with fresh user state because the saved database could not be "
-"used. Your settings and saved logins are unchanged."
-msgstr ""
-"Rufin wurde mit einem neuen Benutzerstatus gestartet, da die gespeicherte "
-"Datenbank nicht verwendet werden konnte. Deine Einstellungen und "
-"gespeicherten Anmeldedaten sind unverändert."
-
-msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -547,6 +539,11 @@ msgstr "Künstler"
 msgid "Artists"
 msgstr "Künstler"
 
+#, fuzzy
+#| msgid "Artwork selected"
+msgid "Artwork cache cleared"
+msgstr "Cover ausgewählt"
+
 msgid "Artwork editing is no longer available"
 msgstr "Die Bearbeitung von Covern ist nicht mehr verfügbar"
 
@@ -762,8 +759,18 @@ msgstr "Album entfernen"
 msgid "Clear artist"
 msgstr "Künstler entfernen"
 
+#, fuzzy
+#| msgid "Search artwork"
+msgid "Clear artwork cache"
+msgstr "Cover suchen"
+
 msgid "Clear fetched lyrics for this track"
 msgstr "Abgerufene Liedtexte für diesen Titel löschen"
+
+#, fuzzy
+#| msgid "Clear Cache"
+msgid "Clear lyrics cache"
+msgstr "Cache leeren"
 
 msgid "Clear queue"
 msgstr "Warteschlange leeren"
@@ -969,6 +976,11 @@ msgstr "Copyright"
 msgid "Could not load listening overview"
 msgstr "Höraktivität konnte nicht geladen werden"
 
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Could not load page"
+msgstr "Diese Seite konnte nicht geladen werden"
+
 msgid "Could not load related tracks"
 msgstr "Verwandte Titel konnten nicht geladen werden"
 
@@ -1126,6 +1138,11 @@ msgstr "Geräteeinladung"
 msgid "Device name"
 msgstr "Gerätename"
 
+#, fuzzy
+#| msgid "Device name"
+msgid "Device"
+msgstr "Gerätename"
+
 msgid "Diagnostic log saved"
 msgstr "Diagnoseprotokoll gespeichert"
 
@@ -1201,6 +1218,16 @@ msgstr "Download-Ordner"
 msgid "Download Queue"
 msgstr "Download-Warteschlange"
 
+#, fuzzy
+#| msgid "Upload artwork"
+msgid "Download artwork"
+msgstr "Cover hochladen"
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Download lyrics"
+msgstr "Downloads"
+
 msgid "Download quality"
 msgstr "Downloadqualität"
 
@@ -1218,6 +1245,12 @@ msgstr "Heruntergeladen"
 
 msgid "Downloading Japanese dictionary..."
 msgstr "Japanisches Wörterbuch wird heruntergeladen …"
+
+msgid "Downloading artwork... {count} checked"
+msgstr ""
+
+msgid "Downloading lyrics... {count} checked"
+msgstr ""
 
 msgid "Downloading"
 msgstr "Wird heruntergeladen"
@@ -1853,9 +1886,6 @@ msgstr ""
 "Zugriff auf lokale Dateien ist erforderlich, bevor diese Tags gespeichert "
 "werden können."
 
-msgid "Local file mapping is no longer available"
-msgstr "Die Zuordnung lokaler Dateien ist nicht mehr verfügbar"
-
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
@@ -1918,6 +1948,11 @@ msgstr "Lautstärkenormalisierung"
 
 msgid "Lyrics background opacity"
 msgstr "Deckkraft des Liedtext-Hintergrunds"
+
+#, fuzzy
+#| msgid "Lyrics loaded"
+msgid "Lyrics cache cleared"
+msgstr "Liedtexte geladen"
 
 msgid "Lyrics loaded"
 msgstr "Liedtexte geladen"
@@ -2155,6 +2190,11 @@ msgstr "Neue Smart-Playlist"
 
 msgid "New download rule"
 msgstr "Neue Download-Regel"
+
+#, fuzzy
+#| msgid "Image files"
+msgid "New file"
+msgstr "Bilddateien"
 
 msgid "New release is available"
 msgstr "Neue Veröffentlichung verfügbar"
@@ -3372,6 +3412,11 @@ msgstr "Im Browser anmelden"
 msgid "Sign In with Password"
 msgstr "Mit Passwort anmelden"
 
+#, fuzzy
+#| msgid "Sign in with Nextcloud"
+msgid "Sign in to Plex first"
+msgstr "Mit Nextcloud anmelden"
+
 msgid "Sign in with Nextcloud"
 msgstr "Mit Nextcloud anmelden"
 
@@ -3444,6 +3489,11 @@ msgstr "Sortieren"
 msgid "Source by position"
 msgstr "Quelle nach Position"
 
+#, fuzzy
+#| msgid "Artwork editing is no longer available"
+msgid "Source is no longer available"
+msgstr "Die Bearbeitung von Covern ist nicht mehr verfügbar"
+
 msgid "Source setup is unavailable"
 msgstr "Quelleneinrichtung ist nicht verfügbar"
 
@@ -3484,6 +3534,11 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr "Berechnete Lautheit in unterstützten lokalen Musikdateien speichern"
 
 msgid "Stream quality"
+msgstr "Streaming-Qualität"
+
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Streaming"
 msgstr "Streaming-Qualität"
 
 msgid "Studio"
@@ -3554,6 +3609,9 @@ msgstr "Text"
 
 msgid "The API token was not accepted. Please connect again."
 msgstr "Das API-Token wurde nicht akzeptiert. Bitte erneut verbinden."
+
+msgid "The connection no longer exists"
+msgstr ""
 
 msgid "TheAudioDB album ID"
 msgstr "TheAudioDB-Album-ID"
@@ -4099,6 +4157,17 @@ msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
 
+#~ msgid ""
+#~ "Rufin started with fresh user state because the saved database could not "
+#~ "be used. Your settings and saved logins are unchanged."
+#~ msgstr ""
+#~ "Rufin wurde mit einem neuen Benutzerstatus gestartet, da die gespeicherte "
+#~ "Datenbank nicht verwendet werden konnte. Deine Einstellungen und "
+#~ "gespeicherten Anmeldedaten sind unverändert."
+
+#~ msgid "Local file mapping is no longer available"
+#~ msgstr "Die Zuordnung lokaler Dateien ist nicht mehr verfügbar"
+
 #~ msgid "Added to favorites"
 #~ msgstr "Zu Favoriten hinzugefügt"
 
@@ -4368,9 +4437,6 @@ msgstr "Willkommen beim Rufin-Setup"
 
 #~ msgid "Choose the current page layout."
 #~ msgstr "Aktuelles Seitenlayout wählen."
-
-#~ msgid "Clear Cache"
-#~ msgstr "Cache leeren"
 
 #~ msgid "Clear Cached Library"
 #~ msgstr "Mediathek-Cache leeren"

@@ -136,11 +136,6 @@ msgstr ""
 "s rendererem"
 
 msgid ""
-"Rufin started with fresh user state because the saved database could not be "
-"used. Your settings and saved logins are unchanged."
-msgstr ""
-
-msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -518,6 +513,11 @@ msgid "Artists"
 msgstr "Interpreti"
 
 #, fuzzy
+#| msgid "No folder selected"
+msgid "Artwork cache cleared"
+msgstr "Nebyla vybrána žádná složka"
+
+#, fuzzy
 #| msgid "Metadata editing is no longer available"
 msgid "Artwork editing is no longer available"
 msgstr "Úprava metadat již není k dispozici"
@@ -784,8 +784,18 @@ msgstr "Přehrát album"
 msgid "Clear artist"
 msgstr "Přehrát interpreta"
 
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Clear artwork cache"
+msgstr "Hledat Texty"
+
 msgid "Clear fetched lyrics for this track"
 msgstr "Vymazat načtený text pro tuto skladbu"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear lyrics cache"
+msgstr "Hledat texty"
 
 msgid "Clear queue"
 msgstr "Vymazat frontu"
@@ -1047,6 +1057,11 @@ msgstr "Nelze načíst tuto složku"
 
 #, fuzzy
 #| msgid "Couldn't load this folder"
+msgid "Could not load page"
+msgstr "Nelze načíst tuto složku"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
 msgid "Could not load related tracks"
 msgstr "Nelze načíst tuto složku"
 
@@ -1232,6 +1247,11 @@ msgstr ""
 msgid "Device name"
 msgstr "Přejmenovat"
 
+#, fuzzy
+#| msgid "Rename"
+msgid "Device"
+msgstr "Přejmenovat"
+
 msgid "Diagnostic log saved"
 msgstr "Diagnostický protokol uložen"
 
@@ -1323,6 +1343,16 @@ msgstr "Stáhnout složku"
 msgid "Download Queue"
 msgstr "Stáhnout frontu"
 
+#, fuzzy
+#| msgid "Download started"
+msgid "Download artwork"
+msgstr "Stahování začalo"
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Download lyrics"
+msgstr "Stahování"
+
 msgid "Download quality"
 msgstr "Kvalita stažení"
 
@@ -1339,6 +1369,12 @@ msgid "Downloaded"
 msgstr "Staženo"
 
 msgid "Downloading Japanese dictionary..."
+msgstr ""
+
+msgid "Downloading artwork... {count} checked"
+msgstr ""
+
+msgid "Downloading lyrics... {count} checked"
 msgstr ""
 
 msgid "Downloading"
@@ -2059,9 +2095,6 @@ msgstr "Nastaven přístup k místním souborům"
 msgid "Local file access is required before these tags can be saved."
 msgstr ""
 
-msgid "Local file mapping is no longer available"
-msgstr "Mapování místních souborů již není k dispozici"
-
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
@@ -2135,6 +2168,11 @@ msgstr "Normalizace hlasitosti"
 
 msgid "Lyrics background opacity"
 msgstr ""
+
+#, fuzzy
+#| msgid "Lyrics loaded"
+msgid "Lyrics cache cleared"
+msgstr "Texty skladeb načteny"
 
 msgid "Lyrics loaded"
 msgstr "Texty skladeb načteny"
@@ -2396,6 +2434,11 @@ msgstr "Nový chytrý playlist"
 
 msgid "New download rule"
 msgstr "Nové pravidlo stahování"
+
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "New file"
+msgstr "Uložené zdroje"
 
 #, fuzzy
 #| msgid "No network devices found"
@@ -3846,6 +3889,9 @@ msgstr ""
 msgid "Sign In with Password"
 msgstr ""
 
+msgid "Sign in to Plex first"
+msgstr ""
+
 msgid "Sign in with Nextcloud"
 msgstr ""
 
@@ -3925,6 +3971,11 @@ msgid "Source by position"
 msgstr "Rozložení postranního panelu podle pozice"
 
 #, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Source is no longer available"
+msgstr "Úprava metadat již není k dispozici"
+
+#, fuzzy
 #| msgid "This isn't available"
 msgid "Source setup is unavailable"
 msgstr "Toto není dostupné"
@@ -3976,6 +4027,11 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 
 msgid "Stream quality"
+msgstr "Kvalita streamu"
+
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Streaming"
 msgstr "Kvalita streamu"
 
 #, fuzzy
@@ -4059,6 +4115,9 @@ msgid "Text"
 msgstr "Text"
 
 msgid "The API token was not accepted. Please connect again."
+msgstr ""
+
+msgid "The connection no longer exists"
 msgstr ""
 
 msgid "TheAudioDB album ID"
@@ -4653,6 +4712,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Local file mapping is no longer available"
+#~ msgstr "Mapování místních souborů již není k dispozici"
 
 #~ msgid "Added to favorites"
 #~ msgstr "Přidat do oblíbených"

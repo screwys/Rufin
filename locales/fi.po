@@ -133,11 +133,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"Rufin started with fresh user state because the saved database could not be "
-"used. Your settings and saved logins are unchanged."
-msgstr ""
-
-msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
@@ -499,6 +494,11 @@ msgid "Artists"
 msgstr "Esittäjät"
 
 #, fuzzy
+#| msgid "No folder selected"
+msgid "Artwork cache cleared"
+msgstr "Kansiota ei ole valittu"
+
+#, fuzzy
 #| msgid "Metadata editing is no longer available"
 msgid "Artwork editing is no longer available"
 msgstr "Metatietojen muokkaaminen ei ole enää saatavilla"
@@ -732,8 +732,18 @@ msgstr "Toista albumi"
 msgid "Clear artist"
 msgstr ""
 
+#, fuzzy
+#| msgid "Show artwork"
+msgid "Clear artwork cache"
+msgstr "Näytä kuvitus"
+
 msgid "Clear fetched lyrics for this track"
 msgstr ""
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear lyrics cache"
+msgstr "Hae sanoituksia"
 
 msgid "Clear queue"
 msgstr "Tyhjennä jono"
@@ -985,6 +995,11 @@ msgstr "Tätä kansiota ei voitu ladata"
 
 #, fuzzy
 #| msgid "Couldn't load this folder"
+msgid "Could not load page"
+msgstr "Tätä kansiota ei voitu ladata"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
 msgid "Could not load related tracks"
 msgstr "Tätä kansiota ei voitu ladata"
 
@@ -1166,6 +1181,11 @@ msgstr ""
 msgid "Device name"
 msgstr "Nimeä uudelleen"
 
+#, fuzzy
+#| msgid "Rename"
+msgid "Device"
+msgstr "Nimeä uudelleen"
+
 msgid "Diagnostic log saved"
 msgstr "Diagnostiikkaloki tallennettu"
 
@@ -1251,6 +1271,16 @@ msgstr "Latauskansio"
 msgid "Download Queue"
 msgstr "Latausjono"
 
+#, fuzzy
+#| msgid "Show artwork"
+msgid "Download artwork"
+msgstr "Näytä kuvitus"
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Download lyrics"
+msgstr "Lataukset"
+
 msgid "Download quality"
 msgstr "Latauslaatu"
 
@@ -1268,6 +1298,12 @@ msgstr "Ladattu"
 
 msgid "Downloading Japanese dictionary..."
 msgstr "Ladataan japaninkielistä sanastoa..."
+
+msgid "Downloading artwork... {count} checked"
+msgstr ""
+
+msgid "Downloading lyrics... {count} checked"
+msgstr ""
 
 msgid "Downloading"
 msgstr "Ladataan"
@@ -1949,9 +1985,6 @@ msgstr ""
 msgid "Local file access is required before these tags can be saved."
 msgstr ""
 
-msgid "Local file mapping is no longer available"
-msgstr ""
-
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
@@ -2014,6 +2047,11 @@ msgstr ""
 
 msgid "Lyrics background opacity"
 msgstr ""
+
+#, fuzzy
+#| msgid "Lyrics loaded"
+msgid "Lyrics cache cleared"
+msgstr "Sanoitukset ladattu"
 
 msgid "Lyrics loaded"
 msgstr "Sanoitukset ladattu"
@@ -2261,6 +2299,11 @@ msgstr "Uusi älykäs soittolista"
 
 msgid "New download rule"
 msgstr "Uusi lataussääntö"
+
+#, fuzzy
+#| msgid "Change Profile"
+msgid "New file"
+msgstr "Vaihda profiilia"
 
 #, fuzzy
 #| msgid "No network devices found"
@@ -3619,6 +3662,11 @@ msgstr "Kirjaudu sisään selaimessa"
 msgid "Sign In with Password"
 msgstr "Kirjaudu sisään salasanalla"
 
+#, fuzzy
+#| msgid "Sign in with Nextcloud"
+msgid "Sign in to Plex first"
+msgstr "Kirjaudu sisään Nextcloudilla"
+
 msgid "Sign in with Nextcloud"
 msgstr "Kirjaudu sisään Nextcloudilla"
 
@@ -3698,6 +3746,11 @@ msgid "Source by position"
 msgstr ""
 
 #, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Source is no longer available"
+msgstr "Metatietojen muokkaaminen ei ole enää saatavilla"
+
+#, fuzzy
 #| msgid "Search is unavailable"
 msgid "Source setup is unavailable"
 msgstr "Haku ei ole saatavilla"
@@ -3747,6 +3800,11 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 
 msgid "Stream quality"
+msgstr "Suoratoiston laatu"
+
+#, fuzzy
+#| msgid "Stream quality"
+msgid "Streaming"
 msgstr "Suoratoiston laatu"
 
 #, fuzzy
@@ -3829,6 +3887,9 @@ msgstr "Teksti"
 
 msgid "The API token was not accepted. Please connect again."
 msgstr "API-polettia ei hyväksytty. Yhdistä uudelleen."
+
+msgid "The connection no longer exists"
+msgstr ""
 
 msgid "TheAudioDB album ID"
 msgstr ""
