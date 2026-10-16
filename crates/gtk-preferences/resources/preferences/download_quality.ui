@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <object class="AdwComboRow" id="format">
+    <property name="title" translatable="yes">Format</property>
+    <property name="model">
+      <object class="GtkStringList">
+        <items>
+          <item translatable="yes">Original</item>
+          <item>Opus</item>
+          <item>AAC</item>
+          <item>MP3</item>
+          <item>Vorbis</item>
+          <item>FLAC</item>
+        </items>
+      </object>
+    </property>
+  </object>
+  <object class="AdwActionRow" id="bitrate">
+    <property name="title" translatable="yes">Bitrate</property>
+    <property name="activatable-widget">bitrate_scale</property>
+    <child type="suffix">
+      <object class="GtkScale" id="bitrate_scale">
+        <property name="orientation">horizontal</property>
+        <property name="valign">center</property>
+        <property name="width-request">220</property>
+        <property name="digits">0</property>
+        <property name="draw-value">false</property>
+        <property name="adjustment"><object class="GtkAdjustment"><property name="upper">320</property></object></property>
+        <style><class name="playback-setting-scale"/></style>
+      </object>
+    </child>
+  </object>
+  <object class="AdwComboRow" id="channels">
+    <property name="title" translatable="yes">Channels</property>
+    <property name="model">
+      <object class="GtkStringList">
+        <items>
+          <item translatable="yes">Preserve channels</item>
+          <item translatable="yes">Stereo for lossy formats</item>
+          <item translatable="yes">Stereo</item>
+        </items>
+      </object>
+    </property>
+  </object>
+</interface>

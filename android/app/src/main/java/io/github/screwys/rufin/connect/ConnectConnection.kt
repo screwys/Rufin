@@ -138,7 +138,7 @@ internal class ConnectConnection(private val model: RufinConnection) {
         musicFolders = loadMusicFolders(owner)
         updated
     })
-    fun encoding(encoding: Encoding) = request({ it.execute(ConnectAction.Encoding(encoding, false)) },
+    fun encoding(encoding: io.github.screwys.rufin.shared.sources.DownloadQuality) = request({ it.execute(ConnectAction.Encoding(encoding, false)) },
         { it.execute(ConnectAction.Encoding(encoding, true)) })
     fun importDocument(uri: String) = request({ it.importDocument(uri, false, null) },
         { it.importDocument(uri, true, null) }, success = translate("Applied"))

@@ -6,9 +6,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::{DownloadQuality, ResolvedDownload};
 use async_channel::{Receiver, Sender};
+use audio_processing::ResolvedStream;
 use library::{Database, Freshness};
-use playback::{ResolvedStream, SourceReportFact, StreamRequest};
+use playback::{SourceReportFact, StreamRequest};
 use serde::{Deserialize, Serialize};
 
 use crate::policy::raw_item_id;
@@ -625,31 +627,6 @@ impl LocalLiveChange {
                 }
             }
         }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ResolvedDownload {
-    stream: ResolvedStream,
-    transcoded_extension: Option<&'static str>,
-}
-
-impl ResolvedDownload {
-    pub(crate) fn new(stream: ResolvedStream, transcoded_extension: Option<&'static str>) -> Self {
-        Self {
-            stream,
-            transcoded_extension,
-        }
-    }
-
-    pub fn stream(&self) -> &ResolvedStream {
-        &self.stream
-    }
-    pub fn into_stream(self) -> ResolvedStream {
-        self.stream
-    }
-    pub fn transcoded_extension(&self) -> Option<&'static str> {
-        self.transcoded_extension
     }
 }
 
@@ -1298,30 +1275,57 @@ impl Source {
     pub async fn resolve_download(
         &self,
         database: &Database,
-        request: &StreamRequest,
+        media_uri: &str,
+        quality: DownloadQuality,
     ) -> SourceResult<ResolvedDownload> {
-        if let Some(stream) = direct_stream(database, &request.media_uri).await? {
-            return Ok(ResolvedDownload::new(stream, None));
+        let cue = library::cue_media_parts(media_uri);
+        let backing = cue
+            .as_ref()
+            .map_or(media_uri, |(_, uri, _, _)| uri.as_str());
+        if library::file_media_path(backing).is_some() {
+            return Ok(ResolvedDownload::encode(
+                ResolvedStream::new(backing),
+                quality,
+            ));
         }
-        let object_id = self.track_object_id(&request.media_uri)?;
+        if let Some(stream) = direct_stream(database, media_uri).await? {
+            return Ok(ResolvedDownload::encode(stream, quality));
+        }
+        let object_id = self.track_object_id(media_uri)?;
         match &self.implementation {
             Implementation::Plex(source) => {
-                source.resolve_download(&object_id, request.quality).await
+                source
+                    .resolve_download(
+                        &object_id,
+                        quality,
+                        database
+                            .download_metadata(media_uri)
+                            .await?
+                            .and_then(|metadata| metadata.channels),
+                    )
+                    .await
             }
             Implementation::Files(source) => source
-                .stream(database, &request.media_uri)
+                .stream(database, media_uri)
                 .await
-                .map(|stream| ResolvedDownload::new(stream, None)),
+                .map(|stream| ResolvedDownload::encode(stream, quality)),
             Implementation::Local(_) => self
-                .document_stream(database, &request.media_uri)
+                .document_stream(database, media_uri)
                 .await
-                .map(|stream| ResolvedDownload::new(stream, None)),
+                .map(|stream| ResolvedDownload::encode(stream, quality)),
             Implementation::JellyfinEmby(source) => {
-                source.resolve_download(&object_id, request.quality).await
+                source
+                    .resolve_download(
+                        &object_id,
+                        quality,
+                        database
+                            .download_metadata(media_uri)
+                            .await?
+                            .and_then(|metadata| metadata.channels),
+                    )
+                    .await
             }
-            Implementation::OpenSubsonic(source) => {
-                source.resolve_download(&object_id, request.quality)
-            }
+            Implementation::OpenSubsonic(source) => source.resolve_download(&object_id, quality),
         }
     }
 

@@ -1180,7 +1180,7 @@ mod tests {
             .expect("create track")
             .write_all(b"track")
             .expect("write track");
-        let stream = PreparedStream::from(playback::ResolvedStream::new(
+        let stream = PreparedStream::from(audio_processing::ResolvedStream::new(
             Url::from_file_path(path).expect("track URL").to_string(),
         ))
         .with_row(test_row().into(), Some("audio/mpeg".to_string()));
@@ -1306,7 +1306,7 @@ mod tests {
             .expect("create track")
             .write_all(b"flac")
             .expect("write track");
-        let stream = PreparedStream::from(playback::ResolvedStream::new(
+        let stream = PreparedStream::from(audio_processing::ResolvedStream::new(
             Url::from_file_path(path).expect("track URL").to_string(),
         ))
         .with_row(test_row().into(), Some("audio/flac".to_string()));
@@ -1581,14 +1581,14 @@ mod tests {
             .write_all(b"next")
             .expect("write next track");
         let stream = PreparedStream::from(
-            playback::ResolvedStream::new(
+            audio_processing::ResolvedStream::new(
                 Url::from_file_path(path).expect("track URL").to_string(),
             )
             .with_window(10_000, 20_000),
         );
         let next = PreparedNext::new(
             RunId::new(2),
-            PreparedStream::from(playback::ResolvedStream::new(
+            PreparedStream::from(audio_processing::ResolvedStream::new(
                 Url::from_file_path(next_path)
                     .expect("next track URL")
                     .to_string(),
@@ -1681,7 +1681,7 @@ mod tests {
             .expect("create track")
             .write_all(b"track")
             .expect("write track");
-        let stream = PreparedStream::from(playback::ResolvedStream::new(
+        let stream = PreparedStream::from(audio_processing::ResolvedStream::new(
             Url::from_file_path(path).expect("track URL").to_string(),
         ));
         let mut relay =
@@ -1819,7 +1819,7 @@ mod tests {
         let private = "https://user:secret@example.test/track?token=secret&signature=opaque";
         let mut row = test_row();
         row.track.media_uri = private.into();
-        let resolved = playback::ResolvedStream::new(private);
+        let resolved = audio_processing::ResolvedStream::new(private);
         assert_eq!(resolved.uri(), private);
         assert!(!format!("{resolved:?}").contains("secret"));
         assert!(!format!("{resolved:?}").contains("opaque"));

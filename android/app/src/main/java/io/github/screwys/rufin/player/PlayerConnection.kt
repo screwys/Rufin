@@ -251,7 +251,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     fun editPreferences(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }
     fun equalizerEnabled(enabled: Boolean) = action { changeSettings { it.setEqualizerEnabled(enabled) } }
     fun equalizerPreset(preset: String) = action { changeSettings { it.selectEqualizerPreset(preset) } }
-    fun equalizerBand(index: Int, value: Float) = action { changeSettings { it.setEqualizerBand(index.toULong(), value.toDouble()) } }
+    fun equalizerBand(index: Int, value: Double) = action { changeSettings { it.setEqualizerBand(index.toULong(), value) } }
     fun lyricsPreference(edit: SettingsOwner.() -> Unit) = action {
         val current = bridge ?: return@action
         changeSettings(edit)

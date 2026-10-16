@@ -43,20 +43,39 @@ pub struct ConnectSettings {
     pub public_relay: bool,
     pub destination: Option<portable::Destination>,
     pub folders: FolderMappings,
-    pub encoding: Encoding,
+    #[serde(with = "encoding_format")]
+    pub encoding: DownloadQuality,
     pub adopting: bool,
     #[serde(alias = "joined")]
     pub established: bool,
     pub setup_pending: bool,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-pub enum Encoding {
-    #[default]
-    Original,
-    Mp3,
+use sources::DownloadQuality;
+
+mod encoding_format {
+    use serde::{Deserialize, Serialize};
+    use sources::DownloadQuality;
+
+    pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<DownloadQuality, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.as_str() == Some("mp3") {
+            return Ok(DownloadQuality::Transcoded(library::AudioEncoding::mp3()));
+        }
+        serde_json::from_value(value).map_err(serde::de::Error::custom)
+    }
+
+    pub(super) fn serialize<S: serde::Serializer>(
+        quality: &DownloadQuality,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        if quality.encoding() == Some(library::AudioEncoding::mp3()) {
+            return "mp3".serialize(serializer);
+        }
+        quality.serialize(serializer)
+    }
 }
 
 impl Default for ConnectSettings {
@@ -72,7 +91,7 @@ impl Default for ConnectSettings {
             public_relay: false,
             destination: None,
             folders: BTreeMap::new(),
-            encoding: Encoding::Original,
+            encoding: DownloadQuality::Original,
             adopting: false,
             established: false,
             setup_pending: false,
@@ -103,6 +122,8 @@ pub struct Device {
     pub name: String,
     pub reachable: bool,
     pub has_playback: bool,
+    #[serde(default)]
+    pub download_profiles: bool,
     #[serde(default)]
     pub enrolled: bool,
     pub connection: String,
@@ -225,7 +246,8 @@ pub enum Action {
         path: downloads::DownloadDirectory,
     },
     Encoding {
-        encoding: Encoding,
+        #[serde(with = "encoding_format")]
+        encoding: DownloadQuality,
         #[serde(default)]
         confirm: bool,
     },
@@ -390,7 +412,8 @@ enum Request {
     Media {
         id: String,
         uri: String,
-        encoding: Encoding,
+        #[serde(with = "encoding_format")]
+        encoding: DownloadQuality,
         position: Option<usize>,
     },
     CancelMedia {
@@ -1974,6 +1997,7 @@ impl ConnectOwner {
                         name,
                         reachable: true,
                         has_playback: false,
+                        download_profiles: false,
                         enrolled: true,
                         connection: String::new(),
                     });
@@ -1987,6 +2011,7 @@ impl ConnectOwner {
                             name,
                             reachable: true,
                             has_playback: false,
+                            download_profiles: false,
                             enrolled: false,
                             connection: String::new(),
                         });
@@ -2242,6 +2267,7 @@ impl ConnectOwner {
                 name,
                 reachable: true,
                 has_playback: false,
+                download_profiles: false,
                 enrolled: true,
                 connection: String::new(),
             });
@@ -2564,6 +2590,7 @@ impl ConnectOwner {
                 name: "Rufin".into(),
                 reachable: false,
                 has_playback: false,
+                download_profiles: false,
                 enrolled: true,
                 connection: String::new(),
             });
@@ -2586,6 +2613,7 @@ impl ConnectOwner {
             if let Ok((route, answer)) = answer {
                 device.name = answer["name"].as_str().unwrap_or(&device.name).to_owned();
                 device.has_playback = answer["playback"].as_bool().unwrap_or(false);
+                device.download_profiles = answer["download_profiles"].as_bool().unwrap_or(false);
                 device.reachable = true;
                 device.connection = connection_label(&route);
             } else {
@@ -2722,7 +2750,7 @@ impl ConnectOwner {
             }
             Request::Presence => {
                 let active = self.playback.has_continuation();
-                serde_json::json!({"name":self.status().settings.name,"playback":active})
+                serde_json::json!({"name":self.status().settings.name,"playback":active,"download_profiles":true})
             }
             Request::Continuation => {
                 let playback = Arc::clone(&self.playback);

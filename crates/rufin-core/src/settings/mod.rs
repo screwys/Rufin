@@ -197,23 +197,6 @@ impl StoredSettings {
         self.migrate_home_blocks();
         self.migrate_legacy_track_table();
         self.ui.sanitize();
-        for download in &mut self.ui.downloads {
-            let limit = self
-                .sources
-                .configured
-                .iter()
-                .find(|source| source.configuration.source_id == download.source_id)
-                .and_then(|source| {
-                    source
-                        .configuration
-                        .transcoded_download_bitrate_limit_kbps()
-                });
-            if let (StreamQuality::MaxBitrateKbps(bitrate), Some(limit)) = (download.quality, limit)
-                && bitrate > limit
-            {
-                download.quality = StreamQuality::MaxBitrateKbps(limit);
-            }
-        }
     }
 
     pub(crate) fn scrobbling_runtime_settings(&self) -> ScrobblingSettings {
@@ -723,7 +706,7 @@ impl SettingsOwner {
     pub fn set_download_quality(
         &self,
         source_id: SourceId,
-        quality: playback::StreamQuality,
+        quality: sources::DownloadQuality,
     ) -> Result<(), SettingsError> {
         self.restore(
             move |stored| {

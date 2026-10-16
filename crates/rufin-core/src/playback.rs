@@ -1066,7 +1066,7 @@ pub(crate) async fn prepare_stream<F>(
     local: Option<&sources::SourceConfiguration>,
     file_transfer: Option<(&crate::connect::ConnectOwner, &playback::QueueRow)>,
     source: impl FnOnce(sources::SourceId) -> F + Send,
-) -> Result<playback::ResolvedStream, String>
+) -> Result<audio_processing::ResolvedStream, String>
 where
     F: std::future::Future<Output = Result<Arc<sources::Source>, String>> + Send,
 {
@@ -1208,7 +1208,7 @@ async fn local_access_available(uri: &str) -> Result<bool, String> {
         .map_err(string_error)
 }
 
-async fn direct_stream(uri: String) -> Result<playback::ResolvedStream, String> {
+async fn direct_stream(uri: String) -> Result<audio_processing::ResolvedStream, String> {
     if library::document_media_id(&uri).is_some() {
         return Err(sources::SourceError::NotFound.to_string());
     }
@@ -1217,7 +1217,7 @@ async fn direct_stream(uri: String) -> Result<playback::ResolvedStream, String> 
             .await
             .map_err(string_error)
     } else {
-        Ok(playback::ResolvedStream::new(uri))
+        Ok(audio_processing::ResolvedStream::new(uri))
     }
 }
 
@@ -1240,7 +1240,7 @@ async fn cached_loudness(
 }
 
 fn prepare_media_stream(
-    stream: playback::ResolvedStream,
+    stream: audio_processing::ResolvedStream,
     loudness: Option<playback::TrackLoudness>,
     occurrence: Arc<playback::QueueRow>,
 ) -> PreparedStream {
@@ -1278,7 +1278,9 @@ pub(crate) fn audio_mime(source_format: &str) -> Option<String> {
         "flac" => "audio/flac",
         "m4a" | "mp4" => "audio/mp4",
         "aac" => "audio/aac",
-        "ogg" | "oga" | "opus" => "audio/ogg",
+        "opus" => "audio/ogg; codecs=opus",
+        "vorbis" => "audio/ogg; codecs=vorbis",
+        "ogg" | "oga" => "audio/ogg",
         "wav" | "wave" => "audio/wav",
         "webm" => "audio/webm",
         _ => return None,
@@ -1395,7 +1397,7 @@ mod tests {
     #[test]
     fn prepared_original_stream_keeps_cast_format() {
         let prepared = prepare_media_stream(
-            playback::ResolvedStream::new("https://provider.example/stream?id=track"),
+            audio_processing::ResolvedStream::new("https://provider.example/stream?id=track"),
             Some(playback::TrackLoudness::default()),
             test_occurrence("flac").into(),
         );
@@ -1406,7 +1408,7 @@ mod tests {
     #[test]
     fn provider_transcode_is_published_as_mpeg() {
         let prepared = prepare_media_stream(
-            playback::ResolvedStream::new("https://provider.example/stream?id=track")
+            audio_processing::ResolvedStream::new("https://provider.example/stream?id=track")
                 .with_content_type(Some("audio/mpeg".to_string())),
             Some(playback::TrackLoudness::default()),
             test_occurrence("flac").into(),
@@ -1470,7 +1472,10 @@ mod tests {
             occurrence.into(),
         );
         assert_eq!(prepared.uri(), uri);
-        assert_eq!(prepared.content_type.as_deref(), Some("audio/ogg"));
+        assert_eq!(
+            prepared.content_type.as_deref(),
+            Some("audio/ogg; codecs=opus")
+        );
         assert_eq!(prepared.row.as_ref().unwrap().track.media_uri, canonical);
     }
 }

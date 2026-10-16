@@ -5,13 +5,14 @@ use crate::{
     ConnectedSource, CredentialInput, ImageBytes, SourceConfiguration, SourceEditResult,
     SourceError, SourceId, SourceResult,
 };
+use audio_processing::ResolvedStream;
 use item::{
     ALBUM_FIELDS, ImageRef, MIXED_ITEM_FIELDS, PLAYLIST_FIELDS, TRACK_FIELDS, album_from_item,
     artist_from_item, genre_from_item, home_entry_from_item, is_audio_item, playlist_from_item,
     primary_image_ref, track_from_item,
 };
 use lyrics::{LyricsBundle, LyricsDocument, LyricsLine, LyricsOrigin, LyricsRole};
-use playback::{RepeatMode, ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality};
+use playback::{RepeatMode, SourceReportFact, SourceReportPhase, StreamQuality};
 use reqwest::{Client, Url, header};
 use serde::Deserialize;
 use serde_json::Value;
@@ -96,7 +97,6 @@ impl ServerKind {
         }
     }
 }
-pub(crate) const JELLYFIN_TRANSCODED_DOWNLOAD_BITRATE_LIMIT_KBPS: u32 = 256;
 const SOURCE_CONFIG_VERSION: u32 = 1;
 
 #[derive(Deserialize)]

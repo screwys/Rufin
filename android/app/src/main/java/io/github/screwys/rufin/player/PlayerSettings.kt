@@ -20,8 +20,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,14 +28,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import io.github.screwys.rufin.shared.playback.PlaybackTransitionMode
 import io.github.screwys.rufin.shared.playback.LoudnessNormalization
 import io.github.screwys.rufin.shared.playback.LoudnessNormalizationScope
@@ -51,7 +43,6 @@ import io.github.screwys.rufin.shared.lyrics.JapaneseDictionaryStatus
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 import kotlinx.coroutines.launch
 import java.util.Locale
-import kotlin.math.round
 
 internal enum class PlayerSettingsPage(val title: String) {
     PREFERENCES("Preferences"), EQUALIZER("Equalizer"), LYRICS("Lyrics"), VISUALIZER("Visualizer")
@@ -193,29 +184,8 @@ private fun EqualizerSettings(player: PlayerConnection) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         options.equalizerBandTitles.forEachIndexed { index, title ->
             key(index) {
-                val storedValue = bands[index].toFloat()
-                var value by remember { mutableFloatStateOf(storedValue) }
-                LaunchedEffect(storedValue) { value = storedValue }
-                var text by remember(storedValue) { mutableStateOf(storedValue.toString()) }
-                var editing by remember { mutableStateOf(false) }
-                val focus = LocalFocusManager.current
-                val parsed = text.replace(',', '.').toFloatOrNull()
-                val valid = parsed != null && parsed in -12f..12f
-                fun commit() { if (valid) { value = parsed!!; player.equalizerBand(index, value) }; editing = false }
-                Surface(Modifier.fillMaxWidth(), RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
-                Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(title, Modifier.width(44.dp), style = MaterialTheme.typography.labelMedium)
-                    Slider(value, { value = round(it * 10) / 10; text = value.toString() },
-                        modifier = Modifier.weight(1f).semantics { contentDescription = title },
-                        colors = SliderDefaults.colors(inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .24f)),
-                        valueRange = -12f..12f,
-                        onValueChangeFinished = { player.equalizerBand(index, value) })
-                    OutlinedTextField(text, { text = it; editing = true }, Modifier.width(96.dp)
-                        .onFocusChanged { if (!it.isFocused && editing) commit() }, singleLine = true, colors = settingsTextFieldColors(),
-                        isError = editing && !valid, suffix = { Text("dB", style = MaterialTheme.typography.labelSmall) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { if (valid) { commit(); focus.clearFocus() } }))
-                }
+                SettingsSliderNumber(title, bands[index], -12.0..12.0, .1, unit = "dB") {
+                    player.equalizerBand(index, (it as Number).toDouble())
                 }
             }
         }

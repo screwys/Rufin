@@ -12,12 +12,15 @@ use std::task::Poll;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
+use audio_processing::ResolvedStream;
 use library::{Database, FolderKey, SourceKey, TrackKey};
-use playback::{ResolvedStream, StreamQuality, StreamRequest};
 use serde::{Deserialize, Serialize};
+use sources::{DownloadQuality, ResolvedDownload};
 use sources::{Source, SourceError, SourceId};
 use tracing::warn;
 
+mod quality;
+pub use quality::{DOWNLOAD_BITRATES, download_bitrates};
 mod storage;
 mod track_download;
 use storage::DownloadAudio;
@@ -51,7 +54,7 @@ pub struct Downloads {
 /// Connect supplies peer media; this actor retains download scheduling and files.
 pub trait ConnectDownload: Send + Sync {
     fn enabled(&self) -> bool;
-    fn extension(&self) -> Option<&'static str>;
+    fn quality(&self) -> DownloadQuality;
     fn reuse<'a>(
         &'a self,
         uri: &'a str,
@@ -73,7 +76,7 @@ pub trait ConnectDownload: Send + Sync {
         &'a self,
         uri: &'a str,
         partial: &'a Path,
-        extension: Option<&'a str>,
+        quality: DownloadQuality,
         cancel: tokio_util::sync::CancellationToken,
     ) -> Pin<Box<dyn Future<Output = sources::SourceResult<library::ConnectMediaFile>> + Send + 'a>>;
 }
@@ -187,7 +190,10 @@ enum DownloadOwner {
 struct DownloadJob {
     id: String,
     subject: DownloadSubject,
-    quality: StreamQuality,
+    #[serde(deserialize_with = "quality::deserialize")]
+    quality: DownloadQuality,
+    #[serde(default)]
+    replace_unknown: bool,
     #[serde(default)]
     completed: Vec<String>,
     #[serde(default)]
@@ -228,7 +234,8 @@ enum ReleasedDownloadOwner {
 struct ReleasedDownloadJob {
     id: String,
     subject: ReleasedDownloadSubject,
-    quality: StreamQuality,
+    #[serde(deserialize_with = "quality::deserialize")]
+    quality: DownloadQuality,
     #[serde(rename = "total_tracks")]
     _total_tracks: usize,
     #[serde(default)]
@@ -352,6 +359,7 @@ async fn load_queue(
                     id: job.id,
                     subject,
                     quality: job.quality,
+                    replace_unknown: false,
                     completed,
                     failed: false,
                     remaining,
@@ -504,6 +512,7 @@ struct ActiveDownload {
     media_uri: String,
     subject: DownloadSubject,
     paths: DownloadPaths,
+    quality: DownloadQuality,
     cancellation: Option<tokio::sync::oneshot::Sender<()>>,
     task: tokio::task::JoinHandle<Result<(), DownloadFailure>>,
     connect_receipt: Arc<Mutex<Option<library::ConnectMediaFile>>>,
@@ -577,7 +586,8 @@ pub struct SourceDownloadSettings {
     #[serde(flatten)]
     pub rules: DownloadRules,
     #[serde(default)]
-    pub quality: StreamQuality,
+    #[serde(deserialize_with = "quality::deserialize")]
+    pub quality: DownloadQuality,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory: Option<DownloadDirectory>,
 }
@@ -587,13 +597,15 @@ impl SourceDownloadSettings {
         Self {
             source_id,
             rules: DownloadRules::default(),
-            quality: StreamQuality::Original,
+            quality: DownloadQuality::Original,
             directory: None,
         }
     }
 
     pub fn is_default(&self) -> bool {
-        self.rules.is_empty() && self.quality == StreamQuality::Original && self.directory.is_none()
+        self.rules.is_empty()
+            && self.quality == DownloadQuality::Original
+            && self.directory.is_none()
     }
 }
 
@@ -686,7 +698,7 @@ pub struct DownloadQueueItem {
     pub source_id: Option<SourceId>,
     pub subject: DownloadSubject,
     pub preview_uris: Vec<String>,
-    pub quality: StreamQuality,
+    pub quality: DownloadQuality,
     pub completed_tracks: DownloadCount,
     pub total_tracks: DownloadCount,
     pub state: DownloadQueueState,
@@ -1072,7 +1084,7 @@ impl Actor {
             return self.connect_after.is_some();
         }
         let _ = self
-            .enqueue(None, subject, StreamQuality::Original, missing)
+            .enqueue(None, subject, DownloadQuality::Original, missing, false)
             .await;
         false
     }
@@ -1172,11 +1184,11 @@ impl Actor {
                     }
                     let quality = source_id
                         .as_ref()
-                        .map_or(StreamQuality::Original, |source_id| {
+                        .map_or(DownloadQuality::Original, |source_id| {
                             self.settings_for(source_id).quality
                         });
                     if let Some(feedback) = self
-                        .enqueue(source_id, subject.clone(), quality, media_uris)
+                        .enqueue(source_id, subject.clone(), quality, media_uris, false)
                         .await
                     {
                         let _ = self.events.send(DownloadEvent::Feedback(feedback)).await;
@@ -1285,10 +1297,24 @@ impl Actor {
         settings: Vec<SourceDownloadSettings>,
         active: &mut Vec<ActiveDownload>,
     ) {
-        self.settings = settings
+        let settings = settings
             .into_iter()
             .map(|settings| (settings.source_id.clone(), settings))
             .collect::<HashMap<_, _>>();
+        let changed_quality = self
+            .settings
+            .keys()
+            .chain(settings.keys())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .filter_map(|id| {
+                let quality = settings
+                    .get(id)
+                    .map_or(DownloadQuality::Original, |setting| setting.quality);
+                (self.settings_for(id).quality != quality).then(|| (id.clone(), quality))
+            })
+            .collect::<Vec<_>>();
+        self.settings = settings;
         let source_ids = self.attached.keys().cloned().collect::<Vec<_>>();
         for source_id in &source_ids {
             let directory = self
@@ -1308,6 +1334,47 @@ impl Actor {
                 if let Some(attached) = self.attached.get_mut(source_id) {
                     attached.directory = directory;
                 }
+            }
+        }
+        for (source_id, quality) in changed_quality {
+            self.abort_matching(active, true, |download| {
+                download.source_id.as_ref() == Some(&source_id) && download.quality != quality
+            })
+            .await;
+            if let Some(jobs) = self.jobs.get_mut(&Some(source_id.clone())) {
+                for job in jobs {
+                    job.quality = quality;
+                    job.replace_unknown = true;
+                    job.remaining.append(&mut job.completed);
+                    job.failed = false;
+                    job.state = DownloadQueueState::Queued;
+                }
+            }
+            let directory = self
+                .attached
+                .get(&source_id)
+                .and_then(|source| source.directory.as_ref());
+            match load_download_records(&self.root, Some(&source_id), directory).await {
+                Ok(records) => {
+                    let mut replacements: HashMap<DownloadSubject, Vec<String>> = HashMap::new();
+                    for (uri, record) in records {
+                        for owner in record.owners {
+                            let subject = match owner {
+                                DownloadOwner::Subject(subject) => subject,
+                                DownloadOwner::Retained => DownloadSubject::Prepared {
+                                    context_id: "retained-downloads".into(),
+                                    title: None,
+                                },
+                            };
+                            replacements.entry(subject).or_default().push(uri.clone());
+                        }
+                    }
+                    for (subject, uris) in replacements {
+                        self.enqueue(Some(source_id.clone()), subject, quality, uris, true)
+                            .await;
+                    }
+                }
+                Err(error) => warn!(%error, "could not read downloads for a quality change"),
             }
         }
         for source_id in source_ids {
@@ -1498,6 +1565,8 @@ impl Actor {
         media_uri: &str,
         owner: &DownloadOwner,
         custom_directory: Option<&DownloadDirectory>,
+        quality: DownloadQuality,
+        replace_unknown: bool,
     ) -> Result<bool, String> {
         let connect = self
             .connect
@@ -1511,16 +1580,25 @@ impl Actor {
         {
             return connect.reuse(media_uri).await;
         }
-        add_owner_to_existing_download(&self.root, source_id, media_uri, owner, custom_directory)
-            .await
+        add_owner_to_existing_download(
+            &self.root,
+            source_id,
+            media_uri,
+            owner,
+            custom_directory,
+            quality,
+            replace_unknown,
+        )
+        .await
     }
 
     async fn enqueue(
         &mut self,
         source_id: Option<SourceId>,
         subject: DownloadSubject,
-        quality: StreamQuality,
+        quality: DownloadQuality,
         media_uris: Vec<String>,
+        replace_unknown: bool,
     ) -> Option<DownloadFeedback> {
         let attached = source_id
             .as_ref()
@@ -1552,6 +1630,8 @@ impl Actor {
                     media_uri,
                     &owner,
                     custom_directory.as_ref(),
+                    quality,
+                    replace_unknown,
                 )
                 .await
             {
@@ -1573,6 +1653,7 @@ impl Actor {
             {
                 let existing = &mut jobs[existing_index];
                 existing.failed = false;
+                existing.replace_unknown |= replace_unknown;
                 let completed_now = completed.iter().collect::<HashSet<_>>();
                 existing
                     .remaining
@@ -1611,6 +1692,7 @@ impl Actor {
                     id: job_id(source_id.as_ref(), &subject, self.next_job),
                     subject: subject.clone(),
                     quality,
+                    replace_unknown,
                     completed,
                     failed: false,
                     remaining,
@@ -1640,7 +1722,7 @@ impl Actor {
         &mut self,
         source_id: SourceId,
         rule: DownloadRule,
-        quality: StreamQuality,
+        quality: DownloadQuality,
         media_uris: Vec<String>,
         active: &mut Vec<ActiveDownload>,
     ) {
@@ -1714,11 +1796,22 @@ impl Actor {
             }
         }
 
+        let replace_unknown = self.jobs.get(&Some(source_id.clone())).is_some_and(|jobs| {
+            jobs.iter()
+                .any(|job| job.subject == subject && job.replace_unknown)
+        });
         let mut completed = Vec::new();
         let mut remaining = Vec::new();
         for media_uri in &media_uris {
             match self
-                .add_download_owner(Some(&source_id), media_uri, &owner, custom_directory)
+                .add_download_owner(
+                    Some(&source_id),
+                    media_uri,
+                    &owner,
+                    custom_directory,
+                    quality,
+                    replace_unknown,
+                )
                 .await
             {
                 Ok(true) => completed.push(media_uri.clone()),
@@ -1760,6 +1853,7 @@ impl Actor {
                 id,
                 subject: subject.clone(),
                 quality,
+                replace_unknown,
                 completed,
                 failed: false,
                 remaining,
@@ -1818,12 +1912,22 @@ impl Actor {
                 self.persist_and_publish(source_id.as_ref()).await;
                 continue;
             }
+            let replace_unknown = self
+                .find_job_mut(&source_id, &job_id)
+                .is_some_and(|job| job.replace_unknown);
             let custom_directory = attached
                 .as_ref()
                 .and_then(|attached| attached.directory.as_ref());
             let owner = DownloadOwner::Subject(subject.clone());
             match self
-                .add_download_owner(source_id.as_ref(), &media_uri, &owner, custom_directory)
+                .add_download_owner(
+                    source_id.as_ref(),
+                    &media_uri,
+                    &owner,
+                    custom_directory,
+                    quality,
+                    replace_unknown,
+                )
                 .await
             {
                 Ok(true) => {
@@ -1869,33 +1973,33 @@ impl Actor {
                 self.persist_and_publish(source_id.as_ref()).await;
                 continue;
             }
-            let request = StreamRequest::new(media_uri.clone(), quality);
-            let resolved = if let Some(connect) = connect.as_ref() {
-                Ok((
-                    connect.extension().map(str::to_owned),
-                    ResolvedStream::new(&media_uri),
-                ))
+            let quality = connect
+                .as_ref()
+                .map_or(quality, |connect| connect.quality());
+            let resolved = if connect.is_some() {
+                Ok(ResolvedDownload::Ready {
+                    stream: ResolvedStream::new(&media_uri),
+                    codec: quality.encoding().map(|encoding| encoding.codec),
+                })
             } else if let Some(source) = source.as_ref() {
                 source
-                    .resolve_download(&self.database, &request)
+                    .resolve_download(&self.database, &media_uri, quality)
                     .await
-                    .map(|download| {
-                        (
-                            download.transcoded_extension().map(str::to_string),
-                            download.into_stream(),
-                        )
-                    })
             } else {
                 Some(media_uri.as_str())
                     .filter(|uri| uri.starts_with("http://") || uri.starts_with("https://"))
-                    .map(|uri| (None, ResolvedStream::new(uri)))
+                    .map(|uri| ResolvedDownload::Ready {
+                        stream: ResolvedStream::new(uri),
+                        codec: None,
+                    })
                     .ok_or(SourceError::InvalidRequest(
                         "Direct media is not downloadable",
                     ))
             };
-            let (transcoded_extension, transfer) = match resolved {
-                Ok((extension, stream)) => (extension, Ok(stream)),
-                Err(error) => (None, Err(download_source_failure(error))),
+            let transcoded_extension = match &resolved {
+                Ok(ResolvedDownload::Ready { codec, .. }) => codec.map(|codec| codec.extension()),
+                Ok(ResolvedDownload::Encode { encoding, .. }) => Some(encoding.codec.extension()),
+                Err(_) => None,
             };
             let metadata = self
                 .database
@@ -1909,7 +2013,7 @@ impl Actor {
                 &media_uri,
                 metadata.as_ref(),
                 custom_directory,
-                transcoded_extension.as_deref(),
+                transcoded_extension,
             );
             if let Some(connect) = &connect {
                 match connect.destination(&media_uri).await {
@@ -1967,12 +2071,8 @@ impl Actor {
                         .await
                         .map_err(download_source_failure)?;
                     let cancel = tokio_util::sync::CancellationToken::new();
-                    let transfer = connect.transfer(
-                        &uri,
-                        &task_paths.audio_part,
-                        transcoded_extension.as_deref(),
-                        cancel.clone(),
-                    );
+                    let transfer =
+                        connect.transfer(&uri, &task_paths.audio_part, quality, cancel.clone());
                     tokio::pin!(transfer);
                     let result = tokio::select! {
                         result = &mut transfer => result,
@@ -1981,17 +2081,76 @@ impl Actor {
                     .map_err(download_source_failure)?;
                     *receipt.lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
                 } else {
-                    let stream = transfer?;
-                    run_transfer(
-                        task_source_id.as_ref(),
-                        &request,
-                        &stream,
-                        &task_paths,
-                        &transfers,
-                        &mut cancelled,
-                    )
-                    .await
-                    .map_err(download_source_failure)?;
+                    match resolved.map_err(download_source_failure)? {
+                        ResolvedDownload::Encode { stream, encoding } => {
+                            encode_download(stream, encoding, &task_paths, &mut cancelled)
+                                .await
+                                .map_err(download_source_failure)?;
+                        }
+                        ResolvedDownload::Ready { stream, codec } => {
+                            let needs_encoding = match run_transfer(
+                                task_source_id.as_ref(),
+                                &uri,
+                                quality,
+                                &stream,
+                                &task_paths,
+                                &transfers,
+                                &mut cancelled,
+                            )
+                            .await
+                            {
+                                Ok(()) => {
+                                    if let Some(codec) = codec {
+                                        let path = task_paths.audio_part.clone();
+                                        tokio::task::spawn_blocking(move || {
+                                            sources::downloaded_codec(&path)
+                                        })
+                                        .await
+                                        .map_err(
+                                            |error| {
+                                                DownloadFailure::NeedsAttention(error.to_string())
+                                            },
+                                        )? != Some(codec)
+                                    } else {
+                                        false
+                                    }
+                                }
+                                Err(SourceError::Server {
+                                    status: 415 | 500 | 501,
+                                    ..
+                                }) if codec.is_some() => true,
+                                Err(error) => return Err(download_source_failure(error)),
+                            };
+                            if needs_encoding {
+                                let source = source.as_ref().ok_or_else(|| {
+                                    DownloadFailure::NeedsAttention(
+                                        "The audio format did not match the download profile"
+                                            .into(),
+                                    )
+                                })?;
+                                let (ResolvedDownload::Ready {
+                                    stream: original, ..
+                                }
+                                | ResolvedDownload::Encode {
+                                    stream: original, ..
+                                }) = source
+                                    .resolve_download(&database, &uri, DownloadQuality::Original)
+                                    .await
+                                    .map_err(download_source_failure)?;
+                                let encoding = quality
+                                    .encoding()
+                                    .expect("encoded downloads have a profile");
+                                encode_download(
+                                    original.without_window(),
+                                    encoding,
+                                    &task_paths,
+                                    &mut cancelled,
+                                )
+                                .await
+                                .map_err(download_source_failure)?;
+                            }
+                        }
+                    }
                 }
                 // Companion failures do not discard successfully downloaded audio.
                 tokio::select! {
@@ -2006,6 +2165,7 @@ impl Actor {
                 media_uri,
                 subject,
                 paths,
+                quality,
                 cancellation: Some(cancellation),
                 task,
                 connect_receipt,
@@ -2020,7 +2180,7 @@ impl Actor {
         Option<SourceId>,
         String,
         DownloadSubject,
-        StreamQuality,
+        DownloadQuality,
         String,
         DownloadQueueState,
     )> {
@@ -2070,6 +2230,7 @@ impl Actor {
             media_uri,
             subject,
             paths,
+            quality,
             connect_receipt,
             ..
         } = active;
@@ -2102,7 +2263,7 @@ impl Actor {
                             .await;
                     } else {
                         let published = self
-                            .commit_transfer(&source_id, &media_uri, &subject, &paths)
+                            .commit_transfer(&source_id, &media_uri, &subject, &paths, quality)
                             .await?;
                         if let Some(mut receipt) = receipt {
                             receipt.path = published
@@ -2165,11 +2326,13 @@ impl Actor {
         media_uri: &str,
         subject: &DownloadSubject,
         paths: &DownloadPaths,
+        quality: DownloadQuality,
     ) -> Result<DownloadPaths, DownloadFailure> {
         let finished = finalize_download(
             paths,
             media_uri.to_string(),
             DownloadOwner::Subject(subject.clone()),
+            quality,
         )
         .await
         .map_err(DownloadFailure::NeedsAttention)?;
@@ -2333,6 +2496,7 @@ impl Actor {
                         &download.media_uri,
                         &download.subject,
                         &download.paths,
+                        download.quality,
                     )
                     .await
                 {
@@ -3130,7 +3294,8 @@ mod tests {
                     Some("Track"),
                     std::slice::from_ref(&media_uri),
                 ),
-                quality: StreamQuality::Original,
+                quality: DownloadQuality::Original,
+                replace_unknown: false,
                 completed: Vec::new(),
                 failed: false,
                 remaining: vec![media_uri.clone()],
@@ -3204,6 +3369,7 @@ mod tests {
             media_uri: media_uri.clone(),
             subject: job.subject,
             paths: paths.clone(),
+            quality: DownloadQuality::Original,
             cancellation: None,
             connect_receipt: Arc::new(Mutex::new(None)),
             task: tokio::spawn(async { Ok(()) }),
@@ -3302,8 +3468,9 @@ mod tests {
             .enqueue(
                 Some(source.clone()),
                 subject.clone(),
-                StreamQuality::Original,
+                DownloadQuality::Original,
                 vec![uri.clone()],
+                false,
             )
             .await;
         let paths = download_paths(root.path(), Some(&source), &uri);
@@ -3332,6 +3499,7 @@ mod tests {
             media_uri: uri.clone(),
             subject,
             paths: paths.clone(),
+            quality: DownloadQuality::Original,
             cancellation: None,
             task: tokio::spawn(async { Ok(()) }),
             connect_receipt: Arc::new(Mutex::new(Some(receipt))),
@@ -3408,6 +3576,7 @@ mod tests {
                     media_uri: uri,
                     subject: job.subject,
                     paths,
+                    quality: DownloadQuality::Original,
                     cancellation: None,
                     connect_receipt: Arc::new(Mutex::new(None)),
                     task: tokio::spawn(async { Ok(()) }),
@@ -3668,7 +3837,8 @@ mod tests {
                 Some("Track"),
                 std::slice::from_ref(&media_uri),
             ),
-            quality: StreamQuality::Original,
+            quality: DownloadQuality::Original,
+            replace_unknown: false,
             completed: Vec::new(),
             failed: false,
             remaining: vec![media_uri],
@@ -3702,6 +3872,7 @@ mod tests {
                 std::slice::from_ref(&media_uri),
             ),
             paths,
+            quality: DownloadQuality::Original,
             cancellation: Some(cancel),
             connect_receipt: Arc::new(Mutex::new(None)),
             task,
@@ -3743,6 +3914,7 @@ mod tests {
                 std::slice::from_ref(&media_uri),
             ),
             paths,
+            quality: DownloadQuality::Original,
             cancellation: Some(cancel),
             connect_receipt: Arc::new(Mutex::new(None)),
             task,
@@ -3809,6 +3981,7 @@ mod tests {
                 std::slice::from_ref(&media_uri),
             ),
             paths: paths.clone(),
+            quality: DownloadQuality::Original,
             cancellation: Some(cancel),
             connect_receipt: Arc::new(Mutex::new(None)),
             task,
@@ -3842,6 +4015,7 @@ mod tests {
                 std::slice::from_ref(&media_uri),
             ),
             paths: paths.clone(),
+            quality: DownloadQuality::Original,
             cancellation: None,
             connect_receipt: Arc::new(Mutex::new(None)),
             task: tokio::spawn(async { Ok(()) }),

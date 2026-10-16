@@ -11,6 +11,26 @@ pub struct ConnectMediaFile {
     pub hash: Option<String>,
 }
 
+pub fn media_encoding_key(encoding: Option<crate::AudioEncoding>) -> String {
+    match encoding {
+        None => "original".into(),
+        Some(encoding) if encoding == crate::AudioEncoding::mp3() => "mp3".into(),
+        Some(encoding) => {
+            serde_json::to_string(&encoding).expect("an audio encoding can be stored")
+        }
+    }
+}
+
+pub fn media_encoding_from_key(
+    key: &str,
+) -> Result<Option<crate::AudioEncoding>, serde_json::Error> {
+    match key {
+        "original" => Ok(None),
+        "mp3" => Ok(Some(crate::AudioEncoding::mp3())),
+        _ => serde_json::from_str(key).map(Some),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

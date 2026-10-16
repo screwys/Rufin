@@ -5,6 +5,7 @@
     <file compressed="true">preferences/playback.ui</file>
     <file compressed="true">preferences/reorder_row.ui</file>
     <file compressed="true">preferences/library.ui</file>
+    <file compressed="true">preferences/download_quality.ui</file>
     <file compressed="true">preferences/connect-components.ui</file>
     <file compressed="true">preferences/connect.ui</file>
     <file compressed="true">preferences/integrations.ui</file>

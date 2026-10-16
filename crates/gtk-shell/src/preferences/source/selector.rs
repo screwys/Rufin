@@ -333,7 +333,6 @@ mod tests {
             id: SourceId::new(id),
             kind: "test".to_string(),
             name: id.to_string(),
-            transcoded_download_bitrate_limit_kbps: None,
             half_stars_enabled: false,
             supports_playlist_public: false,
         }
@@ -408,7 +407,6 @@ mod tests {
             id: SourceId::new("local"),
             kind: "local".to_string(),
             name: "Local".to_string(),
-            transcoded_download_bitrate_limit_kbps: None,
             half_stars_enabled: false,
             supports_playlist_public: false,
         };

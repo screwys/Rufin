@@ -1,12 +1,12 @@
 //! Cancellable EBU R128 analysis for one prepared audio stream.
 
 use super::{configure_sources, ensure_gstreamer_initialized};
+use crate::ResolvedStream;
 use ebur128::{Channel, EbuR128, Mode};
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
 use gstreamer_audio as gst_audio;
-use playback::ResolvedStream;
 use std::time::{Duration, Instant};
 
 const ANALYSIS_STALL_TIMEOUT: Duration = Duration::from_secs(60);

@@ -587,7 +587,10 @@ async fn transcoded_response(
         >())
     } else {
         let mut reader = tokio::task::spawn_blocking(move || {
-            audio_processing::TranscodedAudioReader::mp3(&resource.stream.stream)
+            audio_processing::TranscodedAudioReader::new(
+                &resource.stream.stream,
+                library::AudioEncoding::mp3(),
+            )
         })
         .await
         .map_err(|error| error.to_string())??;
@@ -980,13 +983,13 @@ mod tests {
 
     #[test]
     fn direct_media_requires_a_receiver_reachable_url() {
-        let loopback = PreparedStream::from(playback::ResolvedStream::new(
+        let loopback = PreparedStream::from(audio_processing::ResolvedStream::new(
             "http://127.0.0.1:8096/audio.flac",
         ));
         assert!(!direct_media_uri(&loopback, false, false));
         assert!(direct_media_uri(&loopback, false, true));
 
-        let remote = PreparedStream::from(playback::ResolvedStream::new(
+        let remote = PreparedStream::from(audio_processing::ResolvedStream::new(
             "https://music.example/audio.flac",
         ));
         assert!(direct_media_uri(&remote, false, false));
@@ -1002,7 +1005,7 @@ mod tests {
             .write_all(b"flac")
             .expect("write album");
         let stream = PreparedStream::from(
-            playback::ResolvedStream::new(
+            audio_processing::ResolvedStream::new(
                 Url::from_file_path(&path).expect("album URL").to_string(),
             )
             .with_window(10_000, 100_000),
@@ -1014,7 +1017,7 @@ mod tests {
         )
         .expect("relay");
 
-        let mut negotiated_source = PreparedStream::from(playback::ResolvedStream::new(
+        let mut negotiated_source = PreparedStream::from(audio_processing::ResolvedStream::new(
             Url::from_file_path(&path).expect("source URL").to_string(),
         ));
         negotiated_source.stream.content_type = Some("audio/alac".to_string());
@@ -1113,7 +1116,8 @@ mod tests {
     #[test]
     fn cue_windows_are_published_as_bounded_nonseekable_media() {
         let stream = PreparedStream::from(
-            playback::ResolvedStream::new("file:///music/album.flac").with_window(523_613, 612_345),
+            audio_processing::ResolvedStream::new("file:///music/album.flac")
+                .with_window(523_613, 612_345),
         );
         let mut relay = RelayServer::start(
             "127.0.0.1:9".parse().expect("target"),
@@ -1147,7 +1151,7 @@ mod tests {
             .write_all(b"\x89PNG\r\n\x1a\ncover")
             .expect("write artwork");
         let uri = Url::from_file_path(&path).expect("file URL").to_string();
-        let stream = PreparedStream::from(playback::ResolvedStream::new(uri));
+        let stream = PreparedStream::from(audio_processing::ResolvedStream::new(uri));
         let resolver_count = Arc::clone(&artwork_resolutions);
         let mut relay = RelayServer::start(
             "127.0.0.1:9".parse().expect("target"),
@@ -1253,7 +1257,7 @@ mod tests {
             server
         });
         let upstream_address = *upstream.address();
-        let stream = PreparedStream::from(playback::ResolvedStream::new(format!(
+        let stream = PreparedStream::from(audio_processing::ResolvedStream::new(format!(
             "http://{upstream_address}/audio.mp3?api_key=secret"
         )));
         let mut relay =
@@ -1299,7 +1303,7 @@ mod tests {
             None,
         )
         .expect("relay");
-        let stream = PreparedStream::from(playback::ResolvedStream::new(
+        let stream = PreparedStream::from(audio_processing::ResolvedStream::new(
             "https://music.example/audio.mp3?api_key=secret",
         ));
 

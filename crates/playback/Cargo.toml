@@ -14,9 +14,9 @@ publish.workspace = true
 bindings = ["dep:uniffi", "library/bindings"]
 
 [dependencies]
+audio-processing.workspace = true
 uniffi = { workspace = true, optional = true }
 library.workspace = true
-url.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }

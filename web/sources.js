@@ -1,3 +1,4 @@
+import { qualityControls } from "./download-quality.js";
 import { tr } from "./ui.js";
 import { api, state } from "./connection.js";
 
@@ -100,6 +101,16 @@ function renderSources(configured) {
       action.append(el("span", "", action.getAttribute("aria-label")));
     actions.lastElementChild.classList.add("destructive");
     card.append(sourceIcon(item.kind), label, edit, actions);
+    if (item.kind !== "local") {
+      const quality = el("fieldset", "source-actions");
+      quality.append(el("legend", "", tr("Download quality")), document.getElementById("download-quality-template").content.cloneNode(true));
+      qualityControls(quality, item.quality, async (value) => {
+        await api("/downloads/quality", "POST", { source: item.id, quality: value });
+        item.quality = value;
+        return value;
+      });
+      card.append(quality);
+    }
     if (item.id === state.source) {
       const downloads = el("div", "source-actions");
       downloads.append(

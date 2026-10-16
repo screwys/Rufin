@@ -140,3 +140,21 @@
 #source-menu .menu-item .icon[data-icon="check"] {
   margin-left: auto;
 }
+
+.download-quality-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+.download-quality-controls label {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+.download-quality-controls input[type="range"] {
+  width: 100%;
+}
+.download-quality-controls output {
+  font-variant-numeric: tabular-nums;
+}

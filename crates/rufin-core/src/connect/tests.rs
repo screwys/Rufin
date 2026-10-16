@@ -44,10 +44,10 @@ fn cue_backing_file_reuse_and_removal() {
             let inputs = device(root.path(), "cue-files", diagnostics(), Arc::new(secrets::MemorySecretStore::new())).await;
             let owner = &inputs.products.connect;
             for (case, mapped, original_exists, encoding) in [
-                ("existing", true, true, Encoding::Original),
-                ("empty", true, false, Encoding::Original),
-                ("private", false, false, Encoding::Original),
-                ("smaller", true, false, Encoding::Mp3),
+                ("existing", true, true, DownloadQuality::Original),
+                ("empty", true, false, DownloadQuality::Original),
+                ("private", false, false, DownloadQuality::Original),
+                ("smaller", true, false, DownloadQuality::Transcoded(library::AudioEncoding::mp3())),
             ] {
                 let folder = root.path().join(case);
                 std::fs::create_dir_all(&folder).unwrap();
@@ -81,11 +81,11 @@ fn cue_backing_file_reuse_and_removal() {
                         let destination = downloads::ConnectDownload::destination(owner.as_ref(), uri).await.unwrap()
                             .unwrap_or_else(|| folder.join("private.audio"));
                         downloads::ConnectDownload::finish(owner.as_ref(), library::ConnectMediaFile {
-                            media_uri: uri.clone(), encoding:encoding.name().into(), revision:"\"v1\"".into(),
+                            media_uri: uri.clone(), encoding:library::media_encoding_key(encoding.encoding()), revision:"\"v1\"".into(),
                             path:url::Url::from_file_path(&part).unwrap().into(), managed:true, hash:None,
                         }, &destination).await.unwrap();
                     }
-                    let file = owner.database.connect_media_file(uri, encoding.name()).await.unwrap().unwrap();
+                    let file = owner.database.connect_media_file(uri, &library::media_encoding_key(encoding.encoding())).await.unwrap().unwrap();
                     assert_eq!(file.managed, !original_exists);
                     stored.push(file.path);
                     let stream = crate::playback::prepare_stream(&owner.database, playback::StreamRequest::original(uri), None, None, |_| async { panic!("CUE uses its backing file") }).await.unwrap();

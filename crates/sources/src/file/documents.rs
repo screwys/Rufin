@@ -447,7 +447,7 @@ pub async fn read_document_image(uri: &str, picture_index: u32) -> SourceResult<
     .map_err(|error| SourceError::Other(error.to_string()))?
 }
 
-pub async fn resolve_document_stream(uri: &str) -> SourceResult<playback::ResolvedStream> {
+pub async fn resolve_document_stream(uri: &str) -> SourceResult<audio_processing::ResolvedStream> {
     document_input(uri)
         .await?
         .playback_stream("", "", uri)

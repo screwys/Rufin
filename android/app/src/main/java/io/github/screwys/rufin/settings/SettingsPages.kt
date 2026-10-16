@@ -5,16 +5,16 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
@@ -28,6 +28,7 @@ import io.github.screwys.rufin.player.PlayerSettingsPage
 import io.github.screwys.rufin.player.PlaybackPreferences
 import io.github.screwys.rufin.sources.SourcesPage
 import kotlin.math.round
+import kotlin.math.roundToInt
 
 @Composable
 internal fun SettingsIndexPage(navigate: (MoreDestination) -> Unit) {
@@ -72,53 +73,40 @@ internal fun SettingsNumber(title: String, value: Double, range: ClosedFloatingP
 
 @Composable
 internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFloatingPointRange<Double>,
-    step: Double, integer: Boolean = false, unit: String? = null, save: (Any) -> Unit) {
+    step: Double, integer: Boolean = false, unit: String? = null, enabled: Boolean = true, save: (Any) -> Unit) {
     var draft by remember(value) { mutableDoubleStateOf(value) }
-    var text by remember(value) { mutableStateOf(numberText(value)) }
-    var editing by remember { mutableStateOf(false) }
-    val focus = LocalFocusManager.current
-    val parsed = text.replace(',', '.').toDoubleOrNull()
-    val valid = parsed != null && parsed in range && (!integer || parsed % 1.0 == 0.0)
-    fun commit(next: Double) {
-        draft = next
-        text = numberText(next)
-        save(if (integer) next.toInt() else next)
-    }
-    Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.small) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-            OutlinedTextField(text, { text = it; editing = true }, Modifier.width(108.dp)
-                .onFocusChanged { state ->
-                    if (!state.isFocused && editing) {
-                        if (valid) commit(parsed!!)
-                        editing = false
-                    }
-                }, singleLine = true, isError = editing && !valid, colors = settingsTextFieldColors(),
-                suffix = unit?.let { { Text(it, style = MaterialTheme.typography.labelMedium) } },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { if (valid) { commit(parsed!!); editing = false; focus.clearFocus() } }))
+    val numberFormat = remember(step) {
+        java.text.NumberFormat.getNumberInstance().apply {
+            maximumFractionDigits = java.math.BigDecimal.valueOf(step).stripTrailingZeros().scale().coerceAtLeast(0)
+            isGroupingUsed = false
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton({ commit(java.math.BigDecimal.valueOf(draft).subtract(java.math.BigDecimal.valueOf(step)).toDouble().coerceIn(range)) }, enabled = draft > range.start) {
-                RufinIcon("rufin-list-remove-symbolic", translate("Decrease"), Modifier.size(20.dp))
+    }
+    val displayValue = numberFormat.format(draft) + unit?.let { " $it" }.orEmpty()
+    val colors = MaterialTheme.colorScheme
+    Surface(Modifier.fillMaxWidth(), color = colors.surfaceContainer, shape = MaterialTheme.shapes.medium) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
+                    color = colors.onSurface.copy(alpha = if (enabled) 1f else .38f))
+                Surface(color = if (enabled) colors.secondaryContainer else Color.Transparent,
+                    shape = MaterialTheme.shapes.small) {
+                    Text(displayValue, Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                        color = if (enabled) colors.onSecondaryContainer else colors.onSurface.copy(alpha = .38f))
+                }
             }
             Slider(draft.toFloat(), {
                 draft = java.math.BigDecimal.valueOf(step).multiply(java.math.BigDecimal.valueOf(round(it.toDouble() / step)))
                     .toDouble().coerceIn(range)
-                text = numberText(draft)
-            }, Modifier.weight(1f), valueRange = range.start.toFloat()..range.endInclusive.toFloat(),
-                colors = SliderDefaults.colors(inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .24f)),
-                onValueChangeFinished = { commit(draft) })
-            IconButton({ commit(java.math.BigDecimal.valueOf(draft).add(java.math.BigDecimal.valueOf(step)).toDouble().coerceIn(range)) }, enabled = draft < range.endInclusive) {
-                RufinIcon("rufin-list-add-symbolic", translate("Increase"), Modifier.size(20.dp))
-            }
+            }, Modifier.fillMaxWidth().semantics { contentDescription = title; stateDescription = displayValue },
+                enabled = enabled, valueRange = range.start.toFloat()..range.endInclusive.toFloat(),
+                steps = ((range.endInclusive - range.start) / step).roundToInt().minus(1).coerceAtLeast(0),
+                colors = SliderDefaults.colors(activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent,
+                    disabledActiveTickColor = Color.Transparent, disabledInactiveTickColor = Color.Transparent),
+                onValueChangeFinished = { save(if (integer) draft.toInt() else draft) })
         }
     }
-    }
 }
-
-private fun numberText(value: Double): String = java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()
 
 @Composable
 internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnection, preferences: PreferencesConnection,

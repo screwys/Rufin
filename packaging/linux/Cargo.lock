@@ -572,11 +572,12 @@ dependencies = [
  "gstreamer",
  "gstreamer-app",
  "gstreamer-audio",
- "playback",
+ "library",
  "rustfft",
  "rustls-native-certs",
  "tempfile",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -1954,10 +1955,10 @@ version = "0.16.6"
 dependencies = [
  "artwork",
  "async-channel",
+ "audio-processing",
  "blake3",
  "httpdate",
  "library",
- "playback",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
@@ -6893,6 +6894,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 name = "playback"
 version = "0.16.6"
 dependencies = [
+ "audio-processing",
  "library",
  "serde",
  "serde_json",
@@ -6900,7 +6902,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "uniffi",
- "url",
 ]
 
 [[package]]
@@ -8962,6 +8963,7 @@ name = "sources"
 version = "0.16.6"
 dependencies = [
  "async-channel",
+ "audio-processing",
  "base64 0.23.1",
  "blake3",
  "bytes",
@@ -10564,6 +10566,7 @@ dependencies = [
  "blake3",
  "bytes",
  "constant_time_eq 0.6.0",
+ "downloads",
  "futures-util",
  "getrandom 0.4.3",
  "http-body-util",

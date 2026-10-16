@@ -654,7 +654,7 @@ impl FileSource {
         &self,
         database: &library::Database,
         media_uri: &str,
-    ) -> SourceResult<playback::ResolvedStream> {
+    ) -> SourceResult<audio_processing::ResolvedStream> {
         let (source, kind, _) =
             library::source_entity_parts(media_uri).ok_or(SourceError::NotFound)?;
         if source != self.source_id || kind != "track" {

@@ -4,11 +4,12 @@ use crate::{
     ConnectedSource, CredentialInput, ImageBytes, SourceConfiguration, SourceEditResult,
     SourceError, SourceResult,
 };
+use audio_processing::ResolvedStream;
 use lyrics::{
     LyricsAgent, LyricsAgentRole, LyricsBundle, LyricsCue, LyricsCueLine, LyricsDocument,
     LyricsLine, LyricsOrigin, LyricsRole,
 };
-use playback::{ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality};
+use playback::{SourceReportFact, SourceReportPhase, StreamQuality};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

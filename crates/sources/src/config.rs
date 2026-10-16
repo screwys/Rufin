@@ -215,11 +215,6 @@ impl SourceConfiguration {
         )
     }
 
-    pub fn transcoded_download_bitrate_limit_kbps(&self) -> Option<u32> {
-        (self.kind == crate::jellyfin_emby::JELLYFIN_SOURCE_ID)
-            .then_some(crate::jellyfin_emby::JELLYFIN_TRANSCODED_DOWNLOAD_BITRATE_LIMIT_KBPS)
-    }
-
     pub fn playlist_tracks_can_repeat(&self) -> bool {
         playlist_tracks_can_repeat(&self.kind)
     }

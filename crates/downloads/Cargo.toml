@@ -11,16 +11,16 @@ readme.workspace = true
 publish.workspace = true
 
 [features]
-bindings = ["dep:uniffi"]
+bindings = ["dep:uniffi", "library/bindings", "sources/bindings"]
 
 [dependencies]
 uniffi = { workspace = true, optional = true }
+audio-processing.workspace = true
 artwork.workspace = true
 async-channel.workspace = true
 blake3.workspace = true
 httpdate.workspace = true
 library.workspace = true
-playback.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

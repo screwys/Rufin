@@ -13,7 +13,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.shared.downloads.*
-import io.github.screwys.rufin.shared.playback.StreamQuality
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.settings.PreferenceChoice
@@ -65,10 +64,7 @@ internal fun DownloadSettingsPage(model: RufinConnection, embedded: Boolean = fa
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)) }) { Text(translate("Choose")) }
             })
             if (source.directory() != null) TextButton({ downloads.directory(source.source.id, null) }) { Text(translate("Use Rufin data folder")) }
-            val qualities = listOf(null, 320u, 256u, 192u, 128u).filter { it == null || source.source.transcodedDownloadBitrateLimitKbps == null || it <= source.source.transcodedDownloadBitrateLimitKbps!! }
-            PreferenceChoice(translate("Download quality"), (source.settings.quality as? StreamQuality.MaxBitrateKbps)?.v1?.toString() ?: "original",
-                qualities.map { (it?.toString() ?: "original") to (if (it == null) translate("Original") else "$it kbps") },
-                select = { downloads.quality(source.source.id, it.toUIntOrNull()) })
+            DownloadQualityControls(source.settings.quality) { downloads.quality(source.source.id, it) }
             }
             SettingsGroup {
             DownloadRule.entries.forEach { rule -> SettingsRow(rule.title(), trailing = {

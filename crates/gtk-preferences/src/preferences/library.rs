@@ -1,4 +1,4 @@
-use gtk_widgets::forms::{quality_selection_row, row_action_content};
+use gtk_widgets::forms::row_action_content;
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
@@ -6,7 +6,6 @@ use std::rc::Rc;
 use adw::prelude::*;
 use downloads::{DownloadQueueState, DownloadRule};
 use gtk::gio;
-use playback::StreamQuality;
 
 use localization::{msgid, tr, trn_with};
 
@@ -22,13 +21,6 @@ use rufin_core::runtime::source::{LocalAccessStatus, SourceLocalAccessSummary, S
 const SERVER_PROVIDER_ICON_SIZE: i32 = 28;
 const DOWNLOAD_JOB_DRAG_PREFIX: &str = "rufin-download-job:";
 const DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE: &str = msgid("Rufin data folder");
-const DOWNLOAD_QUALITIES: [StreamQuality; 5] = [
-    StreamQuality::Original,
-    StreamQuality::MaxBitrateKbps(320),
-    StreamQuality::MaxBitrateKbps(256),
-    StreamQuality::MaxBitrateKbps(192),
-    StreamQuality::MaxBitrateKbps(128),
-];
 
 struct DownloadQueueRow {
     row: adw::ActionRow,
@@ -428,30 +420,15 @@ fn library_sources_page(
 
         let quality_shell = Rc::clone(shell);
         let quality_source_id = server.id.clone();
-        let quality_choices =
-            download_quality_choices(server.transcoded_download_bitrate_limit_kbps);
-        let quality_index = quality_choices
-            .iter()
-            .position(|quality| *quality == download_settings.quality)
-            .unwrap_or_default() as u32;
-        let selected_qualities = quality_choices.clone();
-        let quality = quality_selection_row(
-            &tr("Download quality"),
-            &quality_choices,
-            quality_index,
-            move |selected| {
-                let quality = selected_qualities
-                    .get(selected as usize)
-                    .copied()
-                    .unwrap_or(StreamQuality::Original);
-                quality_shell
-                    .settings
-                    .update_app_settings("download quality", |settings| {
-                        settings.set_download_quality(quality_source_id.clone(), quality)
-                    });
-            },
-        );
-        downloads_group.add(&quality);
+        for row in crate::download_quality::rows(download_settings.quality, move |quality, _| {
+            quality_shell
+                .settings
+                .update_app_settings("download quality", |settings| {
+                    settings.set_download_quality(quality_source_id.clone(), quality)
+                });
+        }) {
+            downloads_group.add(&row);
+        }
         downloaded_badge.set_active(
             shell
                 .settings
@@ -1173,10 +1150,7 @@ fn download_queue_item_subtitle(job: &downloads::DownloadQueueItem) -> String {
         DownloadQueueState::WaitingForConnection => tr("Waiting for connection"),
         DownloadQueueState::NeedsAttention => tr("Needs attention"),
     };
-    let quality = match job.quality {
-        StreamQuality::Original => tr("Original"),
-        StreamQuality::MaxBitrateKbps(value) => format!("{value} kbps"),
-    };
+    let quality = crate::download_quality::label(job.quality);
     format!("{state} · {progress} · {quality}")
 }
 
@@ -1349,15 +1323,4 @@ fn local_folder_title(path: &str) -> String {
         .filter(|name| !name.trim().is_empty())
         .map(ToString::to_string)
         .unwrap_or_else(|| desktop_integration::display_path(Path::new(path)))
-}
-
-fn download_quality_choices(limit_kbps: Option<u32>) -> Vec<StreamQuality> {
-    DOWNLOAD_QUALITIES
-        .into_iter()
-        .filter(|quality| {
-            quality
-                .max_bitrate_kbps()
-                .is_none_or(|bitrate| limit_kbps.is_none_or(|limit| bitrate <= limit))
-        })
-        .collect()
 }

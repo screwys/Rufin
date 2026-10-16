@@ -1,0 +1,5 @@
+<div class="download-quality-controls">
+<label>{{ localization::tr("Format") }}<select data-quality="format"><option value="original">{{ localization::tr("Original") }}</option><option value="opus">Opus</option><option value="aac">AAC</option><option value="mp3">MP3</option><option value="vorbis">Vorbis</option><option value="flac">FLAC</option></select></label>
+<label data-quality-row="bitrate">{{ localization::tr("Bitrate") }}<input data-quality="bitrate" type="range" min="{{ downloads::DOWNLOAD_BITRATES[0] }}" max="{{ downloads::DOWNLOAD_BITRATES[downloads::DOWNLOAD_BITRATES.len() - 1] }}" step="{{ downloads::DOWNLOAD_BITRATES[1] - downloads::DOWNLOAD_BITRATES[0] }}"><output data-quality="bitrate-value" aria-live="polite"></output></label>
+<label data-quality-row="channels">{{ localization::tr("Channels") }}<select data-quality="channels"><option value="preserve">{{ localization::tr("Preserve channels") }}</option><option value="stereo_lossy">{{ localization::tr("Stereo for lossy formats") }}</option><option value="stereo">{{ localization::tr("Stereo") }}</option></select></label>
+</div>

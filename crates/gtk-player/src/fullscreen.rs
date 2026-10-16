@@ -1194,6 +1194,32 @@ mod playback_refresh_tests {
             fullscreen_playback_refresh(Some(&current_change), &streaming),
             FullscreenPlaybackRefresh::Static
         );
+        let current = streaming.transport.current.as_mut().unwrap();
+        current.stream = Some(playback::CurrentStream {
+            local: true,
+            format: Some("audio/ogg; codecs=opus".into()),
+            transcoded: false,
+        });
+        assert_eq!(
+            NowPlayingPresentation::new(Some(&streaming)).meta,
+            ["2026", "OPUS", "Local"]
+        );
+        let current = streaming.transport.current.as_mut().unwrap();
+        Arc::make_mut(&mut current.row).track.metadata.source_format = Some("ogg".into());
+        assert_eq!(
+            NowPlayingPresentation::new(Some(&streaming)).meta,
+            ["2026", "OPUS", "Local"]
+        );
+        let current = streaming.transport.current.as_mut().unwrap();
+        let metadata = &mut Arc::make_mut(&mut current.row).track.metadata;
+        metadata.source_format = Some("opus".into());
+        metadata.audio_properties.bit_depth = None;
+        metadata.audio_properties.sample_rate_hz = Some(48_000);
+        current.stream.as_mut().unwrap().format = Some("audio/ogg".into());
+        assert_eq!(
+            NowPlayingPresentation::new(Some(&streaming)).meta,
+            ["2026", "OPUS", "48 kHz", "Local"]
+        );
     }
 
     fn current_media(title: &str, _source: library::SourceKey) -> CurrentMedia {

@@ -6,7 +6,6 @@ impl JellyfinEmbySource {
         track: &str,
         quality: StreamQuality,
         session: Option<&str>,
-        download: bool,
     ) -> SourceResult<ResolvedStream> {
         let session = match session {
             Some(session) => session.to_owned(),
@@ -21,8 +20,6 @@ impl JellyfinEmbySource {
         let transcoded = quality != StreamQuality::Original;
         let path = if !transcoded {
             format!("Audio/{raw}/stream")
-        } else if download {
-            format!("Audio/{raw}/stream.mp3")
         } else {
             format!("Audio/{raw}/universal")
         };
@@ -35,50 +32,44 @@ impl JellyfinEmbySource {
             .append_pair("PlaySessionId", &session);
         if let StreamQuality::MaxBitrateKbps(kbps) = quality {
             let bitrate = kbps.saturating_mul(1000).to_string();
-            if download {
-                url.query_pairs_mut()
-                    .append_pair("Static", "false")
-                    .append_pair("AudioCodec", "mp3")
-                    .append_pair("AudioBitRate", &bitrate);
-            } else {
-                url.query_pairs_mut()
-                    .append_pair("MaxStreamingBitrate", &bitrate)
-                    .append_pair("TranscodingProtocol", "hls")
-                    .append_pair("TranscodingContainer", "ts")
-                    .append_pair("AudioCodec", "aac");
-            }
+            url.query_pairs_mut()
+                .append_pair("MaxStreamingBitrate", &bitrate)
+                .append_pair("TranscodingProtocol", "hls")
+                .append_pair("TranscodingContainer", "ts")
+                .append_pair("AudioCodec", "aac");
         } else {
             url.query_pairs_mut().append_pair("Static", "true");
         }
         let mut stream = ResolvedStream::new(url.to_string())
             .with_trust_invalid_certificate(self.trust_invalid_cert)
             .with_transcoding(transcoded)
-            .with_content_type(transcoded.then(|| {
-                if download {
-                    "audio/mpeg"
-                } else {
-                    "application/vnd.apple.mpegurl"
-                }
-                .to_owned()
-            }));
+            .with_content_type(transcoded.then(|| "application/vnd.apple.mpegurl".to_owned()));
         if transcoded {
-            let mut stop = endpoint(&self.base_url, "Videos/ActiveEncodings")?;
-            stop.query_pairs_mut()
-                .append_pair("DeviceId", &self.device_id)
-                .append_pair("PlaySessionId", &session);
-            let stop = self.authenticated(self.client.delete(stop)).await?;
-            let (release, released) = tokio::sync::oneshot::channel();
-            tokio::spawn(async move {
-                let _ = released.await;
-                if let Err(error) = send_unit(ServerKind::Emby, stop).await {
-                    tracing::debug!(%error, "Emby transcode release failed");
-                }
-            });
-            stream = stream.with_resource(Arc::new(TranscodeResource {
-                release: Some(release),
-            }));
+            stream = self.hold_emby_transcode(stream, &session).await?;
         }
         Ok(stream)
+    }
+
+    pub(super) async fn hold_emby_transcode(
+        &self,
+        stream: ResolvedStream,
+        session: &str,
+    ) -> SourceResult<ResolvedStream> {
+        let mut stop = endpoint(&self.base_url, "Videos/ActiveEncodings")?;
+        stop.query_pairs_mut()
+            .append_pair("DeviceId", &self.device_id)
+            .append_pair("PlaySessionId", session);
+        let stop = self.authenticated(self.client.delete(stop)).await?;
+        let (release, released) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let _ = released.await;
+            if let Err(error) = send_unit(ServerKind::Emby, stop).await {
+                tracing::debug!(%error, "Emby transcode release failed");
+            }
+        });
+        Ok(stream.with_resource(Arc::new(TranscodeResource {
+            release: Some(release),
+        })))
     }
 
     pub(super) async fn emby_create_playlist(
@@ -429,12 +420,27 @@ mod tests {
                 .any(|(k, v)| k == "PlaySessionId" && v == "playing")
         );
         let download = source
-            .resolve_download("emby:track:11", StreamQuality::MaxBitrateKbps(320))
+            .resolve_download(
+                "emby:track:11",
+                crate::DownloadQuality::Transcoded(library::AudioEncoding {
+                    codec: library::AudioCodec::Mp3,
+                    bitrate_kbps: Some(320),
+                    channels: library::AudioChannels::Preserve,
+                }),
+                Some(2),
+            )
             .await
             .unwrap();
-        assert_eq!(download.transcoded_extension(), Some("mp3"));
-        assert!(download.stream().uri().contains("AudioBitRate=320000"));
-        let download_id = Url::parse(download.stream().uri())
+        let crate::ResolvedDownload::Ready {
+            stream: download,
+            codec,
+        } = download
+        else {
+            panic!("Emby provides the encoded download");
+        };
+        assert_eq!(codec, Some(library::AudioCodec::Mp3));
+        assert!(download.uri().contains("AudioBitRate=320000"));
+        let download_id = Url::parse(download.uri())
             .unwrap()
             .query_pairs()
             .find(|(k, _)| k == "PlaySessionId")

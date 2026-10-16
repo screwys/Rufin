@@ -2,7 +2,7 @@ use crate::Preferences;
 use adw::prelude::*;
 use gtk_widgets::popup::present_light_dismiss_dialog;
 use rufin_core::connect::{
-    Action, ActionError, Confirmation, Control, Encoding, Status, portable::Destination,
+    Action, ActionError, Confirmation, Control, Status, portable::Destination,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -391,7 +391,7 @@ fn present(shell: &Rc<Preferences>) {
         relay_enabled: gtk::Switch,
         folder_title: gtk::Label, file_title: gtk::Label, storage_chooser: gtk::FileDialog,
         local_storage_help: gtk::Label, storage_help: gtk::Image, folders_section: gtk::Box,
-        encoding: adw::ComboRow, storage: adw::ComboRow,
+        encoding: gtk::Box, storage: adw::ComboRow,
         choose_connection: gtk::Button,
         file: adw::EntryRow,
         folders: adw::PreferencesGroup,
@@ -433,7 +433,6 @@ fn present(shell: &Rc<Preferences>) {
     relay_enabled.set_active(initial.settings.relay.is_some() || initial.settings.public_relay);
     relay.set_visible(relay_enabled.is_active());
     let updating_network = Rc::new(Cell::new(false));
-    encoding.set_selected(u32::from(initial.settings.encoding == Encoding::Mp3));
     let accounts = Rc::new(RefCell::new(shell.products.source.file_integrations()));
     let storage_draft = Rc::new(RefCell::new(StorageDraft::default()));
     let reload_accounts: Rc<dyn Fn() -> bool> = {
@@ -1079,20 +1078,17 @@ fn present(shell: &Rc<Preferences>) {
     });
     let weak = Rc::downgrade(shell);
     let parent = connect_dialog.downgrade();
-    encoding.connect_selected_notify(move |row| {
+    for row in crate::download_quality::rows(initial.settings.encoding, move |encoding, reset| {
         let (Some(shell), Some(parent)) = (weak.upgrade(), parent.upgrade()) else {
             return;
         };
-        let encoding = if row.selected() == 0 {
-            Encoding::Original
-        } else {
-            Encoding::Mp3
-        };
-        let settings = shell.products.connect.status().settings;
-        if encoding == settings.encoding {
+        let previous = shell.products.connect.status().settings.encoding;
+        if previous == encoding {
             return;
         }
-        if !settings.established || settings.setup_pending {
+        let established = shell.products.connect.status().settings.established
+            && !shell.products.connect.status().settings.setup_pending;
+        if !established {
             run(
                 &shell,
                 Action::Encoding {
@@ -1102,32 +1098,26 @@ fn present(shell: &Rc<Preferences>) {
             );
             return;
         }
-        row.set_sensitive(false);
-        let row = row.downgrade();
         gtk::glib::spawn_future_local(async move {
             let resource = crate::ui_resource::CONNECT_COMPONENTS_RESOURCE;
             let builder = gtk_widgets::ui_resource::builder(resource);
             let dialog: adw::AlertDialog =
                 gtk_widgets::ui_resource::object(&builder, resource, "encoding_confirmation");
-            let accepted = dialog.choose_future(Some(&parent)).await == "continue";
-            if let Some(row) = row.upgrade() {
-                row.set_sensitive(true);
-                if accepted {
-                    run(
-                        &shell,
-                        Action::Encoding {
-                            encoding,
-                            confirm: true,
-                        },
-                    );
-                } else {
-                    row.set_selected(u32::from(
-                        shell.products.connect.status().settings.encoding == Encoding::Mp3,
-                    ));
-                }
+            if dialog.choose_future(Some(&parent)).await == "continue" {
+                run(
+                    &shell,
+                    Action::Encoding {
+                        encoding,
+                        confirm: true,
+                    },
+                );
+            } else {
+                reset(previous);
             }
         });
-    });
+    }) {
+        encoding.append(&row);
+    }
     let parent = shell.window.downgrade();
     let entry = file.downgrade();
     let chooser = file_chooser.clone();

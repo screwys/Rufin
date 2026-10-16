@@ -7,7 +7,7 @@ use localization::{default_language_preference, sanitize_language_preference};
 use lyrics::Settings as LyricsSettings;
 use playback::{
     DEFAULT_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD, MIN_AUTO_DJ_REFILL_THRESHOLD,
-    PlaybackSettings, RepeatMode, StreamQuality,
+    PlaybackSettings, RepeatMode,
 };
 use presence::Settings as RichPresenceSettings;
 use secrets::SecretStorageMode;
@@ -479,7 +479,11 @@ impl Settings {
         self.update_download_settings(source_id, |settings| settings.rules = rules)
     }
 
-    pub fn set_download_quality(&mut self, source_id: SourceId, quality: StreamQuality) -> bool {
+    pub fn set_download_quality(
+        &mut self,
+        source_id: SourceId,
+        quality: sources::DownloadQuality,
+    ) -> bool {
         self.update_download_settings(source_id, |settings| settings.quality = quality)
     }
 

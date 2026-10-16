@@ -11,11 +11,12 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
+url.workspace = true
 ebur128.workspace = true
+library.workspace = true
 gstreamer = { workspace = true, features = ["v1_26"] }
 gstreamer-app = { workspace = true, features = ["v1_26"] }
 gstreamer-audio = { workspace = true, features = ["v1_26"] }
-playback.workspace = true
 rustfft.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

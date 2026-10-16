@@ -29,7 +29,6 @@ pub struct SourceSummary {
     pub id: SourceId,
     pub kind: String,
     pub name: String,
-    pub transcoded_download_bitrate_limit_kbps: Option<u32>,
     pub half_stars_enabled: bool,
     pub supports_playlist_public: bool,
 }

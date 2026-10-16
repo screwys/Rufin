@@ -12,6 +12,8 @@ uniffi::custom_type!(LibraryIndex, u64, {
     try_lift: |value| Ok(usize::try_from(value)?),
 });
 
+mod audio;
+pub use audio::*;
 mod activity;
 mod activity_overview;
 pub use activity_overview::{ActivityOverview, ActivityTotals, GenreActivity};
@@ -38,7 +40,7 @@ mod playlist_format;
 mod playlist_links;
 mod playlists;
 mod queue;
-pub use connect_media::ConnectMediaFile;
+pub use connect_media::{ConnectMediaFile, media_encoding_from_key, media_encoding_key};
 mod catalog;
 mod radio;
 mod scroll_sections;

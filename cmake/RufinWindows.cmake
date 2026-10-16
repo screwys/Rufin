@@ -41,7 +41,7 @@ endforeach()
 
 if(RUFIN_CARGO_FROZEN)
   set(RUFIN_WINDOWS_CARGO_LOCK_FLAG --frozen)
-else()
+elseif(NOT RUFIN_BUILD_IDENTITY STREQUAL "development")
   set(RUFIN_WINDOWS_CARGO_LOCK_FLAG --locked)
 endif()
 

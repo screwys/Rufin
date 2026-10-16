@@ -18,6 +18,17 @@ pub fn audio_source_label(format: Option<&str>, path: Option<&str>) -> Option<St
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let value = format
+        .map(|format| {
+            let mut parts = format.split(';');
+            let media_type = parts.next().unwrap_or(format).trim();
+            parts
+                .find_map(|parameter| {
+                    let (key, value) = parameter.trim().split_once('=')?;
+                    (key.trim().eq_ignore_ascii_case("codecs"))
+                        .then_some(value.trim().trim_matches('"'))
+                })
+                .unwrap_or(media_type)
+        })
         .and_then(|value| value.rsplit('/').next())
         .map(|value| value.trim().trim_start_matches('.'))
         .filter(|value| !value.is_empty())
@@ -60,8 +71,9 @@ pub fn now_playing_labels(
                 original
                     .as_deref()
                     .and_then(crate::playback::audio_mime)
-                    .as_ref()
-                    == Some(format)
+                    .is_some_and(|original| {
+                        original == *format || original.split(';').next() == Some(format.as_str())
+                    })
             })
     });
     let format = if same_format {

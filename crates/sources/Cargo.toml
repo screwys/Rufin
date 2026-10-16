@@ -15,6 +15,7 @@ publish.workspace = true
 bindings = ["dep:uniffi", "library/bindings"]
 
 [dependencies]
+audio-processing.workspace = true
 uniffi = { workspace = true, optional = true }
 lyrics.workspace = true
 async-channel.workspace = true

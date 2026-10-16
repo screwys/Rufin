@@ -1,9 +1,9 @@
 //! Cancellable waveform decoding for one prepared audio stream.
 
 use super::ensure_gstreamer_initialized;
+use crate::ResolvedStream;
 use gst::prelude::*;
 use gstreamer as gst;
-use playback::ResolvedStream;
 use std::time::{Duration, Instant};
 const WAVEFORM_GENERATION_TIMEOUT: Duration = Duration::from_secs(180);
 const WAVEFORM_BUS_POLL: gst::ClockTime = gst::ClockTime::from_mseconds(250);

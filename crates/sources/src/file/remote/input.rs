@@ -82,13 +82,17 @@ impl FileInputServer {
         }))
     }
 
-    pub fn stream(self: &Arc<Self>, path: &str, media_uri: &str) -> playback::ResolvedStream {
+    pub fn stream(
+        self: &Arc<Self>,
+        path: &str,
+        media_uri: &str,
+    ) -> audio_processing::ResolvedStream {
         let mut url = self.base.clone();
         url.path_segments_mut()
             .expect("HTTP URL")
             .pop_if_empty()
             .push(path);
-        let mut stream = playback::ResolvedStream::with_redacted(url.as_str(), media_uri)
+        let mut stream = audio_processing::ResolvedStream::with_redacted(url.as_str(), media_uri)
             .with_resource(Arc::clone(self) as Arc<dyn Send + Sync>);
         stream.local_input = matches!(&*self.input, FileInput::Documents(_));
         stream
@@ -99,7 +103,7 @@ impl FileInputServer {
         path: &str,
         revision: &str,
         media_uri: &str,
-    ) -> SourceResult<playback::ResolvedStream> {
+    ) -> SourceResult<audio_processing::ResolvedStream> {
         if let FileInput::Documents(access) = &*self.input {
             let access = Arc::clone(access);
             let path_owned = path.to_owned();
@@ -450,9 +454,12 @@ fn io_error(error: io::Error) -> SourceError {
 fn temporary_stream(
     path: Arc<tempfile::TempPath>,
     media_uri: &str,
-) -> SourceResult<playback::ResolvedStream> {
+) -> SourceResult<audio_processing::ResolvedStream> {
     let uri = Url::from_file_path(path.as_ref()).map_err(|_| {
         SourceError::Other("Temporary media path could not be represented as a URI".into())
     })?;
-    Ok(playback::ResolvedStream::with_redacted(uri.as_str(), media_uri).with_resource(path))
+    Ok(
+        audio_processing::ResolvedStream::with_redacted(uri.as_str(), media_uri)
+            .with_resource(path),
+    )
 }

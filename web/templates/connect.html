@@ -49,8 +49,7 @@
 
     </section>
     <section data-connect-section="media" hidden>
-      <div class="connect-inline"><label for="connect-encoding">{{ localization::tr("Download quality") }}</label><select id="connect-encoding" aria-describedby="connect-encoding-help"><option value="original">{{ localization::tr("Original") }}</option><option value="mp3">MP3</option></select></div>
-      <p id="connect-encoding-help">{{ localization::tr("This only takes affect for new local files that are added by another device") }}</p>
+      <fieldset id="connect-quality"><legend>{{ localization::tr("Download quality") }}</legend>{% include "download_quality.html" %}</fieldset>
       <p id="connect-media-status" role="status" hidden></p>
       <div id="connect-folder-section" hidden><h3>{{ localization::tr("Local music folders") }} <span class="icon" data-icon="info" tabindex="0" title="{{ localization::tr("Choose where this device stores local music received through Connect. Matching files already in the folder are reused; missing files are downloaded here.") }}" aria-label="{{ localization::tr("Choose where this device stores local music received through Connect. Matching files already in the folder are reused; missing files are downloaded here.") }}"></span></h3><div id="connect-folders" class="connect-card-list"></div></div>
     </section>

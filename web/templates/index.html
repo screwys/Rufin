@@ -461,6 +461,7 @@
         </div>
       </form>
     </dialog>
+    <template id="download-quality-template">{% include "download_quality.html" %}</template>
     <dialog id="source-dialog" aria-labelledby="source-title">
       <form id="source-form" hx-post="/api/sources" hx-ext="source-form" hx-swap="none" hx-disabled-elt="find button[type='submit']" hx-sync="this:drop">
         <h2 id="source-title">{{ localization::tr("Add Source") }}</h2>

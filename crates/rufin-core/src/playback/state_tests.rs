@@ -346,7 +346,7 @@ async fn continuation_preserves_positions_order_and_one_listen_across_devices() 
                 queue: transferred,
             },
             PreparedStream::new(
-                playback::ResolvedStream::new("https://example.test/continued.flac"),
+                audio_processing::ResolvedStream::new("https://example.test/continued.flac"),
                 Some(playback::TrackLoudness::default()),
             ),
             Box::new(IdleBackend(destination_commands.clone())),
@@ -509,7 +509,7 @@ async fn editing_upcoming_queue_does_not_block_continuation() {
                 queue: snapshot.queue.clone(),
             },
             PreparedStream::new(
-                playback::ResolvedStream::new("https://example.test/continued.flac"),
+                audio_processing::ResolvedStream::new("https://example.test/continued.flac"),
                 Some(playback::TrackLoudness::default()),
             ),
             Box::new(IdleBackend(commands.clone())),
@@ -620,7 +620,7 @@ async fn already_qualified_continuation_does_not_create_another_submission() {
         .adopt_continuation(
             snapshot,
             PreparedStream::new(
-                playback::ResolvedStream::new("https://example.test/continued.flac"),
+                audio_processing::ResolvedStream::new("https://example.test/continued.flac"),
                 Some(playback::TrackLoudness::default()),
             ),
             Box::new(IdleBackend(commands.clone())),
@@ -1091,7 +1091,7 @@ async fn stream_access_changes_and_unchanged_settings_leave_the_audible_run_unto
     let run = session.current_run().unwrap();
     session.stream_resolved(
         run,
-        playback::ResolvedStream::new("https://example.test/track.flac"),
+        audio_processing::ResolvedStream::new("https://example.test/track.flac"),
     );
     session.handle_backend(BackendEvent::Started { run }, &sample);
     let position = session.sequence.selected().unwrap().position;
@@ -1599,11 +1599,12 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
     }
     session.stream_resolved(
         current_run,
-        playback::ResolvedStream::new("file:///current.flac"),
+        audio_processing::ResolvedStream::new("file:///current.flac"),
     );
     session.stream_resolved(
         next_run,
-        playback::ResolvedStream::new("https://music.example/next.m3u8").with_transcoding(true),
+        audio_processing::ResolvedStream::new("https://music.example/next.m3u8")
+            .with_transcoding(true),
     );
     assert!(commands.lock().unwrap().iter().any(|command| matches!(command,
         BackendCommand::PrepareNext { next: Some(prepared), .. }
@@ -1897,7 +1898,7 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
     session
         .adopt_local(
             queue,
-            playback::ResolvedStream::new("https://example.test/return.flac").into(),
+            audio_processing::ResolvedStream::new("https://example.test/return.flac").into(),
             false,
             Box::new(IdleBackend(commands.clone())),
         )
@@ -1918,7 +1919,7 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
     session
         .adopt_local(
             session.sequence.snapshot(),
-            playback::ResolvedStream::new("https://example.test/return.flac").into(),
+            audio_processing::ResolvedStream::new("https://example.test/return.flac").into(),
             true,
             Box::new(IdleBackend(commands.clone())),
         )

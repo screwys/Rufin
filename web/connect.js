@@ -1,3 +1,4 @@
+import { qualityControls } from "./download-quality.js";
 import { chooseFileIntegration } from "./sources.js";
 import { api } from "./connection.js";
 import { tr, notice } from "./ui.js";
@@ -10,6 +11,7 @@ const confirmation = () =>
     ),
   );
 let state;
+let quality;
 let offeredDevice;
 let toastDevice;
 let previousDevices;
@@ -363,7 +365,7 @@ function present(value) {
   element("relay").value = value.settings.relay || (value.settings.public_relay ? "https://euc1-1.relay.n0.iroh.link/" : "");
   element("relay-enabled").checked = Boolean(value.settings.relay || value.settings.public_relay);
   showRelay();
-  element("encoding").value = value.settings.encoding;
+  quality?.set(value.settings.encoding);
   updateView();
   element("dialog").showModal();
   if (!value.pairing && !value.connecting) {
@@ -475,17 +477,14 @@ export function init() {
     relay: element("relay-enabled").checked ? element("relay").value.trim() : null,
     public_relay: false,
   }));
-  element("encoding").addEventListener("change", () => run(async () => {
-    const encoding = element("encoding").value;
-    if (encoding === state.settings.encoding) return;
+  quality = qualityControls(element("quality"), "original", async (encoding) => {
+    const previous = state.settings.encoding;
+    if (JSON.stringify(encoding) === JSON.stringify(previous)) return previous;
     const confirm = state.settings.established && !state.settings.setup_pending;
-    if (confirm && !window.confirm(tr("Changing this will redownload all local files."))) {
-      element("encoding").value = state.settings.encoding;
-      return;
-    }
+    if (confirm && !window.confirm(tr("Changing this will redownload all local files."))) return previous;
     await action({ action: "encoding", encoding, confirm });
-    element("encoding").value = state.settings.encoding;
-  }));
+    return state.settings.encoding;
+  });
   click("import", () => action({
     action: "import", path: element("file").value, source_id: fileSource(), replace: false, key: null,
   }));

@@ -10,7 +10,7 @@ plugins {
 val repository = rootDir.parentFile
 val metadata = JsonSlurper().parseText(providers.exec {
     workingDir(repository)
-    commandLine("cargo", "run", "--quiet", "--locked", "-p", "xtask", "--", "android", "metadata")
+    commandLine("cargo", "run", "--quiet", "-p", "xtask", "--", "android", "metadata")
 }.standardOutput.asText.get()) as Map<*, *>
 val version = metadata["version"] as String
 val verifier = file(metadata["verifierManifest"]!!).parentFile
@@ -112,7 +112,7 @@ androidComponents.onVariants { variant ->
         // Variants share native build directories and must finish one at a time.
         mustRunAfter(earlierNativeBuilds)
         workingDir(repository)
-        commandLine("cargo", "run", "--locked", "-p", "xtask", "--", "android", "native", variant.name,
+        commandLine("cargo", "run", "-p", "xtask", "--", "android", "native", variant.name,
             if (variant.productFlavors.any { it.second == "development" }) "development" else "stable", abis)
     }
     nativeBuildTasks += native

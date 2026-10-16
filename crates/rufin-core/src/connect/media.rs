@@ -8,21 +8,15 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
-impl Encoding {
-    pub(super) fn name(self) -> &'static str {
-        match self {
-            Self::Original => "original",
-            Self::Mp3 => "mp3",
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 struct OfferedMedia {
     hash: Option<String>,
     revision: String,
-    encoding: Encoding,
+    #[serde(with = "encoding_format")]
+    encoding: DownloadQuality,
     size: u64,
+    #[serde(skip)]
+    requested: Option<DownloadQuality>,
 }
 
 impl ConnectOwner {
@@ -279,7 +273,7 @@ impl MediaDestination {
         }
     }
 
-    fn version(&mut self, backing: &str, revision: &str, encoding: Encoding) {
+    fn version(&mut self, backing: &str, revision: &str, encoding: DownloadQuality) {
         match self {
             Self::Native(path) => *path = versioned_path(path, backing, revision, encoding),
             Self::Document { relative, .. } => {
@@ -305,19 +299,25 @@ fn corresponding_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
     Ok(root.join(relative))
 }
 
-fn versioned_path(path: &Path, uri: &str, revision: &str, encoding: Encoding) -> PathBuf {
+fn versioned_path(path: &Path, uri: &str, revision: &str, encoding: DownloadQuality) -> PathBuf {
     let key = file_key(uri, revision, encoding);
     let extension = path.extension().unwrap_or_default().to_string_lossy();
     path.with_extension(format!("{key:.12}.{extension}"))
 }
 
-fn media_key(uri: &str, revision: &str, encoding: Encoding) -> String {
-    blake3::hash(format!("{uri}\0{revision}\0{}", encoding.name()).as_bytes())
-        .to_hex()
-        .to_string()
+fn media_key(uri: &str, revision: &str, encoding: DownloadQuality) -> String {
+    blake3::hash(
+        format!(
+            "{uri}\0{revision}\0{}",
+            library::media_encoding_key(encoding.encoding())
+        )
+        .as_bytes(),
+    )
+    .to_hex()
+    .to_string()
 }
 
-fn file_key(uri: &str, revision: &str, encoding: Encoding) -> String {
+fn file_key(uri: &str, revision: &str, encoding: DownloadQuality) -> String {
     // CUE tracks keep their own identity, but transfer the same complete audio file.
     let backing = library::cue_media_parts(uri).map(|(_, backing, _, _)| backing);
     media_key(backing.as_deref().unwrap_or(uri), revision, encoding)
@@ -387,11 +387,16 @@ impl ConnectOwner {
             .is_some_and(|reference| reference["local_media"].as_bool() == Some(true)))
     }
 
-    fn representation_path(&self, backing: &str, revision: &str, encoding: Encoding) -> PathBuf {
+    fn representation_path(
+        &self,
+        backing: &str,
+        revision: &str,
+        encoding: DownloadQuality,
+    ) -> PathBuf {
         self.directory.join("representations").join(format!(
             "{}.{}",
             file_key(backing, revision, encoding),
-            encoding.name()
+            encoding.extension().unwrap_or("original")
         ))
     }
 
@@ -399,7 +404,7 @@ impl ConnectOwner {
         &self,
         backing: &str,
         revision: &str,
-        encoding: Encoding,
+        encoding: DownloadQuality,
     ) -> PathBuf {
         self.directory.join("representations").join(format!(
             "{}.documents",
@@ -411,7 +416,7 @@ impl ConnectOwner {
         &self,
         backing: &str,
         revision: &str,
-        encoding: Encoding,
+        encoding: DownloadQuality,
         entry: &sources::DocumentEntry,
     ) -> PathBuf {
         let metadata = format!(
@@ -422,7 +427,7 @@ impl ConnectOwner {
             .join(format!(
                 "{}.{}",
                 blake3::hash(metadata.as_bytes()).to_hex(),
-                encoding.name()
+                encoding.extension().unwrap_or("original")
             ))
     }
 
@@ -431,7 +436,7 @@ impl ConnectOwner {
         uri: &str,
         backing: &str,
         revision: &str,
-        encoding: Encoding,
+        encoding: DownloadQuality,
         cancel: &CancellationToken,
     ) -> Result<PathBuf, String> {
         let uri = uri.to_string();
@@ -484,11 +489,9 @@ impl ConnectOwner {
                     .connect_backing_id(&file.media_uri)
                     .await
                     .map_err(error)?;
-                let encoding = if file.encoding == "mp3" {
-                    Encoding::Mp3
-                } else {
-                    Encoding::Original
-                };
+                let encoding = library::media_encoding_from_key(&file.encoding)
+                    .map_err(error)?
+                    .map_or(DownloadQuality::Original, DownloadQuality::Transcoded);
                 self.materialize_document(&uri, &backing, &file.revision, encoding, cancel)
                     .await
             }
@@ -499,17 +502,14 @@ impl ConnectOwner {
         &self,
         uri: &str,
         revision: &str,
-        encoding: Encoding,
+        encoding: DownloadQuality,
         source_format: Option<&str>,
     ) -> PathBuf {
         let mut path = self
             .directory
             .join("media")
             .join(file_key(uri, revision, encoding));
-        let extension = match encoding {
-            Encoding::Mp3 => "mp3",
-            Encoding::Original => source_format.unwrap_or("audio"),
-        };
+        let extension = encoding.extension().or(source_format).unwrap_or("audio");
         if !extension.is_empty() && extension.chars().all(|c| c.is_ascii_alphanumeric()) {
             path.set_extension(extension);
         }
@@ -519,7 +519,7 @@ impl ConnectOwner {
     fn selected_media_destination(
         &self,
         uri: &str,
-        encoding: Encoding,
+        encoding: DownloadQuality,
         reference: &serde_json::Value,
     ) -> Result<Option<MediaDestination>, String> {
         let config = self.status().settings;
@@ -533,9 +533,14 @@ impl ConnectOwner {
         Ok(Some(match root {
             downloads::DownloadDirectory::Native(root) => {
                 let mut path = self.local_file_path(corresponding_path(root, relative)?);
-                if encoding == Encoding::Mp3 {
+                if encoding != DownloadQuality::Original {
                     let key = file_key(backing, &revision(reference), encoding);
-                    path.set_extension(format!("{key:.12}.mp3"));
+                    path.set_extension(format!(
+                        "{key:.12}.{}",
+                        encoding
+                            .extension()
+                            .expect("encoded media has an extension")
+                    ));
                 }
                 MediaDestination::Native(path)
             }
@@ -550,11 +555,16 @@ impl ConnectOwner {
                 {
                     return Err("The shared track has an invalid source-relative path".into());
                 }
-                if encoding == Encoding::Mp3 {
+                if encoding != DownloadQuality::Original {
                     let key = file_key(backing, &revision(reference), encoding);
                     let name = relative.last_mut().unwrap();
                     *name = Path::new(name)
-                        .with_extension(format!("{key:.12}.mp3"))
+                        .with_extension(format!(
+                            "{key:.12}.{}",
+                            encoding
+                                .extension()
+                                .expect("encoded media has an extension")
+                        ))
                         .to_string_lossy()
                         .into_owned();
                 }
@@ -573,11 +583,9 @@ impl ConnectOwner {
         destination: &Path,
     ) -> Result<LocalMediaLocation, String> {
         let source_file = file.clone();
-        let encoding = if file.encoding == "mp3" {
-            Encoding::Mp3
-        } else {
-            Encoding::Original
-        };
+        let encoding = library::media_encoding_from_key(&file.encoding)
+            .map_err(error)?
+            .map_or(DownloadQuality::Original, DownloadQuality::Transcoded);
         let reference = self
             .database
             .connect_track_reference(&file.media_uri)
@@ -661,8 +669,9 @@ impl ConnectOwner {
             MediaDestination::Native(path) => source.as_ref() == Some(path),
             MediaDestination::Document { .. } => target_uri.as_ref() == Some(&file.path),
         };
-        let mapped_original =
-            encoding == Encoding::Original && selected.as_ref() == Some(&target) && !owned_target;
+        let mapped_original = encoding == DownloadQuality::Original
+            && selected.as_ref() == Some(&target)
+            && !owned_target;
         let reused = target.present(entry.as_ref())
             && (shared.is_some() || mapped_original || same)
             && (!same || matches!(target, MediaDestination::Document { .. }));
@@ -899,11 +908,9 @@ impl ConnectOwner {
                 .connect_backing_id(&file.media_uri)
                 .await
                 .map_err(error)?;
-            let encoding = if file.encoding == "mp3" {
-                Encoding::Mp3
-            } else {
-                Encoding::Original
-            };
+            let encoding = library::media_encoding_from_key(&file.encoding)
+                .map_err(error)?
+                .map_or(DownloadQuality::Original, DownloadQuality::Transcoded);
             match tokio::fs::remove_dir_all(self.document_representation_directory(
                 &backing,
                 &file.revision,
@@ -933,13 +940,13 @@ impl ConnectOwner {
     async fn offer_saved_media(
         &self,
         uri: &str,
-        encoding: Encoding,
+        encoding: DownloadQuality,
         revision: Option<&str>,
     ) -> Result<Option<serde_json::Value>, String> {
         let _files = self.media_files.lock().await;
         let Some(mut saved) = self
             .database
-            .connect_media_file(uri, encoding.name())
+            .connect_media_file(uri, &library::media_encoding_key(encoding.encoding()))
             .await
             .map_err(error)?
             .filter(|saved| revision.is_none_or(|revision| saved.revision == revision))
@@ -967,6 +974,7 @@ impl ConnectOwner {
                 .map_err(error)?;
         }
         serde_json::to_value(OfferedMedia {
+            requested: None,
             hash: Some(hash),
             revision: saved.revision,
             encoding,
@@ -981,7 +989,7 @@ impl ConnectOwner {
         peer: &str,
         id: &str,
         uri: &str,
-        encoding: Encoding,
+        encoding: DownloadQuality,
         position: Option<usize>,
     ) -> Result<serde_json::Value, String> {
         let session = self.active().await?;
@@ -1107,7 +1115,7 @@ impl ConnectOwner {
         }
         let original_receipt = self
             .database
-            .connect_media_file(uri, Encoding::Original.name())
+            .connect_media_file(uri, &library::media_encoding_key(None))
             .await
             .map_err(error)?;
         let original = if let Some((location, _)) = direct {
@@ -1129,12 +1137,13 @@ impl ConnectOwner {
         let original_managed = original_receipt
             .as_ref()
             .is_some_and(|receipt| receipt.managed && receipt.path == original_uri);
-        if let Some(smaller) = self
+        if self
             .database
-            .connect_media_file(uri, Encoding::Mp3.name())
+            .connect_media_files(uri)
             .await
             .map_err(error)?
-            && smaller.path == original_uri
+            .iter()
+            .any(|file| file.encoding != "original" && file.path == original_uri)
         {
             return Err("This device has only the smaller representation. Request it from a device with the original.".into());
         }
@@ -1150,13 +1159,19 @@ impl ConnectOwner {
             let original = match original {
                 LocalMediaLocation::File(path) => path,
                 LocalMediaLocation::Document(uri) => {
-                    self.materialize_document(&uri, backing, &revision, Encoding::Original, &cancel)
-                        .await?
+                    self.materialize_document(
+                        &uri,
+                        backing,
+                        &revision,
+                        DownloadQuality::Original,
+                        &cancel,
+                    )
+                    .await?
                 }
             };
             let path = match encoding {
-                Encoding::Original => original,
-                Encoding::Mp3 => {
+                DownloadQuality::Original => original,
+                DownloadQuality::Transcoded(profile) => {
                     let directory = self.directory.join("representations");
                     tokio::fs::create_dir_all(&directory).await.map_err(error)?;
                     let destination = self.representation_path(backing, &revision, encoding);
@@ -1166,9 +1181,11 @@ impl ConnectOwner {
                         self.status.send_modify(|status| {
                             status.media_status = Some(localization::tr("Preparing smaller media"))
                         });
-                        tokio::task::spawn_blocking(move || transcode(&original, &output, &cancel))
-                            .await
-                            .map_err(error)??;
+                        tokio::task::spawn_blocking(move || {
+                            transcode(&original, &output, profile, &cancel)
+                        })
+                        .await
+                        .map_err(error)??;
                     }
                     destination
                 }
@@ -1184,19 +1201,19 @@ impl ConnectOwner {
             self.database
                 .connect_save_media_file(&library::ConnectMediaFile {
                     media_uri: uri.into(),
-                    encoding: encoding.name().into(),
+                    encoding: library::media_encoding_key(encoding.encoding()).into(),
                     revision: revision.clone(),
-                    path: if document_original && encoding == Encoding::Original {
+                    path: if document_original && encoding == DownloadQuality::Original {
                         original_uri
                     } else {
                         file_uri(&path)?
                     },
-                    managed: encoding != Encoding::Original || original_managed,
+                    managed: encoding != DownloadQuality::Original || original_managed,
                     hash: hash.clone(),
                 })
                 .await
                 .map_err(error)?;
-            if encoding == Encoding::Original
+            if encoding == DownloadQuality::Original
                 && let Some(previous) = original_receipt
                     .as_ref()
                     .filter(|old| old.path.starts_with("content://") && old.revision != revision)
@@ -1204,6 +1221,7 @@ impl ConnectOwner {
                 self.remove_media_file(previous, false).await?;
             }
             serde_json::to_value(OfferedMedia {
+                requested: None,
                 hash,
                 revision,
                 encoding,
@@ -1258,11 +1276,11 @@ impl ConnectOwner {
     async fn reusable_media(
         &self,
         uri: &str,
-        encoding: Encoding,
+        encoding: DownloadQuality,
         reference: &serde_json::Value,
     ) -> Result<Option<LocalMediaLocation>, String> {
         let revision = revision(reference);
-        if encoding == Encoding::Original
+        if encoding == DownloadQuality::Original
             && let Some(original) = self.original_media_file(uri).await?
         {
             return Ok(Some(original));
@@ -1270,7 +1288,7 @@ impl ConnectOwner {
         let _files = self.media_files.lock().await;
         let receipt = self
             .database
-            .connect_media_file(uri, encoding.name())
+            .connect_media_file(uri, &library::media_encoding_key(encoding.encoding()))
             .await
             .map_err(error)?;
         let available =
@@ -1285,7 +1303,11 @@ impl ConnectOwner {
         if available.is_none()
             && let Some(mut shared) = self
                 .database
-                .connect_backing_media_file(uri, encoding.name(), &revision)
+                .connect_backing_media_file(
+                    uri,
+                    &library::media_encoding_key(encoding.encoding()),
+                    &revision,
+                )
                 .await
                 .map_err(error)?
         {
@@ -1355,7 +1377,7 @@ impl ConnectOwner {
             }
             return Ok(Some(available));
         }
-        if encoding != Encoding::Original
+        if encoding != DownloadQuality::Original
             || receipt.is_some_and(|receipt| receipt.revision != revision)
         {
             return Ok(None);
@@ -1377,7 +1399,7 @@ impl ConnectOwner {
         if let Some(candidate) = candidate {
             let file = library::ConnectMediaFile {
                 media_uri: uri.into(),
-                encoding: encoding.name().into(),
+                encoding: library::media_encoding_key(encoding.encoding()).into(),
                 revision,
                 path: location_uri(&candidate)?,
                 managed: false,
@@ -1394,14 +1416,16 @@ impl ConnectOwner {
             Some(location) => available_location(location).await?,
             None => None,
         };
-        if let Some(candidate) = &candidate
-            && let Some(smaller) = self
+        if let Some(candidate) = &candidate {
+            let path = location_uri(candidate)?;
+            if self
                 .database
-                .connect_media_file(uri, Encoding::Mp3.name())
+                .connect_media_files(uri)
                 .await
                 .map_err(error)?
-        {
-            if smaller.path == location_uri(candidate)? {
+                .iter()
+                .any(|file| file.encoding != "original" && file.path == path)
+            {
                 return Ok(None);
             }
         }
@@ -1444,7 +1468,7 @@ impl ConnectOwner {
         &self,
         peer: &str,
         uri: &str,
-        encoding: Encoding,
+        encoding: DownloadQuality,
         cancel: CancellationToken,
     ) -> Result<LocalMediaLocation, String> {
         let reference = self
@@ -1455,7 +1479,7 @@ impl ConnectOwner {
             .ok_or("The track is not in this profile")?;
         let mut reusable = self.reusable_media(uri, encoding, &reference).await?;
         if reusable.is_none()
-            && encoding == Encoding::Mp3
+            && encoding != DownloadQuality::Original
             && self
                 .original_media_file(uri)
                 .await
@@ -1567,7 +1591,7 @@ impl ConnectOwner {
         &self,
         peer: &str,
         uri: &str,
-        encoding: Encoding,
+        encoding: DownloadQuality,
         cancel: &CancellationToken,
         position: Option<usize>,
     ) -> sources::SourceResult<OfferedMedia> {
@@ -1576,6 +1600,22 @@ impl ConnectOwner {
         getrandom::fill(&mut nonce).map_err(|error| SourceError::Other(error.to_string()))?;
         let id = blake3::hash(&nonce).to_hex().to_string();
         let local = self.active().await.map_err(SourceError::Network)?.identity == peer;
+        let requested = encoding;
+        let encoding = if !local
+            && self
+                .status()
+                .devices
+                .iter()
+                .find(|device| device.id == peer)
+                .is_none_or(|device| !device.download_profiles)
+            && encoding
+                .encoding()
+                .is_some_and(|profile| profile != library::AudioEncoding::mp3())
+        {
+            DownloadQuality::Original
+        } else {
+            encoding
+        };
         self.publish_media_received();
         let offer = tokio::select! {
             offer = async {
@@ -1595,7 +1635,10 @@ impl ConnectOwner {
                 "The provider returned a different media representation".into(),
             ));
         }
-        Ok(offer)
+        Ok(OfferedMedia {
+            requested: Some(requested),
+            ..offer
+        })
     }
 
     async fn receive_media(
@@ -1606,6 +1649,18 @@ impl ConnectOwner {
         offer: OfferedMedia,
         cancel: CancellationToken,
     ) -> Result<library::ConnectMediaFile, String> {
+        let requested = offer.requested.unwrap_or(offer.encoding);
+        let original = if requested != offer.encoding {
+            Some(
+                tempfile::NamedTempFile::new_in(
+                    destination.parent().ok_or("Media path has no parent")?,
+                )
+                .map_err(error)?,
+            )
+        } else {
+            None
+        };
+        let incoming = original.as_ref().map_or(destination, |file| file.path());
         let hash = offer
             .hash
             .ok_or("The device did not provide a media transfer")?;
@@ -1613,19 +1668,31 @@ impl ConnectOwner {
         let (progress, _received) = tokio::sync::watch::channel(0u64);
         network
             .media()
-            .fetch(peer, &hash, destination, cancel, progress)
+            .fetch(peer, &hash, incoming, cancel.clone(), progress)
             .await
             .map_err(error)?;
+        if let Some(original) = original {
+            let encoding = requested
+                .encoding()
+                .ok_or("The requested audio profile is unavailable")?;
+            let output = destination.to_owned();
+            let stop = cancel.clone();
+            tokio::task::spawn_blocking(move || {
+                transcode(original.path(), &output, encoding, &stop)
+            })
+            .await
+            .map_err(error)??;
+        }
         self.media_received
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.publish_media_received();
         Ok(library::ConnectMediaFile {
             media_uri: uri.into(),
-            encoding: offer.encoding.name().into(),
+            encoding: library::media_encoding_key(requested.encoding()),
             revision: offer.revision,
             path: file_uri(destination)?,
             managed: true,
-            hash: Some(hash),
+            hash: (requested == offer.encoding).then_some(hash),
         })
     }
 
@@ -1663,7 +1730,10 @@ impl ConnectOwner {
             && reference.is_none()
             && let Some(receipt) = self
                 .database
-                .connect_media_file(uri, self.status().settings.encoding.name())
+                .connect_media_file(
+                    uri,
+                    &library::media_encoding_key(self.status().settings.encoding.encoding()),
+                )
                 .await
                 .map_err(error)?
         {
@@ -1746,7 +1816,7 @@ impl ConnectOwner {
             return Ok(Some(path));
         }
         let session = self.active().await?;
-        if encoding == Encoding::Mp3
+        if encoding != DownloadQuality::Original
             && self
                 .original_media_file(uri)
                 .await
@@ -1795,8 +1865,8 @@ impl downloads::ConnectDownload for ConnectOwner {
             && !self.joining.load(std::sync::atomic::Ordering::Acquire)
     }
 
-    fn extension(&self) -> Option<&'static str> {
-        (self.status().settings.encoding == Encoding::Mp3).then_some("mp3")
+    fn quality(&self) -> DownloadQuality {
+        self.status().settings.encoding
     }
 
     fn reuse<'a>(
@@ -1895,7 +1965,7 @@ impl downloads::ConnectDownload for ConnectOwner {
         &'a self,
         uri: &'a str,
         partial: &'a Path,
-        extension: Option<&'a str>,
+        quality: DownloadQuality,
         cancel: CancellationToken,
     ) -> std::pin::Pin<
         Box<
@@ -1910,11 +1980,7 @@ impl downloads::ConnectDownload for ConnectOwner {
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .insert(key.clone(), cancel.clone());
-            let encoding = if extension == Some("mp3") {
-                Encoding::Mp3
-            } else {
-                Encoding::Original
-            };
+            let encoding = quality;
             let result = self
                 .transfer_queued(uri, partial, encoding, cancel.clone())
                 .await;
@@ -1935,7 +2001,7 @@ impl ConnectOwner {
         &self,
         uri: &str,
         partial: &Path,
-        encoding: Encoding,
+        encoding: DownloadQuality,
         cancel: CancellationToken,
     ) -> sources::SourceResult<library::ConnectMediaFile> {
         use sources::SourceError;
@@ -1949,7 +2015,7 @@ impl ConnectOwner {
             .await
             .map_err(SourceError::Other)?;
         if reusable.is_none()
-            && encoding == Encoding::Mp3
+            && encoding != DownloadQuality::Original
             && self
                 .original_media_file(uri)
                 .await
@@ -1993,7 +2059,7 @@ impl ConnectOwner {
             }
             return Ok(library::ConnectMediaFile {
                 media_uri: uri.into(),
-                encoding: encoding.name().into(),
+                encoding: library::media_encoding_key(encoding.encoding()).into(),
                 revision: revision(&reference),
                 path: file_uri(partial).map_err(SourceError::Other)?,
                 managed: true,
@@ -2049,26 +2115,21 @@ impl ConnectOwner {
     }
 }
 
-fn transcode(input: &Path, destination: &Path, cancel: &CancellationToken) -> Result<(), String> {
-    let stream = playback::ResolvedStream::new(file_uri(input)?);
-    let mut reader = audio_processing::TranscodedAudioReader::mp3(&stream)?;
-    let mut output = tempfile::NamedTempFile::new_in(
+fn transcode(
+    input: &Path,
+    destination: &Path,
+    encoding: library::AudioEncoding,
+    cancel: &CancellationToken,
+) -> Result<(), String> {
+    let stream = audio_processing::ResolvedStream::new(file_uri(input)?);
+    let output = tempfile::NamedTempFile::new_in(
         destination
             .parent()
             .ok_or("Media destination has no parent")?,
     )
     .map_err(error)?;
-    let mut buffer = [0u8; 64 * 1024];
-    loop {
-        if cancel.is_cancelled() {
-            return Err("Transcoding cancelled".into());
-        }
-        let read = reader.read(&mut buffer).map_err(error)?;
-        if read == 0 {
-            break;
-        }
-        output.write_all(&buffer[..read]).map_err(error)?;
-    }
+    audio_processing::transcode_audio(&stream, encoding, output.path(), || cancel.is_cancelled())
+        .map_err(error)?;
     output.as_file().sync_all().map_err(error)?;
     output.persist(destination).map_err(error)?;
     Ok(())

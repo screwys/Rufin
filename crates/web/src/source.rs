@@ -8,6 +8,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
             "/api/sources",
             get(list).post(add).patch(update).delete(forget),
         )
+        .route("/api/downloads/quality", post(download_quality))
         .route("/api/sources/progress", get(progress))
         .route("/api/sources/events", get(events))
         .route("/api/sources/local", post(add))
@@ -41,6 +42,23 @@ pub(super) fn routes() -> Router<ProductHandles> {
                 .patch(update_file_integration),
         )
         .route("/api/integrations/files/edit", get(edit_file_integration))
+}
+
+async fn download_quality(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    #[derive(Deserialize)]
+    struct Input {
+        source: sources::SourceId,
+        quality: sources::DownloadQuality,
+    }
+    let input: Input = body(request).await?;
+    products
+        .settings
+        .set_download_quality(input.source, input.quality)
+        .map_err(bad_request)?;
+    Ok(accepted())
 }
 
 async fn file_integrations(
@@ -102,7 +120,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
             "library": selected.as_ref().and_then(|source|source.music_folder_object_id.clone()),
             "new_playlist_current": products.settings.load().application.new_playlist_current,
             "libraries": selected.as_ref().map(|source|source.music_folders.iter().map(|folder|json!({"id":folder.object_id,"name":folder.name})).collect::<Vec<_>>()).unwrap_or_default(),
-            "sources": configured.sources.iter().map(|s| json!({"id":s.id,"name":s.name,"kind":s.kind,"supports_playlist_public":s.supports_playlist_public})).collect::<Vec<_>>()
+            "sources": configured.sources.iter().map(|s| json!({"id":s.id,"name":s.name,"kind":s.kind,"supports_playlist_public":s.supports_playlist_public,"quality":products.settings.download_settings(s.id.clone()).quality})).collect::<Vec<_>>()
         }),
     ))
 }

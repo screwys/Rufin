@@ -2,13 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use audio_processing::ResolvedStream;
 use library::{Database, SourceKey, TrackKey};
-use playback::{ResolvedStream, StreamRequest};
 use reqwest::header::{
     ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, DATE, ETAG, IF_RANGE,
     LAST_MODIFIED, RANGE,
 };
 use serde::{Deserialize, Serialize};
+use sources::DownloadQuality;
 use sources::{SourceError, SourceId, SourceResult};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
@@ -28,6 +29,8 @@ pub(super) const CUSTOM_STAGING_DIRECTORY: &str = ".rufin-partials";
 pub(super) struct DownloadRecord {
     pub(super) version: u32,
     pub(super) media_uri: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) quality: Option<sources::DownloadQuality>,
     #[serde(default)]
     pub(super) owners: HashSet<DownloadOwner>,
     #[serde(flatten)]
@@ -191,11 +194,21 @@ impl TransferClients {
 
 fn representation_key(
     source_id: Option<&SourceId>,
-    request: &StreamRequest,
+    media_uri: &str,
+    quality: DownloadQuality,
     redacted_uri: &str,
 ) -> String {
-    let value = serde_json::to_vec(&(source_id, request, redacted_uri))
-        .expect("a download representation can be encoded");
+    #[derive(Serialize)]
+    struct StoredDownload<'a> {
+        media_uri: &'a str,
+        quality: DownloadQuality,
+    }
+    let value = serde_json::to_vec(&(
+        source_id,
+        StoredDownload { media_uri, quality },
+        redacted_uri,
+    ))
+    .expect("a download representation can be encoded");
     hash_id_bytes(&value)
 }
 
@@ -611,7 +624,8 @@ pub(super) async fn prepare_download_directories(paths: &DownloadPaths) -> Sourc
 
 pub(super) async fn run_transfer(
     source_id: Option<&SourceId>,
-    request: &StreamRequest,
+    media_uri: &str,
+    quality: DownloadQuality,
     stream: &ResolvedStream,
     paths: &DownloadPaths,
     transfers: &TransferClients,
@@ -621,10 +635,48 @@ pub(super) async fn run_transfer(
     remove_file_if_present(&paths.record_part)
         .await
         .map_err(SourceError::Other)?;
-    let representation = representation_key(source_id, request, stream.redacted_uri());
-    transfers
-        .download_cancellable(stream, &representation, paths, cancellation)
-        .await
+    let representation = representation_key(source_id, media_uri, quality, stream.redacted_uri());
+    if let Some(path) = library::file_media_path(stream.uri()) {
+        tokio::select! {
+            result = tokio::fs::copy(path, &paths.audio_part) => result.map(|_| ()).map_err(|error| SourceError::Other(error.to_string())),
+            _ = &mut *cancellation => Err(SourceError::Cancelled),
+        }
+    } else {
+        transfers
+            .download_cancellable(stream, &representation, paths, cancellation)
+            .await
+    }
+}
+
+pub(super) async fn encode_download(
+    stream: ResolvedStream,
+    encoding: library::AudioEncoding,
+    paths: &DownloadPaths,
+    cancellation: &mut oneshot::Receiver<()>,
+) -> SourceResult<()> {
+    prepare_download_directories(paths).await?;
+    discard_staging(paths).await?;
+    let output = paths.audio_part.clone();
+    let cancelled = tokio_util::sync::CancellationToken::new();
+    let stop = cancelled.clone();
+    let mut task = tokio::task::spawn_blocking(move || {
+        audio_processing::transcode_audio(&stream, encoding, &output, || stop.is_cancelled())
+            .map_err(|error| match error.kind() {
+                std::io::ErrorKind::Interrupted => SourceError::Cancelled,
+                std::io::ErrorKind::ConnectionAborted => SourceError::Network(error.to_string()),
+                std::io::ErrorKind::PermissionDenied => SourceError::Auth(error.to_string()),
+                std::io::ErrorKind::NotFound => SourceError::NotFound,
+                _ => SourceError::Other(error.to_string()),
+            })
+    });
+    let result = tokio::select! {
+        result = &mut task => result.map_err(|error| SourceError::Other(error.to_string()))?,
+        _ = &mut *cancellation => { cancelled.cancel(); let _ = task.await; Err(SourceError::Cancelled) },
+    };
+    if result.is_err() {
+        discard_staging(paths).await?;
+    }
+    result
 }
 
 pub(super) async fn add_owner_to_existing_download(
@@ -633,11 +685,18 @@ pub(super) async fn add_owner_to_existing_download(
     media_uri: &str,
     owner: &DownloadOwner,
     custom_directory: Option<&DownloadDirectory>,
+    quality: sources::DownloadQuality,
+    replace_unknown: bool,
 ) -> Result<bool, String> {
     let (files, mut records) = load_download_state(root, source_id, custom_directory).await?;
     let Some(mut record) = records.remove(media_uri) else {
         return Ok(false);
     };
+    if record.quality.is_some_and(|stored| stored != quality)
+        || record.quality.is_none() && replace_unknown
+    {
+        return Ok(false);
+    }
     let Some(paths) = files.get(media_uri) else {
         return Ok(false);
     };
@@ -671,6 +730,7 @@ pub(super) async fn finalize_download(
     paths: &DownloadPaths,
     media_uri: String,
     owner: DownloadOwner,
+    quality: sources::DownloadQuality,
 ) -> Result<FinishedDownload, String> {
     let completed_size = tokio::fs::metadata(&paths.audio_part)
         .await
@@ -683,6 +743,18 @@ pub(super) async fn finalize_download(
         ),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.to_string()),
+    };
+    let previous_native = match (&paths.audio, previous.as_ref().map(|record| &record.audio)) {
+        (
+            DownloadAudio::Native { root, .. },
+            Some(RecordedAudio::Native {
+                relative_audio_path: Some(relative),
+                ..
+            }),
+        ) if normal_relative_path(relative) => {
+            Some(root.as_deref().unwrap_or(&paths.directory).join(relative))
+        }
+        _ => None,
     };
     let mut retired_documents = previous
         .as_ref()
@@ -731,6 +803,7 @@ pub(super) async fn finalize_download(
     let mut record = DownloadRecord {
         version: RECORD_VERSION,
         media_uri,
+        quality: Some(quality),
         owners,
         audio,
         retired_documents,
@@ -739,7 +812,13 @@ pub(super) async fn finalize_download(
     write_record(&paths, &record).await?;
     let _ = remove_file_if_present(&paths.audio_part).await;
     let _ = remove_file_if_present(&paths.checkpoint).await;
-    let cleanup_error = retire_documents(&paths, &mut record).await.err();
+    let mut cleanup_error = retire_documents(&paths, &mut record).await.err();
+    if let Some(previous) = previous_native
+        && paths.audio.native() != Some(previous.as_path())
+        && let Err(error) = remove_file_if_present(&previous).await
+    {
+        cleanup_error = Some(error);
+    }
     Ok(FinishedDownload {
         paths,
         cleanup_error,
@@ -908,8 +987,6 @@ fn load_download_state_blocking(
                     .is_none_or(|expected| size == expected)
             })
         }) {
-            let _ = std::fs::remove_file(&expected.audio_part);
-            let _ = std::fs::remove_file(&expected.checkpoint);
             files.insert(identity.clone(), expected);
             records.insert(identity, record);
         } else if !record.retired_documents.is_empty() {
@@ -992,6 +1069,7 @@ async fn migrate_released_download_records(
             let record = DownloadRecord {
                 version: RECORD_VERSION,
                 media_uri,
+                quality: None,
                 owners,
                 audio: RecordedAudio::Native {
                     custom_storage: released.custom_storage,
@@ -1087,6 +1165,7 @@ async fn migrate_released_download_records(
         let record = DownloadRecord {
             version: RECORD_VERSION,
             media_uri,
+            quality: None,
             owners,
             audio: RecordedAudio::Native {
                 custom_storage,
@@ -1595,77 +1674,106 @@ mod tests {
             Mock, MockServer, ResponseTemplate,
             matchers::{header, method, path},
         };
-        for kind in ["smb", "webdav"] {
-            for unchanged in [true, false] {
-                let server = MockServer::start().await;
-                let body = b"complete audio bytes";
-                let offset = 8;
-                let response = if unchanged {
-                    ResponseTemplate::new(206)
-                        .insert_header("ETag", "\"first\"")
-                        .insert_header(
-                            "Content-Range",
-                            format!("bytes {offset}-{}/{}", body.len() - 1, body.len()),
-                        )
-                        .set_body_bytes(body[offset..].to_vec())
-                } else {
-                    ResponseTemplate::new(200)
-                        .insert_header("ETag", "\"changed\"")
-                        .set_body_bytes(body.to_vec())
-                };
-                Mock::given(method("GET"))
-                    .and(path("/new-private-endpoint"))
-                    .and(header("Range", format!("bytes={offset}-").as_str()))
-                    .and(header("If-Range", "\"first\""))
-                    .respond_with(response)
-                    .expect(1)
-                    .mount(&server)
-                    .await;
-                let source = SourceId::new(format!("{kind}:download"));
-                let media_uri = library::source_entity_uri(&source, "track", "persistent-file-id");
-                let request = StreamRequest::original(&media_uri);
-                let previous = ResolvedStream::with_redacted(
-                    "http://127.0.0.1:1/previous-private-endpoint",
-                    &media_uri,
-                );
-                let current = ResolvedStream::with_redacted(
-                    format!("{}/new-private-endpoint", server.uri()),
-                    &media_uri,
-                );
-                let representation =
-                    representation_key(Some(&source), &request, previous.redacted_uri());
-                assert_eq!(
-                    representation,
-                    representation_key(Some(&source), &request, current.redacted_uri())
-                );
-                let directory = tempfile::tempdir().unwrap();
-                let paths = download_paths(directory.path(), Some(&source), &media_uri);
-                std::fs::create_dir_all(&paths.directory).unwrap();
-                std::fs::write(
-                    &paths.audio_part,
-                    if unchanged {
-                        &body[..offset]
+        for quality in [
+            DownloadQuality::Original,
+            DownloadQuality::Transcoded(library::AudioEncoding {
+                codec: library::AudioCodec::Opus,
+                bitrate_kbps: Some(64),
+                channels: library::AudioChannels::Preserve,
+            }),
+        ] {
+            for kind in ["smb", "webdav"] {
+                for unchanged in [true, false] {
+                    let server = MockServer::start().await;
+                    let body = b"complete audio bytes";
+                    let offset = 8;
+                    let response = if unchanged {
+                        ResponseTemplate::new(206)
+                            .insert_header("ETag", "\"first\"")
+                            .insert_header(
+                                "Content-Range",
+                                format!("bytes {offset}-{}/{}", body.len() - 1, body.len()),
+                            )
+                            .set_body_bytes(body[offset..].to_vec())
                     } else {
-                        b"old data"
-                    },
-                )
-                .unwrap();
-                std::fs::write(
-                    &paths.checkpoint,
-                    serde_json::to_vec(&TransferCheckpoint {
-                        representation: representation.clone(),
-                        validator: "\"first\"".into(),
-                        length: body.len() as u64,
-                    })
-                    .unwrap(),
-                )
-                .unwrap();
-                let (_cancel, mut cancellation) = oneshot::channel();
-                TransferClients::default()
-                    .download_cancellable(&current, &representation, &paths, &mut cancellation)
-                    .await
+                        ResponseTemplate::new(200)
+                            .insert_header("ETag", "\"changed\"")
+                            .set_body_bytes(body.to_vec())
+                    };
+                    Mock::given(method("GET"))
+                        .and(path("/new-private-endpoint"))
+                        .and(header("Range", format!("bytes={offset}-").as_str()))
+                        .and(header("If-Range", "\"first\""))
+                        .respond_with(response)
+                        .expect(1)
+                        .mount(&server)
+                        .await;
+                    let source = SourceId::new(format!("{kind}:download"));
+                    let media_uri =
+                        library::source_entity_uri(&source, "track", "persistent-file-id");
+                    let previous = ResolvedStream::with_redacted(
+                        "http://127.0.0.1:1/previous-private-endpoint",
+                        &media_uri,
+                    );
+                    let current = ResolvedStream::with_redacted(
+                        format!("{}/new-private-endpoint", server.uri()),
+                        &media_uri,
+                    );
+                    let representation = representation_key(
+                        Some(&source),
+                        &media_uri,
+                        quality,
+                        previous.redacted_uri(),
+                    );
+                    assert_eq!(
+                        representation,
+                        representation_key(
+                            Some(&source),
+                            &media_uri,
+                            quality,
+                            current.redacted_uri()
+                        )
+                    );
+                    let stored = format!(
+                        "[{},{},{}]",
+                        serde_json::to_string(&Some(&source)).unwrap(),
+                        format_args!(
+                            "{{\"media_uri\":{},\"quality\":{}}}",
+                            serde_json::to_string(&media_uri).unwrap(),
+                            serde_json::to_string(&quality).unwrap()
+                        ),
+                        serde_json::to_string(previous.redacted_uri()).unwrap()
+                    );
+                    assert_eq!(representation, hash_id_bytes(stored.as_bytes()));
+                    let directory = tempfile::tempdir().unwrap();
+                    let paths = download_paths(directory.path(), Some(&source), &media_uri);
+                    std::fs::create_dir_all(&paths.directory).unwrap();
+                    std::fs::write(
+                        &paths.audio_part,
+                        if unchanged {
+                            &body[..offset]
+                        } else {
+                            b"old data"
+                        },
+                    )
                     .unwrap();
-                assert_eq!(std::fs::read(&paths.audio_part).unwrap(), body);
+                    std::fs::write(
+                        &paths.checkpoint,
+                        serde_json::to_vec(&TransferCheckpoint {
+                            representation: representation.clone(),
+                            validator: "\"first\"".into(),
+                            length: body.len() as u64,
+                        })
+                        .unwrap(),
+                    )
+                    .unwrap();
+                    let (_cancel, mut cancellation) = oneshot::channel();
+                    TransferClients::default()
+                        .download_cancellable(&current, &representation, &paths, &mut cancellation)
+                        .await
+                        .unwrap();
+                    assert_eq!(std::fs::read(&paths.audio_part).unwrap(), body);
+                }
             }
         }
     }
@@ -1674,6 +1782,7 @@ mod tests {
         DownloadRecord {
             version: RECORD_VERSION,
             media_uri: library::source_entity_uri(&SourceId::new("source"), "track", "track"),
+            quality: None,
             owners: HashSet::new(),
             audio: RecordedAudio::Native {
                 custom_storage,

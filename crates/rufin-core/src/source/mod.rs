@@ -3397,9 +3397,6 @@ fn configured_sources(
             id: configured.configuration.source_id.clone(),
             kind: configured.configuration.kind.clone(),
             name: configured.configuration.name.clone(),
-            transcoded_download_bitrate_limit_kbps: configured
-                .configuration
-                .transcoded_download_bitrate_limit_kbps(),
             half_stars_enabled: half_stars_enabled(configured),
             supports_playlist_public: configured.configuration.supports_playlist_public(),
         })
@@ -3507,8 +3504,6 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
             id: configuration.source_id.clone(),
             kind: configuration.kind.clone(),
             name: configuration.name.clone(),
-            transcoded_download_bitrate_limit_kbps: configuration
-                .transcoded_download_bitrate_limit_kbps(),
             half_stars_enabled: matches!(configuration.kind.as_str(), "jellyfin" | "emby" | "plex"),
             supports_playlist_public: configuration.supports_playlist_public(),
         },

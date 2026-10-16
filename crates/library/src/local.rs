@@ -35,6 +35,7 @@ pub struct ObservedMediaFile {
 
 #[derive(Debug, FromRow)]
 pub struct DownloadMetadata {
+    pub channels: Option<u32>,
     pub title: String,
     pub artist: String,
     pub album: String,
@@ -452,7 +453,7 @@ impl Database {
         let mut connection = self.acquire_reader().await?;
         Ok(sqlx::query_as(
             "SELECT COALESCE(title,media_uri) title,COALESCE(display_artist,'') artist,COALESCE(display_album,'') album,COALESCE(disc_number,0) disc_number,COALESCE(track_number,0) track_number,
-                    COALESCE(duration_millis,0) duration_millis,source_format,loudness_analysis_key
+                    COALESCE(duration_millis,0) duration_millis,source_format,loudness_analysis_key,json_extract(metadata,'$.audio_properties.channels') channels
              FROM tracks WHERE media_uri=?1",
         )
         .bind(media_uri)

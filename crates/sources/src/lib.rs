@@ -10,6 +10,8 @@ uniffi::setup_scaffolding!();
 #[cfg(test)]
 extern crate self as sources;
 
+mod download;
+pub use download::{DownloadQuality, ResolvedDownload, downloaded_codec};
 mod config;
 mod detail_links;
 pub mod discovery;

@@ -361,18 +361,7 @@
                             <child>
                               <object class="AdwPreferencesGroup">
                                 <child>
-                                  <object class="AdwComboRow" id="encoding">
-                                    <property name="title" translatable="yes">Download quality</property>
-                                    <property name="subtitle" translatable="yes">This only takes affect for new local files that are added by another device</property>
-                                    <property name="model">
-                                      <object class="GtkStringList">
-                                        <items>
-                                          <item translatable="yes">Original</item>
-                                          <item translatable="yes">MP3</item>
-                                        </items>
-                                      </object>
-                                    </property>
-                                  </object>
+                                  <object class="GtkBox" id="encoding"><property name="orientation">vertical</property></object>
                                 </child>
                                 <child>
                                   <object class="GtkLabel" id="media_status">

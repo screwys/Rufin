@@ -456,18 +456,21 @@ impl SubsonicSource {
 
     pub(crate) fn resolve_download(
         &self,
-        track_object_id: &str,
-        quality: StreamQuality,
+        track: &str,
+        quality: crate::DownloadQuality,
     ) -> SourceResult<crate::ResolvedDownload> {
-        let (format, extension) = match quality {
-            StreamQuality::Original => ("raw", None),
-            StreamQuality::MaxBitrateKbps(_) if self.flavor == SubsonicFlavor::Navidrome => {
-                ("opus", Some("opus"))
-            }
-            StreamQuality::MaxBitrateKbps(_) => ("mp3", Some("mp3")),
+        let Some(encoding) = quality.encoding() else {
+            return self
+                .resolve_audio(track, None, "raw")
+                .map(|stream| crate::ResolvedDownload::ready(stream, None));
         };
-        let stream = self.resolve_audio(track_object_id, quality.max_bitrate_kbps(), format)?;
-        Ok(crate::ResolvedDownload::new(stream, extension))
+        if encoding.stereo() {
+            return self
+                .resolve_audio(track, None, "raw")
+                .map(|stream| crate::ResolvedDownload::encode(stream, quality));
+        }
+        let stream = self.resolve_audio(track, encoding.bitrate_kbps, encoding.codec.name())?;
+        Ok(crate::ResolvedDownload::ready(stream, Some(encoding.codec)))
     }
 
     fn resolve_audio(

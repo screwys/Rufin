@@ -201,12 +201,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
         }
         SettingsGroup(translate("Music on this device")) {
             Text(translate("Download quality"), Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(state.settings.encoding == Encoding.ORIGINAL, { connect.encoding(Encoding.ORIGINAL) },
-                    label = { Text(translate("Original")) }, enabled = enabled)
-                FilterChip(state.settings.encoding == Encoding.MP3, { connect.encoding(Encoding.MP3) },
-                    label = { Text(translate("MP3")) }, enabled = enabled)
-            }
+            io.github.screwys.rufin.downloads.DownloadQualityControls(state.settings.encoding, enabled) { connect.encoding(it) }
             state.mediaStatus?.let { Text(it, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall) }
         }
         SettingsGroup(translate("Profile storage")) {

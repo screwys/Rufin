@@ -1,8 +1,8 @@
+use audio_processing::ResolvedStream;
 use audio_processing::{configure_sources, ensure_gstreamer_initialized};
 use gst::glib;
 use gst::prelude::*;
 use gstreamer as gst;
-use playback::ResolvedStream;
 use playback::*;
 use std::collections::VecDeque;
 use std::f64::consts::FRAC_PI_2;

@@ -3,8 +3,8 @@
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::sync::Arc;
 
+use audio_processing::ResolvedStream;
 use futures_util::TryStreamExt;
-use playback::ResolvedStream;
 use reqwest::{
     Client, StatusCode,
     header::{self, HeaderValue},
