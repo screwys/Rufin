@@ -304,7 +304,9 @@ impl PreparedFile {
                 &previous_artist,
                 &mut mp4,
             )?;
-            std::fs::File::open(&self.file)
+            std::fs::File::options()
+                .write(true)
+                .open(&self.file)
                 .and_then(|file| file.sync_all())
                 .map_err(failure)?;
             Ok((self, mp4))

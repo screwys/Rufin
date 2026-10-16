@@ -4590,11 +4590,10 @@ mod tests {
                         _ => {}
                     }
                 }
-                if !pause_requested && frames >= 3_200 {
-                    assert!(
-                        queue.property::<u64>("current-level-time") >= 300_000_000,
-                        "fade test did not queue enough PCM ahead of playback"
-                    );
+                if !pause_requested
+                    && frames >= 3_200
+                    && queue.property::<u64>("current-level-time") >= 300_000_000
+                {
                     engine.handle_command(BackendCommand::Pause { run });
                     pause_requested = true;
                 } else if pause_requested && !resumed && !engine.primary.is_playing() {
@@ -4642,6 +4641,10 @@ mod tests {
             }
             let final_position = engine.primary.position().unwrap().mseconds();
             engine.shutdown();
+            assert!(
+                pause_requested,
+                "fade test did not queue enough PCM ahead of playback"
+            );
             assert!(
                 resumed && up.len() >= 30,
                 "resume did not render sustained audio"
