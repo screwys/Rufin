@@ -8,6 +8,7 @@ pub struct AndroidPlaylistImport {
 
 #[derive(uniffi::Record)]
 pub struct AndroidRouteDescriptor {
+    pub item: SidebarRouteItem,
     pub id: String,
     pub title: String,
     pub icon_name: String,

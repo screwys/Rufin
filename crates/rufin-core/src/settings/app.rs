@@ -16,8 +16,8 @@ use sources::SourceId;
 
 use super::{
     AccentPreference, ContextMenuSettings, LayoutSettings, LibraryListKey, LibraryListSettings,
-    LibraryListSettingsEntry, SettingsError, SettingsOwner, SidebarSettings, ThemePreference,
-    default_library_list_settings, sanitized_window_size,
+    LibraryListSettingsEntry, SettingsError, SettingsOwner, SidebarRouteItem, SidebarSettings,
+    ThemePreference, default_library_list_settings, sanitized_window_size,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -198,6 +198,8 @@ macro_rules! preference_group {
 }
 
 preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] ApplicationPreferences, application, {
+    #[serde(default = "default_starting_page")]
+    starting_page: SidebarRouteItem = default_starting_page() => set_starting_page;
     private_mode: bool = false => set_private_mode;
     #[serde(default)]
     cast_proxy_enabled: bool = false => set_cast_proxy_enabled;
@@ -539,6 +541,10 @@ fn legacy_secret_storage_mode() -> SecretStorageMode {
     SecretStorageMode::ConfigFile
 }
 
+fn default_starting_page() -> SidebarRouteItem {
+    SidebarRouteItem::Home
+}
+
 fn default_release_check_interval_hours() -> u32 {
     6
 }
@@ -614,6 +620,8 @@ fn sanitize_downloads(downloads: &mut Vec<SourceDownloadSettings>) {
 
 #[cfg(test)]
 mod tests {
+    use crate::settings::SidebarRouteItem;
+
     use super::{
         ApplicationPreferences, PlayerDisplayPreferences, RecentSearchKind, RecentSearchResult,
         Settings,
@@ -732,14 +740,25 @@ mod tests {
     }
 
     #[test]
-    fn release_check_interval_defaults_for_existing_settings_and_round_trips_choices() {
+    fn general_preferences_default_for_existing_settings_and_round_trip_choices() {
         let mut saved = serde_json::to_value(Settings::default()).unwrap();
         saved
             .as_object_mut()
             .unwrap()
             .remove("release_check_interval_hours");
+        saved.as_object_mut().unwrap().remove("starting_page");
         let previous: Settings = serde_json::from_value(saved).unwrap();
         assert_eq!(previous.application.release_check_interval_hours, 6);
+        assert_eq!(previous.application.starting_page, SidebarRouteItem::Home);
+
+        for page in SidebarRouteItem::all() {
+            let mut settings = Settings::default();
+            settings.application.starting_page = page;
+            settings.sanitize();
+            let saved = serde_json::to_vec(&settings).unwrap();
+            let restored: Settings = serde_json::from_slice(&saved).unwrap();
+            assert_eq!(restored.application.starting_page, page);
+        }
 
         for hours in [1, 6, 12, 24] {
             let mut settings = Settings {

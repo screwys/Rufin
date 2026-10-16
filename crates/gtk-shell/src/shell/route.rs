@@ -45,15 +45,14 @@ mod route_stack_tests {
     }
 
     #[test]
-    fn resetting_navigation_forgets_back_and_forward_routes() {
-        let mut routes = RouteStack::new(Route::Home);
-        routes.navigate(Route::Albums);
-        routes.navigate(Route::Tracks);
-        routes.back();
-        routes.reset_to_home();
-        assert_eq!(routes.current(), &Route::Home);
-        assert!(!routes.can_back());
-        assert!(routes.forward().is_none());
+    fn initial_route_has_no_navigation_history() {
+        for item in rufin_core::settings::SidebarRouteItem::all() {
+            let initial = rufin_core::route::sidebar_route_descriptor(item).root_route;
+            let mut routes = RouteStack::new(initial.clone());
+            assert_eq!(routes.current(), &initial);
+            assert!(!routes.can_back());
+            assert!(routes.forward().is_none());
+        }
     }
 
     #[test]
@@ -155,12 +154,6 @@ impl RouteStack {
         }
         let previous = std::mem::replace(&mut self.current, route);
         self.back.push(previous);
-        self.forward.clear();
-    }
-
-    pub(crate) fn reset_to_home(&mut self) {
-        self.back.clear();
-        self.current = Route::Home;
         self.forward.clear();
     }
 
@@ -492,17 +485,8 @@ impl Shell {
         self.replace_current_route_when_ready();
     }
 
-    pub(crate) fn reset_navigation_to_home(self: &Rc<Self>) {
-        self.close_activity();
-        debug!("reset navigation to Home");
-        self.player_ui.close_fullscreen_player();
-        self.release_selected_navigation();
-        self.render_current_route();
-    }
-
-    pub(crate) fn release_selected_navigation(&self) {
+    pub(crate) fn clear_route_positions(&self) {
         self.route_viewport.position_memory.borrow_mut().clear();
-        self.navigation.routes.borrow_mut().reset_to_home();
     }
 
     pub(crate) fn go_back(self: &Rc<Self>) {

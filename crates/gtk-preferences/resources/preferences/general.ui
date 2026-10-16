@@ -20,6 +20,7 @@
     <child>
       <object class="AdwPreferencesGroup" id="window_group">
         <property name="title" translatable="yes">App settings</property>
+        <child><object class="AdwComboRow" id="starting_page_row"><property name="title" translatable="yes">Starting page</property></object></child>
         <child><object class="AdwSwitchRow" id="tray_row"><property name="title" translatable="yes">Show tray icon</property></object></child>
         <child><object class="AdwSwitchRow" id="keep_running_row"><property name="title" translatable="yes">Keep Rufin running after closing the window</property></object></child>
         <child><object class="AdwSwitchRow" id="start_minimized_row"><property name="title" translatable="yes">Start minimized</property></object></child>

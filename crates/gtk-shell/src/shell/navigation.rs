@@ -60,9 +60,9 @@ pub(crate) struct NavigationState {
 }
 
 impl NavigationState {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(initial_route: Route) -> Self {
         Self {
-            routes: RefCell::new(RouteStack::new(Route::Home)),
+            routes: RefCell::new(RouteStack::new(initial_route)),
             favorite_category: Cell::new(CollectionCategory::Tracks),
             pin_generation: Cell::new(0),
             pin_identity: RefCell::new(None),

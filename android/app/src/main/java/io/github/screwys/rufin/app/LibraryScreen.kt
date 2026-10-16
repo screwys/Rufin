@@ -220,7 +220,9 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         tween(if (reduceMotion) 0 else 180), label = "libraryTab")
     val routeState = rememberSaveableStateHolder()
     val detailState = rememberSaveableStateHolder()
-    val rootPages = browse.configuredRoutes.filter { it.id != "Search" }.associate { route -> key(route.id) {
+    val rootPages = browse.routes.filter { route ->
+        route.id != "Search" && (route.id == browse.rootId || browse.configuredRoutes.any { it.id == route.id })
+    }.associate { route -> key(route.id) {
         val options = remember(route.id) { browse.optionsFor(route.id) }
         val location = remember(route.id, route.route) { BrowseLocation(route.route, route.title, route.id, options) }
         val lifetime = rememberCoroutineScope()

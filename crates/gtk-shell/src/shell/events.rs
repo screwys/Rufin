@@ -162,7 +162,7 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
 fn release_selected_source(shell: &Rc<Shell>) {
     shell.search_session.set_selected(None);
     shell.clear_mounted_routes();
-    shell.release_selected_navigation();
+    shell.clear_route_positions();
     let released = shell.selected_ui.take();
     drop(released);
     shell.rebuild_sidebar_navigation();
@@ -234,14 +234,7 @@ fn finish_source_assignment(
 
     if source_changed {
         shell.clear_mounted_routes();
-        if matches!(
-            shell.navigation.routes.borrow().current(),
-            Route::History | Route::Playlists | Route::SmartPlaylists
-        ) {
-            shell.replace_current_route_when_ready();
-        } else {
-            shell.reset_navigation_to_home();
-        }
+        shell.replace_current_route_when_ready();
     } else if scope_changed {
         // A mounted Home owns its current snapshot for the duration of the
         // visit. Other routes keep their current page until its replacement

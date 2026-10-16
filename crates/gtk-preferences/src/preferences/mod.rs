@@ -899,6 +899,7 @@ fn general_page(
     gtk_widgets::objects!(builder, resource, {
         page: adw::PreferencesPage,
         language_row: adw::ComboRow,
+        starting_page_row: adw::ComboRow,
         window_group: adw::PreferencesGroup,
         activity_overview_row: adw::ActionRow,
         tray_row: adw::SwitchRow,
@@ -928,6 +929,37 @@ fn general_page(
         secret_storage_row: adw::ComboRow,
     });
     let settings = shell.settings.current.borrow().clone();
+    let starting_pages = SidebarRouteItem::all();
+    let starting_page_titles = starting_pages
+        .iter()
+        .map(|item| tr(gtk_widgets::route::sidebar_route_descriptor(*item).title))
+        .collect::<Vec<_>>();
+    starting_page_row.set_model(Some(&gtk::StringList::new(
+        &starting_page_titles
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    )));
+    starting_page_row.set_selected(
+        starting_pages
+            .iter()
+            .position(|item| *item == settings.application.starting_page)
+            .unwrap() as u32,
+    );
+    let starting_page_shell = Rc::downgrade(shell);
+    starting_page_row.connect_selected_notify(move |row| {
+        let Some(shell) = starting_page_shell.upgrade() else {
+            return;
+        };
+        let Some(&page) = starting_pages.get(row.selected() as usize) else {
+            return;
+        };
+        shell
+            .settings
+            .set_app_setting("starting page", page, |settings| {
+                &mut settings.application.starting_page
+            });
+    });
     let language_options = Rc::new(language_options());
     let language_titles = language_options
         .iter()

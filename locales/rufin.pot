@@ -3419,6 +3419,9 @@ msgstr ""
 msgid "Start playing automatically"
 msgstr ""
 
+msgid "Starting page"
+msgstr ""
+
 msgid "Starting..."
 msgstr ""
 

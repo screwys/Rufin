@@ -17,6 +17,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.app.RufinConnection
+import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
 import io.github.screwys.rufin.more.MoreDestination
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.ui.RufinIcon
@@ -134,6 +135,9 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                         preferences.state?.languages.orEmpty().map { it.id to if (it.id == "system") translate("System default") else it.title }, select = preferences::selectLanguage)
                 }
                 SettingsGroup(translate("App settings")) {
+                    PreferenceChoice(translate("Starting page"), state.startingPage.name,
+                        browse.routes.map { it.item.name to it.title },
+                        select = { page -> preferences.changePreference { setStartingPage(SidebarRouteItem.valueOf(page)) } })
                     PreferenceChoice(translate("Update check interval"), state.releaseCheckIntervalHours.toString(),
                         listOf("1" to translate("1 hour"), "6" to translate("6 hours"), "12" to translate("12 hours"), "24" to translate("24 hours")),
                         select = { preferences.changePreference { setReleaseCheckIntervalHours(it.toUInt()) } })

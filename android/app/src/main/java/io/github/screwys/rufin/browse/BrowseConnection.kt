@@ -2,6 +2,7 @@ package io.github.screwys.rufin.browse
 
 import io.github.screwys.rufin.shared.rufin_core.ConfiguredSources
 import io.github.screwys.rufin.shared.rufin_core.Route
+import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
 import io.github.screwys.rufin.app.RufinConnection
 
 import androidx.compose.runtime.*
@@ -67,6 +68,7 @@ internal class BrowseConnection(private val connection: RufinConnection, scope: 
         artistAlbumsDisplay = display
         if (orderChanged) artistAlbumsRevision++
     }
+    private var startupRouteSelected = false
     private var translationVersion: Int? = null
     private var searchLoading by mutableStateOf(false)
     private val routeOptions = mutableMapOf<String, BrowseOptions>()
@@ -104,7 +106,12 @@ internal class BrowseConnection(private val connection: RufinConnection, scope: 
                     val runtime = service.runtime.value?.getOrNull() ?: return@collectLatest
                     val current = runtime.library()
                     bridge = current
-                    loadDescriptors(current)
+                    val startingPage = if (!startupRouteSelected) withContext(Dispatchers.IO) {
+                        val settings = runtime.settings()
+                        try { settings.applicationPreferences().startingPage } finally { settings.destroy() }
+                    } else null
+                    loadDescriptors(current, startingPage)
+                    startupRouteSelected = true
                     library = current
                     recentSearchRows = loadRecentSearches(current)
                     awaitCancellation()
@@ -139,7 +146,7 @@ internal class BrowseConnection(private val connection: RufinConnection, scope: 
         }
     }
 
-    private suspend fun loadDescriptors(bridge: AndroidLibrary) = withContext(Dispatchers.IO) {
+    private suspend fun loadDescriptors(bridge: AndroidLibrary, startingPage: SidebarRouteItem? = null) = withContext(Dispatchers.IO) {
         val all = bridge.routes()
         val configured = bridge.configuredRoutes()
         val settings = bridge.routeSettings()
@@ -149,7 +156,10 @@ internal class BrowseConnection(private val connection: RufinConnection, scope: 
             configuredRoutes = configured
             routeSettings = settings
             categories = collections
-            if (configured.none { it.id == rootId }) rootId = configured.firstOrNull { it.id != "Search" }?.id ?: "Home"
+            if (all.none { it.id == rootId }) rootId = configured.firstOrNull { it.id != "Search" }?.id ?: "Home"
+            all.firstOrNull { it.item == startingPage }?.let { route ->
+                if (route.id == "Search") section = AppSection.Search else chooseRoot(route.id)
+            }
         }
     }
 

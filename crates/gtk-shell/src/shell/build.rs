@@ -162,7 +162,9 @@ pub async fn build(
         current: RefCell::new(settings.clone()),
         persistence: settings_handle,
     });
-    let navigation = NavigationState::new();
+    let navigation = NavigationState::new(
+        rufin_core::route::sidebar_route_descriptor(settings.application.starting_page).root_route,
+    );
     let selected_ui = SelectedUiState::new();
     let source = Rc::new(SourceState {
         configured: RefCell::new(configured_sources),

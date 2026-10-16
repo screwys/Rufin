@@ -3,6 +3,7 @@ use super::*;
 fn route_descriptor(item: SidebarRouteItem) -> AndroidRouteDescriptor {
     let descriptor = sidebar_route_descriptor(item);
     AndroidRouteDescriptor {
+        item,
         id: descriptor.stable_id.into(),
         title: localization::tr(descriptor.title),
         icon_name: descriptor.icon_name.into(),
