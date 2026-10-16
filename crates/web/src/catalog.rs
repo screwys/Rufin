@@ -667,7 +667,7 @@ async fn folders(
                 .catalog_keys(
                     library::CatalogKind::Folder,
                     Some(source),
-                    &[(parent).to_string()],
+                    std::slice::from_ref(parent),
                     &cancellation,
                 )
                 .await

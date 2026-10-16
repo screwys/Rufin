@@ -684,9 +684,9 @@ mod windows {
             );
         let can_next = playback.queue.can_next || playback.controls.auto_dj_enabled;
         Some(WindowsMediaState {
-            title: media.title.clone(),
-            artist: media.artist.clone(),
-            album: media.album.clone(),
+            title: media.row.track.metadata.title.clone(),
+            artist: media.row.track.metadata.artist.clone(),
+            album: media.row.track.metadata.album.clone(),
             duration_millis: playback.transport.duration_millis,
             position_millis: playback.transport.position_millis,
             art_url,
@@ -1106,9 +1106,9 @@ mod macos {
             let artwork = art_url.and_then(load_artwork);
             {
                 let mut state = self.state.borrow_mut();
-                state.title.clone_from(&media.title);
-                state.artist.clone_from(&media.artist);
-                state.album.clone_from(&media.album);
+                state.title.clone_from(&media.row.track.metadata.title);
+                state.artist.clone_from(&media.row.track.metadata.artist);
+                state.album.clone_from(&media.row.track.metadata.album);
                 state.duration_millis = playback.transport.duration_millis;
                 state.position_millis = playback.transport.position_millis;
                 state.playback = playback_state(playback);
