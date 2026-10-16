@@ -365,10 +365,6 @@ where
             warn!(%error, source_id=%configured.configuration.source_id, "could not reconcile configured source mapping");
         }
     }
-    if let Err(error) = library.ensure_default_smart_playlists().await {
-        warn!(%error, "could not initialize default Smart playlists; startup will continue");
-    }
-
     let connect = crate::connect::ConnectOwner::new(
         paths.data_dir().join("connect"),
         Arc::clone(&library),

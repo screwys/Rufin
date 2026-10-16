@@ -458,33 +458,27 @@ pub(crate) async fn load_smart_playlist_rows(
     Ok(result)
 }
 
-impl Database {
-    pub async fn ensure_default_smart_playlists(&self) -> LibraryResult<bool> {
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        let mut changed = false;
-        for (object_id, name, definition) in default_smart_playlists() {
-            changed |= sqlx::query(
-                "INSERT INTO smart_playlists(
-                     object_id, name, normalized_name,definition_json, position
-                 ) SELECT ?1, ?2, lower(?2), ?3,
-                          COALESCE(max(position) + 1, 0)
-                   FROM smart_playlists WHERE true
-                 ON CONFLICT(object_id) DO NOTHING",
-            )
-            .bind(object_id)
-            .bind(name)
-            .bind(encode_definition(&definition)?)
-            .execute(&mut *transaction)
-            .await?
-            .rows_affected()
-                == 1;
-        }
-        transaction.commit().await?;
-        Ok(changed)
+pub(crate) async fn create_default_smart_playlists(
+    connection: &mut SqliteConnection,
+) -> LibraryResult<()> {
+    for (position, (object_id, name, definition)) in
+        default_smart_playlists().into_iter().enumerate()
+    {
+        sqlx::query(
+            "INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position)
+             VALUES (?1,?2,lower(?2),?3,?4)",
+        )
+        .bind(object_id)
+        .bind(name)
+        .bind(encode_definition(&definition)?)
+        .bind(position as i64)
+        .execute(&mut *connection)
+        .await?;
     }
+    Ok(())
+}
 
+impl Database {
     pub async fn smart_playlist_value_suggestions(
         &self,
         source: SourceKey,

@@ -70,6 +70,10 @@ pub async fn fixture() -> Fixture {
     let directory = tempfile::tempdir().expect("temporary Library directory");
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.expect("open Library");
+    sqlx::query("DELETE FROM smart_playlists")
+        .execute(&mut connection(&path).await)
+        .await
+        .expect("start fixture with no Smart Playlists");
     let source = database
         .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
         .await

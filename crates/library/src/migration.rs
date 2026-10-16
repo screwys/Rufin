@@ -158,6 +158,12 @@ pub(crate) async fn import_released(
         .tempdir_in(parent)?;
     let pending = stage.path().join("store.sqlite");
     let database = Database::open_final(&pending).await?;
+    {
+        let mut writer = database.writer().await?;
+        sqlx::query("DELETE FROM smart_playlists")
+            .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+            .await?;
+    }
     if version >= 41 {
         let mut writer = database.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;

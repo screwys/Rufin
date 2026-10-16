@@ -799,7 +799,7 @@ mod tests {
             .unwrap();
         let mut writer = database.writer().await.unwrap();
         let connection = writer.as_mut().unwrap();
-        sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32)); INSERT INTO genres(genre_key,source_key,object_id,media_uri,metadata) VALUES (1,1,'genre','genre:genre',jsonb(json_object('name','Genre','sort_text','genre'))); INSERT INTO folders(folder_key,source_key,object_id,media_uri,metadata) VALUES (1,1,'folder','folder:folder',jsonb(json_object('name','Folder','sort_text','folder')));").execute(&mut *connection).await.unwrap();
+        sqlx::raw_sql("DELETE FROM smart_playlists; INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32)); INSERT INTO genres(genre_key,source_key,object_id,media_uri,metadata) VALUES (1,1,'genre','genre:genre',jsonb(json_object('name','Genre','sort_text','genre'))); INSERT INTO folders(folder_key,source_key,object_id,media_uri,metadata) VALUES (1,1,'folder','folder:folder',jsonb(json_object('name','Folder','sort_text','folder')));").execute(&mut *connection).await.unwrap();
         let definition = crate::SmartPlaylistDefinition {
             current: true,
             ..crate::SmartPlaylistDefinition::default()

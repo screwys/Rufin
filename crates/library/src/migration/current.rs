@@ -678,6 +678,9 @@ pub(crate) async fn import(input: &Path, destination: &Path, catalog: &Path) -> 
         attach(&mut connection, catalog, "old_catalog").await?;
     }
     let mut transaction = connection.begin().await?;
+    sqlx::query("DELETE FROM smart_playlists")
+        .execute(&mut *transaction)
+        .await?;
     sqlx::query("INSERT INTO sources(source_key,object_id) SELECT source_key,object_id FROM old_store.source_ids")
         .execute(&mut *transaction).await?;
     if has_catalog {

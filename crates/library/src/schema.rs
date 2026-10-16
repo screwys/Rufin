@@ -713,6 +713,9 @@ pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> Lib
     sqlx::raw_sql(STORE_SCHEMA)
         .execute(&mut *transaction)
         .await?;
+    if version == 0 {
+        crate::smart_playlists::create_default_smart_playlists(&mut transaction).await?;
+    }
     transaction.commit().await?;
     Ok(())
 }

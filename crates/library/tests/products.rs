@@ -3430,26 +3430,19 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
 }
 
 #[tokio::test]
-async fn selected_source_defaults_have_the_three_activity_smart_playlists() {
-    let fixture = fixture().await;
-    assert!(
-        fixture
-            .database
-            .ensure_default_smart_playlists()
-            .await
-            .expect("install default Smart Playlists")
-    );
-    assert!(
-        !fixture
-            .database
-            .ensure_default_smart_playlists()
-            .await
-            .expect("default Smart Playlists are idempotent")
-    );
+async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    let database = library::Database::open(&path).await.unwrap();
+    let source = database
+        .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
+        .await
+        .unwrap()
+        .source;
     let cancellation = ReadCancellation::new();
     let (count, _, rows) = library::CatalogQuery {
         subject: library::CatalogSubject::SmartPlaylists {
-            source: (Some(fixture.source)).into(),
+            source: (Some(source)).into(),
             sort: CatalogSort::Position,
             now: 0,
         },
@@ -3460,7 +3453,7 @@ async fn selected_source_defaults_have_the_three_activity_smart_playlists() {
         downloaded_only: false,
         activity: true,
     }
-    .page(&fixture.database, RouteSeedWindow::top(), &cancellation)
+    .page(&database, RouteSeedWindow::top(), &cancellation)
     .await
     .map(|page| {
         (
@@ -3495,6 +3488,30 @@ async fn selected_source_defaults_have_the_three_activity_smart_playlists() {
         SmartPlaylistRuleField::Played
     );
     assert_eq!(rows[2].definition.sort_field, SmartPlaylistSort::SkipCount);
+    assert!(database.delete_smart_playlist(order[2]).await.unwrap());
+    database.close().await.unwrap();
+    let database = library::Database::open(&path).await.unwrap();
+    let mut raw = connection(&path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT object_id FROM smart_playlists ORDER BY position")
+            .fetch_all(&mut raw)
+            .await
+            .unwrap(),
+        ["builtin:most_played", "builtin:never_played"]
+    );
+    for key in &order[..2] {
+        assert!(database.delete_smart_playlist(*key).await.unwrap());
+    }
+    database.close().await.unwrap();
+    let database = library::Database::open(&path).await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM smart_playlists")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        0
+    );
+    database.close().await.unwrap();
 }
 
 #[tokio::test]
