@@ -1,5 +1,7 @@
 package io.github.screwys.rufin.player
 
+import io.github.screwys.rufin.ui.rememberArtwork
+import io.github.screwys.rufin.ui.PlayerArtwork
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.MediaNavigationSheet
@@ -34,6 +36,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.offset
@@ -88,13 +91,15 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     var navigation by remember { mutableStateOf<String?>(null) }
     val lyricsScroll = rememberLazyListState()
     val application = player.settings
+    var artworkPixels by remember { mutableIntStateOf(0) }
+    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, artworkPixels)
     val lyricsEnabled = application?.display?.fullscreenLyricsVisible != false
     val currentLineEnabled = application?.display?.fullscreenCurrentLyricsLineVisible != false
     val visualizerEnabled = application?.display?.fullscreenVisualizerVisible == true
     val combined = lyricsEnabled && visualizerEnabled && application?.rightPanel?.combined == true
     val background = animateColorAsState(
         if (application?.display?.fullscreenDynamicBackground == true)
-            lerp(MaterialTheme.colorScheme.surface, player.artwork?.color ?: MaterialTheme.colorScheme.surface, .12f)
+            lerp(MaterialTheme.colorScheme.surface, artwork?.color ?: MaterialTheme.colorScheme.surface, .12f)
         else MaterialTheme.colorScheme.surface, tween(if (reduceMotion) 0 else 320), label = "fullPlayerColor")
     val verticalOffset = remember { Animatable(0f) }
     val trackOffset = remember { Animatable(0f) }
@@ -136,7 +141,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
             }, onDragCancel = { scope.launch { trackOffset.animateTo(0f, tween(if (reduceMotion) 0 else 180)) } })
         }, color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface) {
         Box(Modifier.fillMaxSize()) {
-            if (application?.display?.fullscreenBackgroundImage == true) player.artwork?.let { artwork ->
+            if (application?.display?.fullscreenBackgroundImage == true) artwork?.let { artwork ->
                 Image(artwork.bitmap.asImageBitmap(), null, Modifier.matchParentSize().blur(48.dp).alpha(.12f), contentScale = ContentScale.Crop)
             }
             AnimatedContent(surface, Modifier.fillMaxSize(), transitionSpec = {
@@ -149,9 +154,9 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                         PlayerIconButton("rufin-go-down-symbolic", "Close", { if (visible == null) onClose() else surface = null })
                         if (visible == null) PlayerContext(player, Modifier.weight(1f).padding(horizontal = 8.dp))
                         else Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(player.currentItem?.title.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            Text(player.currentItem?.metadata?.title.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text(player.currentItem?.artist.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                            Text(player.currentItem?.metadata?.artist.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
                         }
                         if (visible == null) PlayerIconButton("rufin-view-more-symbolic", "More actions", onMore)
                         else if (visible == PlayerSurface.LYRICS) LyricsActions(player)
@@ -160,7 +165,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
                     if (visible == null) {
                         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                             val viewportHeight = maxHeight
-                            val content: @Composable (Modifier) -> Unit = { MainPlayerArtwork(player, currentLineEnabled, it.clipToBounds().graphicsLayer { translationX = trackOffset.value }) }
+                            val content: @Composable (Modifier) -> Unit = { MainPlayerArtwork(player, artwork, currentLineEnabled, it.clipToBounds().graphicsLayer { translationX = trackOffset.value }) { artworkPixels = it } }
                             val controls: @Composable () -> Unit = {
                                 PlayerMetadata(player, Modifier.fillMaxWidth().padding(vertical = 12.dp)) { navigation = it }
                                 PlayerControls(player, Modifier.fillMaxWidth())
@@ -214,13 +219,13 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
 }
 
 @Composable
-private fun MainPlayerArtwork(player: PlayerConnection, showCurrentLine: Boolean, modifier: Modifier) {
+private fun MainPlayerArtwork(player: PlayerConnection, artwork: PlayerArtwork?, showCurrentLine: Boolean, modifier: Modifier, onArtworkSize: (Int) -> Unit) {
     val reduceMotion = LocalReduceMotion.current
     val hasLyrics = showCurrentLine && player.currentLyrics?.document?.lines?.isNotEmpty() == true
     val space by animateDpAsState(if (hasLyrics) 52.dp else 0.dp, tween(if (reduceMotion) 0 else 260), label = "lyricsPreviewSpace")
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            PlayerCover(player, Modifier.size(minOf(maxWidth, maxHeight)))
+            PlayerCover(player, artwork, Modifier.size(minOf(maxWidth, maxHeight)).onSizeChanged { onArtworkSize(maxOf(it.width, it.height)) })
         }
         Box(Modifier.fillMaxWidth().height(space), contentAlignment = Alignment.CenterStart) {
             if (showCurrentLine) CurrentLyricsPreview(player)
@@ -274,9 +279,13 @@ private fun PlayerFooterButton(icon: String, label: String, action: () -> Unit) 
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-private fun PlayerCover(player: PlayerConnection, modifier: Modifier) {
+private fun PlayerCover(player: PlayerConnection, artwork: PlayerArtwork?, modifier: Modifier) {
     val duration = if (LocalReduceMotion.current) 0 else 240
-    val cover = player.displayedArtworkIdentity to player.artwork
+    val binding = player.currentItem?.artworkBinding?.toList()
+    val identity = remember(player.bridge, binding) {
+        binding?.let { player.bridge?.artworkIdentity(it.toByteArray()) }
+    }
+    val cover = identity to artwork
     updateTransition(cover, label = "playerArtwork").Crossfade(modifier.aspectRatio(1f).clip(RoundedCornerShape(8.dp)),
         animationSpec = tween(if (duration == 0) 0 else 220), contentKey = { it.first }) { (_, artwork) ->
         Artwork(artwork, Modifier.fillMaxSize())
@@ -290,7 +299,7 @@ private fun PlayerMetadata(player: PlayerConnection, modifier: Modifier, onGoTo:
     val metadata by remember(player) { derivedStateOf {
         player.playback?.let { state ->
             val links = player.metadataLinks?.takeIf { it.mediaUri == state.transport.current?.id?.mediaUri }
-            PlayerMetadataText(state.transport.current?.id?.mediaUri, player.currentItem?.title.orEmpty(), links?.artistText ?: player.currentItem?.artist.orEmpty(), links?.albumText ?: player.currentItem?.album.orEmpty())
+            PlayerMetadataText(state.transport.current?.id?.mediaUri, player.currentItem?.metadata?.title.orEmpty(), links?.artistText ?: player.currentItem?.metadata?.artist.orEmpty(), links?.albumText ?: player.currentItem?.metadata?.album.orEmpty())
         }
     } }
     val current = metadata ?: return

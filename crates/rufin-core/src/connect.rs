@@ -1,5 +1,6 @@
 //! Connect composition shared by desktop, headless and HTTP clients.
 mod cache;
+pub(crate) use cache::LyricsCacheQuery;
 pub(crate) mod casting;
 mod media;
 pub mod portable;
@@ -349,6 +350,9 @@ pub enum Control {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "request", rename_all = "snake_case")]
 enum Request {
+    CacheFile {
+        asset: cache::CacheRequest,
+    },
     CastFrom {
         transfer: bool,
     },
@@ -504,7 +508,17 @@ impl ConnectOwner {
             media_received: std::sync::atomic::AtomicU64::new(0),
         });
         owner.playback.install_connect(&owner);
+        owner.playback.lyrics.handle().install_connect(&owner);
         owner.source.install_connect(&owner);
+        let cache_owner = Arc::downgrade(&owner);
+        owner
+            .source
+            .shared
+            .artwork
+            .install_cache_resolver(move |keys| {
+                let owner = cache_owner.clone();
+                async move { owner.upgrade()?.fetch_cached_artwork(keys).await }
+            });
         owner
     }
 }
@@ -1291,6 +1305,8 @@ impl ConnectOwner {
             .spawn(async move {
                 source
                     .client(&source_id)?
+                    .profile_file_source()
+                    .map_err(|failure| ActionError::Failed(failure.to_string()))?
                     .list_profile_files(&folder)
                     .await
                     .map(|files| files.into_iter().map(|(path, _)| path).collect())
@@ -1814,6 +1830,8 @@ impl ConnectOwner {
                     if let Some(source_id) = source_id {
                         let source = owner.source.client(&source_id)?;
                         source
+                            .profile_file_source()
+                            .map_err(error)?
                             .write_profile_file(&path.to_string_lossy(), output, Some(None))
                             .await
                             .map_err(error)?;
@@ -1833,7 +1851,9 @@ impl ConnectOwner {
                         let incoming =
                             tempfile::NamedTempFile::new_in(&owner.directory).map_err(error)?;
                         if source
-                            .read_profile_file(&path.to_string_lossy(), incoming.path())
+                            .profile_file_source()
+                            .map_err(error)?
+                            .copy_file(&path.to_string_lossy(), incoming.path())
                             .await
                             .map_err(error)?
                             .is_none()
@@ -2074,13 +2094,6 @@ impl ConnectOwner {
                             })
                             .await;
                     });
-                }
-            }
-            NetworkEvent::CacheChanged { profile } => {
-                if let Some(session) = self.session.read().await.as_ref()
-                    && session.profile == profile
-                {
-                    session.cache_changed.notify_one();
                 }
             }
             NetworkEvent::Reachable { profile, peer } => {
@@ -2621,6 +2634,7 @@ impl ConnectOwner {
         }
         let request: Request = serde_json::from_slice(bytes).map_err(error)?;
         let answer = match request {
+            Request::CacheFile { asset } => self.answer_cache(asset).await?,
             Request::CastFrom { transfer } => {
                 if transfer {
                     self.continue_from_with_state(peer, None).await?;
@@ -2644,12 +2658,22 @@ impl ConnectOwner {
                 offset,
                 limit,
                 filter,
-            } => serde_json::to_value(
-                self.playback
+            } => {
+                let page = self
+                    .playback
                     .receiver_queue_page(offset, limit, filter)
-                    .await?,
-            )
-            .map_err(error)?,
+                    .await?;
+                serde_json::to_value(casting::ReceiverQueuePage {
+                    rows: page
+                        .rows
+                        .iter()
+                        .map(|row| library::QueueTransferRow::from(row.as_ref()))
+                        .collect(),
+                    total: page.total,
+                    window_offset: page.window_offset,
+                })
+                .map_err(error)?
+            }
             Request::CastQueue => {
                 let snapshot = self.playback.cast_queue_snapshot().await?;
                 let header = snapshot.as_ref().map(|snapshot| snapshot.header.clone());
@@ -2898,8 +2922,13 @@ impl ConnectOwner {
                         .await
                         .map_err(error)?;
                 } else {
-                    self.fetch_direct_continuation(peer, &current, header.current)
-                        .await?;
+                    self.fetch_direct_continuation(
+                        peer,
+                        &current.media_uri,
+                        &current.metadata,
+                        header.current,
+                    )
+                    .await?;
                 }
             }
             let prepared = self
@@ -3192,7 +3221,7 @@ impl ConnectOwner {
     async fn finish_adoption(&self) -> Result<(), String> {
         let session = self.active().await?;
         self.source
-            .restore_user_state(true, || async {
+            .restore_user_state(true, false, || async {
                 let playback = Arc::clone(&self.playback);
                 tokio::task::spawn_blocking(move || playback.shutdown())
                     .await
@@ -3230,12 +3259,7 @@ impl ConnectOwner {
         Ok(())
     }
 
-    async fn exchange_import(
-        &self,
-        session: &Arc<Session>,
-        path: PathBuf,
-        cache: bool,
-    ) -> Result<portable::Snapshot, String> {
+    async fn exchange_keys(&self, session: &Session) -> Result<Vec<String>, String> {
         let identity = self.identity_reference()?;
         let mut keys = vec![
             self.secret(file_key(&identity, &session.profile))
@@ -3248,6 +3272,16 @@ impl ConnectOwner {
         {
             keys.extend(serde_json::from_str::<Vec<String>>(&previous).map_err(error)?);
         }
+        Ok(keys)
+    }
+
+    async fn read_exchange_file(
+        &self,
+        session: &Session,
+        path: PathBuf,
+        keys: &[String],
+    ) -> Result<portable::Snapshot, String> {
+        let keys = keys.to_vec();
         let (profile, staged) =
             tokio::task::spawn_blocking(move || portable::decrypt(&path, &keys))
                 .await
@@ -3255,21 +3289,21 @@ impl ConnectOwner {
         if profile != session.profile {
             return Err("The Connect file belongs to another profile".into());
         }
-        // Background exchange only updates the profile it started with. Reading
-        // a file must not hold the lock needed by Join or Disconnect.
-        if cache {
-            session
-                .documents
-                .import_cache_snapshot(staged.reader()?)
-                .await
-                .map_err(error)?;
-        } else {
-            session
-                .documents
-                .import_snapshot(staged.reader()?)
-                .await
-                .map_err(error)?;
-        }
+        Ok(staged)
+    }
+
+    async fn exchange_import(
+        &self,
+        session: &Arc<Session>,
+        path: PathBuf,
+    ) -> Result<portable::Snapshot, String> {
+        let keys = self.exchange_keys(session).await?;
+        let staged = self.read_exchange_file(session, path, &keys).await?;
+        session
+            .documents
+            .import_snapshot(staged.reader()?)
+            .await
+            .map_err(error)?;
         Ok(staged)
     }
 
@@ -3283,30 +3317,17 @@ impl ConnectOwner {
         let session = self.active().await?;
         session
             .stop
-            .run_until_cancelled(self.exchange_session(&session, false))
+            .run_until_cancelled(self.exchange_session(&session))
             .await
             .unwrap_or(Ok(()))
     }
 
-    async fn exchange_session(
-        self: &Arc<Self>,
-        session: &Arc<Session>,
-        cache: bool,
-    ) -> Result<(), String> {
+    async fn exchange_session(self: &Arc<Self>, session: &Arc<Session>) -> Result<(), String> {
         let Some(destination) = self.status().settings.destination else {
             return Ok(());
         };
-        let _exchange = if cache {
-            session.cache_file_exchange.lock().await
-        } else {
-            session.file_exchange.lock().await
-        };
-        let saved = if cache {
-            session.documents.cache_file_exchange().await
-        } else {
-            session.documents.file_exchange().await
-        }
-        .map_err(error)?;
+        let _exchange = session.file_exchange.lock().await;
+        let saved = session.documents.file_exchange().await.map_err(error)?;
         let mut cached = saved
             .map(|state| serde_json::from_str::<FileExchange>(&state))
             .transpose()
@@ -3317,226 +3338,58 @@ impl ConnectOwner {
                 files: BTreeMap::new(),
                 revision: None,
             });
-        let source = match &destination {
-            portable::Destination::Remote { source_id, .. } => Some(self.source.client(source_id)?),
-            portable::Destination::Local { .. } | portable::Destination::Document { .. } => None,
-        };
-        let documents = match &destination {
-            portable::Destination::Document { uri } => {
-                Some(sources::DocumentProfileFiles::new(uri).map_err(error)?)
-            }
-            _ => None,
-        };
-        let entries = match &destination {
-            portable::Destination::Local { path } => {
-                tokio::fs::create_dir_all(path).await.map_err(error)?;
-                let mut directory = tokio::fs::read_dir(path).await.map_err(error)?;
-                let mut files = Vec::new();
-                while let Some(entry) = directory.next_entry().await.map_err(error)? {
-                    let name = entry.file_name();
-                    let Some(name) = name
-                        .to_str()
-                        .filter(|name| name.ends_with(".rufin-connect"))
-                    else {
-                        continue;
-                    };
-                    let metadata = entry.metadata().await.map_err(error)?;
-                    if metadata.is_file() {
-                        files.push((
-                            name.to_owned(),
-                            Some(format!(
-                                "{:?}:{}",
-                                metadata.modified().map_err(error)?,
-                                metadata.len()
-                            )),
-                        ));
-                    }
-                }
-                files
-            }
-            portable::Destination::Remote { path, .. } => source
-                .as_ref()
-                .unwrap()
-                .profile_files(path)
-                .await
-                .map_err(error)?,
-            portable::Destination::Document { .. } => documents
-                .as_ref()
-                .unwrap()
-                .profile_files()
-                .await
-                .map_err(error)?,
-        };
-        let entries = entries
+        cached.files = cached
+            .files
             .into_iter()
-            .filter(|(path, _)| {
-                sources::DocumentProfileFiles::file_name(path).ends_with(".cache.rufin-connect")
-                    == cache
-            })
-            .collect::<Vec<_>>();
-        let filename = if cache {
-            format!("{}.cache.rufin-connect", session.identity)
-        } else {
-            format!("{}.rufin-connect", session.identity)
-        };
-        let mut own_path = match &destination {
-            portable::Destination::Local { .. } => filename,
-            portable::Destination::Document { .. } => entries
-                .iter()
-                .find_map(|(path, _)| {
-                    (sources::DocumentProfileFiles::file_name(path) == filename)
-                        .then(|| path.clone())
-                })
-                .unwrap_or(filename),
-            portable::Destination::Remote { path, .. } => {
-                let folder = path.trim_matches('/');
-                if folder.is_empty() {
-                    filename
-                } else {
-                    format!("{folder}/{filename}")
+            .map(|(path, version)| (sources::FileSource::file_name(&path).to_owned(), version))
+            .collect();
+        let folder = portable::ExchangeFolder::new(self, destination)?;
+        folder.ensure("").await?;
+        let mut entries = Vec::new();
+        folder
+            .visit("", |file| {
+                if !file.name().ends_with(".cache.rufin-connect") {
+                    entries.push(file);
                 }
-            }
-        };
-        let own_exists = entries.iter().any(|(path, _)| path == &own_path);
-        for (path, version) in entries {
-            if version.is_some() && cached.files.get(&path) == Some(&version) {
+                std::future::ready(Ok(()))
+            })
+            .await?;
+        let filename = format!("{}.rufin-connect", session.identity);
+        let own_exists = entries.iter().any(|file| file.name() == filename);
+        for file in entries {
+            if file.version.is_some() && cached.files.get(file.name()) == Some(&file.version) {
                 continue;
             }
             let incoming = tempfile::NamedTempFile::new_in(&self.directory).map_err(error)?;
-            let input = match &destination {
-                portable::Destination::Local { path: folder } => folder.join(&path),
-                portable::Destination::Remote { .. } => {
-                    if source
-                        .as_ref()
-                        .unwrap()
-                        .read_profile_file(&path, incoming.path())
-                        .await
-                        .map_err(error)?
-                        .is_none()
-                    {
-                        continue;
-                    }
-                    incoming.path().to_owned()
-                }
-                portable::Destination::Document { .. } => {
-                    if documents
-                        .as_ref()
-                        .unwrap()
-                        .read_profile_file(&path, incoming.path())
-                        .await
-                        .map_err(error)?
-                        .is_none()
-                    {
-                        continue;
-                    }
-                    incoming.path().to_owned()
-                }
+            let Some(input) = folder.read(&file, incoming.path()).await? else {
+                continue;
             };
-            let imported = self.exchange_import(session, input, cache).await?;
+            let imported = self.exchange_import(session, input).await?;
             session.cache_changed.notify_one();
-            if !cache {
-                self.synchronize().await?;
+            self.synchronize().await?;
+            if file.name() == filename
+                && session
+                    .documents
+                    .device_snapshot_contains_current(imported.reader()?)
+                    .await
+                    .map_err(error)?
+            {
+                cached.revision = Some(session.documents.device_revision().await.map_err(error)?);
             }
-            if path == own_path {
-                let contains = if cache {
-                    session
-                        .documents
-                        .cache_snapshot_contains_current(imported.reader()?)
-                        .await
-                } else {
-                    session
-                        .documents
-                        .device_snapshot_contains_current(imported.reader()?)
-                        .await
-                }
-                .map_err(error)?;
-                if contains {
-                    cached.revision = Some(
-                        if cache {
-                            session.documents.cache_revision().await
-                        } else {
-                            session.documents.device_revision().await
-                        }
-                        .map_err(error)?,
-                    );
-                }
-            }
-            cached.files.insert(path, version);
+            cached.files.insert(file.name().into(), file.version);
         }
-        let revision = if cache {
-            session.documents.cache_revision().await
-        } else {
-            session.documents.device_revision().await
-        }
-        .map_err(error)?;
+        let revision = session.documents.device_revision().await.map_err(error)?;
         if !own_exists || cached.revision != Some(revision) {
-            let (output, revision) = if cache {
-                self.export_cache_session(session).await?
-            } else {
-                self.export_session(session, false).await?
-            };
-            let version = match &destination {
-                portable::Destination::Local { path } => {
-                    let path = path.join(&own_path);
-                    portable::install(output, path.clone()).await?;
-                    let metadata = tokio::fs::metadata(path).await.map_err(error)?;
-                    Some(format!(
-                        "{:?}:{}",
-                        metadata.modified().map_err(error)?,
-                        metadata.len()
-                    ))
-                }
-                portable::Destination::Remote { path, .. } => {
-                    source
-                        .as_ref()
-                        .unwrap()
-                        .write_profile_file(&own_path, output, Some(None))
-                        .await
-                        .map_err(error)?;
-                    source
-                        .as_ref()
-                        .unwrap()
-                        .profile_files(path)
-                        .await
-                        .map_err(error)?
-                        .into_iter()
-                        .find_map(|(path, version)| (path == own_path).then_some(version))
-                        .flatten()
-                }
-                portable::Destination::Document { .. } => {
-                    let documents = documents.as_ref().unwrap();
-                    documents
-                        .write_profile_file(&own_path, output, Some(None))
-                        .await
-                        .map_err(error)?;
-                    let filename = sources::DocumentProfileFiles::file_name(&own_path).to_owned();
-                    if let Some((path, version)) = documents
-                        .profile_files()
-                        .await
-                        .map_err(error)?
-                        .into_iter()
-                        .find(|(path, _)| {
-                            sources::DocumentProfileFiles::file_name(path) == filename
-                        })
-                    {
-                        own_path = path;
-                        version
-                    } else {
-                        None
-                    }
-                }
-            };
+            let (output, revision) = self.export_session(session, false).await?;
+            let file = folder.write(&filename, output).await?;
             cached.revision = Some(revision);
-            // This device only writes its own file; other writers' snapshots remain intact.
-            cached.files.insert(own_path.clone(), version);
+            cached.files.insert(filename, file.version);
         }
-        let cached = serde_json::to_string(&cached).map_err(error)?;
-        if cache {
-            session.documents.save_cache_file_exchange(&cached).await
-        } else {
-            session.documents.save_file_exchange(&cached).await
-        }
-        .map_err(error)
+        session
+            .documents
+            .save_file_exchange(&serde_json::to_string(&cached).map_err(error)?)
+            .await
+            .map_err(error)
     }
 }
 

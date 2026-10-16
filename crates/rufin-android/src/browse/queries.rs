@@ -2,6 +2,28 @@ use super::*;
 
 #[uniffi::export]
 impl AndroidBrowseQuery {
+    pub fn activity_sensitive(&self) -> bool {
+        let settings = self.settings.load();
+        let display = settings.library_list(library_list_key(&self.route, self.category));
+        let mut request = BrowseRequest::new(&self.route, self.category, None, None, &display, 0);
+        request.sort = self.sort;
+        request.activity_sensitive()
+            || (self.release_section.is_none()
+                && matches!(
+                    self.route,
+                    Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
+                )
+                && BrowseRequest::new(
+                    &self.route,
+                    CollectionCategory::Tracks,
+                    None,
+                    None,
+                    &settings.library_list(LibraryListKey::ArtistTracks),
+                    0,
+                )
+                .activity_sensitive())
+    }
+
     pub fn context_id(&self) -> String {
         let context = match &self.route {
             Route::AlbumDetail(uri) => format!("album:{uri}"),
@@ -109,10 +131,9 @@ impl AndroidBrowseQuery {
                 if matches!(self.route, Route::Folders { .. }) {
                     return self.folder_sections().await;
                 }
-                if let Some(query) = self.song_query().await.map_err(error)? {
-                    return Ok(self
-                        .database
-                        .song_sections(query, &ReadCancellation::new())
+                if let Some(query) = self.track_query().await.map_err(error)? {
+                    return Ok((query)
+                        .sections(&self.database, &ReadCancellation::new())
                         .await
                         .map_err(error)?
                         .into_iter()
@@ -176,7 +197,7 @@ impl AndroidBrowseQuery {
                     .collect();
                 self.playback.play_selection(
                     rufin_core::playback::PlayRequest::captured(
-                        SongSelection::Concat(selections),
+                        TrackSelection::Concat(selections),
                         0,
                         placement,
                         false,
@@ -199,10 +220,9 @@ impl AndroidBrowseQuery {
                     let (folders, tracks) = self.folder_counts().await.map_err(error)?;
                     return Ok(folders as u64 + tracks.max(0) as u64);
                 }
-                if let Some(query) = self.song_query().await.map_err(error)? {
-                    return Ok(self
-                        .database
-                        .song_count(query, &ReadCancellation::new())
+                if let Some(query) = self.track_query().await.map_err(error)? {
+                    return Ok((query)
+                        .count(&self.database, &ReadCancellation::new())
                         .await
                         .map_err(error)?
                         .max(0) as u64);
@@ -312,8 +332,11 @@ impl AndroidBrowseQuery {
                     Some(key) => library::TrackKey::from_raw(key),
                     None => self
                         .database
-                        .track_key_by_uri(&media_uri, &cancel)
+                        .catalog_identity(library::CatalogKind::Track, &media_uri, &cancel)
                         .await
+                        .map(|identity| {
+                            identity.map(|identity| library::TrackKey::from_raw(identity.key))
+                        })
                         .map_err(error)?
                         .ok_or_else(|| error("Track is no longer available"))?,
                 };
@@ -321,8 +344,11 @@ impl AndroidBrowseQuery {
                     let album = album_key
                         .map(library::AlbumKey::from_raw)
                         .ok_or_else(|| error("Album is no longer available"))?;
-                    let mut query = SongQuery::new(SongScope::Album(album));
-                    query.sort = Some(self.album_tracks.sort_key.track_sort());
+                    let mut query = CatalogQuery::tracks(TrackScope::Album(album));
+                    query.subject = library::CatalogSubject::Tracks {
+                        scope: TrackScope::Album(album),
+                        sort: Some(self.album_tracks.sort_key.catalog_sort()),
+                    };
                     query.descending = self.album_tracks.descending;
                     let title = Some(Arc::new(library::QueueContextTitle {
                         kind: Some("Album".into()),
@@ -340,8 +366,14 @@ impl AndroidBrowseQuery {
                             self.album_tracks.descending
                         ),
                     )
-                } else if let Some(query) = self.song_query().await.map_err(error)? {
-                    let entry = if matches!(query.scope, SongScope::Playlist(_)) {
+                } else if let Some(query) = self.track_query().await.map_err(error)? {
+                    let entry = if matches!(
+                        query.subject,
+                        library::CatalogSubject::Tracks {
+                            scope: library::TrackScope::Playlist(_),
+                            ..
+                        }
+                    ) {
                         Some(serde_json::from_str(&row_key).map_err(error)?)
                     } else {
                         None
@@ -364,7 +396,12 @@ impl AndroidBrowseQuery {
                         .position(|key| *key == track_key)
                         .ok_or_else(|| error("Track is no longer in this route"))?;
                     (
-                        SongSelection::Tracks(keys.into()),
+                        library::CatalogQuery::keys(
+                            library::CatalogKind::Track,
+                            None,
+                            (keys).iter().map(|key| key.raw()).collect(),
+                        )
+                        .selection(),
                         anchor,
                         None,
                         context_title,

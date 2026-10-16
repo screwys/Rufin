@@ -236,6 +236,7 @@ impl GoogleCastController {
             }
             BackendCommand::PrepareNext { .. }
             | BackendCommand::ConfigureAudio(_)
+            | BackendCommand::UpdateLoudness { .. }
             | BackendCommand::SetPlaybackRate(_)
             | BackendCommand::SetVisualizerEnabled(_)
             | BackendCommand::Play { .. }
@@ -272,7 +273,7 @@ impl GoogleCastController {
         let title = stream
             .row
             .as_ref()
-            .map(|occurrence| occurrence.item.title.trim())
+            .map(|occurrence| occurrence.track.metadata.title.trim())
             .filter(|title| !title.is_empty())
             .map(str::to_string);
         let metadata = (title.is_some() || published.artwork_uri.is_some()).then(|| Metadata {
@@ -468,10 +469,9 @@ fn stream_duration_millis(stream: &PreparedStream) -> Option<u64> {
         .end_millis()
         .map(|end| end.saturating_sub(stream.start_millis()))
         .or_else(|| {
-            stream
-                .row
-                .as_ref()
-                .and_then(|occurrence| u64::try_from(occurrence.item.duration_millis).ok())
+            stream.row.as_ref().and_then(|occurrence| {
+                u64::try_from(occurrence.track.metadata.duration_millis).ok()
+            })
         })
 }
 

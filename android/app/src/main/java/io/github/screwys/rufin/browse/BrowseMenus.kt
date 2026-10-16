@@ -7,9 +7,8 @@ import io.github.screwys.rufin.shared.rufin_core.DisplaySize
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.createPlaylist
 import io.github.screwys.rufin.shared.rufin_core.addPlaylistTracks
-import io.github.screwys.rufin.shared.rufin_core.updatePlaylist
 import io.github.screwys.rufin.shared.rufin_core.deletePlaylist
-import io.github.screwys.rufin.shared.library.SongSelection
+import io.github.screwys.rufin.shared.library.TrackSelection
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SourceIcon
@@ -17,7 +16,6 @@ import io.github.screwys.rufin.R
 import io.github.screwys.rufin.ui.rufinMarquee
 import io.github.screwys.rufin.ui.PagerTabIndicator
 import io.github.screwys.rufin.ui.Artwork
-import io.github.screwys.rufin.ui.ArtworkReadyContent
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.MediaNavigationSheet
 import io.github.screwys.rufin.player.PlayerConnection
@@ -192,8 +190,7 @@ internal fun BrowseMenuSheet(
         if (canRate) ratingVisible = withContext(Dispatchers.IO) {
             model.connectedService().runtime.value!!.getOrThrow().settings().use { it.applicationPreferences().contextMenu.ratingVisible }
         }
-        if (item.row.item is io.github.screwys.rufin.core.AndroidBrowseItem.Recent ||
-            item.row.item is io.github.screwys.rufin.core.AndroidBrowseItem.Queued) {
+        if (item.row.item is io.github.screwys.rufin.core.AndroidBrowseItem.Recent) {
             try { rating = browse.library?.rating(favoriteTarget(item.row.kind, item.row.mediaUri)) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { model.runAction { throw error } }
@@ -287,7 +284,7 @@ internal fun BrowseMenuSheet(
             pinned?.let { isPinned -> BrowseMenuAction("rufin-bookmark-symbolic",
                 if (isPinned) "Remove from Pins" else "Add to Pins") { browse.pin(item, !isPinned); onDismiss() } }
             onRemove?.let { BrowseMenuAction("rufin-user-trash-symbolic", "Remove", it) }
-            if (item.row.kind == "playlist" && item.row.writable && item.row.detailRoute != null) {
+            if ((item.row.item as? io.github.screwys.rufin.core.AndroidBrowseItem.Playlist)?.row?.metadataWritable == true && item.row.detailRoute is Route.PlaylistDetail) {
                 MediaMenuDivider()
                 BrowseMenuAction("rufin-document-edit-symbolic", "Edit Playlist") { rename = true }
                 BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
@@ -306,13 +303,9 @@ internal fun BrowseMenuSheet(
         navigation = false; onDismiss(); onNavigate(route, title, source)
     }, { navigation = false }, mediaUri = item.row.mediaUri, originRoute = item.row.detailRoute)
     if (random) RandomPlaySheet(model, browse) { random = false; onDismiss() }
-    if (rename) PlaylistNameSheet(model, item.row.title, { rename = false }) { name ->
-        model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
-            updatePlaylist(source, (item.row.detailRoute as Route.PlaylistDetail).v1, name, null, null)
-        }
-        browse.refresh()
-        rename = false
-        onDismiss()
+    if (rename) browse.library?.let { library ->
+        PlaylistEditor(model, library, player, (item.row.detailRoute as Route.PlaylistDetail).v1, item.row.title,
+            onChanged = browse::refresh, onDismiss = { rename = false; onDismiss() })
     }
     if (delete) AlertDialog(onDismissRequest = { delete = false },
         title = { Text(translate("Delete \"{name}\"?").replace("{name}", item.row.title)) },
@@ -372,7 +365,6 @@ internal fun MediaMenuDivider() {
 
 @Composable
 internal fun MediaMenuBackdrop(identity: ByteArray?, player: PlayerConnection, content: @Composable () -> Unit) {
-    ArtworkReadyContent(key = identity?.toList(), modifier = Modifier.fillMaxWidth()) {
     val artwork = rememberArtwork(identity, player, with(LocalDensity.current) { 64.dp.roundToPx() })
     val surface = MaterialTheme.colorScheme.surface
     val overlay = if (surface.luminance() < .5f) Color.Black.copy(alpha = .675f) else Color.White.copy(alpha = .75f)
@@ -382,7 +374,6 @@ internal fun MediaMenuBackdrop(identity: ByteArray?, player: PlayerConnection, c
                 contentScale = ContentScale.Crop, colorFilter = ColorFilter.tint(overlay, BlendMode.SrcOver))
         }
         content()
-    }
     }
 }
 
@@ -525,8 +516,8 @@ internal fun PlaylistPickerSheet(model: RufinConnection, browse: BrowseConnectio
     }
 }
 
-private suspend fun playlistSelection(library: io.github.screwys.rufin.core.AndroidLibrary, item: BrowseItem): SongSelection =
-    if (item.row.kind == "track") SongSelection.fromUris(listOf(item.row.mediaUri))
+private suspend fun playlistSelection(library: io.github.screwys.rufin.core.AndroidLibrary, item: BrowseItem): TrackSelection =
+    if (item.row.kind == "track") TrackSelection.fromUris(listOf(item.row.mediaUri))
     else library.targetQuery(item.row.detailRoute!!).use { it.selection() }
 
 @Composable
@@ -566,21 +557,6 @@ internal fun PlaylistCreateSheet(
             save(name.trim(), source?.id?.takeIf { currentSource }, public.takeIf { supportsPublic })
         } }, enabled = name.isNotBlank() && model.pendingActions == 0) { Text(translate("Create")) } },
         dismissButton = { TextButton(onDismiss) { Text(translate("Cancel")) } })
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PlaylistNameSheet(model: RufinConnection, initial: String, onDismiss: () -> Unit, save: suspend (String) -> Unit) {
-    var name by remember { mutableStateOf(initial) }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surface,
-        dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().imePadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(translate(if (initial.isEmpty()) "New Playlist" else "Edit Playlist"), style = MaterialTheme.typography.titleLarge)
-            OutlinedTextField(name, { name = it }, label = { Text(translate("Playlist name")) }, singleLine = true,
-                modifier = Modifier.fillMaxWidth(), colors = settingsTextFieldColors())
-            Button({ model.runAction { save(name) } }, enabled = name.isNotBlank() && model.pendingActions == 0) { Text(translate("Save")) }
-        }
-    }
 }
 
 internal class BrowseChoiceSource(

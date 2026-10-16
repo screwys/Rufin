@@ -1,5 +1,5 @@
 use gtk_widgets::source_labels::source_kind_title;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use adw::prelude::*;
 use gtk::{gio, glib};
@@ -50,7 +50,7 @@ fn manage_server_content(
     exit: ManageServerExitSlot,
     preferences_dialog: &adw::Dialog,
 ) -> gtk::Widget {
-    let (access, access_status, selected) = {
+    let (access, selected) = {
         let configured = shell.source.configured.borrow();
         let summary = configured
             .local_access
@@ -58,14 +58,13 @@ fn manage_server_content(
             .find(|summary| summary.source_id == server.id)
             .cloned();
         let access = summary.as_ref().and_then(|summary| summary.access.clone());
-        let status = summary
-            .as_ref()
-            .map(|summary| summary.status.clone())
-            .unwrap_or_default();
         let selected = configured.selected_source_id.as_ref() == Some(&server.id);
-        (access, status, selected)
+        (access, selected)
     };
-    let sample_source_path = access_status.sample_source_path.clone();
+    let access_status = Rc::new(RefCell::new(
+        rufin_core::runtime::source::LocalAccessStatus::default(),
+    ));
+    let sample_source_path = None;
     let resource = gtk_widgets::ui_resource::MANAGE_SERVER_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
@@ -237,7 +236,7 @@ fn manage_server_content(
             status.set_text(&match operation {
                 LocalAccessOperation::Failed(error) => error,
                 LocalAccessOperation::Editing | LocalAccessOperation::Pending => {
-                    local_access_status_text(&draft, changed, &access_status)
+                    local_access_status_text(&draft, changed, &access_status.borrow())
                 }
             });
         }
@@ -266,6 +265,17 @@ fn manage_server_content(
     });
 
     update_state();
+    let source = shell.products.source.clone();
+    glib::spawn_future_local(async move {
+        match source.local_access_status(server.id).await {
+            Ok(status) => {
+                editor.set_sample_source_path(status.sample_source_path.clone());
+                access_status.replace(status);
+                update_state();
+            }
+            Err(error) => tracing::warn!(%error, "could not read local mapping status"),
+        }
+    });
     scroller.upcast()
 }
 
@@ -325,7 +335,7 @@ fn server_actions_group(
         let source = source.clone();
         let source_id = source_id.clone();
         gtk::glib::spawn_future_local(async move {
-            let _ = source.refresh_source(source_id).await;
+            let _ = source.refresh_source(source_id, false).await;
         });
         if let Some(dialog) = preferences_dialog_for_resync.upgrade() {
             dialog.close();

@@ -17,9 +17,13 @@ mod activity_overview;
 pub use activity_overview::{ActivityOverview, ActivityTotals, GenreActivity};
 mod artwork;
 mod backup;
-mod collection_query;
+mod metadata;
+mod query;
+pub use metadata::*;
 mod collections;
-pub use collection_query::{CollectionKind, CollectionQuery, CollectionRows};
+pub use query::{
+    CatalogIdentity, CatalogKind, CatalogPage, CatalogQuery, CatalogRows, CatalogSubject,
+};
 mod connect;
 mod connect_media;
 mod db;
@@ -35,38 +39,44 @@ mod playlist_links;
 mod playlists;
 mod queue;
 pub use connect_media::ConnectMediaFile;
+mod catalog;
 mod radio;
-mod row;
-mod scan;
 mod scroll_sections;
 pub use scroll_sections::ScrollSection;
 mod schema;
 mod search;
 mod selection;
-pub use selection::{SongQuery, SongScope, SongSelection};
+pub use selection::{TrackScope, TrackSelection};
 mod smart_playlists;
-mod source_window;
 mod tracks;
 pub use tracks::AudioProperties;
 
 pub use activity::{
-    ActivityAlbumRow, ActivityArtistRow, ActivityCsvFormat, ActivityGenreRow, ActivityImportReport,
-    ActivityRecord, ActivityTrackRow, CalendarActivityPeriod, CalendarActivitySummary, HistoryRow,
+    ActivityCsvFormat, ActivityImportReport, ActivityRecord, CalendarActivityPeriod,
     ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
 };
-pub use artwork::{ArtistArtworkBinding, PlaylistArtworkBinding, RepresentativeArtworkScope};
+pub use artwork::{
+    AlbumCover, ArtworkCacheRetention, ArtworkCandidate, ArtworkImage, PlaylistArtworkManifest,
+    RepresentativeArtworkScope, authored_playlist_artwork, automatic_playlist_artwork,
+    merge_playlist_artwork, normalize_artwork_binding,
+};
 pub use backup::{BackupRestoreReport, StateGroups};
+pub use catalog::{
+    AlbumObservation, ArtistObservation, CachedSource, Catalog, CatalogBatch, CatalogUpdate,
+    FolderObservation, Freshness, GenreObservation, LocalArtworkCandidate, MoodObservation,
+    PlaylistEntryObservation, PlaylistObservation, TrackObservation,
+};
 pub use collections::{
-    AlbumArtistLink, AlbumDetailRow, AlbumGenreLink, AlbumReleaseCandidate, AlbumReleaseClass,
-    AlbumReleaseResult, AlbumRow, AlbumSort, ArtistRow, ArtistSort, FolderRow, GenreChoice,
-    GenreRow, GenreSort, MoodRow, MoodSort,
+    AlbumArtistLink, AlbumDetailRow, AlbumGenreLink, AlbumLinks, AlbumReleaseCandidate,
+    AlbumReleaseClass, AlbumReleaseResult, AlbumView, ArtistView, CollectionSummary, FolderChoice,
+    FolderView, GenreChoice, GenreView, MoodView,
 };
 pub use connect::{CONNECT_PAGE_SIZE, ConnectChange, ConnectRecord, ConnectRoot};
 pub use db::{Database, ReadCancellation};
-pub use favorites::{FavoriteTarget, SourceUserData, UserMediaStateWrite};
+pub use favorites::{FavoriteTarget, NativeUserState, UserMediaStateWrite};
 pub use home::{
-    HomeAlbumRow, HomeBlockKind, HomeEntryInput, HomeEntryKind, HomeGenreRow, HomePage,
-    HomeProviderSection, HomeSectionKind, HomeSectionRows, HomeTrackRow,
+    HomeAlbumRow, HomeBlockKind, HomeEntryInput, HomeEntryKind, HomePage, HomeProviderSection,
+    HomeSectionKind, HomeSectionRows, HomeTrackRow,
 };
 pub use keys::{
     AlbumKey, ArtistKey, FolderKey, GenreKey, ListenKey, ListenOutboxKey, LocalAccessFileKey,
@@ -77,9 +87,9 @@ pub use keys::{
     source_id_for_uri,
 };
 pub use local::{
-    DownloadMetadata, LocalAccessOrigin, LocalAccessRow, LocalAccessWrite, LocalFileKind,
-    LocalFileRow, LocalFileState, LocalFileWrite, LocalLocatorWrite, LocalMediaLocation,
-    MappingTrackRow, ObservedMediaFile,
+    DownloadMetadata, FileEditRow, LocalAccessOrigin, LocalAccessRow, LocalAccessWrite,
+    LocalFileKind, LocalFileRow, LocalFileState, LocalFileWrite, LocalLocatorWrite,
+    LocalMediaLocation, MappingTrackRow, ObservedMediaFile,
 };
 pub use loudness::{AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork};
 pub use lyrics::LyricsCacheRow;
@@ -89,28 +99,25 @@ pub use playlist_format::{
 };
 pub use playlist_links::{ObservedPlaylistFile, PlaylistFileLink};
 pub use playlists::{
-    PlaylistAccess, PlaylistDetailPage, PlaylistEditEntry, PlaylistEntryRemovals, PlaylistEntryRow,
-    PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity, PlaylistRow, PlaylistSort,
+    PlaylistAccess, PlaylistEditEntry, PlaylistEntryRemovals, PlaylistEntryView,
+    PlaylistEntryWrite, PlaylistGenreLink, PlaylistIdentity, PlaylistRow,
 };
 pub use queue::{
-    QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntries, QueueEntry, QueueItem, QueueLoad,
-    QueueOrderUpdate, QueuePageRow, QueuePlacement, QueueProvenance, QueueReorderTarget,
-    QueueRepeatMode, QueueRestore, QueueRow, QueueTransferPage, QueueUpdate, shuffle_order,
+    QUEUE_CONTEXT_LIMIT, QueueContextTitle, QueueEntries, QueueEntry, QueueLoad, QueueOrderUpdate,
+    QueuePlacement, QueueProvenance, QueueReorderTarget, QueueRepeatMode, QueueRestore, QueueRow,
+    QueueTransferPage, QueueTransferRow, QueueUpdate, shuffle_order,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
-pub use scan::{
-    AlbumInput, ArtistInput, CachedSource, CatalogUpdate, FolderInput, Freshness, GenreInput,
-    LocalArtworkCandidate, LoudnessInput, MoodInput, PlaylistEntryInput, PlaylistInput,
-    RecordInput, Scan, TrackInput,
-};
 pub use search::{SearchRequest, SearchResults};
 pub use smart_playlists::{
-    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistListSort, SmartPlaylistRow,
-    SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
+    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistRow, SmartPlaylistRule,
+    SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
     SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueSuggestions,
     SmartPlaylistWrite,
 };
-pub use tracks::{TrackArtistLink, TrackGenreLink, TrackRoutePage, TrackRow, TrackSort};
+pub use tracks::{
+    CatalogSort, TrackAccess, TrackArtistLink, TrackGenreLink, TrackLinks, TrackState, TrackView,
+};
 
 use thiserror::Error;
 
@@ -129,16 +136,10 @@ pub enum LibraryError {
     Migration(String),
     #[error("invalid Library Store: {0}")]
     InvalidStore(String),
-    #[error("scan input is invalid: {0}")]
-    InvalidScan(String),
     #[error("Library request is invalid: {0}")]
     InvalidRequest(String),
     #[error("Playlist only accepts Tracks from Source {0}")]
     PlaylistSourceMismatch(SourceId),
-    #[error("scan staging failed; the candidate cannot be published")]
-    ScanFailed,
-    #[error("another source scan is already active")]
-    ScanInProgress,
     #[error("the fixed Library writer is unavailable")]
     WriterUnavailable,
     #[error("the Library read was cancelled")]
@@ -189,11 +190,13 @@ impl RouteSeedWindow {
 }
 
 impl LibraryError {
-    pub fn is_store_path_io(&self) -> bool {
-        matches!(self, Self::Io(_) | Self::Sqlite(sqlx::Error::Io(_)))
-            || matches!(self, Self::Sqlite(sqlx::Error::Database(error))
+    pub fn is_store_unavailable(&self) -> bool {
+        matches!(
+            self,
+            Self::Io(_) | Self::Sqlite(sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut)
+        ) || matches!(self, Self::Sqlite(sqlx::Error::Database(error))
                 if error.code().as_deref().and_then(|code|code.parse::<i32>().ok())
-                    .is_some_and(|code|matches!(code & 0xff, 3 | 8 | 10 | 13 | 14)))
+                    .is_some_and(|code|matches!(code & 0xff, 3 | 5 | 6 | 7 | 8 | 10 | 13 | 14)))
     }
 }
 

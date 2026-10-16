@@ -968,6 +968,7 @@ fn setup_surface_state(operation: &SourceOperation) -> SetupSurfaceState<'_> {
         SourceOperation::Idle
         | SourceOperation::Switching { .. }
         | SourceOperation::Refreshing { .. }
+        | SourceOperation::Downloading { .. }
         | SourceOperation::Failed {
             add_form: false, ..
         } => SetupSurfaceState::Form,

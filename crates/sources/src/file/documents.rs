@@ -380,27 +380,68 @@ pub fn resolve_document_relative(
     request(serde_json::json!({"op":"resolve", "uri":uri, "relative":relative, "roots":roots}))
 }
 
-pub async fn read_document_queue_item(uri: &str) -> SourceResult<Option<library::QueueItem>> {
+pub async fn read_document_track_reference(
+    uri: &str,
+) -> SourceResult<Option<library::TrackReference>> {
+    let (_, read) = read_document_media(uri, crate::LOCAL_LIBRARY_SOURCE_ID).await?;
+    Ok(match read {
+        crate::file::media::MediaRead::Accepted(track) => {
+            Some(crate::file::media::track_reference(*track, uri.to_owned()))
+        }
+        _ => None,
+    })
+}
+
+pub(crate) async fn read_document_media(
+    uri: &str,
+    source_id: &str,
+) -> SourceResult<(DocumentEntry, crate::file::media::MediaRead)> {
     let server = document_input(uri).await?;
     let mut input = crate::file::remote::reader::FileReader::open(&server, "", "", uri).await?;
     let playback_uri = input.uri().to_owned();
     let uri = uri.to_owned();
+    let source_id = crate::SourceId::new(source_id);
     tokio::task::spawn_blocking(move || {
         let entry = stat_document(&uri)?;
-        let mut worker = crate::file::media::Worker::network();
-        let read = crate::file::media::read_media_input(
+        let mut worker = crate::file::media::Worker::default();
+        let mut read = crate::file::media::read_media_input(
             &mut worker,
-            entry.name.into(),
+            entry.name.clone().into(),
             &mut input,
             &playback_uri,
             None,
         );
-        Ok(match read {
-            crate::file::media::MediaRead::Accepted(track) => {
-                Some(crate::file::media::queue_item(*track, uri))
-            }
-            _ => None,
-        })
+        if let crate::file::media::MediaRead::Accepted(track) = &mut read {
+            let (cover, portraits) = crate::file::artwork::inspect_embedded_input(
+                &mut worker.discovery,
+                &mut input,
+                &playback_uri,
+            );
+            track.artist_pictures = portraits;
+            track.local_artwork = cover.map(|picture_index| crate::LocalImageRef::Embedded {
+                source_id,
+                path: entry.uri.clone(),
+                revision: entry.revision.clone().unwrap_or_default(),
+                picture_index,
+            });
+        }
+        Ok((entry, read))
+    })
+    .await
+    .map_err(|error| SourceError::Other(error.to_string()))?
+}
+
+pub async fn read_document_image(uri: &str, picture_index: u32) -> SourceResult<crate::ImageBytes> {
+    let server = document_input(uri).await?;
+    let mut input = crate::file::remote::reader::FileReader::open(&server, "", "", uri).await?;
+    let playback_uri = input.uri().to_owned();
+    tokio::task::spawn_blocking(move || {
+        crate::file::artwork::read_image_input(
+            &mut crate::file::discovery::Reader::default(),
+            &mut input,
+            &playback_uri,
+            picture_index,
+        )
     })
     .await
     .map_err(|error| SourceError::Other(error.to_string()))?

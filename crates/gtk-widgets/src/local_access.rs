@@ -29,7 +29,7 @@ pub struct LocalAccessEditor {
     folder: RefCell<Option<PathBuf>>,
     server_prefix: glib::WeakRef<adw::EntryRow>,
     local_prefix: Option<glib::WeakRef<adw::EntryRow>>,
-    sample_source_path: Option<String>,
+    sample_source_path: RefCell<Option<String>>,
     wait_until_mapped: bool,
     operation: RefCell<LocalAccessOperation>,
     on_success: Rc<dyn Fn()>,
@@ -52,7 +52,7 @@ impl LocalAccessEditor {
             folder: RefCell::new(folder),
             server_prefix: server_prefix.downgrade(),
             local_prefix: local_prefix.map(|row| row.downgrade()),
-            sample_source_path,
+            sample_source_path: RefCell::new(sample_source_path),
             wait_until_mapped,
             operation: RefCell::new(LocalAccessOperation::Editing),
             on_success,
@@ -81,7 +81,11 @@ impl LocalAccessEditor {
     }
 
     pub fn sample_source_path(&self) -> Option<String> {
-        self.sample_source_path.clone()
+        self.sample_source_path.borrow().clone()
+    }
+
+    pub fn set_sample_source_path(&self, path: Option<String>) {
+        self.sample_source_path.replace(path);
     }
 
     pub fn begin_editing(&self) {

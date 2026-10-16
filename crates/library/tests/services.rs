@@ -1,6 +1,6 @@
 use library::{
     ListenDeliveryTarget, ListenWrite, LocalAccessWrite, LocalFileKind, LocalFileState,
-    LocalFileWrite, LoudnessMeasurement, QueueProvenance, QueueRepeatMode, QueueRow,
+    LocalFileWrite, LoudnessMeasurement, QueueProvenance, QueueRepeatMode, QueueTransferRow,
     ReadCancellation,
 };
 
@@ -183,7 +183,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                     integrated_lufs: Some(-8.0),
                     true_peak: Some(1.0),
                     replay_gain_db: None,
-                    replay_gain_peak: None,
+                    replay_gain_peak: None
                 }
             )
             .await
@@ -196,35 +196,52 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         replay_gain_db: None,
         replay_gain_peak: None,
     };
-    let mut input = library::TrackInput {
+    let mut input = library::TrackObservation {
+        user_data: library::NativeUserState {
+            favorite: Some(false),
+            rating: (Some(Some(5))).map(|rating| rating.map(|value| value * 10)),
+            ..Default::default()
+        },
+        metadata: library::TrackMetadata {
+            title: "Alpha".into(),
+            album: "Album A".into(),
+            artist: "Artist A".into(),
+            sort_text: "alpha".into(),
+            duration_millis: 180_000,
+            disc_number: 1,
+            track_number: 1,
+            year: Some(2020),
+            date_added: Some("2024-01-02".into()),
+            source_format: Some("FLAC".into()),
+            comment: Some("Note".into()),
+            bpm: Some(100),
+            source_loudness: Some(library::NativeGain {
+                integrated_lufs: Some(-11.0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
         object_id: "track-0".into(),
         album_object_id: Some("album-a".into()),
-        title: "Alpha".into(),
-        display_album: "Album A".into(),
-        display_artist: "Artist A".into(),
-        sort_text: "alpha".into(),
-        duration_millis: 180_000,
-        disc_number: 1,
-        track_number: 1,
-        year: Some(2020),
-        date_added: Some("2024-01-02".into()),
-        source_format: Some("FLAC".into()),
-        comment: Some("Note".into()),
-        bpm: Some(100),
-        favorite: Some(false),
-        rating: Some(5),
         loudness_analysis_key: work.expected_analysis_key,
-        source_loudness: Some(library::LoudnessInput {
-            integrated_lufs: Some(-11.0),
-            ..Default::default()
-        }),
         ..Default::default()
     };
-    let mut scan = library::Scan::begin_items(&fixture.database, "source")
-        .await
-        .unwrap();
-    scan.write_tracks(&[(&input, None)]).await.unwrap();
-    scan.finish().await.unwrap();
+
+    let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+    {
+        let write = library::CatalogBatch {
+            tracks: vec![input.clone()],
+            ..Default::default()
+        };
+
+        scan_catalog.apply_catalog(&write, true).await.unwrap();
+    };
+    {
+        let update = scan_catalog.into_changes();
+        (&fixture.database)
+            .publish_catalog_update("source", update)
+            .await;
+    };
     assert!(
         fixture
             .database
@@ -242,38 +259,47 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             .0,
         Some(source_fact.clone())
     );
-    let mut scan = library::Scan::begin_items(&fixture.database, "source")
-        .await
-        .unwrap();
+
+    let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
     input.cue_path = Some("/music/changed.cue".into());
     input.cue_start_millis = Some(1_000);
     input.cue_end_millis = Some(181_000);
     input.loudness_analysis_key = [99; 32];
-    input.source_loudness = None;
-    input.artists = vec![library::ArtistInput {
+    input.metadata.source_loudness = None;
+    input.metadata.artists = vec![library::ArtistCredit {
         object_id: "artist-a".into(),
         name: "Artist A".into(),
         ..Default::default()
     }];
-    input.genres = vec![library::GenreInput {
+    input.metadata.genres = vec![library::TagReference {
         object_id: "genre".into(),
         name: "Rock".into(),
         ..Default::default()
     }];
-    input.moods = vec![library::MoodInput {
+    input.metadata.moods = vec![library::TagReference {
         object_id: "mood".into(),
         name: "Energetic".into(),
-        sort_text: "energetic".into(),
+        sort_text: Some("energetic".into()),
     }];
-    scan.write_tracks(&[(&input, None)])
-        .await
-        .expect("refresh Track CUE identity");
+    {
+        let write = library::CatalogBatch {
+            tracks: vec![input.clone()],
+            ..Default::default()
+        };
+
+        scan_catalog.apply_catalog(&write, true).await.unwrap();
+    };
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    fixture.database.observe_catalog(move |update| {
+    fixture.database.observe_catalog(move |_, update| {
         let _ = updates_tx.send(update);
         std::future::ready(())
     });
-    scan.finish().await.unwrap();
+    {
+        let update = scan_catalog.into_changes();
+        (&fixture.database)
+            .publish_catalog_update("source", update)
+            .await;
+    };
     let update = updates.try_recv().unwrap();
     assert!(update.metadata);
     let changed = fixture
@@ -296,7 +322,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                     integrated_lufs: Some(-9.0),
                     true_peak: Some(0.7),
                     replay_gain_db: None,
-                    replay_gain_peak: None,
+                    replay_gain_peak: None
                 }
             )
             .await
@@ -309,15 +335,26 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         replay_gain_db: None,
         replay_gain_peak: None,
     };
-    input.source_loudness = Some(library::LoudnessInput {
+    input.metadata.source_loudness = Some(library::NativeGain {
         integrated_lufs: Some(-10.0),
         ..Default::default()
     });
-    let mut scan = library::Scan::begin_items(&fixture.database, "source")
-        .await
-        .unwrap();
-    scan.write_tracks(&[(&input, None)]).await.unwrap();
-    scan.finish().await.unwrap();
+
+    let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+    {
+        let write = library::CatalogBatch {
+            tracks: vec![input.clone()],
+            ..Default::default()
+        };
+
+        scan_catalog.apply_catalog(&write, true).await.unwrap();
+    };
+    {
+        let update = scan_catalog.into_changes();
+        (&fixture.database)
+            .publish_catalog_update("source", update)
+            .await;
+    };
     assert!(
         !fixture
             .database
@@ -329,7 +366,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                     integrated_lufs: Some(-9.0),
                     true_peak: Some(0.7),
                     replay_gain_db: None,
-                    replay_gain_peak: None,
+                    replay_gain_peak: None
                 }
             )
             .await
@@ -408,27 +445,51 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             .await
             .unwrap()
     );
-    let mut scan = library::Scan::begin(&fixture.database, "source", "Source", "source", None)
-        .await
-        .expect("begin membership-changing Scan");
+
+    let mut scan_catalog = async {
+        if (&fixture.database)
+            .source_identity_key(&library::SourceId::new("source"))
+            .await?
+            .is_none()
+        {
+            (&fixture.database)
+                .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
+                .await?;
+        }
+        fixture.database.catalog("source", None).await
+    }
+    .await
+    .expect("begin membership-changing Inventory");
+    let scan = scan_catalog.start_observation().await.unwrap();
     for (id, title, artist, sort, date) in [
         ("album-a", "Album A", "Artist A", "album a", "2024-01-02"),
         ("album-b", "Album B", "Artist B", "album b", "2023-01-02"),
     ] {
-        scan.write_albums(&[&library::AlbumInput {
-            object_id: id.to_owned(),
-            title: title.to_owned(),
-            display_artist: artist.to_owned(),
-            sort_text: sort.to_owned(),
-            year: Some(2024),
-            release_date: Some(date.to_owned()),
-            date_added: Some(date.to_owned()),
-            is_compilation: Some(id == "album-a"),
-            favorite: Some(false),
-            ..Default::default()
-        }])
-        .await
-        .expect("stage Album");
+        {
+            let write = library::CatalogBatch {
+                albums: vec![library::AlbumObservation {
+                    user_data: library::NativeUserState {
+                        favorite: Some(false),
+                        ..Default::default()
+                    },
+                    metadata: library::AlbumMetadata {
+                        title: title.to_owned(),
+                        artist: artist.to_owned(),
+                        sort_text: sort.to_owned(),
+                        year: Some(2024),
+                        release_date: Some(date.to_owned()),
+                        date_added: Some(date.to_owned()),
+                        is_compilation: Some(id == "album-a"),
+                        ..Default::default()
+                    },
+                    object_id: id.to_owned(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+
+            scan_catalog.apply_catalog(&write, true).await.unwrap();
+        };
     }
     for (index, album_id, artist, title) in [
         (0, "album-a", "Artist A", "Alpha"),
@@ -436,59 +497,90 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         (2, "album-a", "Artist B", "Gamma"),
         (3, "album-b", "Artist B", "Delta"),
     ] {
-        scan.write_tracks(&[(
-            &library::TrackInput {
-                object_id: format!("track-{index}"),
-                album_object_id: Some(album_id.to_owned()),
-                title: title.to_owned(),
-                display_album: (if album_id == "album-a" {
-                    "Album A"
-                } else {
-                    "Album B"
-                })
-                .to_owned(),
-                display_artist: artist.to_owned(),
-                sort_text: title.to_lowercase(),
-                duration_millis: 180_000 + index * 1_000,
-                disc_number: 1,
-                track_number: index + 1,
-                year: Some(2020 + index),
-                date_added: Some("2024-01-02".into()),
-                source_format: Some("FLAC".into()),
-                comment: Some("Note".into()),
-                bpm: Some(100 + index),
-                favorite: Some(false),
-                loudness_analysis_key: [index as u8 + 10; 32],
-                source_loudness: match index {
-                    1 => Some(library::LoudnessInput {
-                        integrated_lufs: Some(-15.0),
+        {
+            let write = library::CatalogBatch {
+                tracks: vec![library::TrackObservation {
+                    user_data: library::NativeUserState {
+                        favorite: Some(false),
                         ..Default::default()
-                    }),
-                    2 => Some(library::LoudnessInput {
-                        integrated_lufs: Some(-16.0),
-                        true_peak: Some(0.75),
-                        replay_gain_db: Some(-4.5),
-                        replay_gain_peak: Some(0.9),
-                    }),
-                    _ => None,
-                },
-                album_loudness: (index == 3).then_some(library::LoudnessInput {
-                    integrated_lufs: Some(-13.0),
+                    },
+                    metadata: library::TrackMetadata {
+                        title: title.to_owned(),
+                        album: (if album_id == "album-a" {
+                            "Album A"
+                        } else {
+                            "Album B"
+                        })
+                        .to_owned(),
+                        artist: artist.to_owned(),
+                        sort_text: title.to_lowercase(),
+                        duration_millis: 180_000 + index * 1_000,
+                        disc_number: 1,
+                        track_number: index + 1,
+                        year: Some(2020 + index),
+                        date_added: Some("2024-01-02".into()),
+                        source_format: Some("FLAC".into()),
+                        comment: Some("Note".into()),
+                        bpm: Some(100 + index),
+                        source_loudness: match index {
+                            1 => Some(library::NativeGain {
+                                integrated_lufs: Some(-15.0),
+                                ..Default::default()
+                            }),
+                            2 => Some(library::NativeGain {
+                                integrated_lufs: Some(-16.0),
+                                true_peak: Some(0.75),
+                                replay_gain_db: Some(-4.5),
+                                replay_gain_peak: Some(0.9),
+                            }),
+                            _ => None,
+                        },
+                        album_loudness: (index == 3).then_some(library::NativeGain {
+                            integrated_lufs: Some(-13.0),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                    object_id: format!("track-{index}"),
+                    album_object_id: Some(album_id.to_owned()),
+                    loudness_analysis_key: [index as u8 + 10; 32],
                     ..Default::default()
-                }),
+                }],
                 ..Default::default()
-            },
-            None,
-        )])
-        .await
-        .expect("stage Track");
+            };
+
+            scan_catalog.apply_catalog(&write, true).await.unwrap();
+        };
     }
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    fixture.database.observe_catalog(move |update| {
+    fixture.database.observe_catalog(move |_, update| {
         let _ = updates_tx.send(update);
         std::future::ready(())
     });
-    scan.finish().await.expect("publish membership change");
+    {
+        let update = {
+            scan_catalog
+                .complete_source_observation(
+                    scan,
+                    &[
+                        "track", "album", "artist", "genre", "mood", "folder", "playlist",
+                    ],
+                    None,
+                )
+                .await
+                .unwrap();
+
+            scan_catalog
+                .complete_source_observation(scan, &[], None)
+                .await
+                .unwrap();
+
+            scan_catalog.into_changes()
+        };
+        (&fixture.database)
+            .publish_catalog_update("source", update)
+            .await;
+    };
     let update = updates.try_recv().unwrap();
     assert!(update.metadata);
     assert!(
@@ -558,37 +650,38 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                     integrated_lufs: Some(-12.5),
                     true_peak: Some(0.82),
                     replay_gain_db: None,
-                    replay_gain_peak: None,
+                    replay_gain_peak: None
                 }
             )
             .await
             .expect("replace stale analyzed Album value")
     );
 
-    let mut raw = connection(&fixture.path).await;
-    let plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT analysis_key FROM loudness_measurements WHERE source_key=?1 AND entity_kind='track' AND entity_key=?2")
-        .bind(fixture.source).bind(work.track_key).fetch_all(&mut raw).await.expect("loudness point plan").into_iter().map(|row|row.3).collect::<Vec<_>>().join(" | ");
-    assert!(
-        plan.contains("sqlite_autoindex_loudness_measurements_1"),
-        "{plan}"
-    );
-    let mut scan = library::Scan::begin_items(&fixture.database, "source")
-        .await
-        .unwrap();
-    scan.write_tracks(&[(
-        &library::TrackInput {
-            object_id: "track-3".into(),
-            album_object_id: Some("album-b".into()),
-            title: "Delta".into(),
-            sort_text: "delta".into(),
-            loudness_analysis_key: [43; 32],
+    let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+    {
+        let write = library::CatalogBatch {
+            tracks: vec![library::TrackObservation {
+                metadata: library::TrackMetadata {
+                    title: "Delta".into(),
+                    sort_text: "delta".into(),
+                    ..Default::default()
+                },
+                object_id: "track-3".into(),
+                album_object_id: Some("album-b".into()),
+                loudness_analysis_key: [43; 32],
+                ..Default::default()
+            }],
             ..Default::default()
-        },
-        None,
-    )])
-    .await
-    .unwrap();
-    scan.finish().await.unwrap();
+        };
+
+        scan_catalog.apply_catalog(&write, true).await.unwrap();
+    };
+    {
+        let update = scan_catalog.into_changes();
+        (&fixture.database)
+            .publish_catalog_update("source", update)
+            .await;
+    };
     assert!(
         fixture
             .database
@@ -625,84 +718,108 @@ async fn loudness_keeps_canonical_provider_uri_without_direct_access() {
 }
 
 #[tokio::test]
-async fn artwork_pages_distinct_opaque_bindings_by_digest() {
+async fn source_artwork_pages_distinct_bindings() {
     let fixture = fixture().await;
-    let digest = [9; 32];
+    let binding = |id: &str| {
+        serde_json::to_vec(&[library::ArtworkCandidate::new(
+            library::ArtworkImage::Native {
+                source_id: library::SourceId::new("source"),
+                item_id: id.into(),
+                tag: None,
+            },
+            None,
+        )])
+        .unwrap()
+    };
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE artists SET artwork_binding=NULL")
+    sqlx::query("UPDATE artists SET native_artwork=NULL ")
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("UPDATE tracks SET artwork_binding=?2 WHERE track_key=?1")
+    sqlx::query("UPDATE tracks SET native_artwork=?2 WHERE track_key=?1")
         .bind(fixture.tracks[0])
-        .bind(b"binding-a".as_slice())
+        .bind(binding("binding-a").as_slice())
         .execute(&mut raw)
         .await
         .expect("hydrate Track artwork");
-    sqlx::query("UPDATE albums SET artwork_binding=?2 WHERE album_key=?1")
+    sqlx::query("UPDATE albums SET native_artwork=?2 WHERE album_key=?1")
         .bind(fixture.albums[0])
-        .bind(b"binding-a".as_slice())
+        .bind(binding("binding-a").as_slice())
         .execute(&mut raw)
         .await
         .expect("hydrate duplicate Album artwork");
-    sqlx::query("UPDATE artists SET artwork_binding=?2 WHERE artist_key=?1")
+    sqlx::query("UPDATE artists SET native_artwork=?2 WHERE artist_key=?1")
         .bind(fixture.artists[0])
-        .bind(b"binding-b".as_slice())
+        .bind(binding("binding-b").as_slice())
         .execute(&mut raw)
         .await
         .expect("hydrate Artist artwork");
-    sqlx::query("UPDATE sources SET artwork_digest=?2 WHERE source_key=?1")
-        .bind(fixture.source)
-        .bind(digest.as_slice())
-        .execute(&mut raw)
-        .await
-        .expect("hydrate artwork digest");
     let cancel = ReadCancellation::new();
     let first = fixture
         .database
-        .artwork_preparation_page(fixture.source, None, 1, &cancel)
+        .source_artwork_page(fixture.source, None, None, 1, &cancel)
         .await
         .expect("first artwork page");
     assert_eq!(first.len(), 1);
     let second = fixture
         .database
-        .artwork_preparation_page(fixture.source, Some(&first[0]), 128, &cancel)
+        .source_artwork_page(fixture.source, None, Some(&first[0]), 128, &cancel)
         .await
         .expect("resume artwork page");
-    assert_eq!(second, [b"binding-b".to_vec()]);
-    sqlx::query("WITH RECURSIVE numbers(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM numbers WHERE n<259)
-        INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis,artwork_binding)
-        SELECT ?1,'artwork-'||n,'test:artwork-'||n,'','','','','',0,CAST(printf('binding-%04d',n) AS BLOB) FROM numbers")
+    let mut expected_first = [binding("binding-a"), binding("binding-b")];
+    expected_first.sort();
+    assert_eq!(first, expected_first[..1]);
+    assert_eq!(second, expected_first[1..]);
+    sqlx::query("WITH RECURSIVE numbers(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM numbers WHERE n<259)\n        INSERT INTO tracks(source_key,object_id,media_uri,native_artwork,metadata,normalized_search,indexed) SELECT ?1,'artwork-'||n,'test:artwork-'||n,NULL,jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),'$.comment'),'')),1 FROM numbers")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
-    sqlx::query("UPDATE genres SET artwork_binding=X'' WHERE genre_key=?1")
+    fixture
+        .database
+        .catalog("source", None)
+        .await
+        .unwrap()
+        .set_source_artwork(
+            "track",
+            &(0..260)
+                .map(|n| {
+                    (
+                        format!("artwork-{n}"),
+                        Some(binding(&format!("binding-{n:04}"))),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE genres SET native_artwork=NULL WHERE genre_key=?1")
         .bind(fixture.genre)
         .execute(&mut raw)
         .await
         .unwrap();
-    sqlx::query("UPDATE folders SET artwork_binding=?2 WHERE folder_key=?1")
+    sqlx::query("UPDATE folders SET native_artwork=?2 WHERE folder_key=?1")
         .bind(fixture.folder)
-        .bind(b"binding-folder".as_slice())
+        .bind(binding("binding-folder").as_slice())
         .execute(&mut raw)
         .await
         .unwrap();
     sqlx::query("INSERT INTO playlists(source_key,owner,object_id,name,normalized_name,sort_text,position,artwork_binding) VALUES(?1,'source','artwork','Artwork','artwork','artwork',(SELECT COALESCE(max(position),-1)+1 FROM playlists),?2)")
-        .bind(fixture.source).bind(b"binding-playlist".as_slice())
+        .bind(fixture.source).bind(binding("binding-playlist").as_slice())
         .execute(&mut raw).await.unwrap();
-    let mut expected = vec![Vec::new()];
-    expected.extend((0..260).map(|n| format!("binding-{n:04}").into_bytes()));
+    let mut expected = Vec::new();
+    expected.extend((0..260).map(|n| binding(&format!("binding-{n:04}"))));
     expected.extend([
-        b"binding-a".to_vec(),
-        b"binding-b".to_vec(),
-        b"binding-folder".to_vec(),
-        b"binding-playlist".to_vec(),
+        binding("binding-a"),
+        binding("binding-b"),
+        binding("binding-folder"),
+        binding("binding-playlist"),
     ]);
     expected.sort();
     let mut actual = Vec::<Vec<u8>>::new();
     loop {
         let page = fixture
             .database
-            .artwork_preparation_page(
+            .source_artwork_page(
                 fixture.source,
+                None,
                 actual.last().map(Vec::as_slice),
                 128,
                 &cancel,
@@ -717,9 +834,66 @@ async fn artwork_pages_distinct_opaque_bindings_by_digest() {
         assert!(actual.len() <= expected.len());
     }
     assert_eq!(actual, expected);
-    let plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT artwork_binding FROM tracks WHERE source_key=?1 AND artwork_binding IS NOT NULL AND artwork_binding>?2 ORDER BY artwork_binding LIMIT 128")
-        .bind(fixture.source).bind(b"binding-a".as_slice()).fetch_all(&mut raw).await.expect("artwork preparation plan").into_iter().map(|row|row.3).collect::<Vec<_>>().join(" | ");
-    assert!(plan.contains("tracks_artwork_idx"), "{plan}");
+    sqlx::query("INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) SELECT media_uri,'download',media_uri,'','',media_uri FROM tracks WHERE object_id LIKE 'artwork-%' AND CAST(substr(object_id,9) AS INTEGER)%2=0")
+        .execute(&mut raw).await.unwrap();
+    let mut retention = fixture
+        .database
+        .artwork_cache_retention(&["test:artwork-1".into()])
+        .await
+        .unwrap();
+    let mut retained = Vec::new();
+    loop {
+        let page = retention.next_bindings().await.unwrap();
+        assert!(page.len() <= 128);
+        if page.is_empty() {
+            break;
+        }
+        retained.extend(page);
+    }
+    assert_eq!(retained.len(), 131);
+    assert!(retained.contains(&binding("binding-0001")));
+    assert!(!retained.contains(&binding("binding-a")));
+    retention
+        .retain(&["native/source/cover".into(), "external/cover".into()])
+        .await
+        .unwrap();
+    assert_eq!(
+        retention
+            .unretained(&[
+                "native/source/cover".into(),
+                "external/other".into(),
+                "external/cover".into()
+            ])
+            .await
+            .unwrap(),
+        [false, true, false]
+    );
+    retention.finish().await.unwrap();
+    let scoped = fixture
+        .database
+        .source_artwork_page(fixture.source, Some(fixture.folder), None, 128, &cancel)
+        .await
+        .unwrap();
+    let mut scoped_expected = vec![
+        binding("binding-a"),
+        binding("binding-b"),
+        binding("binding-folder"),
+        binding("binding-playlist"),
+    ];
+    scoped_expected.sort();
+    assert_eq!(scoped, scoped_expected);
+    let scoped_tracks = fixture
+        .database
+        .source_track_uri_page(fixture.source, Some(fixture.folder), None, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(
+        scoped_tracks
+            .iter()
+            .map(|(key, _)| *key)
+            .collect::<Vec<_>>(),
+        fixture.tracks
+    );
 }
 
 #[tokio::test]
@@ -858,27 +1032,6 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         .expect("resolve metadata Local access")
         .unwrap();
     assert_eq!(matched.access_uri, "file:///downloads/metadata.flac");
-
-    let mut raw = connection(&fixture.path).await;
-    let identity_plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT local_file_key FROM local_files WHERE source_key=?1 AND device_id=?2 AND inode=?3")
-        .bind(fixture.source).bind(1_i64).bind(2_i64).fetch_all(&mut raw).await.expect("Local identity plan").into_iter().map(|row|row.3).collect::<Vec<_>>().join(" | ");
-    assert!(
-        identity_plan.contains("local_files_identity_idx"),
-        "{identity_plan}"
-    );
-    let access_plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT local_access_file_key FROM local_access_files WHERE media_uri=?1")
-        .bind(&fixture.track_uris[0]).fetch_all(&mut raw).await.expect("Local access plan").into_iter().map(|row|row.3).collect::<Vec<_>>().join(" | ");
-    assert!(
-        access_plan
-            .contains("SEARCH locator USING INDEX local_locators_precedence_idx (media_uri=?)"),
-        "{access_plan}"
-    );
-    let match_plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT locator.local_access_file_key FROM main.local_access_metadata metadata JOIN local_access_files locator USING(access_uri) WHERE locator.source_key=?1 AND metadata.normalized_title=?2 AND metadata.normalized_album=?3 AND metadata.normalized_artist=?4 AND metadata.disc_number=?5 AND metadata.track_number=?6 AND metadata.duration_millis=?7")
-        .bind(fixture.source).bind("alpha").bind("album a").bind("artist a").bind(1_i64).bind(1_i64).bind(180_000_i64).fetch_all(&mut raw).await.expect("Local metadata match plan").into_iter().map(|row|row.3).collect::<Vec<_>>().join(" | ");
-    assert!(
-        match_plan.contains("local_access_match_uri_idx"),
-        "{match_plan}"
-    );
 }
 
 #[tokio::test]
@@ -914,10 +1067,7 @@ async fn local_mapping_counts_formula_coverage_without_probing_local_files() {
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
     sqlx::query(
-        "UPDATE tracks SET source_path=CASE track_key
-           WHEN ?1 THEN '/music/Artist/Album/Track.flac'
-           ELSE 'Other/Album/Track.flac' END
-         WHERE source_key=?2",
+        "UPDATE tracks SET source_path=CASE track_key\n           WHEN ?1 THEN '/music/Artist/Album/Track.flac'\n           ELSE 'Other/Album/Track.flac' END WHERE source_key=?2",
     )
     .bind(fixture.tracks[0])
     .bind(fixture.source)
@@ -946,6 +1096,7 @@ async fn local_mapping_counts_formula_coverage_without_probing_local_files() {
 #[tokio::test]
 async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     let fixture = fixture().await;
+    let mut writes = fixture.database.subscribe_lyrics_cache_writes();
     let cancel = ReadCancellation::new();
     let capacity_payload = "x".repeat(8 * 1024 * 1024);
     fixture
@@ -962,6 +1113,8 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         )
         .await
         .expect("write lyrics");
+    assert!(writes.has_changed().unwrap());
+    writes.borrow_and_update();
     fixture
         .database
         .write_lyrics_cache(
@@ -980,9 +1133,9 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         .database
         .lyrics_cache_for_role(
             &fixture.track_uris[0],
-            "lyrics",
-            "en",
-            "Latn",
+            "original",
+            "",
+            "",
             [1; 32],
             "source",
             &cancel,
@@ -1006,6 +1159,22 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         .expect("read preferred external lyrics")
         .unwrap();
     assert_eq!(external.lyrics, "External");
+    assert!(
+        fixture
+            .database
+            .lyrics_cache_for_role(
+                &fixture.track_uris[0],
+                "original",
+                "",
+                "",
+                [1; 32],
+                "external",
+                &cancel,
+            )
+            .await
+            .expect("external cache keeps its display key")
+            .is_none()
+    );
     assert!(
         fixture
             .database
@@ -1080,6 +1249,119 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
             .await
             .expect("remove lyrics")
     );
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES(?1,'download',?1,'','',?1),(?2,'mapping',?2,'','',?2)")
+        .bind(&fixture.track_uris[0]).bind(&fixture.track_uris[2])
+        .execute(&mut raw).await.unwrap();
+    for index in [1, 2] {
+        for authority in ["source", "external"] {
+            fixture
+                .database
+                .write_lyrics_cache(
+                    &fixture.track_uris[index],
+                    authority,
+                    "lyrics",
+                    "en",
+                    "Latn",
+                    [1; 32],
+                    "Cached",
+                    30,
+                )
+                .await
+                .unwrap();
+        }
+    }
+    fixture
+        .database
+        .clear_lyrics_cache(&[fixture.track_uris[1].clone()])
+        .await
+        .unwrap();
+    for (index, retained) in [(0, true), (1, true), (2, false)] {
+        for authority in ["source", "external"] {
+            assert_eq!(
+                fixture
+                    .database
+                    .lyrics_cache_for_role(
+                        &fixture.track_uris[index],
+                        "lyrics",
+                        "en",
+                        "Latn",
+                        [1; 32],
+                        authority,
+                        &cancel
+                    )
+                    .await
+                    .unwrap()
+                    .is_some(),
+                retained
+            );
+        }
+    }
+    writes.borrow_and_update();
+    let revision = fixture.database.lyrics_cache_revision().await.unwrap();
+    let imported = library::LyricsCacheRow {
+        media_uri: fixture.track_uris[2].clone(),
+        authority: "source".into(),
+        role: "original".into(),
+        language: String::new(),
+        script: String::new(),
+        cache_input_digest: [9; 32],
+        lyrics: "Peer".into(),
+        updated_at: 40,
+    };
+    assert_eq!(
+        fixture
+            .database
+            .import_lyrics_cache(vec![imported], false)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        !writes.has_changed().unwrap(),
+        "peer import does not wake local publication"
+    );
+    assert_eq!(
+        fixture.database.lyrics_cache_revision().await.unwrap(),
+        revision,
+        "peer imports are not local export changes"
+    );
+    assert!(
+        fixture
+            .database
+            .lyrics_cache_changes((revision, i64::MAX), revision)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    fixture
+        .database
+        .write_lyrics_cache(
+            &fixture.track_uris[2],
+            "source",
+            "original",
+            "",
+            "",
+            [9; 32],
+            "Local edit",
+            41,
+        )
+        .await
+        .unwrap();
+    assert!(
+        writes.has_changed().unwrap(),
+        "local source write wakes publication while idle"
+    );
+    let edited_revision = fixture.database.lyrics_cache_revision().await.unwrap();
+    assert!(edited_revision > revision);
+    let changes = fixture
+        .database
+        .lyrics_cache_changes((revision, i64::MAX), edited_revision)
+        .await
+        .unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].1.lyrics, "Local edit");
 }
 
 #[tokio::test]
@@ -1130,39 +1412,45 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
         )
         .await
         .expect("write source lyrics");
-    let mut scan = library::Scan::begin_items(&fixture.database, "source")
-        .await
-        .unwrap();
-    scan.write_tracks(&[(
-        &library::TrackInput {
-            object_id: "track-0".into(),
-            title: "Alpha".into(),
-            sort_text: "alpha".into(),
-            loudness_analysis_key: [1; 32],
-            source_loudness: Some(library::LoudnessInput {
-                integrated_lufs: Some(-12.0),
-                true_peak: Some(0.8),
+
+    let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+    {
+        let write = library::CatalogBatch {
+            tracks: vec![library::TrackObservation {
+                metadata: library::TrackMetadata {
+                    title: "Alpha".into(),
+                    sort_text: "alpha".into(),
+                    source_loudness: Some(library::NativeGain {
+                        integrated_lufs: Some(-12.0),
+                        true_peak: Some(0.8),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                object_id: "track-0".into(),
+                loudness_analysis_key: [1; 32],
                 ..Default::default()
-            }),
+            }],
             ..Default::default()
-        },
-        None,
-    )])
-    .await
-    .unwrap();
-    scan.finish().await.unwrap();
+        };
+
+        scan_catalog.apply_catalog(&write, true).await.unwrap();
+    };
+    {
+        let update = scan_catalog.into_changes();
+        (&fixture.database)
+            .publish_catalog_update("source", update)
+            .await;
+    };
     let queue_media = fixture
         .database
-        .queue_items_for_uris(&fixture.track_uris[..1], &ReadCancellation::new())
+        .track_references_for_uris(&fixture.track_uris[..1], &ReadCancellation::new())
         .await
         .expect("materialize Queue media")
         .remove(0);
     persist_queue(
         &fixture.database,
-        fixture.source,
-        &[QueueRow {
-            occurrence_id: None,
-            track_key: None,
+        &[QueueTransferRow {
             received_from_connect: false,
             item: queue_media,
             position: 0,

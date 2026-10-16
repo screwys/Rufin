@@ -458,6 +458,9 @@ msgstr ""
 msgid "Artists"
 msgstr ""
 
+msgid "Artwork cache cleared"
+msgstr ""
+
 msgid "Artwork editing is no longer available"
 msgstr ""
 
@@ -674,7 +677,13 @@ msgstr ""
 msgid "Clear artist"
 msgstr ""
 
+msgid "Clear artwork cache"
+msgstr ""
+
 msgid "Clear fetched lyrics for this track"
+msgstr ""
+
+msgid "Clear lyrics cache"
 msgstr ""
 
 msgid "Clear queue"
@@ -1051,6 +1060,9 @@ msgstr ""
 msgid "Device name"
 msgstr ""
 
+msgid "Device"
+msgstr ""
+
 msgid "Diagnostic log saved"
 msgstr ""
 
@@ -1127,6 +1139,12 @@ msgstr ""
 msgid "Download Queue"
 msgstr ""
 
+msgid "Download artwork"
+msgstr ""
+
+msgid "Download lyrics"
+msgstr ""
+
 msgid "Download quality"
 msgstr ""
 
@@ -1143,6 +1161,14 @@ msgid "Downloaded"
 msgstr ""
 
 msgid "Downloading Japanese dictionary..."
+msgstr ""
+
+#, rust-format
+msgid "Downloading artwork... {count} checked"
+msgstr ""
+
+#, rust-format
+msgid "Downloading lyrics... {count} checked"
 msgstr ""
 
 msgid "Downloading"
@@ -1830,6 +1856,9 @@ msgstr ""
 msgid "Lyrics background opacity"
 msgstr ""
 
+msgid "Lyrics cache cleared"
+msgstr ""
+
 msgid "Lyrics loaded"
 msgstr ""
 
@@ -2061,6 +2090,9 @@ msgid "New Smart Playlist"
 msgstr ""
 
 msgid "New download rule"
+msgstr ""
+
+msgid "New file"
 msgstr ""
 
 msgid "New release is available"
@@ -3475,6 +3507,9 @@ msgid "Text"
 msgstr ""
 
 msgid "The API token was not accepted. Please connect again."
+msgstr ""
+
+msgid "The connection no longer exists"
 msgstr ""
 
 msgid "TheAudioDB album ID"

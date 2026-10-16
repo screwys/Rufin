@@ -1,14 +1,15 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use library::{Database, LocalFileKind, Scan};
 use smb_fscc::NotifyAction;
 
 use super::FileSource;
+use crate::file::check_cancelled;
 use crate::file::remote::input::FileInput;
 use crate::{SourceError, SourceResult};
 
 pub(crate) enum FileChange {
-    Inventory,
+    FullRefresh,
     Paths {
         paths: Vec<String>,
         rename: Option<(String, String)>,
@@ -26,14 +27,14 @@ impl FileChange {
                 },
             ) => {
                 if rename.is_some() && next.is_some() {
-                    return Self::Inventory;
+                    return Self::FullRefresh;
                 }
                 for path in incoming {
                     if !paths.contains(&path) {
                         paths.push(path);
                     }
                     if paths.len() > crate::source::LIVE_CHANGE_LIMIT {
-                        return Self::Inventory;
+                        return Self::FullRefresh;
                     }
                 }
                 Self::Paths {
@@ -41,7 +42,7 @@ impl FileChange {
                     rename: rename.or(next),
                 }
             }
-            _ => Self::Inventory,
+            _ => Self::FullRefresh,
         }
     }
 }
@@ -68,7 +69,7 @@ impl FileSource {
                 }
             }
             if let Some(client) = connected {
-                if !changed(FileChange::Inventory) {
+                if !changed(FileChange::FullRefresh) {
                     return;
                 }
                 let mut old_name = None;
@@ -109,7 +110,7 @@ impl FileSource {
                         // Explicit protocol limitation: retain automatic checks on this server.
                         loop {
                             tokio::time::sleep(Duration::from_secs(300)).await;
-                            if !changed(FileChange::Inventory) {
+                            if !changed(FileChange::FullRefresh) {
                                 return;
                             }
                         }
@@ -122,15 +123,20 @@ impl FileSource {
         }
     }
 
-    pub(crate) async fn publish_paths(
+    pub(crate) async fn acquire_paths(
         &self,
-        database: &Database,
-        source: library::SourceKey,
+        catalog: &mut library::Catalog<'_>,
         paths: &[String],
         rename: Option<&(String, String)>,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
+        let database = catalog.database;
+        let source_id = catalog.source_id;
+        let stamp = catalog.observed;
         let mut affected = Vec::new();
         for path in paths {
+            let relative = self.relative(path).ok();
+            let path = relative.as_ref().unwrap_or(path);
             if self.includes(path) {
                 if !affected.contains(path) {
                     affected.push(path.clone());
@@ -157,82 +163,89 @@ impl FileSource {
         let rename = rename
             .map(|(old, new)| Ok::<_, SourceError>((self.location(old)?, self.location(new)?)))
             .transpose()?;
-        let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
-        let result = async {
-            for page in seeds.chunks(128) {
-                scan.write_local_component_paths(page).await?;
-            }
-            // The same inventory dependency expansion used by Local includes CUE backing files.
-            // Prefixes include old directory contents even when a moved directory no longer exists.
-            let prefixes = seeds
-                .iter()
-                .map(|path| format!("{}/", path.trim_end_matches('/')))
-                .collect::<Vec<_>>();
-            for page in prefixes.chunks(128) {
-                scan.expand_local_artwork_prefixes(source, page, &[])
-                    .await?;
-            }
-            let mut image_directories = Vec::new();
-            for path in &paths {
-                if crate::file::artwork::supported_image(std::path::Path::new(path)) {
-                    let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
-                    let prefix = format!("{}/", self.location(parent)?.trim_end_matches('/'));
-                    if !image_directories.contains(&prefix) {
-                        image_directories.push(prefix);
-                    }
+        let mut prefixes = seeds
+            .iter()
+            .map(|path| format!("{}/", path.trim_end_matches('/')))
+            .collect::<Vec<_>>();
+        let mut image_directories = Vec::new();
+        for path in &paths {
+            if crate::file::artwork::supported_image(std::path::Path::new(path)) {
+                let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
+                let prefix = format!("{}/", self.location(parent)?.trim_end_matches('/'));
+                if !image_directories.contains(&prefix) {
+                    image_directories.push(prefix);
                 }
             }
-            for page in image_directories.chunks(128) {
-                scan.expand_local_artwork_prefixes(source, &[], page)
-                    .await?;
-            }
-            scan.expand_local_component(source).await?;
-            let mut after = None;
-            loop {
-                let page = scan
-                    .local_component_path_page(after.as_deref(), 128)
-                    .await?;
-                if page.is_empty() {
-                    break;
-                }
-                after = page.last().cloned();
-                let mut observations = Vec::new();
-                let result: SourceResult<()> = async {
-                    for path in &page {
-                        match self.stat(&input, &self.relative(path)?).await {
-                            Ok(file) => observations.push((file, vec![])),
-                            Err(SourceError::NotFound) => {}
-                            Err(error) => return Err(error),
-                        }
-                    }
-                    Ok(())
-                }
-                .await;
-                scan.write_local_files(&observations).await?;
-                result?;
-                scan.remove_local_file_paths(&page).await?;
-            }
-            let mut after = None;
-            loop {
-                let page = scan
-                    .local_inventory_path_page(LocalFileKind::Directory, after.as_deref(), false, 1)
-                    .await?;
-                let Some(directory) = page.into_iter().next() else {
-                    break;
-                };
-                self.list_directory(&input, &mut scan, &self.relative(&directory)?, &|| false)
-                    .await?;
-                after = Some(directory);
-            }
-            self.stage_files(&mut scan, &|_| {}, &|| false, rename.as_ref())
-                .await?;
-            scan.remove_local_component_tracks(source).await?;
-            crate::file::artwork::ArtworkFiles::Remote(self)
-                .stage(database, &mut scan, &|| false)
-                .await?;
-            Ok(())
         }
-        .await;
-        crate::finish_scan(scan, result).await
+        prefixes.extend(image_directories);
+        let mut after = None;
+        loop {
+            let page = database
+                .source_component_page(source_id, &seeds, &prefixes, after.as_deref())
+                .await?;
+            if page.is_empty() {
+                break;
+            }
+            after = page.last().cloned();
+            let mut observations = Vec::new();
+            let mut missing = Vec::new();
+            let result: SourceResult<()> = async {
+                for path in &page {
+                    match self.stat(&input, &self.relative(path)?).await {
+                        Ok(file) => observations.push((file, vec![])),
+                        Err(SourceError::NotFound) => missing.push(path.clone()),
+                        Err(error) => return Err(error),
+                    }
+                }
+                Ok(())
+            }
+            .await;
+            check_cancelled(cancelled)?;
+            catalog
+                .write_file_observations(&observations, Vec::new(), true)
+                .await?;
+            result?;
+            check_cancelled(cancelled)?;
+            catalog
+                .remove_source_files(&missing, stamp.expect("file observation"))
+                .await?;
+        }
+        let workers: [_; 4] =
+            std::array::from_fn(|_| Arc::new(Mutex::new(crate::file::media::Worker::default())));
+        self.acquire_cues(
+            catalog,
+            None,
+            Arc::clone(&workers[0]),
+            &|_| {},
+            cancelled,
+            rename.as_ref(),
+        )
+        .await?;
+        let mut after = None;
+        loop {
+            let Some(directory) = database
+                .source_next_directory(source_id, stamp, after.as_deref(), &self.location("")?)
+                .await?
+            else {
+                break;
+            };
+            self.acquire_directory(
+                catalog,
+                &input,
+                &directory,
+                Arc::clone(&workers[0]),
+                &|_| {},
+                cancelled,
+                rename.as_ref(),
+            )
+            .await?;
+            after = Some(directory);
+        }
+        self.acquire_media_files(catalog, &workers, &|_| {}, cancelled, rename.as_ref(), 0)
+            .await?;
+        crate::file::artwork::ArtworkFiles::Remote(self)
+            .acquire(catalog, cancelled)
+            .await?;
+        Ok(())
     }
 }

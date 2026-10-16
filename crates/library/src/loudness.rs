@@ -1,12 +1,10 @@
 //! Owns persisted source gain and EBU R128 facts and selects one missing analysis unit at a time.
 //! Current source measurements take precedence over Rufin analysis; parsing, scheduling, and tag writing stay outside Library.
 
-use blake3::Hasher;
-use futures_util::TryStreamExt;
 use sqlx::{Connection, FromRow, SqliteConnection};
 
 use crate::{
-    AlbumKey, Database, LibraryError, LibraryResult, LoudnessInput, ReadCancellation, SourceKey,
+    AlbumKey, Database, LibraryError, LibraryResult, NativeGain, ReadCancellation, SourceKey,
     TrackKey,
 };
 
@@ -93,26 +91,18 @@ impl Database {
         media_uri: &str,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<(Option<LoudnessMeasurement>, Option<LoudnessMeasurement>)> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let rows = sqlx::query_as::<_, MeasurementScalar>(
-            "WITH owners AS (
-                SELECT 'track' entity_kind,track_key entity_key,source_key,loudness_analysis_key
-                FROM tracks WHERE media_uri=?1
-                UNION ALL
-                SELECT 'album',album.album_key,album.source_key,album.loudness_analysis_key
-                FROM tracks track JOIN albums album USING(album_key) WHERE track.media_uri=?1
-             ) SELECT owner.entity_kind,owner.loudness_analysis_key analysis_key,
-                    loudness.integrated_lufs,loudness.true_peak,replay.gain_db replay_gain_db,
-                    replay.peak replay_gain_peak
-             FROM owners owner LEFT JOIN loudness_measurements loudness
-               ON loudness.source_key=owner.source_key AND loudness.entity_kind=owner.entity_kind
-              AND loudness.entity_key=owner.entity_key AND loudness.analysis_key=owner.loudness_analysis_key
-             LEFT JOIN replay_gain_measurements replay
-               ON replay.source_key=owner.source_key AND replay.entity_kind=owner.entity_kind
-              AND replay.entity_key=owner.entity_key AND replay.analysis_key=owner.loudness_analysis_key
-             WHERE loudness.entity_key IS NOT NULL OR replay.entity_key IS NOT NULL
-             ORDER BY loudness.origin='source' DESC",
-        ).bind(media_uri).fetch_all(&mut *connection).await?;
+        let mut connection = tokio::select! {
+            connection = self.acquire_reader() => connection?,
+            () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
+        };
+        let rows = sqlx::query_as::<_, MeasurementScalar>(sqlx::AssertSqlSafe(format!(
+            "WITH owner AS(SELECT track.*,album.source_loudness_analysis_key album_source_token,album.loudness_analysis_key album_token,album.accepted_audio FROM tracks track LEFT JOIN albums album USING(album_key) WHERE track.media_uri=?1),
+             native AS(SELECT 'track' entity_kind,track_key entity_key,source_key,loudness_analysis_key analysis_key,CASE WHEN source_loudness_analysis_key=loudness_analysis_key THEN json_extract(metadata,'$.source_loudness') END gain FROM owner
+             UNION ALL SELECT 'album',album_key,source_key,album_token,{} FROM owner),
+             chosen AS(SELECT native.entity_kind,native.analysis_key,json_extract(native.gain,'$.integrated_lufs') integrated_lufs,json_extract(native.gain,'$.true_peak') true_peak,json_extract(native.gain,'$.replay_gain_db') replay_gain_db,json_extract(native.gain,'$.replay_gain_peak') replay_gain_peak,0 priority FROM native WHERE native.gain IS NOT NULL AND native.gain<>'null'
+             UNION ALL SELECT native.entity_kind,native.analysis_key,measurement.integrated_lufs,measurement.true_peak,NULL,NULL,1 FROM native JOIN loudness_measurements measurement ON measurement.source_key=native.source_key AND measurement.entity_kind=native.entity_kind AND measurement.entity_key=native.entity_key AND measurement.analysis_key=native.analysis_key)
+             SELECT entity_kind,analysis_key,integrated_lufs,true_peak,replay_gain_db,replay_gain_peak FROM chosen ORDER BY priority",native_album_sql("owner"))))
+            .bind(media_uri).fetch_all(&mut *connection).await?;
         let (mut track, mut album) = (None, None);
         for row in rows {
             let selected = if row.entity_kind == "track" {
@@ -140,22 +130,22 @@ impl Database {
             ));
         }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_as::<_, R128TagWrite>(
+        let native = native_album_sql("owner");
+        let result = sqlx::query_as::<_, R128TagWrite>(sqlx::AssertSqlSafe(format!(
             "SELECT track.track_key,track_loudness.integrated_lufs track_lufs,
+                coalesce((SELECT json_extract({native},'$.integrated_lufs') FROM
+                  (SELECT album.*,source_loudness_analysis_key album_source_token,loudness_analysis_key album_token FROM albums album WHERE album.album_key=track.album_key) owner),
                 (SELECT measurement.integrated_lufs FROM loudness_measurements measurement
                  JOIN albums album ON album.album_key=track.album_key
                  WHERE measurement.source_key=track.source_key AND measurement.entity_kind='album'
                    AND measurement.entity_key=album.album_key AND measurement.analysis_key=album.loudness_analysis_key
-                 ORDER BY measurement.origin='source' DESC LIMIT 1) album_lufs
+                 LIMIT 1)) album_lufs
              FROM tracks track JOIN loudness_measurements track_loudness
                ON track_loudness.source_key=track.source_key AND track_loudness.entity_kind='track'
               AND track_loudness.entity_key=track.track_key AND track_loudness.analysis_key=track.loudness_analysis_key
-              AND track_loudness.origin='analysis'
-             WHERE track.source_key=?1 AND track.track_key>?2 AND NOT EXISTS(
-                SELECT 1 FROM loudness_measurements source WHERE source.source_key=track.source_key
-                  AND source.entity_kind='track' AND source.entity_key=track.track_key
-                  AND source.analysis_key=track.loudness_analysis_key AND source.origin='source')
-             ORDER BY track.track_key LIMIT ?3")
+             WHERE track.source_key=?1 AND track.indexed=1 AND track.track_key>?2
+               AND NOT(track.source_loudness_analysis_key=track.loudness_analysis_key AND json_extract(track.metadata,'$.source_loudness.integrated_lufs') IS NOT NULL)
+             ORDER BY track.track_key LIMIT ?3")))
             .bind(source)
             .bind(after.map_or(0, TrackKey::raw))
             .bind(limit as i64)
@@ -171,7 +161,7 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<TrackLoudnessWork>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_as::<_, TrackWorkScalar>("SELECT track.track_key,track.loudness_analysis_key expected_analysis_key,COALESCE((SELECT access.access_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.media_uri=track.media_uri ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.media_uri) media_uri FROM tracks track WHERE track.source_key=?1 AND track.track_key>?2 AND NOT EXISTS(SELECT 1 FROM loudness_measurements measurement WHERE measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key AND measurement.analysis_key=track.loudness_analysis_key) ORDER BY track.track_key LIMIT 1")
+        let result = sqlx::query_as::<_, TrackWorkScalar>("SELECT track.track_key,track.loudness_analysis_key expected_analysis_key,COALESCE((SELECT access.access_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.media_uri=track.media_uri ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.media_uri) media_uri FROM tracks track WHERE track.source_key=?1 AND track.indexed=1 AND track.track_key>?2 AND NOT(track.source_loudness_analysis_key=track.loudness_analysis_key AND json_extract(track.metadata,'$.source_loudness.integrated_lufs') IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM loudness_measurements measurement WHERE measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key AND measurement.analysis_key=track.loudness_analysis_key) ORDER BY track.track_key LIMIT 1")
             .bind(source).bind(after.map_or(0, TrackKey::raw)).fetch_optional(&mut *connection).await;
         result?.map(TryInto::try_into).transpose()
     }
@@ -184,10 +174,11 @@ impl Database {
     ) -> LibraryResult<Option<AlbumLoudnessWork>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let album = sqlx::query_as::<_,(AlbumKey,Vec<u8>)>("SELECT album.album_key,album.loudness_analysis_key FROM albums album WHERE album.source_key=?1 AND album.album_key>?2 AND NOT EXISTS(SELECT 1 FROM loudness_measurements measurement WHERE measurement.source_key=album.source_key AND measurement.entity_kind='album' AND measurement.entity_key=album.album_key AND measurement.analysis_key=album.loudness_analysis_key) AND EXISTS (SELECT 1 FROM tracks track WHERE track.source_key=album.source_key AND track.album_key=album.album_key) ORDER BY album.album_key LIMIT 1")
+        let native = native_album_sql("album");
+        let album = sqlx::query_as::<_,(AlbumKey,Vec<u8>)>(sqlx::AssertSqlSafe(format!("WITH album AS(SELECT albums.*,source_loudness_analysis_key album_source_token,loudness_analysis_key album_token FROM albums) SELECT album.album_key,album.loudness_analysis_key FROM album WHERE album.source_key=?1 AND album.album_key>?2 AND json_extract({native},'$.integrated_lufs') IS NULL AND NOT EXISTS(SELECT 1 FROM loudness_measurements measurement WHERE measurement.source_key=album.source_key AND measurement.entity_kind='album' AND measurement.entity_key=album.album_key AND measurement.analysis_key=album.loudness_analysis_key) AND EXISTS (SELECT 1 FROM tracks track WHERE track.source_key=album.source_key AND track.album_key=album.album_key AND track.indexed=1) ORDER BY album.album_key LIMIT 1")))
             .bind(source).bind(after.map_or(0, AlbumKey::raw)).fetch_optional(&mut *transaction).await?;
         let result = if let Some((album_key, expected)) = album {
-            let tracks = sqlx::query_as::<_, TrackWorkScalar>("SELECT track.track_key,track.loudness_analysis_key expected_analysis_key,COALESCE((SELECT access.access_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.media_uri=track.media_uri ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.media_uri) media_uri FROM tracks track WHERE track.source_key=?1 AND track.album_key=?2 ORDER BY track.disc_number,track.track_number,track.track_key")
+            let tracks = sqlx::query_as::<_, TrackWorkScalar>("SELECT track.track_key,track.loudness_analysis_key expected_analysis_key,COALESCE((SELECT access.access_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.media_uri=track.media_uri ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.media_uri) media_uri FROM tracks track WHERE track.source_key=?1 AND track.album_key=?2 AND track.indexed=1 ORDER BY track.disc_number,track.track_number,track.track_key")
                 .bind(source).bind(album_key).fetch_all(&mut *transaction).await?;
             Some(AlbumLoudnessWork {
                 album_key,
@@ -233,7 +224,7 @@ async fn write_analyzed_loudness(
     key: i64,
     measurement: &LoudnessMeasurement,
 ) -> LibraryResult<bool> {
-    let input = LoudnessInput {
+    let input = NativeGain {
         integrated_lufs: measurement.integrated_lufs,
         true_peak: measurement.true_peak,
         replay_gain_db: measurement.replay_gain_db,
@@ -246,12 +237,13 @@ async fn write_analyzed_loudness(
     }
     let mut writer = database.writer().await?;
     let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+    let native = if kind == "track" {
+        "CASE WHEN item.source_loudness_analysis_key=item.loudness_analysis_key THEN json_extract(item.metadata,'$.source_loudness') END".to_owned()
+    } else {
+        native_album_sql("item")
+    };
     let accepted = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!(
-        "SELECT item.loudness_analysis_key=?3 AND NOT EXISTS(
-            SELECT 1 FROM loudness_measurements measurement WHERE measurement.source_key=?1
-              AND measurement.entity_kind='{kind}' AND measurement.entity_key=?2
-              AND measurement.analysis_key=?3 AND measurement.origin='source')
-         FROM {kind}s item WHERE item.source_key=?1 AND item.{kind}_key=?2"
+        "WITH item AS(SELECT {kind}s.*,source_loudness_analysis_key album_source_token,loudness_analysis_key album_token FROM {kind}s WHERE source_key=?1 AND {kind}_key=?2) SELECT item.loudness_analysis_key=?3 AND json_extract({native},'$.integrated_lufs') IS NULL FROM item"
     )))
     .bind(source)
     .bind(key)
@@ -263,8 +255,8 @@ async fn write_analyzed_loudness(
     })?;
     if accepted {
         sqlx::query(
-            "INSERT INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak,origin)
-             VALUES(?1,?2,?3,?4,?5,?6,'analysis') ON CONFLICT(source_key,entity_kind,entity_key,origin) DO UPDATE SET
+            "INSERT INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak)
+             VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET
                 analysis_key=excluded.analysis_key,integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak
              WHERE (analysis_key,integrated_lufs,true_peak) IS NOT (excluded.analysis_key,excluded.integrated_lufs,excluded.true_peak)")
             .bind(source).bind(kind).bind(key).bind(measurement.analysis_key.as_slice())
@@ -273,7 +265,7 @@ async fn write_analyzed_loudness(
     Ok(accepted)
 }
 
-pub(crate) fn valid_measurement(input: LoudnessInput) -> bool {
+pub(crate) fn valid_measurement(input: NativeGain) -> bool {
     (input.integrated_lufs.is_some() || input.replay_gain_db.is_some())
         && input.integrated_lufs.is_none_or(f64::is_finite)
         && input
@@ -285,34 +277,23 @@ pub(crate) fn valid_measurement(input: LoudnessInput) -> bool {
             .is_none_or(|value| value.is_finite() && value >= 0.0)
 }
 
-pub(crate) async fn recompute_album_loudness_key(
+pub(crate) async fn invalidate_album_audio(
     connection: &mut SqliteConnection,
-    album: AlbumKey,
+    albums: &[AlbumKey],
     update_source: bool,
 ) -> LibraryResult<bool> {
-    let mut source_hasher = Hasher::new();
-    source_hasher.update(b"rufin-album-loudness-v1\0");
-    let mut current_hasher = source_hasher.clone();
-    let mut rows = sqlx::query_as::<_, (Vec<u8>, Vec<u8>)>(
-        "SELECT track.source_loudness_analysis_key,track.loudness_analysis_key
-         FROM tracks track JOIN albums album USING(album_key)
-         WHERE album.album_key=?1 AND track.source_key=album.source_key AND (NOT ?2 OR track.indexed)
-         ORDER BY track.disc_number,track.track_number,track.sort_text,track.object_id")
-        .bind(album).bind(update_source).fetch(&mut *connection);
-    while let Some((source_key, current_key)) = rows.try_next().await? {
-        if update_source {
-            source_hasher.update(&source_key);
-        }
-        current_hasher.update(&current_key);
+    if albums.is_empty() {
+        return Ok(false);
     }
-    drop(rows);
-    let source_key = source_hasher.finalize();
-    let current_key = current_hasher.finalize();
-    Ok(sqlx::query(
-        "UPDATE albums SET source_loudness_analysis_key=CASE WHEN ?2 THEN ?3 ELSE source_loudness_analysis_key END,
-             loudness_analysis_key=?4 WHERE album_key=?1
-         AND (source_loudness_analysis_key,loudness_analysis_key) IS NOT
-             (CASE WHEN ?2 THEN ?3 ELSE source_loudness_analysis_key END,?4)")
-        .bind(album).bind(update_source).bind(source_key.as_bytes().as_slice())
-        .bind(current_key.as_bytes().as_slice()).execute(connection).await?.rows_affected()>0)
+    let input = serde_json::to_string(albums)?;
+    if update_source {
+        sqlx::query("UPDATE albums SET source_loudness_analysis_key=randomblob(32),accepted_audio=NULL WHERE album_key IN(SELECT value FROM json_each(?1))").bind(&input).execute(&mut *connection).await?;
+    }
+    Ok(sqlx::query("UPDATE albums SET loudness_analysis_key=CASE WHEN EXISTS(SELECT 1 FROM tracks WHERE tracks.album_key=albums.album_key AND indexed=1 AND source_loudness_analysis_key<>loudness_analysis_key) THEN randomblob(32) ELSE source_loudness_analysis_key END WHERE album_key IN(SELECT value FROM json_each(?1))").bind(input).execute(connection).await?.rows_affected()>0)
+}
+
+fn native_album_sql(owner: &str) -> String {
+    format!(
+        "CASE WHEN {owner}.album_source_token={owner}.album_token THEN coalesce((SELECT json_extract(member.metadata,'$.album_loudness') FROM tracks member WHERE member.album_key={owner}.album_key AND member.indexed=1 AND json_type(member.metadata,'$.album_loudness')='object' AND(json_extract(member.metadata,'$.album_loudness.integrated_lufs') IS NOT NULL OR json_extract(member.metadata,'$.album_loudness.replay_gain_db') IS NOT NULL) ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1),CASE WHEN json_extract({owner}.accepted_audio,'$.token')=hex({owner}.album_source_token) THEN json_extract({owner}.accepted_audio,'$.gain') END) END"
+    )
 }

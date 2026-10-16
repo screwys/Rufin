@@ -487,10 +487,6 @@ async fn exercise_http_api(
         .unwrap();
     assert_eq!(invalid.status(), reqwest::StatusCode::BAD_REQUEST);
     assert_eq!(
-        api(reqwest::Method::GET, "sources/progress", Value::Null).await["state"],
-        "failed"
-    );
-    assert_eq!(
         api(
             reqwest::Method::POST,
             "sources/refresh",
@@ -498,10 +494,6 @@ async fn exercise_http_api(
         )
         .await["refreshed"],
         true
-    );
-    assert_eq!(
-        api(reqwest::Method::GET, "sources/progress", Value::Null).await["state"],
-        "idle"
     );
     let response: Value = client
         .get(format!("{base}/tracks"))
@@ -581,26 +573,6 @@ async fn exercise_http_api(
     .await["id"]
         .clone();
     assert!(playlist.is_i64());
-    let mut cover_row = products
-        .library
-        .playlist_rows(
-            &[serde_json::from_value(playlist.clone()).unwrap()],
-            &library::ReadCancellation::new(),
-        )
-        .await
-        .unwrap()
-        .pop()
-        .unwrap();
-    cover_row.artwork_binding = Some(vec![1]);
-    assert_eq!(
-        rufin_core::playlists::playlist_artwork_bindings(&cover_row),
-        &[vec![1]]
-    );
-    cover_row.artwork_binding = None;
-    assert_eq!(
-        rufin_core::playlists::playlist_artwork_bindings(&cover_row),
-        &[] as &[Vec<u8>]
-    );
     let listed = api(reqwest::Method::GET, "playlists", Value::Null).await;
     let row = listed["playlists"]
         .as_array()
@@ -930,7 +902,7 @@ async fn exercise_http_api(
     let inserted = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let queue = api(reqwest::Method::GET, "queue", Value::Null).await;
-            if queue["total"] == 1 {
+            if queue["total"] == 1 && queue["loading"] == false {
                 break queue;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -955,7 +927,7 @@ async fn exercise_http_api(
     let inserted = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let queue = api(reqwest::Method::GET, "queue", Value::Null).await;
-            if queue["total"] == 3 {
+            if queue["total"] == 3 && queue["loading"] == false {
                 break queue;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -972,6 +944,16 @@ async fn exercise_http_api(
     assert_eq!(uris, vec![json!(items[1]), json!(items[0]), json!(uri)]);
     let after_drop = api(reqwest::Method::GET, "playback", Value::Null).await;
     assert_eq!(after_drop["state"], previous_playback["state"]);
+    assert!(
+        !products
+            .playback
+            .updates
+            .current()
+            .unwrap()
+            .transport
+            .desired_playing
+    );
+    assert!(after_drop["current"]["run"].is_null());
     let mut expected_current = first_drop["current"].clone();
     expected_current["position"] = json!(1);
     assert_eq!(after_drop["current"], expected_current);

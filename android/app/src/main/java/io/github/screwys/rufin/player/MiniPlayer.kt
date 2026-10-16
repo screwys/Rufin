@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.player
 
+import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.RufinIcon
 
@@ -60,13 +61,13 @@ private data class MiniMedia(val uri: String, val title: String, val subtitle: S
 internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: () -> Unit) {
     val media by remember(player) { derivedStateOf {
         player.playback?.let { current -> current.transport.current?.id?.mediaUri?.let { uri ->
-            MiniMedia(uri, player.currentItem?.title.orEmpty(), player.currentItem?.artist.orEmpty(),
+            MiniMedia(uri, player.currentItem?.metadata?.title.orEmpty(), player.currentItem?.metadata?.artist.orEmpty(),
                 current.transport.desiredPlaying, current.transport.durationMillis)
         } }
     } }
     val current = media ?: return
     val reduceMotion = LocalReduceMotion.current
-    val artwork = player.artwork
+    val artwork = rememberArtwork(player.currentItem?.artworkBinding, player, with(LocalDensity.current) { 48.dp.roundToPx() })
     val background by animateColorAsState(
         artwork?.color?.let { lerp(MaterialTheme.colorScheme.surfaceContainer, it, .24f) }
             ?: MaterialTheme.colorScheme.surfaceContainer,

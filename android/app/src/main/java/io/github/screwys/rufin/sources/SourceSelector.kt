@@ -26,7 +26,7 @@ internal fun SourceSelector(expanded: Boolean, model: RufinConnection, browse: B
     val sources = model.sources
     val selectedId = sources?.selectedSourceId
     var folders by remember(selectedId) { mutableStateOf<AndroidMusicFolderState?>(null) }
-    LaunchedEffect(expanded, browse.library, selectedId, model.sources?.selectedSourceId, model.catalogRevision) {
+    LaunchedEffect(expanded, browse.library, sources, model.catalogRevision?.catalog) {
         val library = browse.library ?: return@LaunchedEffect
         if (!expanded || selectedId != model.sources?.selectedSourceId) return@LaunchedEffect
         try { folders = library.musicFolders() }

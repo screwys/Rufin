@@ -1,53 +1,29 @@
 //! Owns Favorite and Rating overrides plus bounded remote Favorite delivery.
 //! Source clients perform network delivery and retry scheduling decisions.
 
-use sqlx::{Connection, QueryBuilder, Sqlite, Transaction, sqlite::SqliteConnection};
+use sqlx::{Connection, Sqlite, Transaction, sqlite::SqliteConnection};
 
 use crate::{Database, LibraryError, LibraryResult, ReadCancellation};
 
 /// Sparse source facts. An absent field leaves the stored value alone.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SourceUserData {
+pub struct NativeUserState {
     pub favorite: Option<bool>,
     /// Outer None means absent; Some(None) clears the source rating (0..100).
     pub rating: Option<Option<i64>>,
     pub play_count: Option<i64>,
+    pub skip_count: Option<i64>,
     pub last_played: Option<i64>,
 }
 
-impl SourceUserData {
+impl NativeUserState {
     pub fn merge(&mut self, incoming: Self) {
         self.favorite = incoming.favorite.or(self.favorite);
         self.rating = incoming.rating.or(self.rating);
         self.play_count = incoming.play_count.or(self.play_count);
+        self.skip_count = incoming.skip_count.or(self.skip_count);
         self.last_played = incoming.last_played.or(self.last_played);
     }
-}
-
-/// Updates source facts without changing local overrides or pending actions.
-pub(crate) fn source_user_data_query(
-    kind: &str,
-    input: impl FnOnce(&mut QueryBuilder<Sqlite>),
-) -> QueryBuilder<Sqlite> {
-    let mut query = QueryBuilder::new(
-        "WITH incoming(source_key,object_id,favorite,rating_set,rating,play_count,skip_count,last_played) AS (",
-    );
-    input(&mut query);
-    query.push(format!(
-        ") UPDATE {kind}s AS current SET
-         source_favorite=COALESCE(incoming.favorite,current.source_favorite),
-         source_rating=CASE WHEN incoming.rating_set THEN incoming.rating ELSE current.source_rating END,
-         source_play_count=COALESCE(incoming.play_count,current.source_play_count),
-         source_skip_count=COALESCE(incoming.skip_count,current.source_skip_count),
-         source_last_played=COALESCE(incoming.last_played,current.source_last_played)
-         FROM incoming WHERE current.source_key=incoming.source_key AND current.object_id=incoming.object_id
-         AND ((incoming.favorite IS NOT NULL AND current.source_favorite IS NOT incoming.favorite)
-           OR (incoming.rating_set AND current.source_rating IS NOT incoming.rating)
-           OR (incoming.play_count IS NOT NULL AND current.source_play_count IS NOT incoming.play_count)
-           OR (incoming.skip_count IS NOT NULL AND current.source_skip_count IS NOT incoming.skip_count)
-           OR (incoming.last_played IS NOT NULL AND current.source_last_played IS NOT incoming.last_played))"
-    ));
-    query
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -201,21 +177,8 @@ impl Database {
             .fetch_one(&mut *transaction)
             .await?;
         if known {
-            let changed = source_user_data_query(target.kind(), |query| {
-                query
-                    .push("SELECT source_key,object_id,")
-                    .push_bind(favorite)
-                    .push(format!(
-                        ",0,NULL,NULL,NULL,NULL FROM {}s WHERE media_uri=",
-                        target.kind()
-                    ))
-                    .push_bind(target.media_uri());
-            })
-            .build()
-            .execute(&mut *transaction)
-            .await?
-            .rows_affected()
-                > 0;
+            let changed = sqlx::query("INSERT INTO native_media_state(media_uri,favorite) VALUES(?1,?2) ON CONFLICT(media_uri) DO UPDATE SET favorite=excluded.favorite WHERE favorite IS NOT excluded.favorite")
+                .bind(target.media_uri()).bind(favorite).execute(&mut *transaction).await?.rows_affected()>0;
             if changed {
                 sqlx::query(sqlx::AssertSqlSafe(format!(
                     "UPDATE sources SET catalog_revision=catalog_revision+1 WHERE source_key=(SELECT source_key FROM {}s WHERE media_uri=?1)",
@@ -280,29 +243,7 @@ async fn effective_favorite(
     transaction: &mut Transaction<'_, Sqlite>,
     target: &FavoriteTarget,
 ) -> LibraryResult<bool> {
-    let sql = match target {
-        FavoriteTarget::Track(_) => {
-            "SELECT COALESCE(
-                 (SELECT favorite FROM user_media_state WHERE media_uri=?1),
-                 (SELECT source_favorite FROM tracks WHERE media_uri=?1),
-                 0
-             )"
-        }
-        FavoriteTarget::Album(_) => {
-            "SELECT COALESCE(
-                 (SELECT favorite FROM user_media_state WHERE media_uri=?1),
-                 (SELECT source_favorite FROM albums WHERE media_uri=?1),
-                 0
-             )"
-        }
-        FavoriteTarget::Artist(_) => {
-            "SELECT COALESCE(
-                 (SELECT favorite FROM user_media_state WHERE media_uri=?1),
-                 (SELECT source_favorite FROM artists WHERE media_uri=?1),
-                 0
-             )"
-        }
-    };
+    let sql = "SELECT COALESCE((SELECT favorite FROM user_media_state WHERE media_uri=?1),(SELECT favorite FROM native_media_state WHERE media_uri=?1),0)";
     Ok(sqlx::query_scalar(sql)
         .bind(target.media_uri())
         .fetch_one(&mut **transaction)
@@ -424,3 +365,5 @@ pub(crate) async fn write_user_media_state(
     .await?;
     cleanup_empty_state(connection, &state.media_uri).await
 }
+
+pub(crate) const FAVORITE_URIS: &str = "SELECT media_uri FROM user_media_state WHERE favorite=1 UNION SELECT native.media_uri FROM native_media_state native WHERE native.favorite=1 AND COALESCE((SELECT favorite FROM user_media_state WHERE media_uri=native.media_uri),1)=1";

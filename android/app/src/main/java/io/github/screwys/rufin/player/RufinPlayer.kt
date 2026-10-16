@@ -18,14 +18,14 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import io.github.screwys.rufin.shared.playback.*
 import io.github.screwys.rufin.core.AndroidPlaybackUpdate
-import io.github.screwys.rufin.shared.library.QueueItem
+import io.github.screwys.rufin.shared.library.TrackView
 import io.github.screwys.rufin.shared.library.QueueRepeatMode
 
 /** Maps shared playback state and commands to Android media controls. */
 @UnstableApi
 internal class RufinPlayer(private val service: RufinService) : SimpleBasePlayer(Looper.getMainLooper()) {
     private var playback: AndroidPlaybackUpdate? = null
-    private var item: QueueItem? = null
+    private var item: TrackView? = null
     private var artworkRevision = 0UL
     var artworkIdentity: List<Byte>? = null
         private set
@@ -50,11 +50,11 @@ internal class RufinPlayer(private val service: RufinService) : SimpleBasePlayer
         val previousRow = previous?.transport?.current?.row
         val rowChanged = if (row == null) previousRow != null else previousRow == null ||
             row !== previousRow && !row.sameRow(previousRow)
-        val nextItem = if (rowChanged) row?.item() else item
+        val nextItem = if (rowChanged) row?.track() else item
         val nextIdentity = if (rowChanged) nextItem?.artworkBinding?.toList() else artworkIdentity
         val artworkChanged = nextIdentity != artworkIdentity
-        if (artworkChanged || nextItem?.title != item?.title || nextItem?.artist != item?.artist || nextItem?.album != item?.album) {
-            metadata = metadata.buildUpon().setTitle(nextItem?.title).setArtist(nextItem?.artist).setAlbumTitle(nextItem?.album)
+        if (artworkChanged || nextItem?.metadata?.title != item?.metadata?.title || nextItem?.metadata?.artist != item?.metadata?.artist || nextItem?.metadata?.album != item?.metadata?.album) {
+            metadata = metadata.buildUpon().setTitle(nextItem?.metadata?.title).setArtist(nextItem?.metadata?.artist).setAlbumTitle(nextItem?.metadata?.album)
                 .apply { if (artworkChanged) setArtworkData(null, MediaMetadata.PICTURE_TYPE_FRONT_COVER) }.build()
         }
         if (value?.transport?.error != previous?.transport?.error) {
@@ -139,9 +139,10 @@ internal class RufinPlayer(private val service: RufinService) : SimpleBasePlayer
                 QueueRepeatMode.ONE -> Player.REPEAT_MODE_ONE
                 else -> Player.REPEAT_MODE_OFF
             })
-        current?.transport?.current?.id?.mediaUri?.let { uri ->
-            val item = MediaItem.Builder().setMediaId(uri).setUri(uri).setMediaMetadata(metadata).build()
-            state.setPlaylist(listOf(MediaItemData.Builder(uri)
+        current?.transport?.current?.let { media ->
+            val id = media.id.run?.let { "run:$it" } ?: "track:${item?.trackKey}"
+            val item = MediaItem.Builder().setMediaId(id).setMediaMetadata(metadata).build()
+            state.setPlaylist(listOf(MediaItemData.Builder(id)
                 .setMediaItem(item)
                 .setIsSeekable(current.transport.canSeek)
                 .setDurationUs(if (current.transport.durationMillis == 0UL) C.TIME_UNSET else current.transport.durationMillis.toLong() * 1000)

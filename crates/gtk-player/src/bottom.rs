@@ -3,7 +3,7 @@ use adw::prelude::*;
 use gtk::glib;
 use gtk_widgets::{
     artwork::ArtworkTile,
-    detail_links::{DetailLinkBinding, DetailLinks},
+    detail_links::DetailLinkBinding,
     favorites::{favorite_icon_button, set_favorite_button_active},
     layout::{AllocationOwner, allocation_owner},
     localization::{bind_widget_accessible_label, bind_widget_tooltip},
@@ -972,9 +972,7 @@ pub fn transport_button_position(width: i32, slot: f64, size: i32) -> (f64, f64)
 }
 
 use crate::{progress::seekbar_target_seconds, state::NowPlayingPresentation};
-use gtk_widgets::{
-    artwork::LARGE_COVER_SIZE, controls::set_active_class, format_duration, route::Route,
-};
+use gtk_widgets::{controls::set_active_class, format_duration, route::Route};
 use std::{
     sync::{
         Arc,
@@ -1183,7 +1181,6 @@ impl crate::PlayerUi {
                 &controls.cover,
                 presentation.artwork.clone(),
                 BOTTOM_PLAYER_COVER_SIZE,
-                LARGE_COVER_SIZE,
             );
         } else {
             self.artwork.clear_artwork_tile(&controls.cover);
@@ -1227,7 +1224,7 @@ impl crate::PlayerUi {
             .selected_playback()
             .as_deref()
             .and_then(|player| player.transport.current.as_ref())
-            .is_some_and(|current| current.media_uri == *media_uri);
+            .is_some_and(|current| current.row.track.media_uri == *media_uri);
         if current_matches {
             set_favorite_button_active(&self.views.player_controls.favorite_button, value);
         }
@@ -1242,22 +1239,9 @@ impl crate::PlayerUi {
         else {
             return;
         };
-        let database = self.database.clone();
-        let task = self.runtime.spawn(async move {
-            database
-                .track_row_by_uri(&current.media_uri, &library::ReadCancellation::new())
-                .await
-        });
-        let shell = Rc::downgrade(self);
-        gtk::glib::spawn_future_local(async move {
-            let Ok(Ok(Some(track))) = task.await else {
-                return;
-            };
-            let Some(shell) = shell.upgrade() else { return };
-            if let Some(album) = track.album_media_uri {
-                (shell.navigate)(Route::AlbumDetail(album));
-            }
-        });
+        if let Some(album) = &current.row.track.links.album_media_uri {
+            (self.navigate)(Route::AlbumDetail(album.clone()));
+        }
     }
 
     pub fn maybe_clear_player_seek_preview(&self, player: &PlaybackView, track_changed: bool) {
@@ -2353,40 +2337,14 @@ pub fn connect_player_controls(shell: &Rc<crate::PlayerUi>) {
 }
 
 impl crate::PlayerUi {
-    pub fn apply_current_control_details(
+    pub fn set_current_rating_and_favorite(
         &self,
-        media_uri: Option<&str>,
         favorite: bool,
         rating: Option<u8>,
         half_stars: bool,
-        links: Option<(DetailLinks, DetailLinks)>,
     ) {
-        if self
-            .selected_playback()
-            .as_ref()
-            .and_then(|view| view.transport.current.as_ref())
-            .map(|current| current.media_uri.as_str())
-            != media_uri
-        {
-            return;
-        }
         let controls = &self.views.player_controls;
         set_favorite_button_active(&controls.favorite_button, favorite);
         controls.rating.set_rating(rating, half_stars);
-        if let Some((artist, album)) = links {
-            let fullscreen = &self.views.fullscreen_player;
-            if let Some(binding) = fullscreen.artist_links.borrow().as_ref() {
-                binding.bind(artist.clone());
-            }
-            if let Some(binding) = fullscreen.album_links.borrow().as_ref() {
-                binding.bind(album.clone());
-            }
-            if let Some(binding) = controls.artist_links.borrow().as_ref() {
-                binding.bind(artist);
-            }
-            if let Some(binding) = controls.album_links.borrow().as_ref() {
-                binding.bind(album);
-            }
-        }
     }
 }

@@ -695,7 +695,7 @@ fn refresh_selected_library(shell: &Shell) {
         let source = shell.products.source.clone();
         let source_id = selected.source_id.clone();
         gtk::glib::spawn_future_local(async move {
-            let _ = source.refresh_source(source_id).await;
+            let _ = source.refresh_source(source_id, false).await;
         });
     }
 }

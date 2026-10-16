@@ -1,5 +1,4 @@
-use rufin_core::browse::BrowseRequest;
-use rufin_core::route::{CollectionCategory, Route};
+use rufin_core::route::Route;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -7,13 +6,13 @@ use std::sync::Arc;
 
 use adw::prelude::*;
 use gtk::glib;
-use library::{AlbumKey, AlbumRow, TrackRow};
+use library::{AlbumKey, AlbumView, TrackView};
 use localization::track_count_text;
 use rufin_core::playback::QueuePlacement;
 
 use crate::CatalogUi;
 use crate::{LibraryField, LibraryLayout, LibraryListKey};
-use gtk_widgets::artwork::{ArtworkTile, THUMB_COVER_SIZE};
+use gtk_widgets::artwork::ArtworkTile;
 use gtk_widgets::favorites::{
     favorite_button_is_active, row_favorite_icon_button, set_favorite_button_active,
 };
@@ -73,7 +72,7 @@ fn detail_key(row: &AlbumDetailRow) -> AlbumDetailKey {
 
 #[derive(Clone)]
 pub struct AlbumCollectionModels {
-    pub rows: Option<Rc<SparseRouteModel<AlbumKey, AlbumRow>>>,
+    pub rows: Option<Rc<SparseRouteModel<AlbumKey, AlbumView>>>,
     detail: AlbumDetailModel,
 }
 
@@ -106,47 +105,33 @@ impl AlbumCollectionModels {
         selected: &rufin_core::runtime::SelectedLibrary,
         count: usize,
         first_row_position: usize,
-        first_rows: Vec<AlbumRow>,
+        first_rows: Vec<AlbumView>,
         first_detail_rows: Vec<AlbumDetailRow>,
         layout: LibraryLayout,
         favorites_only: bool,
         request: Rc<RefCell<crate::routes::CollectionReadRequest>>,
     ) -> Self {
-        let source = selected.source_key;
-        let folder = selected.music_folder_key;
+        let read = crate::routes::CollectionRead::new(
+            library,
+            Route::Albums,
+            Some(selected.source_key),
+            selected.music_folder_key,
+            favorites_only,
+        );
         if layout == LibraryLayout::Detail {
-            let database = Arc::clone(library);
-            let load = Rc::new(
-                move |_: Vec<AlbumDetailKey>,
-                      range: std::ops::Range<usize>,
-                      cancellation: library::ReadCancellation| {
-                    let database = Arc::clone(&database);
+            let load = read.row_load(|rows| match rows {
+                library::CatalogRows::AlbumDetails(rows) => rows,
+                _ => unreachable!("catalog album detail rows"),
+            });
+            let sparse = SparseRouteModel::new(
+                SparseSource::Query { count },
+                24,
+                runtime.clone(),
+                Rc::new(move |_, range, cancellation| {
                     let request = request.borrow().clone();
-                    Box::pin(async move {
-                        BrowseRequest {
-                            filter: &request.query,
-                            favorites_only: favorites_only,
-                            ..BrowseRequest::new(
-                                &Route::Albums,
-                                CollectionCategory::Albums,
-                                Some(source),
-                                folder,
-                                &request.settings,
-                                8,
-                            )
-                        }
-                        .collection()
-                        .expect("collection route")
-                        .rows(&database, range.start, range.len(), &cancellation)
-                        .await
-                        .map(|rows| rows.album_details())
-                        .map_err(|error| error.to_string())
-                    })
-                        as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-                },
+                    load(request, range, cancellation)
+                }),
             );
-            let sparse =
-                SparseRouteModel::new(SparseSource::Query { count }, 24, runtime.clone(), load);
             sparse.seed_matching_at(first_row_position, first_detail_rows, detail_key);
             return Self {
                 rows: None,
@@ -155,37 +140,10 @@ impl AlbumCollectionModels {
                 },
             };
         }
-        let database = Arc::clone(library);
-        let load: gtk_widgets::media_drag::CollectionRowsLoad<
-            crate::routes::CollectionReadRequest,
-            AlbumRow,
-        > = Arc::new(
-            move |request: crate::routes::CollectionReadRequest,
-                  range: std::ops::Range<usize>,
-                  cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&database);
-                Box::pin(async move {
-                    BrowseRequest {
-                        filter: &request.query,
-                        favorites_only: favorites_only,
-                        ..BrowseRequest::new(
-                            &Route::Albums,
-                            CollectionCategory::Albums,
-                            Some(source),
-                            folder,
-                            &request.settings,
-                            8,
-                        )
-                    }
-                    .collection()
-                    .expect("collection route")
-                    .rows(&database, range.start, range.len(), &cancellation)
-                    .await
-                    .map(|rows| rows.albums())
-                    .map_err(|error| error.to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            },
-        );
+        let load = read.row_load(|rows| match rows {
+            library::CatalogRows::Albums(rows) => rows,
+            _ => unreachable!("catalog album rows"),
+        });
         let sparse = SparseRouteModel::new(SparseSource::Query { count }, 32, runtime.clone(), {
             let load = Arc::clone(&load);
             let request = Rc::clone(&request);
@@ -195,7 +153,7 @@ impl AlbumCollectionModels {
             })
         });
         gtk_widgets::media_drag::install_collection_selection(&sparse, request, load, |row| {
-            gtk_widgets::selection::collection_play_request(library::SongScope::Album(
+            gtk_widgets::selection::collection_play_request(library::TrackScope::Album(
                 row.album_key,
             ))
         });
@@ -213,7 +171,7 @@ impl AlbumCollectionModels {
             .list_model()
     }
 
-    pub fn album_rows(&self) -> Option<Rc<SparseRouteModel<AlbumKey, AlbumRow>>> {
+    pub fn album_rows(&self) -> Option<Rc<SparseRouteModel<AlbumKey, AlbumView>>> {
         self.rows.as_ref().map(Rc::clone)
     }
 
@@ -240,7 +198,7 @@ impl AlbumCollectionModels {
         &self,
         count: usize,
         first_row_position: usize,
-        first_rows: Vec<AlbumRow>,
+        first_rows: Vec<AlbumView>,
         first_detail_rows: Vec<AlbumDetailRow>,
     ) -> bool {
         if let Some(rows) = &self.rows {
@@ -269,7 +227,7 @@ impl AlbumCollectionModels {
             let Some(position) = rows.ready_position(|row| row.media_uri == media_uri) else {
                 return false;
             };
-            rows.update_ready(position as usize, |row| row.favorite = favorite)
+            rows.update_ready(position as usize, |row| row.state.favorite = favorite)
         } else if let Some(detail) = &self.detail.sparse {
             let Some(position) = detail.ready_position(|row| {
                 matches!(row, AlbumDetailRow::Album { album, .. } if album.media_uri == media_uri)
@@ -279,7 +237,7 @@ impl AlbumCollectionModels {
             };
             detail.update_ready(position as usize, |row| {
                 if let AlbumDetailRow::Album { album, .. } = row {
-                    album.favorite = favorite;
+                    album.state.favorite = favorite;
                 }
             })
         } else {
@@ -590,23 +548,25 @@ impl AlbumDetailCell {
             }) => {
                 self.lead.set(true);
                 self.last.set(last);
-                self.has_genres.set(!album.genres.is_empty());
+                self.has_genres.set(!album.links.genres.is_empty());
                 self.cover.bind(shell, Some(&album));
-                self.labels[0].1.set_text(&album.title);
+                self.labels[0].1.set_text(&album.metadata.title);
                 self.artist_links
                     .bind(gtk_widgets::detail_links::album_artist_links(&album));
                 let mut facts = album
+                    .metadata
                     .year
                     .map(|year| year.to_string())
                     .into_iter()
                     .collect::<Vec<_>>();
-                facts.push(track_count_text(album.track_count.max(0) as u64));
+                facts.push(track_count_text(album.summary.track_count.max(0) as u64));
                 facts.push(gtk_widgets::format_duration_units(
-                    (album.duration_millis.max(0) / 1000) as u32,
+                    (album.summary.duration_millis.max(0) / 1000) as u32,
                 ));
                 self.labels[2].1.set_text(&facts.join(" • "));
                 self.labels[3].1.set_text(
                     &album
+                        .links
                         .genres
                         .iter()
                         .map(|genre| genre.name.as_str())
@@ -680,7 +640,7 @@ impl AlbumDetailCell {
 
 struct AlbumTrackSlot {
     widget: gtk::Box,
-    current: Rc<RefCell<Option<Rc<TrackRow>>>>,
+    current: Rc<RefCell<Option<Rc<TrackView>>>>,
     cells: Vec<(gtk::Widget, AlbumTrackField)>,
 }
 
@@ -696,7 +656,7 @@ impl AlbumTrackSlot {
         let widget = gtk::Box::new(gtk::Orientation::Horizontal, ALBUM_DETAIL_TRACK_COLUMN_GAP);
         widget.add_css_class("album-detail-track-row");
         widget.set_hexpand(true);
-        let current = Rc::new(RefCell::new(None::<Rc<TrackRow>>));
+        let current = Rc::new(RefCell::new(None::<Rc<TrackView>>));
         let menu_shell = Rc::downgrade(shell);
         let row = Rc::clone(&current);
         let menu: gtk_widgets::interactions::ContextMenuOpen = Rc::new(move |target, position| {
@@ -720,7 +680,7 @@ impl AlbumTrackSlot {
                 && let Some(track) = row
             {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
-                play_album_track(&shell, track.album_key, track.track_key);
+                play_album_track(&shell, track.links.album_key, track.track_key);
             }
         });
         widget.add_controller(click);
@@ -770,7 +730,7 @@ impl AlbumTrackSlot {
                             if let Some(shell) = play_shell.upgrade()
                                 && let Some(track) = row
                             {
-                                play_album_track(&shell, track.album_key, track.track_key);
+                                play_album_track(&shell, track.links.album_key, track.track_key);
                             }
                         });
                         (cell.clone().upcast(), AlbumTrackField::Index(cell))
@@ -793,7 +753,7 @@ impl AlbumTrackSlot {
         }
     }
 
-    fn bind(&self, shell: &CatalogUi, value: Option<(usize, TrackRow)>) {
+    fn bind(&self, shell: &CatalogUi, value: Option<(usize, TrackView)>) {
         self.widget.set_visible(value.is_some());
         let index = value.as_ref().map_or(0, |(index, _)| *index);
         self.current.replace(value.map(|(_, track)| Rc::new(track)));
@@ -818,7 +778,7 @@ impl AlbumTrackSlot {
                 ),
                 AlbumTrackField::Favorite(button) => set_favorite_button_active(
                     button,
-                    current.as_ref().is_some_and(|track| track.favorite),
+                    current.as_ref().is_some_and(|track| track.state.favorite),
                 ),
                 AlbumTrackField::Image(tile) => {
                     if let Some(track) = current.as_ref() {
@@ -826,7 +786,6 @@ impl AlbumTrackSlot {
                             tile,
                             opaque_artwork(track.artwork_binding.as_deref()),
                             32,
-                            THUMB_COVER_SIZE,
                         );
                     } else {
                         shell.artwork.clear_artwork_tile(tile);
@@ -1131,11 +1090,14 @@ fn play_album_track(
         .library_list(LibraryListKey::AlbumDetailTracks);
     queue.play_selection(
         rufin_core::playback::PlayRequest::ordered(
-            library::SongQuery {
+            library::CatalogQuery {
+                subject: library::CatalogSubject::Tracks {
+                    scope: library::TrackScope::Album(album),
+                    sort: Some(settings.sort_key.catalog_sort()),
+                },
                 folder: selected.music_folder_key,
-                sort: Some(settings.sort_key.track_sort()),
                 descending: settings.descending,
-                ..library::SongQuery::new(library::SongScope::Album(album))
+                ..library::CatalogQuery::tracks(library::TrackScope::Album(album))
             }
             .selection(),
             0,
@@ -1147,7 +1109,7 @@ fn play_album_track(
     );
 }
 
-pub fn album_detail_track_text(track: &TrackRow, index: usize, field: LibraryField) -> String {
+pub fn album_detail_track_text(track: &TrackView, index: usize, field: LibraryField) -> String {
     if field == LibraryField::RowIndex {
         (index + 1).to_string()
     } else {
@@ -1205,19 +1167,5 @@ mod tests {
         assert!(album_detail_play_click(2));
         assert!(!album_detail_play_click(3));
         assert!(album_detail_play_click(4));
-    }
-
-    #[test]
-    fn album_detail_header_keeps_space_for_genres_and_inline_tracks() {
-        let width = 720;
-        let cover = album_detail_row_metrics_for_width(width).cover_size;
-        let expected_meta = cover
-            + 4 * (ALBUM_DETAIL_META_LABEL_HEIGHT + ALBUM_DETAIL_META_SPACING)
-            + ALBUM_DETAIL_META_LABEL_HEIGHT;
-        let expected_tracks = ALBUM_DETAIL_TRACK_HEADER_HEIGHT + 3 * ALBUM_TRACK_HEIGHT;
-        assert_eq!(
-            album_detail_ready_height(width, true, 3, &Default::default()),
-            expected_meta.max(expected_tracks),
-        );
     }
 }

@@ -251,13 +251,13 @@ pub fn right_sidebar_mode_from_index(index: u32) -> RightSidebarMode {
 pub fn discord_display_index(display_type: DisplayType) -> u32 {
     match display_type {
         DisplayType::Application => 0,
-        DisplayType::Song => 1,
+        DisplayType::Track => 1,
         DisplayType::Artist => 2,
     }
 }
 pub fn discord_display_from_index(index: u32) -> DisplayType {
     match index {
-        1 => DisplayType::Song,
+        1 => DisplayType::Track,
         2 => DisplayType::Artist,
         _ => DisplayType::Application,
     }

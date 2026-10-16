@@ -1,10 +1,11 @@
+use rufin_core::browse::{DetailContent, DetailPage, DetailSummary};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
     sync::Arc,
 };
 
-use ::library::{AlbumRow, FavoriteTarget};
+use ::library::{AlbumView, FavoriteTarget};
 use adw::prelude::*;
 
 use crate::CatalogUi;
@@ -35,16 +36,18 @@ use gtk_widgets::detail_links::{DetailLinkBinding, album_artist_links};
 use gtk_widgets::route::Route;
 
 impl CatalogUi {
-    pub fn album_detail_view(
-        self: &Rc<Self>,
-        detail: Option<(AlbumRow, library::TrackRoutePage)>,
-    ) -> MountedRoute {
-        let Some((album, page)) = detail else {
+    pub fn album_detail_view(self: &Rc<Self>, detail: Option<DetailPage>) -> MountedRoute {
+        let Some(DetailPage {
+            summary: DetailSummary::Album(album),
+            content: DetailContent::Tracks(page),
+        }) = detail
+        else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 "Album",
                 msgid("This isn't available"),
             ));
         };
+        let album = *album;
         let album_id = album.album_key;
         let current_album = Rc::new(RefCell::new(album.clone()));
         let context_id = format!("album:{album_id}");
@@ -85,11 +88,11 @@ impl CatalogUi {
             gtk_widgets::artwork::presentation::stable_seed(&album.object_id),
             album_release_kind_label(&album),
             true,
-            &album.title,
+            &album.metadata.title,
         );
         showcase_view.add_external_links_class("album-detail-link-stack");
         showcase_view.replace_summary(&album_summary_items(&album));
-        let track_count = Rc::new(Cell::new(album.track_count.max(0) as u32));
+        let track_count = Rc::new(Cell::new(album.summary.track_count.max(0) as u32));
         let localized_track_count = Rc::clone(&track_count);
         showcase_view.bind_summary_text_with(1, move || {
             track_count_text(u64::from(localized_track_count.get()))
@@ -104,10 +107,10 @@ impl CatalogUi {
             )));
         });
         showcase_view.append_kind_control(&radio);
-        self.append_album_genre_buttons(&showcase_view, &album.genres);
+        self.append_album_genre_buttons(&showcase_view, &album.links.genres);
 
         let (scroll, artist) = gtk_widgets::text_slide::new_label();
-        artist.set_text(&album.display_artist);
+        artist.set_text(&album.metadata.artist);
         artist.add_css_class("detail-artist");
         artist.set_xalign(0.0);
         artist.set_halign(gtk::Align::Start);
@@ -134,13 +137,13 @@ impl CatalogUi {
         let cover_controls = detail_playback_controls(
             &actions,
             msgid("Play album"),
-            Some(album.favorite),
+            Some(album.state.favorite),
             Rc::clone(&play),
         );
 
         let favorite = favorite_icon_button("Favorite");
         configure_action_button(&favorite, ActionButtonVariant::DetailFavorite);
-        set_favorite_button_active(&favorite, album.favorite);
+        set_favorite_button_active(&favorite, album.state.favorite);
         actions.append(&favorite);
         let hover_favorite = cover_controls
             .favorite
@@ -243,7 +246,11 @@ impl CatalogUi {
         let downloads = crate::collection_download_change(move |identity, downloaded| {
             if identity.strip_prefix("album:") == Some(download_target.as_str()) {
                 let mut row = download_album.borrow_mut();
-                row.downloaded_count = if downloaded { row.track_count } else { 0 };
+                row.summary.downloaded_count = if downloaded {
+                    row.summary.track_count
+                } else {
+                    0
+                };
             }
         });
         MountedRoute::new(route_stack.upcast(), resume)
@@ -274,49 +281,25 @@ impl CatalogUi {
     }
 }
 
-fn album_summary_items(summary: &AlbumRow) -> Vec<(&'static str, String)> {
+fn album_summary_items(summary: &AlbumView) -> Vec<(&'static str, String)> {
     vec![
         (
             "rufin-x-office-calendar-symbolic",
             summary
+                .metadata
                 .year
                 .map(|year| year.to_string())
                 .unwrap_or_default(),
         ),
         (
             "rufin-tracks-symbolic",
-            track_count_text(summary.track_count.max(0) as u64),
+            track_count_text(summary.summary.track_count.max(0) as u64),
         ),
         (
             "rufin-preferences-system-time-symbolic",
-            format_duration_units((summary.duration_millis.max(0) / 1_000) as u32),
+            format_duration_units((summary.summary.duration_millis.max(0) / 1_000) as u32),
         ),
     ]
 }
 
 use gtk_media_menus::media_menus::CollectionPlay;
-
-pub async fn load_album_detail(
-    database: &library::Database,
-    album_uri: &str,
-    settings: &rufin_core::settings::LibraryListSettings,
-    window: library::RouteSeedWindow,
-    cancellation: &library::ReadCancellation,
-) -> library::LibraryResult<Option<(AlbumRow, library::TrackRoutePage)>> {
-    let route = rufin_core::route::Route::AlbumDetail(album_uri.to_string());
-    let request = rufin_core::browse::BrowseRequest::new(
-        &route,
-        rufin_core::route::CollectionCategory::Tracks,
-        None,
-        None,
-        settings,
-        8,
-    );
-    let Some((album, query)) = request.album(database, cancellation).await? else {
-        return Ok(None);
-    };
-    let page = database
-        .song_route_page(&query, window, cancellation)
-        .await?;
-    Ok(Some((album, page)))
-}

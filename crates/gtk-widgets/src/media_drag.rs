@@ -1,6 +1,6 @@
 use crate::selection::collection_play_request;
 use crate::{
-    artwork::{ArtworkTile, THUMB_COVER_SIZE},
+    artwork::ArtworkTile,
     selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot},
 };
 use adw::prelude::*;
@@ -72,18 +72,26 @@ pub fn install_collection_selection<K, R, Q>(
             let position = sparse.ready_position(|row| {
                 match (target(row).selection(), dragged.selection()) {
                     (
-                        Some(library::SongSelection::Query { query: left, .. }),
-                        Some(library::SongSelection::Query { query: right, .. }),
-                    ) => match (&left.scope, &right.scope) {
+                        Some(library::TrackSelection::Query { query: left, .. }),
+                        Some(library::TrackSelection::Query { query: right, .. }),
+                    ) => match (&left.subject, &right.subject) {
                         (
-                            library::SongScope::Smart {
-                                key: left,
-                                source: left_source,
+                            library::CatalogSubject::Tracks {
+                                scope:
+                                    library::TrackScope::Smart {
+                                        key: left,
+                                        source: left_source,
+                                        ..
+                                    },
                                 ..
                             },
-                            library::SongScope::Smart {
-                                key: right,
-                                source: right_source,
+                            library::CatalogSubject::Tracks {
+                                scope:
+                                    library::TrackScope::Smart {
+                                        key: right,
+                                        source: right_source,
+                                        ..
+                                    },
                                 ..
                             },
                         ) => left == right && left_source == right_source,
@@ -259,7 +267,6 @@ impl MediaDragPreviewBinding {
                             &tile,
                             binding,
                             PLAYLIST_DRAG_ICON_COVER_SIZE,
-                            THUMB_COVER_SIZE,
                         );
                         let widget = tile.widget();
                         active_tile.replace(Some(tile));
@@ -511,15 +518,17 @@ fn compact_playlist_drag_icon(cover: Option<gtk::Widget>, title: &str) -> gtk::W
 }
 
 impl MediaDragSource {
-    pub async fn song_selection(
+    pub async fn track_selection(
         &self,
         database: &library::Database,
-    ) -> Result<library::SongSelection, String> {
+    ) -> Result<library::TrackSelection, String> {
         match self {
             Self::MediaUris(uris)
             | Self::Queue {
                 media_uris: uris, ..
-            } => Ok(library::SongSelection::Uris(uris.clone())),
+            } => Ok(
+                library::CatalogQuery::uris(library::CatalogKind::Track, uris.to_vec()).selection(),
+            ),
             _ => Ok(self
                 .play_request(database)
                 .await?
@@ -531,8 +540,8 @@ impl MediaDragSource {
     pub async fn playlist_input(
         &self,
         database: &library::Database,
-    ) -> Result<(library::SongSelection, String, Vec<String>), String> {
-        let selection = self.song_selection(database).await?;
+    ) -> Result<(library::TrackSelection, String, Vec<String>), String> {
+        let selection = self.track_selection(database).await?;
         let title = match self {
             Self::Target { .. } | Self::LiveCollection { .. } => selection_title(Some(&selection)),
             Self::PlaylistEntries(_) => localization::tr("Playlist"),
@@ -611,16 +620,37 @@ impl MediaDragSource {
     }
 }
 
-fn selection_title(selection: Option<&library::SongSelection>) -> String {
+fn selection_title(selection: Option<&library::TrackSelection>) -> String {
     match selection {
-        Some(library::SongSelection::Tracks(_)) => localization::tr("Track"),
-        Some(library::SongSelection::Query { query, .. }) => match query.scope {
-            library::SongScope::Album(_) => localization::tr("Album"),
-            library::SongScope::Artist { .. } => localization::tr("Artist"),
-            library::SongScope::Genre(_) => localization::tr("Genre"),
-            library::SongScope::Mood(_) => localization::tr("Mood"),
-            library::SongScope::Playlist(_) => localization::tr("Playlist"),
-            library::SongScope::Smart { .. } => localization::tr("Smart Playlist"),
+        Some(library::TrackSelection::Query { query, .. }) => match &query.subject {
+            library::CatalogSubject::Keys {
+                kind: library::CatalogKind::Track,
+                ..
+            } => localization::tr("Track"),
+            library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Album(_),
+                ..
+            } => localization::tr("Album"),
+            library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Artist { .. },
+                ..
+            } => localization::tr("Artist"),
+            library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Genre(_),
+                ..
+            } => localization::tr("Genre"),
+            library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Mood(_),
+                ..
+            } => localization::tr("Mood"),
+            library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Playlist(_),
+                ..
+            } => localization::tr("Playlist"),
+            library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Smart { .. },
+                ..
+            } => localization::tr("Smart Playlist"),
             _ => localization::tr("Folder"),
         },
         _ => localization::tr("Selection"),
@@ -642,24 +672,30 @@ async fn prepare_live_collection(
         .map(|(_, kind, _)| kind)
         .as_deref()
     {
-        Some("album") => database
-            .album_row_by_media_uri(media_uri, &cancellation)
-            .await
-            .map_err(|error| error.to_string())?
-            .map(|row| library::SongScope::Album(row.album_key)),
+        Some("album") => {
+            library::CatalogQuery::uris(library::CatalogKind::Album, vec![(media_uri).to_string()])
+                .rows(&database, 0, 1, &cancellation)
+                .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Albums(mut rows) => rows.pop(),
+                    _ => unreachable!("typed catalog projection"),
+                })
+                .map_err(|error| error.to_string())?
+                .map(|row| library::TrackScope::Album(row.album_key))
+        }
         Some("artist") => database
-            .artist_identity_by_media_uri(media_uri, &cancellation)
+            .catalog_identity(library::CatalogKind::Artist, media_uri, &cancellation)
             .await
             .map_err(|error| error.to_string())?
-            .map(|(_, key)| library::SongScope::Artist {
-                key,
+            .map(|identity| library::TrackScope::Artist {
+                key: library::ArtistKey::from_raw(identity.key),
                 album_artist: false,
             }),
         _ => None,
     }
     .ok_or_else(|| "Collection is no longer available".to_string())?;
     let kind = match &scope {
-        library::SongScope::Album(_) => "album",
+        library::TrackScope::Album(_) => "album",
         _ => "artist",
     };
     Ok(collection_play_request(scope).with_context(format!("{kind}:{media_uri}").into()))

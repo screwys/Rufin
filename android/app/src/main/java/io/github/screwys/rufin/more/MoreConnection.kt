@@ -129,7 +129,7 @@ internal class MoreConnection(private val connection: RufinConnection, scope: Co
                     report = loaded
                     reportPeriod = period
                     if (autoplay && preferences?.autoplayFirstTrack != false) {
-                        loaded.tracks.firstOrNull()?.let { connection.openOverview(it.mediaUri, it.title, "track", period.key) }
+                        loaded.tracks.firstOrNull()?.let { connection.openOverview(it.mediaUri, it.metadata.title, "track", period.key) }
                     }
                 }
                 catch (cancelled: CancellationException) { throw cancelled }

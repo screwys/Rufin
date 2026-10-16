@@ -2,7 +2,7 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 
 use futures_util::TryStreamExt;
-use sqlx::Connection;
+use sqlx::{Connection, FromRow, Row};
 
 use crate::{
     Database, LibraryError, LibraryResult, PlaylistEntryWrite, PlaylistIdentity, PlaylistKey,
@@ -10,6 +10,7 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum PlaylistPathMode {
     #[default]
     Automatic,
@@ -270,26 +271,17 @@ impl PlaylistFile {
 }
 
 impl PlaylistFileEntry {
-    fn to_entry(&self, position: i64) -> PlaylistEntryWrite {
+    pub fn to_entry(&self, position: i64) -> PlaylistEntryWrite {
         let mut entry = self
             .preserved
             .clone()
             .unwrap_or_else(|| PlaylistEntryWrite {
                 object_id: format!("playlist:{position}"),
-                media_uri: self.locator.clone(),
-                title: None,
-                artist: None,
-                album: None,
-                album_display_artist: None,
-                duration_millis: None,
-                disc_number: None,
-                track_number: None,
-                year: None,
-                release_date: None,
-                source_format: None,
-                musicbrainz_recording_id: None,
-                musicbrainz_release_track_id: None,
                 position,
+                track: crate::TrackReference {
+                    media_uri: self.locator.clone(),
+                    ..Default::default()
+                },
             });
         let unchanged_display = self
             .display
@@ -297,18 +289,18 @@ impl PlaylistFileEntry {
             .is_some_and(|value| *value == entry_display(&entry));
         if !unchanged_display {
             if let Some(value) = &self.title {
-                entry.title = Some(value.clone());
-                entry.artist = self.artist.clone();
+                entry.track.metadata.title = value.clone();
+                entry.track.metadata.artist = self.artist.clone().unwrap_or_default();
             }
             if let Some(value) = &self.artist {
-                entry.artist = Some(value.clone());
+                entry.track.metadata.artist = value.clone();
             }
         }
         if let Some(value) = &self.album {
-            entry.album = Some(value.clone());
+            entry.track.metadata.album = value.clone();
         }
         if self.duration_present {
-            entry.duration_millis = self.duration_millis;
+            entry.track.metadata.duration_millis = self.duration_millis.unwrap_or_default();
         }
         entry.position = position;
         entry
@@ -360,6 +352,18 @@ impl Database {
     ) -> LibraryResult<u64> {
         let (_export, mut connection) = self.acquire_export().await?;
         export_playlist_on(&mut connection, playlist, file, mode, output).await
+    }
+
+    pub async fn export_playlist_file_as(
+        &self,
+        playlist: PlaylistKey,
+        file: &Path,
+        format: PlaylistFormat,
+        mode: PlaylistPathMode,
+        output: impl Write,
+    ) -> LibraryResult<u64> {
+        let (_export, mut connection) = self.acquire_export().await?;
+        export_playlist_as_on(&mut connection, playlist, file, format, mode, output).await
     }
 }
 
@@ -434,7 +438,7 @@ pub(crate) async fn import_playlist_on(
             continue;
         }
         let mut entry = item.to_entry(entries.len() as i64);
-        entry.media_uri = uri;
+        entry.track.media_uri = uri;
         if entry.object_id.is_empty() {
             entry.object_id = format!("playlist:{}", entries.len());
         }
@@ -446,7 +450,7 @@ pub(crate) async fn import_playlist_on(
         .await?;
     let mut tracks = Vec::with_capacity(entries.len());
     for entry in &entries {
-        tracks.push(crate::playlists::remember_playlist_song(connection, entry).await?);
+        tracks.push(crate::playlists::remember_playlist_track(connection, entry).await?);
     }
     changed |= sqlx::query_scalar::<_, i64>("SELECT total_changes()")
         .fetch_one(&mut *connection)
@@ -499,6 +503,19 @@ pub(crate) async fn export_playlist_on(
     mode: PlaylistPathMode,
     output: impl Write,
 ) -> LibraryResult<u64> {
+    let format =
+        PlaylistFormat::from_path(file).ok_or_else(|| invalid("Unsupported playlist format"))?;
+    export_playlist_as_on(connection, playlist, file, format, mode, output).await
+}
+
+async fn export_playlist_as_on(
+    connection: &mut sqlx::SqliteConnection,
+    playlist: PlaylistKey,
+    file: &Path,
+    format: PlaylistFormat,
+    mode: PlaylistPathMode,
+    output: impl Write,
+) -> LibraryResult<u64> {
     let identity = sqlx::query_as::<_, PlaylistIdentity>(
         "SELECT playlist.owner='source' source_owned,source.object_id source_id,
                 playlist.object_id,playlist.name,playlist.position
@@ -508,24 +525,34 @@ pub(crate) async fn export_playlist_on(
     .bind(playlist)
     .fetch_one(&mut *connection)
     .await?;
-    let mut writer = PlaylistWriter::new(
+    let mut writer = PlaylistWriter::new_as(
         output,
         file,
+        format,
         mode,
         identity.name.as_deref(),
         Some(&identity),
     )?;
-    let mut entries = sqlx::query_as::<_, PlaylistEntryWrite>(
-        "SELECT entry.object_id,track.media_uri,track.title,track.display_artist artist,
-                track.display_album album,COALESCE(album.display_artist,track.album_display_artist) album_display_artist,
-                track.duration_millis,track.disc_number,track.track_number,track.year,track.release_date,
-                track.source_format,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,entry.position
+    let mut entries = sqlx::query(
+        "SELECT entry.object_id,track.media_uri,json(track.metadata) metadata,entry.position,
+                CASE WHEN ?2 THEN coalesce((
+                    SELECT access_uri FROM local_locators
+                    WHERE media_uri=track.media_uri AND origin<>'download' AND access_uri LIKE 'content:%'
+                    ORDER BY CASE origin WHEN 'mapping' THEN 0 ELSE 1 END,local_access_file_key LIMIT 1
+                ),track.source_path) END document_locator
          FROM playlist_entries entry JOIN tracks track USING(track_key)
          LEFT JOIN albums album USING(album_key)
          WHERE entry.playlist_key=?1 ORDER BY entry.position",
-    ).bind(playlist).fetch(&mut *connection);
-    while let Some(entry) = entries.try_next().await? {
-        writer.entry(&entry)?;
+    ).bind(playlist).bind(file.to_str().is_some_and(|file| file.starts_with("content:"))).fetch(&mut *connection);
+    while let Some(row) = entries.try_next().await? {
+        let entry = PlaylistEntryWrite::from_row(&row)?;
+        let locator: Option<String> = row.try_get("document_locator")?;
+        let locator = locator.filter(|_| crate::cue_media_parts(&entry.track.media_uri).is_none());
+        let locator = locator.and_then(|locator| {
+            crate::document_access_uri(&locator)
+                .or_else(|| locator.starts_with("content:").then_some(locator))
+        });
+        writer.entry_with_locator(&entry, locator.as_deref().unwrap_or(&entry.track.media_uri))?;
     }
     writer.finish()
 }
@@ -540,7 +567,7 @@ pub(crate) struct PlaylistWriter<'a, W: Write> {
 
 impl<'a, W: Write> PlaylistWriter<'a, W> {
     pub(crate) fn new(
-        mut output: W,
+        output: W,
         file: &'a Path,
         mode: PlaylistPathMode,
         name: Option<&str>,
@@ -548,6 +575,17 @@ impl<'a, W: Write> PlaylistWriter<'a, W> {
     ) -> LibraryResult<Self> {
         let format = PlaylistFormat::from_path(file)
             .ok_or_else(|| invalid("Unsupported playlist format"))?;
+        Self::new_as(output, file, format, mode, name, identity)
+    }
+
+    fn new_as(
+        mut output: W,
+        file: &'a Path,
+        format: PlaylistFormat,
+        mode: PlaylistPathMode,
+        name: Option<&str>,
+        identity: Option<&PlaylistIdentity>,
+    ) -> LibraryResult<Self> {
         match format {
             PlaylistFormat::M3u => {
                 writeln!(output, "#EXTM3U")?;
@@ -603,7 +641,7 @@ impl<'a, W: Write> PlaylistWriter<'a, W> {
     }
 
     pub(crate) fn entry(&mut self, entry: &PlaylistEntryWrite) -> LibraryResult<()> {
-        self.entry_with_locator(entry, &entry.media_uri)
+        self.entry_with_locator(entry, &entry.track.media_uri)
     }
 
     fn entry_with_locator(
@@ -618,10 +656,11 @@ impl<'a, W: Write> PlaylistWriter<'a, W> {
         }
         let locator = export_locator(locator, self.file, self.mode);
         let display = entry_display(entry);
-        let seconds = entry
-            .duration_millis
-            .map(|value| value as f64 / 1000.0)
-            .unwrap_or(-1.0);
+        let seconds = if entry.track.metadata.duration_millis > 0 {
+            entry.track.metadata.duration_millis as f64 / 1000.0
+        } else {
+            -1.0
+        };
         match self.format {
             PlaylistFormat::M3u => {
                 writeln!(
@@ -658,16 +697,20 @@ impl<'a, W: Write> PlaylistWriter<'a, W> {
                 };
                 writeln!(self.output, "<track><location>{}</location>", xml(&locator))?;
                 for (field, value) in [
-                    ("title", &entry.title),
-                    ("creator", &entry.artist),
-                    ("album", &entry.album),
+                    ("title", &entry.track.metadata.title),
+                    ("creator", &entry.track.metadata.artist),
+                    ("album", &entry.track.metadata.album),
                 ] {
-                    if let Some(value) = value {
+                    if !value.is_empty() {
                         writeln!(self.output, "<{field}>{}</{field}>", xml(value))?;
                     }
                 }
-                if let Some(value) = entry.duration_millis {
-                    writeln!(self.output, "<duration>{value}</duration>")?;
+                if entry.track.metadata.duration_millis > 0 {
+                    writeln!(
+                        self.output,
+                        "<duration>{}</duration>",
+                        entry.track.metadata.duration_millis
+                    )?;
                 }
                 writeln!(
                     self.output,
@@ -702,9 +745,11 @@ fn xml(value: &str) -> String {
 }
 
 fn entry_display(entry: &PlaylistEntryWrite) -> String {
-    match (&entry.artist, &entry.title) {
-        (Some(artist), Some(title)) => format!("{artist} - {title}"),
-        (_, title) => title.clone().unwrap_or_default(),
+    let song = &entry.track.metadata;
+    if song.artist.is_empty() {
+        song.title.clone()
+    } else {
+        format!("{} - {}", song.artist, song.title)
     }
 }
 
@@ -751,7 +796,11 @@ fn xspf_location(node: roxmltree::Node<'_, '_>, file: &Path) -> Option<String> {
 }
 
 fn export_locator(uri: &str, file: &Path, mode: PlaylistPathMode) -> String {
-    if mode != PlaylistPathMode::Absolute {
+    if mode != PlaylistPathMode::Absolute
+        && !file
+            .to_str()
+            .is_some_and(|file| file.starts_with("content:"))
+    {
         if let Some(path) = crate::file_media_path(uri) {
             if let Some(relative) = relative_path(
                 &playlist_host_path(&path),
@@ -859,23 +908,6 @@ pub fn playlist_locator(value: &str, base: &Path) -> Option<String> {
         });
     }
     if let Ok(uri) = url::Url::parse(value) {
-        if !uri.username().is_empty()
-            || uri.password().is_some()
-            || uri.query_pairs().any(|(key, _)| {
-                matches!(
-                    key.to_ascii_lowercase().as_str(),
-                    "api_key"
-                        | "apikey"
-                        | "access_token"
-                        | "token"
-                        | "password"
-                        | "authorization"
-                        | "x-emby-token"
-                ) || (uri.path().contains("/rest/") && matches!(key.as_ref(), "p" | "t" | "s"))
-            })
-        {
-            return None;
-        }
         return crate::normalize_direct_media_uri(value).or_else(|| Some(uri.to_string()));
     }
     if value.contains("://") {
@@ -938,9 +970,12 @@ mod tests {
         let keys = database
             .playlist_edit_entries(
                 first.playlist,
-                &crate::SongQuery {
-                    sort: Some(crate::TrackSort::Position),
-                    ..crate::SongQuery::new(crate::SongScope::Playlist(first.playlist))
+                &crate::CatalogQuery {
+                    subject: crate::CatalogSubject::Tracks {
+                        scope: crate::TrackScope::Playlist(first.playlist),
+                        sort: Some(crate::CatalogSort::Position),
+                    },
+                    ..crate::CatalogQuery::tracks(crate::TrackScope::Playlist(first.playlist))
                 }
                 .selection(),
                 &crate::ReadCancellation::new(),
@@ -968,9 +1003,12 @@ mod tests {
             database
                 .playlist_edit_entries(
                     first.playlist,
-                    &crate::SongQuery {
-                        sort: Some(crate::TrackSort::Position),
-                        ..crate::SongQuery::new(crate::SongScope::Playlist(first.playlist))
+                    &crate::CatalogQuery {
+                        subject: crate::CatalogSubject::Tracks {
+                            scope: crate::TrackScope::Playlist(first.playlist),
+                            sort: Some(crate::CatalogSort::Position)
+                        },
+                        ..crate::CatalogQuery::tracks(crate::TrackScope::Playlist(first.playlist))
                     }
                     .selection(),
                     &crate::ReadCancellation::new()
@@ -998,9 +1036,12 @@ mod tests {
             database
                 .playlist_edit_entries(
                     first.playlist,
-                    &crate::SongQuery {
-                        sort: Some(crate::TrackSort::Position),
-                        ..crate::SongQuery::new(crate::SongScope::Playlist(first.playlist))
+                    &crate::CatalogQuery {
+                        subject: crate::CatalogSubject::Tracks {
+                            scope: crate::TrackScope::Playlist(first.playlist),
+                            sort: Some(crate::CatalogSort::Position)
+                        },
+                        ..crate::CatalogQuery::tracks(crate::TrackScope::Playlist(first.playlist))
                     }
                     .selection(),
                     &crate::ReadCancellation::new()
@@ -1145,13 +1186,10 @@ mod tests {
             let parsed = PlaylistFile::read(std::io::Cursor::new(&output), &export).unwrap();
             assert_eq!(parsed.name.as_deref(), Some("Mix & café"));
             assert_eq!(parsed.entries[0].duration_millis, Some(12500));
+            assert_eq!(parsed.entries[0].to_entry(0).track.metadata.title, "Track");
             assert_eq!(
-                parsed.entries[0].to_entry(0).title.as_deref(),
-                Some("Track")
-            );
-            assert_eq!(
-                parsed.entries[0].to_entry(0).artist.as_deref(),
-                Some("Earth - Wind")
+                parsed.entries[0].to_entry(0).track.metadata.artist,
+                "Earth - Wind"
             );
             let imported = database
                 .import_playlist_file(std::io::Cursor::new(output), &export, None, |_| None)
@@ -1179,6 +1217,125 @@ mod tests {
                     cue.clone(),
                     "https://example.test/stream".to_owned()
                 ]
+            );
+        }
+        let destination = Path::new("content://documents.example/document/71");
+        let mut output = Vec::new();
+        database
+            .export_playlist_file_as(
+                original.playlist,
+                destination,
+                PlaylistFormat::M3u,
+                PlaylistPathMode::Relative,
+                &mut output,
+            )
+            .await
+            .unwrap();
+        let parsed = PlaylistFile::read_as(
+            std::io::Cursor::new(output),
+            destination,
+            PlaylistFormat::M3u,
+        )
+        .unwrap();
+        assert_eq!(parsed.entries[0].locator, uri);
+        let local_document = "content://documents.example/document/22";
+        for (origin, access_uri) in [
+            ("download", "content://documents.example/document/download"),
+            ("import", local_document),
+        ] {
+            database
+                .upsert_local_locator(&crate::LocalLocatorWrite {
+                    source_id: None,
+                    media_uri: uri.clone(),
+                    origin: origin.into(),
+                    path: access_uri.into(),
+                    root: access_uri.into(),
+                    relative_path: "song.flac".into(),
+                    access_uri: access_uri.into(),
+                })
+                .await
+                .unwrap();
+        }
+        let provider_document = "content://documents.example/document/23";
+        let source_path = format!(
+            "rufin-document://root/Artist/one.flac#{}",
+            crate::document_locator_fragment("native-track", provider_document)
+        );
+        {
+            let mut writer = database.writer().await.unwrap();
+            let connection = writer.as_mut().unwrap();
+            sqlx::query("UPDATE tracks SET source_path=?1 WHERE media_uri=?2")
+                .bind(&source_path)
+                .bind(&provider)
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO local_files(source_key,path,root,relative_path,kind,mtime_ns,native_id,state) SELECT source_key,source_path,'root','Artist/one.flac','media',0,'native-track','accepted' FROM tracks WHERE media_uri=?1")
+                .bind(&provider).execute(&mut *connection).await.unwrap();
+        }
+        assert_eq!(
+            database
+                .media_uris_for_document_ids(&[
+                    "native-track".into(),
+                    "missing".into(),
+                    "native-track".into(),
+                ])
+                .await
+                .unwrap(),
+            vec![Some(provider.clone()), None, Some(provider.clone())]
+        );
+        for format in [
+            PlaylistFormat::M3u,
+            PlaylistFormat::Pls,
+            PlaylistFormat::Xspf,
+        ] {
+            let mut output = Vec::new();
+            assert_eq!(
+                database
+                    .export_playlist_file_as(
+                        original.playlist,
+                        destination,
+                        format,
+                        PlaylistPathMode::Relative,
+                        &mut output,
+                    )
+                    .await
+                    .unwrap(),
+                5
+            );
+            let parsed =
+                PlaylistFile::read_as(std::io::Cursor::new(output), destination, format).unwrap();
+            assert_eq!(
+                parsed
+                    .entries
+                    .iter()
+                    .map(|entry| entry.locator.as_str())
+                    .collect::<Vec<_>>(),
+                [
+                    local_document,
+                    local_document,
+                    provider_document,
+                    &cue,
+                    "https://example.test/stream"
+                ]
+            );
+            assert_eq!(
+                parsed.entries[0]
+                    .preserved
+                    .as_ref()
+                    .unwrap()
+                    .track
+                    .media_uri,
+                uri
+            );
+            assert_eq!(
+                parsed.entries[2]
+                    .preserved
+                    .as_ref()
+                    .unwrap()
+                    .track
+                    .media_uri,
+                provider
             );
         }
     }
@@ -1260,17 +1417,19 @@ mod tests {
                 .is_err()
         );
         assert_eq!(
-            database
-                .song_playlist_rows(
-                    &crate::SongQuery {
-                        sort: Some(crate::TrackSort::Position),
-                        ..crate::SongQuery::new(crate::SongScope::Playlist(second.playlist))
-                    },
-                    0,
-                    128,
-                    &crate::ReadCancellation::new()
-                )
+            (&crate::CatalogQuery {
+                subject: crate::CatalogSubject::Tracks {
+                    scope: crate::TrackScope::Playlist(second.playlist),
+                    sort: Some(crate::CatalogSort::Position)
+                },
+                ..crate::CatalogQuery::tracks(crate::TrackScope::Playlist(second.playlist))
+            })
+                .rows(&database, 0, 128, &crate::ReadCancellation::new())
                 .await
+                .map(|rows| match rows {
+                    crate::CatalogRows::PlaylistEntries(rows) => rows,
+                    _ => unreachable!(),
+                })
                 .unwrap()
                 .len(),
             1
@@ -1435,10 +1594,7 @@ mod tests {
         let file = directory.path().join("large.m3u8");
         {
             let mut writer = database.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'source');
-                WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<10000)
-                INSERT INTO tracks(source_key,object_id,media_uri,indexed,title,normalized_search,sort_text,duration_millis)
-                SELECT 1,CAST(i AS TEXT),'https://example.test/'||i,1,'Song '||i,'song '||i,'song '||i,12000 FROM n;")
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'source');\n                WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<10000)\n                INSERT INTO tracks(source_key,object_id,media_uri,indexed,metadata) SELECT 1,CAST(i AS TEXT),'https://example.test/'||i,1,jsonb(json_object('title',COALESCE('Song '||i,''),'sort_text',COALESCE('song '||i,''),'duration_millis',COALESCE(12000,0))) FROM n;")
                 .execute(writer.as_mut().unwrap()).await.unwrap();
         }
         let key = database
@@ -1472,10 +1628,7 @@ mod tests {
         {
             let mut writer = database.writer().await.unwrap();
             let connection = writer.as_mut().unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (5,'source','Source','source',zeroblob(32));
-              INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,normalized_name,sort_text,position) VALUES(8,5,'source','native','Native','native','native',0);
-              INSERT INTO tracks(track_key,media_uri,title) VALUES(1,'https://example.test/song','Song');
-              INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(8,'one',1,0),(8,'two',1,1);")
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (5,'source','Source','source',zeroblob(32));\n              INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,normalized_name,sort_text,position) VALUES(8,5,'source','native','Native','native','native',0);\n              INSERT INTO tracks(track_key,media_uri,metadata) VALUES (1,'https://example.test/song',jsonb(json_object('title',COALESCE('Song',''))));\n              INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(8,'one',1,0),(8,'two',1,1);")
               .execute(connection).await.unwrap();
         }
         let file = directory.path().join("native.m3u8");
@@ -1556,21 +1709,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(report.imported, 3);
-        let entries = database
-            .song_playlist_rows(
-                &crate::SongQuery {
-                    sort: Some(crate::TrackSort::Position),
-                    ..crate::SongQuery::new(crate::SongScope::Playlist(report.playlist))
-                },
-                0,
-                128,
-                &crate::ReadCancellation::new(),
-            )
+        let entries = (&crate::CatalogQuery {
+            subject: crate::CatalogSubject::Tracks {
+                scope: crate::TrackScope::Playlist(report.playlist),
+                sort: Some(crate::CatalogSort::Position),
+            },
+            ..crate::CatalogQuery::tracks(crate::TrackScope::Playlist(report.playlist))
+        })
+            .rows(&database, 0, 128, &crate::ReadCancellation::new())
             .await
+            .map(|rows| match rows {
+                crate::CatalogRows::PlaylistEntries(rows) => rows,
+                _ => unreachable!("typed song projection"),
+            })
             .unwrap();
         assert_eq!(entries.len(), 3);
         for entry in entries {
-            let actual = entry.media_uri;
+            let actual = entry.track.media_uri;
             assert_eq!(actual, uri);
             assert_eq!(crate::file_media_path(&actual).unwrap(), path);
         }
@@ -1583,8 +1738,8 @@ mod tests {
             .await
             .unwrap();
         let file = directory.path().join("mix.m3u8");
-        let report = database.import_playlist_file(std::io::Cursor::new("#EXTM3U\n#PLAYLIST:Björk\n#EXTINF:12.5,Björk - Jóga\nmissing.flac\nmissing.flac\nhttps://example.test/song\nhttps://user:secret@example.test/song\nhttps:// bad\n"), &file, None, |_| None).await.unwrap();
-        assert_eq!((report.imported, report.skipped), (3, 2));
+        let report = database.import_playlist_file(std::io::Cursor::new("#EXTM3U\n#PLAYLIST:Björk\n#EXTINF:12.5,Björk - Jóga\nmissing.flac\nmissing.flac\nhttps://example.test/song\nhttps://user:secret@example.test/song\nhttps://example.test/song?token=secret&signature=abc%2Bdef&token=other\nhttps://example.test/song?token=secret&signature=abc%2Bdef&token=other\nhttps:// bad\n"), &file, None, |_| None).await.unwrap();
+        assert_eq!((report.imported, report.skipped), (6, 1));
         let mut output = Vec::new();
         assert_eq!(
             database
@@ -1596,17 +1751,49 @@ mod tests {
                 )
                 .await
                 .unwrap(),
-            3
+            6
         );
         let text = String::from_utf8(output.clone()).unwrap();
         assert!(text.contains("#PLAYLIST:Björk"));
         assert!(text.contains("\nmissing.flac\n"));
-        assert!(!text.contains("secret"));
+        assert!(text.contains("https://user:secret@example.test/song"));
+        assert_eq!(
+            text.lines()
+                .filter(|line| *line
+                    == "https://example.test/song?token=secret&signature=abc%2Bdef&token=other")
+                .count(),
+            2
+        );
         let again = database
             .import_playlist_file(std::io::Cursor::new(output), &file, None, |_| None)
             .await
             .unwrap();
         assert_eq!(again.playlist, report.playlist);
-        assert_eq!(again.imported, 3);
+        assert_eq!(again.imported, 6);
+        let queued = database
+            .queue_entries(
+                crate::QueueLoad::tracks(
+                    crate::CatalogQuery::tracks(crate::TrackScope::Playlist(report.playlist))
+                        .selection(),
+                ),
+                None,
+            )
+            .await
+            .unwrap();
+        let requested = queued.entries.into_iter().enumerate().collect::<Vec<_>>();
+        let rows = database
+            .queue_rows_for_entries(&requested, &crate::ReadCancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 6);
+        assert_eq!(
+            rows[3].track.media_uri,
+            "https://user:secret@example.test/song"
+        );
+        assert_eq!(
+            rows[4].track.media_uri,
+            "https://example.test/song?token=secret&signature=abc%2Bdef&token=other"
+        );
+        assert_eq!(rows[4].track.media_uri, rows[5].track.media_uri);
     }
 }

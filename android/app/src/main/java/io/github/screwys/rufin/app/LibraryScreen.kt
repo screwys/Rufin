@@ -28,7 +28,6 @@ import io.github.screwys.rufin.browse.DetailContent
 import io.github.screwys.rufin.browse.DetailTrackRow
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.RufinIcon
-import io.github.screwys.rufin.ui.ArtworkReadyContent
 import io.github.screwys.rufin.player.PlayerIconButton
 import io.github.screwys.rufin.player.MiniPlayer
 import io.github.screwys.rufin.more.MoreDestination
@@ -134,7 +133,7 @@ internal fun FeedbackToast(model: RufinConnection, player: PlayerConnection) {
             Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 feedback.artworkIdentity?.let { identity ->
                     val pixels = with(androidx.compose.ui.platform.LocalDensity.current) { 40.dp.roundToPx() }
-                    io.github.screwys.rufin.ui.Artwork(io.github.screwys.rufin.ui.rememberArtwork(identity, player, pixels, reuseCached = true),
+                    io.github.screwys.rufin.ui.Artwork(io.github.screwys.rufin.ui.rememberArtwork(identity, player, pixels),
                         Modifier.size(40.dp).clip(RoundedCornerShape(6.dp)))
                 }
                 Text(feedback.message, style = MaterialTheme.typography.bodyMedium)
@@ -253,7 +252,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     LaunchedEffect(destination, destinationPage, browse.section, reduceMotion) {
         if (browse.section != AppSection.Browse) return@LaunchedEffect
         navigation.seekTo(0f, destination)
-        destinationPage?.let { page -> snapshotFlow { page.artworkScene?.revealed == true }.first { it } }
+        destinationPage?.let { page -> snapshotFlow { !page.loading }.first { it } }
         if (reduceMotion) navigation.snapTo(destination) else navigation.animateTo(destination)
     }
     val hasMedia by remember(player) { derivedStateOf { player.currentId?.mediaUri != null } }
@@ -387,8 +386,19 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
             Column(Modifier.fillMaxSize()) {
                 model.startupError?.let { ErrorRow(it, label("Retry"), model::retryStartup) }
                 model.sourceStatus?.let {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text(it, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
+                    val download = model.sourceOperation as? SourceOperation.Downloading
+                    val total = download?.progress?.total
+                    if (download != null && total != null) {
+                        LinearProgressIndicator(progress = {
+                            if (total == 0UL) 1f else (download.progress.completed.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                        }, modifier = Modifier.fillMaxWidth())
+                    } else LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(it, Modifier.weight(1f).padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
+                        if (download != null) TextButton({ model.runAction { model.sourceOwner?.cancelSourceDownload(download.sourceId) } }) {
+                            Text(label("Cancel"))
+                        }
+                    }
                 }
                 Box(Modifier.weight(1f)) {
                     if (browse.section == AppSection.Browse) navigationTransition.AnimatedContent(
@@ -464,8 +474,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
             fullPlayer = false
             browse.openLinkedRoute(route, title, source)
         }, onMore = {
-            val uri = player.currentId?.mediaUri
-            if (uri != null) model.runAction { browse.library?.trackItem(uri)?.let { menu = BrowseItem(it, 0UL, null) } }
+            player.currentItem?.let { song -> browse.library?.trackItem(song)?.let { menu = BrowseItem(it, 0UL, null) } }
         }) { fullPlayer = false }
     }
     if (outputs) PlayerOutputSheet(player) { outputs = false }
@@ -476,7 +485,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     playlist?.let { item -> PlaylistPickerSheet(model, browse, item, player) { playlist = null } }
     if (createPlaylist) PlaylistCreateSheet(model, { createPlaylist = false },
         initialCurrentSource = preferences.applicationSettings?.newPlaylistCurrent != false) { name, sourceId, public ->
-        io.github.screwys.rufin.shared.library.SongSelection.fromUris(emptyList()).use { selection ->
+        io.github.screwys.rufin.shared.library.TrackSelection.fromUris(emptyList()).use { selection ->
             val source = model.sourceOwner ?: return@PlaylistCreateSheet
             io.github.screwys.rufin.shared.rufin_core.createPlaylist(source, sourceId, name, selection, public, null)
                 ?.settingsError?.let { error(it) }
@@ -555,10 +564,6 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
         "artist" -> browse.categories.filter { it.id != "artists" }
         else -> emptyList()
     }
-    val artworkKey = listOf(page.contentKey, options.category, options.displaySettings ?: page.displaySettings)
-    val artworkScene = page.artworkScene?.takeIf { it.key == artworkKey }
-        ?: io.github.screwys.rufin.ui.ArtworkScene(artworkKey).also { page.artworkScene = it }
-    ArtworkReadyContent(modifier = Modifier.fillMaxSize(), owner = artworkScene) {
     Column(Modifier.fillMaxSize()) {
         if (location.kind == "History") {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -607,7 +612,6 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
                 page.hasActiveFilters, page::resetFilters, page.loading, onRadio = { browse.radio(it, "now") },
                 emptyIcon = if (location.kind in listOf("Folders", "folder")) "rufin-folders-symbolic" else null)
         }
-    }
     }
 }
 

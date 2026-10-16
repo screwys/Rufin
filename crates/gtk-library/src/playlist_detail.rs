@@ -1,3 +1,4 @@
+use rufin_core::browse::{DetailContent, DetailPage, DetailSummary};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -5,9 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::glib;
-use library::{
-    Database, PlaylistKey, PlaylistRow, ReadCancellation, SmartPlaylistKey, SmartPlaylistRow,
-};
+use library::{PlaylistKey, PlaylistRow, ReadCancellation, SmartPlaylistKey, SmartPlaylistRow};
 use localization::{msgid, track_count_text};
 
 use crate::CatalogUi;
@@ -31,13 +30,6 @@ use gtk_widgets::route::Route;
 const PLAYLIST_DETAIL_COMPACT_WIDTH: i32 = 760;
 const PLAYLIST_DETAIL_TINY_COVER_SIZE: i32 = 150;
 const PLAYLIST_DETAIL_WIDE_COVER_SIZE: i32 = 208;
-
-pub use library::PlaylistDetailPage as PlaylistDetailData;
-
-pub struct SmartPlaylistDetailData {
-    pub summary: SmartPlaylistRow,
-    projection: library::TrackRoutePage,
-}
 
 #[derive(Clone, PartialEq)]
 enum PlaylistDetailOwner {
@@ -113,7 +105,7 @@ impl PlaylistDetailOwner {
         match self {
             Self::Saved { summary, .. } => playlist_artwork(summary),
             Self::Smart { summary, .. } => summary
-                .artwork_bindings
+                .artwork_binding
                 .iter()
                 .map(|binding| ArtworkBinding::opaque(binding))
                 .collect(),
@@ -160,28 +152,36 @@ impl CatalogUi {
     pub fn smart_playlist_detail_route(
         self: &Rc<Self>,
         key: SmartPlaylistKey,
-        detail: Option<SmartPlaylistDetailData>,
+        detail: Option<DetailPage>,
     ) -> MountedRoute {
-        let Some(detail) = detail else {
+        let Some(DetailPage {
+            summary: DetailSummary::SmartPlaylist(summary),
+            content: DetailContent::Tracks(projection),
+        }) = detail
+        else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 msgid("Smart Playlist"),
                 msgid("This isn't available"),
             ));
         };
-        (self.update_smart_playlist_pin)(&detail.summary);
-        let library::SongScope::Smart { source, .. } = detail.projection.query.scope else {
+        (self.update_smart_playlist_pin)(&summary);
+        let library::CatalogSubject::Tracks {
+            scope: library::TrackScope::Smart { source, .. },
+            ..
+        } = projection.query.subject
+        else {
             unreachable!("smart playlist page owns a smart song query")
         };
-        let folder = detail.projection.query.folder;
+        let folder = projection.query.folder;
         let owner = PlaylistDetailOwner::Smart {
             key,
-            summary: detail.summary,
+            summary: summary,
         };
         let list_key = owner.key();
         let model = crate::track_model::TrackCollectionModel::new(
             Arc::clone(&self.library),
             self.runtime.clone(),
-            detail.projection,
+            projection,
         );
         let play_model = model.clone();
         let play_queue = self.playback.clone();
@@ -239,25 +239,29 @@ impl CatalogUi {
     pub fn playlist_detail_route(
         self: &Rc<Self>,
         key: PlaylistKey,
-        detail: Option<PlaylistDetailData>,
+        detail: Option<DetailPage>,
     ) -> MountedRoute {
-        let Some(detail) = detail else {
+        let Some(DetailPage {
+            summary: DetailSummary::Playlist(summary),
+            content: DetailContent::Tracks(page),
+        }) = detail
+        else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 msgid("Playlist"),
                 msgid("This isn't available"),
             ));
         };
-        let owner = PlaylistDetailOwner::Saved {
-            key,
-            summary: detail.summary,
+        let library::CatalogRows::PlaylistEntries(first_rows) = page.rows else {
+            unreachable!("playlist entries")
         };
+        let owner = PlaylistDetailOwner::Saved { key, summary };
         let entries = Rc::new(self.playlist_entries_view(
             key,
             owner.name().to_string(),
             matches!(&owner, PlaylistDetailOwner::Saved { summary, .. } if summary.writable),
-            detail.count,
-            detail.first_row_position,
-            detail.first_rows,
+            page.count,
+            page.first_row_position,
+            first_rows,
         ));
         let item_navigation = entries.item_navigation();
         let tracks_widget = entries.widget();
@@ -268,19 +272,23 @@ impl CatalogUi {
                   cancellation: ReadCancellation| {
                 let database = Arc::clone(&database);
                 Box::pin(async move {
-                    let count = database
-                        .song_count(&request.query, &cancellation)
+                    let count = (&request.query)
+                        .count(&database, &cancellation)
                         .await
                         .map_err(|error| error.to_string())?
                         .max(0) as usize;
-                    let rows = database
-                        .song_playlist_rows(
-                            &request.query,
+                    let rows = (&request.query)
+                        .rows(
+                            &database,
                             request.first_row_position.min(count),
                             64,
                             &cancellation,
                         )
                         .await
+                        .map(|rows| match rows {
+                            library::CatalogRows::PlaylistEntries(rows) => rows,
+                            _ => unreachable!("typed song projection"),
+                        })
                         .map_err(|error| error.to_string())?;
                     Ok((count, rows))
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
@@ -288,7 +296,7 @@ impl CatalogUi {
         );
         let apply_entries = Rc::downgrade(&entries);
         let apply = Rc::new(
-            move |request, result: Result<(usize, Vec<library::PlaylistEntryRow>), String>| {
+            move |request, result: Result<(usize, Vec<library::PlaylistEntryView>), String>| {
                 if let Ok((count, rows)) = result
                     && let Some(entries) = apply_entries.upgrade()
                 {
@@ -391,6 +399,7 @@ impl CatalogUi {
             &artwork,
             playlist_cover_size(width),
             playlist_cover_size(i32::MAX),
+            false,
         );
         cover.widget().add_css_class("playlist-detail-cover");
         let showcase_view = DetailShowcaseView::new(
@@ -539,11 +548,19 @@ impl CatalogUi {
                     Box::pin(async move {
                         match owner_key {
                             PlaylistDetailOwner::Saved { key, .. } => {
-                                let mut summary = database
-                                    .playlist_rows(&[key], &cancellation)
-                                    .await
-                                    .map_err(|error| error.to_string())?
-                                    .pop();
+                                let mut summary = library::CatalogQuery::keys(
+                                    library::CatalogKind::Playlist,
+                                    None,
+                                    (&[key]).iter().map(|key| key.raw()).collect(),
+                                )
+                                .rows(&database, 0, (&[key]).len(), &cancellation)
+                                .await
+                                .map(|rows| match rows {
+                                    library::CatalogRows::Playlists(rows) => rows,
+                                    _ => unreachable!("typed catalog projection"),
+                                })
+                                .map_err(|error| error.to_string())?
+                                .pop();
                                 if let Some(summary) = &mut summary {
                                     summary.genres = database
                                         .playlist_genres(key, &cancellation)
@@ -636,58 +653,6 @@ impl CatalogUi {
     }
 }
 
-pub async fn load_smart_playlist_detail(
-    database: &Database,
-    source: Option<library::SourceKey>,
-    folder: Option<library::FolderKey>,
-    key: SmartPlaylistKey,
-    settings: LibraryListSettings,
-    window: library::RouteSeedWindow,
-    cancellation: &ReadCancellation,
-) -> Result<Option<SmartPlaylistDetailData>, String> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs() as i64);
-    let Some(summary) = database
-        .smart_playlist_rows(source, &[key], folder, now, cancellation)
-        .await
-        .map_err(|error| error.to_string())?
-        .pop()
-    else {
-        return Ok(None);
-    };
-    let query = rufin_core::browse::BrowseRequest {
-        now,
-        ..rufin_core::browse::BrowseRequest::new(
-            &Route::SmartPlaylistDetail(key),
-            rufin_core::route::CollectionCategory::Tracks,
-            source,
-            folder,
-            &settings,
-            8,
-        )
-    }
-    .songs()
-    .expect("smart playlist route");
-    let count = summary.track_count.max(0) as usize;
-    let range = window.range(count);
-    let first_rows = database
-        .song_rows(&query, range.start, range.len(), cancellation)
-        .await
-        .map_err(|error| error.to_string())?;
-    let projection = library::TrackRoutePage {
-        query,
-        count,
-        first_row_position: range.start,
-        first_rows,
-        disc_sections: Vec::new(),
-    };
-    Ok(Some(SmartPlaylistDetailData {
-        summary,
-        projection,
-    }))
-}
-
 pub fn playlist_cover_size(width: i32) -> i32 {
     if width < DETAIL_SHOWCASE_METADATA_MIN_WIDTH {
         width.clamp(96, PLAYLIST_DETAIL_TINY_COVER_SIZE)
@@ -755,7 +720,6 @@ mod tests {
                 track_count: 4,
                 duration_millis: 1,
                 downloaded_count: 0,
-                representative_artwork: Vec::new(),
                 genres: Vec::new(),
             },
         };

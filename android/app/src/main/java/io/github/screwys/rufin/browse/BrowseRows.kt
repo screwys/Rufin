@@ -13,13 +13,10 @@ internal val AndroidDetailSummary.showsReleases: Boolean
 internal val AndroidBrowseRow.kind: String
     get() = when (val item = item) {
         is AndroidBrowseItem.Track -> "track"
-        is AndroidBrowseItem.History -> "track"
         is AndroidBrowseItem.PlaylistEntry -> "track"
-        is AndroidBrowseItem.Queued -> "track"
         is AndroidBrowseItem.Album -> if (albumHeader) "album_header" else "album"
         is AndroidBrowseItem.Artist -> "artist"
         is AndroidBrowseItem.Genre -> "genre"
-        is AndroidBrowseItem.HomeGenre -> "genre"
         is AndroidBrowseItem.Mood -> "mood"
         is AndroidBrowseItem.Playlist -> "playlist"
         is AndroidBrowseItem.SmartPlaylist -> "smart_playlist"
@@ -30,13 +27,10 @@ internal val AndroidBrowseRow.kind: String
 internal val AndroidBrowseRow.key: String
     get() = when (val item = item) {
         is AndroidBrowseItem.Track -> item.row.mediaUri
-        is AndroidBrowseItem.History -> item.row.mediaUri
         is AndroidBrowseItem.PlaylistEntry -> item.row.playlistEntryKey.toString()
-        is AndroidBrowseItem.Queued -> item.row.mediaUri
         is AndroidBrowseItem.Album -> item.row.objectId
         is AndroidBrowseItem.Artist -> item.row.objectId
         is AndroidBrowseItem.Genre -> item.row.objectId
-        is AndroidBrowseItem.HomeGenre -> item.row.objectId
         is AndroidBrowseItem.Mood -> item.row.moodKey.toString()
         is AndroidBrowseItem.Playlist -> item.row.objectId
         is AndroidBrowseItem.SmartPlaylist -> item.row.objectId
@@ -47,9 +41,7 @@ internal val AndroidBrowseRow.key: String
 internal val AndroidBrowseRow.mediaUri: String
     get() = when (val item = item) {
         is AndroidBrowseItem.Track -> item.row.mediaUri
-        is AndroidBrowseItem.History -> item.row.mediaUri
-        is AndroidBrowseItem.PlaylistEntry -> item.row.mediaUri
-        is AndroidBrowseItem.Queued -> item.row.mediaUri
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.mediaUri
         is AndroidBrowseItem.Album -> item.row.mediaUri
         is AndroidBrowseItem.Artist -> item.row.mediaUri
         is AndroidBrowseItem.Recent -> item.row.mediaUri
@@ -58,15 +50,12 @@ internal val AndroidBrowseRow.mediaUri: String
 
 internal val AndroidBrowseRow.title: String
     get() = displayTitle ?: when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.title
-        is AndroidBrowseItem.History -> item.row.title
-        is AndroidBrowseItem.PlaylistEntry -> item.row.title
-        is AndroidBrowseItem.Queued -> item.row.title
-        is AndroidBrowseItem.Album -> item.row.title
-        is AndroidBrowseItem.Artist -> item.row.name
-        is AndroidBrowseItem.Genre -> item.row.name
-        is AndroidBrowseItem.HomeGenre -> item.row.name
-        is AndroidBrowseItem.Mood -> item.row.name
+        is AndroidBrowseItem.Track -> item.row.metadata.title
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.metadata.title
+        is AndroidBrowseItem.Album -> item.row.metadata.title
+        is AndroidBrowseItem.Artist -> item.row.metadata.name
+        is AndroidBrowseItem.Genre -> item.row.metadata.name
+        is AndroidBrowseItem.Mood -> item.row.metadata.name
         is AndroidBrowseItem.Playlist -> item.row.name
         is AndroidBrowseItem.SmartPlaylist -> item.row.name
         is AndroidBrowseItem.Recent -> item.row.title
@@ -75,59 +64,49 @@ internal val AndroidBrowseRow.title: String
 
 internal val AndroidBrowseRow.artist: String
     get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.artist
-        is AndroidBrowseItem.History -> item.row.artist
-        is AndroidBrowseItem.PlaylistEntry -> item.row.artist
-        is AndroidBrowseItem.Queued -> item.row.artist
-        is AndroidBrowseItem.Album -> item.row.displayArtist
-        is AndroidBrowseItem.Artist -> item.row.name
+        is AndroidBrowseItem.Track -> item.row.metadata.artist
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.metadata.artist
+        is AndroidBrowseItem.Album -> item.row.metadata.artist
+        is AndroidBrowseItem.Artist -> item.row.metadata.name
         else -> ""
     }
 
 internal val AndroidBrowseRow.album: String
     get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.album
-        is AndroidBrowseItem.History -> item.row.album
-        is AndroidBrowseItem.PlaylistEntry -> item.row.album
-        is AndroidBrowseItem.Queued -> item.row.album
-        is AndroidBrowseItem.Album -> item.row.title
+        is AndroidBrowseItem.Track -> item.row.metadata.album
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.metadata.album
+        is AndroidBrowseItem.Album -> item.row.metadata.title
         else -> ""
     }
 
 internal val AndroidBrowseRow.subtitle: String
     get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> if (displayTitle != null) "${item.row.artist}\n${item.row.album}" else "${item.row.artist} · ${item.row.album}"
-        is AndroidBrowseItem.History -> "${item.row.artist} · ${item.row.album}"
-        is AndroidBrowseItem.PlaylistEntry -> "${item.row.artist} · ${item.row.album}"
-        is AndroidBrowseItem.Queued -> "${item.row.artist} · ${item.row.album}"
-        is AndroidBrowseItem.Album -> item.row.displayArtist
+        is AndroidBrowseItem.Track -> if (displayTitle != null) "${item.row.metadata.artist}\n${item.row.metadata.album}" else "${item.row.metadata.artist} · ${item.row.metadata.album}"
+        is AndroidBrowseItem.PlaylistEntry -> "${item.row.track.metadata.artist} · ${item.row.track.metadata.album}"
+        is AndroidBrowseItem.Album -> item.row.metadata.artist
         is AndroidBrowseItem.Recent -> item.row.subtitle
         else -> ""
     }
 
 internal val AndroidBrowseRow.favorite: Boolean
     get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.favorite
-        is AndroidBrowseItem.History -> item.row.favorite
-        is AndroidBrowseItem.PlaylistEntry -> item.row.favorite
-        is AndroidBrowseItem.Album -> item.row.favorite
-        is AndroidBrowseItem.Artist -> item.row.favorite
-        is AndroidBrowseItem.Queued -> item.favorite
+        is AndroidBrowseItem.Track -> item.row.state.favorite
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.state.favorite
+        is AndroidBrowseItem.Album -> item.row.state.favorite
+        is AndroidBrowseItem.Artist -> item.row.state.favorite
         else -> false
     }
 
 internal val AndroidBrowseRow.durationMillis: ULong
     get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.durationMillis.coerceAtLeast(0).toULong()
-        is AndroidBrowseItem.History -> item.row.durationMillis.coerceAtLeast(0).toULong()
-        is AndroidBrowseItem.PlaylistEntry -> item.row.durationMillis.coerceAtLeast(0).toULong()
-        is AndroidBrowseItem.Album -> item.row.durationMillis.coerceAtLeast(0).toULong()
-        is AndroidBrowseItem.Artist -> item.row.durationMillis.coerceAtLeast(0).toULong()
-        is AndroidBrowseItem.Genre -> item.row.durationMillis.coerceAtLeast(0).toULong()
-        is AndroidBrowseItem.Mood -> item.row.durationMillis.coerceAtLeast(0).toULong()
+        is AndroidBrowseItem.Track -> item.row.metadata.durationMillis.coerceAtLeast(0).toULong()
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.metadata.durationMillis.coerceAtLeast(0).toULong()
+        is AndroidBrowseItem.Album -> item.row.summary.durationMillis.coerceAtLeast(0).toULong()
+        is AndroidBrowseItem.Artist -> item.row.summary.durationMillis.coerceAtLeast(0).toULong()
+        is AndroidBrowseItem.Genre -> item.row.summary.durationMillis.coerceAtLeast(0).toULong()
+        is AndroidBrowseItem.Mood -> item.row.summary.durationMillis.coerceAtLeast(0).toULong()
         is AndroidBrowseItem.Playlist -> item.row.durationMillis.coerceAtLeast(0).toULong()
         is AndroidBrowseItem.SmartPlaylist -> item.row.durationMillis.coerceAtLeast(0).toULong()
-        is AndroidBrowseItem.Queued -> item.row.durationMillis.coerceAtLeast(0).toULong()
         else -> 0UL
     }
 
@@ -136,7 +115,6 @@ internal val AndroidBrowseRow.detailRoute: Route?
         is AndroidBrowseItem.Album -> Route.AlbumDetail(item.row.mediaUri)
         is AndroidBrowseItem.Artist -> if (item.albumArtist) Route.AlbumArtistDetail(item.row.mediaUri) else Route.ArtistDetail(item.row.mediaUri)
         is AndroidBrowseItem.Genre -> Route.GenreDetail(item.row.genreKey)
-        is AndroidBrowseItem.HomeGenre -> Route.GenreDetail(item.row.genreKey)
         is AndroidBrowseItem.Mood -> Route.MoodDetail(item.row.moodKey)
         is AndroidBrowseItem.Playlist -> Route.PlaylistDetail(item.row.playlistKey)
         is AndroidBrowseItem.SmartPlaylist -> Route.SmartPlaylistDetail(item.row.smartPlaylistKey)
@@ -154,7 +132,6 @@ internal val AndroidBrowseRow.playbackContextId: String?
         is AndroidBrowseItem.Album -> "album:${item.row.mediaUri}"
         is AndroidBrowseItem.Artist -> "${if (item.albumArtist) "album-artist" else "artist"}:${item.row.mediaUri}"
         is AndroidBrowseItem.Genre -> "genre:${item.row.genreKey}"
-        is AndroidBrowseItem.HomeGenre -> "genre:${item.row.genreKey}"
         is AndroidBrowseItem.Mood -> "mood:${item.row.moodKey}"
         is AndroidBrowseItem.Playlist -> "playlist:${item.row.playlistKey}"
         is AndroidBrowseItem.SmartPlaylist -> "smart-playlist:${item.row.smartPlaylistKey}"
@@ -164,25 +141,20 @@ internal val AndroidBrowseRow.playbackContextId: String?
 
 internal val AndroidBrowseRow.year: Long?
     get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.year
-        is AndroidBrowseItem.History -> item.row.year
-        is AndroidBrowseItem.PlaylistEntry -> item.row.year
-        is AndroidBrowseItem.Album -> item.row.year
-        is AndroidBrowseItem.Queued -> item.row.year
+        is AndroidBrowseItem.Track -> item.row.metadata.year
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.metadata.year
+        is AndroidBrowseItem.Album -> item.row.metadata.year
         else -> null
     }
 
 internal val AndroidBrowseRow.trackCount: ULong
     get() = when (val item = item) {
         is AndroidBrowseItem.Track -> 1UL
-        is AndroidBrowseItem.History -> 1UL
         is AndroidBrowseItem.PlaylistEntry -> 1UL
-        is AndroidBrowseItem.Queued -> 1UL
-        is AndroidBrowseItem.Album -> item.row.trackCount.coerceAtLeast(0).toULong()
-        is AndroidBrowseItem.Artist -> item.row.trackCount.coerceAtLeast(0).toULong()
-        is AndroidBrowseItem.Genre -> item.row.trackCount.coerceAtLeast(0).toULong()
-        is AndroidBrowseItem.HomeGenre -> item.row.trackCount.coerceAtLeast(0).toULong()
-        is AndroidBrowseItem.Mood -> item.row.trackCount.coerceAtLeast(0).toULong()
+        is AndroidBrowseItem.Album -> item.row.summary.trackCount.coerceAtLeast(0).toULong()
+        is AndroidBrowseItem.Artist -> item.row.summary.trackCount.coerceAtLeast(0).toULong()
+        is AndroidBrowseItem.Genre -> item.row.summary.trackCount.coerceAtLeast(0).toULong()
+        is AndroidBrowseItem.Mood -> item.row.summary.trackCount.coerceAtLeast(0).toULong()
         is AndroidBrowseItem.Playlist -> item.row.trackCount.coerceAtLeast(0).toULong()
         is AndroidBrowseItem.SmartPlaylist -> item.row.trackCount.coerceAtLeast(0).toULong()
         else -> 0UL
@@ -191,65 +163,55 @@ internal val AndroidBrowseRow.trackCount: ULong
 internal val AndroidBrowseRow.artworkIdentity: ByteArray?
     get() = when (val item = item) {
         is AndroidBrowseItem.Track -> item.row.artworkBinding
-        is AndroidBrowseItem.History -> item.row.artworkBinding
-        is AndroidBrowseItem.PlaylistEntry -> item.row.artworkBinding
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.artworkBinding
         is AndroidBrowseItem.Album -> item.row.artworkBinding
         is AndroidBrowseItem.Artist -> item.row.artworkBinding
-        is AndroidBrowseItem.HomeGenre -> item.row.artworkBinding
         is AndroidBrowseItem.Recent -> item.row.artworkBinding
-        is AndroidBrowseItem.Queued -> item.row.artworkBinding
         is AndroidBrowseItem.Genre -> item.row.artworkBinding ?: item.row.representativeArtwork.firstOrNull()
         is AndroidBrowseItem.Mood -> item.row.representativeArtwork.firstOrNull()
-        is AndroidBrowseItem.Playlist -> item.row.artworkBinding ?: item.row.representativeArtwork.firstOrNull()
-        is AndroidBrowseItem.SmartPlaylist -> item.row.artworkBinding ?: item.row.artworkBindings.firstOrNull()
+        is AndroidBrowseItem.Playlist -> item.row.artworkBinding
+        is AndroidBrowseItem.SmartPlaylist -> item.row.artworkBinding
         is AndroidBrowseItem.Folder -> item.artwork
     }
 
 internal val AndroidBrowseRow.downloaded: Boolean
     get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.isDownloaded
-        is AndroidBrowseItem.History -> item.row.isDownloaded
-        is AndroidBrowseItem.PlaylistEntry -> item.row.isDownloaded
-        is AndroidBrowseItem.Album -> item.row.trackCount > 0 && item.row.downloadedCount == item.row.trackCount
-        is AndroidBrowseItem.Artist -> item.row.trackCount > 0 && item.row.downloadedCount == item.row.trackCount
-        is AndroidBrowseItem.Genre -> item.row.trackCount > 0 && item.row.downloadedCount == item.row.trackCount
-        is AndroidBrowseItem.HomeGenre -> item.row.trackCount > 0 && item.row.downloadedCount == item.row.trackCount
-        is AndroidBrowseItem.Mood -> item.row.trackCount > 0 && item.row.downloadedCount == item.row.trackCount
+        is AndroidBrowseItem.Track -> item.row.access.isDownloaded
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.access.isDownloaded
+        is AndroidBrowseItem.Album -> item.row.summary.trackCount > 0 && item.row.summary.downloadedCount == item.row.summary.trackCount
+        is AndroidBrowseItem.Artist -> item.row.summary.trackCount > 0 && item.row.summary.downloadedCount == item.row.summary.trackCount
+        is AndroidBrowseItem.Genre -> item.row.summary.trackCount > 0 && item.row.summary.downloadedCount == item.row.summary.trackCount
+        is AndroidBrowseItem.Mood -> item.row.summary.trackCount > 0 && item.row.summary.downloadedCount == item.row.summary.trackCount
         is AndroidBrowseItem.Playlist -> item.row.trackCount > 0 && item.row.downloadedCount == item.row.trackCount
         is AndroidBrowseItem.SmartPlaylist -> item.row.trackCount > 0 && item.row.downloadedCount == item.row.trackCount
-        is AndroidBrowseItem.Queued -> item.downloaded
         else -> false
     }
 
 internal val AndroidBrowseRow.sourceId: String?
     get() = contextSourceId ?: when (val item = item) {
         is AndroidBrowseItem.Track -> item.row.sourceId
-        is AndroidBrowseItem.PlaylistEntry -> item.row.sourceId
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.sourceId
         is AndroidBrowseItem.Genre -> item.row.sourceId
         is AndroidBrowseItem.Playlist -> item.row.sourceId
         is AndroidBrowseItem.Album -> sourceIdForUri(item.row.mediaUri)
         is AndroidBrowseItem.Artist -> sourceIdForUri(item.row.mediaUri)
-        is AndroidBrowseItem.History -> sourceIdForUri(item.row.mediaUri)
         is AndroidBrowseItem.Recent -> sourceIdForUri(item.row.mediaUri)
-        is AndroidBrowseItem.Queued -> sourceIdForUri(item.row.mediaUri)
         else -> null
     }
 
 internal val AndroidBrowseRow.sourceName: String
     get() = contextSourceName.takeIf { it.isNotEmpty() } ?: when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.sourceName
-        is AndroidBrowseItem.History -> item.row.sourceName.orEmpty()
-        is AndroidBrowseItem.PlaylistEntry -> item.row.sourceName.orEmpty()
+        is AndroidBrowseItem.Track -> item.row.access.sourceName
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.access.sourceName
         else -> contextSourceName
     }
 
 internal val AndroidBrowseRow.lastPlayed: Long?
     get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.lastPlayed
-        is AndroidBrowseItem.History -> item.row.lastPlayed
-        is AndroidBrowseItem.PlaylistEntry -> item.row.lastPlayed
-        is AndroidBrowseItem.Album -> item.row.lastPlayed
-        is AndroidBrowseItem.Artist -> item.row.lastPlayed
+        is AndroidBrowseItem.Track -> item.row.state.lastPlayed
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.state.lastPlayed
+        is AndroidBrowseItem.Album -> item.row.state.lastPlayed
+        is AndroidBrowseItem.Artist -> item.row.state.lastPlayed
         else -> null
     }
 
@@ -262,20 +224,19 @@ internal val AndroidBrowseRow.writable: Boolean
 internal val AndroidBrowseRow.trackKey: Long?
     get() = when (val item = item) {
         is AndroidBrowseItem.Track -> item.row.trackKey
-        is AndroidBrowseItem.History -> item.row.trackKey
-        is AndroidBrowseItem.PlaylistEntry -> item.row.trackKey
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.trackKey
         else -> null
     }
 
 internal val AndroidBrowseRow.albumKey: Long?
     get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.albumKey
+        is AndroidBrowseItem.Track -> item.row.links.albumKey
         else -> null
     }
 
 internal val AndroidBrowseRow.albumMediaUri: String?
     get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.albumMediaUri
+        is AndroidBrowseItem.Track -> item.row.links.albumMediaUri
         else -> null
     }
 
@@ -310,12 +271,10 @@ internal val Route.kind: String
     }
 
 internal fun AndroidBrowseRow.withFavorite(value: Boolean): AndroidBrowseRow = copy(item = when (val item = item) {
-    is AndroidBrowseItem.Track -> item.copy(row = item.row.copy(favorite = value))
-    is AndroidBrowseItem.History -> item.copy(row = item.row.copy(favorite = value))
-    is AndroidBrowseItem.PlaylistEntry -> item.copy(row = item.row.copy(favorite = value))
-    is AndroidBrowseItem.Album -> item.copy(row = item.row.copy(favorite = value))
-    is AndroidBrowseItem.Artist -> item.copy(row = item.row.copy(favorite = value))
-    is AndroidBrowseItem.Queued -> item.copy(favorite = value)
+    is AndroidBrowseItem.Track -> item.copy(row = item.row.copy(state = item.row.state.copy(favorite = value)))
+    is AndroidBrowseItem.PlaylistEntry -> item.copy(row = item.row.copy(track = item.row.track.copy(state = item.row.track.state.copy(favorite = value))))
+    is AndroidBrowseItem.Album -> item.copy(row = item.row.copy(state = item.row.state.copy(favorite = value)))
+    is AndroidBrowseItem.Artist -> item.copy(row = item.row.copy(state = item.row.state.copy(favorite = value)))
     else -> item
 })
 
@@ -340,10 +299,9 @@ internal val io.github.screwys.rufin.shared.rufin_core.FavoriteSettlement.mediaU
 
 internal val AndroidBrowseRow.rating: UByte?
     get() = (when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.rating
-        is AndroidBrowseItem.History -> item.row.rating
-        is AndroidBrowseItem.PlaylistEntry -> item.row.rating
-        is AndroidBrowseItem.Album -> item.row.rating
-        is AndroidBrowseItem.Artist -> item.row.rating
+        is AndroidBrowseItem.Track -> item.row.state.rating
+        is AndroidBrowseItem.PlaylistEntry -> item.row.track.state.rating
+        is AndroidBrowseItem.Album -> item.row.state.rating
+        is AndroidBrowseItem.Artist -> item.row.state.rating
         else -> null
     })?.takeIf { it in 0..255 }?.toUByte()

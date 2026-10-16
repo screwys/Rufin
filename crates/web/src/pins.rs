@@ -6,7 +6,9 @@ fn artwork_revision<'a>(bindings: impl IntoIterator<Item = &'a Vec<u8>>) -> Stri
     use std::hash::{Hash, Hasher};
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     for binding in bindings {
-        binding.hash(&mut hash);
+        artwork::ArtworkBinding::opaque(binding)
+            .stable_identity()
+            .hash(&mut hash);
     }
     format!("{:x}", hash.finish())
 }
@@ -26,61 +28,62 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
     let folder = selected.as_ref().and_then(|s| s.music_folder_key);
     let mut items = Vec::new();
     for pin in &sidebar.pins {
-        let source_key = match pin {
-            SidebarPin::Album { source_id, .. }
-            | SidebarPin::Artist { source_id, .. }
-            | SidebarPin::Genre { source_id, .. } => database
-                .source_identity_key(source_id)
-                .await
-                .map_err(internal)?,
-            _ => None,
-        };
         let row = match pin {
             SidebarPin::Album {
                 album_id,
                 source_id,
             } => {
-                let Some(source) = source_key else { continue };
-                let Some(key) = database
-                    .album_key_by_object(source, album_id, &cancellation)
+                let uri = library::source_entity_uri(source_id, "album", album_id);
+                let query = library::CatalogQuery::uris(library::CatalogKind::Album, vec![uri]);
+                let library::CatalogRows::Albums(mut rows) = query
+                    .rows(database, 0, 1, &cancellation)
                     .await
                     .map_err(internal)?
                 else {
-                    continue;
+                    unreachable!("pin projection")
                 };
-                database.album_rows(source, &[key], None, &cancellation).await.map_err(internal)?.pop()
-                    .map(|row| json!({"kind":"album","id":row.album_key,"object_id":row.object_id,"source":source_id,"title":row.title,"uri":row.media_uri,"favorite":row.favorite,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter())}))
+                let row = rows.pop();
+                row.map(|row| json!({"kind":"album","id":row.album_key,"object_id":row.object_id,"source":source_id,"title":row.metadata.title,"uri":row.media_uri,"favorite":row.state.favorite,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter()),"artwork_previews":artwork_previews(&products, row.artwork_binding.iter())}))
             }
             SidebarPin::Artist {
                 artist_id,
                 source_id,
                 album_artist,
             } => {
-                let Some(source) = source_key else { continue };
-                let Some(key) = database
-                    .artist_key_by_object(source, artist_id, &cancellation)
+                let uri = library::source_entity_uri(source_id, "artist", artist_id);
+                let mut query =
+                    library::CatalogQuery::uris(library::CatalogKind::Artist, vec![uri]);
+                if let library::CatalogSubject::Uris {
+                    album_artist: role, ..
+                } = &mut query.subject
+                {
+                    *role = *album_artist;
+                }
+                let library::CatalogRows::Artists(mut rows) = query
+                    .rows(database, 0, 1, &cancellation)
                     .await
                     .map_err(internal)?
                 else {
-                    continue;
+                    unreachable!("pin projection")
                 };
-                database.artist_rows(source, &[key], *album_artist, None, &cancellation).await.map_err(internal)?.pop()
-                    .map(|row| json!({"kind":"artist","id":row.artist_key,"object_id":row.object_id,"source":source_id,"name":row.name,"uri":row.media_uri,"favorite":row.favorite,"album_artists":album_artist,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter())}))
+                let row = rows.pop();
+                row.map(|row| json!({"kind":"artist","id":row.artist_key,"object_id":row.object_id,"source":source_id,"name":row.metadata.name,"uri":row.media_uri,"favorite":row.state.favorite,"album_artists":album_artist,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter()),"artwork_previews":artwork_previews(&products, row.artwork_binding.iter())}))
             }
             SidebarPin::Genre {
                 genre_id,
                 source_id,
             } => {
-                let Some(source) = source_key else { continue };
-                let Some(key) = database
-                    .genre_key_by_object(source, genre_id, &cancellation)
+                let uri = library::source_entity_uri(source_id, "genre", genre_id);
+                let query = library::CatalogQuery::uris(library::CatalogKind::Genre, vec![uri]);
+                let library::CatalogRows::Genres(mut rows) = query
+                    .rows(database, 0, 1, &cancellation)
                     .await
                     .map_err(internal)?
                 else {
-                    continue;
+                    unreachable!("pin projection")
                 };
-                database.genre_rows(source, &[key], None, &cancellation).await.map_err(internal)?.pop()
-                    .map(|row| json!({"kind":"genre","id":row.genre_key,"object_id":row.object_id,"source":source_id,"name":row.name,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_ref().map_or(row.representative_artwork.len(), |_| 1),"artwork_revision":artwork_revision(row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork))}))
+                let row = rows.pop();
+                row.map(|row| json!({"kind":"genre","id":row.genre_key,"object_id":row.object_id,"source":source_id,"name":row.metadata.name,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_count":row.artwork_binding.as_ref().map_or(row.representative_artwork.len(), |_| 1),"artwork_revision":artwork_revision(row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork)),"artwork_previews":artwork_previews(&products, row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork))}))
             }
             SidebarPin::Playlist {
                 source_id,
@@ -93,10 +96,22 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 else {
                     continue;
                 };
-                database.playlist_rows(&[key], &cancellation).await.map_err(internal)?.pop()
-                    .map(|row| {
-                        let artwork = rufin_core::playlists::playlist_artwork_bindings(&row);
-                        json!({"kind":"playlist","id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":artwork.len(),"artwork_revision":artwork_revision(artwork)})
+                let row = library::CatalogQuery::keys(
+                    library::CatalogKind::Playlist,
+                    None,
+                    (&[key]).iter().map(|key| key.raw()).collect(),
+                )
+                .rows(&database, 0, (&[key]).len(), &cancellation)
+                .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Playlists(rows) => rows,
+                    _ => unreachable!("typed catalog projection"),
+                })
+                .map_err(internal)?
+                .pop();
+                row.map(|row| {
+                        let artwork = row.artwork_binding.as_slice();
+                        json!({"kind":"playlist","id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":artwork.len(),"artwork_revision":artwork_revision(artwork),"artwork_previews":artwork_previews(&products, artwork)})
                     })
             }
             SidebarPin::SmartPlaylist { playlist_id } => {
@@ -107,8 +122,12 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 else {
                     continue;
                 };
-                database.smart_playlist_rows(source, &[key], folder, catalog::now(), &cancellation).await.map_err(internal)?.pop()
-                    .map(|row| json!({"kind":"smart-playlist","id":row.smart_playlist_key,"object_id":row.object_id,"name":rufin_core::playlists::smart_playlist_display_name(&row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_bindings.len(),"artwork_revision":artwork_revision(&row.artwork_bindings),"source":selected.as_ref().filter(|_| row.definition.current).map(|s| &s.source_id)}))
+                let row = database
+                    .smart_playlist_rows(source, &[key], folder, catalog::now(), &cancellation)
+                    .await
+                    .map_err(internal)?
+                    .pop();
+                row.map(|row| json!({"kind":"smart-playlist","id":row.smart_playlist_key,"object_id":row.object_id,"name":rufin_core::playlists::smart_playlist_display_name(&row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_revision":artwork_revision(row.artwork_binding.as_slice()),"artwork_previews":artwork_previews(&products, row.artwork_binding.as_slice()),"source":selected.as_ref().filter(|_| row.definition.current).map(|s| &s.source_id)}))
             }
         };
         if let Some(mut row) = row {

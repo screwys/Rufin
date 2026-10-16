@@ -48,7 +48,7 @@ impl JellyfinEmbySource {
     }
     pub async fn read_track_metadata(
         &self,
-        track: library::TrackRow,
+        track: library::TrackView,
     ) -> Result<MetadataDraft, SourceMetadataError> {
         self.read_metadata(
             track
@@ -57,19 +57,23 @@ impl JellyfinEmbySource {
                 .ok_or(SourceMetadataError::Unavailable)?,
             SourceEntityKind::Track,
             [
-                ("title", Some(track.title)),
-                ("album", Some(track.album)),
+                ("title", Some(track.metadata.title)),
+                ("album", Some(track.metadata.album)),
                 (
                     "bpm",
                     track
+                        .metadata
                         .bpm
                         .and_then(|v| u16::try_from(v).ok())
                         .map(|v| v.to_string()),
                 ),
-                ("musicbrainz_recording_id", track.musicbrainz_recording_id),
+                (
+                    "musicbrainz_recording_id",
+                    track.metadata.musicbrainz_recording_id,
+                ),
                 (
                     "musicbrainz_release_track_id",
-                    track.musicbrainz_release_track_id,
+                    track.metadata.musicbrainz_release_track_id,
                 ),
             ],
             1,
@@ -79,38 +83,44 @@ impl JellyfinEmbySource {
 
     pub async fn read_album_metadata(
         &self,
-        album: library::AlbumRow,
+        album: library::AlbumView,
     ) -> Result<MetadataDraft, SourceMetadataError> {
         self.read_metadata(
             &album.object_id,
             SourceEntityKind::Album,
             [
-                ("title", Some(album.title)),
-                ("artist", Some(album.display_artist.clone())),
-                ("album_artist", Some(album.display_artist)),
-                ("musicbrainz_album_id", album.musicbrainz_release_id),
+                ("title", Some(album.metadata.title)),
+                ("artist", Some(album.metadata.artist.clone())),
+                ("album_artist", Some(album.metadata.artist)),
+                (
+                    "musicbrainz_album_id",
+                    album.metadata.musicbrainz_release_id,
+                ),
                 (
                     "musicbrainz_release_group_id",
-                    album.musicbrainz_release_group_id,
+                    album.metadata.musicbrainz_release_group_id,
                 ),
             ],
-            album.track_count.max(0) as usize,
+            album.summary.track_count.max(0) as usize,
         )
         .await
     }
 
     pub async fn read_artist_metadata(
         &self,
-        artist: library::ArtistRow,
+        artist: library::ArtistView,
     ) -> Result<MetadataDraft, SourceMetadataError> {
         self.read_metadata(
             &artist.object_id,
             SourceEntityKind::Artist,
             [
-                ("title", Some(artist.name)),
-                ("musicbrainz_artist_id", artist.musicbrainz_artist_id),
+                ("title", Some(artist.metadata.name)),
+                (
+                    "musicbrainz_artist_id",
+                    artist.metadata.musicbrainz_artist_id,
+                ),
             ],
-            artist.track_count.max(0) as usize,
+            artist.summary.track_count.max(0) as usize,
         )
         .await
     }
@@ -877,7 +887,7 @@ mod tests {
             .await;
         let source = test_source(&server);
         let mut row = track_row();
-        row.musicbrainz_release_track_id = Some("rufin-release-track".to_string());
+        row.metadata.musicbrainz_release_track_id = Some("rufin-release-track".to_string());
         let metadata = source
             .read_track_metadata(row)
             .await
@@ -969,54 +979,30 @@ mod tests {
         assert_eq!(item["ArtistItems"], original);
     }
 
-    fn track_row() -> library::TrackRow {
-        library::TrackRow {
-            audio_properties: Default::default(),
-            source_name: String::new(),
-            source_path: None,
-            source_id: Some("source".to_string()),
+    fn track_row() -> library::TrackView {
+        library::TrackView {
             track_key: library::TrackKey::from_raw(1),
             source_key: Some(library::SourceKey::from_raw(1)),
-            object_id: Some("jellyfin:track:track".to_string()),
-            album_key: None,
-            album_media_uri: None,
-            title: "Fallback".to_string(),
-            album: "Album".to_string(),
-            album_display_artist: None,
-            artist: "Artist".to_string(),
-            duration_millis: 180_000,
-            disc_number: 1,
-            track_number: 1,
-            year: None,
-            release_date: None,
-            date_added: None,
+            source_id: Some("source".into()),
+            object_id: Some("jellyfin:track:track".into()),
             media_uri: library::source_entity_uri(
                 &library::SourceId::new("source"),
                 "track",
                 "jellyfin:track:track",
             ),
-            source_format: None,
-            comment: None,
-            bpm: None,
-            musicbrainz_recording_id: None,
-            musicbrainz_release_track_id: None,
-            cue_path: None,
-            cue_start_millis: None,
-            cue_end_millis: None,
-            loudness_analysis_key: [0; 32],
+            metadata: library::TrackMetadata {
+                title: "Fallback".into(),
+                album: "Album".into(),
+                artist: "Artist".into(),
+                duration_millis: 180_000,
+                disc_number: 1,
+                track_number: 1,
+                ..Default::default()
+            },
+            access: Default::default(),
+            state: Default::default(),
+            links: Default::default(),
             artwork_binding: None,
-            favorite: false,
-            rating: None,
-            last_played: None,
-            play_count: 0,
-            skip_count: 0,
-            is_downloaded: false,
-            musicbrainz_album_id: None,
-            musicbrainz_release_group_id: None,
-            primary_artist_musicbrainz_id: None,
-            artists: Vec::new(),
-            album_artists: Vec::new(),
-            genres: Vec::new(),
         }
     }
 

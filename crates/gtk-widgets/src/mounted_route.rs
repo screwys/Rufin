@@ -24,7 +24,7 @@ pub struct RouteCurrentTrack {
 pub fn route_current_track(player: Option<&playback::PlaybackView>) -> Option<RouteCurrentTrack> {
     let player = player?;
     let entry = player.transport.current.as_ref()?;
-    let context = match &entry.provenance {
+    let context = match &entry.row.provenance {
         playback::Provenance::Context {
             context_id,
             source_rank,
@@ -40,8 +40,8 @@ pub fn route_current_track(player: Option<&playback::PlaybackView>) -> Option<Ro
         | playback::Provenance::Legacy => None,
     };
     Some(RouteCurrentTrack {
-        track_key: entry.track_key,
-        media_uri: entry.media_uri.clone(),
+        track_key: Some(entry.row.track.track_key),
+        media_uri: entry.row.track.media_uri.clone(),
         context,
         paused: player.transport.effective_state() == TransportStatus::Paused,
     })

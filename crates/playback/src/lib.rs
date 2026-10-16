@@ -9,7 +9,7 @@ mod view;
 
 pub use backend::*;
 pub use library::{
-    QueueItem, QueueProvenance as Provenance, QueueRepeatMode as RepeatMode, QueueRow,
+    QueueProvenance as Provenance, QueueRepeatMode as RepeatMode, QueueRow, TrackReference,
 };
 pub use listening::*;
 pub use settings::*;

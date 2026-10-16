@@ -1,7 +1,6 @@
 //! File tag semantics and atomic edits for originals and remote working copies.
 
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -16,64 +15,6 @@ use super::lofty::{MetadataWriter, read_lofty_for_edit};
 use crate::{MetadataDraft, MetadataEdit, MetadataField, SourceEntityKind, SourceMetadataError};
 
 mod fields;
-
-/// A provider working copy keeps the original revision and connection until replacement.
-pub(crate) struct WorkingFile {
-    pub file: tempfile::TempPath,
-    pub relative: String,
-    pub revision: Option<String>,
-    pub existed: bool,
-    pub input: std::sync::Arc<crate::file::remote::input::FileInputServer>,
-}
-
-pub(crate) struct CollectionTracks<'a> {
-    database: &'a library::Database,
-    uri: &'a str,
-    after: Option<library::TrackKey>,
-    page: std::vec::IntoIter<(library::TrackKey, String)>,
-    finished: bool,
-}
-
-impl<'a> CollectionTracks<'a> {
-    pub(crate) fn new(database: &'a library::Database, uri: &'a str) -> Self {
-        Self {
-            database,
-            uri,
-            after: None,
-            page: Vec::new().into_iter(),
-            finished: false,
-        }
-    }
-
-    pub(crate) async fn next(&mut self) -> Result<Option<library::TrackRow>, SourceMetadataError> {
-        if self.page.len() == 0 && !self.finished {
-            let page = self
-                .database
-                .file_metadata_track_page(self.uri, self.after)
-                .await
-                .map_err(|error| SourceMetadataError::Write(error.to_string()))?;
-            self.after = page.last().map(|(key, _)| *key);
-            self.finished = page.is_empty();
-            self.page = page.into_iter();
-        }
-        let Some((_, uri)) = self.page.next() else {
-            return Ok(None);
-        };
-        self.database
-            .track_row_by_uri(&uri, &library::ReadCancellation::new())
-            .await
-            .map_err(|error| SourceMetadataError::Write(error.to_string()))?
-            .ok_or(SourceMetadataError::Unavailable)
-            .map(Some)
-    }
-}
-
-pub(crate) fn hash_file_revision(hash: &mut blake3::Hasher, uri: &str, revision: Option<&str>) {
-    for value in [uri, revision.unwrap_or_default()] {
-        hash.update(&(value.len() as u64).to_le_bytes());
-        hash.update(value.as_bytes());
-    }
-}
 
 pub(crate) fn revision(path: &Path) -> Result<String, SourceMetadataError> {
     if path.to_string_lossy().starts_with("content:") {
@@ -90,86 +31,21 @@ pub(crate) fn revision(path: &Path) -> Result<String, SourceMetadataError> {
     Ok(format!("{}:{modified}", metadata.len()))
 }
 
-pub(crate) fn combined_revision(
-    paths: impl IntoIterator<Item = impl AsRef<Path>>,
-) -> Result<String, SourceMetadataError> {
-    let mut value = String::from("v1");
-    for path in paths {
-        let path = path.as_ref();
-        let revision = revision(path)?;
-        let path = path.to_string_lossy();
-        value.push_str(&format!(":{}:{path}:{revision}", path.len()));
-    }
-    Ok(value)
+#[derive(Clone)]
+pub(crate) enum TagUpdate {
+    Metadata(crate::MetadataEdit),
+    Rating(Option<u8>),
+    Lyrics(String),
+    R128 {
+        track: Option<f64>,
+        album: Option<f64>,
+    },
 }
 
-pub(crate) fn write_metadata(
-    targets: &[MetadataFileTarget],
-    expected_revision: &str,
-    previous_artist: &str,
-    edit: &crate::MetadataEdit,
-    folder_image: Option<&Path>,
-) -> Result<(), SourceMetadataError> {
-    let current = if edit.kind == SourceEntityKind::Track {
-        revision(&targets[0].path)?
-    } else {
-        combined_revision(targets.iter().map(|target| &target.path))?
-    };
-    if current != expected_revision {
-        return Err(SourceMetadataError::Conflict);
-    }
-    let embedded = edit
-        .artwork
-        .as_ref()
-        .is_some_and(|art| art.storage == crate::ArtworkStorage::Embedded);
-    if targets.iter().any(|target| !target.tag_writable) && (!edit.changes.is_empty() || embedded) {
-        return Err(SourceMetadataError::Unavailable);
-    }
-    if edit
-        .artwork
-        .as_ref()
-        .is_some_and(|art| art.storage == crate::ArtworkStorage::Server)
-    {
-        return Err(SourceMetadataError::Unavailable);
-    }
-    let mut prepared = Vec::new();
-    let mut mp4_image = None;
-    if !edit.changes.is_empty() || embedded {
-        for target in targets {
-            prepared.push(prepare_file(
-                &target.path,
-                target.format.as_deref(),
-                None,
-                |tag, writer| apply_metadata(tag, writer, edit, previous_artist, &mut mp4_image),
-            )?);
-        }
-    }
-    let renamed_artwork = if artist_image_needs_rename(edit, previous_artist, folder_image) {
-        let image = folder_image.unwrap();
-        Some(crate::ArtworkEdit {
-            change: crate::ArtworkChange::Replace(std::sync::Arc::new(crate::ImageBytes {
-                bytes: fs::read(image).map_err(write_error)?,
-                content_type: super::artwork::content_type(image),
-            })),
-            storage: crate::ArtworkStorage::Folder,
-        })
-    } else {
-        None
-    };
-    finish_artwork(
-        prepared,
-        targets,
-        edit.artwork.as_ref().or(renamed_artwork.as_ref()),
-        artist_name(edit, previous_artist),
-        folder_image,
-    )
-}
-
-/// Edits a disposable remote copy; uploading it owns the actual file replacement.
-pub(crate) fn write_metadata_copy(
+pub(crate) fn edit_copy(
     path: &Path,
     format: Option<&str>,
-    edit: &crate::MetadataEdit,
+    update: &TagUpdate,
     previous_artist: &str,
     mp4_image: &mut Option<std::sync::Arc<crate::ImageBytes>>,
 ) -> Result<(), SourceMetadataError> {
@@ -177,8 +53,61 @@ pub(crate) fn write_metadata_copy(
         .and_then(MetadataWriter::for_source_format)
         .or_else(|| MetadataWriter::for_path(path))
         .ok_or(SourceMetadataError::Unavailable)?;
-    edit_tag(path, writer, None, |tag, writer| {
-        apply_metadata(tag, writer, edit, previous_artist, mp4_image)
+    let tag_type = if matches!(update, TagUpdate::Lyrics(_)) {
+        if !lyrics_writer_supported(Some(writer)) {
+            return Err(SourceMetadataError::Unavailable);
+        }
+        Some(
+            writer
+                .lyrics_target()
+                .ok_or(SourceMetadataError::Unavailable)?
+                .0,
+        )
+    } else {
+        None
+    };
+    edit_tag(path, writer, tag_type, |tag, writer| {
+        match update {
+            TagUpdate::Metadata(edit) => {
+                apply_metadata(tag, writer, edit, previous_artist, mp4_image)?
+            }
+            TagUpdate::Rating(rating) => {
+                tag.remove_key(ItemKey::Popularimeter);
+                if let Some(rating) = rating.filter(|rating| *rating > 0) {
+                    let stars = match rating.div_ceil(2).clamp(1, 5) {
+                        1 => StarRating::One,
+                        2 => StarRating::Two,
+                        3 => StarRating::Three,
+                        4 => StarRating::Four,
+                        _ => StarRating::Five,
+                    };
+                    tag.insert_text(
+                        ItemKey::Popularimeter,
+                        Popularimeter::musicbee(stars, 0).to_string(),
+                    );
+                }
+            }
+            TagUpdate::Lyrics(lyrics) => {
+                let (_, key) = writer
+                    .lyrics_target()
+                    .ok_or(SourceMetadataError::Unavailable)?;
+                set_embedded_lyrics(tag, key, lyrics);
+            }
+            TagUpdate::R128 { track, album } => {
+                for (value, key) in [
+                    (track, ItemKey::R128TrackGain),
+                    (album, ItemKey::R128AlbumGain),
+                ] {
+                    if let Some(value) = value {
+                        if !writer.metadata_key_is_writable(key) {
+                            return Err(SourceMetadataError::Unavailable);
+                        }
+                        set_text(tag, key, Some(&r128_gain_text(*value)));
+                    }
+                }
+            }
+        }
+        Ok(())
     })
 }
 
@@ -320,32 +249,6 @@ fn apply_artist_edit(tag: &mut Tag, previous_name: &str, changes: &crate::Metada
     }
 }
 
-pub(crate) fn write_rating(
-    path: &Path,
-    source_format: Option<&str>,
-    rating: Option<u8>,
-) -> Result<(), SourceMetadataError> {
-    let prepared = prepare_file(path, source_format, None, |tag, _| {
-        tag.remove_key(ItemKey::Popularimeter);
-        if let Some(rating) = rating.filter(|rating| *rating > 0) {
-            let stars = rating.div_ceil(2).clamp(1, 5);
-            let stars = match stars {
-                1 => StarRating::One,
-                2 => StarRating::Two,
-                3 => StarRating::Three,
-                4 => StarRating::Four,
-                _ => StarRating::Five,
-            };
-            tag.insert_text(
-                ItemKey::Popularimeter,
-                Popularimeter::musicbee(stars, 0).to_string(),
-            );
-        }
-        Ok(())
-    })?;
-    commit_batch(vec![prepared])
-}
-
 pub fn read_embedded_lyrics(path: &Path) -> Result<Option<String>, SourceMetadataError> {
     read_embedded_lyrics_input(fs::File::open(path).map_err(write_error)?)
 }
@@ -368,99 +271,15 @@ pub(crate) fn read_embedded_lyrics_input(
     }))
 }
 
-pub(crate) fn write_embedded_lyrics(path: &Path, lyrics: &str) -> Result<(), SourceMetadataError> {
-    let writer = MetadataWriter::for_path(path).ok_or(SourceMetadataError::Unavailable)?;
-    if matches!(
-        writer.file_type(),
-        ::lofty::file::FileType::Wav | ::lofty::file::FileType::Aiff
-    ) {
-        return Err(SourceMetadataError::Unavailable);
-    }
-    let (tag_type, key) = writer
-        .lyrics_target()
-        .ok_or(SourceMetadataError::Unavailable)?;
-    let prepared = prepare_file(path, None, Some(tag_type), |tag, _| {
-        set_embedded_lyrics(tag, key, lyrics);
-        Ok(())
-    })?;
-    commit_batch(vec![prepared])
-}
-
-pub(crate) fn write_sidecar_lyrics(
-    audio_path: &Path,
-    lyrics: &str,
-) -> Result<(), SourceMetadataError> {
-    let path = audio_path.with_extension("lrc");
-    let parent = path.parent().ok_or(SourceMetadataError::Unavailable)?;
-    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(write_error)?;
-    temporary
-        .write_all(lyrics.as_bytes())
-        .map_err(write_error)?;
-    if let Ok(permissions) = fs::metadata(&path)
-        .or_else(|_| fs::metadata(audio_path))
-        .map(|metadata| metadata.permissions())
-    {
-        temporary
-            .as_file()
-            .set_permissions(permissions)
-            .map_err(write_error)?;
-    }
-    temporary.as_file().sync_all().map_err(write_error)?;
-    temporary
-        .persist(&path)
-        .map_err(|error| write_error(error.error))?;
-    sync_parent(parent)
-}
-
 fn set_embedded_lyrics(tag: &mut Tag, key: ItemKey, lyrics: &str) {
     tag.remove_key(ItemKey::UnsyncLyrics);
     tag.remove_key(ItemKey::Lyrics);
     tag.insert_text(key, lyrics.to_string());
 }
 
-pub(crate) fn write_r128(
-    path: &Path,
-    source_format: Option<&str>,
-    track_lufs: Option<f64>,
-    album_lufs: Option<f64>,
-) -> Result<(), SourceMetadataError> {
-    let writer = source_format
-        .and_then(MetadataWriter::for_source_format)
-        .or_else(|| MetadataWriter::for_path(path))
-        .ok_or(SourceMetadataError::Unavailable)?;
-    if track_lufs.is_some() && !writer.metadata_key_is_writable(ItemKey::R128TrackGain)
-        || album_lufs.is_some() && !writer.metadata_key_is_writable(ItemKey::R128AlbumGain)
-    {
-        return Err(SourceMetadataError::Unavailable);
-    }
-    let prepared = prepare_file(path, source_format, None, |tag, _| {
-        if let Some(lufs) = track_lufs {
-            set_text(tag, ItemKey::R128TrackGain, Some(&r128_gain_text(lufs)));
-        }
-        if let Some(lufs) = album_lufs {
-            set_text(tag, ItemKey::R128AlbumGain, Some(&r128_gain_text(lufs)));
-        }
-        Ok(())
-    })?;
-    commit_batch(vec![prepared])
-}
-
 fn r128_gain_text(integrated_lufs: f64) -> String {
     let gain = ((-23.0 - integrated_lufs) * 256.0).round();
     (gain.clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16).to_string()
-}
-
-pub(crate) fn artwork_embeddable(path: &Path, format: Option<&str>, artist: bool) -> bool {
-    let writer = format
-        .and_then(MetadataWriter::for_source_format)
-        .or_else(|| MetadataWriter::for_path(path));
-    writer.is_some_and(|writer| match writer.file_type().primary_tag_type() {
-        ::lofty::tag::TagType::Id3v2
-        | ::lofty::tag::TagType::VorbisComments
-        | ::lofty::tag::TagType::Ape => true,
-        ::lofty::tag::TagType::Mp4Ilst => !artist,
-        _ => false,
-    })
 }
 
 fn embedded_picture(
@@ -655,125 +474,6 @@ pub(crate) fn folder_artwork_filename(
     }
 }
 
-pub(crate) fn save_folder_artwork(
-    targets: &[MetadataFileTarget],
-    edit: &crate::ArtworkEdit,
-    artist_name: Option<&str>,
-    folder_image: Option<&Path>,
-) -> Result<(), SourceMetadataError> {
-    finish_artwork(Vec::new(), targets, Some(edit), artist_name, folder_image)
-}
-
-fn finish_artwork(
-    mut prepared: Vec<PreparedFile>,
-    targets: &[MetadataFileTarget],
-    edit: Option<&crate::ArtworkEdit>,
-    artist_name: Option<&str>,
-    folder_image: Option<&Path>,
-) -> Result<(), SourceMetadataError> {
-    let mut replaced = Vec::new();
-    if let Some(edit) = edit.filter(|edit| edit.storage == crate::ArtworkStorage::Folder) {
-        let directories = if let Some(image) = folder_image {
-            image
-                .parent()
-                .into_iter()
-                .collect::<std::collections::BTreeSet<_>>()
-        } else {
-            targets
-                .iter()
-                .filter_map(|target| target.path.parent())
-                .collect()
-        };
-        for directory in directories {
-            let current = if let Some(image) = folder_image {
-                Some(image.to_path_buf())
-            } else if let Some(name) = artist_name {
-                super::local::artwork::directory_artist_image_for(directory, name, false)
-            } else {
-                super::local::artwork::directory_image(directory)
-            };
-            let crate::ArtworkChange::Replace(image) = &edit.change else {
-                replaced.extend(current);
-                continue;
-            };
-            let extension = artwork_extension(image)?;
-            let target = current
-                .as_ref()
-                .and_then(|path| path.parent())
-                .unwrap_or(directory)
-                .join(folder_artwork_filename(
-                    current.as_deref().and_then(Path::file_name),
-                    artist_name,
-                    extension,
-                ));
-            let mut temp = tempfile::NamedTempFile::new_in(directory).map_err(write_error)?;
-            temp.write_all(&image.bytes).map_err(write_error)?;
-            if let Some(permissions) = current
-                .as_deref()
-                .or_else(|| targets.first().map(|target| target.path.as_path()))
-                .and_then(|path| fs::metadata(path).ok())
-                .map(|metadata| metadata.permissions())
-            {
-                temp.as_file()
-                    .set_permissions(permissions)
-                    .map_err(write_error)?;
-            }
-            temp.as_file().sync_all().map_err(write_error)?;
-            prepared.push(PreparedFile {
-                existed: target.exists(),
-                target: target.clone(),
-                temp: temp.into_temp_path(),
-            });
-            if let Some(current) = current.filter(|current| *current != target) {
-                replaced.push(current);
-            }
-        }
-    }
-    commit_batch(prepared)?;
-    for path in replaced {
-        fs::remove_file(&path).map_err(|error| SourceMetadataError::PartiallySaved {
-            reason: format!("The previous artwork image could not be removed: {error}"),
-        })?;
-        if let Some(parent) = path.parent() {
-            sync_parent(parent)?;
-        }
-    }
-    Ok(())
-}
-
-struct PreparedFile {
-    target: PathBuf,
-    temp: tempfile::TempPath,
-    existed: bool,
-}
-
-fn prepare_file(
-    path: &Path,
-    source_format: Option<&str>,
-    tag_type: Option<::lofty::tag::TagType>,
-    mutate: impl FnOnce(&mut Tag, MetadataWriter) -> Result<(), SourceMetadataError>,
-) -> Result<PreparedFile, SourceMetadataError> {
-    let writer = source_format
-        .and_then(MetadataWriter::for_source_format)
-        .or_else(|| MetadataWriter::for_path(path))
-        .ok_or(SourceMetadataError::Unavailable)?;
-    let parent = path.parent().ok_or_else(|| {
-        SourceMetadataError::Write("metadata file has no parent folder".to_string())
-    })?;
-    let temp = tempfile::Builder::new()
-        .prefix(".rufin-metadata-")
-        .tempfile_in(parent)
-        .map_err(write_error)?;
-    fs::copy(path, temp.path()).map_err(write_error)?;
-    edit_tag(temp.path(), writer, tag_type, mutate)?;
-    temp.as_file().sync_all().map_err(write_error)?;
-    Ok(PreparedFile {
-        target: path.to_path_buf(),
-        temp: temp.into_temp_path(),
-        existed: true,
-    })
-}
-
 fn edit_tag(
     path: &Path,
     writer: MetadataWriter,
@@ -813,35 +513,6 @@ fn edit_tag(
             .map_err(write_error)?;
     }
     save_tag(tag, path)
-}
-
-fn commit_batch(mut prepared: Vec<PreparedFile>) -> Result<(), SourceMetadataError> {
-    for index in 0..prepared.len() {
-        let file = &mut prepared[index];
-        let result = if file.existed {
-            replace(&mut file.temp, &file.target)
-        } else {
-            fs::rename(&file.temp, &file.target).map_err(write_error)
-        };
-        if let Err(error) = result {
-            for rollback in prepared[..index].iter_mut().rev() {
-                if rollback.existed {
-                    let _ = replace(&mut rollback.temp, &rollback.target);
-                } else {
-                    let _ = fs::remove_file(&rollback.target);
-                }
-            }
-            return Err(error);
-        }
-    }
-    for file in &prepared {
-        if let Some(parent) = file.target.parent() {
-            sync_parent(parent).map_err(|error| SourceMetadataError::PartiallySaved {
-                reason: format!("Saved files could not be synced: {error}"),
-            })?;
-        }
-    }
-    Ok(())
 }
 
 fn writable_tag(tagged: &::lofty::file::TaggedFile) -> Tag {
@@ -948,7 +619,10 @@ fn set_artist_value(
 }
 
 #[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
-fn replace(replacement: &mut tempfile::TempPath, target: &Path) -> Result<(), SourceMetadataError> {
+pub(crate) fn replace(
+    replacement: &mut tempfile::TempPath,
+    target: &Path,
+) -> Result<(), SourceMetadataError> {
     rustix::fs::renameat_with(
         rustix::fs::CWD,
         &**replacement,
@@ -960,7 +634,10 @@ fn replace(replacement: &mut tempfile::TempPath, target: &Path) -> Result<(), So
 }
 
 #[cfg(target_os = "windows")]
-fn replace(replacement: &mut tempfile::TempPath, target: &Path) -> Result<(), SourceMetadataError> {
+pub(crate) fn replace(
+    replacement: &mut tempfile::TempPath,
+    target: &Path,
+) -> Result<(), SourceMetadataError> {
     let backup = tempfile::Builder::new()
         .prefix(".rufin-metadata-")
         .tempfile_in(target.parent().ok_or(SourceMetadataError::Unavailable)?)
@@ -986,7 +663,7 @@ fn replace(replacement: &mut tempfile::TempPath, target: &Path) -> Result<(), So
     target_os = "macos",
     target_os = "windows"
 )))]
-fn replace(
+pub(crate) fn replace(
     _replacement: &mut tempfile::TempPath,
     _target: &Path,
 ) -> Result<(), SourceMetadataError> {
@@ -994,7 +671,7 @@ fn replace(
 }
 
 #[cfg(unix)]
-fn sync_parent(parent: &Path) -> Result<(), SourceMetadataError> {
+pub(crate) fn sync_parent(parent: &Path) -> Result<(), SourceMetadataError> {
     fs::File::open(parent)
         .map_err(write_error)?
         .sync_all()
@@ -1002,7 +679,7 @@ fn sync_parent(parent: &Path) -> Result<(), SourceMetadataError> {
 }
 
 #[cfg(not(unix))]
-fn sync_parent(_parent: &Path) -> Result<(), SourceMetadataError> {
+pub(crate) fn sync_parent(_parent: &Path) -> Result<(), SourceMetadataError> {
     Ok(())
 }
 
@@ -1013,7 +690,6 @@ fn write_error(error: impl std::fmt::Display) -> SourceMetadataError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lofty::prelude::Accessor;
 
     #[test]
     fn repeated_album_edits_replace_the_previous_tag_in_a_working_copy() {
@@ -1045,21 +721,12 @@ mod tests {
                 changes: [("title".into(), title.into())].into(),
                 artwork: None,
             };
-            let paths = [file.to_path_buf()];
-            let revision = combined_revision(&paths).unwrap();
-            write_metadata(
-                &(&[(file.to_path_buf(), Some("wav".into()))])
-                    .iter()
-                    .map(|(path, format)| crate::file::metadata::MetadataFileTarget {
-                        path: path.clone(),
-                        format: format.clone(),
-                        tag_writable: true,
-                    })
-                    .collect::<Vec<_>>(),
-                &revision,
+            edit_copy(
+                &file,
+                Some("wav"),
+                &TagUpdate::Metadata(edit),
                 "",
-                &edit,
-                None,
+                &mut None,
             )
             .unwrap();
             let observed = read_track_metadata(&file, Some("wav")).unwrap();
@@ -1119,7 +786,6 @@ mod tests {
         let path = directory.path().join("track.wav");
         fs::write(&path, silent_wav()).expect("write WAV");
         assert!(super::metadata_file_available(&path, Some("wav")));
-        let before = revision(&path).expect("file revision");
         let edit = track_edit(&[
             ("title", "Updated title"),
             ("artist", "Updated artist"),
@@ -1129,16 +795,12 @@ mod tests {
             ("musicbrainz_recording_id", "recording"),
         ]);
 
-        write_metadata(
-            &[crate::file::metadata::MetadataFileTarget {
-                path: (&path).to_path_buf(),
-                format: Some("wav").map(str::to_owned),
-                tag_writable: true,
-            }],
-            &before,
+        edit_copy(
+            &path,
+            Some("wav"),
+            &TagUpdate::Metadata((edit).clone()),
             "",
-            &edit,
-            None,
+            &mut None,
         )
         .expect("write metadata");
         let read = super::read_track_metadata(&path, Some("wav")).expect("read metadata");
@@ -1161,21 +823,42 @@ mod tests {
         assert_eq!(values["musicbrainz_recording_id"], "recording");
     }
 
-    #[test]
-    fn unindexed_file_uri_metadata_edits_the_original_and_rejects_segments() {
+    #[tokio::test]
+    async fn unindexed_file_uri_metadata_edits_the_original_and_rejects_segments() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("original.wav");
         fs::write(&path, silent_wav()).unwrap();
         let uri = url::Url::from_file_path(&path).unwrap().to_string();
-        let metadata = crate::Source::read_direct_file_metadata(&uri).unwrap();
-        crate::Source::write_direct_file_metadata(
-            &uri,
-            metadata.revision.as_deref().unwrap(),
-            &track_edit(&[("title", "Direct original")]),
-        )
-        .unwrap();
+        let database = library::Database::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let key = database
+            .remember_media_uris(std::slice::from_ref(&uri))
+            .await
+            .unwrap()[0];
+        let before = revision(&path).unwrap();
+        let (editor, draft) =
+            crate::FileEditSession::open(None, &database, uri.clone(), SourceEntityKind::Track)
+                .await
+                .unwrap();
+        assert_eq!(draft.revision.as_deref(), Some(before.as_str()));
+        editor
+            .save(&database, track_edit(&[("title", "Direct original")]))
+            .await
+            .unwrap();
+        let library::CatalogRows::Tracks(rows) =
+            library::CatalogQuery::uris(library::CatalogKind::Track, vec![uri.clone()])
+                .rows(&database, 0, 1, &library::ReadCancellation::new())
+                .await
+                .unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(rows[0].track_key, key);
+        assert_eq!(rows[0].metadata.title, "Direct original");
+        assert!(rows[0].source_key.is_none());
         assert_eq!(
-            crate::Source::read_direct_file_metadata(&uri)
+            read_track_metadata(&path, None)
                 .unwrap()
                 .fields
                 .into_iter()
@@ -1184,15 +867,10 @@ mod tests {
                 .value,
             "Direct original"
         );
+        assert!(crate::source::metadata::NativeFile::direct(&format!("{uri}#cue=1")).is_err());
         assert!(
-            crate::Source::write_direct_file_metadata(
-                &format!("{uri}#cue=1"),
-                "",
-                &track_edit(&[])
-            )
-            .is_err()
+            crate::source::metadata::NativeFile::direct("https://example.com/song.wav").is_err()
         );
-        assert!(crate::Source::read_direct_file_metadata("https://example.com/song.wav").is_err());
     }
 
     #[test]
@@ -1200,22 +878,23 @@ mod tests {
         let directory = tempfile::tempdir().expect("metadata directory");
         let path = directory.path().join("track.wav");
         fs::write(&path, silent_wav()).expect("write WAV");
-        let before = revision(&path).expect("file revision");
-        write_metadata(
-            &[crate::file::metadata::MetadataFileTarget {
-                path: (&path).to_path_buf(),
-                format: Some("wav").map(str::to_owned),
-                tag_writable: true,
-            }],
-            &before,
+        edit_copy(
+            &path,
+            Some("wav"),
+            &TagUpdate::Metadata((track_edit(&[("title", "Track title")])).clone()),
             "",
-            &track_edit(&[("title", "Track title")]),
-            None,
+            &mut None,
         )
         .expect("seed metadata");
 
         assert_eq!(
-            write_embedded_lyrics(&path, "[00:01.000]A line"),
+            edit_copy(
+                &path,
+                Some("wav"),
+                &TagUpdate::Lyrics("[00:01.000]A line".into()),
+                "",
+                &mut None
+            ),
             Err(SourceMetadataError::Unavailable)
         );
         assert!(!super::embedded_lyrics_writable(&path));
@@ -1236,161 +915,226 @@ mod tests {
         assert_eq!(id3.get_string(ItemKey::UnsyncLyrics), Some("updated"));
     }
 
-    #[test]
-    fn sidecar_lyrics_replace_the_neighbor_without_changing_audio() {
-        let directory = tempfile::tempdir().expect("metadata directory");
+    #[tokio::test]
+    async fn sidecar_lyrics_replace_the_neighbor_without_changing_audio() {
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("track.wav");
         let audio = silent_wav();
-        fs::write(&path, &audio).expect("write WAV");
-
-        write_sidecar_lyrics(&path, "[00:01.000]First").expect("write sidecar");
-        write_sidecar_lyrics(&path, "[00:02.000]Updated").expect("replace sidecar");
-
+        fs::write(&path, &audio).unwrap();
+        let uri = url::Url::from_file_path(&path).unwrap();
+        let file = crate::source::metadata::NativeFile::direct(uri.as_str()).unwrap();
+        file.write_sidecar("[00:01.000]First").await.unwrap();
+        file.write_sidecar("[00:02.000]Updated").await.unwrap();
         assert_eq!(
-            fs::read_to_string(directory.path().join("track.lrc")).expect("read sidecar"),
+            fs::read_to_string(path.with_extension("lrc")).unwrap(),
             "[00:02.000]Updated"
         );
-        assert_eq!(fs::read(path).expect("read WAV"), audio);
+        assert_eq!(fs::read(path).unwrap(), audio);
     }
 
-    #[test]
-    fn local_album_metadata_updates_each_backing_track_as_one_batch() {
-        let directory = tempfile::tempdir().expect("metadata directory");
-        let paths = [
-            directory.path().join("one.wav"),
-            directory.path().join("two.wav"),
-        ];
-        for (index, path) in paths.iter().enumerate() {
-            fs::write(path, silent_wav()).expect("write WAV");
-            let before = revision(path).expect("file revision");
-            write_metadata(
-                &[crate::file::metadata::MetadataFileTarget {
-                    path: (path).to_path_buf(),
-                    format: Some("wav").map(str::to_owned),
-                    tag_writable: true,
-                }],
-                &before,
-                "",
-                &track_edit(&[
-                    ("title", &path.file_stem().unwrap().to_string_lossy()),
-                    ("album", "Before"),
-                    ("genre", &format!("Genre {index}")),
-                ]),
-                None,
-            )
-            .expect("seed Track metadata");
-        }
-        let targets = paths
-            .iter()
-            .cloned()
-            .map(|path| (path, Some("wav".to_string())))
+    #[tokio::test]
+    async fn local_album_metadata_updates_each_backing_track_as_one_batch() {
+        let directory = tempfile::tempdir().unwrap();
+        let music = directory.path().join("music");
+        fs::create_dir(&music).unwrap();
+        let paths = (0..130)
+            .map(|index| music.join(format!("track-{index:03}.wav")))
             .collect::<Vec<_>>();
-        let before = combined_revision(&paths).expect("Album revision");
-        write_metadata(
-            &(&targets)
-                .iter()
-                .map(|(path, format)| crate::file::metadata::MetadataFileTarget {
-                    path: path.clone(),
-                    format: format.clone(),
-                    tag_writable: true,
-                })
-                .collect::<Vec<_>>(),
-            &before,
+        for (index, path) in paths.iter().enumerate() {
+            fs::write(path, silent_wav()).unwrap();
+            edit_copy(
+                path,
+                Some("wav"),
+                &TagUpdate::Metadata(track_edit(&[
+                    ("title", &format!("Track {index}")),
+                    ("album", "Before"),
+                    ("artist", "Guest"),
+                    ("album_artist", "Album Artist"),
+                    ("genre", &format!("Genre {index}")),
+                    (
+                        "musicbrainz_album_id",
+                        "11111111-1111-4111-8111-111111111111",
+                    ),
+                ])),
+                "",
+                &mut None,
+            )
+            .unwrap();
+        }
+        let database = library::Database::open(directory.path().join("library.db"))
+            .await
+            .unwrap();
+        let connected = crate::Source::connect(
+            crate::SourceId::new("metadata-pages"),
+            crate::SourceSetup::Local { roots: vec![music] },
             "",
-            &MetadataEdit {
-                kind: SourceEntityKind::Album,
-                changes: [
-                    ("title".into(), "After".into()),
-                    ("album_artist".into(), "Album Artist".into()),
-                ]
-                .into(),
-                artwork: None,
-            },
-            None,
         )
-        .expect("write Album metadata");
-
+        .await
+        .unwrap();
+        let (configuration, source, _) = connected.into_parts();
+        database
+            .reconcile_source(
+                &configuration.source_id,
+                &configuration.kind,
+                &configuration.name,
+            )
+            .await
+            .unwrap();
+        let source = std::sync::Arc::new(source);
+        source
+            .acquire_catalog(
+                &database,
+                &|_| {},
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                true,
+            )
+            .await
+            .unwrap();
+        let track = library::CatalogQuery::uris(
+            library::CatalogKind::Track,
+            vec![(url::Url::from_file_path(&paths[0]).unwrap().as_str()).to_owned()],
+        )
+        .rows(&database, 0, 256, &library::ReadCancellation::new())
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+            _ => unreachable!(),
+        })
+        .unwrap()
+        .unwrap();
+        let artist = crate::file::media::artist_credit("Album Artist".into(), None);
+        let artist_uri =
+            library::source_entity_uri(&configuration.source_id, "artist", &artist.object_id);
+        let (send, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |_, update| {
+            let _ = send.send(update);
+            std::future::ready(())
+        });
+        for (uri, kind, title) in [
+            (artist_uri, SourceEntityKind::Artist, "Renamed Artist"),
+            (
+                track.links.album_media_uri.unwrap(),
+                SourceEntityKind::Album,
+                "After",
+            ),
+        ] {
+            let (editor, draft) =
+                crate::FileEditSession::open(Some(source.clone()), &database, uri, kind)
+                    .await
+                    .unwrap();
+            assert_eq!(draft.track_count, 130);
+            editor
+                .save(
+                    &database,
+                    MetadataEdit {
+                        kind,
+                        changes: [("title".into(), title.into())].into(),
+                        artwork: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(updates.try_recv().unwrap().metadata);
+            assert!(
+                updates.try_recv().is_err(),
+                "one publication for the collection save"
+            );
+        }
         for (index, path) in paths.iter().enumerate() {
             let values = read_track_metadata(path, Some("wav"))
-                .expect("read Album metadata")
+                .unwrap()
                 .fields
                 .into_iter()
                 .map(|field| (field.key, field.value))
                 .collect::<std::collections::BTreeMap<_, _>>();
             assert_eq!(values["album"], "After");
-            assert_eq!(values["album_artist"], "Album Artist");
+            assert_eq!(values["album_artist"], "Renamed Artist");
+            assert_eq!(values["artist"], "Guest");
             assert_eq!(
                 values["genre"],
                 format!("Genre {index}"),
-                "an untouched mixed aggregate field keeps each Track's value"
+                "untouched mixed values stay with each file"
             );
         }
     }
 
-    #[test]
-    fn local_metadata_rejects_a_concurrent_file_change_without_overwriting_it() {
-        let directory = tempfile::tempdir().expect("metadata directory");
+    #[tokio::test]
+    async fn local_metadata_rejects_a_concurrent_file_change_without_overwriting_it() {
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("track.wav");
-        fs::write(&path, silent_wav()).expect("write WAV");
-        let stale = revision(&path).expect("file revision");
+        fs::write(&path, silent_wav()).unwrap();
+        let stale = revision(&path).unwrap();
         let mut concurrent = silent_wav();
         concurrent.extend_from_slice(b"concurrent-change");
-        fs::write(&path, &concurrent).expect("change WAV");
-
-        let result = write_metadata(
-            &[crate::file::metadata::MetadataFileTarget {
-                path: (&path).to_path_buf(),
-                format: Some("wav").map(str::to_owned),
-                tag_writable: true,
-            }],
-            &stale,
-            "",
-            &track_edit(&[("title", "Should not replace")]),
-            None,
-        );
-
-        assert!(matches!(result, Err(SourceMetadataError::Conflict)));
-        assert_eq!(
-            fs::read(&path).expect("unchanged concurrent file"),
-            concurrent
-        );
+        fs::write(&path, &concurrent).unwrap();
+        let uri = url::Url::from_file_path(&path).unwrap();
+        let file = crate::source::metadata::NativeFile::direct(uri.as_str()).unwrap();
+        assert!(matches!(
+            file.prepare(Some(&stale)).await,
+            Err(SourceMetadataError::Conflict)
+        ));
+        assert_eq!(fs::read(&path).unwrap(), concurrent);
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(any(
         target_os = "android",
         target_os = "linux",
         target_os = "macos",
         target_os = "windows"
     ))]
-    fn aggregate_commit_failure_restores_every_replaced_file() {
-        let directory = tempfile::tempdir().expect("metadata directory");
+    async fn later_commit_failure_preserves_earlier_successful_file() {
+        let directory = tempfile::tempdir().unwrap();
         let first = directory.path().join("first.wav");
         let second = directory.path().join("second.wav");
-        fs::write(&first, silent_wav()).expect("first WAV");
-        let mut second_bytes = silent_wav();
-        second_bytes.extend_from_slice(b"second");
-        fs::write(&second, &second_bytes).expect("second WAV");
-        let first_bytes = fs::read(&first).expect("first original");
+        for path in [&first, &second] {
+            fs::write(path, silent_wav()).unwrap();
+        }
+        let first_file = crate::source::metadata::NativeFile::direct(
+            url::Url::from_file_path(&first).unwrap().as_str(),
+        )
+        .unwrap();
+        let second_file = crate::source::metadata::NativeFile::direct(
+            url::Url::from_file_path(&second).unwrap().as_str(),
+        )
+        .unwrap();
+        let (prepared_first, _) = first_file
+            .prepare(None)
+            .await
+            .unwrap()
+            .mutate(
+                TagUpdate::Metadata(track_edit(&[("title", "After")])),
+                String::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        let (prepared_second, _) = second_file
+            .prepare(None)
+            .await
+            .unwrap()
+            .mutate(
+                TagUpdate::Metadata(track_edit(&[("title", "After")])),
+                String::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        prepared_first.commit(&|| false).await.unwrap();
         let second_original = directory.path().join("second.original");
-        let prepared = [&first, &second]
-            .into_iter()
-            .map(|path| {
-                prepare_file(path, Some("wav"), None, |tag, _| {
-                    tag.set_title("After".into());
-                    Ok(())
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .expect("prepared metadata files");
-        fs::rename(&second, &second_original).expect("make second replacement fail");
-
-        assert!(commit_batch(prepared).is_err());
-        assert_eq!(fs::read(&first).expect("restored first"), first_bytes);
+        fs::rename(&second, &second_original).unwrap();
+        assert!(prepared_second.commit(&|| false).await.is_err());
         assert_eq!(
-            fs::read(&second_original).expect("untouched second"),
-            second_bytes
+            read_track_metadata(&first, None)
+                .unwrap()
+                .fields
+                .into_iter()
+                .find(|field| field.key == "title")
+                .unwrap()
+                .value,
+            "After"
         );
+        assert_eq!(fs::read(second_original).unwrap(), silent_wav());
     }
 
     #[tokio::test]
@@ -1411,40 +1155,71 @@ mod tests {
         )
         .await
         .unwrap();
-        let (_, source, _) = connected.into_parts();
+        let (configuration, source, _) = connected.into_parts();
+        database
+            .reconcile_source(
+                &configuration.source_id,
+                &configuration.kind,
+                &configuration.name,
+            )
+            .await
+            .unwrap();
         source
-            .manual_refresh(
+            .acquire_catalog(
                 &database,
-                "Local",
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                true,
             )
             .await
             .unwrap();
         let uri = url::Url::from_file_path(&audio).unwrap().to_string();
-        let before = database
-            .track_row_by_uri(&uri, &library::ReadCancellation::new())
-            .await
-            .unwrap()
-            .unwrap();
+        let before =
+            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
+                .rows(&database, 0, 256, &library::ReadCancellation::new())
+                .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+                    _ => unreachable!(),
+                })
+                .unwrap()
+                .unwrap();
         for path in [
             root.join(".").join("café %.wav"),
             library::file_media_path(&uri).unwrap(),
         ] {
-            crate::file::local::scan::publish_metadata_paths(
-                &database,
-                source.source_id().as_str(),
-                &[path],
-                None,
-                None,
-            )
-            .await
-            .unwrap();
-            let after = database
-                .track_row_by_uri(&uri, &library::ReadCancellation::new())
+            let mut catalog = database
+                .catalog(source.source_id().as_str(), None)
                 .await
-                .unwrap()
                 .unwrap();
+            let (observation, facts) =
+                crate::file::local::scan::read_saved_file(&catalog, &uri, &path)
+                    .await
+                    .unwrap();
+            catalog
+                .write_file_observations(
+                    &observation
+                        .into_iter()
+                        .map(|row| (row, Vec::new()))
+                        .collect::<Vec<_>>(),
+                    vec![facts],
+                    true,
+                )
+                .await
+                .unwrap();
+            database
+                .publish_catalog_update(source.source_id().as_str(), catalog.into_changes())
+                .await;
+            let after =
+                library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
+                    .rows(&database, 0, 256, &library::ReadCancellation::new())
+                    .await
+                    .map(|rows| match rows {
+                        library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+                        _ => unreachable!(),
+                    })
+                    .unwrap()
+                    .unwrap();
             assert_eq!(after.track_key, before.track_key);
             assert_eq!(after.object_id, before.object_id);
         }
@@ -1461,23 +1236,23 @@ mod tests {
         let new_root = root.join("new");
         fs::create_dir(&old_root).unwrap();
         fs::create_dir(&new_root).unwrap();
-        let audio = old_root.join("track.wav");
-        let imported = old_root.join("imported.wav");
+        let excluded = old_root.join("excluded");
+        fs::create_dir(&excluded).unwrap();
+        let audio = excluded.join("track.wav");
+        let imported = excluded.join("imported.wav");
         let new_audio = new_root.join("new.wav");
         let file_root = root.join("individual.wav");
         let paths = [&audio, &imported, &new_audio, &file_root];
         for path in paths {
             fs::write(path, silent_wav()).unwrap();
-            write_metadata(
-                &[MetadataFileTarget {
-                    path: path.to_path_buf(),
-                    format: Some("wav".into()),
-                    tag_writable: true,
-                }],
-                &revision(path).unwrap(),
+            edit_copy(
+                path,
+                Some("wav"),
+                &TagUpdate::Metadata(
+                    (track_edit(&[("album", "Album"), ("artist", "Artist")])).clone(),
+                ),
                 "",
-                &track_edit(&[("album", "Album"), ("artist", "Artist")]),
-                None,
+                &mut None,
             )
             .unwrap();
         }
@@ -1494,20 +1269,76 @@ mod tests {
         .await
         .unwrap();
         let (configuration, source, _) = connected.into_parts();
+        database
+            .reconcile_source(
+                &configuration.source_id,
+                &configuration.kind,
+                &configuration.name,
+            )
+            .await
+            .unwrap();
         source
-            .manual_refresh(
+            .acquire_catalog(&database, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .await
+            .unwrap();
+        let key = database
+            .source_identity_key(source.source_id())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut physical = database
+            .source_files(
+                source.source_id().as_str(),
+                &[audio.to_string_lossy().into_owned()],
+            )
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        physical.parse_version = Some(14);
+        physical.root = audio
+            .ancestors()
+            .last()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        database
+            .catalog(source.source_id().as_str(), None)
+            .await
+            .unwrap()
+            .write_file_observations(&[(physical, Vec::new())], Vec::new(), true)
+            .await
+            .unwrap();
+        let progress = std::sync::Mutex::new(Vec::new());
+        source
+            .catch_up_local(
                 &database,
-                "Local",
-                &|_| {},
+                &|update| progress.lock().unwrap().push(update),
                 Arc::new(AtomicBool::new(false)),
             )
             .await
             .unwrap();
+        assert!(
+            progress.into_inner().unwrap().is_empty(),
+            "accepted released metadata does not need a new read"
+        );
+        assert_eq!(
+            library::CatalogQuery::tracks(library::TrackScope::Tracks(key))
+                .count(&database, &library::ReadCancellation::new())
+                .await
+                .unwrap(),
+            2,
+            "a historical point-import root must not withdraw the configured music tree"
+        );
         let uri = url::Url::from_file_path(&audio).unwrap().to_string();
         assert!(
-            database
-                .track_row_by_uri(&uri, &library::ReadCancellation::new())
+            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
+                .rows(&database, 0, 256, &library::ReadCancellation::new())
                 .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+                    _ => unreachable!(),
+                })
                 .unwrap()
                 .is_some()
         );
@@ -1516,12 +1347,49 @@ mod tests {
             .await
             .unwrap();
         let imported_uri = url::Url::from_file_path(&imported).unwrap().to_string();
+        assert_eq!(
+            database
+                .playlist_entry_uri_page(playlist, -1)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(_, _, uri)| uri)
+                .collect::<Vec<_>>(),
+            vec![imported_uri.clone()],
+            "import retains the selected already-indexed file"
+        );
         let new_uri = url::Url::from_file_path(&new_audio).unwrap().to_string();
         let key = database
             .source_identity_key(source.source_id())
             .await
             .unwrap()
             .unwrap();
+        assert_eq!(
+            database
+                .local_file_page(key, None, 128, &library::ReadCancellation::new())
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|file| file.path == imported.to_string_lossy())
+                .unwrap()
+                .root,
+            old_root.to_string_lossy()
+        );
+        source
+            .import_playlist_files(&database, playlist)
+            .await
+            .unwrap();
+        assert_eq!(
+            database
+                .local_file_page(key, None, 128, &library::ReadCancellation::new())
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|file| file.path == imported.to_string_lossy())
+                .unwrap()
+                .root,
+            old_root.to_string_lossy()
+        );
         let source_id = configuration.source_id.clone();
         let edit = crate::Source::edit(
             configuration,
@@ -1548,12 +1416,7 @@ mod tests {
         tokio::select! {
             biased;
             () = first_files.notified() => {}
-            result = source.manual_refresh(
-                &database,
-                "Local",
-                &progress,
-                Arc::new(AtomicBool::new(false)),
-            ) => panic!("refresh completed before interruption: {result:?}"),
+            result = source.acquire_catalog(&database, &progress, Arc::new(AtomicBool::new(false)), true) => panic!("refresh completed before interruption: {result:?}"),
         }
         assert!(
             database
@@ -1572,17 +1435,16 @@ mod tests {
         let database = library::Database::open(&database_path).await.unwrap();
         let source = crate::Source::open(configuration.clone(), None, None).unwrap();
         source
-            .catch_up_local(&database, key, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .catch_up_local(&database, &|_| {}, Arc::new(AtomicBool::new(false)))
             .await
             .expect("catch up the edited roots after an interrupted refresh");
-        let tracks = database
-            .song_rows(
-                &library::SongQuery::new(library::SongScope::Tracks(key)),
-                0,
-                10,
-                &library::ReadCancellation::new(),
-            )
+        let tracks = (&library::CatalogQuery::tracks(library::TrackScope::Tracks(key)))
+            .rows(&database, 0, 10, &library::ReadCancellation::new())
             .await
+            .map(|rows| match rows {
+                library::CatalogRows::Tracks(rows) => rows,
+                _ => unreachable!("typed song projection"),
+            })
             .unwrap();
         assert_eq!(tracks.len(), 2);
         assert!(tracks.iter().any(|track| track.media_uri == new_uri));
@@ -1602,15 +1464,22 @@ mod tests {
         assert!(
             inventory
                 .iter()
-                .all(|file| Path::new(&file.root) == new_root)
+                .any(|file| Path::new(&file.root) == new_root)
+        );
+        let folders = source.browse_folder(&database, None, None).await.unwrap();
+        assert!(
+            folders
+                .folders
+                .iter()
+                .all(|folder| !folder.name.contains("old"))
         );
         let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |update| {
+        database.observe_catalog(move |_, update| {
             let _ = sender.send(update);
             std::future::ready(())
         });
         source
-            .catch_up_local(&database, key, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .catch_up_local(&database, &|_| {}, Arc::new(AtomicBool::new(false)))
             .await
             .unwrap();
         while let Ok(update) = updates.try_recv() {
@@ -1638,18 +1507,17 @@ mod tests {
         let database = library::Database::open(&database_path).await.unwrap();
         let source = crate::Source::open(configuration.clone(), None, None).unwrap();
         source
-            .catch_up_local(&database, key, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .catch_up_local(&database, &|_| {}, Arc::new(AtomicBool::new(false)))
             .await
             .unwrap();
         let file_uri = url::Url::from_file_path(&file_root).unwrap().to_string();
-        let tracks = database
-            .song_rows(
-                &library::SongQuery::new(library::SongScope::Tracks(key)),
-                0,
-                10,
-                &library::ReadCancellation::new(),
-            )
+        let tracks = (&library::CatalogQuery::tracks(library::TrackScope::Tracks(key)))
+            .rows(&database, 0, 10, &library::ReadCancellation::new())
             .await
+            .map(|rows| match rows {
+                library::CatalogRows::Tracks(rows) => rows,
+                _ => unreachable!("typed song projection"),
+            })
             .unwrap();
         assert_eq!(tracks.len(), 3);
         assert!(tracks.iter().any(|track| track.media_uri == file_uri));
@@ -1663,12 +1531,12 @@ mod tests {
                 .any(|file| Path::new(&file.root) == file_root)
         );
         let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |update| {
+        database.observe_catalog(move |_, update| {
             let _ = sender.send(update);
             std::future::ready(())
         });
         source
-            .catch_up_local(&database, key, &|_| {}, Arc::new(AtomicBool::new(false)))
+            .catch_up_local(&database, &|_| {}, Arc::new(AtomicBool::new(false)))
             .await
             .unwrap();
         while let Ok(update) = updates.try_recv() {
@@ -1682,7 +1550,7 @@ mod tests {
             crate::SourceSettingsChange::Local {
                 source_id: source.source_id().clone(),
                 roots: Vec::new(),
-                excluded_folders: None,
+                excluded_folders: Some(vec![excluded.clone()]),
             },
             None,
         )
@@ -1691,14 +1559,9 @@ mod tests {
         let crate::SourceEditResult::Connected(connected) = edit else {
             panic!("expected removed Local roots")
         };
-        let (_, source, _) = (*connected).into_parts();
+        let (configuration, source, _) = (*connected).into_parts();
         source
-            .manual_refresh(
-                &database,
-                "Local",
-                &|_| {},
-                Arc::new(AtomicBool::new(false)),
-            )
+            .acquire_catalog(&database, &|_| {}, Arc::new(AtomicBool::new(false)), true)
             .await
             .unwrap();
         let key = database
@@ -1707,29 +1570,90 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            database
-                .song_count(
-                    &library::SongQuery::new(library::SongScope::Tracks(key)),
-                    &library::ReadCancellation::new()
-                )
+            (&library::CatalogQuery::tracks(library::TrackScope::Tracks(key)))
+                .count(&database, &library::ReadCancellation::new())
                 .await
                 .unwrap(),
-            0
+            1
         );
+        let audio_query =
+            library::CatalogQuery::uris(library::CatalogKind::Track, vec![uri.clone()]);
+        let library::CatalogRows::Tracks(cached) = audio_query
+            .rows(&database, 0, 1, &library::ReadCancellation::new())
+            .await
+            .unwrap()
+        else {
+            panic!("track rows")
+        };
+        assert_eq!(cached.len(), 1);
+        let physical = database
+            .local_file_page(key, None, 128, &library::ReadCancellation::new())
+            .await
+            .unwrap();
         assert!(
-            database
-                .track_row_by_uri(&uri, &library::ReadCancellation::new())
+            physical
+                .iter()
+                .find(|file| Path::new(&file.path) == audio)
+                .unwrap()
+                .current_output,
+            "removing a configured root keeps its accepted parsed output"
+        );
+        let edit = crate::Source::edit(
+            configuration,
+            None,
+            crate::SourceSettingsChange::Local {
+                source_id: source.source_id().clone(),
+                roots: vec![old_root.clone()],
+                excluded_folders: None,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let crate::SourceEditResult::Connected(connected) = edit else {
+            panic!("expected restored Local root")
+        };
+        let (_, source, _) = (*connected).into_parts();
+        source
+            .acquire_catalog(&database, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .await
+            .unwrap();
+        assert_eq!(
+            library::CatalogQuery::tracks(library::TrackScope::Tracks(key))
+                .count(&database, &library::ReadCancellation::new())
+                .await
+                .unwrap(),
+            1,
+            "the excluded descendant must not be re-admitted with its parent root"
+        );
+        let library::CatalogRows::Tracks(members) =
+            library::CatalogQuery::tracks(library::TrackScope::Tracks(key))
+                .rows(&database, 0, 10, &library::ReadCancellation::new())
                 .await
                 .unwrap()
-                .is_some()
+        else {
+            panic!("track rows")
+        };
+        assert_eq!(
+            members[0].media_uri, imported_uri,
+            "the explicit import overrides the excluded folder"
         );
+        let library::CatalogRows::Tracks(after_edit) = audio_query
+            .rows(&database, 0, 1, &library::ReadCancellation::new())
+            .await
+            .unwrap()
+        else {
+            panic!("track rows")
+        };
+        assert_eq!(after_edit[0].track_key, cached[0].track_key);
+        assert_eq!(after_edit[0].object_id, cached[0].object_id);
         for (path, original) in paths.into_iter().zip(original_files) {
             assert_eq!(fs::read(path).unwrap(), original);
         }
     }
 
     #[tokio::test]
-    async fn imported_local_files_survive_rescan_and_leave_catalog_after_last_playlist_reference() {
+    async fn imported_local_files_survive_rescan_and_playlist_deletion() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap();
         let audio = root.join("Jóga #1.wav");
@@ -1745,11 +1669,13 @@ mod tests {
         )
         .await
         .unwrap();
-        let (_, source, _) = connected.into_parts();
-        library::Scan::begin(&database, source_id.as_str(), "Local", "local", None)
-            .await
-            .unwrap()
-            .finish()
+        let (configuration, source, _) = connected.into_parts();
+        database
+            .reconcile_source(
+                &configuration.source_id,
+                &configuration.kind,
+                &configuration.name,
+            )
             .await
             .unwrap();
         let imported_path = root.join("Jóga #1.wav");
@@ -1812,25 +1738,33 @@ mod tests {
                 .unwrap();
         }
         assert!(
-            database
-                .track_row_by_uri(&uri, &library::ReadCancellation::new())
+            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
+                .rows(&database, 0, 256, &library::ReadCancellation::new())
                 .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+                    _ => unreachable!(),
+                })
                 .unwrap()
                 .is_some()
         );
         source
-            .manual_refresh(
+            .acquire_catalog(
                 &database,
-                "Local",
                 &|_| {},
                 std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                true,
             )
             .await
             .unwrap();
         assert!(
-            database
-                .track_row_by_uri(&uri, &library::ReadCancellation::new())
+            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
+                .rows(&database, 0, 256, &library::ReadCancellation::new())
                 .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+                    _ => unreachable!(),
+                })
                 .unwrap()
                 .is_some()
         );
@@ -1843,50 +1777,109 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(
-            database
-                .local_file_page(source_key, None, 128, &library::ReadCancellation::new())
+        assert_eq!(
+            library::CatalogQuery::tracks(library::TrackScope::Tracks(source_key))
+                .count(&database, &library::ReadCancellation::new())
                 .await
-                .unwrap()
-                .is_empty()
+                .unwrap(),
+            1
+        );
+        let folders = source.browse_folder(&database, None, None).await.unwrap();
+        assert!(
+            folders.folders.is_empty() && folders.tracks.is_empty(),
+            "outside-root imports remain outside library folders"
         );
         database
             .delete_playlist(None, playlist.playlist)
             .await
             .unwrap();
-        source.prune_imported_files(&database).await.unwrap();
         assert!(
-            database
-                .track_row_by_uri(&uri, &library::ReadCancellation::new())
+            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
+                .rows(&database, 0, 256, &library::ReadCancellation::new())
                 .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+                    _ => unreachable!(),
+                })
                 .unwrap()
                 .is_some()
         );
         database.delete_playlist(None, second).await.unwrap();
-        source.prune_imported_files(&database).await.unwrap();
         let key = database
             .source_identity_key(source.source_id())
             .await
             .unwrap()
             .unwrap();
         assert_eq!(
-            database
-                .song_count(
-                    &library::SongQuery::new(library::SongScope::Tracks(key)),
-                    &library::ReadCancellation::new()
-                )
+            (&library::CatalogQuery::tracks(library::TrackScope::Tracks(key)))
+                .count(&database, &library::ReadCancellation::new())
                 .await
                 .unwrap(),
-            0
+            1
         );
         assert!(
-            database
-                .track_row_by_uri(&uri, &library::ReadCancellation::new())
+            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
+                .rows(&database, 0, 256, &library::ReadCancellation::new())
                 .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+                    _ => unreachable!(),
+                })
                 .unwrap()
                 .is_some()
         );
         assert!(audio.is_file());
+        database.close().await.unwrap();
+        let database = library::Database::open(directory.path().join("library.db"))
+            .await
+            .unwrap();
+        source
+            .catch_up_local(
+                &database,
+                &|_| {},
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            library::CatalogQuery::tracks(library::TrackScope::Tracks(key))
+                .count(&database, &library::ReadCancellation::new())
+                .await
+                .unwrap(),
+            1
+        );
+        fs::remove_file(&audio).unwrap();
+        source
+            .catch_up_local(
+                &database,
+                &|_| {},
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            library::CatalogQuery::tracks(library::TrackScope::Tracks(key))
+                .count(&database, &library::ReadCancellation::new())
+                .await
+                .unwrap(),
+            0
+        );
+        fs::write(&audio, silent_wav()).unwrap();
+        source
+            .catch_up_local(
+                &database,
+                &|_| {},
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            library::CatalogQuery::tracks(library::TrackScope::Tracks(key))
+                .count(&database, &library::ReadCancellation::new())
+                .await
+                .unwrap(),
+            1
+        );
     }
 
     fn silent_wav() -> Vec<u8> {
@@ -1926,6 +1919,7 @@ fn lyrics_writer_supported(writer: Option<super::lofty::MetadataWriter>) -> bool
     })
 }
 
+#[cfg(test)]
 pub(crate) fn metadata_file_available(path: &Path, source_format: Option<&str>) -> bool {
     source_format
         .and_then(super::lofty::MetadataWriter::for_source_format)
@@ -1933,42 +1927,20 @@ pub(crate) fn metadata_file_available(path: &Path, source_format: Option<&str>) 
         .is_some()
 }
 
-fn read_metadata_file(
-    path: &Path,
-    source_format: Option<&str>,
-) -> Result<(Option<::lofty::file::TaggedFile>, Option<MetadataWriter>), SourceMetadataError> {
-    if path.to_string_lossy().starts_with("content:") {
-        let reader =
-            super::documents::open_document_input(&path.to_string_lossy()).map_err(write_error)?;
-        let tagged = super::lofty::read_lofty_file(
-            reader,
-            ::lofty::config::ParseOptions::new().read_cover_art(false),
-        )
-        .map_err(write_error)?;
-        let writer = tagged
-            .as_ref()
-            .and_then(|file| MetadataWriter::for_file_type(file.file_type()));
-        return Ok((tagged, writer));
-    }
-    let writer = source_format
-        .and_then(MetadataWriter::for_source_format)
-        .or_else(|| MetadataWriter::for_path(path));
-    let tagged = match writer {
-        Some(writer) => read_lofty_for_edit(path, writer.file_type()),
-        None => super::lofty::read_lofty(path, false),
-    }
-    .map_err(write_error)?;
-    let writer = writer.filter(|_| tagged.is_some());
-    Ok((tagged, writer))
-}
-
-fn read_file(
+pub(crate) fn read_metadata_input(
+    input: impl std::io::Read + std::io::Seek,
     kind: SourceEntityKind,
     path: &Path,
-    format: Option<&str>,
     artist: Option<&str>,
 ) -> Result<MetadataDraft, SourceMetadataError> {
-    let (tagged, writer) = read_metadata_file(path, format)?;
+    let tagged = super::lofty::read_lofty_file(
+        input,
+        ::lofty::config::ParseOptions::new().read_cover_art(false),
+    )
+    .map_err(write_error)?;
+    let writer = tagged
+        .as_ref()
+        .and_then(|file| MetadataWriter::for_file_type(file.file_type()));
     let tag = tagged
         .as_ref()
         .and_then(|file| file.primary_tag().or_else(|| file.first_tag()));
@@ -1993,16 +1965,35 @@ fn read_file(
     }
     let mut metadata = MetadataDraft::new(kind, values);
     metadata.track_count = 1;
-    metadata.artwork.can_embed = artwork_embeddable(path, format, artist.is_some());
-    metadata.revision = Some(revision(path)?);
+    metadata.artwork.can_embed = writer.is_some_and(|writer| {
+        writer
+            .file_type()
+            .tag_support(writer.file_type().primary_tag_type())
+            .is_writable()
+            && match writer.file_type().primary_tag_type() {
+                ::lofty::tag::TagType::Id3v2
+                | ::lofty::tag::TagType::VorbisComments
+                | ::lofty::tag::TagType::Ape => true,
+                ::lofty::tag::TagType::Mp4Ilst => artist.is_none(),
+                _ => false,
+            }
+    });
     Ok(metadata)
 }
 
+#[cfg(test)]
 pub(crate) fn read_track_metadata(
     path: &Path,
-    source_format: Option<&str>,
+    _format: Option<&str>,
 ) -> Result<MetadataDraft, SourceMetadataError> {
-    read_file(SourceEntityKind::Track, path, source_format, None)
+    let mut draft = read_metadata_input(
+        fs::File::open(path).map_err(write_error)?,
+        SourceEntityKind::Track,
+        path,
+        None,
+    )?;
+    draft.revision = Some(revision(path)?);
+    Ok(draft)
 }
 
 fn artist_fields(
@@ -2080,41 +2071,40 @@ fn artist_fields(
     ]
 }
 
-pub(crate) struct MetadataFileTarget {
-    pub path: PathBuf,
-    pub format: Option<String>,
-    pub tag_writable: bool,
-}
-
 pub(crate) fn readonly_track_metadata(
-    track: &library::TrackRow,
+    track: &library::TrackView,
     revision: Option<String>,
 ) -> MetadataDraft {
     let mut metadata = MetadataDraft::new(
         SourceEntityKind::Track,
         [
-            ("title", track.title.clone()),
-            ("artist", track.artist.clone()),
-            ("album", track.album.clone()),
+            ("title", track.metadata.title.clone()),
+            ("artist", track.metadata.artist.clone()),
+            ("album", track.metadata.album.clone()),
             (
                 "album_artist",
-                track.album_display_artist.clone().unwrap_or_default(),
+                track
+                    .metadata
+                    .album_display_artist
+                    .clone()
+                    .unwrap_or_default(),
             ),
             (
                 "track_number",
-                (track.track_number > 0)
-                    .then(|| track.track_number.to_string())
+                (track.metadata.track_number > 0)
+                    .then(|| track.metadata.track_number.to_string())
                     .unwrap_or_default(),
             ),
             (
                 "disc_number",
-                (track.disc_number > 0)
-                    .then(|| track.disc_number.to_string())
+                (track.metadata.disc_number > 0)
+                    .then(|| track.metadata.disc_number.to_string())
                     .unwrap_or_default(),
             ),
             (
                 "recording_date",
                 track
+                    .metadata
                     .year
                     .map(|value| value.to_string())
                     .unwrap_or_default(),
@@ -2122,35 +2112,53 @@ pub(crate) fn readonly_track_metadata(
             (
                 "genre",
                 track
+                    .metadata
                     .genres
                     .iter()
                     .map(|genre| genre.name.as_str())
                     .collect::<Vec<_>>()
                     .join("; "),
             ),
-            ("comment", track.comment.clone().unwrap_or_default()),
+            (
+                "comment",
+                track.metadata.comment.clone().unwrap_or_default(),
+            ),
             (
                 "bpm",
-                track.bpm.map(|value| value.to_string()).unwrap_or_default(),
+                track
+                    .metadata
+                    .bpm
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
             ),
             (
                 "musicbrainz_recording_id",
-                track.musicbrainz_recording_id.clone().unwrap_or_default(),
+                track
+                    .metadata
+                    .musicbrainz_recording_id
+                    .clone()
+                    .unwrap_or_default(),
             ),
             (
                 "musicbrainz_release_track_id",
                 track
+                    .metadata
                     .musicbrainz_release_track_id
                     .clone()
                     .unwrap_or_default(),
             ),
             (
                 "musicbrainz_album_id",
-                track.musicbrainz_album_id.clone().unwrap_or_default(),
+                track
+                    .metadata
+                    .musicbrainz_album_id
+                    .clone()
+                    .unwrap_or_default(),
             ),
             (
                 "musicbrainz_release_group_id",
                 track
+                    .metadata
                     .musicbrainz_release_group_id
                     .clone()
                     .unwrap_or_default(),
@@ -2158,6 +2166,7 @@ pub(crate) fn readonly_track_metadata(
             (
                 "musicbrainz_artist_id",
                 track
+                    .metadata
                     .primary_artist_musicbrainz_id
                     .clone()
                     .unwrap_or_default(),
@@ -2173,18 +2182,19 @@ pub(crate) fn readonly_track_metadata(
 }
 
 pub(crate) fn readonly_album_metadata(
-    album: &library::AlbumRow,
+    album: &library::AlbumView,
     revision: Option<String>,
 ) -> MetadataDraft {
     let mut metadata = MetadataDraft::new(
         SourceEntityKind::Album,
         [
-            ("title", album.title.clone()),
-            ("artist", album.display_artist.clone()),
-            ("album_artist", album.display_artist.clone()),
+            ("title", album.metadata.title.clone()),
+            ("artist", album.metadata.artist.clone()),
+            ("album_artist", album.metadata.artist.clone()),
             (
                 "recording_date",
                 album
+                    .metadata
                     .year
                     .map(|value| value.to_string())
                     .unwrap_or_default(),
@@ -2192,6 +2202,7 @@ pub(crate) fn readonly_album_metadata(
             (
                 "genre",
                 album
+                    .metadata
                     .genres
                     .iter()
                     .map(|genre| genre.name.as_str())
@@ -2200,11 +2211,16 @@ pub(crate) fn readonly_album_metadata(
             ),
             (
                 "musicbrainz_album_id",
-                album.musicbrainz_release_id.clone().unwrap_or_default(),
+                album
+                    .metadata
+                    .musicbrainz_release_id
+                    .clone()
+                    .unwrap_or_default(),
             ),
             (
                 "musicbrainz_release_group_id",
                 album
+                    .metadata
                     .musicbrainz_release_group_id
                     .clone()
                     .unwrap_or_default(),
@@ -2215,127 +2231,35 @@ pub(crate) fn readonly_album_metadata(
         .collect(),
     );
     metadata.revision = revision;
-    metadata.track_count = album.track_count.max(0) as usize;
+    metadata.track_count = album.summary.track_count.max(0) as usize;
     metadata
 }
 
 pub(crate) fn readonly_artist_metadata(
-    artist: &library::ArtistRow,
+    artist: &library::ArtistView,
     revision: Option<String>,
 ) -> MetadataDraft {
     let mut metadata = MetadataDraft::new(
         SourceEntityKind::Artist,
         vec![
-            MetadataField::new("title", artist.name.clone(), false),
+            MetadataField::new("title", artist.metadata.name.clone(), false),
             MetadataField::new(
                 "musicbrainz_artist_id",
-                artist.musicbrainz_artist_id.clone().unwrap_or_default(),
+                artist
+                    .metadata
+                    .musicbrainz_artist_id
+                    .clone()
+                    .unwrap_or_default(),
                 false,
             ),
         ],
     );
     metadata.revision = revision;
-    metadata.track_count = artist.track_count.max(0) as usize;
+    metadata.track_count = artist.summary.track_count.max(0) as usize;
     metadata
 }
 
-pub(crate) fn read_album_file(
-    album: &library::AlbumRow,
-    current: Option<MetadataDraft>,
-    path: &Path,
-    format: Option<&str>,
-) -> Result<MetadataDraft, SourceMetadataError> {
-    let mut next = read_file(SourceEntityKind::Album, path, format, None)?;
-    if current.is_none() {
-        for field in &mut next.fields {
-            if field.value.is_empty() {
-                match field.key.as_str() {
-                    "title" => field.value = album.title.clone(),
-                    "artist" | "album_artist" => field.value = album.display_artist.clone(),
-                    _ => {}
-                }
-            }
-        }
-        next.suggest("musicbrainz_album_id", album.musicbrainz_release_id.clone());
-        next.suggest(
-            "musicbrainz_release_group_id",
-            album.musicbrainz_release_group_id.clone(),
-        );
-    }
-    Ok(merge_file(current, next))
-}
-
-pub(crate) fn read_artist_file(
-    artist: &library::ArtistRow,
-    current: Option<MetadataDraft>,
-    path: &Path,
-    format: Option<&str>,
-) -> Result<MetadataDraft, SourceMetadataError> {
-    let mut next = read_file(SourceEntityKind::Artist, path, format, Some(&artist.name))?;
-    if current.is_none() {
-        next.suggest(
-            "musicbrainz_artist_id",
-            artist.musicbrainz_artist_id.clone(),
-        );
-    }
-    Ok(merge_file(current, next))
-}
-
-fn merge_file(current: Option<MetadataDraft>, next: MetadataDraft) -> MetadataDraft {
-    if let Some(mut current) = current {
-        fields::merge(&mut current.fields, next.fields);
-        current.artwork.can_embed &= next.artwork.can_embed;
-        current.track_count += 1;
-        current
-    } else {
-        next
-    }
-}
-
-pub(crate) fn album_metadata_from_targets(
-    album: library::AlbumRow,
-    targets: &[MetadataFileTarget],
-) -> Result<MetadataDraft, SourceMetadataError> {
-    let revision = Some(combined_revision(
-        targets.iter().map(|target| &target.path),
-    )?);
-    if targets.iter().any(|target| !target.tag_writable) {
-        return Ok(readonly_album_metadata(&album, revision));
-    }
-    let mut metadata = None;
-    for target in targets {
-        metadata = Some(read_album_file(
-            &album,
-            metadata,
-            &target.path,
-            target.format.as_deref(),
-        )?);
-    }
-    let mut metadata = metadata.ok_or(SourceMetadataError::Unavailable)?;
-    metadata.revision = revision;
-    Ok(metadata)
-}
-
-pub(crate) fn artist_metadata_from_targets(
-    artist: library::ArtistRow,
-    targets: &[MetadataFileTarget],
-) -> Result<MetadataDraft, SourceMetadataError> {
-    let revision = Some(combined_revision(
-        targets.iter().map(|target| &target.path),
-    )?);
-    if targets.iter().any(|target| !target.tag_writable) {
-        return Ok(readonly_artist_metadata(&artist, revision));
-    }
-    let mut metadata = None;
-    for target in targets {
-        metadata = Some(read_artist_file(
-            &artist,
-            metadata,
-            &target.path,
-            target.format.as_deref(),
-        )?);
-    }
-    let mut metadata = metadata.ok_or(SourceMetadataError::Unavailable)?;
-    metadata.revision = revision;
-    Ok(metadata)
+pub(crate) fn merge_draft(current: &mut MetadataDraft, next: MetadataDraft) {
+    fields::merge(&mut current.fields, next.fields);
+    current.artwork.can_embed &= next.artwork.can_embed;
 }

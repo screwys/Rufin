@@ -1,6 +1,7 @@
 package io.github.screwys.rufin.app
 
 import io.github.screwys.rufin.shared.rufin_core.Route
+import io.github.screwys.rufin.shared.rufin_core.CatalogRevision
 import io.github.screwys.rufin.shared.library.sourceIdForUri
 
 import io.github.screwys.rufin.browse.BrowseConnection
@@ -113,7 +114,7 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         private set
     var pendingActions by mutableIntStateOf(0)
         private set
-    var catalogRevision by mutableStateOf(0UL)
+    var catalogRevision by mutableStateOf<CatalogRevision?>(null)
         private set
     var sourceOperation by mutableStateOf<SourceOperation>(SourceOperation.Idle)
         private set
@@ -176,8 +177,7 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                 try {
                     sources = withContext(Dispatchers.Default) { sourceChanges.next() }
                     sourceOperation = withContext(Dispatchers.Default) { operations.next() }
-                    withContext(Dispatchers.Default) { catalog.next() }
-                    catalogRevision++
+                    catalogRevision = withContext(Dispatchers.Default) { catalog.next() }
                     ready = true
                     coroutineScope {
                         launch { connected.playbackNotices.collect { showFeedback(it) } }
@@ -192,13 +192,11 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                         launch {
                             while (isActive) {
                                 sources = withContext(Dispatchers.Default) { sourceChanges.next() }
-                                catalogRevision++
                             }
                         }
                         launch {
                             while (isActive) {
-                                withContext(Dispatchers.Default) { catalog.next() }
-                                catalogRevision++
+                                catalogRevision = withContext(Dispatchers.Default) { catalog.next() }
                             }
                         }
                         while (isActive) {
@@ -306,7 +304,7 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
     }
 
     fun refresh() = runAction {
-        sources?.selectedSourceId?.let { sourceOwner?.refreshSource(it) }
+        sources?.selectedSourceId?.let { sourceOwner?.refreshSource(it, false) }
     }
 
     fun selectSource(id: String) = runAction {

@@ -17,7 +17,7 @@ use rufin_core::playback::QueuePlacement;
 
 use crate::CatalogUi;
 use crate::{LibraryField, LibraryLayout};
-use gtk_widgets::artwork::{ArtworkTile, LARGE_COVER_SIZE};
+use gtk_widgets::artwork::ArtworkTile;
 use gtk_widgets::favorites::{favorite_button_is_active, set_favorite_button_active};
 use gtk_widgets::interactions::install_context_menu_openers;
 use gtk_widgets::mounted_route::{MountedRoute, MountedRouteItemNavigation};
@@ -56,9 +56,9 @@ pub mod session;
 #[derive(Clone)]
 #[expect(clippy::large_enum_variant, reason = "bounded prepared Search rows")]
 enum SearchItem {
-    Track(library::TrackRow),
-    Album(library::AlbumRow),
-    Artist(library::ArtistRow),
+    Track(library::TrackView),
+    Album(library::AlbumView),
+    Artist(library::ArtistView),
 }
 
 impl SearchItem {
@@ -107,9 +107,9 @@ impl SearchItem {
     }
     fn title(&self) -> &str {
         match self {
-            Self::Track(row) => &row.title,
-            Self::Album(row) => &row.title,
-            Self::Artist(row) => &row.name,
+            Self::Track(row) => &row.metadata.title,
+            Self::Album(row) => &row.metadata.title,
+            Self::Artist(row) => &row.metadata.name,
         }
     }
     fn artwork(&self) -> ArtworkBinding {
@@ -136,9 +136,10 @@ impl SearchItem {
             Self::Track(row) => match field {
                 LibraryField::Artist => track_artist_links(row),
                 LibraryField::AlbumArtist => track_album_artist_links(row),
-                LibraryField::Album => {
-                    DetailLinks::route(&text, row.album_media_uri.clone().map(Route::AlbumDetail))
-                }
+                LibraryField::Album => DetailLinks::route(
+                    &text,
+                    row.links.album_media_uri.clone().map(Route::AlbumDetail),
+                ),
                 _ => DetailLinks::text(&text),
             },
             Self::Album(row) => match field {
@@ -163,8 +164,8 @@ impl SearchItem {
     }
     fn subtitle(&self) -> &str {
         match self {
-            Self::Track(row) => &row.artist,
-            Self::Album(row) => &row.display_artist,
+            Self::Track(row) => &row.metadata.artist,
+            Self::Album(row) => &row.metadata.artist,
             Self::Artist(_) => "",
         }
     }
@@ -174,28 +175,28 @@ impl SearchItem {
     fn numeric_field(&self, field: LibraryField) -> Option<i64> {
         match self {
             Self::Track(row) => match field {
-                LibraryField::Year => row.year,
-                LibraryField::Duration => Some(row.duration_millis),
-                LibraryField::PlayCount => Some(row.play_count),
-                LibraryField::UserRating => row.rating,
-                LibraryField::Favorite => Some(i64::from(row.favorite)),
+                LibraryField::Year => row.metadata.year,
+                LibraryField::Duration => Some(row.metadata.duration_millis),
+                LibraryField::PlayCount => Some(row.state.play_count),
+                LibraryField::UserRating => row.state.rating,
+                LibraryField::Favorite => Some(i64::from(row.state.favorite)),
                 _ => None,
             },
             Self::Album(row) => match field {
-                LibraryField::Year => row.year,
-                LibraryField::Duration => Some(row.duration_millis),
-                LibraryField::PlayCount => Some(row.play_count),
-                LibraryField::UserRating => row.rating,
-                LibraryField::SongCount => Some(row.track_count),
-                LibraryField::Favorite => Some(i64::from(row.favorite)),
+                LibraryField::Year => row.metadata.year,
+                LibraryField::Duration => Some(row.summary.duration_millis),
+                LibraryField::PlayCount => Some(row.state.play_count),
+                LibraryField::UserRating => row.state.rating,
+                LibraryField::SongCount => Some(row.summary.track_count),
+                LibraryField::Favorite => Some(i64::from(row.state.favorite)),
                 _ => None,
             },
             Self::Artist(row) => match field {
-                LibraryField::Duration => Some(row.duration_millis),
-                LibraryField::PlayCount => Some(row.play_count),
-                LibraryField::AlbumCount => Some(row.album_count),
-                LibraryField::SongCount => Some(row.track_count),
-                LibraryField::Favorite => Some(i64::from(row.favorite)),
+                LibraryField::Duration => Some(row.summary.duration_millis),
+                LibraryField::PlayCount => Some(row.state.play_count),
+                LibraryField::AlbumCount => Some(row.summary.album_count),
+                LibraryField::SongCount => Some(row.summary.track_count),
+                LibraryField::Favorite => Some(i64::from(row.state.favorite)),
                 _ => None,
             },
         }
@@ -203,13 +204,13 @@ impl SearchItem {
     fn date_field(&self, field: LibraryField) -> Option<&str> {
         match self {
             Self::Track(row) => match field {
-                LibraryField::ReleaseDate => row.release_date.as_deref(),
-                LibraryField::DateAdded => row.date_added.as_deref(),
+                LibraryField::ReleaseDate => row.metadata.release_date.as_deref(),
+                LibraryField::DateAdded => row.metadata.date_added.as_deref(),
                 _ => None,
             },
             Self::Album(row) => match field {
-                LibraryField::ReleaseDate => row.release_date.as_deref(),
-                LibraryField::DateAdded => row.date_added.as_deref(),
+                LibraryField::ReleaseDate => row.metadata.release_date.as_deref(),
+                LibraryField::DateAdded => row.metadata.date_added.as_deref(),
                 _ => None,
             },
             Self::Artist(_) => None,
@@ -219,15 +220,15 @@ impl SearchItem {
         Some(match self {
             Self::Track(row) => (
                 library::FavoriteTarget::Track(row.media_uri.clone()),
-                row.favorite,
+                row.state.favorite,
             ),
             Self::Album(row) => (
                 library::FavoriteTarget::Album(row.media_uri.clone()),
-                row.favorite,
+                row.state.favorite,
             ),
             Self::Artist(row) => (
                 library::FavoriteTarget::Artist(row.media_uri.clone()),
-                row.favorite,
+                row.state.favorite,
             ),
         })
     }
@@ -374,7 +375,6 @@ impl SearchGridCell {
             &self.cover,
             item.artwork(),
             COLLECTION_GRID_MAX_CARD_WIDTH,
-            LARGE_COVER_SIZE,
         );
     }
 
@@ -822,20 +822,30 @@ impl CatalogUi {
                     |row| match row {
                         SearchItem::Album(row) => {
                             identity.strip_prefix("album:") == Some(row.media_uri.as_str())
-                                && (row.downloaded_count == row.track_count) != downloaded
+                                && (row.summary.downloaded_count == row.summary.track_count)
+                                    != downloaded
                         }
                         SearchItem::Artist(row) => {
                             identity.strip_prefix("artist:") == Some(row.media_uri.as_str())
-                                && (row.downloaded_count == row.track_count) != downloaded
+                                && (row.summary.downloaded_count == row.summary.track_count)
+                                    != downloaded
                         }
                         SearchItem::Track(_) => false,
                     },
                     |row| match row {
                         SearchItem::Album(row) => {
-                            row.downloaded_count = if downloaded { row.track_count } else { 0 }
+                            row.summary.downloaded_count = if downloaded {
+                                row.summary.track_count
+                            } else {
+                                0
+                            }
                         }
                         SearchItem::Artist(row) => {
-                            row.downloaded_count = if downloaded { row.track_count } else { 0 }
+                            row.summary.downloaded_count = if downloaded {
+                                row.summary.track_count
+                            } else {
+                                0
+                            }
                         }
                         SearchItem::Track(_) => {}
                     },
@@ -852,10 +862,10 @@ impl CatalogUi {
             let (uri, downloaded) = (uri.as_str(), *downloaded);
             if let Some(projection) = download_tracks.upgrade() {
                 projection.update_matching(
-                    |row| matches!(row, SearchItem::Track(row) if row.media_uri == uri && row.is_downloaded != downloaded),
+                    |row| matches!(row, SearchItem::Track(row) if row.media_uri == uri && row.access.is_downloaded != downloaded),
                     |row| {
                         if let SearchItem::Track(row) = row {
-                            row.is_downloaded = downloaded;
+                            row.access.is_downloaded = downloaded;
                         }
                     },
                 );
@@ -1122,12 +1132,9 @@ fn search_merged_column(
             }
             return;
         };
-        bind_shell.artwork.bind_artwork_tile(
-            &cover,
-            value.artwork(),
-            48,
-            gtk_widgets::artwork::THUMB_COVER_SIZE,
-        );
+        bind_shell
+            .artwork
+            .bind_artwork_tile(&cover, value.artwork(), 48);
         title.set_text(value.title());
         cell.bind_subtitle(value.subtitle_links());
         cell.subtitle().set_visible(!value.subtitle().is_empty());
@@ -1286,7 +1293,7 @@ mod tests {
     #[test]
     fn accepted_search_metadata_keeps_its_exact_route_link() {
         let artist_key = library::ArtistKey::from_raw(7);
-        let item = SearchItem::Artist(library::ArtistRow {
+        let item = SearchItem::Artist(library::ArtistView {
             artist_key,
             source_key: library::SourceKey::from_raw(3),
             object_id: "artist-object".to_string(),
@@ -1295,17 +1302,26 @@ mod tests {
                 "artist",
                 "artist-object",
             ),
-            name: "Performer".to_string(),
-            musicbrainz_artist_id: None,
             artwork_binding: None,
-            favorite: false,
-            rating: None,
-            play_count: 0,
-            last_played: None,
-            album_count: 1,
-            track_count: 1,
-            duration_millis: 1,
-            downloaded_count: 0,
+            metadata: library::ArtistMetadata {
+                name: "Performer".to_string(),
+                musicbrainz_artist_id: None,
+                ..Default::default()
+            },
+            state: library::TrackState {
+                favorite: false,
+                rating: None,
+                play_count: 0,
+                last_played: None,
+                ..Default::default()
+            },
+            summary: library::CollectionSummary {
+                album_count: 1,
+                track_count: 1,
+                duration_millis: 1,
+                downloaded_count: 0,
+                ..Default::default()
+            },
         });
         assert_eq!(
             item.field_links(LibraryField::Title),

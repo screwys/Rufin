@@ -7,7 +7,7 @@ pub(crate) struct ReceiverState {
     pub total: usize,
     pub offset: usize,
     pub current: Option<usize>,
-    pub rows: Vec<library::QueueRow>,
+    pub rows: Vec<library::QueueTransferRow>,
     pub state: playback::TransportStatus,
     pub position: u64,
     pub duration: u64,
@@ -17,6 +17,13 @@ pub(crate) struct ReceiverState {
     pub shuffle: bool,
     pub auto_dj: bool,
     pub auto_dj_threshold: usize,
+}
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct ReceiverQueuePage {
+    pub rows: Vec<library::QueueTransferRow>,
+    pub total: u64,
+    pub window_offset: u64,
 }
 
 impl ConnectOwner {
@@ -46,7 +53,7 @@ impl ConnectOwner {
         offset: u64,
         limit: u32,
         filter: String,
-    ) -> Result<crate::playback::QueuePage, String> {
+    ) -> Result<ReceiverQueuePage, String> {
         serde_json::from_value(
             self.request(
                 peer,

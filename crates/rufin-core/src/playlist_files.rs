@@ -23,6 +23,7 @@ pub fn is_conflict(error: &str) -> bool {
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlaylistFileSettings {
     pub can_link: bool,
     pub link: Option<PlaylistFileLink>,
@@ -58,15 +59,26 @@ pub fn settings(
             .get_playlist_file_link(playlist)
             .await
             .map_err(string_error)?;
-        let display_path = link.as_ref().map(|link| {
-            local_path(&owner, link)
-                .map(|path| {
-                    library::playlist_host_path(&path)
-                        .to_string_lossy()
-                        .into_owned()
-                })
-                .unwrap_or_else(|| link.path.clone())
-        });
+        let display_path = if let Some(link) = &link {
+            Some(
+                if link.source_id.is_none() && link.path.starts_with("content:") {
+                    document_entry(&link.path)
+                        .await
+                        .map(|entry| entry.name)
+                        .unwrap_or_else(|_| link.path.clone())
+                } else {
+                    local_path(&owner, link)
+                        .map(|path| {
+                            library::playlist_host_path(&path)
+                                .to_string_lossy()
+                                .into_owned()
+                        })
+                        .unwrap_or_else(|| link.path.clone())
+                },
+            )
+        } else {
+            None
+        };
         let source_auto_save = database
             .playlist_file_auto_save(link.as_ref().and_then(|link| link.source_id.as_ref()))
             .await
@@ -186,6 +198,17 @@ pub fn link_source(
     })
 }
 
+pub fn link_document(
+    owner: &SourceOwner,
+    playlist: PlaylistKey,
+    uri: String,
+    replace_file: bool,
+) -> Receiver<Result<(), String>> {
+    run(owner, move |owner| async move {
+        link_on(&owner, playlist, None, uri, replace_file).await
+    })
+}
+
 async fn link_on(
     owner: &SourceOwner,
     playlist: PlaylistKey,
@@ -259,7 +282,12 @@ pub(crate) async fn check_link(
     {
         return Err("Export a copy of this provider playlist before linking a file".into());
     }
-    if library::PlaylistFormat::from_path(Path::new(path)).is_none() {
+    let name = if source.is_none() && path.starts_with("content:") {
+        document_entry(path).await?.name
+    } else {
+        path.to_owned()
+    };
+    if library::PlaylistFormat::from_path(Path::new(&name)).is_none() {
         return Err("Unsupported playlist format".into());
     }
     if owner
@@ -347,6 +375,12 @@ pub fn delete_file(owner: &SourceOwner, playlist: PlaylistKey) -> Receiver<Resul
                 .delete_playlist_file(&link.path)
                 .await
                 .map_err(string_error)?;
+        } else if link.path.starts_with("content:") {
+            let uri = link.path.clone();
+            tokio::task::spawn_blocking(move || sources::delete_document(&uri))
+                .await
+                .map_err(string_error)?
+                .map_err(string_error)?;
         } else {
             std::fs::remove_file(&link.path).map_err(string_error)?;
         }
@@ -364,7 +398,6 @@ pub fn delete_file(owner: &SourceOwner, playlist: PlaylistKey) -> Receiver<Resul
             .delete_playlist(source, playlist)
             .await
             .map_err(string_error)?;
-        crate::playlists::prune_imported_playlist_files(&owner).await;
         publish(&owner, Some(playlist)).await;
         Ok(())
     })
@@ -380,13 +413,32 @@ pub fn rename_file(
         if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
             return Err("Enter a filename without folders".into());
         }
+        let document = if link.source_id.is_none() && link.path.starts_with("content:") {
+            Some(document_entry(&link.path).await?)
+        } else {
+            None
+        };
+        let is_document = document.is_some();
         if library::PlaylistFormat::from_path(Path::new(&name))
-            != library::PlaylistFormat::from_path(Path::new(&link.path))
+            != library::PlaylistFormat::from_path(Path::new(
+                document.as_ref().map_or(&link.path, |entry| &entry.name),
+            ))
         {
             return Err("Use Export to change the playlist format".into());
         }
         let previous = link.path.clone();
-        let next = if local_path(&owner, &link).is_some() {
+        let next = if let Some(document) = document {
+            if document.name == name {
+                return Ok(());
+            }
+            let uri = link.path.clone();
+            let document_name = name.clone();
+            tokio::task::spawn_blocking(move || sources::rename_document(&uri, &document_name))
+                .await
+                .map_err(string_error)?
+                .map_err(string_error)?
+                .uri
+        } else if local_path(&owner, &link).is_some() {
             Path::new(&link.path)
                 .with_file_name(&name)
                 .to_string_lossy()
@@ -396,7 +448,7 @@ pub fn rename_file(
                 .rsplit_once('/')
                 .map_or_else(|| name.clone(), |(parent, _)| format!("{parent}/{name}"))
         };
-        if previous == next {
+        if previous == next && !is_document {
             return Ok(());
         }
         check_link(&owner, playlist, link.source_id.as_ref(), &next).await?;
@@ -496,9 +548,18 @@ pub(crate) fn source_location(
 
 fn local_path(owner: &SourceOwner, link: &PlaylistFileLink) -> Option<PathBuf> {
     match &link.source_id {
+        None if link.path.starts_with("content:") => None,
         None => Some(PathBuf::from(&link.path)),
         Some(source) => owner.client(source).ok()?.local_playlist_path(&link.path),
     }
+}
+
+async fn document_entry(uri: &str) -> Result<sources::DocumentEntry, String> {
+    let uri = uri.to_owned();
+    tokio::task::spawn_blocking(move || sources::stat_document(&uri))
+        .await
+        .map_err(string_error)?
+        .map_err(string_error)
 }
 
 async fn revision(owner: &SourceOwner, link: &PlaylistFileLink) -> Result<String, String> {
@@ -509,7 +570,21 @@ async fn revision(owner: &SourceOwner, link: &PlaylistFileLink) -> Result<String
             .map_err(string_error);
     }
     match &link.source_id {
-        None => sources::playlist_file_revision(Path::new(&link.path)).map_err(string_error),
+        None => {
+            let uri = link.path.clone();
+            tokio::task::spawn_blocking(move || {
+                let entry = sources::stat_document(&uri).map_err(string_error)?;
+                if let Some(revision) = entry.revision {
+                    return Ok(revision);
+                }
+                let mut input = sources::open_document_input(&uri).map_err(string_error)?;
+                let mut hash = blake3::Hasher::new();
+                std::io::copy(&mut input, &mut hash).map_err(string_error)?;
+                Ok(hash.finalize().to_hex().to_string())
+            })
+            .await
+            .map_err(string_error)?
+        }
         Some(source) => owner
             .client(source)?
             .playlist_file_revision(&link.path)
@@ -574,6 +649,9 @@ async fn reload_on(
             .import_playlist_file(&owner.shared.database, &link.path, Some(link.playlist))
             .await
             .map_err(string_error)?
+    } else if link.path.starts_with("content:") {
+        crate::playlists::import_document_on(owner, link.path.clone(), Some(link.playlist), None)
+            .await?
     } else {
         let (_, _, access) = local_location(owner, Path::new(&link.path));
         sources::import_local_playlist_file(
@@ -591,6 +669,7 @@ async fn reload_on(
         .mark_playlist_file_synced(link.playlist, &before)
         .await
         .map_err(string_error)?;
+    crate::playlists::enrich_imported_playlist(owner, report.playlist).await?;
     Ok(report.changed)
 }
 
@@ -631,6 +710,42 @@ async fn save_on(
             },
         )
         .await?;
+    } else {
+        use std::io::Write;
+        let entry = document_entry(&link.path).await?;
+        let format = library::PlaylistFormat::from_path(Path::new(&entry.name))
+            .ok_or("Unsupported playlist format")?;
+        let file = tempfile::NamedTempFile::new().map_err(string_error)?;
+        let mut output = std::io::BufWriter::new(file.reopen().map_err(string_error)?);
+        owner
+            .shared
+            .database
+            .export_playlist_file_as(
+                link.playlist,
+                Path::new(&link.path),
+                format,
+                link.path_mode,
+                &mut output,
+            )
+            .await
+            .map_err(string_error)?;
+        output.flush().map_err(string_error)?;
+        drop(output);
+        let uri = link.path.clone();
+        let expected = if overwrite || entry.revision.is_none() {
+            None
+        } else {
+            link.revision.clone()
+        };
+        tokio::task::spawn_blocking(move || {
+            sources::save_document(&uri, file.path(), expected.as_deref())
+        })
+        .await
+        .map_err(string_error)?
+        .map_err(|error| match error {
+            sources::SourceError::Server { status: 412, .. } => FILE_CONFLICT.into(),
+            error => error.to_string(),
+        })?;
     }
     let next = revision(owner, link).await?;
     owner

@@ -17,7 +17,7 @@ impl crate::shell::Shell {
             .selected_playback()
             .as_deref()
             .and_then(|player| player.transport.current.as_ref())
-            .map(|entry| entry.media_uri.clone());
+            .map(|entry| entry.row.track.media_uri.clone());
         if let Some(media_uri) = track {
             self.set_rating(FavoriteTarget::Track(media_uri), rating);
         }

@@ -148,13 +148,18 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     let secrets = Arc::new(secrets::SwitchableSecretStore::new(memory));
     let artwork = artwork::Artwork::new(root.path().join("artwork"), runtime.clone()).unwrap();
     let downloads = downloads::Downloads::new(
+        artwork::Artwork::new(
+            (root.path().join("downloads")).join("artwork"),
+            (runtime.clone()).clone(),
+        )
+        .unwrap(),
         root.path().join("downloads"),
         database.as_ref().clone(),
         runtime.clone(),
         async_channel::unbounded().0,
         Vec::new(),
     );
-    let bootstrap = SourceOwner::open_dormant(
+    let source = SourceOwner::open_dormant(
         artwork.clone(),
         database.clone(),
         downloads,
@@ -166,7 +171,6 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
             discovery: async_channel::unbounded().0,
         },
     );
-    let source = bootstrap.owner;
     let waveform = WaveformOwner::new(
         runtime.clone(),
         async_channel::unbounded().0,

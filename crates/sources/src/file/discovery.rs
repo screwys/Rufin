@@ -18,7 +18,7 @@ pub use process::run_worker;
 #[cfg(target_os = "android")]
 pub use process::{DiscoveryHost, DiscoverySession, install_discovery_host};
 
-const DISCOVERER_TIMEOUT_SECONDS: u64 = 1;
+const DISCOVERER_TIMEOUT_SECONDS: u64 = 30;
 const MAX_ATTACHMENT_COUNT: usize = 256;
 const MAX_ATTACHMENT_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_EBML_HEADERS: usize = 65_536;
@@ -31,6 +31,8 @@ const ID_SEEK_HEAD: u64 = 0x114D_9B74;
 const ID_INFO: u64 = 0x1549_A966;
 const ID_CLUSTER: u64 = 0x1F43_B675;
 const ID_TRACKS: u64 = 0x1654_AE6B;
+const ID_TRACK_ENTRY: u64 = 0xAE;
+const ID_TRACK_TYPE: u64 = 0x83;
 const ID_CUES: u64 = 0x1C53_BB6B;
 const ID_ATTACHMENTS: u64 = 0x1941_A469;
 const ID_CHAPTERS: u64 = 0x1043_A770;
@@ -91,12 +93,6 @@ pub(crate) struct Reader {
 }
 
 impl Reader {
-    pub(crate) fn network() -> Self {
-        Self {
-            process: None,
-            timeout_seconds: Some(30),
-        }
-    }
     pub(crate) fn read(&mut self, path: &Path) -> Option<Metadata> {
         let mut file = fs::File::open(path).ok()?;
         let uri = url::Url::from_file_path(path).ok()?;
@@ -108,8 +104,22 @@ impl Reader {
         file: &mut (impl Read + Seek),
         uri: &str,
     ) -> std::io::Result<Option<Metadata>> {
-        if preflight_known_container(file).is_err() {
-            return Ok(None);
+        if let Some(header) = preflight_known_container(file)
+            .map_err(|error| std::io::Error::other(format!("Media inspection failed: {error:?}")))?
+            && header.skip_metadata
+        {
+            if header.moving_video {
+                return Ok(None);
+            }
+            if header.audio {
+                return Ok(Some(Metadata {
+                    duration_seconds: header.duration_seconds(),
+                    ..Default::default()
+                }));
+            }
+            return Err(std::io::Error::other(
+                "Media metadata could not be inspected",
+            ));
         }
         match self.request(uri, None)? {
             process::Reply::Metadata(metadata) => Ok(metadata.map(|metadata| *metadata)),
@@ -141,7 +151,12 @@ pub(crate) fn read_image_input(
     uri: &str,
     picture_index: u32,
 ) -> SourceResult<ImageBytes> {
-    preflight_known_container(file).map_err(|_| SourceError::NotFound)?;
+    if preflight_known_container(file)
+        .map_err(|_| SourceError::NotFound)?
+        .is_some_and(|header| header.skip_metadata)
+    {
+        return Err(SourceError::NotFound);
+    }
     match reader
         .request(uri, Some(picture_index))
         .map_err(|error| SourceError::Other(error.to_string()))?
@@ -247,7 +262,7 @@ fn container_is_asf(info: &DiscovererInfo) -> bool {
 }
 
 fn admitted_audio_stream(info: &DiscovererInfo) -> Option<gstreamer_pbutils::DiscovererAudioInfo> {
-    let mut audio = info.audio_streams();
+    let audio = info.audio_streams();
     let video_is_image = info
         .video_streams()
         .iter()
@@ -256,7 +271,7 @@ fn admitted_audio_stream(info: &DiscovererInfo) -> Option<gstreamer_pbutils::Dis
     if !discovery_is_admitted(info.result(), audio.len(), &video_is_image) {
         return None;
     }
-    audio.pop()
+    audio.into_iter().next()
 }
 
 fn video_is_still(video: &gstreamer_pbutils::DiscovererVideoInfo) -> bool {
@@ -277,7 +292,7 @@ fn discovery_is_admitted(
     video_is_image: &[bool],
 ) -> bool {
     result == DiscovererResult::Ok
-        && audio_streams == 1
+        && audio_streams > 0
         && video_is_image.iter().all(|is_image| *is_image)
 }
 
@@ -618,6 +633,9 @@ enum Scope {
     Segment,
     Attachments,
     AttachedFile,
+    Tracks,
+    Track,
+    Info,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -625,41 +643,50 @@ enum PreflightError {
     Io,
     InvalidAsf,
     InvalidEbml,
-    AsfHeaderTooLarge,
     TooManyHeaders,
-    TooManyAsfObjects,
-    TooManyAttachments,
-    AttachmentTooLarge,
-    AttachmentsTooLarge,
     UnknownSize,
     TooDeep,
     MissingSegment,
 }
 
-fn preflight_known_container(file: &mut (impl Read + Seek)) -> Result<(), PreflightError> {
+fn preflight_known_container(
+    file: &mut (impl Read + Seek),
+) -> Result<Option<PreflightState>, PreflightError> {
     file.rewind().map_err(|_| PreflightError::Io)?;
     let mut prefix = Vec::with_capacity(16);
     file.take(16)
         .read_to_end(&mut prefix)
         .map_err(|_| PreflightError::Io)?;
     if prefix.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) {
-        preflight_mka(file)
+        preflight_mka(file).map(Some)
     } else if prefix == ASF_HEADER_GUID {
-        preflight_asf(file)
+        preflight_asf(file).map(Some)
     } else {
-        Ok(())
+        Ok(None)
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default, PartialEq)]
 struct PreflightState {
     header_count: usize,
     attachment_count: usize,
     attachment_bytes: u64,
     segment_found: bool,
+    audio: bool,
+    moving_video: bool,
+    skip_metadata: bool,
+    duration: f64,
+    timecode_scale: Option<u64>,
 }
 
-fn preflight_mka(mut file: &mut (impl Read + Seek)) -> Result<(), PreflightError> {
+impl PreflightState {
+    fn duration_seconds(&self) -> u32 {
+        (self.duration * self.timecode_scale.unwrap_or(1_000_000) as f64 / 1_000_000_000.0)
+            .clamp(0.0, u32::MAX as f64) as u32
+    }
+}
+
+fn preflight_mka(mut file: &mut (impl Read + Seek)) -> Result<PreflightState, PreflightError> {
     let file_len = file
         .seek(SeekFrom::End(0))
         .map_err(|_| PreflightError::Io)?;
@@ -669,10 +696,10 @@ fn preflight_mka(mut file: &mut (impl Read + Seek)) -> Result<(), PreflightError
     if !state.segment_found {
         return Err(PreflightError::MissingSegment);
     }
-    Ok(())
+    Ok(state)
 }
 
-fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<(), PreflightError> {
+fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<PreflightState, PreflightError> {
     let file_len = file
         .seek(SeekFrom::End(0))
         .map_err(|_| PreflightError::Io)?;
@@ -684,16 +711,15 @@ fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<(), PreflightError
         return Err(PreflightError::InvalidAsf);
     }
     let header_size = read_u64_le(&mut file)?;
-    if header_size > MAX_ASF_HEADER_BYTES {
-        return Err(PreflightError::AsfHeaderTooLarge);
-    }
+    let mut state = PreflightState {
+        skip_metadata: header_size > MAX_ASF_HEADER_BYTES,
+        ..Default::default()
+    };
     if header_size < 30 || header_size > file_len {
         return Err(PreflightError::InvalidAsf);
     }
     let object_count = read_u32_le(&mut file)?;
-    if object_count > MAX_ASF_HEADER_OBJECTS {
-        return Err(PreflightError::TooManyAsfObjects);
-    }
+    state.skip_metadata |= object_count > MAX_ASF_HEADER_OBJECTS;
     let mut reserved = [0_u8; 2];
     file.read_exact(&mut reserved)
         .map_err(|_| PreflightError::InvalidAsf)?;
@@ -703,7 +729,7 @@ fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<(), PreflightError
     let mut position = 30_u64;
     let mut declared_file_size = None;
     let mut contains_wma_pro = false;
-    for _ in 0..object_count {
+    for _ in 0..object_count.min(MAX_ASF_HEADER_OBJECTS) {
         let object_start = position;
         let next = position
             .checked_add(24)
@@ -727,6 +753,13 @@ fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<(), PreflightError
             if size != 0 {
                 declared_file_size = Some(size);
             }
+            file.seek(SeekFrom::Start(object_start + 64))
+                .map_err(|_| PreflightError::Io)?;
+            let play_duration = read_u64_le(&mut file)?;
+            file.seek(SeekFrom::Start(object_start + 80))
+                .map_err(|_| PreflightError::Io)?;
+            let preroll_millis = read_u64_le(&mut file)?;
+            state.duration = (play_duration as f64 / 10_000.0 - preroll_millis as f64).max(0.0);
         }
         if guid == ASF_STREAM_PROPERTIES_GUID {
             if object_size < 78 {
@@ -738,6 +771,7 @@ fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<(), PreflightError
             file.read_exact(&mut stream_type)
                 .map_err(|_| PreflightError::InvalidAsf)?;
             if stream_type == ASF_AUDIO_MEDIA_GUID {
+                state.audio = true;
                 file.seek(SeekFrom::Start(object_start + 64))
                     .map_err(|_| PreflightError::Io)?;
                 let type_specific_size = u64::from(read_u32_le(&mut file)?);
@@ -752,6 +786,13 @@ fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<(), PreflightError
                 file.seek(SeekFrom::Start(object_start + 78))
                     .map_err(|_| PreflightError::Io)?;
                 contains_wma_pro |= read_u16_le(&mut file)? == WAVE_FORMAT_WMA_PRO;
+            } else if stream_type
+                == [
+                    0xC0, 0xEF, 0x19, 0xBC, 0x4D, 0x5B, 0xCF, 0x11, 0xA8, 0xFD, 0, 0x80, 0x5F,
+                    0x5C, 0x44, 0x2B,
+                ]
+            {
+                state.moving_video = true;
             }
         }
         position = position
@@ -762,8 +803,8 @@ fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<(), PreflightError
     if contains_wma_pro && declared_file_size.is_some_and(|size| size > file_len) {
         return Err(PreflightError::InvalidAsf);
     }
-    (position == header_size)
-        .then_some(())
+    (position == header_size || object_count > MAX_ASF_HEADER_OBJECTS)
+        .then_some(state)
         .ok_or(PreflightError::InvalidAsf)
 }
 
@@ -811,18 +852,12 @@ fn scan_elements(
         let data_start = file.stream_position().map_err(|_| PreflightError::Io)?;
 
         if scope == Scope::AttachedFile && id == ID_FILE_DATA {
-            let ElementSize::Known(size) = size else {
-                return Err(PreflightError::UnknownSize);
-            };
-            if size > MAX_ATTACHMENT_BYTES {
-                return Err(PreflightError::AttachmentTooLarge);
-            }
-            state.attachment_bytes = state
-                .attachment_bytes
-                .checked_add(size)
-                .ok_or(PreflightError::AttachmentsTooLarge)?;
-            if state.attachment_bytes > MAX_ATTACHMENT_BYTES {
-                return Err(PreflightError::AttachmentsTooLarge);
+            if let ElementSize::Known(size) = size {
+                state.attachment_bytes = state.attachment_bytes.saturating_add(size);
+                state.skip_metadata |=
+                    size > MAX_ATTACHMENT_BYTES || state.attachment_bytes > MAX_ATTACHMENT_BYTES;
+            } else {
+                state.skip_metadata = true;
             }
         }
 
@@ -836,6 +871,7 @@ fn scan_elements(
                 scan_unknown_cluster(file, end, state)?;
                 continue;
             }
+            ElementSize::Unknown if scope == Scope::AttachedFile && id == ID_FILE_DATA => end,
             ElementSize::Unknown => return Err(PreflightError::UnknownSize),
         };
 
@@ -844,15 +880,52 @@ fn scan_elements(
                 state.segment_found = true;
                 scan_elements(file, data_end, Scope::Segment, depth + 1, state)?;
             }
+            (Scope::Segment, ID_INFO) => {
+                scan_elements(file, data_end, Scope::Info, depth + 1, state)?;
+            }
+            (Scope::Info, 0x4489) if matches!(data_end - data_start, 4 | 8) => {
+                let mut bytes = [0; 8];
+                let size = (data_end - data_start) as usize;
+                file.read_exact(&mut bytes[..size])
+                    .map_err(|_| PreflightError::Io)?;
+                state.duration = if size == 4 {
+                    f32::from_be_bytes(bytes[..4].try_into().unwrap()) as f64
+                } else {
+                    f64::from_be_bytes(bytes)
+                };
+            }
+            (Scope::Info, 0x2AD7B1) if data_end - data_start <= 8 => {
+                let mut bytes = [0; 8];
+                file.read_exact(&mut bytes[(8 - (data_end - data_start)) as usize..])
+                    .map_err(|_| PreflightError::Io)?;
+                state.timecode_scale = Some(u64::from_be_bytes(bytes));
+            }
+            (Scope::Segment, ID_TRACKS) => {
+                scan_elements(file, data_end, Scope::Tracks, depth + 1, state)?;
+            }
+            (Scope::Tracks, ID_TRACK_ENTRY) => {
+                scan_elements(file, data_end, Scope::Track, depth + 1, state)?;
+            }
+            (Scope::Track, ID_TRACK_TYPE) if data_end - data_start <= 8 => {
+                let mut value = [0; 8];
+                file.read_exact(&mut value[(8 - (data_end - data_start)) as usize..])
+                    .map_err(|_| PreflightError::Io)?;
+                let kind = u64::from_be_bytes(value);
+                state.audio |= kind == 2;
+                state.moving_video |= kind == 1;
+            }
             (Scope::Segment, ID_ATTACHMENTS) => {
                 scan_elements(file, data_end, Scope::Attachments, depth + 1, state)?;
             }
             (Scope::Attachments, ID_ATTACHED_FILE) => {
                 state.attachment_count += 1;
-                if state.attachment_count > MAX_ATTACHMENT_COUNT {
-                    return Err(PreflightError::TooManyAttachments);
+                state.skip_metadata |= state.attachment_count > MAX_ATTACHMENT_COUNT;
+                if state.skip_metadata {
+                    file.seek(SeekFrom::Start(data_end))
+                        .map_err(|_| PreflightError::Io)?;
+                } else {
+                    scan_elements(file, data_end, Scope::AttachedFile, depth + 1, state)?;
                 }
-                scan_elements(file, data_end, Scope::AttachedFile, depth + 1, state)?;
             }
             (Scope::AttachedFile, ID_FILE_DATA) => {
                 file.seek(SeekFrom::Start(data_end))
@@ -1060,7 +1133,7 @@ mod tests {
             assert_eq!(metadata.year, Some(2001));
             assert_eq!(
                 metadata.release_date.as_deref(),
-                Some(&date[..date.len().min(10)])
+                date.get(..date.len().min(10))
             );
         }
     }
@@ -1083,7 +1156,7 @@ mod tests {
     }
 
     #[test]
-    fn admission_requires_success_one_audio_and_only_still_images() {
+    fn admission_requires_success_audio_and_only_still_images() {
         assert!(discovery_is_admitted(DiscovererResult::Ok, 1, &[]));
         assert!(discovery_is_admitted(DiscovererResult::Ok, 1, &[true]));
         for result in [
@@ -1094,7 +1167,7 @@ mod tests {
             assert!(!discovery_is_admitted(result, 1, &[]));
         }
         assert!(!discovery_is_admitted(DiscovererResult::Ok, 0, &[]));
-        assert!(!discovery_is_admitted(DiscovererResult::Ok, 2, &[]));
+        assert!(discovery_is_admitted(DiscovererResult::Ok, 2, &[]));
         assert!(!discovery_is_admitted(DiscovererResult::Ok, 1, &[false]));
         assert!(!discovery_is_admitted(
             DiscovererResult::Ok,
@@ -1113,19 +1186,21 @@ mod tests {
         fs::write(&path, mka_with_attachment(&[1, 2, 3], false)).expect("write MKA fixture");
 
         assert_eq!(
-            preflight_mka(&mut fs::File::open(&path).expect("open fixture")),
-            Ok(())
+            preflight_mka(&mut fs::File::open(&path).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Ok(false)
         );
     }
 
     #[test]
-    fn preflight_rejects_unknown_and_oversized_attachments() {
+    fn preflight_skips_unknown_artwork_and_rejects_truncated_payloads() {
         let directory = tempfile::tempdir().expect("MKA fixture directory");
         let unknown = directory.path().join("unknown.mka");
         fs::write(&unknown, mka_with_attachment(&[], true)).expect("write unknown fixture");
         assert_eq!(
-            preflight_mka(&mut fs::File::open(&unknown).expect("open fixture")),
-            Err(PreflightError::UnknownSize)
+            preflight_mka(&mut fs::File::open(&unknown).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Ok(true)
         );
 
         let oversized = directory.path().join("oversized.mka");
@@ -1136,8 +1211,9 @@ mod tests {
         bytes.extend(element(ID_ATTACHMENTS, &attached_file));
         fs::write(&oversized, bytes).expect("write oversized fixture");
         assert_eq!(
-            preflight_mka(&mut fs::File::open(&oversized).expect("open fixture")),
-            Err(PreflightError::AttachmentTooLarge)
+            preflight_mka(&mut fs::File::open(&oversized).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Err(PreflightError::InvalidEbml)
         );
     }
 
@@ -1152,15 +1228,17 @@ mod tests {
         bytes.extend(element(ID_ATTACHMENTS, &attachments));
         fs::write(&excessive_count, bytes).expect("write attachment-count fixture");
         assert_eq!(
-            preflight_mka(&mut fs::File::open(&excessive_count).expect("open fixture")),
-            Err(PreflightError::TooManyAttachments)
+            preflight_mka(&mut fs::File::open(&excessive_count).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Ok(true)
         );
 
         let excessive_bytes = directory.path().join("large-attachments.mka");
         write_sparse_attachments(&excessive_bytes, &[MAX_ATTACHMENT_BYTES / 2 + 1; 2]);
         assert_eq!(
-            preflight_mka(&mut fs::File::open(&excessive_bytes).expect("open fixture")),
-            Err(PreflightError::AttachmentsTooLarge)
+            preflight_mka(&mut fs::File::open(&excessive_bytes).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Ok(true)
         );
     }
 
@@ -1175,7 +1253,8 @@ mod tests {
         fs::write(&path, bytes).expect("write element-count fixture");
 
         assert_eq!(
-            preflight_mka(&mut fs::File::open(&path).expect("open fixture")),
+            preflight_mka(&mut fs::File::open(&path).expect("open fixture"))
+                .map(|state| state.skip_metadata),
             Err(PreflightError::TooManyHeaders)
         );
     }
@@ -1197,8 +1276,9 @@ mod tests {
         file.write_all(&[0]).expect("finish sparse payload");
 
         assert_eq!(
-            preflight_mka(&mut fs::File::open(&path).expect("open fixture")),
-            Ok(())
+            preflight_mka(&mut fs::File::open(&path).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Ok(false)
         );
     }
 
@@ -1211,8 +1291,9 @@ mod tests {
         bytes.extend(element(0xE7, &[0]));
         fs::write(&valid, &bytes).expect("write streaming MKA fixture");
         assert_eq!(
-            preflight_mka(&mut fs::File::open(&valid).expect("open fixture")),
-            Ok(())
+            preflight_mka(&mut fs::File::open(&valid).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Ok(false)
         );
 
         let oversized = directory.path().join("streaming-oversized-artwork.mka");
@@ -1225,8 +1306,9 @@ mod tests {
         ));
         fs::write(&oversized, bytes).expect("write streaming MKA with oversized artwork");
         assert_eq!(
-            preflight_mka(&mut fs::File::open(&oversized).expect("open fixture")),
-            Err(PreflightError::AttachmentTooLarge)
+            preflight_mka(&mut fs::File::open(&oversized).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Err(PreflightError::InvalidEbml)
         );
     }
 
@@ -1241,8 +1323,9 @@ mod tests {
             .expect("extend sparse audio payload");
 
         assert_eq!(
-            preflight_asf(&mut fs::File::open(&path).expect("open fixture")),
-            Ok(())
+            preflight_asf(&mut fs::File::open(&path).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Ok(false)
         );
     }
 
@@ -1253,16 +1336,18 @@ mod tests {
         fs::write(&oversized, asf_header(MAX_ASF_HEADER_BYTES + 1, 0))
             .expect("write oversized ASF header");
         assert_eq!(
-            preflight_asf(&mut fs::File::open(&oversized).expect("open fixture")),
-            Err(PreflightError::AsfHeaderTooLarge)
+            preflight_asf(&mut fs::File::open(&oversized).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Err(PreflightError::InvalidAsf)
         );
 
         let excessive = directory.path().join("excessive.wma");
         fs::write(&excessive, asf_header(30, MAX_ASF_HEADER_OBJECTS + 1))
             .expect("write excessive ASF header");
         assert_eq!(
-            preflight_asf(&mut fs::File::open(&excessive).expect("open fixture")),
-            Err(PreflightError::TooManyAsfObjects)
+            preflight_asf(&mut fs::File::open(&excessive).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Err(PreflightError::InvalidAsf)
         );
     }
 
@@ -1276,8 +1361,9 @@ mod tests {
         )
         .expect("write complete ASF fixture");
         assert_eq!(
-            preflight_asf(&mut fs::File::open(&complete).expect("open fixture")),
-            Ok(())
+            preflight_asf(&mut fs::File::open(&complete).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Ok(false)
         );
 
         let truncated_pro = directory.path().join("truncated-pro.wma");
@@ -1287,7 +1373,8 @@ mod tests {
         )
         .expect("write truncated WMA Pro fixture");
         assert_eq!(
-            preflight_asf(&mut fs::File::open(&truncated_pro).expect("open fixture")),
+            preflight_asf(&mut fs::File::open(&truncated_pro).expect("open fixture"))
+                .map(|state| state.skip_metadata),
             Err(PreflightError::InvalidAsf)
         );
 
@@ -1295,8 +1382,9 @@ mod tests {
         fs::write(&partial_wma2, asf_with_declared_file_size(1_000, 0x0161))
             .expect("write partial WMA2 fixture");
         assert_eq!(
-            preflight_asf(&mut fs::File::open(&partial_wma2).expect("open fixture")),
-            Ok(())
+            preflight_asf(&mut fs::File::open(&partial_wma2).expect("open fixture"))
+                .map(|state| state.skip_metadata),
+            Ok(false)
         );
     }
 

@@ -3,9 +3,7 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use gtk_library::activity::ActivityCollections;
 use gtk_player::fullscreen_background::FullscreenBackground;
-use gtk_widgets::{
-    artwork::cover_fetch_size_for_display, mounted_route::route_current_track, route::Route,
-};
+use gtk_widgets::{mounted_route::route_current_track, route::Route};
 use library::{ActivityOverview, CalendarActivityPeriod};
 use localization::{tr, tr_with};
 use rufin_core::activity::{ReportAppearance, percentage_change, period_key, period_label};
@@ -559,9 +557,11 @@ impl ActivityView {
         let db = shell.products.library.clone();
         let (sender, receiver) = async_channel::bounded(1);
         let task = shell.products.runtime.spawn(async move {
-            let result = db
-                .activity_overview(period, 10, &library::ReadCancellation::new())
-                .await;
+            let result = async {
+                db.activity_overview(period, 10, &library::ReadCancellation::new())
+                    .await
+            }
+            .await;
             let _ = sender.send(result).await;
         });
         self.task.replace(Some(task.abort_handle()));
@@ -613,13 +613,7 @@ impl ActivityView {
                         let weak = Rc::downgrade(&view);
                         let task =
                             glib::MainContext::ref_thread_default().spawn_local(async move {
-                                let texture = artwork
-                                    .load_texture(
-                                        first_artwork,
-                                        256,
-                                        cover_fetch_size_for_display(256),
-                                    )
-                                    .await;
+                                let texture = artwork.load_texture(first_artwork, 256).await;
                                 let Some(view) = weak.upgrade() else { return };
                                 if view.selected_period() == Some(period) {
                                     view.background_texture.replace(texture);

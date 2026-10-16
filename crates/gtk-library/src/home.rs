@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use library::{HomeAlbumRow, HomeGenreRow, HomePage, HomeSectionRows, HomeTrackRow, RadioSeed};
+use library::{GenreView, HomeAlbumRow, HomePage, HomeSectionRows, HomeTrackRow, RadioSeed};
 use localization::{album_count_text, msgid, tr, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
 
@@ -511,8 +511,8 @@ impl CatalogUi {
             if let Some(showcase) = &mut download_counts.home.borrow_mut().showcase
                 && showcase.album.media_uri == uri
             {
-                showcase.album.downloaded_count = if downloaded {
-                    showcase.album.track_count
+                showcase.album.summary.downloaded_count = if downloaded {
+                    showcase.album.summary.track_count
                 } else {
                     0
                 };
@@ -528,10 +528,11 @@ impl CatalogUi {
                 view.mounted.update(|item| {
                     if let HomeItem::Album(item) = item
                         && item.album.media_uri == uri
-                        && (item.album.downloaded_count == item.album.track_count) != downloaded
+                        && (item.album.summary.downloaded_count == item.album.summary.track_count)
+                            != downloaded
                     {
-                        item.album.downloaded_count = if downloaded {
-                            item.album.track_count
+                        item.album.summary.downloaded_count = if downloaded {
+                            item.album.summary.track_count
                         } else {
                             0
                         };
@@ -564,9 +565,9 @@ impl CatalogUi {
                     view.mounted.update(|item| {
                         if let HomeItem::Track(item) = item
                             && item.track.media_uri == uri
-                            && item.track.is_downloaded != downloaded
+                            && item.track.access.is_downloaded != downloaded
                         {
-                            item.track.is_downloaded = downloaded;
+                            item.track.access.is_downloaded = downloaded;
                             true
                         } else {
                             false
@@ -651,14 +652,14 @@ impl CatalogUi {
     ) -> gtk::Widget {
         let width = crate::route_layout::home_album_content_width_for((self.route_width)());
         let mut album = item.album.clone();
-        album.title.clone_from(&item.title);
+        album.metadata.title.clone_from(&item.title);
         let seed = stable_seed(&album.object_id);
         let cover = home_album_cover_projection(
             self,
             &album,
             crate::route_layout::detail_showcase_cover_size(width),
         );
-        let title_text = album.title.clone();
+        let title_text = album.metadata.title.clone();
         let showcase_view =
             DetailShowcaseView::new("home-showcase", seed, "Showcase", true, &title_text);
         let radio = detail_radio_button();
@@ -688,11 +689,15 @@ impl CatalogUi {
         let play: CollectionPlay = Rc::new(move |placement, shuffled| {
             (play_shell.media_menus.play_target)(&play_target, placement, shuffled);
         });
-        let controls =
-            detail_playback_controls(&actions, msgid("Play album"), Some(album.favorite), play);
+        let controls = detail_playback_controls(
+            &actions,
+            msgid("Play album"),
+            Some(album.state.favorite),
+            play,
+        );
         let favorite = favorite_icon_button("Favorite");
         configure_action_button(&favorite, ActionButtonVariant::DetailFavorite);
-        set_favorite_button_active(&favorite, album.favorite);
+        set_favorite_button_active(&favorite, album.state.favorite);
         actions.append(&favorite);
         let hover_favorite = controls
             .favorite
@@ -738,7 +743,7 @@ impl CatalogUi {
         });
 
         let (artist_scroll, artist) = gtk_widgets::text_slide::new_label();
-        artist.set_text(&album.display_artist);
+        artist.set_text(&album.metadata.artist);
         artist.add_css_class("detail-artist");
         artist.set_xalign(0.0);
         artist.set_halign(gtk::Align::Start);
@@ -749,18 +754,22 @@ impl CatalogUi {
         showcase_view.replace_summary(&[
             (
                 "rufin-x-office-calendar-symbolic",
-                album.year.map(|year| year.to_string()).unwrap_or_default(),
+                album
+                    .metadata
+                    .year
+                    .map(|year| year.to_string())
+                    .unwrap_or_default(),
             ),
             (
                 "rufin-tracks-symbolic",
-                track_count_text(album.track_count.max(0) as u64),
+                track_count_text(album.summary.track_count.max(0) as u64),
             ),
             (
                 "rufin-preferences-system-time-symbolic",
-                format_duration_units((album.duration_millis.max(0) / 1_000) as u32),
+                format_duration_units((album.summary.duration_millis.max(0) / 1_000) as u32),
             ),
         ]);
-        let track_count = album.track_count.max(0) as u64;
+        let track_count = album.summary.track_count.max(0) as u64;
         showcase_view.bind_summary_text_with(1, move || track_count_text(track_count));
 
         let showcase = media_showcase(MediaShowcase {
@@ -774,7 +783,7 @@ impl CatalogUi {
         showcase.upcast()
     }
 
-    fn home_genres(self: &Rc<Self>, genres: &[HomeGenreRow]) -> Option<gtk::Widget> {
+    fn home_genres(self: &Rc<Self>, genres: &[GenreView]) -> Option<gtk::Widget> {
         if genres.is_empty() {
             return None;
         }
@@ -802,7 +811,7 @@ impl CatalogUi {
         Some(section.upcast())
     }
 
-    fn home_genre_chip(self: &Rc<Self>, genre: &HomeGenreRow) -> gtk::Widget {
+    fn home_genre_chip(self: &Rc<Self>, genre: &GenreView) -> gtk::Widget {
         let button = gtk::Button::new();
         button.add_css_class("flat");
         button.add_css_class("home-genre-chip");
@@ -813,14 +822,14 @@ impl CatalogUi {
         labels.set_margin_bottom(8);
         labels.set_margin_start(10);
         labels.set_margin_end(10);
-        let name = gtk::Label::new(Some(&genre.name));
+        let name = gtk::Label::new(Some(&genre.metadata.name));
         name.add_css_class("album-title");
         name.set_xalign(0.0);
         name.set_ellipsize(gtk::pango::EllipsizeMode::End);
         labels.append(&name);
         let counts = gtk::Label::new(None);
-        let album_count = genre.album_count.max(0) as u64;
-        let track_count = genre.track_count.max(0) as u64;
+        let album_count = genre.summary.album_count.max(0) as u64;
+        let track_count = genre.summary.track_count.max(0) as u64;
         bind_label_text_with(&counts, move || {
             format!(
                 "{} • {}",
@@ -844,7 +853,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
     match item {
         HomeItem::Track(item) => {
             let mut track = item.track;
-            track.title = item.title;
+            track.metadata.title = item.title;
             let play_shell = Rc::clone(shell);
             let play_key = track.track_key;
             let play = Rc::new(move |_| {
@@ -854,12 +863,12 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
                     false,
                 );
             });
-            let field = Rc::new(move |_, track: &library::TrackRow, field| match field {
+            let field = Rc::new(move |_, track: &library::TrackView, field| match field {
                 LibraryField::Artist => track_artist_links(track),
                 LibraryField::AlbumArtist => track_album_artist_links(track),
                 LibraryField::Album => DetailLinks::route(
-                    &track.album,
-                    track.album_media_uri.clone().map(Route::AlbumDetail),
+                    &track.metadata.album,
+                    track.links.album_media_uri.clone().map(Route::AlbumDetail),
                 ),
                 _ => DetailLinks::text(&track_field(track, field)),
             });
@@ -870,7 +879,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
                 Rc::new(move |item| {
                     if let HomeItem::Track(item) = item {
                         let mut track = item.track;
-                        track.title = item.title;
+                        track.metadata.title = item.title;
                         cell.bind(0, track);
                     }
                 }),
@@ -878,7 +887,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
         }
         HomeItem::Album(item) => {
             let mut album = item.album;
-            album.title = item.title;
+            album.metadata.title = item.title;
             let cell = AlbumGridCell::new(shell, &HOME_ALBUM_GRID_FIELDS, None);
             cell.bind(0, album);
             (
@@ -886,7 +895,7 @@ fn home_item_widget(shell: &Rc<CatalogUi>, item: HomeItem) -> (gtk::Widget, Home
                 Rc::new(move |item| {
                     if let HomeItem::Album(item) = item {
                         let mut album = item.album;
-                        album.title = item.title;
+                        album.metadata.title = item.title;
                         cell.bind(0, album);
                     }
                 }),

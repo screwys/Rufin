@@ -88,6 +88,8 @@ impl Drop for DownloadSuspension {
 }
 
 enum Command {
+    ClearArtworkCache(Sender<Result<(), String>>),
+    ClearLyricsCache(Sender<Result<(), String>>),
     Page {
         offset: u64,
         limit: u32,
@@ -98,6 +100,7 @@ enum Command {
         source_key: SourceKey,
         source: Option<Weak<Source>>,
         folder: Option<FolderKey>,
+        input_digest: [u8; 32],
         response: Sender<Result<(), String>>,
     },
     Download {
@@ -146,6 +149,7 @@ enum Command {
 #[derive(Clone)]
 struct AttachedSource {
     source_key: SourceKey,
+    input_digest: [u8; 32],
     source: Option<Weak<Source>>,
     folder: Option<FolderKey>,
     directory: Option<DownloadDirectory>,
@@ -387,8 +391,14 @@ async fn released_queue_media_uri(
 ) -> Result<Option<(String, String)>, String> {
     let (key, staging_identity) = if let Some(object_id) = identity.as_str() {
         let Some(key) = database
-            .track_key_by_object(source, object_id, cancellation)
+            .catalog_keys(
+                library::CatalogKind::Track,
+                Some(source),
+                &[(object_id).to_string()],
+                cancellation,
+            )
             .await
+            .map(|keys| keys.into_iter().next().map(library::TrackKey::from_raw))
             .map_err(|error| error.to_string())?
         else {
             return Ok(None);
@@ -400,7 +410,16 @@ async fn released_queue_media_uri(
         return Err("the saved download queue has an invalid media identity".to_string());
     };
     Ok(database
-        .track_uris_for_source(source, &[key], cancellation)
+        .selected_track_uris(
+            &library::CatalogQuery::keys(
+                library::CatalogKind::Track,
+                Some(source),
+                (&[key]).iter().map(|key| key.raw()).collect(),
+            )
+            .selection(),
+            None,
+            cancellation,
+        )
         .await
         .map_err(|error| error.to_string())?
         .pop()
@@ -587,7 +606,7 @@ async fn rule_media_uris(
     let cancellation = library::ReadCancellation::new();
     match rule {
         DownloadRule::EntireLibrary | DownloadRule::Favorites => {
-            let mut query = library::SongQuery::new(library::SongScope::Tracks(source));
+            let mut query = library::CatalogQuery::tracks(library::TrackScope::Tracks(source));
             query.folder = folder;
             query.favorites_only = matches!(rule, DownloadRule::Favorites);
             database
@@ -713,6 +732,7 @@ pub enum DownloadEvent {
 }
 
 struct Actor {
+    artwork: artwork::Artwork,
     root: Arc<PathBuf>,
     database: Database,
     events: DownloadEvents,
@@ -738,6 +758,7 @@ impl Downloads {
     }
 
     pub fn new(
+        artwork: artwork::Artwork,
         root: PathBuf,
         database: Database,
         runtime: tokio::runtime::Handle,
@@ -755,6 +776,7 @@ impl Downloads {
         };
         runtime.spawn(run(
             Actor {
+                artwork,
                 root: Arc::clone(&downloads.root),
                 database,
                 events: DownloadEvents {
@@ -788,6 +810,7 @@ impl Downloads {
         source_key: SourceKey,
         source: Option<Arc<Source>>,
         folder: Option<FolderKey>,
+        input_digest: [u8; 32],
     ) -> Result<(), String> {
         let (response, result) = async_channel::bounded(1);
         self.commands
@@ -796,6 +819,7 @@ impl Downloads {
                 source_key,
                 source: source.as_ref().map(Arc::downgrade),
                 folder,
+                input_digest,
                 response,
             })
             .await
@@ -1055,6 +1079,30 @@ impl Actor {
 
     async fn apply(&mut self, command: Command, active: &mut Vec<ActiveDownload>) {
         match command {
+            Command::ClearArtworkCache(response) => {
+                let active_uris: Vec<_> = active
+                    .iter()
+                    .map(|download| download.media_uri.clone())
+                    .collect();
+                let result = self
+                    .artwork
+                    .clear_cache(&self.database, &active_uris)
+                    .await
+                    .map_err(|error| error.to_string());
+                let _ = response.send(result).await;
+            }
+            Command::ClearLyricsCache(response) => {
+                let active_uris: Vec<_> = active
+                    .iter()
+                    .map(|download| download.media_uri.clone())
+                    .collect();
+                let result = self
+                    .database
+                    .clear_lyrics_cache(&active_uris)
+                    .await
+                    .map_err(|error| error.to_string());
+                let _ = response.send(result).await;
+            }
             Command::Page {
                 offset,
                 limit,
@@ -1067,6 +1115,7 @@ impl Actor {
                 source_key,
                 source,
                 folder,
+                input_digest,
                 response,
             } => {
                 let directory = self.settings_for(&source_id).directory;
@@ -1084,7 +1133,14 @@ impl Actor {
                 })
                 .await;
                 let result = self
-                    .attach(source_id.clone(), source_key, source, folder, directory)
+                    .attach(
+                        source_id.clone(),
+                        source_key,
+                        source,
+                        folder,
+                        directory,
+                        input_digest,
+                    )
                     .await;
                 let ready = result.is_ok();
                 self.pending_rules = None;
@@ -1352,6 +1408,7 @@ impl Actor {
         source: Option<Weak<Source>>,
         folder: Option<FolderKey>,
         directory: Option<DownloadDirectory>,
+        input_digest: [u8; 32],
     ) -> Result<(), String> {
         let unchanged = self.attached.get(&source_id).is_some_and(|attached| {
             attached.directory == directory
@@ -1364,6 +1421,7 @@ impl Actor {
             source_id.clone(),
             AttachedSource {
                 source_key,
+                input_digest,
                 source: source.clone(),
                 folder,
                 directory: directory.clone(),
@@ -1817,7 +1875,7 @@ impl Actor {
                     connect.extension().map(str::to_owned),
                     ResolvedStream::new(&media_uri),
                 ))
-            } else if let Some(source) = source {
+            } else if let Some(source) = source.as_ref() {
                 source
                     .resolve_download(&self.database, &request)
                     .await
@@ -1894,10 +1952,17 @@ impl Actor {
             let transfers = Arc::clone(&self.transfers);
             let (cancellation, cancelled) = tokio::sync::oneshot::channel();
             let connect_receipt = Arc::new(Mutex::new(None));
-            let task = if let Some(connect) = connect {
-                let receipt = Arc::clone(&connect_receipt);
-                let uri = media_uri.clone();
-                tokio::spawn(async move {
+            let receipt = Arc::clone(&connect_receipt);
+            let uri = media_uri.clone();
+            let database = self.database.clone();
+            let artwork = self.artwork.clone();
+            let input = attached
+                .as_ref()
+                .map_or([0; 32], |source| source.input_digest);
+            let task_source_id = source_id.clone();
+            let task = tokio::spawn(async move {
+                let mut cancelled = cancelled;
+                if let Some(connect) = connect {
                     prepare_download_directories(&task_paths)
                         .await
                         .map_err(download_source_failure)?;
@@ -1911,28 +1976,30 @@ impl Actor {
                     tokio::pin!(transfer);
                     let result = tokio::select! {
                         result = &mut transfer => result,
-                        _ = cancelled => { cancel.cancel(); transfer.await },
+                        _ = &mut cancelled => { cancel.cancel(); transfer.await },
                     }
                     .map_err(download_source_failure)?;
                     *receipt.lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
-                    Ok(())
-                })
-            } else {
-                match transfer {
-                    Ok(stream) => tokio::spawn(download_track(
-                        source_id.clone(),
-                        request,
-                        stream,
-                        task_paths,
-                        transfers,
-                        cancelled,
-                    )),
-                    Err(error) => {
-                        drop(cancelled);
-                        tokio::spawn(async move { Err(error) })
-                    }
+                } else {
+                    let stream = transfer?;
+                    run_transfer(
+                        task_source_id.as_ref(),
+                        &request,
+                        &stream,
+                        &task_paths,
+                        &transfers,
+                        &mut cancelled,
+                    )
+                    .await
+                    .map_err(download_source_failure)?;
                 }
-            };
+                // Companion failures do not discard successfully downloaded audio.
+                tokio::select! {
+                    _ = &mut cancelled => {},
+                    _ = cache_track_assets(&database, &artwork, source.as_deref(), &uri, input) => {},
+                }
+                Ok(())
+            });
             return Some(ActiveDownload {
                 source_id,
                 job_id,
@@ -2896,24 +2963,46 @@ impl Actor {
     }
 }
 
-async fn download_track(
-    source_id: Option<SourceId>,
-    request: StreamRequest,
-    stream: ResolvedStream,
-    paths: DownloadPaths,
-    transfers: Arc<TransferClients>,
-    cancellation: tokio::sync::oneshot::Receiver<()>,
-) -> Result<(), DownloadFailure> {
-    run_transfer(
-        source_id.as_ref(),
-        &request,
-        &stream,
-        &paths,
-        &transfers,
-        cancellation,
-    )
-    .await
-    .map_err(download_source_failure)
+async fn cache_track_assets(
+    database: &Database,
+    artwork: &artwork::Artwork,
+    source: Option<&Source>,
+    media_uri: &str,
+    input_digest: [u8; 32],
+) {
+    let images = async {
+        let bindings = database
+            .track_artwork_bindings(&[media_uri.to_owned()], &library::ReadCancellation::new())
+            .await
+            .map_err(|error| error.to_string())?;
+        for binding in bindings {
+            artwork
+                .cache_source(&binding)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        Ok::<_, String>(())
+    };
+    let lyrics = async {
+        if let Some(source) = source {
+            let input = if library::source_entity_parts(media_uri).is_some() {
+                input_digest
+            } else {
+                [0; 32]
+            };
+            source
+                .cached_lyrics(database, media_uri, input)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        Ok::<_, String>(())
+    };
+    let (images, lyrics) = tokio::join!(images, lyrics);
+    for (kind, result) in [("artwork", images), ("lyrics", lyrics)] {
+        if let Err(error) = result {
+            warn!(%error, %media_uri, kind, "could not download accompanying media");
+        }
+    }
 }
 
 fn download_source_failure(error: SourceError) -> DownloadFailure {
@@ -2980,33 +3069,49 @@ mod tests {
         let database = Database::open(&directory.path().join("library.sqlite3"))
             .await
             .expect("open Library");
-        let mut scan = library::Scan::begin(&database, source_id, "Source", "source", None)
+        let source = database
+            .reconcile_source(&library::SourceId::new(source_id), "server", "Source")
             .await
-            .expect("begin source scan");
-        scan.write_tracks(&[(
-            &library::TrackInput {
-                object_id: track_object_id.to_owned(),
-                title: "Track".into(),
-                display_album: "Album".into(),
-                display_artist: "Artist".into(),
-                sort_text: "track".into(),
-                duration_millis: 180_000,
-                disc_number: 1,
-                track_number: 1,
-                source_format: Some("FLAC".into()),
-                favorite: Some(false),
-                loudness_analysis_key: [7; 32],
-                ..Default::default()
-            },
-            None,
-        )])
-        .await
-        .expect("stage Track");
-        let source = scan.source();
-        scan.finish().await.expect("finish source");
+            .unwrap()
+            .source;
+        database
+            .catalog(source_id, None)
+            .await
+            .unwrap()
+            .apply_catalog(
+                &library::CatalogBatch {
+                    tracks: vec![library::TrackObservation {
+                        object_id: track_object_id.to_owned(),
+                        metadata: library::TrackMetadata {
+                            title: "Track".into(),
+                            artist: "Artist".into(),
+                            album: "Album".into(),
+                            sort_text: "track".into(),
+                            duration_millis: 180_000,
+                            disc_number: 1,
+                            track_number: 1,
+                            source_format: Some("FLAC".into()),
+                            ..Default::default()
+                        },
+                        loudness_analysis_key: [7; 32],
+                        artwork_binding: None,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                true,
+            )
+            .await
+            .unwrap();
         let track = database
-            .track_key_by_object(source, track_object_id, &library::ReadCancellation::new())
+            .catalog_keys(
+                library::CatalogKind::Track,
+                Some(source),
+                &[(track_object_id).to_string()],
+                &library::ReadCancellation::new(),
+            )
             .await
+            .map(|keys| keys.into_iter().next().map(library::TrackKey::from_raw))
             .expect("read Track key")
             .expect("Track exists");
         (directory, database, source, track)
@@ -3250,9 +3355,15 @@ mod tests {
         assert!(saved.managed);
         assert!(
             database
-                .track_key_by_object(source_key, "track", &library::ReadCancellation::new())
+                .catalog_keys(
+                    library::CatalogKind::Track,
+                    Some(source_key),
+                    &["track".into()],
+                    &library::ReadCancellation::new()
+                )
                 .await
                 .unwrap()
+                .first()
                 .is_some()
         );
     }
@@ -3514,6 +3625,8 @@ mod tests {
         let (events, _) = async_channel::unbounded();
         let (prepared_rules, _) = async_channel::unbounded();
         Actor {
+            artwork: artwork::Artwork::new(root.join("artwork"), tokio::runtime::Handle::current())
+                .unwrap(),
             root: Arc::new(root.to_path_buf()),
             database,
             events: DownloadEvents {
@@ -3527,6 +3640,7 @@ mod tests {
                 source_id.clone(),
                 AttachedSource {
                     source_key,
+                    input_digest: [0; 32],
                     source: None,
                     folder: None,
                     directory: None,
@@ -3782,7 +3896,7 @@ pub struct DownloadQueueSummary {
 pub struct DownloadPage {
     pub total: u64,
     pub jobs: Vec<DownloadQueueItem>,
-    pub previews: Vec<library::TrackRow>,
+    pub previews: Vec<library::TrackView>,
 }
 
 struct DownloadEvents {
@@ -3889,10 +4003,18 @@ impl Actor {
             .iter()
             .filter_map(|job| job.preview_uris.first().cloned())
             .collect::<Vec<_>>();
-        let previews = self
-            .database
-            .track_rows_by_uri(&uris, &library::ReadCancellation::new())
+        let previews = library::CatalogQuery::uris(library::CatalogKind::Track, (&uris).to_vec())
+            .rows(
+                &self.database,
+                0,
+                (&uris).len(),
+                &library::ReadCancellation::new(),
+            )
             .await
+            .map(|rows| match rows {
+                library::CatalogRows::Tracks(rows) => rows,
+                _ => unreachable!("typed catalog projection"),
+            })
             .map_err(|error| error.to_string())?;
         Ok(DownloadPage {
             total,
@@ -3904,6 +4026,26 @@ impl Actor {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl Downloads {
+    pub async fn clear_artwork_cache(&self) -> sources::SourceResult<()> {
+        let (response, receive) = async_channel::bounded(1);
+        self.send(Command::ClearArtworkCache(response));
+        receive
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map_err(SourceError::Other)
+    }
+
+    pub async fn clear_lyrics_cache(&self) -> sources::SourceResult<()> {
+        let (response, receive) = async_channel::bounded(1);
+        self.send(Command::ClearLyricsCache(response));
+        receive
+            .recv()
+            .await
+            .map_err(|error| SourceError::Other(error.to_string()))?
+            .map_err(SourceError::Other)
+    }
+
     pub fn subscribe(&self) -> Arc<DownloadSubscription> {
         let mut changes = self.status.clone();
         changes.mark_changed();

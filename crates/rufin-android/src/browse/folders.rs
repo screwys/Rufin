@@ -3,7 +3,7 @@ use super::*;
 impl AndroidBrowseQuery {
     pub(super) async fn folder_sections(&self) -> Result<Vec<AndroidScrollSection>, AndroidError> {
         let query = self
-            .song_query()
+            .track_query()
             .await
             .map_err(error)?
             .expect("Folder query");
@@ -49,8 +49,13 @@ impl AndroidBrowseQuery {
             Some(key) => Some(library::TrackKey::from_raw(key)),
             None => self
                 .database
-                .track_key_by_uri(&media_uri, &ReadCancellation::new())
+                .catalog_identity(
+                    library::CatalogKind::Track,
+                    &media_uri,
+                    &ReadCancellation::new(),
+                )
                 .await
+                .map(|identity| identity.map(|identity| library::TrackKey::from_raw(identity.key)))
                 .map_err(error)?,
         };
         if let Some(key) = key {
@@ -60,9 +65,9 @@ impl AndroidBrowseQuery {
         Ok(())
     }
 
-    pub(super) async fn folder_selection(&self) -> Result<SongSelection, AndroidError> {
+    pub(super) async fn folder_selection(&self) -> Result<TrackSelection, AndroidError> {
         Ok(self
-            .song_query()
+            .track_query()
             .await
             .map_err(error)?
             .expect("Folder query")
@@ -88,14 +93,14 @@ impl AndroidBrowseQuery {
             .await
     }
 
-    pub(super) async fn folder_counts(&self) -> library::LibraryResult<(usize, i64)> {
+    pub(super) async fn folder_counts(&self) -> library::LibraryResult<(usize, usize)> {
         let cancel = ReadCancellation::new();
         let projection = self.folder_projection().await?;
         let folders = projection
             .child_page(
                 &self.database,
                 self.selected().source_key,
-                self.song_query().await?.expect("Folder query"),
+                self.track_query().await?.expect("Folder query"),
                 0..0,
                 &cancel,
             )
@@ -103,8 +108,8 @@ impl AndroidBrowseQuery {
             .0;
         Ok((
             folders,
-            self.database
-                .song_count(self.song_query().await?.expect("Folder query"), &cancel)
+            (self.track_query().await?.expect("Folder query"))
+                .count(&self.database, &cancel)
                 .await?,
         ))
     }
@@ -146,7 +151,7 @@ impl AndroidBrowseQuery {
             .child_page(
                 &self.database,
                 source,
-                self.song_query().await?.expect("Folder query"),
+                self.track_query().await?.expect("Folder query"),
                 offset..offset.saturating_add(limit),
                 &cancel,
             )
@@ -155,15 +160,18 @@ impl AndroidBrowseQuery {
             .into_iter()
             .map(|folder| self.folder_row(folder.object_id, folder.name, folder.artwork_binding))
             .collect::<Vec<_>>();
-        let tracks = self
-            .database
-            .song_rows(
-                self.song_query().await?.expect("Folder query"),
+        let tracks = (self.track_query().await?.expect("Folder query"))
+            .rows(
+                &self.database,
                 offset.saturating_sub(folder_count),
                 limit.saturating_sub(rows.len()),
                 &cancel,
             )
-            .await?;
+            .await
+            .map(|rows| match rows {
+                library::CatalogRows::Tracks(rows) => rows,
+                _ => unreachable!("typed song projection"),
+            })?;
         rows.extend(tracks.into_iter().enumerate().map(|(index, track)| {
             self.track_row(track, offset.saturating_sub(folder_count) + index)
         }));

@@ -1,6 +1,168 @@
 use super::*;
-use crate::source_window::{SourceQuery, quote};
-use crate::{AlbumKey, ArtistKey, FolderKey, GenreKey, MoodKey, SmartPlaylistKey, SongScope};
+use crate::query::{OrderedQuery, quote};
+use crate::{AlbumKey, ArtistKey, FolderKey, GenreKey, MoodKey, SmartPlaylistKey, TrackScope};
+
+#[derive(serde::Deserialize)]
+struct SavedQueue {
+    entries: Vec<SavedEntry>,
+    #[serde(default)]
+    contexts: Vec<SavedContext<Arc<str>>>,
+    #[serde(default)]
+    order: Arc<[u32]>,
+    #[serde(default)]
+    current_index: Option<usize>,
+    #[serde(default)]
+    progress_millis: i64,
+    #[serde(default)]
+    repeat_mode: QueueRepeatMode,
+    #[serde(default)]
+    shuffled: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum SavedEntry {
+    Compact((String, String, SavedProvenance, Option<String>)),
+    Exported {
+        occurrence: String,
+        media_uri: String,
+        provenance: QueueProvenance,
+    },
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum SavedProvenance {
+    Context(usize, usize),
+    Other(QueueProvenance),
+}
+
+pub(crate) async fn stored_rows(
+    connection: &mut SqliteConnection,
+) -> LibraryResult<(Vec<LegacyQueueRow>, Vec<crate::TrackKey>)> {
+    let columns: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info('queue_occurrences','old_store')")
+            .fetch_all(&mut *connection)
+            .await?;
+    let column = |name: &str, absent: &str| {
+        if columns.iter().any(|column| column == name) {
+            format!("occurrence.{name}")
+        } else {
+            absent.to_owned()
+        }
+    };
+    let source = column("origin_source", "NULL");
+    let position = column("origin_position", "occurrence.position");
+    let playlist = column("playlist_entry_id", "NULL");
+    let title = column("provenance_context_title", "NULL");
+    let records = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT occurrence.object_id,occurrence.media_uri,coalesce({position},occurrence.position) canonical_position,
+            {source} source_index,{playlist} playlist_entry_id,{title} context_title,
+            occurrence.provenance_kind,occurrence.provenance_context_id,occurrence.provenance_source_rank,track.track_key
+        FROM old_store.queue_occurrences occurrence JOIN tracks track USING(media_uri) ORDER BY occurrence.traversal_position"
+    )))
+    .fetch_all(&mut *connection)
+    .await?;
+    let mut rows = Vec::with_capacity(records.len());
+    let mut keys = Vec::with_capacity(records.len());
+    for row in records {
+        let provenance = match row.try_get::<String, _>("provenance_kind")?.as_str() {
+            "context" => QueueProvenance::Context {
+                context_id: row.try_get::<String, _>("provenance_context_id")?.into(),
+                context_title: row
+                    .try_get::<Option<String>, _>("context_title")?
+                    .map(|title| serde_json::from_str(&title).map(Arc::new))
+                    .transpose()?,
+                source_rank: row.try_get::<i64, _>("provenance_source_rank")? as usize,
+            },
+            "manual" => QueueProvenance::Manual,
+            "random" => QueueProvenance::Random,
+            "radio" => QueueProvenance::Radio,
+            "auto-dj" => QueueProvenance::AutoDj,
+            _ => QueueProvenance::Legacy,
+        };
+        rows.push(LegacyQueueRow {
+            occurrence: row.try_get("object_id")?,
+            item: TrackReference {
+                media_uri: row.try_get("media_uri")?,
+                ..Default::default()
+            },
+            canonical_position: row.try_get::<i64, _>("canonical_position")? as usize,
+            source_index: row
+                .try_get::<Option<i64>, _>("source_index")?
+                .map(|index| index as usize),
+            playlist_entry_id: row.try_get("playlist_entry_id")?,
+            provenance,
+        });
+        keys.push(row.try_get("track_key")?);
+    }
+    Ok((rows, keys))
+}
+
+pub(crate) async fn decode_saved(
+    connection: &mut SqliteConnection,
+    value: serde_json::Value,
+) -> LibraryResult<(QueueRestore, Vec<Option<String>>)> {
+    let saved: SavedQueue = serde_json::from_value(value)?;
+    let mut entries = Vec::with_capacity(saved.entries.len());
+    let mut occurrences = Vec::with_capacity(saved.entries.len());
+    for entry in saved.entries {
+        let (occurrence, media_uri, provenance) = match entry {
+            SavedEntry::Compact((occurrence, uri, provenance, _)) => {
+                let provenance = match provenance {
+                    SavedProvenance::Context(context, source_rank) => {
+                        let (id, title) = match saved.contexts.get(context).ok_or_else(|| {
+                            LibraryError::InvalidStore("saved Queue context is missing".into())
+                        })? {
+                            SavedContext::Titled { id, title } => (id.clone(), Some(title.clone())),
+                            SavedContext::Legacy(id) => (id.clone(), None),
+                        };
+                        QueueProvenance::Context {
+                            context_id: id,
+                            context_title: title,
+                            source_rank,
+                        }
+                    }
+                    SavedProvenance::Other(value) => value,
+                };
+                (occurrence, uri, provenance)
+            }
+            SavedEntry::Exported {
+                occurrence,
+                media_uri,
+                provenance,
+            } => (occurrence, media_uri, provenance),
+        };
+        let track_key = crate::catalog::remember_track(
+            connection,
+            &TrackReference {
+                media_uri,
+                ..Default::default()
+            },
+        )
+        .await?;
+        entries.push(QueueEntry {
+            track_key,
+            provenance,
+            received_from_connect: false,
+        });
+        occurrences.push(Some(occurrence));
+    }
+    let ids = (1..=entries.len() as u64).collect();
+    Ok((
+        QueueRestore {
+            ids,
+            entries: entries.into(),
+            order: saved.order,
+            current_index: saved.current_index,
+            progress_millis: saved.progress_millis,
+            repeat_mode: saved.repeat_mode,
+            shuffled: saved.shuffled,
+            ..Default::default()
+        },
+        occurrences,
+    ))
+}
 
 #[derive(Clone, Debug, PartialEq, serde::Deserialize)]
 enum QueueInput {
@@ -16,7 +178,7 @@ struct QueueChoice {
     #[serde(default)]
     origin: Option<(usize, usize)>,
     media_uri: String,
-    fallback: Option<QueueItem>,
+    fallback: Option<TrackReference>,
     provenance: QueueProvenance,
 }
 
@@ -33,7 +195,7 @@ enum QueueScope {
     },
     Playlist {
         reference: CollectionSourceReference,
-        sort: crate::TrackSort,
+        sort: crate::CatalogSort,
         anchor_entry: Option<String>,
     },
     Smart {
@@ -46,7 +208,7 @@ enum QueueScope {
 struct QueueSource {
     pub scope: QueueScope,
     pub filter: String,
-    pub sort: crate::TrackSort,
+    pub sort: crate::CatalogSort,
     pub descending: bool,
     pub anchor_uri: Option<String>,
 }
@@ -68,11 +230,11 @@ struct LegacyQueueCursor {
     pub anchor: Option<usize>,
 }
 
-pub(super) async fn migrate_saved(
-    connection: &mut sqlx::Transaction<'_, Sqlite>,
+pub(crate) async fn migrate_saved(
+    connection: &mut SqliteConnection,
     value: serde_json::Value,
     rows: &[LegacyQueueRow],
-) -> LibraryResult<QueueRestore> {
+) -> LibraryResult<(QueueRestore, Vec<Option<String>>)> {
     let sources: Vec<LegacyQueueInstruction> = serde_json::from_value(value["sources"].clone())?;
     let pending: Vec<LegacyQueueCursor> = serde_json::from_value(value["pending"].clone())?;
     let mut row_keys = HashMap::new();
@@ -83,6 +245,7 @@ pub(super) async fn migrate_saved(
         );
     }
     let mut entries = Vec::new();
+    let mut occurrences = Vec::new();
     let mut members: Vec<Vec<Option<usize>>> = Vec::new();
     for source in &sources {
         let mut mapping = Vec::new();
@@ -96,10 +259,12 @@ pub(super) async fn migrate_saved(
                     let key = if let Some(item) = &choice.fallback {
                         persist_metadata(connection, item).await?
                     } else {
-                        crate::tracks::remember_song(
+                        crate::catalog::remember_track(
                             connection,
-                            &choice.media_uri,
-                            Default::default(),
+                            &crate::TrackReference {
+                                media_uri: choice.media_uri.clone(),
+                                ..Default::default()
+                            },
                         )
                         .await?
                     };
@@ -113,6 +278,7 @@ pub(super) async fn migrate_saved(
                             provenance: choice.provenance.clone(),
                             received_from_connect: false,
                         });
+                        occurrences.push(None);
                         index
                     });
                     mapping.push(Some(index));
@@ -127,8 +293,14 @@ pub(super) async fn migrate_saved(
                 let mut positions = HashMap::new();
                 for (rank, (uri, identity, _)) in rows.into_iter().enumerate() {
                     let index = entries.len();
-                    let key =
-                        crate::tracks::remember_song(connection, &uri, Default::default()).await?;
+                    let key = crate::catalog::remember_track(
+                        connection,
+                        &crate::TrackReference {
+                            media_uri: uri.clone(),
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
                     entries.push(QueueEntry {
                         track_key: key,
                         provenance: QueueProvenance::Context {
@@ -138,6 +310,7 @@ pub(super) async fn migrate_saved(
                         },
                         received_from_connect: false,
                     });
+                    occurrences.push(None);
                     positions.insert((uri, identity), index);
                     mapping.push(Some(index));
                 }
@@ -171,8 +344,10 @@ pub(super) async fn migrate_saved(
         let index = candidate.unwrap_or_else(|| {
             let index = entries.len();
             entries.push(row.entry(row_keys[&row.item.media_uri]));
+            occurrences.push(None);
             index
         });
+        occurrences[index] = Some(row.occurrence.clone());
         if value["current_index"].as_u64() == Some(position as u64) {
             selected = Some(index as u32);
         }
@@ -224,6 +399,7 @@ pub(super) async fn migrate_saved(
     let current_index =
         selected.and_then(|selected| order.iter().position(|index| *index == selected));
     let mut state = QueueRestore {
+        ids: (1..=entries.len() as u64).collect(),
         entries: entries.into(),
         order: order.into(),
         current_index,
@@ -232,10 +408,10 @@ pub(super) async fn migrate_saved(
     state.progress_millis = value["progress_millis"].as_i64().unwrap_or(0);
     state.repeat_mode = serde_json::from_value(value["repeat_mode"].clone())?;
     state.shuffled = value["shuffled"].as_bool().unwrap_or(false);
-    Ok(state)
+    Ok((state, occurrences))
 }
 
-impl SourceQuery {
+impl OrderedQuery {
     pub async fn members(
         mut self,
         connection: &mut SqliteConnection,
@@ -266,6 +442,11 @@ async fn source_members_on(
     source: &QueueSource,
     legacy_seed: Option<u64>,
 ) -> LibraryResult<Vec<(String, Option<String>, bool)>> {
+    let sort = if legacy_seed.is_some() {
+        crate::CatalogSort::Title
+    } else {
+        source.sort
+    };
     let mut query = match &source.scope {
         QueueScope::Smart { reference, now } => {
             let mut uris = smart_members_ref(
@@ -338,14 +519,21 @@ async fn source_members_on(
             } else {
                 None
             };
-            crate::tracks::track_query(
-                key,
-                source.sort,
-                source.descending,
-                *favorites_only,
-                folder,
-                &source.filter,
+            crate::query::compile_on(
+                connection,
+                &crate::CatalogQuery {
+                    subject: crate::CatalogSubject::Tracks {
+                        scope: crate::TrackScope::Tracks(key),
+                        sort: Some(sort),
+                    },
+                    folder,
+                    filter: source.filter.clone(),
+                    descending: source.descending,
+                    favorites_only: *favorites_only,
+                    ..crate::CatalogQuery::tracks(crate::TrackScope::Tracks(key))
+                },
             )
+            .await?
         }
         QueueScope::Collection {
             reference,
@@ -356,16 +544,19 @@ async fn source_members_on(
             else {
                 return Ok(Vec::new());
             };
-            crate::selection::song_query_on(
+            crate::query::compile_on(
                 connection,
-                &crate::SongQuery {
-                    scope: collection,
+                &crate::CatalogQuery {
+                    subject: crate::CatalogSubject::Tracks {
+                        scope: collection,
+                        sort: Some(sort),
+                    },
                     folder,
                     filter: source.filter.clone(),
-                    sort: Some(source.sort),
                     descending: source.descending,
                     favorites_only: *favorites_only,
                     downloaded_only: false,
+                    activity: false,
                 },
             )
             .await?
@@ -373,7 +564,7 @@ async fn source_members_on(
         QueueScope::Playlist {
             reference, sort, ..
         } => {
-            let Some((SongScope::Playlist(key), folder)) =
+            let Some((TrackScope::Playlist(key), folder)) =
                 resolve_collection_reference(connection, reference).await?
             else {
                 return Ok(Vec::new());
@@ -455,8 +646,8 @@ pub(crate) struct CollectionSourceReference {
 async fn resolve_collection_reference(
     connection: &mut SqliteConnection,
     reference: &CollectionSourceReference,
-) -> LibraryResult<Option<(crate::SongScope, Option<FolderKey>)>> {
-    use crate::SongScope as C;
+) -> LibraryResult<Option<(crate::TrackScope, Option<FolderKey>)>> {
+    use crate::TrackScope as C;
     let collection = match &reference.collection {
         CollectionIdentity::Album(uri) => {
             let Some(key) = sqlx::query_scalar::<_, AlbumKey>(
@@ -543,7 +734,7 @@ async fn smart_members_ref(
     reference: &SmartSourceReference,
     now: i64,
     filter: &str,
-    display_sort: Option<crate::TrackSort>,
+    display_sort: Option<crate::CatalogSort>,
     descending: bool,
 ) -> LibraryResult<Vec<String>> {
     let Some((key, source, folder)) = resolve_smart_reference(connection, reference).await? else {
@@ -608,7 +799,7 @@ mod tests {
             .unwrap();
         let mut writer = database.writer().await.unwrap();
         let connection = writer.as_mut().unwrap();
-        sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32)); INSERT INTO genres(genre_key,source_key,object_id,name,normalized_name,sort_text) VALUES(1,1,'genre','Genre','genre','genre'); INSERT INTO folders(folder_key,source_key,object_id,name,normalized_name,sort_text) VALUES(1,1,'folder','Folder','folder','folder');").execute(&mut *connection).await.unwrap();
+        sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32)); INSERT INTO genres(genre_key,source_key,object_id,media_uri,metadata) VALUES (1,1,'genre','genre:genre',jsonb(json_object('name','Genre','sort_text','genre'))); INSERT INTO folders(folder_key,source_key,object_id,media_uri,metadata) VALUES (1,1,'folder','folder:folder',jsonb(json_object('name','Folder','sort_text','folder')));").execute(&mut *connection).await.unwrap();
         let definition = crate::SmartPlaylistDefinition {
             current: true,
             ..crate::SmartPlaylistDefinition::default()
@@ -630,7 +821,7 @@ mod tests {
             },
             folder: Some((crate::SourceId::new("source"), "folder".into())),
         };
-        sqlx::raw_sql("DELETE FROM sources; UPDATE smart_playlists SET smart_playlist_key=500; INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (99,'source','Source','source',zeroblob(32)); INSERT INTO genres(genre_key,source_key,object_id,name,normalized_name,sort_text) VALUES(88,99,'genre','Genre','genre','genre'); INSERT INTO folders(folder_key,source_key,object_id,name,normalized_name,sort_text) VALUES(77,99,'folder','Folder','folder','folder');").execute(&mut *connection).await.unwrap();
+        sqlx::raw_sql("DELETE FROM sources; UPDATE smart_playlists SET smart_playlist_key=500; INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (99,'source','Source','source',zeroblob(32)); INSERT INTO genres(genre_key,source_key,object_id,media_uri,metadata) VALUES (88,99,'genre','genre:genre',jsonb(json_object('name','Genre','sort_text','genre'))); INSERT INTO folders(folder_key,source_key,object_id,media_uri,metadata) VALUES (77,99,'folder','folder:folder',jsonb(json_object('name','Folder','sort_text','folder')));").execute(&mut *connection).await.unwrap();
         let (key, source, folder) = resolve_smart_reference(connection, &smart)
             .await
             .unwrap()
@@ -643,7 +834,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(matches!(collection,crate::SongScope::Genre(key) if key.raw()==88));
+        assert!(matches!(collection,crate::TrackScope::Genre(key) if key.raw()==88));
         assert_eq!(folder.unwrap().raw(), 77);
         sqlx::query("DELETE FROM folders")
             .execute(&mut *connection)

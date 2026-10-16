@@ -1,4 +1,5 @@
 //! Shared track identity with device-owned files and encoding choices.
+use super::cache::CacheRequest;
 use super::*;
 use library::LocalMediaLocation;
 use std::{
@@ -22,6 +23,160 @@ struct OfferedMedia {
     revision: String,
     encoding: Encoding,
     size: u64,
+}
+
+impl ConnectOwner {
+    pub(super) async fn media_assets(
+        &self,
+        uri: &str,
+    ) -> Result<Option<library::LyricsCacheRow>, String> {
+        let Some(track) =
+            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(uri).to_string()])
+                .rows(&self.database, 0, 1, &library::ReadCancellation::new())
+                .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Tracks(mut rows) => rows.pop(),
+                    _ => unreachable!("typed catalog projection"),
+                })
+                .map_err(error)?
+        else {
+            return Ok(None);
+        };
+        if let Some(binding) = track.artwork_binding {
+            if let Err(error) = self.source.shared.artwork.cache_source(&binding).await {
+                tracing::warn!(%error, "Could not prepare transferred artwork");
+            }
+        }
+        let input = library::source_entity_parts(uri).map_or([0; 32], |(source, _, _)| {
+            self.source.source_input_digest(&source)
+        });
+        let cached = self
+            .database
+            .lyrics_cache_for_role(
+                uri,
+                "original",
+                "",
+                "",
+                input,
+                "source",
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .map_err(error)?
+            .and_then(|row| lyrics::LyricsBundle::from_cache_payload(&row.lyrics))
+            .and_then(lyrics::lyrics_with_displayable_content)
+            .filter(|bundle| {
+                bundle.origin == lyrics::LyricsOrigin::Native
+                    || bundle.origin == lyrics::LyricsOrigin::Local
+                        && library::cue_media_parts(uri).is_none()
+            });
+        let bundle = match cached {
+            Some(bundle) => Some(bundle),
+            None => match self.source.media_client(uri).await {
+                Ok(source) => source
+                    .cached_lyrics(&self.database, uri, input)
+                    .await
+                    .map_err(error)?,
+                Err(_) => sources::read_local_lyrics(
+                    &self.database,
+                    uri,
+                    Some(&track.metadata.title),
+                    &lyrics::UserPreferences::default(),
+                )
+                .await
+                .map_err(error)?
+                .and_then(lyrics::lyrics_with_displayable_content)
+                .map(|mut bundle| {
+                    bundle.origin = lyrics::LyricsOrigin::Native;
+                    bundle
+                }),
+            },
+        };
+        let Some(bundle) = bundle else {
+            return Ok(None);
+        };
+        let payload = bundle.cache_payload().map_err(error)?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |time| time.as_secs().min(i64::MAX as u64) as i64);
+        Ok(Some(library::LyricsCacheRow {
+            media_uri: uri.into(),
+            authority: "source".into(),
+            role: "original".into(),
+            language: String::new(),
+            script: String::new(),
+            cache_input_digest: input,
+            lyrics: payload,
+            updated_at: now,
+        }))
+    }
+
+    pub(super) async fn cache_transfer_assets(&self, peer: Option<&str>, uri: &str) {
+        let peers = peer.map(|peer| vec![peer.to_owned()]).unwrap_or_else(|| {
+            self.status()
+                .devices
+                .into_iter()
+                .filter(|peer| peer.enrolled && peer.reachable)
+                .map(|peer| peer.id)
+                .collect()
+        });
+        let result = async {
+            let mut peers = peers.into_iter().map(Some).collect::<Vec<_>>();
+            if peer.is_none() {
+                peers.insert(0, None);
+            }
+            for peer in peers {
+                let row = match peer {
+                    Some(peer) => self
+                        .request(
+                            &peer,
+                            Request::CacheFile {
+                                asset: CacheRequest::MediaAssets { uri: uri.into() },
+                            },
+                        )
+                        .await
+                        .and_then(|value| {
+                            serde_json::from_value::<Option<library::LyricsCacheRow>>(value)
+                                .map_err(error)
+                        }),
+                    None => self.media_assets(uri).await,
+                };
+                let row = match row {
+                    Ok(Some(row)) if row.media_uri == uri && row.authority == "source" => row,
+                    Ok(_) => continue,
+                    Err(error) => {
+                        tracing::debug!(%error, "Could not read accompanying lyrics");
+                        continue;
+                    }
+                };
+                let payload = row.lyrics;
+                let bundle = lyrics::LyricsBundle::from_cache_payload(&payload)
+                    .ok_or("Invalid transferred lyrics")?;
+                if !matches!(
+                    bundle.origin,
+                    lyrics::LyricsOrigin::Local | lyrics::LyricsOrigin::Native
+                ) {
+                    return Err("Transferred lyrics are not from the source".into());
+                }
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |time| time.as_secs().min(i64::MAX as u64) as i64);
+                let input = library::source_entity_parts(uri).map_or([0; 32], |(source, _, _)| {
+                    self.source.source_input_digest(&source)
+                });
+                self.database
+                    .write_lyrics_cache(uri, "source", "original", "", "", input, &payload, now)
+                    .await
+                    .map_err(error)?;
+                return Ok(());
+            }
+            Ok::<_, String>(())
+        }
+        .await;
+        if let Err(error) = result {
+            tracing::warn!(%error, "Could not download accompanying media");
+        }
+    }
 }
 
 fn revision(reference: &serde_json::Value) -> String {
@@ -858,8 +1013,13 @@ impl ConnectOwner {
             };
             let key = self
                 .database
-                .track_key_by_uri(uri, &library::ReadCancellation::new())
+                .catalog_identity(
+                    library::CatalogKind::Track,
+                    uri,
+                    &library::ReadCancellation::new(),
+                )
                 .await
+                .map(|identity| identity.map(|identity| library::TrackKey::from_raw(identity.key)))
                 .map_err(error)?;
             let entry = position
                 .and_then(|position| queue.order.get(position))
@@ -875,7 +1035,7 @@ impl ConnectOwner {
             let received = entry.received_from_connect;
             let item = self
                 .database
-                .queue_items_for_uris(&[uri.to_owned()], &library::ReadCancellation::new())
+                .track_references_for_uris(&[uri.to_owned()], &library::ReadCancellation::new())
                 .await
                 .map_err(error)?
                 .pop()
@@ -930,7 +1090,7 @@ impl ConnectOwner {
             };
             Some((
                 original,
-                serde_json::json!({"source_format":item.source_format,"revision":revision,"backing_id":backing}),
+                serde_json::json!({"source_format":item.metadata.source_format,"revision":revision,"backing_id":backing}),
             ))
         } else {
             None
@@ -1258,9 +1418,15 @@ impl ConnectOwner {
         {
             previous.cancel();
         }
-        let result = self
-            .fetch_media(peer, uri, self.status().settings.encoding, cancel)
+        let mut result = self
+            .fetch_media(peer, uri, self.status().settings.encoding, cancel.clone())
             .await;
+        if result.is_ok() {
+            tokio::select! {
+                _ = self.cache_transfer_assets(Some(peer), uri) => {},
+                _ = cancel.cancelled() => result = Err("Transfer cancelled".into()),
+            }
+        }
         self.download_cancel
             .lock()
             .unwrap_or_else(|p| p.into_inner())
@@ -1337,23 +1503,24 @@ impl ConnectOwner {
     pub(super) async fn fetch_direct_continuation(
         &self,
         peer: &str,
-        item: &library::QueueItem,
+        uri: &str,
+        metadata: &library::TrackMetadata,
         position: usize,
     ) -> Result<(), String> {
-        if raw_document_reference(&item.media_uri) {
+        if raw_document_reference(uri) {
             return Err("The source device did not provide a portable document identity".into());
         }
         let encoding = self.status().settings.encoding;
         let cancel = CancellationToken::new();
         let offer = self
-            .request_media(peer, &item.media_uri, encoding, &cancel, Some(position))
+            .request_media(peer, uri, encoding, &cancel, Some(position))
             .await
             .map_err(error)?;
         let destination = self.media_path(
-            &item.media_uri,
+            uri,
             &offer.revision,
             encoding,
-            item.source_format.as_deref(),
+            metadata.source_format.as_deref(),
         );
         let parent = destination.parent().ok_or("Media path has no parent")?;
         tokio::fs::create_dir_all(parent).await.map_err(error)?;
@@ -1361,22 +1528,25 @@ impl ConnectOwner {
             .map_err(error)?
             .into_temp_path();
         let receipt = self
-            .receive_media(peer, &item.media_uri, &staged, offer, cancel)
+            .receive_media(peer, uri, &staged, offer, cancel)
             .await?;
         let _files = self.media_files.lock().await;
         let destination = self.store_media(receipt, &destination).await?;
-        self.register_queue_access(item, &destination).await
+        self.register_queue_access(uri, metadata, &destination)
+            .await
     }
 
     async fn register_queue_access(
         &self,
-        item: &library::QueueItem,
+        uri: &str,
+        metadata: &library::TrackMetadata,
         location: &LocalMediaLocation,
     ) -> Result<(), String> {
+        let media_uri = uri;
         match location {
             LocalMediaLocation::File(path) => self
                 .database
-                .connect_set_queue_file(item, path)
+                .connect_set_queue_file(uri, metadata, path)
                 .await
                 .map_err(error),
             LocalMediaLocation::Document(uri) => {
@@ -1386,7 +1556,7 @@ impl ConnectOwner {
                     .map_err(error)?
                     .map_err(error)?;
                 self.database
-                    .connect_set_queue_document(item, uri, entry.size)
+                    .connect_set_queue_document(media_uri, metadata, uri, entry.size)
                     .await
                     .map_err(error)
             }
@@ -1479,7 +1649,7 @@ impl ConnectOwner {
         &self,
         occurrence: &library::QueueRow,
     ) -> Result<Option<LocalMediaLocation>, String> {
-        let uri = &occurrence.media_uri;
+        let uri = &occurrence.track.media_uri;
         let received = occurrence.received_from_connect;
         if received && raw_document_reference(uri) {
             return Err("The source device did not provide a portable document identity".into());
@@ -1500,8 +1670,12 @@ impl ConnectOwner {
             if let Some(location) = location(&receipt.path)
                 && let Some(location) = available_location(location).await?
             {
-                self.register_queue_access(&occurrence.item, &location)
-                    .await?;
+                self.register_queue_access(
+                    &occurrence.track.media_uri,
+                    &occurrence.track.metadata,
+                    &location,
+                )
+                .await?;
                 return Ok(Some(location));
             }
         }
@@ -1544,7 +1718,12 @@ impl ConnectOwner {
                     }
                     _ => {
                         match self
-                            .fetch_direct_continuation(&peer, &occurrence.item, occurrence.position)
+                            .fetch_direct_continuation(
+                                &peer,
+                                &occurrence.track.media_uri,
+                                &occurrence.track.metadata,
+                                occurrence.position,
+                            )
                             .await
                         {
                             Ok(()) => {
@@ -1642,10 +1821,11 @@ impl downloads::ConnectDownload for ConnectOwner {
             else {
                 return Ok(false);
             };
-            Ok(self
+            let reused = self
                 .reusable_media(uri, self.status().settings.encoding, &reference)
                 .await?
-                .is_some())
+                .is_some();
+            Ok(reused)
         })
     }
 
@@ -1807,6 +1987,10 @@ impl ConnectOwner {
                 copy = tokio::fs::copy(path, partial) => { copy.map_err(|error|SourceError::Other(error.to_string()))?; },
                 _ = cancel.cancelled() => return Err(SourceError::Cancelled),
             }
+            tokio::select! {
+                _ = self.cache_transfer_assets(None, uri) => {},
+                _ = cancel.cancelled() => return Err(SourceError::Cancelled),
+            }
             return Ok(library::ConnectMediaFile {
                 media_uri: uri.into(),
                 encoding: encoding.name().into(),
@@ -1845,10 +2029,15 @@ impl ConnectOwner {
                 }
                 Err(_) => return Err(SourceError::Cancelled),
             };
-            return self
-                .receive_media(&peer, uri, partial, offer, cancel)
+            let received = self
+                .receive_media(&peer, uri, partial, offer, cancel.clone())
                 .await
-                .map_err(SourceError::Network);
+                .map_err(SourceError::Network)?;
+            tokio::select! {
+                _ = self.cache_transfer_assets(Some(&peer), uri) => {},
+                _ = cancel.cancelled() => return Err(SourceError::Cancelled),
+            }
+            return Ok(received);
         }
         Err(unavailable.unwrap_or_else(|| {
             if missing {

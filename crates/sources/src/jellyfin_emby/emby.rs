@@ -252,6 +252,14 @@ mod tests {
         assert!(configuration.playlist_tracks_can_repeat());
         let identity = configuration.input_identity().unwrap();
         let source = super::super::open(&configuration, credential, Some("device".into())).unwrap();
+        let owner = crate::Source::new(
+            crate::SourceId::new("source"),
+            crate::source::Implementation::JellyfinEmby(source),
+        );
+        let crate::source::Implementation::JellyfinEmby(source) = &owner.implementation else {
+            unreachable!()
+        };
+
         assert_eq!(configuration.input_identity().unwrap(), identity);
         let album = json!({"Id":"10","Type":"MusicAlbum","Name":"Album","AlbumArtists":[{"Id":"artist","Name":"Artist"}],"GenreItems":[{"Id":"genre","Name":"Genre"}]});
         let track = json!({"Id":"11","Type":"Audio","Name":"Song","AlbumId":"10","Album":"Album","AlbumArtists":[{"Id":"artist","Name":"Artist"}],"ArtistItems":[{"Id":"artist","Name":"Artist"}],"GenreItems":[{"Id":"genre","Name":"Genre"}],"UserData":{"LastPlayedDate":"2026-01-01T00:00:00Z","Rating":7},"ParentBackdropItemId":"10","ParentBackdropImageTags":["cover"]});
@@ -296,43 +304,75 @@ mod tests {
         let database = library::Database::open(root.path().join("library.sqlite"))
             .await
             .unwrap();
-        let mut scan = library::Scan::begin(&database, "source", "Music", "music", None)
+        database
+            .reconcile_source(&library::SourceId::new("source"), "music", "Music")
             .await
             .unwrap();
+        let catalog_source_id = ("source").to_string();
+        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+        catalog.start_observation().await.unwrap();
+
         source
-            .stage_catalog(&mut scan, &|_| {}, &|| false)
+            .acquire_catalog(&mut catalog, &|_| {}, &|| false)
             .await
             .unwrap();
-        scan.finish().await.unwrap();
+        {
+            database
+                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+                .await;
+            Ok::<_, crate::SourceError>(())
+        }
+        .unwrap();
         let uri = library::source_entity_uri(&SourceId::new("source"), "track", "emby:track:11");
-        let track = database
-            .track_row_by_uri(&uri, &library::ReadCancellation::new())
-            .await
-            .unwrap()
-            .unwrap();
+        let track =
+            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
+                .rows(&database, 0, 256, &library::ReadCancellation::new())
+                .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+                    _ => unreachable!(),
+                })
+                .unwrap()
+                .unwrap();
         assert_eq!(track.object_id.as_deref(), Some("emby:track:11"));
-        assert_eq!(track.rating, Some(7));
-        assert!(track.last_played.is_some());
+        assert_eq!(track.state.rating, Some(7));
+        assert!(track.state.last_played.is_some());
         database
             .set_rating(&library::FavoriteTarget::Track(uri.clone()), Some(9))
             .await
             .unwrap();
         source.set_rating("emby:track:11", Some(9)).await.unwrap();
-        let mut scan = library::Scan::begin(&database, "source", "Music", "music", None)
+        database
+            .reconcile_source(&library::SourceId::new("source"), "music", "Music")
             .await
             .unwrap();
+        let catalog_source_id = ("source").to_string();
+        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+        catalog.start_observation().await.unwrap();
+
         source
-            .stage_catalog(&mut scan, &|_| {}, &|| false)
+            .acquire_catalog(&mut catalog, &|_| {}, &|| false)
             .await
             .unwrap();
-        scan.finish().await.unwrap();
-        let rated = database
-            .track_row_by_uri(&uri, &library::ReadCancellation::new())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(rated.rating, Some(9));
-        assert_eq!(rated.last_played, track.last_played);
+        {
+            database
+                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+                .await;
+            Ok::<_, crate::SourceError>(())
+        }
+        .unwrap();
+        let rated =
+            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
+                .rows(&database, 0, 256, &library::ReadCancellation::new())
+                .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+                    _ => unreachable!(),
+                })
+                .unwrap()
+                .unwrap();
+        assert_eq!(rated.state.rating, Some(9));
+        assert_eq!(rated.state.last_played, track.state.last_played);
         let requests = server.received_requests().await.unwrap();
         assert!(
             !requests

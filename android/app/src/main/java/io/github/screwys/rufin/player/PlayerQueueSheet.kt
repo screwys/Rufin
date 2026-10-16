@@ -32,17 +32,15 @@ import androidx.compose.ui.zIndex
 import io.github.screwys.rufin.shared.rufin_core.PreparedQueuePage
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.browse.*
-import io.github.screwys.rufin.shared.library.QueuePageRow
+import io.github.screwys.rufin.shared.library.QueueRow
 import io.github.screwys.rufin.core.trackCountText
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.browse.BrowseItem
 import io.github.screwys.rufin.browse.BrowseMenuSheet
 import io.github.screwys.rufin.browse.PlaylistPickerSheet
 import io.github.screwys.rufin.browse.PlaylistCreateSheet
-import io.github.screwys.rufin.browse.CompactMediaMenuHeader
 import io.github.screwys.rufin.ui.PlayingIndicator
 import io.github.screwys.rufin.ui.rufinMarquee
-import io.github.screwys.rufin.browse.MediaMenuBackdrop
 import io.github.screwys.rufin.metadata.MetadataEditorScreen
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.settings.LocalTranslationRevision
@@ -76,8 +74,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
     var search by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("") }
     var pages by remember { mutableStateOf<Map<Int, PreparedQueuePage>>(emptyMap()) }
-    var selected by remember { mutableStateOf<QueuePageRow?>(null) }
-    var menu by remember { mutableStateOf<Pair<QueuePageRow, BrowseItem>?>(null) }
+    var menu by remember { mutableStateOf<Pair<QueueRow, BrowseItem>?>(null) }
     var playlist by remember { mutableStateOf<BrowseItem?>(null) }
     var metadataEditor by remember { mutableStateOf<BrowseItem?>(null) }
     var create by remember { mutableStateOf(false) }
@@ -88,7 +85,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
     var dragTop by remember { mutableFloatStateOf(0f) }
     var dragHeight by remember { mutableIntStateOf(0) }
     var dragDistance by remember { mutableFloatStateOf(0f) }
-    var dragRow by remember { mutableStateOf<QueuePageRow?>(null) }
+    var dragRow by remember { mutableStateOf<QueueRow?>(null) }
     var released by remember { mutableStateOf<ULong?>(null) }
     val releaseOffset = remember { Animatable(0f) }
     var dragScroll by remember { mutableFloatStateOf(0f) }
@@ -100,7 +97,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
         dragRow != null && dragIndex < dragOrigin && index in dragIndex + 1..dragOrigin -> index - 1
         else -> index
     }
-    fun rowAt(index: Int): QueuePageRow? {
+    fun rowAt(index: Int): QueueRow? {
         if (dragRow != null && index == dragIndex) return dragRow
         val original = originalIndex(index)
         return pages[original / 80 * 80]?.rows?.getOrNull(original % 80)
@@ -119,15 +116,8 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
         }
     }
     fun close() { scope.launch { sheet.hide(); onDismiss() } }
-    fun openMenu(row: QueuePageRow) {
-        scope.launch {
-            try {
-                val facts = player.model.browse.library?.trackItem(row.entry.item().mediaUri)
-                if (facts != null) menu = row to BrowseItem(facts, 0UL, null)
-                else selected = row
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { player.reportError(error); selected = row }
-        }
+    fun openMenu(row: QueueRow) {
+        player.model.browse.library?.trackItem(row.track())?.let { menu = row to BrowseItem(it, 0UL, null) }
     }
     LaunchedEffect(search) { delay(200); filter = search }
     LaunchedEffect(player, player.bridge, revision, output, filter, dragged == null) {
@@ -171,7 +161,7 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
     fun finishDrag() {
         val id = dragged
         val after = dragIndex > dragOrigin
-        val target = rowAt(dragIndex + if (after) -1 else 1)?.entry?.position()
+        val target = rowAt(dragIndex + if (after) -1 else 1)?.position()
         val top = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == id?.toLong() }?.offset ?: 0
         val offset = dragTop + dragDistance - top
         val moved = dragOrigin != dragIndex
@@ -211,12 +201,12 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
                 verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 if (first == null) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
                 else if (count == 0) item { Text(translate("Your queue is empty."), Modifier.padding(24.dp)) }
-                items(count, key = { index -> rowAt(index)?.entry?.position()?.toLong() ?: "queue:$index" }) { index ->
+                items(count, key = { index -> rowAt(index)?.position()?.toLong() ?: "queue:$index" }) { index ->
                     val row = rowAt(index)
                     if (row == null) Spacer(Modifier.height(72.dp))
                     else {
-                        val position = remember(row) { row.entry.position() }
-                        val metadata = remember(row) { row.entry.item() }
+                        val position = remember(row) { row.position() }
+                        val metadata = remember(row) { row.track().metadata }
                         val isDragging = dragged == position && released != position
                         val isReleased = released == position
                         val placement = if (reduceMotion || isDragging || isReleased) Modifier
@@ -316,42 +306,14 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
             create = false
         }
     }
-    selected?.let { row ->
-        ModalBottomSheet(onDismissRequest = { selected = null }, containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            dragHandle = null, sheetState = rememberModalBottomSheetState()) {
-            val favorite = player.projectedFavorite(row.entry.item().mediaUri, row.favorite)
-            val toggleFavorite: () -> Unit = {
-                scope.launch {
-                    try {
-                        val requested = !favorite
-                        val result = player.queueFavorite(row.entry.item().mediaUri, requested)
-                        if (result != null && selected?.entry?.position() == row.entry.position() && selected?.entry?.item()?.mediaUri == row.entry.item().mediaUri &&
-                            player.projectedFavorite(row.entry.item().mediaUri, requested) == requested)
-                            selected = selected?.copy(favorite = result)
-                    }
-                    catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { player.reportError(error) }
-                }
-            }
-            MediaMenuBackdrop(row.entry.item().artworkBinding, player) {
-                Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing).padding(vertical = 8.dp)) {
-                    BottomSheetDefaults.DragHandle(Modifier.align(Alignment.CenterHorizontally))
-                    CompactMediaMenuHeader(row.entry.item().artworkBinding, listOf(row.entry.item().artist, row.entry.item().album).filter(String::isNotBlank).joinToString(" · "),
-                        favorite, player, toggleFavorite) { Text(row.entry.item().title, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1, style = MaterialTheme.typography.bodyLarge) }
-                    QueueSheetAction("rufin-media-playback-start-symbolic", "Play") { player.activateQueue(row.entry.position()); selected = null; close() }
-                    QueueSheetAction("rufin-user-trash-symbolic", "Remove from Queue") { player.removeQueue(row.entry.position()); selected = null }
-                }
-            }
-        }
-    }
     menu?.let { (row, item) ->
         BrowseMenuSheet(player.model, player.model.browse, item, player, { menu = null },
             { playlist = item; menu = null }, { metadataEditor = item; menu = null },
-            onRemove = { player.removeQueue(row.entry.position()); menu = null },
+            onRemove = { player.removeQueue(row.position()); menu = null },
             onNavigate = { route, title, source -> menu = null; close(); onNavigate(route, title, source) },
             onPlayNow = { shuffled -> player.model.runAction {
                 if (shuffled) withContext(Dispatchers.IO) { player.service?.setShuffle(true) }
-                player.activateQueue(row.entry.position()); close()
+                player.activateQueue(row.position()); close()
             } })
     }
     playlist?.let { item -> PlaylistPickerSheet(player.model, player.model.browse, item, player) { playlist = null } }
@@ -359,18 +321,11 @@ internal fun PlayerQueueSheet(player: PlayerConnection, preferences: Preferences
 }
 
 @Composable
-private fun QueueSheetCover(row: QueuePageRow, player: PlayerConnection) {
+private fun QueueSheetCover(row: QueueRow, player: PlayerConnection) {
     val pixels = with(LocalDensity.current) { 48.dp.roundToPx() }
-    val identity = remember(row) { row.entry.item().artworkBinding }
+    val identity = remember(row) { row.track().artworkBinding }
     val artwork = rememberArtwork(identity, player, pixels)
     Box(Modifier.size(48.dp)) {
         Artwork(artwork, Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)))
     }
-}
-
-@Composable
-private fun QueueSheetAction(icon: String, label: String, action: () -> Unit) {
-    ListItem(headlineContent = { Text(translate(label)) }, leadingContent = { RufinIcon(icon, null, Modifier.size(24.dp)) },
-        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        modifier = Modifier.clickable(onClick = action))
 }

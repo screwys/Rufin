@@ -1,4 +1,4 @@
-use library::{AlbumRow, ArtistRow};
+use library::{AlbumView, ArtistView};
 use localization::msgid;
 
 use crate::settings::ExternalSiteLinkSettings;
@@ -39,14 +39,14 @@ pub fn source_link(source: &sources::SourceConfiguration, media_uri: &str) -> Op
 pub fn album_external_links(
     settings: &ExternalSiteLinkSettings,
     source: Option<&sources::SourceConfiguration>,
-    album: &AlbumRow,
+    album: &AlbumView,
 ) -> Vec<DetailLink> {
     if !settings.enabled {
         return Vec::new();
     }
     let mut links = Vec::new();
     if settings.lastfm
-        && let Some(url) = lastfm_album_url(&album.display_artist, &album.title)
+        && let Some(url) = lastfm_album_url(&album.metadata.artist, &album.metadata.title)
     {
         links.push(DetailLink {
             title: msgid("Open on Last.fm"),
@@ -75,14 +75,14 @@ pub fn album_external_links(
 pub fn artist_external_links(
     settings: &ExternalSiteLinkSettings,
     source: Option<&sources::SourceConfiguration>,
-    artist: &ArtistRow,
+    artist: &ArtistView,
 ) -> Vec<DetailLink> {
     if !settings.enabled {
         return Vec::new();
     }
     let mut links = Vec::new();
     if settings.lastfm
-        && let Some(url) = lastfm_artist_url(&artist.name)
+        && let Some(url) = lastfm_artist_url(&artist.metadata.name)
     {
         links.push(DetailLink {
             title: msgid("Open on Last.fm"),
@@ -126,8 +126,9 @@ fn lastfm_artist_url(artist: &str) -> Option<String> {
     ))
 }
 
-fn musicbrainz_album_url(album: &AlbumRow) -> Option<String> {
+fn musicbrainz_album_url(album: &AlbumView) -> Option<String> {
     if let Some(group_id) = album
+        .metadata
         .musicbrainz_release_group_id
         .as_deref()
         .and_then(clean_url_label)
@@ -135,14 +136,16 @@ fn musicbrainz_album_url(album: &AlbumRow) -> Option<String> {
         return Some(format!("https://musicbrainz.org/release-group/{group_id}"));
     }
     let release_id = album
+        .metadata
         .musicbrainz_release_id
         .as_deref()
         .and_then(clean_url_label)?;
     Some(format!("https://musicbrainz.org/release/{release_id}"))
 }
 
-fn musicbrainz_artist_url(artist: &ArtistRow) -> Option<String> {
+fn musicbrainz_artist_url(artist: &ArtistView) -> Option<String> {
     let artist_id = artist
+        .metadata
         .musicbrainz_artist_id
         .as_deref()
         .and_then(clean_url_label)?;

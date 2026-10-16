@@ -13,8 +13,8 @@ use rufin_core::settings::app::Settings as UiSettings;
 use crate::settings::SettingsState;
 
 pub const THUMB_COVER_SIZE: u32 = 96;
-pub const MEDIUM_COVER_SIZE: u32 = 256;
-pub const LARGE_COVER_SIZE: u32 = 512;
+const MEDIUM_COVER_SIZE: u32 = 256;
+const LARGE_COVER_SIZE: u32 = 512;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlaybackArtworkPath {
     pub path: PathBuf,
@@ -30,32 +30,32 @@ pub use cover_group::CoverGroupProjection;
 use texture_cache::TextureCache;
 pub use tile::{ArtworkTile, ArtworkTileWeak};
 
-pub fn cover_decode_size(display_size: i32, fetch_size: u32, scale: f64) -> u32 {
+pub fn cover_decode_size(display_size: i32, scale: f64) -> u32 {
     let display_size = f64::from(display_size.max(1));
     let scale = if scale.is_finite() {
         scale.max(1.0)
     } else {
         1.0
     };
-    let scaled = (display_size * scale).ceil().min(f64::from(u32::MAX)) as u32;
-    scaled.min(fetch_size.max(1))
+    (display_size * scale).ceil().min(f64::from(u32::MAX)) as u32
 }
 
-pub fn cover_fetch_size_for_display(display_size: i32) -> u32 {
+fn cover_fetch_size_for_display(display_size: i32) -> u32 {
     if display_size <= THUMB_COVER_SIZE as i32 {
         THUMB_COVER_SIZE
     } else if display_size <= MEDIUM_COVER_SIZE as i32 {
         MEDIUM_COVER_SIZE
-    } else {
+    } else if display_size <= LARGE_COVER_SIZE as i32 {
         LARGE_COVER_SIZE
+    } else {
+        display_size as u32
     }
 }
 
-fn cover_request_sizes(display_size: i32, fetch_size_cap: u32, scale: f64) -> (u32, u32) {
-    let fetch_size_cap = fetch_size_cap.max(1);
-    let render_size = cover_decode_size(display_size, fetch_size_cap, scale);
+fn cover_request_sizes(display_size: i32, scale: f64) -> (u32, u32) {
+    let render_size = cover_decode_size(display_size, scale);
     let fetch_size = cover_fetch_size_for_display(render_size as i32);
-    (fetch_size.min(fetch_size_cap), render_size)
+    (fetch_size, render_size)
 }
 
 pub struct ArtworkState {
@@ -93,9 +93,8 @@ impl ArtworkState {
         tile: &ArtworkTile,
         artwork: ArtworkBinding,
         render_size: i32,
-        fetch_size: u32,
     ) {
-        self.bind_artwork_tile_request(tile, artwork, render_size, fetch_size, false, false);
+        self.bind_artwork_tile_request(tile, artwork, render_size, false, false);
     }
 
     pub fn bind_cache_only_artwork_tile(
@@ -103,9 +102,8 @@ impl ArtworkState {
         tile: &ArtworkTile,
         artwork: ArtworkBinding,
         render_size: i32,
-        fetch_size: u32,
     ) {
-        self.bind_artwork_tile_request(tile, artwork, render_size, fetch_size, false, true);
+        self.bind_artwork_tile_request(tile, artwork, render_size, false, true);
     }
 
     pub fn bind_playback_artwork_tile(
@@ -113,9 +111,8 @@ impl ArtworkState {
         tile: &ArtworkTile,
         artwork: ArtworkBinding,
         render_size: i32,
-        fetch_size: u32,
     ) {
-        self.bind_artwork_tile_request(tile, artwork, render_size, fetch_size, true, false);
+        self.bind_artwork_tile_request(tile, artwork, render_size, true, false);
     }
 
     fn bind_artwork_tile_request(
@@ -123,7 +120,6 @@ impl ArtworkState {
         tile: &ArtworkTile,
         artwork: ArtworkBinding,
         render_size: i32,
-        fetch_size_cap: u32,
         refresh_desktop_on_ready: bool,
         cache_only: bool,
     ) {
@@ -133,8 +129,8 @@ impl ArtworkState {
             tile.bind_missing();
             return;
         }
-        let (fetch_size, render_size) =
-            cover_request_sizes(render_size, fetch_size_cap, self.artwork_scale());
+        let display_size = render_size;
+        let (fetch_size, render_size) = cover_request_sizes(render_size, self.artwork_scale());
         let external = if cache_only {
             cache_only_artwork_external_policy()
         } else {
@@ -152,7 +148,13 @@ impl ArtworkState {
             request
         };
         let key = self.service.key(&request);
-        tile.bind_artwork_request(Rc::downgrade(self), key, request, refresh_desktop_on_ready);
+        tile.bind_artwork_request(
+            Rc::downgrade(self),
+            key,
+            request,
+            refresh_desktop_on_ready,
+            display_size,
+        );
     }
 
     fn load_artwork_tile(
@@ -163,6 +165,13 @@ impl ArtworkState {
         request: ArtworkRequest,
     ) {
         let key = self.service.key(&request);
+        if !refresh_desktop_on_ready {
+            let texture = self.textures.borrow_mut().cached_texture(&key);
+            if let Some(texture) = texture {
+                tile.set_texture_if_current(generation, texture);
+                return;
+            }
+        }
         if refresh_desktop_on_ready {
             let existing =
                 self.animations
@@ -176,40 +185,24 @@ impl ArtworkState {
             }
         }
         let immediate = refresh_desktop_on_ready || request.cache_only;
-        let pending = if immediate {
-            match self.service.load(request.clone()) {
-                artwork::ArtworkLoad::Pending(pending) => Some(pending),
-                artwork::ArtworkLoad::Ready(image) => {
-                    self.apply_artwork(
-                        tile,
-                        generation,
-                        artwork::ArtworkOutcome::Ready(image),
-                        refresh_desktop_on_ready,
-                    );
-                    return;
-                }
-                artwork::ArtworkLoad::Missing => {
-                    self.apply_artwork(
-                        tile,
-                        generation,
-                        artwork::ArtworkOutcome::Missing,
-                        refresh_desktop_on_ready,
-                    );
-                    return;
-                }
-            }
-        } else {
-            None
-        };
-        let preview = refresh_desktop_on_ready.then(|| {
-            ArtworkRequest::new(
-                request.binding.clone(),
-                MEDIUM_COVER_SIZE,
-                request.render_size.min(MEDIUM_COVER_SIZE),
-            )
-            .with_external(request.external.clone())
-            .cache_only()
-        });
+        let load = immediate.then(|| self.service.load(request.clone()));
+        if let Some(artwork::ArtworkLoad::Ready(image)) = load.as_ref() {
+            self.apply_artwork(
+                tile,
+                generation,
+                artwork::ArtworkOutcome::Ready(Arc::clone(image)),
+                refresh_desktop_on_ready,
+            );
+            return;
+        }
+        if let Some(preview) = self
+            .service
+            .preview(request.binding.clone(), request.external.allow_cached)
+            && let Some(texture) = texture_cache::texture_from_preview(preview.image.clone())
+        {
+            tile.set_preview_if_current(generation, texture);
+        }
+        let service = self.service.clone();
         let tile_weak = tile.downgrade();
         let shell = Rc::downgrade(self);
         // Let GTK allocation unmap offscreen pooled rows before starting their cover work.
@@ -221,71 +214,38 @@ impl ArtworkState {
         let request = glib::MainContext::ref_thread_default().spawn_local_with_priority(
             priority,
             async move {
-                let load = if let Some(pending) = pending {
-                    artwork::ArtworkLoad::Pending(pending)
+                let load = if let Some(load) = load {
+                    load
                 } else {
-                    let (Some(tile), Some(shell)) = (tile_weak.upgrade(), shell.upgrade()) else {
+                    let Some(tile) = tile_weak.upgrade() else {
                         return;
                     };
                     if !tile.generation_is_current(generation) || !tile.area.is_mapped() {
                         return;
                     }
-                    shell.service.load(request)
+                    service.load(request)
                 };
-                let (outcome, preview_shown) = match load {
-                    artwork::ArtworkLoad::Ready(image) => {
-                        (artwork::ArtworkOutcome::Ready(image), false)
-                    }
-                    artwork::ArtworkLoad::Missing => (artwork::ArtworkOutcome::Missing, false),
-                    artwork::ArtworkLoad::Pending(pending) => {
-                        let preview = preview.and_then(|request| {
-                            let shell = shell.upgrade()?;
-                            shell
-                                .service
-                                .cache_only_file(&request)
-                                .map(|_| shell.service.load(request))
-                        });
-                        let preview = match preview {
-                            Some(artwork::ArtworkLoad::Ready(loaded)) => Some(loaded),
-                            Some(artwork::ArtworkLoad::Pending(preview)) => {
-                                match preview.finish().await {
-                                    artwork::ArtworkOutcome::Ready(loaded) => Some(loaded),
-                                    _ => None,
-                                }
-                            }
-                            _ => None,
-                        };
-                        let shown = preview.is_some_and(|loaded| {
-                            let (Some(tile), Some(shell)) = (tile_weak.upgrade(), shell.upgrade())
-                            else {
-                                return false;
-                            };
-                            shell.texture_for_decoded(loaded).is_some_and(|texture| {
-                                tile.set_preview_if_current(generation, texture)
-                            })
-                        });
-                        if shown && let Some(shell) = shell.upgrade() {
-                            (shell.playback_ready)();
-                        }
-                        (pending.finish().await, shown)
-                    }
+                let outcome = match load {
+                    artwork::ArtworkLoad::Ready(image) => artwork::ArtworkOutcome::Ready(image),
+                    artwork::ArtworkLoad::Missing => artwork::ArtworkOutcome::Missing,
+                    artwork::ArtworkLoad::Pending(pending) => pending.finish().await,
                 };
                 let (Some(tile), Some(shell)) = (tile_weak.upgrade(), shell.upgrade()) else {
                     return;
                 };
-                let ready = if preview_shown
+                if tile.has_preview(generation)
                     && matches!(
                         outcome,
                         artwork::ArtworkOutcome::Missing | artwork::ArtworkOutcome::Failed(_)
-                    ) {
+                    )
+                {
                     if let artwork::ArtworkOutcome::Failed(error) = outcome {
-                        warn!(%error, "original cover request failed");
+                        warn!(%error, "cover request failed");
                     }
-                    tile.complete_preview_if_current(generation);
-                    false
-                } else {
-                    shell.apply_artwork(&tile, generation, outcome, refresh_desktop_on_ready)
-                };
+                    return;
+                }
+                let ready =
+                    shell.apply_artwork(&tile, generation, outcome, refresh_desktop_on_ready);
                 if ready && refresh_desktop_on_ready {
                     (shell.playback_ready)();
                 }
@@ -351,13 +311,11 @@ impl ArtworkState {
         &self,
         binding: ArtworkBinding,
         display_size: i32,
-        fetch_size_cap: u32,
     ) -> Option<gtk::gdk::Texture> {
         if binding.stable_identity().is_empty() {
             return None;
         }
-        let (fetch_size, render_size) =
-            cover_request_sizes(display_size, fetch_size_cap, self.artwork_scale());
+        let (fetch_size, render_size) = cover_request_sizes(display_size, self.artwork_scale());
         let request = ArtworkRequest::new(binding, fetch_size, render_size)
             .with_external(artwork_external_policy(&self.settings.current.borrow()));
         let outcome = match self.service.load(request) {
@@ -385,6 +343,8 @@ impl ArtworkState {
         preferred_size: u32,
     ) -> Option<PlaybackArtworkPath> {
         let candidates = media
+            .row
+            .track
             .artwork_binding
             .as_deref()
             .map(ArtworkBinding::opaque)
@@ -412,27 +372,16 @@ fn cache_only_artwork_external_policy() -> artwork::ExternalPolicy {
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_only_artwork_external_policy, cover_decode_size, cover_request_sizes};
-
-    #[test]
-    fn cover_decode_size_uses_the_surface_scale_without_exceeding_the_fetch_size() {
-        assert_eq!(cover_decode_size(48, 96, 1.0), 48);
-        assert_eq!(cover_decode_size(48, 96, 1.25), 60);
-        assert_eq!(cover_decode_size(48, 96, 1.5), 72);
-        assert_eq!(cover_decode_size(48, 96, 1.75), 84);
-        assert_eq!(cover_decode_size(48, 96, 2.0), 96);
-        assert_eq!(cover_decode_size(160, 256, 2.0), 256);
-        assert_eq!(cover_decode_size(512, 256, 1.0), 256);
-    }
+    use super::{cache_only_artwork_external_policy, cover_request_sizes};
 
     #[test]
     fn artwork_requests_use_physical_size_and_canonical_fetch_tiers() {
-        assert_eq!(cover_request_sizes(200, 512, 1.0), (256, 200));
-        assert_eq!(cover_request_sizes(200, 512, 1.25), (256, 250));
-        assert_eq!(cover_request_sizes(200, 512, 1.5), (512, 300));
-        assert_eq!(cover_request_sizes(200, 512, 2.0), (512, 400));
-        assert_eq!(cover_request_sizes(200, 256, 2.0), (256, 256));
-        assert_eq!(cover_request_sizes(48, 96, 2.0), (96, 96));
+        assert_eq!(cover_request_sizes(200, 1.0), (256, 200));
+        assert_eq!(cover_request_sizes(200, 1.25), (256, 250));
+        assert_eq!(cover_request_sizes(200, 1.5), (512, 300));
+        assert_eq!(cover_request_sizes(200, 2.0), (512, 400));
+        assert_eq!(cover_request_sizes(512, 2.0), (1024, 1024));
+        assert_eq!(cover_request_sizes(48, 2.0), (96, 96));
     }
 
     #[test]

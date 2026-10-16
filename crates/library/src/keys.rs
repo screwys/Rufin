@@ -35,7 +35,10 @@ impl fmt::Display for SourceId {
 }
 
 pub fn source_entity_uri(source: &SourceId, entity_kind: &str, object_id: &str) -> String {
-    debug_assert!(matches!(entity_kind, "track" | "album" | "artist"));
+    debug_assert!(matches!(
+        entity_kind,
+        "track" | "album" | "artist" | "genre" | "mood" | "folder"
+    ));
     format!(
         "{}{}",
         source_entity_prefix(source, entity_kind),
@@ -44,7 +47,10 @@ pub fn source_entity_uri(source: &SourceId, entity_kind: &str, object_id: &str) 
 }
 
 pub(crate) fn source_entity_prefix(source: &SourceId, entity_kind: &str) -> String {
-    debug_assert!(matches!(entity_kind, "track" | "album" | "artist"));
+    debug_assert!(matches!(
+        entity_kind,
+        "track" | "album" | "artist" | "genre" | "mood" | "folder"
+    ));
     format!("rufin:source/{entity_kind}/{}/", encode(source.as_str()))
 }
 
@@ -101,10 +107,7 @@ pub fn normalize_direct_media_uri(uri: &str) -> Option<String> {
     if parsed.scheme() == "content" {
         return Some(uri.to_owned());
     }
-    if !matches!(parsed.scheme(), "file" | "http" | "https")
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-    {
+    if !matches!(parsed.scheme(), "file" | "http" | "https") {
         return None;
     }
     parsed.set_fragment(None);
@@ -255,12 +258,17 @@ mod tests {
     }
 
     #[test]
-    fn direct_identity_rejects_credentials_and_normalizes_paths() {
+    fn direct_identity_preserves_authentication_and_normalizes_paths() {
         assert_eq!(
             normalize_direct_media_uri("https://example.test/a/../song.flac#fragment").as_deref(),
             Some("https://example.test/song.flac")
         );
-        assert!(normalize_direct_media_uri("https://user:secret@example.test/song").is_none());
+        for uri in [
+            "https://user:secret@example.test/song",
+            "https://example.test/song?token=secret&signature=abc%2Bdef&token=other",
+        ] {
+            assert_eq!(normalize_direct_media_uri(uri).as_deref(), Some(uri));
+        }
     }
 
     #[test]

@@ -5,7 +5,8 @@ use artwork::ArtworkBinding;
 use gtk::glib;
 use playback::{CurrentMediaId, PlaybackView, RemoteOutput};
 
-use gtk_widgets::detail_links::DetailLinks;
+use gtk_widgets::detail_links::{DetailLinks, track_artist_links};
+use gtk_widgets::route::Route;
 use localization::tr;
 use rufin_core::settings::presentation::now_playing_labels;
 
@@ -36,18 +37,33 @@ impl NowPlayingPresentation {
     pub fn new(player: Option<&PlaybackView>) -> Self {
         let current = player.and_then(|player| player.transport.current.as_ref());
         let title = current
-            .map(|entry| entry.title.clone())
+            .map(|entry| entry.row.track.metadata.title.clone())
             .unwrap_or_else(|| tr("Nothing playing"));
         let artist = current
-            .map(|entry| entry.artist.clone())
+            .map(|entry| entry.row.track.metadata.artist.clone())
             .unwrap_or_else(|| tr("Queue a track to begin"));
-        let album = current.map(|entry| entry.album.clone()).unwrap_or_default();
+        let album = current
+            .map(|entry| entry.row.track.metadata.album.clone())
+            .unwrap_or_default();
         Self {
             current: current.is_some(),
-            artist_links: DetailLinks::text(&artist),
-            album_links: DetailLinks::text(&album),
+            artist_links: current
+                .map(|current| track_artist_links(&current.row.track))
+                .unwrap_or_else(|| DetailLinks::text(&artist)),
+            album_links: DetailLinks::route(
+                &album,
+                current.and_then(|current| {
+                    current
+                        .row
+                        .track
+                        .links
+                        .album_media_uri
+                        .clone()
+                        .map(Route::AlbumDetail)
+                }),
+            ),
             artwork: current
-                .and_then(|entry| entry.artwork_binding.as_deref())
+                .and_then(|entry| entry.row.track.artwork_binding.as_deref())
                 .map(ArtworkBinding::opaque)
                 .unwrap_or_default(),
             meta: now_playing_labels(current, None),
@@ -58,12 +74,12 @@ impl NowPlayingPresentation {
     }
 }
 
-pub fn current_playback_track(player: Option<&PlaybackView>) -> Option<playback::QueueItem> {
+pub fn current_playback_track(player: Option<&PlaybackView>) -> Option<library::TrackView> {
     player?
         .transport
         .current
         .as_ref()
-        .map(|entry| entry.item.clone())
+        .map(|entry| entry.row.track.clone())
 }
 
 pub fn current_playback_track_id(player: Option<&PlaybackView>) -> Option<String> {
@@ -71,7 +87,7 @@ pub fn current_playback_track_id(player: Option<&PlaybackView>) -> Option<String
         .transport
         .current
         .as_ref()
-        .map(|entry| entry.media_uri.clone())
+        .map(|entry| entry.row.track.media_uri.clone())
 }
 
 pub fn current_playback_media_id(player: Option<&PlaybackView>) -> Option<CurrentMediaId> {

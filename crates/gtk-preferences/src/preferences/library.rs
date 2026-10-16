@@ -17,7 +17,7 @@ use super::{
 use crate::Preferences;
 use gtk_widgets::source_labels::{configured_source_display_name, configured_source_icon_name};
 use localization::{album_count_text, track_count_text};
-use rufin_core::runtime::source::{SourceLocalAccessSummary, SourceSummary};
+use rufin_core::runtime::source::{LocalAccessStatus, SourceLocalAccessSummary, SourceSummary};
 
 const SERVER_PROVIDER_ICON_SIZE: i32 = 28;
 const DOWNLOAD_JOB_DRAG_PREFIX: &str = "rufin-download-job:";
@@ -81,6 +81,14 @@ fn library_sources_page(
         library_page: adw::PreferencesPage,
         servers_group: adw::PreferencesGroup,
         empty_remote_row: adw::ActionRow,
+        source_downloads_group: adw::PreferencesGroup,
+        download_artwork: adw::ActionRow,
+        download_lyrics: adw::ActionRow,
+        cache_group: adw::PreferencesGroup,
+        clear_artwork_cache: adw::ActionRow,
+        clear_lyrics_cache: adw::ActionRow,
+        artwork_cache_cleared: gtk::Label,
+        lyrics_cache_cleared: gtk::Label,
         downloads_group: adw::PreferencesGroup,
         download_folder_row: adw::ActionRow,
         open_folder: gtk::Button,
@@ -135,9 +143,33 @@ fn library_sources_page(
                     credentials
                         .as_ref()
                         .map(|credentials| credentials.username.as_str()),
+                    None,
                 ))
                 .subtitle_lines(4)
                 .build();
+            if summary.is_some_and(|summary| summary.access.is_some()) {
+                let source = shell.products.source.clone();
+                let server = server.clone();
+                let summary = summary.cloned();
+                let row = row.downgrade();
+                gtk::glib::spawn_future_local(async move {
+                    if let Ok(status) = source.local_access_status(server.id.clone()).await
+                        && let Some(row) = row.upgrade()
+                    {
+                        row.set_subtitle(&source_summary_subtitle(
+                            &server,
+                            summary.as_ref(),
+                            credentials
+                                .as_ref()
+                                .map(|credentials| credentials.server_url.as_str()),
+                            credentials
+                                .as_ref()
+                                .map(|credentials| credentials.username.as_str()),
+                            Some(&status),
+                        ));
+                    }
+                });
+            }
             let icon = gtk::Image::from_icon_name(configured_source_icon_name(server));
             icon.set_pixel_size(SERVER_PROVIDER_ICON_SIZE);
             icon.set_size_request(SERVER_PROVIDER_ICON_SIZE, SERVER_PROVIDER_ICON_SIZE);
@@ -228,6 +260,71 @@ fn library_sources_page(
         add_navigation_controls.set_nested_page_visible(true);
     });
     servers_group.set_header_suffix(Some(&add_source));
+
+    if let Some(source_id) = configured.selected_source_id.clone() {
+        for (row, artwork) in [(download_artwork, true), (download_lyrics, false)] {
+            let source = shell.products.source.clone();
+            let source_id = source_id.clone();
+            let weak_shell = Rc::downgrade(shell);
+            let dialog = dialog.downgrade();
+            row.connect_activated(move |_| {
+                let result = if artwork {
+                    source.download_artwork(source_id.clone())
+                } else {
+                    source.download_lyrics(source_id.clone())
+                };
+                match result {
+                    Ok(()) => {
+                        if let Some(dialog) = dialog.upgrade() {
+                            dialog.close();
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(shell) = weak_shell.upgrade() {
+                            shell
+                                .control_feedback
+                                .show_feedback_toast(error.to_string());
+                        }
+                    }
+                }
+            });
+        }
+        library_page.add(&source_downloads_group);
+    }
+
+    for (row, artwork, message) in [
+        (clear_artwork_cache, true, artwork_cache_cleared.label()),
+        (clear_lyrics_cache, false, lyrics_cache_cleared.label()),
+    ] {
+        let downloads = shell.products.downloads.clone();
+        let weak_shell = Rc::downgrade(shell);
+        let group = cache_group.downgrade();
+        row.connect_activated(move |_| {
+            let Some(group) = group.upgrade() else { return };
+            group.set_sensitive(false);
+            let group = group.downgrade();
+            let downloads = downloads.clone();
+            let weak_shell = weak_shell.clone();
+            let message = message.to_string();
+            gtk::glib::spawn_future_local(async move {
+                let result = if artwork {
+                    downloads.clear_artwork_cache().await
+                } else {
+                    downloads.clear_lyrics_cache().await
+                };
+                if let Some(group) = group.upgrade() {
+                    group.set_sensitive(true);
+                }
+                if let Some(shell) = weak_shell.upgrade() {
+                    shell.control_feedback.show_feedback_toast(match result {
+                        Ok(()) => message,
+                        Err(error) => error.to_string(),
+                    });
+                }
+            });
+        });
+    }
+    library_page.add(&cache_group);
 
     if let Some(server) = remote_sources
         .iter()
@@ -525,7 +622,7 @@ pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw:
         if let Some(source_id) = resync_source_id.clone() {
             let source = source.clone();
             gtk::glib::spawn_future_local(async move {
-                let _ = source.refresh_source(source_id).await;
+                let _ = source.refresh_source(source_id, false).await;
             });
         }
         if let Some(dialog) = resync_dialog.upgrade() {
@@ -1176,6 +1273,7 @@ fn source_summary_subtitle(
     summary: Option<&SourceLocalAccessSummary>,
     address: Option<&str>,
     username: Option<&str>,
+    status: Option<&LocalAccessStatus>,
 ) -> String {
     let address = address
         .filter(|address| !address.trim().is_empty())
@@ -1185,7 +1283,7 @@ fn source_summary_subtitle(
         .and_then(|summary| summary.selected_music_folder_name.as_deref())
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| tr("All Music"));
-    let mapping = local_mapping_status(summary);
+    let mapping = local_mapping_status(summary, status);
     let account = username
         .filter(|username| !username.trim().is_empty())
         .map(|username| format!("{}: {}", tr("User"), username))
@@ -1218,14 +1316,19 @@ fn source_cache_line(summary: &SourceLocalAccessSummary) -> String {
     )
 }
 
-fn local_mapping_status(summary: Option<&SourceLocalAccessSummary>) -> String {
+fn local_mapping_status(
+    summary: Option<&SourceLocalAccessSummary>,
+    status: Option<&LocalAccessStatus>,
+) -> String {
     let Some(summary) = summary else {
         return tr("No local file mapping");
     };
     if summary.access.is_none() {
         return tr("No local file mapping");
     }
-    let status = &summary.status;
+    let Some(status) = status else {
+        return tr("Local playback saved");
+    };
     if status.total_track_count == 0 {
         return tr("Local playback saved");
     }

@@ -11,11 +11,10 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
+blurhash.workspace = true
 metadata-lookup.workspace = true
 library.workspace = true
 process-memory.workspace = true
-futures-util.workspace = true
-tokio-util = { workspace = true, features = ["rt"] }
 image.workspace = true
 jxl.workspace = true
 jxl-image-rs-integration.workspace = true
@@ -25,12 +24,12 @@ md5_digest.workspace = true
 serde_json.workspace = true
 sources.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt", "sync"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["fs", "rt", "sync"] }
 tracing.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
-tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [lints]

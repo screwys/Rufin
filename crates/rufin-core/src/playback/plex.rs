@@ -881,11 +881,20 @@ async fn queue_keys(
     source: &sources::SourceId,
 ) -> Result<Vec<String>, String> {
     let uris = database
-        .track_uris(
-            &entries
-                .iter()
-                .map(|entry| entry.track_key)
-                .collect::<Vec<_>>(),
+        .selected_track_uris(
+            &library::CatalogQuery::keys(
+                library::CatalogKind::Track,
+                None,
+                (&entries
+                    .iter()
+                    .map(|entry| entry.track_key)
+                    .collect::<Vec<_>>())
+                    .iter()
+                    .map(|key| key.raw())
+                    .collect(),
+            )
+            .selection(),
+            None,
             &ReadCancellation::new(),
         )
         .await
@@ -1076,14 +1085,14 @@ impl PlaybackOwner {
                         .as_ref()
                         .is_none_or(|media| {
                             media.id.run != request.seed_run
-                                || media.media_uri != request.seed_media_uri
+                                || media.row.track.media_uri != request.seed_media_uri
                         })
                 {
                     return Ok(());
                 }
                 plex.insert(
                     PlayRequest::from_input(
-                        library::QueueLoad::media_uris(candidates, playback::Provenance::AutoDj),
+                        library::QueueLoad::track_keys(candidates, playback::Provenance::AutoDj),
                         crate::playback::QueuePlacement::Last,
                     ),
                     None,
@@ -1122,7 +1131,7 @@ impl PlaybackOwner {
                 let _guard = plex.commands.lock().await;
                 plex.insert(
                     PlayRequest::from_input(
-                        library::QueueLoad::media_uris(candidates, playback::Provenance::Radio),
+                        library::QueueLoad::track_keys(candidates, playback::Provenance::Radio),
                         request.placement,
                     ),
                     None,
@@ -1165,7 +1174,7 @@ impl PlaybackOwner {
                 let _guard = plex.commands.lock().await;
                 plex.insert(
                     PlayRequest::from_input(
-                        library::QueueLoad::media_uris(candidates, playback::Provenance::Random),
+                        library::QueueLoad::track_keys(candidates, playback::Provenance::Random),
                         request.placement,
                     ),
                     None,
@@ -1209,8 +1218,16 @@ impl PlaybackOwner {
             let uris = self
                 .runtime
                 .block_on(
-                    self.database
-                        .track_uris(&[entry.track_key], &ReadCancellation::new()),
+                    self.database.selected_track_uris(
+                        &library::CatalogQuery::keys(
+                            library::CatalogKind::Track,
+                            None,
+                            (&[entry.track_key]).iter().map(|key| key.raw()).collect(),
+                        )
+                        .selection(),
+                        None,
+                        &ReadCancellation::new(),
+                    ),
                 )
                 .map_err(string_error)?;
             let (source, _, _) = uris.first().and_then(|uri| library::source_entity_parts(uri)).ok_or(
@@ -1526,8 +1543,10 @@ impl PlaybackOwner {
                 .find(|row| row.position == selected)
                 .cloned()
                 .ok_or("The current Plex track is not available locally")?;
-            let mut request =
-                StreamRequest::for_item(&row.item, self.settings.playback_stream_quality());
+            let mut request = StreamRequest::new(
+                (&row.track).media_uri.clone(),
+                self.settings.playback_stream_quality(),
+            );
             request.session_identifier =
                 Some(plex.playback.handoff_snapshot().map_err(string_error)?.2);
             let source = plex.connection().0.clone();
@@ -1540,19 +1559,13 @@ impl PlaybackOwner {
                 move |_| async { Ok(source) },
             )
             .await?;
-            let (track, album) = self
-                .database
-                .playback_loudness(&row.media_uri, &ReadCancellation::new())
-                .await
-                .map_err(string_error)?;
-            let prepared = prepare_media_stream(
-                stream,
-                playback::TrackLoudness {
-                    track: track.map(Box::new),
-                    album: album.map(Box::new),
-                },
-                row,
-            );
+            let loudness = super::cached_loudness(
+                &self.database,
+                &row.track.media_uri,
+                self.settings.load().ui.playback.loudness_normalization,
+            )
+            .await;
+            let prepared = prepare_media_stream(stream, loudness, row);
             check_cancelled(&cancelled)?;
             queue.progress_millis = plex
                 .playback

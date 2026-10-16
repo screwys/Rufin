@@ -1,8 +1,9 @@
+use rufin_core::browse::{DetailContent, DetailPage, DetailSummary};
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use adw::prelude::*;
 use artwork::ArtworkBinding;
-use library::{ArtistKey, ArtistRow, Database, RadioSeed, ReadCancellation};
+use library::{ArtistKey, ArtistView, RadioSeed};
 use localization::{album_count_text, msgid, track_count_text};
 use rufin_core::playback::RadioPlayRequest;
 
@@ -27,28 +28,6 @@ use super::routes::SearchableTrackOptions;
 use crate::route_layout::PRIMARY_ROUTE_MARGIN_START;
 use gtk_media_menus::media_menus::present_artist_context_menu;
 use gtk_widgets::route::Route;
-
-#[derive(Clone)]
-pub struct ArtistOverviewData {
-    pub summary: ArtistRow,
-    pub favorite_tracks: library::TrackRoutePage,
-    pub releases: ArtistReleasePage,
-}
-
-#[derive(Clone)]
-pub struct ArtistTracksData {
-    pub summary: ArtistRow,
-    pub tracks: library::TrackRoutePage,
-}
-
-#[derive(Clone)]
-pub struct ArtistDiscographyData {
-    pub summary: ArtistRow,
-    pub releases: ArtistReleasePage,
-}
-
-use rufin_core::browse::{ArtistReleasePage, BrowseRequest};
-use rufin_core::route::CollectionCategory;
 
 const ARTIST_RELEASE_TITLES: [&str; 6] = [
     msgid("Albums"),
@@ -86,21 +65,28 @@ fn artist_tracks_route(artist: String, album_artist: bool) -> Route {
 impl CatalogUi {
     pub fn artist_detail_view(
         self: &Rc<Self>,
-        artist: ArtistKey,
         album_artist: bool,
-        detail: Option<ArtistOverviewData>,
+        detail: Option<DetailPage>,
     ) -> MountedRoute {
-        let Some(detail) = detail else {
+        let Some(DetailPage {
+            summary: DetailSummary::Artist(summary),
+            content:
+                DetailContent::Releases {
+                    page,
+                    favorites: Some(favorite_tracks),
+                },
+        }) = detail
+        else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 "Artist",
                 msgid("No music from this artist yet"),
             ));
         };
-        let summary = detail.summary.clone();
+        let artist = summary.artist_key;
         let header = artist_detail_header_restored(self, &summary, artist, album_artist);
-        let favorite_count = detail.favorite_tracks.count;
+        let favorite_count = favorite_tracks.count;
         let favorite = self.searchable_track_collection(
-            detail.favorite_tracks,
+            favorite_tracks,
             LibraryListKey::ArtistTracks,
             SearchableTrackOptions {
                 context_id: format!(
@@ -151,7 +137,7 @@ impl CatalogUi {
                 )),
             },
             ARTIST_RELEASE_TITLES,
-            detail.releases,
+            *page,
         ));
         connect_artist_release_requests(self, &releases);
         let refresh_lane = releases.lane();
@@ -167,22 +153,31 @@ impl CatalogUi {
                 let releases = Rc::clone(&releases);
                 let lane = Rc::clone(&refresh_lane);
                 Rc::new(
-                    move |generation,
-                          detail: ArtistOverviewData,
-                          album_settings: LibraryListSettings| {
+                    move |generation, detail: DetailPage, album_settings: LibraryListSettings| {
                         let Some(shell) = shell.upgrade() else { return };
                         if !lane.finish(generation) {
                             return;
                         }
-                        header.replace(&shell, detail.summary.clone());
-                        favorite.replace_page(detail.favorite_tracks);
+                        let DetailPage {
+                            summary: DetailSummary::Artist(summary),
+                            content:
+                                DetailContent::Releases {
+                                    page,
+                                    favorites: Some(favorite_tracks),
+                                },
+                        } = detail
+                        else {
+                            unreachable!("artist overview")
+                        };
+                        header.replace(&shell, summary);
+                        favorite.replace_page(favorite_tracks);
                         let present = !favorite.source_is_empty();
                         releases.set_favorite_present(present);
                         let height = 30 + favorite.source_count().min(4) as i32 * 64;
                         favorite_scroller.set_max_content_height(-1);
                         favorite_scroller.set_min_content_height(height);
                         favorite_scroller.set_max_content_height(height);
-                        releases.replace_page(detail.releases);
+                        releases.replace_page(*page);
                         releases.apply_library_list_settings(&album_settings);
                     },
                 )
@@ -199,34 +194,14 @@ impl CatalogUi {
                 let query = releases.query(&album_settings);
                 let favorite_query = favorite.query();
                 let task = shell.runtime.spawn(async move {
-                    let Some(summary) = database
-                        .artist_rows(
-                            query.source,
-                            &[query.artist],
-                            query.album_artist,
-                            query.folder,
-                            &cancellation,
-                        )
-                        .await?
-                        .pop()
-                    else {
-                        return Ok::<_, library::LibraryError>(None);
-                    };
-                    let favorite_tracks = database
-                        .song_route_page(
-                            &favorite_query,
+                    query
+                        .detail_page(
+                            &database,
+                            Some(favorite_query),
                             library::RouteSeedWindow::top(),
                             &cancellation,
                         )
-                        .await?;
-                    let releases = query
-                        .page(&database, library::RouteSeedWindow::top(), &cancellation)
-                        .await?;
-                    Ok(Some(ArtistOverviewData {
-                        summary,
-                        favorite_tracks,
-                        releases,
-                    }))
+                        .await
                 });
                 let apply = Rc::downgrade(&apply);
                 gtk::glib::spawn_future_local(async move {
@@ -284,15 +259,26 @@ impl CatalogUi {
             };
             if identity.strip_prefix(prefix) == Some(download_artist.borrow().media_uri.as_str()) {
                 let mut row = download_artist.borrow_mut();
-                row.downloaded_count = if downloaded { row.track_count } else { 0 };
+                row.summary.downloaded_count = if downloaded {
+                    row.summary.track_count
+                } else {
+                    0
+                };
             }
             if let Some(uri) = identity.strip_prefix("album:") {
                 download_rows.update_matching(
                     |row| {
                         row.media_uri == uri
-                            && (row.downloaded_count == row.track_count) != downloaded
+                            && (row.summary.downloaded_count == row.summary.track_count)
+                                != downloaded
                     },
-                    |row| row.downloaded_count = if downloaded { row.track_count } else { 0 },
+                    |row| {
+                        row.summary.downloaded_count = if downloaded {
+                            row.summary.track_count
+                        } else {
+                            0
+                        }
+                    },
                 );
             }
         });
@@ -321,51 +307,46 @@ impl CatalogUi {
 
     pub fn artist_tracks_view(
         self: &Rc<Self>,
-        artist: ArtistKey,
         album_artist: bool,
-        detail: Option<ArtistTracksData>,
+        detail: Option<DetailPage>,
     ) -> MountedRoute {
-        let Some(detail) = detail else {
+        let Some(DetailPage {
+            summary: DetailSummary::Artist(summary),
+            content: DetailContent::Tracks(tracks),
+        }) = detail
+        else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 msgid("Tracks"),
                 msgid("This isn't available"),
             ));
         };
-        self.artist_track_surface_restored(
-            artist,
-            detail.summary,
-            detail.tracks,
-            album_artist,
-            false,
-        )
+        self.artist_track_surface_restored(summary.artist_key, summary, tracks, album_artist, false)
     }
 
     pub fn artist_favorite_tracks_view(
         self: &Rc<Self>,
-        artist: ArtistKey,
         album_artist: bool,
-        detail: Option<ArtistTracksData>,
+        detail: Option<DetailPage>,
     ) -> MountedRoute {
-        let Some(detail) = detail else {
+        let Some(DetailPage {
+            summary: DetailSummary::Artist(summary),
+            content: DetailContent::Tracks(tracks),
+        }) = detail
+        else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 msgid("Favorite tracks"),
                 msgid("No favorites yet"),
             ));
         };
-        self.artist_track_surface_restored(
-            artist,
-            detail.summary,
-            detail.tracks,
-            album_artist,
-            true,
-        )
+        self.artist_track_surface_restored(summary.artist_key, summary, tracks, album_artist, true)
     }
 
-    pub fn artist_discography_view(
-        self: &Rc<Self>,
-        detail: Option<ArtistDiscographyData>,
-    ) -> MountedRoute {
-        let Some(detail) = detail else {
+    pub fn artist_discography_view(self: &Rc<Self>, detail: Option<DetailPage>) -> MountedRoute {
+        let Some(DetailPage {
+            summary: DetailSummary::Artist(summary),
+            content: DetailContent::Releases { page, .. },
+        }) = detail
+        else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 msgid("Discography"),
                 msgid("No albums from this artist yet"),
@@ -374,7 +355,7 @@ impl CatalogUi {
         let releases = Rc::new(ArtistReleaseProjections::new(
             self,
             ArtistReleaseRoutePreamble {
-                header: artist_subroute_header(self, &detail.summary, msgid("Discography")),
+                header: artist_subroute_header(self, &summary, msgid("Discography")),
                 favorite: None,
                 favorite_present: false,
                 empty: crate::route_layout::route_empty_view(msgid(
@@ -382,7 +363,7 @@ impl CatalogUi {
                 )),
             },
             ARTIST_RELEASE_TITLES,
-            detail.releases,
+            *page,
         ));
         connect_artist_release_requests(self, &releases);
         let resume_releases = Rc::clone(&releases);
@@ -425,9 +406,16 @@ impl CatalogUi {
             };
             download_rows.update_matching(
                 |row| {
-                    row.media_uri == uri && (row.downloaded_count == row.track_count) != downloaded
+                    row.media_uri == uri
+                        && (row.summary.downloaded_count == row.summary.track_count) != downloaded
                 },
-                |row| row.downloaded_count = if downloaded { row.track_count } else { 0 },
+                |row| {
+                    row.summary.downloaded_count = if downloaded {
+                        row.summary.track_count
+                    } else {
+                        0
+                    }
+                },
             );
         });
         MountedRoute::new(releases.widget(), resume)
@@ -455,8 +443,8 @@ impl CatalogUi {
     fn artist_track_surface_restored(
         self: &Rc<Self>,
         artist: ArtistKey,
-        summary: ArtistRow,
-        page: library::TrackRoutePage,
+        summary: ArtistView,
+        page: library::CatalogPage,
         album_artist: bool,
         favorites_only: bool,
     ) -> MountedRoute {
@@ -583,147 +571,11 @@ fn request_artist_releases(
     });
 }
 
-pub async fn load_artist_overview(
-    database: &Database,
-    route: &Route,
-    track_settings: &LibraryListSettings,
-    album_settings: &LibraryListSettings,
-    window: library::RouteSeedWindow,
-    cancellation: &ReadCancellation,
-) -> Result<Option<ArtistOverviewData>, String> {
-    let request = BrowseRequest::new(
-        route,
-        CollectionCategory::Albums,
-        None,
-        None,
-        album_settings,
-        8,
-    );
-    let Some(releases) = request
-        .artist(database, cancellation)
-        .await
-        .map_err(|error| error.to_string())?
-    else {
-        return Ok(None);
-    };
-    let Some(summary) = database
-        .artist_rows(
-            releases.source,
-            &[releases.artist],
-            releases.album_artist,
-            releases.folder,
-            cancellation,
-        )
-        .await
-        .map_err(|error| error.to_string())?
-        .pop()
-    else {
-        return Ok(None);
-    };
-    let favorites = BrowseRequest {
-        favorites_only: true,
-        ..BrowseRequest::new(
-            route,
-            CollectionCategory::Tracks,
-            Some(releases.source),
-            releases.folder,
-            track_settings,
-            8,
-        )
-    }
-    .artist_songs(&releases);
-    let favorite_tracks = database
-        .song_route_page(&favorites, library::RouteSeedWindow::top(), cancellation)
-        .await
-        .map_err(|error| error.to_string())?;
-    let releases = releases
-        .page(database, window, cancellation)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(Some(ArtistOverviewData {
-        summary,
-        favorite_tracks,
-        releases,
-    }))
-}
-
-pub async fn load_artist_discography(
-    database: &Database,
-    route: &Route,
-    settings: &LibraryListSettings,
-    window: library::RouteSeedWindow,
-    cancellation: &ReadCancellation,
-) -> Result<Option<ArtistDiscographyData>, String> {
-    let request = BrowseRequest::new(route, CollectionCategory::Albums, None, None, settings, 8);
-    let Some(releases) = request
-        .artist(database, cancellation)
-        .await
-        .map_err(|error| error.to_string())?
-    else {
-        return Ok(None);
-    };
-    let Some(summary) = database
-        .artist_rows(
-            releases.source,
-            &[releases.artist],
-            releases.album_artist,
-            releases.folder,
-            cancellation,
-        )
-        .await
-        .map_err(|error| error.to_string())?
-        .pop()
-    else {
-        return Ok(None);
-    };
-    let releases = releases
-        .page(database, window, cancellation)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(Some(ArtistDiscographyData { summary, releases }))
-}
-
-pub async fn load_artist_tracks(
-    database: &Database,
-    route: &Route,
-    settings: &LibraryListSettings,
-    window: library::RouteSeedWindow,
-    cancellation: &ReadCancellation,
-) -> Result<Option<ArtistTracksData>, String> {
-    let request = BrowseRequest::new(route, CollectionCategory::Tracks, None, None, settings, 8);
-    let Some(artist) = request
-        .artist(database, cancellation)
-        .await
-        .map_err(|error| error.to_string())?
-    else {
-        return Ok(None);
-    };
-    let Some(summary) = database
-        .artist_rows(
-            artist.source,
-            &[artist.artist],
-            artist.album_artist,
-            artist.folder,
-            cancellation,
-        )
-        .await
-        .map_err(|error| error.to_string())?
-        .pop()
-    else {
-        return Ok(None);
-    };
-    let tracks = database
-        .song_route_page(&request.artist_songs(&artist), window, cancellation)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(Some(ArtistTracksData { summary, tracks }))
-}
-
 #[derive(Clone)]
 struct ArtistDetailHeaderProjection {
     album_artist: bool,
     root: gtk::Widget,
-    current: Rc<RefCell<ArtistRow>>,
+    current: Rc<RefCell<ArtistView>>,
     showcase: DetailShowcaseView,
     album_count: gtk::Label,
     track_count: gtk::Label,
@@ -735,12 +587,12 @@ impl ArtistDetailHeaderProjection {
         self.root.clone()
     }
 
-    fn replace(&self, shell: &Rc<CatalogUi>, artist: ArtistRow) {
-        self.showcase.set_title(&artist.name);
+    fn replace(&self, shell: &Rc<CatalogUi>, artist: ArtistView) {
+        self.showcase.set_title(&artist.metadata.name);
         self.album_count
-            .set_text(&album_count_text(artist.album_count.max(0) as u64));
+            .set_text(&album_count_text(artist.summary.album_count.max(0) as u64));
         self.track_count
-            .set_text(&track_count_text(artist.track_count.max(0) as u64));
+            .set_text(&track_count_text(artist.summary.track_count.max(0) as u64));
         self.cover.replace(
             shell,
             artist
@@ -757,7 +609,7 @@ impl ArtistDetailHeaderProjection {
             ));
         shell.update_visible_favorite_buttons(
             &library::FavoriteTarget::Artist(artist.media_uri.clone()),
-            artist.favorite,
+            artist.state.favorite,
         );
         self.current.replace(artist);
     }
@@ -765,7 +617,7 @@ impl ArtistDetailHeaderProjection {
 
 fn artist_detail_header_restored(
     shell: &Rc<CatalogUi>,
-    artist: &ArtistRow,
+    artist: &ArtistView,
     artist_key: ArtistKey,
     album_artist: bool,
 ) -> ArtistDetailHeaderProjection {
@@ -789,7 +641,7 @@ fn artist_detail_header_restored(
         stable_seed(&artist.object_id),
         "Artist",
         true,
-        &artist.name,
+        &artist.metadata.name,
     );
     let radio = detail_radio_button();
     let radio_controller = shell.playback.clone();
@@ -806,7 +658,7 @@ fn artist_detail_header_restored(
     counts.set_halign(gtk::Align::Start);
     let (albums, album_count) = artist_count_button(
         "rufin-albums-symbolic",
-        &album_count_text(artist.album_count.max(0) as u64),
+        &album_count_text(artist.summary.album_count.max(0) as u64),
     );
     let album_shell = Rc::clone(shell);
     let album_uri = artist.media_uri.clone();
@@ -816,7 +668,7 @@ fn artist_detail_header_restored(
     counts.append(&albums);
     let (tracks, track_count) = artist_count_button(
         "rufin-tracks-symbolic",
-        &track_count_text(artist.track_count.max(0) as u64),
+        &track_count_text(artist.summary.track_count.max(0) as u64),
     );
     let track_shell = Rc::clone(shell);
     let track_uri = artist.media_uri.clone();
@@ -837,12 +689,12 @@ fn artist_detail_header_restored(
     let controls = detail_playback_controls(
         &actions,
         msgid("Play artist"),
-        Some(artist.favorite),
+        Some(artist.state.favorite),
         Rc::clone(&play),
     );
     let favorite = favorite_icon_button("Favorite");
     configure_action_button(&favorite, ActionButtonVariant::DetailFavorite);
-    set_favorite_button_active(&favorite, artist.favorite);
+    set_favorite_button_active(&favorite, artist.state.favorite);
     actions.append(&favorite);
     let hover_favorite = controls
         .favorite
@@ -902,7 +754,7 @@ fn artist_detail_header_restored(
 
 fn artist_subroute_header(
     shell: &Rc<CatalogUi>,
-    artist: &ArtistRow,
+    artist: &ArtistView,
     kind_text: &str,
 ) -> gtk::Widget {
     let width = crate::route_layout::detail_route_inner_width_for_viewport(
@@ -922,16 +774,16 @@ fn artist_subroute_header(
     let kind = localized_label(kind_text);
     kind.add_css_class("eyebrow");
     kind.set_xalign(0.0);
-    let title = gtk::Label::new(Some(&artist.name));
+    let title = gtk::Label::new(Some(&artist.metadata.name));
     title.add_css_class("detail-title");
     title.set_xalign(0.0);
     title.set_wrap(true);
     title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    super::detail_showcase::fit_detail_text(&title, &artist.name);
+    super::detail_showcase::fit_detail_text(&title, &artist.metadata.name);
     let summary = gtk::Label::new(Some(&format!(
         "{} / {}",
-        album_count_text(artist.album_count.max(0) as u64),
-        track_count_text(artist.track_count.max(0) as u64)
+        album_count_text(artist.summary.album_count.max(0) as u64),
+        track_count_text(artist.summary.track_count.max(0) as u64)
     )));
     summary.add_css_class("muted");
     summary.set_xalign(0.0);
@@ -995,12 +847,12 @@ mod tests {
         let key = library::ArtistKey::from_raw(7);
         for album_artist in [false, true] {
             let request =
-                gtk_widgets::selection::collection_play_request(library::SongScope::Artist {
+                gtk_widgets::selection::collection_play_request(library::TrackScope::Artist {
                     key,
                     album_artist,
                 });
             assert!(
-                matches!(request.selection(), Some(library::SongSelection::Query { query: library::SongQuery { scope: library::SongScope::Artist { key: value, album_artist: role }, .. }, .. }) if value == key && role == album_artist)
+                matches!(request.selection(), Some(library::TrackSelection::Query { query: library::CatalogQuery { subject: library::CatalogSubject::Tracks { scope: library::TrackScope::Artist { key: value, album_artist: role }, .. }, .. }, .. }) if value == key && role == album_artist)
             );
         }
     }

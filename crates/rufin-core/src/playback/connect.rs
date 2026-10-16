@@ -59,8 +59,11 @@ impl RufinPlayback {
             || previous
                 .queue_window
                 .iter()
-                .map(|row| (&row.media_uri, row.position))
-                .ne(state.rows.iter().map(|row| (&row.media_uri, row.position)));
+                .map(|row| (&row.track.media_uri, row.position))
+                .ne(state
+                    .rows
+                    .iter()
+                    .map(|row| (&row.item.media_uri, row.position)));
         let restore = if changed {
             let mut page = self
                 .database
@@ -215,7 +218,7 @@ impl PlaybackOwner {
             .into_iter()
             .enumerate()
             .map(|(index, row)| {
-                let mut row = (*row).clone();
+                let mut row = library::QueueTransferRow::from(row.as_ref());
                 row.position = offset + index;
                 row
             })
@@ -250,27 +253,42 @@ impl PlaybackOwner {
         let receiver = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).clone();
         if let Some(receiver) = receiver {
             let _command = receiver.commands.lock().await;
-            let mut page = receiver
+            let page = receiver
                 .connection()?
                 .receiver_queue_page(&receiver.peer, offset, limit, filter)
                 .await?;
-            let uris = page
-                .rows
-                .iter()
-                .map(|row| row.media_uri.clone())
-                .collect::<Vec<_>>();
-            let bindings = self
+            let page_entries = self
                 .database
-                .queue_artwork_for_uris(&uris)
+                .queue_entries(
+                    library::QueueLoad::items(
+                        page.rows
+                            .iter()
+                            .map(|row| (row.item.clone(), row.provenance.clone()))
+                            .collect(),
+                    ),
+                    None,
+                )
                 .await
-                .map_err(string_error)?
+                .map_err(string_error)?;
+            let entries = page_entries
+                .entries
                 .into_iter()
-                .collect::<std::collections::HashMap<_, _>>();
-            for row in &mut page.rows {
-                Arc::make_mut(row).item.artwork_binding =
-                    bindings.get(&row.media_uri).cloned().flatten();
-            }
-            return Ok(page);
+                .zip(&page.rows)
+                .map(|(mut entry, row)| {
+                    entry.received_from_connect = row.received_from_connect;
+                    (row.position, entry)
+                })
+                .collect::<Vec<_>>();
+            let rows = self
+                .database
+                .queue_rows_for_entries(&entries, &ReadCancellation::new())
+                .await
+                .map_err(string_error)?;
+            return Ok(crate::playback::QueuePage {
+                rows,
+                total: page.total,
+                window_offset: page.window_offset,
+            });
         }
         let Some(active) = self.active() else {
             return Ok(crate::playback::QueuePage {
@@ -570,7 +588,7 @@ impl PlaybackOwner {
                 receiver
                     .input(
                         PlayRequest::from_input(
-                            library::QueueLoad::media_uris(candidates, playback::Provenance::Radio),
+                            library::QueueLoad::track_keys(candidates, playback::Provenance::Radio),
                             request.placement,
                         ),
                         None,
@@ -597,7 +615,7 @@ impl PlaybackOwner {
         };
         let excluded = self
             .current_media()
-            .map(|media| vec![media.media_uri.clone()])
+            .map(|media| vec![media.row.track.track_key])
             .unwrap_or_default();
         let request = request.clone();
         self.runtime.spawn(async move {
@@ -618,7 +636,7 @@ impl PlaybackOwner {
                 receiver
                     .input(
                         PlayRequest::from_input(
-                            library::QueueLoad::media_uris(
+                            library::QueueLoad::track_keys(
                                 candidates,
                                 playback::Provenance::Random,
                             ),

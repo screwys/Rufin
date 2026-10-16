@@ -30,7 +30,11 @@ async fn local_media_download_pages_include_files_and_cue_segments_without_copie
         .create_playlist(
             None,
             "Saved",
-            &library::SongSelection::Uris((&[file.clone(), cue.clone()]).to_vec().into()),
+            &library::CatalogQuery::uris(
+                library::CatalogKind::Track,
+                (&[file.clone(), cue.clone()]).to_vec(),
+            )
+            .selection(),
         )
         .await
         .unwrap();
@@ -95,7 +99,11 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
         .create_playlist(
             None,
             "Saved",
-            &library::SongSelection::Uris((std::slice::from_ref(uri)).to_vec().into()),
+            &library::CatalogQuery::uris(
+                library::CatalogKind::Track,
+                (std::slice::from_ref(uri)).to_vec(),
+            )
+            .selection(),
         )
         .await
         .unwrap();
@@ -187,7 +195,7 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_without_catalog_mem
         .create_playlist(
             None,
             "Saved",
-            &library::SongSelection::Uris((&uris).to_vec().into()),
+            &library::CatalogQuery::uris(library::CatalogKind::Track, (&uris).to_vec()).selection(),
         )
         .await
         .unwrap()
@@ -223,7 +231,7 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_without_catalog_mem
     assert_eq!(
         received
             .selected_track_uris(
-                &library::SongQuery::new(library::SongScope::Playlist(imported_playlist))
+                &library::CatalogQuery::tracks(library::TrackScope::Playlist(imported_playlist))
                     .selection(),
                 None,
                 &library::ReadCancellation::new()

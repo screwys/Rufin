@@ -55,14 +55,6 @@ pub struct CurrentStream {
     pub transcoded: bool,
 }
 
-impl std::ops::Deref for CurrentMedia {
-    type Target = QueueRow;
-
-    fn deref(&self) -> &Self::Target {
-        &self.row
-    }
-}
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct CurrentMediaId {

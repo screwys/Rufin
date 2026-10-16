@@ -201,7 +201,6 @@ impl Database {
                 )
                 .await?;
         }
-        crate::collections::refresh_facts_on(&mut transaction).await?;
         transaction.commit().await?;
         Ok(report)
     }
@@ -331,9 +330,48 @@ mod tests {
         let target = database(directory.path(), "target").await;
         {
             let mut writer = source.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'missing-source');INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,position) VALUES(1,1,'source','native',NULL,0),(2,NULL,'rufin','authored','Mine',1);INSERT INTO tracks(track_key,media_uri,title) VALUES(1,'https://example.test/song','Saved');INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(2,'a',1,0),(2,'b',1,1);INSERT INTO listens(listen_key,external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(7,NULL,'missing-source','https://example.test/song','Saved','Artist','Album',1,'2026-09',100,90);").execute(writer.as_mut().unwrap()).await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(2,'local');INSERT INTO playlists(playlist_key,source_key,object_id,name,position) VALUES(3,2,'local-authored','Local playlist',2);INSERT INTO tracks(track_key,media_uri,title) VALUES(2,'file:///music/song.flac','Local saved');INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(3,'c',2,0);")
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'missing-source');INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,position) VALUES(1,1,'source','native',NULL,0),(2,NULL,'rufin','authored','Mine',1);INSERT INTO tracks(track_key,media_uri,metadata) VALUES(1,'https://example.test/song',jsonb(json_object('title','Saved')));INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(2,'a',1,0),(2,'b',1,1);INSERT INTO listens(listen_key,external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(7,NULL,'missing-source','https://example.test/song','Saved','Artist','Album',1,'2026-09',100,90);").execute(writer.as_mut().unwrap()).await.unwrap();
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(2,'local');INSERT INTO playlists(playlist_key,source_key,object_id,name,position) VALUES(3,2,'local-authored','Local playlist',2);INSERT INTO tracks(track_key,media_uri,metadata) VALUES(2,'file:///music/song.flac',jsonb(json_object('title','Local saved')));INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(3,'c',2,0);")
                 .execute(writer.as_mut().unwrap()).await.unwrap();
+        }
+        let smart = source
+            .create_smart_playlist("Saved choice", &crate::SmartPlaylistDefinition::default())
+            .await
+            .unwrap();
+        let mut expected_artwork = Vec::new();
+        {
+            let mut writer = source.writer().await.unwrap();
+            let connection = writer.as_mut().unwrap();
+            let owners: Vec<(String,Option<String>,String)> = sqlx::query_as("SELECT 'playlists',source.object_id,playlist.object_id FROM playlists playlist LEFT JOIN sources source USING(source_key) UNION ALL SELECT 'smart_playlists',NULL,object_id FROM smart_playlists WHERE smart_playlist_key=?1")
+                .bind(smart).fetch_all(&mut *connection).await.unwrap();
+            for (table, source_id, object_id) in owners {
+                let binding = serde_json::to_vec(&[crate::ArtworkCandidate::new(
+                    crate::ArtworkImage::Playlist {
+                        smart: table == "smart_playlists",
+                        source_id,
+                        object_id: object_id.clone(),
+                        revision: "auto:saved".into(),
+                        automatic: Some(crate::PlaylistArtworkManifest {
+                            source_id: None,
+                            folder_id: None,
+                            chosen: vec!["https://example.test/song".into()],
+                            pending: false,
+                        }),
+                        resolved: None,
+                    },
+                    None,
+                )])
+                .unwrap();
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "UPDATE {table} SET artwork_binding=?1 WHERE object_id=?2"
+                )))
+                .bind(&binding)
+                .bind(&object_id)
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+                expected_artwork.push((table, object_id, binding));
+            }
         }
         let admitted = source
             .queue_entries(
@@ -341,7 +379,7 @@ mod tests {
                     (0..250)
                         .map(|_| {
                             (
-                                crate::QueueItem::direct(
+                                crate::TrackReference::direct(
                                     "https://example.test/song",
                                     "Saved",
                                     "",
@@ -376,12 +414,49 @@ mod tests {
         assert_eq!(playlist_count, 2);
         {
             let mut writer = target.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'catalog','Catalog','catalog',zeroblob(32)); INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis,local_play_count) VALUES(1,'song','https://example.test/song','Song','song','','','song',100,7);").execute(writer.as_mut().unwrap()).await.unwrap();
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'catalog','Catalog','catalog',zeroblob(32)); INSERT INTO tracks(source_key,object_id,media_uri,metadata,normalized_search,local_play_count,indexed,native_metadata) VALUES(1,'song','https://example.test/song',jsonb(json_object('title','Song','sort_text','song','duration_millis',100)),'song',7,1,1);").execute(writer.as_mut().unwrap()).await.unwrap();
         }
         target
             .restore_state(staged.path(), all_groups(), playlist_count)
             .await
             .unwrap();
+        for (table, object, binding) in expected_artwork {
+            let restored: Vec<u8> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT artwork_binding FROM {table} WHERE object_id=?1"
+            )))
+            .bind(object)
+            .fetch_one(&mut *target.acquire_reader().await.unwrap())
+            .await
+            .unwrap();
+            let restored: Vec<crate::ArtworkCandidate> = serde_json::from_slice(&restored).unwrap();
+            let expected: Vec<crate::ArtworkCandidate> = serde_json::from_slice(&binding).unwrap();
+            let restored = restored
+                .into_iter()
+                .find(crate::ArtworkCandidate::is_automatic_playlist)
+                .unwrap();
+            let expected = expected
+                .into_iter()
+                .find(crate::ArtworkCandidate::is_automatic_playlist)
+                .unwrap();
+            assert_eq!(restored.asset_identity(), expected.asset_identity());
+            let (
+                crate::ArtworkImage::Playlist {
+                    automatic: Some(restored),
+                    ..
+                },
+                crate::ArtworkImage::Playlist {
+                    automatic: Some(expected),
+                    ..
+                },
+            ) = (restored.image, expected.image)
+            else {
+                unreachable!()
+            };
+            assert_eq!(
+                (restored.source_id, restored.folder_id, restored.chosen),
+                (expected.source_id, expected.folder_id, expected.chosen)
+            );
+        }
         let mut restored_queue = Vec::new();
         target
             .export_queue_jsonl(&mut restored_queue)

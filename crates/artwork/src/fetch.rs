@@ -33,6 +33,13 @@ impl FetchContext {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(database);
     }
 
+    pub(crate) fn database(&self) -> Option<Arc<library::Database>> {
+        self.database
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+
     fn source(&self, source_id: &sources::SourceId) -> Result<Arc<sources::Source>, String> {
         let resolver = self
             .source_resolver
@@ -50,16 +57,13 @@ impl FetchContext {
         size: ImageSize,
         policy: &ExternalPolicy,
     ) -> Result<FetchOutcome, String> {
-        match candidate {
-            Candidate::Playlist(image) => {
+        match &candidate.image {
+            library::ArtworkImage::Playlist { .. } => {
                 let database = self
-                    .database
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .clone()
+                    .database()
                     .ok_or_else(|| "Playlist artwork storage is unavailable".to_string())?;
                 runtime
-                    .block_on(database.playlist_image(image))
+                    .block_on(database.playlist_image(&candidate.image))
                     .map(|bytes| {
                         bytes
                             .map(FetchOutcome::Ready)
@@ -67,7 +71,7 @@ impl FetchContext {
                     })
                     .map_err(|error| error.to_string())
             }
-            Candidate::Artist {
+            library::ArtworkImage::Artist {
                 name,
                 musicbrainz_id,
                 ..
@@ -78,7 +82,10 @@ impl FetchContext {
                 metadata_lookup::lookup_artist_image(
                     name,
                     musicbrainz_id.as_deref(),
-                    size == ImageSize::Original,
+                    match size {
+                        ImageSize::Original => None,
+                        ImageSize::Thumbnail(size) => Some(size),
+                    },
                 )
                 .map(|bytes| {
                     bytes
@@ -86,11 +93,15 @@ impl FetchContext {
                         .unwrap_or(FetchOutcome::Missing)
                 })
             }
-            Candidate::Native(image_ref) => {
-                let source = self.source(&image_ref.source_id)?;
+            library::ArtworkImage::Native {
+                source_id,
+                item_id,
+                tag,
+            } => {
+                let source = self.source(source_id)?;
                 runtime
                     .block_on(source.image(SourceImageRequest::Native {
-                        image_ref: image_ref.image.clone(),
+                        image_ref: sources::NativeImageRef::new(item_id, tag.clone()),
                         size,
                     }))
                     .map(|image| {
@@ -102,22 +113,39 @@ impl FetchContext {
                     })
                     .or_else(source_result)
             }
-            Candidate::Local(reference) => {
-                let path = match reference {
-                    sources::LocalImageRef::File { path, .. }
-                    | sources::LocalImageRef::Embedded { path, .. } => path,
+            library::ArtworkImage::Local {
+                source_id,
+                path,
+                revision,
+                picture_index,
+            } => {
+                let reference = match picture_index {
+                    Some(picture_index) => sources::LocalImageRef::Embedded {
+                        source_id: source_id.clone(),
+                        path: path.clone(),
+                        revision: revision.clone(),
+                        picture_index: *picture_index,
+                    },
+                    None => sources::LocalImageRef::File {
+                        source_id: source_id.clone(),
+                        path: path.clone(),
+                        revision: revision.clone(),
+                    },
                 };
-                let image = if !["http://", "https://", "smb://", "rufin-document://"]
-                    .iter()
-                    .any(|prefix| path.starts_with(prefix))
-                {
-                    sources::read_local_image(reference)
-                } else {
-                    runtime.block_on(
-                        self.source(reference.source_id())?
-                            .image(SourceImageRequest::Local(reference.clone())),
-                    )
-                };
+                let image =
+                    if let (true, Some(index)) = (path.starts_with("content://"), picture_index) {
+                        runtime.block_on(sources::read_document_image(path, *index))
+                    } else if !["http://", "https://", "smb://", "rufin-document://"]
+                        .iter()
+                        .any(|prefix| path.starts_with(prefix))
+                    {
+                        sources::read_local_image(&reference)
+                    } else {
+                        runtime.block_on(
+                            self.source(source_id)?
+                                .image(SourceImageRequest::Local(reference.clone())),
+                        )
+                    };
                 image
                     .map(|image| {
                         if image.bytes.is_empty() {
@@ -128,7 +156,7 @@ impl FetchContext {
                     })
                     .or_else(source_result)
             }
-            Candidate::Album(album) => metadata_lookup::lookup_album_cover(
+            library::ArtworkImage::Album(album) => metadata_lookup::lookup_album_cover(
                 album,
                 match size {
                     ImageSize::Original => None,

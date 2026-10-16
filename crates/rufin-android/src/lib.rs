@@ -21,6 +21,8 @@ mod pins;
 #[cfg(target_os = "android")]
 mod player;
 #[cfg(target_os = "android")]
+mod playlists;
+#[cfg(target_os = "android")]
 mod preferences;
 
 uniffi::setup_scaffolding!();

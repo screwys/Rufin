@@ -112,6 +112,14 @@ impl Default for SidebarSettings {
     }
 }
 impl SidebarSettings {
+    pub fn pins_use_activity(&self) -> bool {
+        self.pins_visible
+            && self
+                .pins
+                .iter()
+                .any(|pin| matches!(pin, SidebarPin::SmartPlaylist { .. }))
+    }
+
     pub fn set_route_visible(&mut self, item: SidebarRouteItem, visible: bool) -> bool {
         let Some(stored) = self
             .route_items

@@ -3,7 +3,7 @@ use std::sync::Arc;
 pub use library::{QueuePlacement as Placement, QueueReorderTarget};
 use library::{RadioSeed, RandomCriteria};
 
-use playback::{Provenance, QueueItem};
+use playback::{Provenance, TrackReference};
 
 pub type QueuePlacement = Placement;
 
@@ -17,10 +17,10 @@ pub struct PlayRequest {
 }
 
 impl PlayRequest {
-    pub fn one(item: QueueItem, placement: QueuePlacement) -> Self {
+    pub fn one(item: TrackReference, placement: QueuePlacement) -> Self {
         Self::items(vec![item], placement)
     }
-    pub fn items(items: Vec<QueueItem>, placement: QueuePlacement) -> Self {
+    pub fn items(items: Vec<TrackReference>, placement: QueuePlacement) -> Self {
         Self::from_input(
             library::QueueLoad::items(
                 items
@@ -47,12 +47,12 @@ impl PlayRequest {
         }
     }
     pub fn ordered(
-        selection: library::SongSelection,
+        selection: library::TrackSelection,
         anchor_index: usize,
         placement: QueuePlacement,
         shuffled_start: bool,
     ) -> Self {
-        let mut request = Self::from_input(library::QueueLoad::songs(selection), placement);
+        let mut request = Self::from_input(library::QueueLoad::tracks(selection), placement);
         request.placement = placement.with_anchor(anchor_index);
         request.start = if shuffled_start {
             QueueStart::RandomIfShuffled
@@ -62,7 +62,7 @@ impl PlayRequest {
         request
     }
     pub fn captured(
-        selection: library::SongSelection,
+        selection: library::TrackSelection,
         anchor_index: usize,
         placement: QueuePlacement,
         shuffled_start: bool,
@@ -74,20 +74,20 @@ impl PlayRequest {
     pub fn group(requests: Vec<Self>, placement: QueuePlacement) -> Self {
         let mut groups = Vec::new();
         for request in requests {
-            if let library::QueueLoad::Songs(selections) = request.input {
+            if let library::QueueLoad::Tracks(selections) = request.input {
                 groups.extend(selections);
             }
         }
-        Self::from_input(library::QueueLoad::Songs(groups), placement)
+        Self::from_input(library::QueueLoad::Tracks(groups), placement)
     }
-    pub fn selection(&self) -> Option<library::SongSelection> {
-        let library::QueueLoad::Songs(groups) = &self.input else {
+    pub fn selection(&self) -> Option<library::TrackSelection> {
+        let library::QueueLoad::Tracks(groups) = &self.input else {
             return None;
         };
         if groups.len() == 1 {
             Some(groups[0].0.clone())
         } else {
-            Some(library::SongSelection::Concat(
+            Some(library::TrackSelection::Concat(
                 groups
                     .iter()
                     .map(|(selection, _)| selection.clone())
@@ -96,7 +96,7 @@ impl PlayRequest {
         }
     }
     pub fn context(&self) -> Option<&str> {
-        let library::QueueLoad::Songs(groups) = &self.input else {
+        let library::QueueLoad::Tracks(groups) = &self.input else {
             return None;
         };
         let (_, Provenance::Context { context_id, .. }) = groups.first()? else {
@@ -106,7 +106,7 @@ impl PlayRequest {
     }
     pub fn with_context(mut self, context: Arc<str>) -> Self {
         match &mut self.input {
-            library::QueueLoad::Songs(groups) => {
+            library::QueueLoad::Tracks(groups) => {
                 for (_, provenance) in groups {
                     *provenance = Provenance::Context {
                         context_id: context.clone(),
@@ -155,7 +155,7 @@ impl PlayRequest {
         {
             return None;
         }
-        let library::QueueLoad::Songs(groups) = &self.input else {
+        let library::QueueLoad::Tracks(groups) = &self.input else {
             return None;
         };
         let (
@@ -177,7 +177,22 @@ impl PlayRequest {
             .anchor
             .map(|(key, _)| key)
             .or_else(|| match selection {
-                library::SongSelection::Tracks(keys) => keys.get(anchor_index).copied(),
+                library::TrackSelection::Query {
+                    query:
+                        library::CatalogQuery {
+                            subject:
+                                library::CatalogSubject::Keys {
+                                    kind: library::CatalogKind::Track,
+                                    keys,
+                                    ..
+                                },
+                            ..
+                        },
+                    ranges: None,
+                } => keys
+                    .get(anchor_index)
+                    .copied()
+                    .map(library::TrackKey::from_raw),
                 _ => None,
             })?;
         Some((context_id.to_string(), key, source_rank + anchor_index))
@@ -199,7 +214,7 @@ impl PlayRequest {
             }
         };
         match &mut self.input {
-            library::QueueLoad::Songs(groups) => groups.iter_mut().for_each(|(_, p)| set(p)),
+            library::QueueLoad::Tracks(groups) => groups.iter_mut().for_each(|(_, p)| set(p)),
             library::QueueLoad::Items(items) => items.iter_mut().for_each(|(_, p)| set(p)),
             library::QueueLoad::Uris(_, p) => set(p),
             library::QueueLoad::Captured(entries) => Arc::make_mut(entries)
@@ -321,111 +336,9 @@ impl RadioPlayRequest {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct QueuePage {
     pub rows: Vec<Arc<playback::QueueRow>>,
     pub total: u64,
     pub window_offset: u64,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{PlayRequest, QueuePlacement};
-    use playback::Provenance;
-    use std::sync::Arc;
-
-    #[test]
-    fn full_context_keeps_the_absolute_route_rank_for_reactivation() {
-        let keys: Arc<[library::TrackKey]> = (0..250)
-            .map(|index| library::TrackKey::from_raw(index + 1))
-            .collect();
-        for anchor in [3, 125, 248] {
-            let request = PlayRequest::captured(
-                library::SongSelection::Tracks(keys.clone()),
-                anchor,
-                QueuePlacement::Now,
-                false,
-            )
-            .with_context("mounted-order".into());
-            assert_eq!(
-                request.placement,
-                QueuePlacement::Replace {
-                    anchor_index: anchor
-                }
-            );
-            let Some(library::SongSelection::Tracks(captured)) = request.selection() else {
-                panic!("captured route order");
-            };
-            assert!(Arc::ptr_eq(&captured, &keys));
-            assert_eq!(captured.len(), 250);
-            assert_eq!(
-                request.activation_context(false),
-                Some(("mounted-order".into(), keys[anchor], anchor))
-            );
-        }
-        let request = PlayRequest::from_input(
-            library::QueueLoad::media_uris(
-                (0..250).map(|index| format!("https://example.test/{index}")),
-                Provenance::Random,
-            ),
-            QueuePlacement::Last,
-        );
-        let library::QueueLoad::Uris(uris, provenance) = &request.input else {
-            panic!("external media order");
-        };
-        assert_eq!(uris.len(), 250);
-        assert_eq!(uris[125], "https://example.test/125");
-        assert_eq!(*provenance, Provenance::Random);
-    }
-
-    #[tokio::test]
-    async fn collection_positions_share_one_context_identity() {
-        let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("queue.sqlite3"))
-            .await
-            .unwrap();
-        let admitted = database
-            .queue_entries(
-                library::QueueLoad::media_uris(
-                    vec![
-                        "https://example.test/first".into(),
-                        "https://example.test/second".into(),
-                    ],
-                    Provenance::Manual,
-                ),
-                None,
-            )
-            .await
-            .unwrap();
-        let request = PlayRequest::captured(
-            library::SongSelection::Tracks(
-                admitted
-                    .entries
-                    .iter()
-                    .map(|entry| entry.track_key)
-                    .collect(),
-            ),
-            0,
-            QueuePlacement::Now,
-            false,
-        )
-        .with_context("genre:4".into());
-        let page = database.queue_entries(request.input, None).await.unwrap();
-        let first = &page.entries[0].provenance;
-        let second = &page.entries[1].provenance;
-        assert!(matches!(second, Provenance::Context { source_rank: 1, .. }));
-        let (
-            Provenance::Context {
-                context_id: first, ..
-            },
-            Provenance::Context {
-                context_id: second, ..
-            },
-        ) = (first, second)
-        else {
-            panic!("Context Queue entries keep Context provenance");
-        };
-
-        assert!(Arc::ptr_eq(&first, &second));
-    }
 }

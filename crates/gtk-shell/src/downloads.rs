@@ -82,7 +82,7 @@ impl Shell {
             ),
             OperationArtwork::Bindings(bindings) => self
                 .artwork
-                .cover_group_projection_for_artwork(bindings, 48, 48)
+                .cover_group_projection_for_artwork(bindings, 48, 48, true)
                 .widget(),
         };
         self.chrome.operation_feedback_artwork.append(&artwork);

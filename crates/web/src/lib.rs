@@ -13,13 +13,6 @@ mod playlists;
 mod source;
 pub use controller::{Controller, ControllerStatus, controller_addresses};
 
-use std::collections::{HashMap, VecDeque};
-use std::convert::Infallible;
-use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-
 use axum::{
     Extension, Router,
     body::Body,
@@ -34,12 +27,44 @@ use hyper::{Request, Response, StatusCode, body::Frame};
 use hyper_util::{rt::TokioIo, service::TowerToHyperService};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::{HashMap, VecDeque};
+use std::convert::Infallible;
+use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 use tokio::task::JoinSet;
 
 use rufin_core::runtime::ProductHandles;
 
 type Error = (StatusCode, axum::Json<Value>);
+
+fn artwork_previews<'a>(
+    products: &ProductHandles,
+    bindings: impl IntoIterator<Item = &'a Vec<u8>>,
+) -> Vec<Option<String>> {
+    use base64::Engine;
+    let allow_external = products
+        .settings
+        .load()
+        .application
+        .external_metadata_enabled;
+    bindings
+        .into_iter()
+        .map(|binding| {
+            products
+                .artwork
+                .preview(artwork::ArtworkBinding::opaque(binding), allow_external)
+                .map(|preview| {
+                    format!(
+                        "data:image/png;base64,{}",
+                        base64::engine::general_purpose::STANDARD.encode(preview.png.as_slice())
+                    )
+                })
+        })
+        .collect()
+}
 
 /// The host binds the requested address and owns this future. Dropping it closes
 /// the listener and its connections, including live event subscriptions.
@@ -119,19 +144,31 @@ async fn playback_state(State(products): State<ProductHandles>) -> Result<Respon
     let products = &products;
     Ok(json_response(
         StatusCode::OK,
-        playback_json(products.playback.updates.current().as_deref()),
+        playback_json(
+            products,
+            products.playback.updates.current().as_deref(),
+            true,
+        ),
     ))
 }
 
 async fn playback_events(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {
-    let products = &products;
     let subscription = products.playback.updates.subscribe();
-    let stream = futures_util::stream::unfold(subscription, |mut subscription| async move {
-        let publication = subscription.recv().await.ok()?;
-        let value = publication_json(publication.as_ref());
-        let frame = Frame::data(Bytes::from(format!("event: playback\ndata: {value}\n\n")));
-        Some((Ok::<_, Infallible>(frame), subscription))
-    });
+    let stream = futures_util::stream::unfold(
+        (subscription, None, products),
+        |(mut subscription, previous, products)| async move {
+            let publication = subscription.recv().await.ok()?;
+            let current = publication
+                .as_ref()
+                .and_then(|p| p.view.transport.current.clone());
+            let value = publication_json(&products, publication.as_ref(), current != previous);
+            let frame = Frame::data(Bytes::from(format!("event: playback\ndata: {value}\n\n")));
+            Some((
+                Ok::<_, Infallible>(frame),
+                (subscription, current, products),
+            ))
+        },
+    );
     Ok(event_response(Body::new(StreamBody::new(stream))))
 }
 
@@ -151,17 +188,25 @@ async fn tracks_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let query = catalog::song_query(products, parameters, "tracks").await?;
+    let query = catalog::track_query(products, parameters, "tracks").await?;
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(256);
-    let rows = products
-        .library
-        .song_rows(&query, offset, limit, &library::ReadCancellation::new())
+    let rows = (&query)
+        .rows(
+            &products.library,
+            offset,
+            limit,
+            &library::ReadCancellation::new(),
+        )
         .await
+        .map(|rows| match rows {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!("typed song projection"),
+        })
         .map_err(internal)?;
-    let total = catalog::song_total(products, parameters, &query).await?;
+    let total = catalog::track_total(products, parameters, &query).await?;
     Ok(
-        json!({"offset":offset,"limit":limit,"total":total,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
+        json!({"activity_sensitive":query.activity_sensitive(),"offset":offset,"limit":limit,"total":total,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
 }
 
@@ -175,11 +220,15 @@ async fn queue_state(
     let state = products.playback.updates.current();
     Ok(json_response(
         StatusCode::OK,
-        queue_json(state.as_deref(), limit),
+        queue_json(products, state.as_deref(), limit),
     ))
 }
 
-fn queue_json(state: Option<&playback::PlaybackView>, limit: usize) -> Value {
+fn queue_json(
+    products: &ProductHandles,
+    state: Option<&playback::PlaybackView>,
+    limit: usize,
+) -> Value {
     state.map(|state| {
         let current = state.queue_window.iter().position(|row| Some(row.position) == state.queue.current_index).unwrap_or(0);
         let start = current.saturating_sub(limit / 2).min(state.queue_window.len().saturating_sub(limit));
@@ -187,7 +236,7 @@ fn queue_json(state: Option<&playback::PlaybackView>, limit: usize) -> Value {
         let offset = rows.clone().next().map_or(0, |row| row.position);
         json!({
             "total": state.queue.total, "current_index": state.queue.current_index, "loading": state.queue_loading,
-            "offset": offset, "window": rows.map(|row| json!({"position": row.position, "track": track_json(&row.item)})).collect::<Vec<_>>()
+            "offset": offset, "window": rows.map(|row| json!({"position": row.position, "track": track_json(products, &row.track, false)})).collect::<Vec<_>>()
         })
     }).unwrap_or(json!({"total": 0, "current_index": null, "loading": false, "offset": 0, "window": []}))
 }
@@ -293,8 +342,13 @@ async fn queue_play(
         if let Some(uri) = input.selection.get("anchor_uri").and_then(Value::as_str) {
             products
                 .library
-                .track_key_by_uri(uri, &library::ReadCancellation::new())
+                .catalog_identity(
+                    library::CatalogKind::Track,
+                    uri,
+                    &library::ReadCancellation::new(),
+                )
                 .await
+                .map(|identity| identity.map(|identity| library::TrackKey::from_raw(identity.key)))
                 .map_err(internal)?
         } else {
             None
@@ -310,7 +364,7 @@ async fn queue_play(
             anchor_key = products
                 .library
                 .selected_track_keys(
-                    &library::SongSelection::PlaylistEntries(Arc::from([entry])),
+                    &library::CatalogQuery::playlist_entries(vec![entry]).selection(),
                     &library::ReadCancellation::new(),
                 )
                 .await
@@ -322,14 +376,19 @@ async fn queue_play(
     let selection = if kind == "track" {
         let uris: Vec<String> =
             serde_json::from_value(input.selection["uris"].clone()).map_err(bad_request)?;
-        library::SongSelection::Tracks(
-            products
+        library::CatalogQuery::keys(
+            library::CatalogKind::Track,
+            None,
+            (products
                 .library
                 .remember_media_uris(&uris)
                 .await
-                .map_err(internal)?
-                .into(),
+                .map_err(internal)?)
+            .iter()
+            .map(|key| key.raw())
+            .collect(),
         )
+        .selection()
     } else {
         let parameters = input
             .selection
@@ -347,7 +406,7 @@ async fn queue_play(
                 )
             })
             .collect();
-        catalog::song_query(products, &parameters, &kind)
+        catalog::track_query(products, &parameters, &kind)
             .await?
             .selection()
     };
@@ -575,8 +634,8 @@ fn boolean(parameters: &HashMap<String, String>, key: &str) -> Result<bool, Erro
         .unwrap_or(Ok(false))
 }
 
-fn track_sort(value: &str) -> Result<library::TrackSort, Error> {
-    use library::TrackSort::*;
+fn track_sort(value: &str) -> Result<library::CatalogSort, Error> {
+    use library::CatalogSort::*;
     match value {
         "position" => Ok(Position),
         "title" => Ok(Title),
@@ -598,7 +657,7 @@ fn track_sort(value: &str) -> Result<library::TrackSort, Error> {
     }
 }
 
-fn smart_track_sort(value: Option<&str>) -> Result<Option<library::TrackSort>, Error> {
+fn smart_track_sort(value: Option<&str>) -> Result<Option<library::CatalogSort>, Error> {
     match value {
         None | Some("definition") => Ok(None),
         Some("position") => Err(bad_request("Unknown smart playlist track sort")),
@@ -606,16 +665,28 @@ fn smart_track_sort(value: Option<&str>) -> Result<Option<library::TrackSort>, E
     }
 }
 
-fn track_json(track: &playback::QueueItem) -> Value {
-    json!({"uri":track.media_uri,"title":track.title,"artist":track.artist,"album":track.album,"duration_ms":track.duration_millis})
+fn track_json(
+    products: &ProductHandles,
+    track: &library::TrackView,
+    include_preview: bool,
+) -> Value {
+    let mut row = json!({"uri":track.media_uri,"title":track.metadata.title,"artist":track.metadata.artist,"album":track.metadata.album,"duration_ms":track.metadata.duration_millis});
+    if include_preview {
+        row["artwork_previews"] = json!(artwork_previews(products, track.artwork_binding.iter()));
+    }
+    row
 }
-fn track_row_json(row: &library::TrackRow) -> Value {
-    json!({"uri":row.media_uri,"object_id":row.object_id,"title":row.title,"artist":row.artist,"album":row.album,
-        "duration_ms":row.duration_millis,"track_number":row.track_number,"disc_number":row.disc_number,
-        "year":row.year,"favorite":row.favorite,"rating":row.rating})
+fn track_row_json(row: &library::TrackView) -> Value {
+    json!({"uri":row.media_uri,"object_id":row.object_id,"title":row.metadata.title,"artist":row.metadata.artist,"album":row.metadata.album,
+        "duration_ms":row.metadata.duration_millis,"track_number":row.metadata.track_number,"disc_number":row.metadata.disc_number,
+        "year":row.metadata.year,"favorite":row.state.favorite,"rating":row.state.rating})
 }
 
-fn playback_json(state: Option<&playback::PlaybackView>) -> Value {
+fn playback_json(
+    products: &ProductHandles,
+    state: Option<&playback::PlaybackView>,
+    include_preview: bool,
+) -> Value {
     let Some(state) = state else {
         return Value::Null;
     };
@@ -629,7 +700,7 @@ fn playback_json(state: Option<&playback::PlaybackView>) -> Value {
     };
     json!({
         "state":status,"position_ms":state.transport.position_millis,"duration_ms":state.transport.duration_millis,"can_seek":state.transport.can_seek,
-        "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,"run":current.id.run.map(playback::RunId::get),"track":track_json(&current.item)})),
+        "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,"run":current.id.run.map(playback::RunId::get),"track":track_json(products, &current.row.track, include_preview)})),
         "volume":state.controls.volume,"muted":state.controls.muted,"shuffle":state.controls.shuffle_enabled,"auto_dj":state.controls.auto_dj_enabled,
         "repeat":match state.controls.repeat_mode {playback::RepeatMode::Off=>"off",playback::RepeatMode::One=>"one",playback::RepeatMode::All=>"all"},
         "queue_total":state.queue.total,"queue_loading":state.queue_loading,"error":state.transport.error,
@@ -879,8 +950,12 @@ async fn authorize(
     response
 }
 
-fn publication_json(publication: Option<&playback::PlaybackProjection>) -> Value {
-    let mut value = playback_json(publication.map(|p| &p.view));
+fn publication_json(
+    products: &ProductHandles,
+    publication: Option<&playback::PlaybackProjection>,
+    include_preview: bool,
+) -> Value {
+    let mut value = playback_json(products, publication.map(|p| &p.view), include_preview);
     if let Some(publication) = publication {
         value["notices"] = publication.notices.iter().map(|notice| match notice {
                         playback::PlaybackNotice::RunStarted(run) => json!({"type":"run_started","run":run.get()}),
@@ -899,9 +974,10 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
         products.appearance.subscribe(),
         products.settings.sidebar_changes(),
         products.source.catalog_changes(),
-        products.settings.clone(),
+        products.clone(),
         true,
         None,
+        rufin_core::runtime::CatalogRevision::default(),
     );
     let stream = futures_util::stream::unfold(
         receivers,
@@ -912,31 +988,39 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
             mut appearance,
             mut sidebar,
             mut catalog,
-            settings,
+            products,
             first,
             mut previous,
+            mut previous_catalog,
         )| async move {
             let value = if first {
                 let publication = playback.recv().await.ok()?;
-                let mut value = playback_event_json(publication, &mut previous, true);
+                let mut value = playback_event_json(&products, publication, &mut previous, true);
                 value["source"] = json!(*source.borrow_and_update());
-                value["lyrics"] =
-                    media::lyrics_json(&lyrics.borrow_and_update(), &settings.load().lyrics);
+                value["lyrics"] = media::lyrics_json(
+                    &lyrics.borrow_and_update(),
+                    &products.settings.load().lyrics,
+                );
                 value["appearance"] = json!(*appearance.borrow_and_update());
                 sidebar.borrow_and_update();
-                catalog.borrow_and_update();
+                previous_catalog = catalog.borrow_and_update().clone();
                 value["pins_changed"] = json!(true);
                 value
             } else {
                 tokio::select! {
-                    publication = playback.recv() => playback_event_json(publication.ok()?, &mut previous, false),
+                    publication = playback.recv() => playback_event_json(&products, publication.ok()?, &mut previous, false),
                     changed = source.changed() => { changed.ok()?; json!({"source":*source.borrow_and_update()}) },
-                    changed = lyrics.changed() => { changed.ok()?; json!({"lyrics":media::lyrics_json(&lyrics.borrow_and_update(), &settings.load().lyrics)}) },
+                    changed = lyrics.changed() => { changed.ok()?; json!({"lyrics":media::lyrics_json(&lyrics.borrow_and_update(), &products.settings.load().lyrics)}) },
                     changed = appearance.changed() => { changed.ok()?; json!({"appearance":*appearance.borrow_and_update()}) },
                     changed = sidebar.changed() => { changed.ok()?; json!({"pins_changed":true}) },
                     changed = catalog.changed() => {
                         changed.ok()?;
-                        json!({"catalog_acquired": matches!(*catalog.borrow_and_update(), Some(rufin_core::runtime::CatalogChange::Acquired)), "pins_changed":true})
+                        let revision = catalog.borrow_and_update().clone();
+                        let changed = revision.catalog != previous_catalog.catalog;
+                        let activity = revision.activity != previous_catalog.activity;
+                        let value = json!({"catalog_acquired": changed && matches!(revision.change, Some(rufin_core::runtime::CatalogChange::Broad)), "pins_changed":changed || (activity && products.settings.load().sidebar.pins_use_activity()), "activity_changed":activity});
+                        previous_catalog = revision;
+                        value
                     },
                 }
             };
@@ -945,8 +1029,16 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                     "event: update\ndata: {value}\n\n"
                 )))),
                 (
-                    playback, source, lyrics, appearance, sidebar, catalog, settings, false,
+                    playback,
+                    source,
+                    lyrics,
+                    appearance,
+                    sidebar,
+                    catalog,
+                    products,
+                    false,
                     previous,
+                    previous_catalog,
                 ),
             ))
         },
@@ -955,6 +1047,7 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
 }
 
 fn playback_event_json(
+    products: &ProductHandles,
     publication: Option<playback::PlaybackProjection>,
     previous: &mut Option<playback::PlaybackView>,
     first: bool,
@@ -969,9 +1062,15 @@ fn playback_event_json(
         (None, None) => false,
         _ => true,
     };
-    let mut value = json!({"playback": publication_json(publication.as_ref())});
+    let preview_changed = first
+        || previous
+            .as_ref()
+            .and_then(|view| view.transport.current.as_ref())
+            != current.and_then(|view| view.transport.current.as_ref());
+    let mut value =
+        json!({"playback": publication_json(products, publication.as_ref(), preview_changed)});
     if first || changed {
-        value["queue"] = queue_json(current, library::QUEUE_CONTEXT_LIMIT);
+        value["queue"] = queue_json(products, current, library::QUEUE_CONTEXT_LIMIT);
     }
     *previous = publication.map(|publication| publication.view);
     value

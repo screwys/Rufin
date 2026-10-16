@@ -21,7 +21,7 @@ const CLASSIC_EQUALIZER_FREQUENCIES: [f64; EQUALIZER_BAND_COUNT] = [
 const EQUALIZER_DUMMY_LOW_FREQUENCY: f64 = 20.0;
 const EQUALIZER_DUMMY_HIGH_FREQUENCY: f64 = 20_000.0;
 
-pub(super) type SharedQueuedLoudness = Arc<Mutex<TrackLoudness>>;
+pub(super) type SharedQueuedLoudness = Arc<Mutex<Option<TrackLoudness>>>;
 
 pub(super) struct AudioGraph {
     root: gst::Element,
@@ -57,7 +57,7 @@ impl AudioEffects {
 struct AudioGraphState {
     settings: BackendAudioSettings,
     effects: AudioEffects,
-    current_loudness: TrackLoudness,
+    current_loudness: Option<TrackLoudness>,
     tags: gst::TagList,
     pending: Option<(BackendAudioSettings, AudioEffects)>,
 }
@@ -67,11 +67,17 @@ impl AudioGraphState {
         let Some(volume) = self.effects.volume.as_ref() else {
             return;
         };
-        let gain = selected_loudness(&self.settings, &self.current_loudness)
-            .map(|(gain, peak)| clipping_safe_gain_db(gain, peak))
-            .unwrap_or_else(|| {
-                embedded_replaygain(&self.tags, self.settings.loudness_normalization_scope)
-            });
+        let gain = self
+            .current_loudness
+            .as_ref()
+            .map(|loudness| {
+                selected_loudness(&self.settings, loudness)
+                    .map(|(gain, peak)| clipping_safe_gain_db(gain, peak))
+                    .unwrap_or_else(|| {
+                        embedded_replaygain(&self.tags, self.settings.loudness_normalization_scope)
+                    })
+            })
+            .unwrap_or_default();
         apply_loudness_gain(volume, gain);
     }
 }
@@ -80,7 +86,7 @@ impl AudioGraph {
     pub(super) fn new(
         settings: &BackendAudioSettings,
         playback_rate: f64,
-        current_loudness: TrackLoudness,
+        current_loudness: Option<TrackLoudness>,
         queued_loudness: SharedQueuedLoudness,
     ) -> Result<Self, String> {
         let bin = gst::Bin::new();
@@ -258,7 +264,7 @@ impl AudioGraph {
         self.gain_curve.unset_all();
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         state.tags = gst::TagList::new();
-        state.current_loudness = TrackLoudness::default();
+        state.current_loudness = None;
     }
 
     pub(super) fn output(&self) -> &gst::Element {
@@ -340,6 +346,12 @@ impl AudioGraph {
 
     pub(super) fn uses_output(&self, selected: Option<&str>) -> bool {
         self.audio_output.as_deref() == selected
+    }
+
+    pub(super) fn set_loudness(&mut self, loudness: TrackLoudness) {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state.current_loudness = Some(loudness);
+        state.apply_loudness();
     }
 
     pub(super) fn reconfigure(
@@ -878,7 +890,7 @@ mod tests {
     }
 
     fn test_stream(loudness: TrackLoudness) -> SharedQueuedLoudness {
-        Arc::new(Mutex::new(loudness))
+        Arc::new(Mutex::new(Some(loudness)))
     }
 
     fn empty_stream() -> SharedQueuedLoudness {
@@ -1118,14 +1130,26 @@ mod tests {
             audio_output: Some("fakesink".to_string()),
             ..BackendAudioSettings::default()
         };
+        let stream = Arc::new(Mutex::new(None));
         let mut graph =
-            test_graph(&settings, DEFAULT_PLAYBACK_RATE, empty_stream()).expect("audio graph");
+            test_graph(&settings, DEFAULT_PLAYBACK_RATE, stream.clone()).expect("audio graph");
+        let bin = graph.root.downcast_ref::<gst::Bin>().unwrap();
+        let volume = bin.by_name("rufin-loudness-normalization").unwrap();
+        assert_eq!(volume.property::<f64>("volume"), 1.0);
+        let measured = TrackLoudness {
+            track: Some(Box::new(measurement(-28.0, Some(0.1)))),
+            album: Some(Box::new(measurement(-33.0, Some(0.1)))),
+        };
+        graph.set_loudness(measured.clone());
+        *stream.lock().unwrap() = Some(measured);
+        assert!((volume.property::<f64>("volume") - 10_f64.powf(5.0 / 20.0)).abs() < 0.001);
 
         let album = BackendAudioSettings {
             loudness_normalization_scope: LoudnessNormalizationScope::Album,
             ..settings.clone()
         };
         assert!(graph.reconfigure(&album, DEFAULT_PLAYBACK_RATE).unwrap());
+        assert!((volume.property::<f64>("volume") - 10_f64.powf(10.0 / 20.0)).abs() < 0.001);
 
         let target = BackendAudioSettings {
             ebu_r128_target_lufs: -18.0,
@@ -1272,7 +1296,7 @@ mod tests {
         };
         let observed = observe_direct_gains(&graph, move |index| {
             if index == 0 {
-                *stream.lock().expect("prepared loudness") = next.clone();
+                *stream.lock().expect("prepared loudness") = Some(next.clone());
             }
         });
         assert!(observed.len() >= 2, "observed gains: {observed:?}");
@@ -1300,10 +1324,10 @@ mod tests {
         });
         let graph = test_graph(&settings, DEFAULT_PLAYBACK_RATE, Arc::clone(&stream))
             .expect("normalization graph");
-        *stream.lock().expect("prepared loudness") = TrackLoudness {
+        *stream.lock().expect("prepared loudness") = Some(TrackLoudness {
             track: Some(Box::new(measurement(-18.0, Some(1.0)))),
             album: None,
-        };
+        });
         let observed = observe_direct_gains(&graph, |_| {})[0];
         assert!((observed - 10_f64.powf(-5.0 / 20.0)).abs() < 0.001);
     }
@@ -1403,9 +1427,9 @@ mod tests {
                 let index = index.fetch_add(1, Ordering::Relaxed);
                 if index > 0 {
                     *stream.lock().unwrap() = if index == 1 || index == 3 {
-                        TrackLoudness::default()
+                        Some(TrackLoudness::default())
                     } else {
-                        loudness.clone()
+                        Some(loudness.clone())
                     };
                     pad.push_event(
                         gst::event::StreamStart::builder(&format!("gain-{index}"))

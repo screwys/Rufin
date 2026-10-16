@@ -1,0 +1,858 @@
+use super::*;
+use crate::{LocalFileState, LocalFileWrite, LocalLocatorWrite, TrackKey, TrackObservation};
+use sqlx::{QueryBuilder, Sqlite};
+
+pub(crate) async fn album_order(
+    connection: &mut SqliteConnection,
+    keys: &[i64],
+) -> LibraryResult<Vec<i64>> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let input = serde_json::to_string(keys)?;
+    // Retire only the migrated local header, after every admitted member has raw tags.
+    let retired:Vec<i64>=sqlx::query_scalar("UPDATE albums SET metadata=NULL,cached_local=0,accepted_audio=NULL WHERE cached_local=1 AND album_key IN(SELECT value FROM json_each(?1)) AND NOT EXISTS(SELECT 1 FROM tracks INDEXED BY tracks_album_order_idx WHERE tracks.album_key=albums.album_key AND indexed=1 AND json_type(metadata,'$.album_tags') IS NOT 'object') RETURNING album_key")
+        .bind(&input).fetch_all(&mut *connection).await?;
+    if !retired.is_empty() {
+        for table in ["album_artists", "album_genres", "album_release_types"] {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM {table} WHERE album_key IN(SELECT value FROM json_each(?1))"
+            )))
+            .bind(serde_json::to_string(&retired)?)
+            .execute(&mut *connection)
+            .await?;
+        }
+    }
+    let identity = crate::collections::album_release_identity("album");
+    sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE albums AS album SET release_lookup_identity=NULL WHERE album_key IN(SELECT value FROM json_each(?1)) AND release_lookup_identity IS NOT NULL AND release_lookup_identity IS NOT({identity})"))).bind(&input).execute(&mut *connection).await?;
+    let member = "FROM tracks member INDEXED BY tracks_album_order_idx WHERE member.album_key=album.album_key AND member.indexed=1";
+    let order = "ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1";
+    let title = format!(
+        "coalesce(album.sort_text,(SELECT coalesce(json_extract(member.metadata,'$.album_tags.sort_text'),member.display_album,'') {member} {order}),'')"
+    );
+    let artist = "CASE WHEN album.metadata IS NOT NULL THEN(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key ORDER BY credit.position LIMIT 1) ELSE(SELECT artist.sort_text FROM tracks member INDEXED BY tracks_album_order_idx JOIN track_album_artists credit USING(track_key) JOIN artists artist USING(artist_key) WHERE member.album_key=album.album_key AND member.indexed=1 ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id,credit.position LIMIT 1) END";
+    let year = format!(
+        "CASE WHEN album.metadata IS NOT NULL THEN album.year ELSE(SELECT member.year {member} AND member.year IS NOT NULL {order}) END"
+    );
+    let release = format!(
+        "CASE WHEN album.metadata IS NOT NULL THEN album.release_date ELSE(SELECT member.release_date {member} AND member.release_date IS NOT NULL {order}) END"
+    );
+    let added = format!(
+        "coalesce(unixepoch(album.date_added),album.first_seen_at,(SELECT coalesce(unixepoch(member.date_added),member.first_seen_at) {member} {order}))"
+    );
+    let mut changed:Vec<i64>=sqlx::query_scalar(sqlx::AssertSqlSafe(format!("INSERT INTO album_order(album_key,source_key,title_sort,album_artist_sort,year_sort,release_sort,added_sort) SELECT album.album_key,album.source_key,{title},{artist},{year},{release},{added} FROM albums album WHERE album.album_key IN(SELECT value FROM json_each(?1)) ON CONFLICT(album_key) DO UPDATE SET title_sort=excluded.title_sort,album_artist_sort=excluded.album_artist_sort,year_sort=excluded.year_sort,release_sort=excluded.release_sort,added_sort=excluded.added_sort WHERE(title_sort,album_artist_sort,year_sort,release_sort,added_sort) IS NOT(excluded.title_sort,excluded.album_artist_sort,excluded.year_sort,excluded.release_sort,excluded.added_sort) RETURNING album_key")))
+        .bind(&input).fetch_all(&mut *connection).await?;
+    let captions:Vec<(i64,String,String,String,String)>=sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT album.album_key,ordering.title_search,ordering.artist_search,coalesce(album.title,(SELECT member.display_album {member} AND member.display_album<>'' {order}),'') ,CASE WHEN album.metadata IS NOT NULL THEN coalesce(json_extract(album.metadata,'$.artist'),'') ELSE coalesce((SELECT coalesce(nullif(json_extract(member.metadata,'$.album_display_artist'),''),member.display_artist) {member} {order}),'') END FROM albums album JOIN album_order ordering USING(album_key) WHERE album.album_key IN(SELECT value FROM json_each(?1))"))).bind(&input).fetch_all(&mut *connection).await?;
+    let searches = captions
+        .into_iter()
+        .filter_map(|(key, previous, previous_artist, caption, artist)| {
+            let normalized = caption.to_lowercase();
+            let artist = artist.to_lowercase();
+            (previous != normalized || previous_artist != artist)
+                .then_some((key, normalized, artist))
+        })
+        .collect::<Vec<_>>();
+    if !searches.is_empty() {
+        let mut query =
+            QueryBuilder::<Sqlite>::new("WITH input(album_key,title_search,artist_search) AS(");
+        query.push_values(&searches, |mut row, (key, search, artist)| {
+            row.push_bind(key).push_bind(search).push_bind(artist);
+        });
+        query.push(") UPDATE album_order SET title_search=input.title_search,artist_search=input.artist_search FROM input WHERE album_order.album_key=input.album_key");
+        query.build().execute(&mut *connection).await?;
+        changed.extend(searches.into_iter().map(|(key, _, _)| key));
+    }
+    Ok(changed)
+}
+
+pub(crate) fn directory_locator(path: &str) -> String {
+    path.trim_end_matches(['/', std::path::MAIN_SEPARATOR])
+        .to_owned()
+}
+
+pub(crate) fn parent_locator(path: &str) -> String {
+    if let Ok(mut uri) = url::Url::parse(path)
+        && uri.path_segments().is_some()
+    {
+        uri.set_fragment(None);
+        if let Ok(mut segments) = uri.path_segments_mut() {
+            segments.pop_if_empty().pop();
+        }
+        return directory_locator(uri.as_str());
+    }
+    std::path::Path::new(path)
+        .parent()
+        .map(|parent| directory_locator(&parent.to_string_lossy()))
+        .unwrap_or_default()
+}
+
+async fn physical(
+    connection: &mut SqliteConnection,
+    source: i64,
+    files: &[(LocalFileWrite, Vec<String>)],
+    observed: Option<i64>,
+) -> LibraryResult<bool> {
+    let mut changed = false;
+    for page in files.chunks(128) {
+        if page.is_empty() {
+            continue;
+        }
+        let structure = serde_json::to_string(
+            &page
+                .iter()
+                .map(|(file, _)| (&file.path, &file.root, &file.relative_path, file.kind))
+                .collect::<Vec<_>>(),
+        )?;
+        changed|=sqlx::query_scalar::<_,bool>("SELECT EXISTS(SELECT 1 FROM json_each(?2) input LEFT JOIN local_files previous ON previous.source_key=?1 AND previous.path=json_extract(input.value,'$[0]') WHERE(json_extract(input.value,'$[3]')='directory' OR previous.kind='directory') AND(previous.path IS NULL OR(previous.root,previous.relative_path,previous.kind) IS NOT(json_extract(input.value,'$[1]'),json_extract(input.value,'$[2]'),json_extract(input.value,'$[3]'))))").bind(source).bind(structure).fetch_one(&mut *connection).await?;
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "INSERT INTO local_files(source_key,path,root,relative_path,parent_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,artist_pictures,parse_version,state,observed_stamp,parsed_stamp) ",
+        );
+        query.push_values(page, |mut row, (file, _)| {
+            let parent = parent_locator(&file.path);
+            let parsed = matches!(
+                file.state,
+                LocalFileState::Accepted | LocalFileState::Rejected
+            )
+            .then(|| {
+                let mut parsed = serde_json::json!([
+                    file.size_bytes,
+                    file.mtime_ns,
+                    file.revision,
+                    file.parse_version
+                ]);
+                if file.kind == crate::LocalFileKind::Directory {
+                    parsed
+                        .as_array_mut()
+                        .unwrap()
+                        .push(observed.unwrap_or(0).into());
+                }
+                serde_json::to_string(&parsed).unwrap()
+            });
+            row.push_bind(source)
+                .push_bind(&file.path)
+                .push_bind(&file.root)
+                .push_bind(&file.relative_path)
+                .push_bind(parent)
+                .push_bind(file.kind)
+                .push_bind(file.size_bytes)
+                .push_bind(file.mtime_ns)
+                .push_bind(file.device_id)
+                .push_bind(file.inode)
+                .push_bind(&file.native_id)
+                .push_bind(&file.revision)
+                .push_bind(file.picture_index)
+                .push_bind(&file.artist_pictures)
+                .push_bind(file.parse_version)
+                .push_bind(file.state)
+                .push_bind(observed.unwrap_or(0))
+                .push_bind(parsed);
+        });
+        query.push(" ON CONFLICT(source_key,path) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,parent_path=excluded.parent_path,kind=excluded.kind,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,native_id=excluded.native_id,revision=excluded.revision,observed_stamp=CASE WHEN excluded.observed_stamp=0 THEN local_files.observed_stamp ELSE excluded.observed_stamp END,picture_index=CASE WHEN excluded.artist_pictures IS NULL AND(local_files.size_bytes,local_files.mtime_ns,local_files.revision) IS(excluded.size_bytes,excluded.mtime_ns,excluded.revision) THEN local_files.picture_index ELSE excluded.picture_index END,artist_pictures=CASE WHEN(local_files.size_bytes,local_files.mtime_ns,local_files.revision) IS(excluded.size_bytes,excluded.mtime_ns,excluded.revision) THEN coalesce(excluded.artist_pictures,local_files.artist_pictures) ELSE excluded.artist_pictures END,parse_version=CASE WHEN excluded.state='observed' AND(local_files.size_bytes,local_files.mtime_ns,local_files.revision) IS(excluded.size_bytes,excluded.mtime_ns,excluded.revision) THEN local_files.parse_version ELSE excluded.parse_version END,state=CASE WHEN excluded.state='observed' AND(local_files.size_bytes,local_files.mtime_ns,local_files.revision) IS(excluded.size_bytes,excluded.mtime_ns,excluded.revision) THEN local_files.state ELSE excluded.state END,parsed_stamp=coalesce(excluded.parsed_stamp,local_files.parsed_stamp) WHERE excluded.observed_stamp>=local_files.observed_stamp");
+        query.build().execute(&mut *connection).await?;
+        let parsed = page
+            .iter()
+            .filter(|(file, dependencies)| {
+                !dependencies.is_empty()
+                    || matches!(
+                        file.state,
+                        LocalFileState::Accepted | LocalFileState::Rejected
+                    )
+            })
+            .map(|(file, dependencies)| {
+                (
+                    &file.path,
+                    dependencies,
+                    file.state == LocalFileState::Accepted,
+                )
+            })
+            .collect::<Vec<_>>();
+        if parsed.is_empty() {
+            continue;
+        }
+        let input = serde_json::to_string(&parsed)?;
+        let expected = "WITH owners AS(SELECT json_extract(value,'$[0]') path,json_extract(value,'$[1]') dependencies,json_extract(value,'$[2]') accepted FROM json_each(?2)),expected AS(SELECT file.local_file_key,item.value dependency_path,CAST(item.key AS INTEGER) position FROM owners CROSS JOIN local_files file ON file.source_key=?1 AND file.path=owners.path AND file.observed_stamp<=?3 CROSS JOIN json_each(owners.dependencies) item) ";
+        sqlx::query(sqlx::AssertSqlSafe(format!("{expected} DELETE FROM local_file_dependencies AS current WHERE local_file_key IN(SELECT file.local_file_key FROM local_files file JOIN owners ON owners.path=file.path WHERE file.source_key=?1 AND file.observed_stamp<=?3) AND NOT EXISTS(SELECT 1 FROM expected WHERE expected.local_file_key=current.local_file_key AND expected.dependency_path=current.dependency_path AND expected.position=current.position)"))).bind(source).bind(&input).bind(observed).execute(&mut *connection).await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!("{expected} INSERT OR IGNORE INTO local_file_dependencies(local_file_key,dependency_path,position) SELECT local_file_key,dependency_path,position FROM expected"))).bind(source).bind(&input).bind(observed).execute(&mut *connection).await?;
+        sqlx::query("WITH accepted AS MATERIALIZED(SELECT edge.local_file_key,edge.dependency_path,json_array(dependency.size_bytes,dependency.mtime_ns,dependency.revision) inputs FROM json_each(?2) input CROSS JOIN local_files owner ON owner.source_key=?1 AND owner.path=json_extract(input.value,'$[0]') CROSS JOIN local_file_dependencies edge ON edge.local_file_key=owner.local_file_key CROSS JOIN local_files dependency ON dependency.source_key=?1 AND dependency.path=edge.dependency_path WHERE json_extract(input.value,'$[2]') AND owner.kind='cue' AND owner.observed_stamp<=?3 AND dependency.observed_stamp<=?3) UPDATE local_file_dependencies AS edge SET accepted_inputs=accepted.inputs FROM accepted WHERE edge.local_file_key=accepted.local_file_key AND edge.dependency_path=accepted.dependency_path AND edge.accepted_inputs IS NOT accepted.inputs")
+            .bind(source).bind(&input).bind(observed).execute(&mut *connection).await?;
+    }
+    Ok(changed)
+}
+
+async fn withdrawn_tracks(
+    connection: &mut SqliteConnection,
+    source: i64,
+    files: &[(LocalFileWrite, Vec<String>)],
+    songs: &[TrackObservation],
+    observed: i64,
+) -> LibraryResult<Vec<i64>> {
+    let owners = serde_json::to_string(
+        &files
+            .iter()
+            .filter(|(file, dependencies)| {
+                !dependencies.is_empty()
+                    || matches!(
+                        file.state,
+                        LocalFileState::Accepted | LocalFileState::Rejected
+                    )
+            })
+            .map(|(file, dependencies)| {
+                (
+                    &file.path,
+                    file.state,
+                    file.kind,
+                    dependencies,
+                    serde_json::to_string(&(file.size_bytes, file.mtime_ns, &file.revision))
+                        .unwrap(),
+                )
+            })
+            .collect::<Vec<_>>(),
+    )?;
+    let incoming = serde_json::to_string(
+        &songs
+            .iter()
+            .map(|song| (&song.object_id, &song.source_path, &song.cue_path))
+            .collect::<Vec<_>>(),
+    )?;
+    let unreferenced = "NOT EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.track_key=track.track_key)
+        AND NOT EXISTS(SELECT 1 FROM queue_entries entry WHERE entry.track_key=track.track_key)
+        AND NOT EXISTS(SELECT 1 FROM user_media_state state WHERE state.media_uri=track.media_uri AND(state.favorite=1 OR state.rating IS NOT NULL))
+        AND NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='import')";
+    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("WITH owners AS(SELECT json_extract(value,'$[0]') path,json_extract(value,'$[1]') state,json_extract(value,'$[2]') kind,json_extract(value,'$[3]') dependencies,json_extract(value,'$[4]') parsed FROM json_each(?2)),incoming AS(SELECT json_extract(value,'$[0]') object_id,json_extract(value,'$[1]') path,json_extract(value,'$[2]') cue FROM json_each(?3))
+        SELECT track.track_key FROM tracks track WHERE track.source_key=?1 AND(track.indexed=1 OR track.local_file_key IS NOT NULL) AND track.observed_stamp<=?4 AND track.object_id NOT IN(SELECT object_id FROM incoming) AND EXISTS(
+          SELECT 1 FROM owners LEFT JOIN local_files physical ON physical.source_key=?1 AND physical.path=owners.path WHERE coalesce(physical.observed_stamp,0)<=?4 AND(
+            (owners.state='rejected' AND coalesce(track.cue_path,track.source_path)=owners.path)
+            OR(owners.state='accepted' AND owners.kind='cue' AND track.cue_path=owners.path AND track.observed_stamp<?4 AND(
+              EXISTS(SELECT 1 FROM incoming WHERE cue=owners.path) OR json_array(json_extract(physical.parsed_stamp,'$[0]'),json_extract(physical.parsed_stamp,'$[1]'),json_extract(physical.parsed_stamp,'$[2]')) IS NOT owners.parsed OR EXISTS(SELECT 1 FROM tracks accepted WHERE accepted.local_file_key=physical.local_file_key AND accepted.cue_path=owners.path AND accepted.observed_stamp=?4) OR EXISTS(
+                SELECT 1 FROM json_each(owners.dependencies) declared LEFT JOIN local_file_dependencies edge ON edge.local_file_key=physical.local_file_key AND edge.dependency_path=declared.value LEFT JOIN local_files backing ON backing.source_key=?1 AND backing.path=declared.value WHERE edge.accepted_inputs IS NOT json_array(backing.size_bytes,backing.mtime_ns,backing.revision))))
+            OR(owners.kind='cue' AND {unreferenced} AND track.cue_path IS NULL AND track.source_path IN(SELECT value FROM json_each(owners.dependencies)) AND(
+              EXISTS(SELECT 1 FROM incoming WHERE cue=owners.path AND path=track.source_path) OR EXISTS(SELECT 1 FROM tracks segment WHERE segment.local_file_key=physical.local_file_key AND segment.cue_path=owners.path AND segment.source_path=track.source_path)))
+            OR(owners.state='accepted' AND owners.kind='media' AND {unreferenced} AND track.cue_path IS NULL AND track.source_path=owners.path AND EXISTS(SELECT 1 FROM incoming WHERE path=owners.path AND cue IS NOT NULL))
+          ))")))
+        .bind(source).bind(owners).bind(incoming).bind(observed).fetch_all(connection).await?)
+}
+
+fn descendant_prefix(path: &str) -> (char, String) {
+    let separator = if url::Url::parse(path).is_ok_and(|uri| uri.path_segments().is_some()) {
+        '/'
+    } else {
+        std::path::MAIN_SEPARATOR
+    };
+    (
+        separator,
+        format!("{}{separator}", path.trim_end_matches(separator)),
+    )
+}
+
+async fn write_track_membership(
+    connection: &mut SqliteConnection,
+    tracks: &[i64],
+    indexed: bool,
+    files_removed: bool,
+    observed: Option<i64>,
+) -> LibraryResult<bool> {
+    if tracks.is_empty() {
+        return Ok(false);
+    }
+    let input = serde_json::to_string(tracks)?;
+    let albums: Vec<i64>=sqlx::query_scalar("SELECT DISTINCT album_key FROM tracks WHERE track_key IN(SELECT value FROM json_each(?1)) AND album_key IS NOT NULL").bind(&input).fetch_all(&mut *connection).await?;
+    let changed=sqlx::query("UPDATE tracks SET indexed=?2,local_file_key=CASE WHEN ?3 THEN NULL ELSE local_file_key END,observed_stamp=CASE WHEN ?2 THEN max(observed_stamp,coalesce(?4,observed_stamp)) ELSE observed_stamp END WHERE track_key IN(SELECT value FROM json_each(?1)) AND(indexed<>?2 OR(?3 AND local_file_key IS NOT NULL))").bind(input).bind(indexed).bind(files_removed).bind(observed).execute(&mut *connection).await?.rows_affected()>0;
+    crate::loudness::invalidate_album_audio(
+        connection,
+        &albums
+            .iter()
+            .map(|key| crate::AlbumKey::from_raw(*key))
+            .collect::<Vec<_>>(),
+        true,
+    )
+    .await?;
+    if changed {
+        album_order(connection, &albums).await?;
+        super::artwork::refresh_choices(connection, tracks, &albums, &[], false).await?;
+    }
+    Ok(changed)
+}
+
+async fn delete_physical_files(
+    connection: &mut SqliteConnection,
+    source: i64,
+    keys: &[i64],
+    bound: i64,
+) -> LibraryResult<()> {
+    let input = serde_json::to_string(keys)?;
+    sqlx::query("UPDATE local_files SET state='observed' WHERE source_key=?1 AND local_file_key IN(SELECT dependency.local_file_key FROM local_file_dependencies dependency JOIN local_files missing ON missing.path=dependency.dependency_path AND missing.source_key=?1 WHERE missing.local_file_key IN(SELECT value FROM json_each(?2))) AND observed_stamp<=?3").bind(source).bind(&input).bind(bound).execute(&mut *connection).await?;
+    sqlx::query("DELETE FROM local_files WHERE local_file_key IN(SELECT value FROM json_each(?1))")
+        .bind(input)
+        .execute(connection)
+        .await?;
+    Ok(())
+}
+
+impl Database {
+    pub async fn source_file_reuse_candidates(
+        &self,
+        source_id: &str,
+        files: &[LocalFileWrite],
+    ) -> LibraryResult<Vec<crate::LocalFileRow>> {
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let source = super::cache::source_key(connection, source_id).await?;
+        let mut rows = crate::local::local_file_reuse_candidates_on(
+            connection,
+            SourceKey::from_raw(source),
+            files,
+        )
+        .await?;
+        let stamps:std::collections::HashMap<String,String>=sqlx::query_as::<_,(String,String)>("SELECT path,parsed_stamp FROM local_files WHERE source_key=?1 AND parsed_stamp IS NOT NULL AND path IN(SELECT value FROM json_each(?2))")
+            .bind(source).bind(serde_json::to_string(&rows.iter().map(|row|&row.path).collect::<Vec<_>>())?).fetch_all(&mut *connection).await?.into_iter().collect();
+        for row in &mut rows {
+            if let Some(stamp) = stamps.get(&row.path) {
+                let (size, mtime, revision, version): (
+                    Option<i64>,
+                    i64,
+                    Option<String>,
+                    Option<i64>,
+                ) = serde_json::from_value(serde_json::Value::Array(
+                    serde_json::from_str::<Vec<serde_json::Value>>(stamp)?
+                        .into_iter()
+                        .take(4)
+                        .collect(),
+                ))?;
+                row.size_bytes = size;
+                row.mtime_ns = mtime;
+                row.revision = revision;
+                row.parse_version = version;
+            } else {
+                row.parse_version = None;
+            }
+        }
+        Ok(rows)
+    }
+}
+
+impl super::Catalog<'_> {
+    pub async fn write_file_observations(
+        &mut self,
+        files: &[(LocalFileWrite, Vec<String>)],
+        mut songs: Vec<TrackObservation>,
+        admit: bool,
+    ) -> LibraryResult<()> {
+        let source_id = self.source_id;
+        let observed = self.observed;
+        let mut writer = self.database.writer().await?;
+        let mut tx = writer
+            .as_mut()
+            .ok_or(LibraryError::WriterUnavailable)?
+            .begin()
+            .await?;
+        let source = self.source.raw();
+        let observed = Some(super::cache::observation_stamp(&mut tx, source, observed).await?);
+        let mut update = CatalogUpdate::default();
+        let physical_files = files
+            .iter()
+            .map(|(file, _)| (file.path.as_str(), (file.device_id, file.inode)))
+            .collect::<std::collections::HashMap<_, _>>();
+        let whole_files = songs
+            .iter()
+            .filter(|track| {
+                track.cue_path.is_none()
+                    && track
+                        .media_uri
+                        .as_deref()
+                        .is_none_or(|uri| crate::cue_media_parts(uri).is_none())
+            })
+            .filter_map(|track| {
+                let path = track.source_path.as_ref()?;
+                let (device, inode) = physical_files
+                    .get(path.as_str())
+                    .copied()
+                    .unwrap_or((None, None));
+                Some((
+                    track.media_uri.clone().unwrap_or_else(|| {
+                        crate::source_entity_uri(
+                            &SourceId::new(source_id),
+                            "track",
+                            &track.object_id,
+                        )
+                    }),
+                    path.clone(),
+                    device,
+                    inode,
+                ))
+            })
+            .collect::<Vec<_>>();
+        let aliases =
+            super::file_reads::equivalent_cue_uris_on(&mut tx, source, &whole_files).await?;
+        let reused: std::collections::HashSet<_> =
+            aliases.iter().map(|(uri, _, _)| uri.as_str()).collect();
+        songs.retain(|track| {
+            !reused.contains(
+                track
+                    .media_uri
+                    .as_deref()
+                    .unwrap_or(&crate::source_entity_uri(
+                        &SourceId::new(source_id),
+                        "track",
+                        &track.object_id,
+                    )),
+            )
+        });
+        let songs = songs.as_slice();
+        let withdrawn = withdrawn_tracks(&mut tx, source, files, songs, observed.unwrap()).await?;
+        update.metadata = physical(&mut tx, source, files, observed).await?;
+        update.metadata |= write_track_membership(&mut tx, &withdrawn, false, true, None).await?;
+        if admit {
+            let admitted: Vec<i64> = sqlx::query_scalar("SELECT track_key FROM tracks WHERE source_key=?1 AND indexed=0 AND observed_stamp<=?3 AND local_file_key IN(SELECT local_file_key FROM local_files WHERE source_key=?1 AND path IN(SELECT json_extract(value,'$[0]') FROM json_each(?2)))")
+                .bind(source).bind(serde_json::to_string(&files.iter().filter(|(file,_)|file.state==LocalFileState::Accepted).map(|(file,_)|(&file.path,)).collect::<Vec<_>>())?).bind(observed).fetch_all(&mut *tx).await?;
+            update.metadata |=
+                write_track_membership(&mut tx, &admitted, true, false, observed).await?;
+        }
+        let (track_update, previous_albums) =
+            super::cache::tracks(&mut tx, source, source_id, songs, observed, admit, true).await?;
+        update.merge(track_update);
+        if !songs.is_empty() {
+            update.metadata |= sqlx::query("WITH expected AS(
+                SELECT track.track_key,file.local_file_key
+                FROM json_each(?2) input
+                JOIN tracks track ON track.source_key=?1 AND track.object_id=input.value
+                LEFT JOIN local_files file ON file.source_key=?1 AND file.path=coalesce(track.cue_path,track.source_path)
+                WHERE track.observed_stamp<=?3)
+              UPDATE tracks SET local_file_key=expected.local_file_key FROM expected
+              WHERE tracks.track_key=expected.track_key AND tracks.local_file_key IS NOT expected.local_file_key")
+                .bind(source)
+                .bind(serde_json::to_string(&songs.iter().map(|track| &track.object_id).collect::<Vec<_>>())?)
+                .bind(observed)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected() > 0;
+        }
+        update.merge(merge_local_file_uris_on(&mut tx, &aliases).await?);
+        let accepted_cues = files
+            .iter()
+            .filter(|(file, _)| {
+                file.kind == crate::LocalFileKind::Cue && file.state == LocalFileState::Accepted
+            })
+            .map(|(file, _)| file.path.clone())
+            .collect::<Vec<_>>();
+        if !aliases.is_empty() || !accepted_cues.is_empty() {
+            let paths = whole_files
+                .iter()
+                .map(|(_, path, _, _)| path.clone())
+                .chain(
+                    files
+                        .iter()
+                        .filter(|(file, _)| accepted_cues.contains(&file.path))
+                        .flat_map(|(_, dependencies)| dependencies.iter().cloned()),
+                )
+                .chain(songs.iter().filter_map(|track| track.source_path.clone()))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let mut after = 0;
+            loop {
+                let page =
+                    super::file_reads::referenced_file_page_on(&mut tx, source, &paths, after)
+                        .await?;
+                let Some(last) = page.last() else { break };
+                after = last.0;
+                let files = page
+                    .into_iter()
+                    .map(|(_, uri, path)| (uri, path, None, None))
+                    .collect::<Vec<_>>();
+                let aliases =
+                    super::file_reads::equivalent_cue_uris_on(&mut tx, source, &files).await?;
+                update.merge(merge_local_file_uris_on(&mut tx, &aliases).await?);
+            }
+        }
+        if update.metadata || update.artwork {
+            update.artwork |= super::artwork::refresh_batch(
+                &mut tx,
+                source,
+                songs,
+                &[],
+                &[],
+                &previous_albums,
+                &update,
+            )
+            .await?;
+        }
+        if update.changed() {
+            sqlx::query(
+                "UPDATE sources SET catalog_revision=catalog_revision+1 WHERE source_key=?1",
+            )
+            .bind(source)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        self.changes.merge(update);
+        Ok(())
+    }
+    pub async fn purge_source_file_absences(&mut self, observed: i64) -> LibraryResult<()> {
+        let source_id = self.source_id;
+        let mut after = String::new();
+        loop {
+            let paths: Vec<String> = {
+                let mut connection = self.database.acquire_reader().await?;
+                sqlx::query_scalar("SELECT child.path FROM local_files parent JOIN sources source ON source.source_key=parent.source_key CROSS JOIN local_files child ON child.source_key=parent.source_key AND child.parent_path=rtrim(parent.path,'/'||char(92)) WHERE source.object_id=?1 AND parent.kind='directory' AND parent.observed_stamp=?2 AND json_extract(parent.parsed_stamp,'$[4]')=?2 AND child.observed_stamp<?2 AND child.path>?3 ORDER BY child.path LIMIT 128")
+                    .bind(source_id).bind(observed).bind(&after).fetch_all(&mut *connection).await?
+            };
+            if paths.is_empty() {
+                break;
+            }
+            after = paths.last().expect("nonempty missing paths").clone();
+            self.remove_source_files(&paths, observed - 1).await?;
+        }
+        Ok(())
+    }
+    pub async fn update_source_file_membership(
+        &mut self,
+        roots: &[String],
+        excluded: &[std::path::PathBuf],
+    ) -> LibraryResult<()> {
+        let roots = serde_json::to_string(
+            &roots
+                .iter()
+                .map(|root| {
+                    let (_, prefix) = descendant_prefix(root);
+                    (root, prefix)
+                })
+                .collect::<Vec<_>>(),
+        )?;
+        let excluded = serde_json::to_string(
+            &excluded
+                .iter()
+                .map(|path| {
+                    let path = path.to_string_lossy();
+                    let (_, prefix) = descendant_prefix(&path);
+                    (path, prefix)
+                })
+                .collect::<Vec<_>>(),
+        )?;
+        for indexed in [false, true] {
+            let mut after = 0_i64;
+            loop {
+                let mut writer = self.database.writer().await?;
+                let mut tx = writer
+                    .as_mut()
+                    .ok_or(LibraryError::WriterUnavailable)?
+                    .begin()
+                    .await?;
+                let tracks: Vec<i64> = sqlx::query_scalar("SELECT track_key FROM tracks track WHERE source_key=?1 AND indexed=?2 AND track_key>?3 AND coalesce(cue_path,source_path) IS NOT NULL AND CASE WHEN ?4 THEN local_file_key IS NOT NULL AND EXISTS(SELECT 1 FROM local_files file WHERE file.local_file_key=track.local_file_key AND file.state='accepted') ELSE 1 END AND (EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='import') OR(EXISTS(SELECT 1 FROM json_each(?5) root WHERE coalesce(track.cue_path,track.source_path)=json_extract(root.value,'$[0]') OR(coalesce(track.cue_path,track.source_path)>=json_extract(root.value,'$[1]') AND coalesce(track.cue_path,track.source_path)<json_extract(root.value,'$[1]')||char(1114111))) AND NOT EXISTS(SELECT 1 FROM json_each(?6) excluded WHERE coalesce(track.cue_path,track.source_path)=json_extract(excluded.value,'$[0]') OR(coalesce(track.cue_path,track.source_path)>=json_extract(excluded.value,'$[1]') AND coalesce(track.cue_path,track.source_path)<json_extract(excluded.value,'$[1]')||char(1114111)))))=?4 ORDER BY track_key LIMIT 128")
+                .bind(self.source).bind(!indexed).bind(after).bind(indexed).bind(&roots).bind(&excluded).fetch_all(&mut *tx).await?;
+                let Some(last) = tracks.last() else {
+                    tx.commit().await?;
+                    break;
+                };
+                after = *last;
+                let changed =
+                    write_track_membership(&mut tx, &tracks, indexed, false, self.observed).await?;
+                tx.commit().await?;
+                self.changes.metadata |= changed;
+            }
+        }
+        Ok(())
+    }
+    pub async fn remove_source_files(
+        &mut self,
+        paths: &[String],
+        observed: i64,
+    ) -> LibraryResult<()> {
+        let mut update = CatalogUpdate::default();
+        let bound = observed;
+        for path in paths {
+            let (separator, prefix) = descendant_prefix(path);
+            loop {
+                let mut writer = self.database.writer().await?;
+                let mut tx = writer
+                    .as_mut()
+                    .ok_or(LibraryError::WriterUnavailable)?
+                    .begin()
+                    .await?;
+                let source = self.source.raw();
+
+                let songs:Vec<i64>=sqlx::query_scalar("SELECT track_key FROM tracks track WHERE source_key=?1 AND indexed=1 AND observed_stamp<=?4 AND(source_path=?2 OR(source_path>=?3 AND source_path<?3||char(1114111)) OR cue_path=?2 OR(cue_path>=?3 AND cue_path<?3||char(1114111))) AND NOT EXISTS(SELECT 1 FROM local_files file WHERE file.source_key=?1 AND file.path=coalesce(track.cue_path,track.source_path) AND file.observed_stamp>?4) ORDER BY track_key LIMIT 128").bind(source).bind(path).bind(&prefix).bind(bound).fetch_all(&mut *tx).await?;
+                let files: Vec<(i64, bool)> = sqlx::query_as("SELECT local_file_key,kind='directory' FROM local_files file WHERE source_key=?1 AND(path=?2 OR(path>=?3 AND path<?3||char(1114111))) AND observed_stamp<=?4 AND(kind<>'directory' OR NOT EXISTS(SELECT 1 FROM local_files child WHERE child.source_key=?1 AND child.path>=rtrim(file.path,?5)||?5 AND child.path<rtrim(file.path,?5)||?5||char(1114111) AND child.observed_stamp>?4)) ORDER BY path DESC LIMIT 128").bind(source).bind(path).bind(&prefix).bind(bound).bind(separator.to_string()).fetch_all(&mut *tx).await?;
+                if songs.is_empty() && files.is_empty() {
+                    tx.commit().await?;
+                    self.changes.merge(update.clone());
+                    break;
+                }
+                update.metadata |=
+                    write_track_membership(&mut tx, &songs, false, true, None).await?;
+                if !files.is_empty() {
+                    update.metadata |= files.iter().any(|(_, directory)| *directory);
+                    delete_physical_files(
+                        &mut tx,
+                        source,
+                        &files.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
+                        bound,
+                    )
+                    .await?;
+                }
+                tx.commit().await?;
+                self.changes.merge(update.clone());
+            }
+        }
+        self.changes.merge(update);
+        Ok(())
+    }
+}
+
+impl super::Catalog<'_> {
+    pub async fn merge_local_file_uris(
+        &mut self,
+        aliases: &[(String, String, String)],
+    ) -> LibraryResult<()> {
+        if aliases.is_empty() {
+            return Ok(());
+        }
+        let mut writer = self.database.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        let update = merge_local_file_uris_on(&mut transaction, aliases).await?;
+        transaction.commit().await?;
+        self.changes.merge(update);
+        Ok(())
+    }
+}
+
+async fn merge_local_file_uris_on(
+    connection: &mut SqliteConnection,
+    aliases: &[(String, String, String)],
+) -> LibraryResult<CatalogUpdate> {
+    let mut update = CatalogUpdate::default();
+    if aliases.is_empty() {
+        return Ok(update);
+    }
+    let candidates: Vec<(i64,Option<i64>)> = sqlx::query_as("SELECT track_key,album_key FROM tracks WHERE media_uri IN(SELECT json_extract(value,'$[0]') FROM json_each(?1) UNION SELECT json_extract(value,'$[1]') FROM json_each(?1))")
+        .bind(serde_json::to_string(aliases)?).fetch_all(&mut *connection).await?;
+    let albums = candidates
+        .iter()
+        .filter_map(|(_, album)| *album)
+        .collect::<Vec<_>>();
+    let mut rekeys = Vec::new();
+    for (previous, current, object_id) in aliases {
+        if previous == current {
+            continue;
+        }
+        let old_identity=sqlx::query_as::<_,(i64,String,String)>("SELECT track.source_key,source.object_id,track.object_id FROM tracks track JOIN sources source USING(source_key) WHERE track.media_uri=?1 AND track.object_id IS NOT NULL")
+            .bind(previous).fetch_optional(&mut *connection).await?;
+        let target: Option<(TrackKey, bool)> =
+            sqlx::query_as("SELECT track_key,cue_path IS NOT NULL FROM tracks WHERE media_uri=?1")
+                .bind(current)
+                .fetch_optional(&mut *connection)
+                .await?;
+        let old = sqlx::query_as::<_, (TrackKey, Option<i64>, bool)>(
+            "SELECT track_key,source_key,indexed FROM tracks WHERE media_uri=?1
+              AND(NOT ?2 OR object_id IS NOT NULL OR indexed=1 OR local_file_key IS NOT NULL
+                OR EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.track_key=tracks.track_key)
+                OR EXISTS(SELECT 1 FROM queue_entries entry WHERE entry.track_key=tracks.track_key)
+                OR EXISTS(SELECT 1 FROM home_entries entry WHERE entry.entity_kind='track' AND entry.entity_key=tracks.track_key))",
+        )
+        .bind(previous).bind(target.is_some_and(|(_,cue)| cue))
+        .fetch_optional(&mut *connection)
+        .await?;
+        let current_key = if let Some((key, _)) = target {
+            key
+        } else if let Some((old_key, _, _)) = old {
+            sqlx::query("UPDATE tracks SET media_uri=?2,object_id=CASE WHEN source_key IS NOT NULL THEN ?3 ELSE object_id END,source_path=CASE WHEN source_path IS NOT NULL THEN COALESCE(?4,source_path) ELSE NULL END WHERE track_key=?1")
+                .bind(old_key).bind(current).bind(object_id).bind(crate::file_media_path(current).map(|path|path.to_string_lossy().into_owned())).execute(&mut *connection).await?;
+            old_key
+        } else {
+            crate::catalog::remember_track(
+                &mut *connection,
+                &crate::TrackReference {
+                    media_uri: current.clone(),
+                    ..Default::default()
+                },
+            )
+            .await?
+        };
+        if let Some((old_key, source, indexed)) = old.filter(|(key, _, _)| *key != current_key) {
+            sqlx::query(
+                "UPDATE tracks SET object_id=NULL,indexed=0,local_file_key=NULL WHERE track_key=?1",
+            )
+            .bind(old_key)
+            .execute(&mut *connection)
+            .await?;
+            sqlx::query("UPDATE tracks AS canonical SET metadata=CASE WHEN canonical.indexed=0 THEN previous.metadata ELSE canonical.metadata END,native_artwork=CASE WHEN canonical.indexed=1 THEN canonical.native_artwork ELSE COALESCE(canonical.native_artwork,previous.native_artwork) END,first_seen_at=COALESCE(canonical.first_seen_at,previous.first_seen_at),source_key=COALESCE(canonical.source_key,?3),object_id=COALESCE(canonical.object_id,CASE WHEN ?3 IS NOT NULL THEN ?4 END),indexed=max(canonical.indexed,?5),album_key=CASE WHEN canonical.indexed=0 THEN COALESCE(canonical.album_key,previous.album_key) ELSE canonical.album_key END,source_path=COALESCE(canonical.source_path,CASE WHEN previous.source_path IS NOT NULL THEN ?6 END),source_loudness_analysis_key=CASE WHEN canonical.source_key IS NULL THEN previous.source_loudness_analysis_key ELSE canonical.source_loudness_analysis_key END,loudness_analysis_key=CASE WHEN canonical.source_key IS NULL THEN previous.loudness_analysis_key ELSE canonical.loudness_analysis_key END FROM tracks previous WHERE canonical.track_key=?1 AND previous.track_key=?2")
+                .bind(current_key).bind(old_key).bind(source).bind(object_id).bind(indexed).bind(crate::file_media_path(current).map(|path|path.to_string_lossy().into_owned())).execute(&mut *connection).await?;
+            for table in [
+                "track_artists",
+                "track_album_artists",
+                "track_genres",
+                "track_moods",
+                "track_folders",
+            ] {
+                let relation = match table {
+                    "track_artists" | "track_album_artists" => "artist_key",
+                    "track_genres" => "genre_key",
+                    "track_moods" => "mood_key",
+                    _ => "folder_key",
+                };
+                sqlx::query(sqlx::AssertSqlSafe(format!("INSERT OR IGNORE INTO {table}(track_key,{relation},position) SELECT ?2,{relation},position FROM {table} WHERE track_key=?1 AND (SELECT metadata FROM tracks WHERE track_key=?1) IS (SELECT metadata FROM tracks WHERE track_key=?2) AND NOT EXISTS(SELECT 1 FROM {table} target WHERE target.track_key=?2)")))
+                    .bind(old_key).bind(current_key).execute(&mut *connection).await?;
+            }
+            update.metadata |= indexed;
+            update.playlists |=
+                sqlx::query("UPDATE playlist_entries SET track_key=?2 WHERE track_key=?1")
+                    .bind(old_key)
+                    .bind(current_key)
+                    .execute(&mut *connection)
+                    .await?
+                    .rows_affected()
+                    > 0;
+            sqlx::query("UPDATE queue_entries SET track_key=?2 WHERE track_key=?1")
+                .bind(old_key)
+                .bind(current_key)
+                .execute(&mut *connection)
+                .await?;
+            update.home |= sqlx::query(
+                "UPDATE home_entries SET entity_key=?2 WHERE entity_kind='track' AND entity_key=?1",
+            )
+            .bind(old_key)
+            .bind(current_key)
+            .execute(&mut *connection)
+            .await?
+            .rows_affected()
+                > 0;
+            rekeys.push((old_key, current_key));
+        }
+        update.metadata |= sqlx::query(
+            "INSERT INTO main.user_media_state(media_uri,favorite,rating)
+            SELECT ?2,favorite,rating FROM main.user_media_state WHERE media_uri=?1
+            ON CONFLICT(media_uri) DO UPDATE SET
+                favorite=COALESCE(user_media_state.favorite,excluded.favorite),
+                rating=COALESCE(user_media_state.rating,excluded.rating)
+            WHERE (user_media_state.favorite IS NULL AND excluded.favorite IS NOT NULL)
+               OR (user_media_state.rating IS NULL AND excluded.rating IS NOT NULL)",
+        )
+        .bind(previous)
+        .bind(current)
+        .execute(&mut *connection)
+        .await?
+        .rows_affected()
+            > 0;
+        sqlx::query("INSERT INTO native_media_state(media_uri,favorite,rating,play_count,skip_count,last_played) SELECT ?2,favorite,rating,play_count,skip_count,last_played FROM native_media_state WHERE media_uri=?1 ON CONFLICT(media_uri) DO NOTHING").bind(previous).bind(current).execute(&mut *connection).await?;
+        sqlx::query("DELETE FROM native_media_state WHERE media_uri=?1")
+            .bind(previous)
+            .execute(&mut *connection)
+            .await?;
+        sqlx::query("DELETE FROM main.user_media_state WHERE media_uri=?1")
+            .bind(previous)
+            .execute(&mut *connection)
+            .await?;
+        update.activity |= sqlx::query(
+            "UPDATE main.listens SET
+                captured_media_uri=COALESCE(captured_media_uri,media_uri),media_uri=?2
+            WHERE media_uri=?1",
+        )
+        .bind(previous)
+        .bind(current)
+        .execute(&mut *connection)
+        .await?
+        .rows_affected()
+            > 0;
+        sqlx::query(
+            "UPDATE tracks SET local_play_count=(
+                SELECT count(*) FROM main.listens WHERE media_uri=tracks.media_uri)
+            WHERE media_uri IN (?1,?2) AND local_play_count IS NOT (
+                SELECT count(*) FROM main.listens WHERE media_uri=tracks.media_uri)",
+        )
+        .bind(previous)
+        .bind(current)
+        .execute(&mut *connection)
+        .await?;
+
+        if let Some((old_source, old_source_id, old_object)) = old_identity {
+            let (source, source_id, object) = sqlx::query_as::<_, (i64, String, String)>(
+                "SELECT track.source_key,source.object_id,track.object_id
+                 FROM tracks track JOIN sources source USING(source_key) WHERE track.media_uri=?1",
+            )
+            .bind(current)
+            .fetch_optional(&mut *connection)
+            .await?
+            .unwrap_or_else(|| (old_source, old_source_id.clone(), object_id.clone()));
+            if (old_source, old_object.as_str()) != (source, object.as_str()) {
+                sqlx::query("INSERT INTO main.legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
+                    SELECT ?3,period,item_kind,?4,play_count,skip_count,last_played_at
+                    FROM main.legacy_activity WHERE source_id=?1 AND track_object_id=?2 AND item_kind='track'
+                    ON CONFLICT(source_id,period,item_kind,track_object_id) DO UPDATE SET
+                        play_count=legacy_activity.play_count+excluded.play_count,
+                        skip_count=legacy_activity.skip_count+excluded.skip_count,
+                        last_played_at=COALESCE(max(legacy_activity.last_played_at,excluded.last_played_at),legacy_activity.last_played_at,excluded.last_played_at)")
+                    .bind(&old_source_id).bind(&old_object).bind(&source_id).bind(&object)
+                    .execute(&mut *connection).await?;
+                sqlx::query("DELETE FROM main.legacy_activity WHERE source_id=?1 AND track_object_id=?2 AND item_kind='track'")
+                    .bind(&old_source_id).bind(&old_object).execute(&mut *connection).await?;
+            }
+        }
+        if crate::cue_media_parts(current).is_some() {
+            sqlx::query("INSERT INTO local_locators(source_key,media_uri,origin,path,root,relative_path,access_uri) SELECT source_key,?2,origin,path,root,relative_path,access_uri FROM local_locators WHERE media_uri=?1 ON CONFLICT(media_uri,origin) DO NOTHING")
+                .bind(previous).bind(current).execute(&mut *connection).await?;
+        }
+        if let Some(path) = crate::file_media_path(current) {
+            let path = path.to_string_lossy().into_owned();
+            let existing:Option<(Option<String>,String,String)>=sqlx::query_as("SELECT source.object_id,locator.root,locator.relative_path FROM local_locators locator LEFT JOIN sources source USING(source_key) WHERE locator.media_uri=?1 AND locator.origin='import'").bind(previous).fetch_optional(&mut *connection).await?;
+            let (source_id, root, relative_path) =
+                existing.unwrap_or((None, String::new(), String::new()));
+            crate::local::write_local_locator(
+                &mut *connection,
+                &LocalLocatorWrite {
+                    source_id,
+                    media_uri: previous.clone(),
+                    origin: "import".into(),
+                    path,
+                    root,
+                    relative_path,
+                    access_uri: current.clone(),
+                },
+            )
+            .await?;
+            sqlx::query("UPDATE local_locators SET access_uri=?2,path=?3 WHERE media_uri=?1 AND access_uri=?1 AND origin='local'")
+                .bind(previous).bind(current).bind(crate::file_media_path(current).map(|path|path.to_string_lossy().into_owned())).execute(&mut *connection).await?;
+        }
+        sqlx::query("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at) SELECT ?2,authority,role,language,script,cache_input_digest,lyrics,updated_at FROM lyrics_cache WHERE media_uri=?1 ON CONFLICT DO NOTHING").bind(previous).bind(current).execute(&mut *connection).await?;
+        sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1")
+            .bind(previous)
+            .execute(&mut *connection)
+            .await?;
+        sqlx::query("INSERT INTO favorite_outbox(media_uri,favorite,previous_favorite,attempts,next_attempt_at) SELECT ?2,favorite,previous_favorite,attempts,next_attempt_at FROM favorite_outbox WHERE media_uri=?1 ON CONFLICT DO NOTHING").bind(previous).bind(current).execute(&mut *connection).await?;
+        sqlx::query("DELETE FROM favorite_outbox WHERE media_uri=?1")
+            .bind(previous)
+            .execute(&mut *connection)
+            .await?;
+    }
+    for table in ["playlists", "smart_playlists"] {
+        update.playlists |= sqlx::query(sqlx::AssertSqlSafe(format!("WITH aliases AS(
+            SELECT json_extract(value,'$[0]') previous,json_extract(value,'$[1]') current FROM json_each(?1)
+        ) UPDATE {table} AS owner SET artwork_binding=CAST((
+            SELECT json_group_array(json(CASE WHEN json_type(candidate.value,'$.image.automatic.chosen')='array'
+                THEN json_set(candidate.value,'$.image.automatic.chosen',json((
+                    SELECT json_group_array(uri ORDER BY ordinal) FROM (
+                        SELECT coalesce((SELECT current FROM aliases WHERE previous=chosen.value LIMIT 1),chosen.value) uri,
+                               min(CAST(chosen.key AS INTEGER)) ordinal
+                        FROM json_each(candidate.value,'$.image.automatic.chosen') chosen GROUP BY uri)))
+                ) ELSE candidate.value END) ORDER BY CAST(candidate.key AS INTEGER))
+            FROM json_each(owner.artwork_binding) candidate
+        ) AS BLOB) WHERE EXISTS(
+            SELECT 1 FROM json_each(owner.artwork_binding) candidate
+            CROSS JOIN json_each(candidate.value,'$.image.automatic.chosen') chosen
+            JOIN aliases ON aliases.previous=chosen.value)")))
+            .bind(serde_json::to_string(aliases)?).execute(&mut *connection).await?.rows_affected()>0;
+    }
+    if !rekeys.is_empty() {
+        album_order(connection, &albums).await?;
+        super::artwork::refresh_choices(
+            connection,
+            &candidates.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
+            &albums,
+            &[],
+            true,
+        )
+        .await?;
+    }
+    update.track_rekeys = rekeys.into();
+    Ok(update)
+}

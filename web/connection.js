@@ -4,7 +4,7 @@ import {
   applyAppearance,
   initialAppearance,
   applyColors,
-  coverUrls,
+  covers,
   $,
   notice,
   run,
@@ -116,8 +116,7 @@ function disconnect() {
   session = null;
   resetPins();
   token = "";
-  for (const url of coverUrls.values()) URL.revokeObjectURL(url);
-  coverUrls.clear();
+  for (const entry of covers.values()) entry.dispose();
   state.playback = null;
   state.currentMediaUri = null;
   state.currentRun = null;
@@ -167,6 +166,7 @@ async function connect() {
         updateSources(await api("/sources"));
         await loadView();
       });
+      else if (value.activity_changed && $("content").querySelector('[data-activity-sensitive="true"]')) run(loadView);
     },
     session.signal,
   );

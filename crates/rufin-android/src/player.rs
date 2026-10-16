@@ -167,46 +167,50 @@ impl AndroidPlayer {
             .spawn(async move {
                 use rufin_core::route::Route;
                 use rufin_core::route::detail_links::{
-                    DetailLinks, metadata_links, track_artist_links,
+                    DetailLinks, album_artist_links, metadata_links, track_artist_links,
                 };
                 use rufin_core::settings::layout::LibraryField;
                 let cancellation = library::ReadCancellation::new();
                 let entity = library::source_entity_parts(&media_uri);
                 let (artists, album, source_id) = match entity {
                     Some((source, kind, _)) if kind == "album" => {
-                        let Some((title, artist, credits)) = database
-                            .album_metadata_links(&media_uri, &cancellation)
-                            .await
-                            .map_err(error)?
+                        let library::CatalogRows::Albums(mut rows) = library::CatalogQuery::uris(
+                            library::CatalogKind::Album,
+                            vec![media_uri.clone()],
+                        )
+                        .rows(&database, 0, 1, &cancellation)
+                        .await
+                        .map_err(error)?
                         else {
+                            unreachable!("album query")
+                        };
+                        let Some(album) = rows.pop() else {
                             return Ok(None);
                         };
                         (
-                            metadata_links(
-                                LibraryField::AlbumArtist,
-                                &artist,
-                                Some(&media_uri),
-                                &[],
-                                &credits,
-                            ),
-                            metadata_links(
-                                LibraryField::Album,
-                                &title,
-                                Some(&media_uri),
-                                &[],
-                                &credits,
+                            album_artist_links(&album),
+                            DetailLinks::route(
+                                &album.metadata.title,
+                                Some(Route::AlbumDetail(media_uri.clone())),
                             ),
                             Some(source.to_string()),
                         )
                     }
                     Some((source, kind, _)) if kind == "artist" => {
-                        let Some(name) = database
-                            .artist_name_by_uri(&media_uri, &cancellation)
-                            .await
-                            .map_err(error)?
+                        let library::CatalogRows::Artists(mut rows) = library::CatalogQuery::uris(
+                            library::CatalogKind::Artist,
+                            vec![media_uri.clone()],
+                        )
+                        .rows(&database, 0, 1, &cancellation)
+                        .await
+                        .map_err(error)?
                         else {
+                            unreachable!("artist query")
+                        };
+                        let Some(artist) = rows.pop() else {
                             return Ok(None);
                         };
+                        let name = artist.metadata.name;
                         let route = match origin_route {
                             Some(Route::AlbumArtistDetail(uri)) if uri == media_uri => {
                                 Route::AlbumArtistDetail(uri)
@@ -220,10 +224,17 @@ impl AndroidPlayer {
                         )
                     }
                     _ => {
-                        let Some(track) = database
-                            .track_row_by_uri(&media_uri, &cancellation)
-                            .await
-                            .map_err(error)?
+                        let Some(track) = library::CatalogQuery::uris(
+                            library::CatalogKind::Track,
+                            vec![(&media_uri).to_string()],
+                        )
+                        .rows(&database, 0, 1, &cancellation)
+                        .await
+                        .map(|rows| match rows {
+                            library::CatalogRows::Tracks(mut rows) => rows.pop(),
+                            _ => unreachable!("typed catalog projection"),
+                        })
+                        .map_err(error)?
                         else {
                             return Ok(None);
                         };
@@ -231,10 +242,10 @@ impl AndroidPlayer {
                             track_artist_links(&track),
                             metadata_links(
                                 LibraryField::Album,
-                                &track.album,
-                                track.album_media_uri.as_deref(),
-                                &track.artists,
-                                &track.album_artists,
+                                &track.metadata.album,
+                                track.links.album_media_uri.as_deref(),
+                                &track.links.artists,
+                                &track.links.album_artists,
                             ),
                             track.source_id,
                         )
@@ -257,7 +268,7 @@ impl AndroidPlayer {
                 for window in media_uris.chunks(128) {
                     bindings.extend(
                         database
-                            .collection_artwork_bindings(window, &cancellation)
+                            .artwork_bindings(window, &cancellation)
                             .await
                             .map_err(error)?,
                     );
@@ -320,7 +331,7 @@ impl AndroidPlayer {
                 state.clearable = media.as_ref().is_some_and(|media| {
                     settings.can_suppress_auto_lyrics(
                         stored.application.private_mode,
-                        &media.media_uri,
+                        &media.row.track.media_uri,
                         *origin,
                     )
                 });
@@ -571,6 +582,26 @@ impl AndroidPlayer {
             end_color: color(colors[1]),
         }
     }
+    pub fn artwork_identity(&self, binding: Vec<u8>) -> String {
+        artwork::ArtworkBinding::opaque(&binding)
+            .stable_identity()
+            .to_owned()
+    }
+
+    pub fn artwork_preview(&self, identity: Vec<u8>) -> Option<Vec<u8>> {
+        self.products
+            .artwork
+            .preview(
+                artwork::ArtworkBinding::opaque(&identity),
+                self.products
+                    .settings
+                    .load()
+                    .application
+                    .external_metadata_enabled,
+            )
+            .map(|preview| preview.png.as_ref().clone())
+    }
+
     pub async fn artwork(
         &self,
         identity: Vec<u8>,

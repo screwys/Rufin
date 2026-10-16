@@ -47,6 +47,7 @@ smb-msg.workspace = true
 rustix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
 serde_path_to_error.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true

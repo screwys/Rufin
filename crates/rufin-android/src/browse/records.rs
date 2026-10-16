@@ -85,6 +85,15 @@ impl AndroidArtistLink {
 }
 
 #[derive(uniffi::Record)]
+pub struct AndroidBrowsePage {
+    pub count: u64,
+    pub rows: Vec<AndroidBrowseRow>,
+    pub summary: Option<AndroidDetailSummary>,
+    pub groups: Vec<AndroidArtistReleaseGroup>,
+    pub favorite_rows: Vec<AndroidBrowseRow>,
+}
+
+#[derive(uniffi::Record)]
 pub struct AndroidDetailSummary {
     pub row: AndroidBrowseRow,
     pub artwork_bindings: Vec<Vec<u8>>,
@@ -104,6 +113,7 @@ pub struct AndroidDetailSummary {
 
 #[derive(uniffi::Record)]
 pub struct AndroidArtistReleaseGroup {
+    pub first_rows: Vec<AndroidBrowseRow>,
     pub id: String,
     pub title: String,
     pub total: u64,
@@ -152,29 +162,23 @@ pub struct AndroidPinPage {
 #[derive(Clone, uniffi::Enum)]
 pub enum AndroidBrowseItem {
     Track {
-        row: library::TrackRow,
-    },
-    History {
-        row: library::HistoryRow,
+        row: library::TrackView,
     },
     PlaylistEntry {
-        row: library::PlaylistEntryRow,
+        row: library::PlaylistEntryView,
     },
     Album {
-        row: library::AlbumRow,
+        row: library::AlbumView,
     },
     Artist {
-        row: library::ArtistRow,
+        row: library::ArtistView,
         album_artist: bool,
     },
     Genre {
-        row: library::GenreRow,
-    },
-    HomeGenre {
-        row: library::HomeGenreRow,
+        row: library::GenreView,
     },
     Mood {
-        row: library::MoodRow,
+        row: library::MoodView,
     },
     Playlist {
         row: library::PlaylistRow,
@@ -184,11 +188,6 @@ pub enum AndroidBrowseItem {
     },
     Recent {
         row: rufin_core::settings::app::RecentSearchResult,
-    },
-    Queued {
-        row: library::QueueItem,
-        favorite: bool,
-        downloaded: bool,
     },
     Folder {
         key: String,
@@ -233,19 +232,18 @@ impl AndroidBrowseRow {
     pub(super) fn track_key(&self) -> Option<library::TrackKey> {
         match &self.item {
             AndroidBrowseItem::Track { row } => Some(row.track_key),
-            AndroidBrowseItem::History { row } => Some(row.track_key),
-            AndroidBrowseItem::PlaylistEntry { row } => Some(row.track_key),
+            AndroidBrowseItem::PlaylistEntry { row } => Some(row.track.track_key),
             _ => None,
         }
     }
 
     pub(super) fn matches_filter(&self, filter: &str) -> bool {
         let (title, subtitle) = match &self.item {
-            AndroidBrowseItem::Track { row } => {
-                (&row.title, format!("{} · {}", row.artist, row.album))
-            }
-            AndroidBrowseItem::Album { row } => (&row.title, row.display_artist.clone()),
-            AndroidBrowseItem::HomeGenre { row } => (&row.name, String::new()),
+            AndroidBrowseItem::Track { row } => (
+                &row.metadata.title,
+                format!("{} · {}", row.metadata.artist, row.metadata.album),
+            ),
+            AndroidBrowseItem::Album { row } => (&row.metadata.title, row.metadata.artist.clone()),
             _ => return true,
         };
         format!(
@@ -258,13 +256,13 @@ impl AndroidBrowseRow {
     }
 }
 
-impl From<library::TrackRow> for AndroidBrowseRow {
-    fn from(row: library::TrackRow) -> Self {
+impl From<library::TrackView> for AndroidBrowseRow {
+    fn from(row: library::TrackView) -> Self {
         Self::new(AndroidBrowseItem::Track { row })
     }
 }
-impl From<library::AlbumRow> for AndroidBrowseRow {
-    fn from(row: library::AlbumRow) -> Self {
+impl From<library::AlbumView> for AndroidBrowseRow {
+    fn from(row: library::AlbumView) -> Self {
         let pin = library::source_entity_parts(&row.media_uri).map(|(source_id, _, album_id)| {
             SidebarPin::Album {
                 source_id,
@@ -277,8 +275,8 @@ impl From<library::AlbumRow> for AndroidBrowseRow {
         }
     }
 }
-impl From<library::GenreRow> for AndroidBrowseRow {
-    fn from(row: library::GenreRow) -> Self {
+impl From<library::GenreView> for AndroidBrowseRow {
+    fn from(row: library::GenreView) -> Self {
         let pin = Some(SidebarPin::Genre {
             source_id: sources::SourceId::new(row.source_id.clone()),
             genre_id: row.object_id.clone(),
@@ -290,8 +288,8 @@ impl From<library::GenreRow> for AndroidBrowseRow {
         }
     }
 }
-impl From<library::MoodRow> for AndroidBrowseRow {
-    fn from(row: library::MoodRow) -> Self {
+impl From<library::MoodView> for AndroidBrowseRow {
+    fn from(row: library::MoodView) -> Self {
         Self::new(AndroidBrowseItem::Mood { row })
     }
 }
@@ -341,7 +339,7 @@ impl From<library::HomeTrackRow> for AndroidBrowseRow {
 impl From<rufin_core::detail_links::DetailLink> for AndroidDetailLink {
     fn from(link: rufin_core::detail_links::DetailLink) -> Self {
         Self {
-            title: localization::tr(link.title),
+            title: link.title.to_string(),
             url: link.url,
             icon_id: link.icon_name.into(),
         }

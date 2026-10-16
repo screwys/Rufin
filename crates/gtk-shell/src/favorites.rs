@@ -16,7 +16,7 @@ impl Shell {
             .selected_playback()
             .as_deref()
             .and_then(|player| player.transport.current.as_ref())
-            .map(|entry| entry.media_uri.clone())
+            .map(|entry| entry.row.track.media_uri.clone())
         else {
             return;
         };

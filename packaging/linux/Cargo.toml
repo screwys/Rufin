@@ -66,6 +66,7 @@ ashpd = { version = "0.13.13", default-features = false, features = [
 ] }
 base64 = "0.23.0"
 blake3 = "1.8.2"
+blurhash = { version = "0.2.3", default-features = false }
 bytes = "1"
 constant_time_eq = "0.6.0"
 digest_auth = "0.3.1"

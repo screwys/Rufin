@@ -627,12 +627,9 @@ impl SearchPopup {
                     .as_deref()
                     .map(artwork::ArtworkBinding::opaque)
                     .unwrap_or_default();
-                shell.artwork.bind_artwork_tile(
-                    &row.cover,
-                    artwork,
-                    SEARCH_COVER_SIZE,
-                    SEARCH_COVER_SIZE as u32,
-                );
+                shell
+                    .artwork
+                    .bind_artwork_tile(&row.cover, artwork, SEARCH_COVER_SIZE);
                 self.actions
                     .borrow_mut()
                     .push((row.row.clone(), SearchAction::Recent(result.clone())));
@@ -674,7 +671,6 @@ impl SearchPopup {
                         &row.cover,
                         preview.artwork.clone(),
                         SEARCH_COVER_SIZE,
-                        SEARCH_COVER_SIZE as u32,
                     );
                     self.actions
                         .borrow_mut()

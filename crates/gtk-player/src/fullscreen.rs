@@ -343,7 +343,6 @@ fn connect_fullscreen_player_switcher(
 
 use crate::{bottom::BOTTOM_PLAYER_HEIGHT, state::NowPlayingPresentation};
 use gtk::glib;
-use gtk_widgets::artwork::cover_fetch_size_for_display;
 
 fn present_fullscreen_settings(shell: &Rc<crate::PlayerUi>) {
     let Some(window) = shell.window.upgrade() else {
@@ -645,7 +644,7 @@ impl crate::PlayerUi {
                 .transport
                 .current
                 .as_ref()
-                .map(|track| track.media_uri.clone())
+                .map(|track| track.row.track.media_uri.clone())
         });
         if *parts.related_seed.borrow() == seed {
             return;
@@ -675,11 +674,19 @@ impl crate::PlayerUi {
         let database = self.database.clone();
         let read_cancellation = cancellation.clone();
         let task = self.runtime.spawn(async move {
-            let uris = candidates.await?;
-            database
-                .track_rows_by_uri(&uris, &read_cancellation)
-                .await
-                .map_err(|error| error.to_string())
+            let keys = candidates.await?;
+            library::CatalogQuery::keys(
+                library::CatalogKind::Track,
+                None,
+                keys.iter().map(|key| key.raw()).collect(),
+            )
+            .rows(&database, 0, keys.len(), &read_cancellation)
+            .await
+            .map(|rows| match rows {
+                library::CatalogRows::Tracks(rows) => rows,
+                _ => unreachable!("typed catalog projection"),
+            })
+            .map_err(|error| error.to_string())
         });
         *parts.related_task.borrow_mut() = Some((cancellation, task.abort_handle()));
         let task_id = task.id();
@@ -923,12 +930,10 @@ impl crate::PlayerUi {
             .cover
             .set_square_size(cover_size);
         if presentation.current {
-            let fetch_size = cover_fetch_size_for_display(512);
             self.artwork.bind_playback_artwork_tile(
                 &self.views.fullscreen_player.cover,
                 presentation.artwork.clone(),
-                512,
-                fetch_size,
+                cover_size,
             );
         } else {
             self.clear_fullscreen_player_cover();
@@ -1127,8 +1132,8 @@ fn update_fullscreen_meta_row(row: &gtk::FlowBox, parts: &[String]) {
 mod playback_refresh_tests {
     use super::*;
     use playback::{
-        ControlsView, CurrentMedia, CurrentMediaId, PlaybackOutput, Provenance, QueueItem,
-        QueueRow, QueueSummaryView, RepeatMode, RunId, TransportStatus, TransportView,
+        ControlsView, CurrentMedia, CurrentMediaId, PlaybackOutput, Provenance, QueueRow,
+        QueueSummaryView, RepeatMode, RunId, TrackReference, TransportStatus, TransportView,
     };
     use std::sync::Arc;
 
@@ -1207,37 +1212,53 @@ mod playback_refresh_tests {
             row: Arc::new(QueueRow {
                 occurrence_id: None,
                 position: 0,
-                item: QueueItem {
-                    audio_properties: library::AudioProperties {
-                        bit_depth: Some(24),
-                        sample_rate_hz: Some(96_000),
-                        ..Default::default()
-                    },
-                    media_uri: library::source_entity_uri(
-                        &library::SourceId::new("source"),
-                        "track",
-                        title,
-                    ),
-                    title: title.to_string(),
-                    artist: "Artist".to_string(),
-                    album: "Album".to_string(),
-                    album_display_artist: None,
-                    artwork_binding: None,
-                    duration_millis: 180_000,
-                    disc_number: None,
-                    track_number: None,
-                    year: Some(2026),
-                    release_date: None,
-                    source_format: Some("audio/flac".to_string()),
-                    musicbrainz_recording_id: None,
-                    musicbrainz_release_track_id: None,
-                    musicbrainz_album_id: None,
-                    musicbrainz_release_group_id: None,
-                    primary_artist_musicbrainz_id: None,
-                },
                 received_from_connect: false,
-                track_key: None,
                 provenance: Provenance::Manual,
+                track: {
+                    let reference = TrackReference {
+                        media_uri: library::source_entity_uri(
+                            &library::SourceId::new("source"),
+                            "track",
+                            title,
+                        ),
+                        artwork_binding: None,
+                        metadata: library::TrackMetadata {
+                            audio_properties: library::AudioProperties {
+                                bit_depth: Some(24),
+                                sample_rate_hz: Some(96_000),
+                                ..Default::default()
+                            },
+                            title: title.to_string(),
+                            artist: "Artist".to_string(),
+                            album: "Album".to_string(),
+                            album_display_artist: None,
+                            duration_millis: 180_000,
+                            disc_number: 0,
+                            track_number: 0,
+                            year: Some(2026),
+                            release_date: None,
+                            source_format: Some("audio/flac".to_string()),
+                            musicbrainz_recording_id: None,
+                            musicbrainz_release_track_id: None,
+                            musicbrainz_album_id: None,
+                            musicbrainz_release_group_id: None,
+                            primary_artist_musicbrainz_id: None,
+                            ..Default::default()
+                        },
+                    };
+                    library::TrackView {
+                        track_key: library::TrackKey::from_raw(1),
+                        source_key: None,
+                        source_id: None,
+                        object_id: None,
+                        media_uri: reference.media_uri,
+                        metadata: reference.metadata,
+                        artwork_binding: reference.artwork_binding,
+                        state: Default::default(),
+                        access: Default::default(),
+                        links: Default::default(),
+                    }
+                },
             }),
         }
     }

@@ -952,6 +952,15 @@ impl GstEngine {
                 }
                 Ok(())
             }
+            BackendCommand::UpdateLoudness { run, loudness } => {
+                if self.run_is_current(run) {
+                    if let Some(current) = lock_recover(&self.shared).current.as_mut() {
+                        current.stream.loudness = Some(loudness.clone());
+                    }
+                    self.active_pipeline_mut().update_loudness(&loudness);
+                }
+                Ok(())
+            }
             BackendCommand::ConfigureAudio(mut settings) => {
                 debug!(
                     fade_on_play_stop = settings.fade_on_status_change,
@@ -3304,14 +3313,14 @@ mod tests {
             run: RunId::new(1),
             stream: PreparedStream::new(
                 ResolvedStream::new("file:///music/current.flac"),
-                direct_loudness.clone(),
+                Some(direct_loudness.clone()),
             ),
         };
         let direct_next = PreparedNext::new(
             RunId::new(2),
             PreparedStream::new(
                 ResolvedStream::new("file:///music/direct-next.flac"),
-                direct_loudness,
+                Some(direct_loudness),
             ),
             NextTransition::Gapless,
         );

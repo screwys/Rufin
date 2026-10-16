@@ -12,12 +12,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.semantics.hideFromAccessibility
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,78 +30,36 @@ import kotlinx.coroutines.sync.withLock
 import io.github.screwys.rufin.settings.LocalReduceMotion
 import java.util.TreeMap
 
-internal class ArtworkScene(val key: Any? = Unit) {
-    var pending by mutableIntStateOf(0)
-    var laidOut by mutableStateOf(false)
-    var revealed by mutableStateOf(false)
-}
-
-private val LocalArtworkScene = staticCompositionLocalOf<ArtworkScene?> { null }
-private data class ArtworkLoad(val artwork: PlayerArtwork?, val complete: Boolean)
-
 @Composable
-internal fun HoldInitialReveal(loading: Boolean) {
-    val scene = LocalArtworkScene.current
-    DisposableEffect(scene, loading) {
-        if (scene != null && loading) {
-            scene.pending++
-            onDispose { scene.pending-- }
-        } else onDispose {}
-    }
-}
-
-@Composable
-internal fun ArtworkReadyContent(key: Any? = Unit, modifier: Modifier = Modifier, owner: ArtworkScene? = null, content: @Composable () -> Unit) {
-    val scene = owner ?: remember(key) { ArtworkScene(key) }
-    DisposableEffect(scene) {
-        onDispose { scene.laidOut = false; scene.revealed = false }
-    }
-    if (scene.laidOut && scene.pending == 0) SideEffect { if (scene.pending == 0) scene.revealed = true }
-    Box(modifier.onGloballyPositioned {
-        scene.laidOut = true
-        if (scene.pending == 0) scene.revealed = true
-    }.drawWithContent { if (scene.revealed) drawContent() }
-        .semantics { if (!scene.revealed) hideFromAccessibility() }
-        .pointerInput(scene) {
-            awaitPointerEventScope {
-                while (true) {
-                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                    if (!scene.revealed) event.changes.forEach { it.consume() }
-                }
-            }
-        }) {
-        CompositionLocalProvider(LocalArtworkScene provides scene, content = content)
-    }
-}
-
-@Composable
-internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection, pixels: Int, reuseCached: Boolean = true): PlayerArtwork? {
-    val identity = remember(identityBytes) { identityBytes?.toList() } ?: return null
+internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection, pixels: Int): PlayerArtwork? {
+    val binding = remember(identityBytes) { identityBytes?.toList() } ?: return null
     val bridge = player.bridge
+    val identity = remember(bridge, binding) { bridge?.artworkIdentity(binding.toByteArray()) } ?: return null
     val revision = player.artworkRevision
-    return key(identity, pixels) {
-        val cached = remember(bridge, revision) { if (reuseCached) player.artworkCache.peekNearby(identity, pixels) else player.artworkCache.peek(identity, pixels) }
-        val loaded by produceState(ArtworkLoad(cached, cached != null || bridge == null), bridge, revision) {
-            if (bridge != null) {
-                val visible = cached ?: value.artwork
-                value = ArtworkLoad(visible, visible != null)
-                try { value = ArtworkLoad(player.artworkCache.load(bridge, identity, pixels), true) }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { value = ArtworkLoad(value.artwork, true); player.reportError(error) }
-            } else value = ArtworkLoad(cached, true)
+    return key(identity) {
+        val cached = remember(bridge, revision, pixels) { player.artworkCache.peek(identity, pixels) }
+        val preview = remember(bridge, revision, binding) {
+            if (cached == null) bridge?.artworkPreview(binding.toByteArray())?.let { decodeArtwork(it, 32) } else null
         }
-        HoldInitialReveal(!loaded.complete)
-        loaded.artwork
+        val loaded by produceState(cached ?: preview, bridge, revision, pixels, binding) {
+            value = cached ?: value ?: preview
+            if (bridge != null && pixels > 0) {
+                try { value = player.artworkCache.load(bridge, identity, binding.toByteArray(), pixels) ?: value }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { player.reportError(error) }
+            }
+        }
+        loaded
     }
 }
 
 internal data class PlayerArtwork(val bitmap: Bitmap, val color: Color)
 
 internal class ArtworkCache {
-    private data class Key(val identity: List<Byte>, val pixels: Int, val revision: ULong)
+    private data class Key(val identity: String, val pixels: Int, val revision: ULong)
     private class Load(val mutex: Mutex = Mutex(), var readers: Int = 0)
     private val loads = HashMap<Key, Load>()
-    private val sizes = HashMap<List<Byte>, TreeMap<Int, Key>>()
+    private val sizes = HashMap<String, TreeMap<Int, Key>>()
     private var revision = 0UL
     private val decoded = object : LruCache<Key, PlayerArtwork>(32 * 1024 * 1024) {
         override fun sizeOf(key: Key, value: PlayerArtwork) = value.bitmap.allocationByteCount
@@ -129,33 +81,19 @@ internal class ArtworkCache {
         }
     }
 
-    fun peek(identity: List<Byte>, pixels: Int): PlayerArtwork? = synchronized(decoded) {
-        decoded.get(Key(identity, pixels, revision))
+    fun peek(identity: String, pixels: Int): PlayerArtwork? = synchronized(decoded) {
+        decoded.get(Key(identity, pixels, revision)) ?: sizes[identity]?.ceilingEntry(pixels)?.value?.let(decoded::get)
     }
 
-    fun peekNearby(identity: List<Byte>, pixels: Int): PlayerArtwork? = synchronized(decoded) {
-        decoded.get(Key(identity, pixels, revision)) ?: sizes[identity]?.let { available ->
-            val below = available.floorEntry(pixels)
-            val above = available.ceilingEntry(pixels)
-            val nearest = when {
-                below == null -> above
-                above == null -> below
-                pixels - below.key < above.key - pixels -> below
-                else -> above
-            }
-            nearest?.value?.let(decoded::get)
-        }
-    }
-
-    suspend fun load(player: AndroidPlayer, identity: List<Byte>, pixels: Int): PlayerArtwork? {
+    suspend fun load(player: AndroidPlayer, identity: String, binding: ByteArray, pixels: Int): PlayerArtwork? {
         val key = synchronized(decoded) { Key(identity, pixels, revision) }
-        decoded.get(key)?.let { return it }
+        peek(identity, pixels)?.let { return it }
         val load = synchronized(loads) { loads.getOrPut(key) { Load() }.also { it.readers++ } }
         try {
             return load.mutex.withLock {
-                decoded.get(key)?.let { return@withLock it }
+                peek(identity, pixels)?.let { return@withLock it }
                 val artwork = withContext(Dispatchers.Default) {
-                    val encoded = player.artwork(identity.toByteArray(), pixels.toUInt()) ?: return@withContext null
+                    val encoded = player.artwork(binding, pixels.toUInt()) ?: return@withContext null
                     decodePlayerArtwork(encoded, pixels)
                 } ?: return@withLock null
                 synchronized(decoded) {
@@ -175,12 +113,16 @@ internal class ArtworkCache {
 
 // The shared artwork cache supplies the encoded image. Compose only decodes it for display.
 internal suspend fun decodePlayerArtwork(bytes: ByteArray, maxDimension: Int = 2048): PlayerArtwork? = withContext(Dispatchers.Default) {
+    decodeArtwork(bytes, maxDimension)
+}
+
+private fun decodeArtwork(bytes: ByteArray, maxDimension: Int): PlayerArtwork? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     var sampleSize = 1
-    while (maxOf(bounds.outWidth, bounds.outHeight) / sampleSize > maxDimension) sampleSize *= 2
+    while (minOf(bounds.outWidth, bounds.outHeight) / (sampleSize * 2) >= maxDimension) sampleSize *= 2
     val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return@withContext null
+    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
     val sample = Bitmap.createScaledBitmap(bitmap, 8, 8, true)
     var red = 0L
     var green = 0L
@@ -199,12 +141,12 @@ internal suspend fun decodePlayerArtwork(bytes: ByteArray, maxDimension: Int = 2
     val color = if (count == 0) Color.Gray else Color(
         (red / count).toInt(), (green / count).toInt(), (blue / count).toInt(),
     )
-    PlayerArtwork(bitmap, color)
+    return PlayerArtwork(bitmap, color)
 }
 
 @Composable
 internal fun Artwork(artwork: PlayerArtwork?, modifier: Modifier = Modifier, description: String? = null) {
-    val opacity = if (LocalArtworkScene.current != null) 1f else animateFloatAsState(if (artwork == null) 0f else 1f,
+    val opacity = animateFloatAsState(if (artwork == null) 0f else 1f,
         tween(if (LocalReduceMotion.current) 0 else 160), label = "artworkOpacity").value
     Box(modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
         if (artwork == null || opacity < 1f) FallbackCover(Modifier.fillMaxSize())

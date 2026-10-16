@@ -10,7 +10,7 @@ pub async fn import_local_playlist_file(
     recognize: impl Fn(&str) -> Option<String>,
 ) -> crate::SourceResult<library::PlaylistImportReport> {
     let path = path.to_owned();
-    let (document, path, locators) = tokio::task::spawn_blocking(move || {
+    let (mut document, path, mut locators, files) = tokio::task::spawn_blocking(move || {
         let input = std::fs::File::open(&path)
             .map_err(|error| crate::SourceError::Other(error.to_string()))?;
         let mut document = library::PlaylistFile::read(std::io::BufReader::new(input), &path)?;
@@ -19,6 +19,7 @@ pub async fn import_local_playlist_file(
         }
         let mut worker = media::Worker::default();
         let mut locators = Vec::new();
+        let mut files = Vec::new();
         let before = document.entries.len();
         document.entries.retain_mut(|entry| {
             let Some(uri) =
@@ -26,9 +27,15 @@ pub async fn import_local_playlist_file(
             else {
                 return true;
             };
-            let Some(access) = library::file_media_path(&uri).filter(|path| path.is_file()) else {
+            let Some(access) = library::file_media_path(&uri) else {
                 return true;
             };
+            let Ok(metadata) = access.metadata() else {
+                return true;
+            };
+            if !metadata.is_file() {
+                return true;
+            }
             match local::media::read_media(&mut worker, access.clone(), None) {
                 media::MediaRead::Accepted(track) => {
                     let canonical = track.track.media_uri.expect("local media identity");
@@ -36,6 +43,22 @@ pub async fn import_local_playlist_file(
                     let access_uri = url::Url::from_file_path(&access)
                         .expect("absolute local media path")
                         .to_string();
+                    #[cfg(unix)]
+                    let (device_id, inode) = {
+                        use std::os::unix::fs::MetadataExt;
+                        (
+                            i64::try_from(metadata.dev()).ok(),
+                            i64::try_from(metadata.ino()).ok(),
+                        )
+                    };
+                    #[cfg(not(unix))]
+                    let (device_id, inode) = (None, None);
+                    files.push((
+                        canonical.clone(),
+                        access.to_string_lossy().into_owned(),
+                        device_id,
+                        inode,
+                    ));
                     if canonical != access_uri {
                         locators.push(library::LocalLocatorWrite {
                             source_id: None,
@@ -63,12 +86,25 @@ pub async fn import_local_playlist_file(
             }
         });
         document.skipped += (before - document.entries.len()) as u64;
-        Ok::<_, crate::SourceError>((document, path, locators))
+        Ok::<_, crate::SourceError>((document, path, locators, files))
     })
     .await
     .map_err(|error| crate::SourceError::Other(error.to_string()))??;
-    for locator in locators {
-        database.upsert_local_locator(&locator).await?;
+    let resolved = database
+        .equivalent_local_file_uris(&files)
+        .await?
+        .into_iter()
+        .collect::<std::collections::HashMap<_, _>>();
+    for locator in &mut locators {
+        if let Some(canonical) = resolved.get(&locator.media_uri) {
+            locator.media_uri = canonical.clone();
+        }
+        database.upsert_local_locator(locator).await?;
+    }
+    for entry in &mut document.entries {
+        if let Some(canonical) = resolved.get(&entry.locator) {
+            entry.locator = canonical.clone();
+        }
     }
     database
         .import_playlist_document(document, &path, target, recognize)

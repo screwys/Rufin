@@ -9,8 +9,8 @@ use std::{
 };
 
 use ::library::{
-    AlbumRow, ArtistKey, ArtistRow, PlaylistKey, PlaylistRow, SmartPlaylistKey, SmartPlaylistRow,
-    TrackRow,
+    AlbumView, ArtistKey, ArtistView, PlaylistKey, PlaylistRow, SmartPlaylistKey, SmartPlaylistRow,
+    TrackView,
 };
 use adw::prelude::*;
 use gtk::{gio, glib};
@@ -24,7 +24,7 @@ use rufin_core::playlists::SmartPlaylistChange;
 use super::album_detail::{AlbumCollectionModels, AlbumDetailVirtualList, album_detail_list};
 use super::columns::{
     TrackRowPlayingIndicator, album_column, artist_column, column_fit_width, playlist_column,
-    smart_playlist_column, song_column_for_key, track_column_fit_width,
+    smart_playlist_column, track_column_fit_width, track_column_for_key,
 };
 use super::grid_cells::{
     AlbumGridCell, ArtistGridCell, CollectionGridProjection, TrackGridCell,
@@ -32,7 +32,7 @@ use super::grid_cells::{
 };
 use super::table_sizing::{column_view_initial_width, route_column_view_initial_width};
 use crate::route_layout::{PRIMARY_ROUTE_MARGIN_END, PRIMARY_ROUTE_MARGIN_START};
-use crate::track_model::{CollectionTrack, TrackCollectionModel};
+use crate::track_model::TrackCollectionModel;
 use crate::track_selection::TrackSelection;
 use crate::track_selection::install_track_drag_source;
 use gtk_widgets::library_fields::TrackPresentation;
@@ -42,8 +42,8 @@ use gtk_widgets::library_fields::{
 use gtk_widgets::route::Route;
 use gtk_widgets::table_sizing::{ColumnViewWidthFit, install_column_view_width_fit};
 
-struct TrackTablePlayingStateInner<T: CollectionTrack> {
-    model: TrackCollectionModel<T>,
+struct TrackTablePlayingStateInner {
+    model: TrackCollectionModel,
     handler_model: gtk_widgets::sparse_model::SparseObjectModel,
     model_handler: RefCell<Option<glib::SignalHandlerId>>,
     track_id: RefCell<Option<String>>,
@@ -52,8 +52,8 @@ struct TrackTablePlayingStateInner<T: CollectionTrack> {
 }
 
 #[derive(Clone)]
-pub struct TrackTablePlayingState<T: CollectionTrack = TrackRow> {
-    inner: Rc<TrackTablePlayingStateInner<T>>,
+pub struct TrackTablePlayingState {
+    inner: Rc<TrackTablePlayingStateInner>,
 }
 
 #[derive(Clone)]
@@ -400,8 +400,8 @@ fn matching_context_rank(
         .map(|context| context.source_rank)
 }
 
-impl<T: CollectionTrack> TrackTablePlayingState<T> {
-    pub fn new(model: &TrackCollectionModel<T>, indicator: TrackRowPlayingIndicator) -> Self {
+impl TrackTablePlayingState {
+    pub fn new(model: &TrackCollectionModel, indicator: TrackRowPlayingIndicator) -> Self {
         let handler_model = model.list_model();
         let inner = Rc::new(TrackTablePlayingStateInner {
             model: model.clone(),
@@ -465,7 +465,7 @@ impl<T: CollectionTrack> TrackTablePlayingState<T> {
     }
 }
 
-impl<T: CollectionTrack> Drop for TrackTablePlayingStateInner<T> {
+impl Drop for TrackTablePlayingStateInner {
     fn drop(&mut self) {
         if let Some(handler) = self.model_handler.take() {
             self.handler_model.disconnect(handler);
@@ -515,7 +515,7 @@ pub fn album_collection_projection(
 
 pub fn artist_collection_projection(
     shell: &Rc<CatalogUi>,
-    sparse: Rc<gtk_widgets::sparse_model::SparseRouteModel<ArtistKey, ArtistRow>>,
+    sparse: Rc<gtk_widgets::sparse_model::SparseRouteModel<ArtistKey, ArtistView>>,
     key: LibraryListKey,
 ) -> LibraryCollectionProjection {
     let settings = shell.settings.current.borrow().library_list(key);
@@ -532,9 +532,9 @@ pub fn artist_collection_projection(
         }),
     )
 }
-pub fn track_collection_projection<T: CollectionTrack>(
+pub fn track_collection_projection(
     shell: &Rc<CatalogUi>,
-    model: TrackCollectionModel<T>,
+    model: TrackCollectionModel,
     key: LibraryListKey,
     settings: crate::LibraryListSettings,
     context_id: String,
@@ -608,7 +608,7 @@ pub fn album_grid(
         sparse.list_model(),
         &fields,
         move |fields| AlbumGridCell::new(&cell_shell, fields, None),
-        move |_, album: AlbumRow| {
+        move |_, album: AlbumView| {
             activate_shell.navigate(Route::AlbumDetail(album.media_uri.clone()))
         },
         move |position| demand.demand_positions([position as usize]),
@@ -617,7 +617,7 @@ pub fn album_grid(
 
 pub fn artist_grid(
     shell: &Rc<CatalogUi>,
-    sparse: &Rc<gtk_widgets::sparse_model::SparseRouteModel<ArtistKey, ArtistRow>>,
+    sparse: &Rc<gtk_widgets::sparse_model::SparseRouteModel<ArtistKey, ArtistView>>,
     key: LibraryListKey,
 ) -> CollectionGridProjection {
     let fields = shell
@@ -634,7 +634,7 @@ pub fn artist_grid(
         sparse.list_model(),
         &fields,
         move |fields| ArtistGridCell::new(&cell_shell, fields, album_artist),
-        move |_, artist: ArtistRow| {
+        move |_, artist: ArtistView| {
             activate_shell.navigate(super::artist::artist_detail_route(
                 artist.media_uri.clone(),
                 album_artist,
@@ -643,43 +643,25 @@ pub fn artist_grid(
         move |position| demand.demand_positions([position as usize]),
     )
 }
-pub fn track_grid<T: CollectionTrack>(
+pub fn track_grid(
     shell: &Rc<CatalogUi>,
-    model: TrackCollectionModel<T>,
+    model: TrackCollectionModel,
     key: LibraryListKey,
     play_from_collection: Rc<dyn Fn(u32)>,
     selection: TrackSelection,
 ) -> CollectionGridProjection {
     let sparse = model.sparse_model();
     let demand = Rc::clone(&sparse);
-    song_grid::<_, T>(
-        shell,
-        sparse.list_model(),
-        key,
-        play_from_collection,
-        selection,
-        Rc::new(move |position| demand.demand_positions([position as usize])),
-    )
-}
-
-fn song_grid<M, T: TrackPresentation>(
-    shell: &Rc<CatalogUi>,
-    model: M,
-    key: LibraryListKey,
-    play_from_collection: Rc<dyn Fn(u32)>,
-    selection: TrackSelection,
-    demand: Rc<dyn Fn(u32)>,
-) -> CollectionGridProjection
-where
-    M: IsA<gio::ListModel> + Clone + 'static,
-{
+    let model = sparse.list_model();
+    let demand: Rc<dyn Fn(u32)> =
+        Rc::new(move |position| demand.demand_positions([position as usize]));
     let fields = shell
         .settings
         .current
         .borrow()
         .library_list(key)
         .grid_fields;
-    let field = Rc::new(move |_: u32, item: &T, field| item.links(field));
+    let field = Rc::new(move |_: u32, item: &TrackView, field| item.links(field));
     let cell_shell = Rc::clone(shell);
     let cell_play = Rc::clone(&play_from_collection);
     let activate = Rc::clone(&play_from_collection);
@@ -697,7 +679,7 @@ where
                 Some(selection.clone()),
             )
         },
-        move |position, _: T| activate(position),
+        move |position, _: TrackView| activate(position),
         move |position| bind_demand(position),
     )
 }
@@ -723,7 +705,7 @@ where
         move |field| album_column(&column_shell, field, column_playback_context.clone()),
         |field| column_fit_width(field, column_width(field)),
         true,
-        Some(Box::new(move |_, album: AlbumRow| {
+        Some(Box::new(move |_, album: AlbumView| {
             activate_shell.navigate(Route::AlbumDetail(album.media_uri.clone()));
         })),
         None,
@@ -752,7 +734,7 @@ where
         move |field| artist_column(&column_shell, field, album_artist),
         |field| column_fit_width(field, column_width(field)),
         true,
-        Some(Box::new(move |_, artist: ArtistRow| {
+        Some(Box::new(move |_, artist: ArtistView| {
             activate_shell.navigate(super::artist::artist_detail_route(
                 artist.media_uri.clone(),
                 album_artist,
@@ -970,26 +952,24 @@ where
 impl CatalogUi {
     pub fn related_tracks_view(
         self: &Rc<Self>,
-        rows: Vec<TrackRow>,
+        rows: Vec<TrackView>,
     ) -> (gtk::Widget, Rc<dyn Fn()>) {
         let key = LibraryListKey::FullscreenTracks;
-        let order = rows.iter().map(|row| row.track_key).collect::<Vec<_>>();
-        let database = self.library.clone();
-        let model = TrackCollectionModel::with_load(
-            self.runtime.clone(),
-            order.into(),
+        let query = library::CatalogQuery::keys(
+            library::CatalogKind::Track,
             None,
-            0,
-            rows,
-            Rc::new(move |keys, _, _, cancellation| {
-                let database = database.clone();
-                Box::pin(async move {
-                    database
-                        .track_rows(&keys, &cancellation)
-                        .await
-                        .map_err(|error| error.to_string())
-                })
-            }),
+            rows.iter().map(|row| row.track_key.raw()).collect(),
+        );
+        let model = TrackCollectionModel::new(
+            self.library.clone(),
+            self.runtime.clone(),
+            library::CatalogPage {
+                query,
+                count: rows.len(),
+                first_row_position: 0,
+                rows: library::CatalogRows::Tracks(rows),
+                disc_sections: Vec::new(),
+            },
         );
         let selection = TrackSelection::new(model.clone());
         self.register_current_route_track_selection_owner(selection.clone());
@@ -1033,9 +1013,9 @@ impl CatalogUi {
     }
 }
 
-pub fn track_table<T: CollectionTrack>(
+pub fn track_table(
     shell: &Rc<CatalogUi>,
-    model: TrackCollectionModel<T>,
+    model: TrackCollectionModel,
     key: LibraryListKey,
     options: TrackTableOptions,
     selection: TrackSelection,
@@ -1079,7 +1059,7 @@ pub fn track_table<T: CollectionTrack>(
     let queue = shell.playback.clone();
     let play_model = model.clone();
     let context_id = options.context_id;
-    let activate = Box::new(move |position, _: T| {
+    let activate = Box::new(move |position, _: TrackView| {
         play_model.play(
             queue.clone(),
             position as usize,
@@ -1100,10 +1080,14 @@ pub fn track_table<T: CollectionTrack>(
         &fields,
         Vec::new(),
         move |field| {
-            let column =
-                song_column_for_key::<T>(&column_shell, key, field, &column_playing_indicator);
+            let column = track_column_for_key::<TrackView>(
+                &column_shell,
+                key,
+                field,
+                &column_playing_indicator,
+            );
             if field != LibraryField::Favorite {
-                install_track_column_drag_source::<T>(
+                install_track_column_drag_source::<TrackView>(
                     &column,
                     &column_shell,
                     column_selection.clone(),
@@ -1215,10 +1199,14 @@ pub fn install_smart_playlist_reorder(
         target,
         Rc::new(move || current().map(|playlist| playlist.smart_playlist_key.raw())),
         |target| match target.selection() {
-            Some(library::SongSelection::Query {
+            Some(library::TrackSelection::Query {
                 query:
-                    library::SongQuery {
-                        scope: library::SongScope::Smart { key, .. },
+                    library::CatalogQuery {
+                        subject:
+                            library::CatalogSubject::Tracks {
+                                scope: library::TrackScope::Smart { key, .. },
+                                ..
+                            },
                         ..
                     },
                 ..
@@ -1256,10 +1244,14 @@ pub fn install_playlist_reorder(
         target,
         Rc::new(move || current().map(|playlist| playlist.playlist_key.raw())),
         |target| match target.selection() {
-            Some(library::SongSelection::Query {
+            Some(library::TrackSelection::Query {
                 query:
-                    library::SongQuery {
-                        scope: library::SongScope::Playlist(key),
+                    library::CatalogQuery {
+                        subject:
+                            library::CatalogSubject::Tracks {
+                                scope: library::TrackScope::Playlist(key),
+                                ..
+                            },
                         ..
                     },
                 ..
@@ -1373,7 +1365,7 @@ mod layout_policy_tests {
     #[test]
     fn contextual_playback_target_uses_the_route_context() {
         let target =
-            collection_play_request(library::SongScope::Album(library::AlbumKey::from_raw(1)))
+            collection_play_request(library::TrackScope::Album(library::AlbumKey::from_raw(1)))
                 .with_context("artist:1|releases".into());
 
         assert_eq!(target.context(), Some("artist:1|releases"));

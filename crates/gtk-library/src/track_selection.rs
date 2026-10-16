@@ -14,13 +14,13 @@ use super::track_model::TrackCollectionModel;
 
 #[derive(Clone)]
 pub struct TrackSelection {
-    input: Rc<dyn Fn(&gtk::Bitset) -> library::SongSelection>,
+    input: Rc<dyn Fn(&gtk::Bitset) -> library::TrackSelection>,
     position: Rc<dyn Fn(&str) -> Option<u32>>,
     selection: PositionSelectionModel,
 }
 
 impl TrackSelection {
-    pub fn new<T: super::track_model::CollectionTrack>(model: TrackCollectionModel<T>) -> Self {
+    pub fn new(model: TrackCollectionModel) -> Self {
         let selection = PositionSelectionModel::new(model.list_model());
         let locate = model.clone();
         Self {
@@ -121,7 +121,7 @@ impl PlaylistEntrySelection {
             playlist: self.model.playlist_key(),
             playlist_name: Arc::clone(&self.playlist_name),
             count: 1,
-            input: library::SongSelection::PlaylistEntries(Arc::from([entry])),
+            input: library::CatalogQuery::playlist_entries(vec![entry]).selection(),
         }
     }
 

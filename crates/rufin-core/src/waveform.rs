@@ -33,11 +33,11 @@ struct WaveformKey {
 impl WaveformKey {
     fn for_media(media: &CurrentMedia) -> Self {
         Self {
-            source_id: library::source_entity_parts(&media.media_uri)
+            source_id: library::source_entity_parts(&media.row.track.media_uri)
                 .and_then(|(source_id, kind, _)| (kind == "track").then_some(source_id)),
-            media_uri: media.media_uri.clone(),
-            duration_millis: media.duration_millis,
-            source_format: media.source_format.clone(),
+            media_uri: media.row.track.media_uri.clone(),
+            duration_millis: media.row.track.metadata.duration_millis,
+            source_format: media.row.track.metadata.source_format.clone(),
         }
     }
 
@@ -431,24 +431,41 @@ mod tests {
             id: media_id.clone(),
             row: Arc::new(playback::QueueRow {
                 occurrence_id: None,
-                item: playback::QueueItem::direct(
-                    library::source_entity_uri(&sources::SourceId::new("remote"), "track", "track"),
-                    "Track",
-                    "Artist",
-                    "Album",
-                    0,
-                ),
                 position: 0,
                 received_from_connect: false,
-                track_key: None,
                 provenance: playback::Provenance::Manual,
+                track: {
+                    let reference = playback::TrackReference::direct(
+                        library::source_entity_uri(
+                            &sources::SourceId::new("remote"),
+                            "track",
+                            "track",
+                        ),
+                        "Track",
+                        "Artist",
+                        "Album",
+                        0,
+                    );
+                    library::TrackView {
+                        track_key: library::TrackKey::from_raw(1),
+                        source_key: None,
+                        source_id: None,
+                        object_id: None,
+                        media_uri: reference.media_uri,
+                        metadata: reference.metadata,
+                        artwork_binding: reference.artwork_binding,
+                        state: Default::default(),
+                        access: Default::default(),
+                        links: Default::default(),
+                    }
+                },
             }),
         });
         let peaks = vec![(0.1, 0.2), (0.3, 0.4)];
         save_cached(directory.path(), &WaveformKey::for_media(&media), &peaks)
             .expect("cached waveform");
         let input = WaveformMedia {
-            request: StreamRequest::original(media.media_uri.clone()),
+            request: StreamRequest::original(media.row.track.media_uri.clone()),
             media,
             source: Weak::new(),
             database: Arc::new(database),

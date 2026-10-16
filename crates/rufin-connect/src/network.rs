@@ -205,9 +205,6 @@ pub enum NetworkEvent {
         peer: String,
         active: bool,
     },
-    CacheChanged {
-        profile: String,
-    },
     Reachable {
         profile: String,
         peer: String,
@@ -268,8 +265,6 @@ struct SyncPage {
     addresses: Vec<EndpointAddr>,
     #[serde(default)]
     acknowledgements: bool,
-    #[serde(default)]
-    cache_sync: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -975,14 +970,10 @@ impl ConnectNetwork {
             return Ok(());
         };
         let mut receiving = false;
-        let mut cache_supported = false;
         loop {
             // Check settings before every catalog page, even during initial catch-up.
             let mut more = false;
-            for stream in [SyncStream::Settings, SyncStream::Catalog, SyncStream::Cache] {
-                if stream == SyncStream::Cache && !cache_supported {
-                    continue;
-                }
+            for stream in [SyncStream::Settings, SyncStream::Catalog] {
                 loop {
                     self.authorize(peer).await?;
                     let after = documents.sync_cursor_in(&peer.to_string(), stream).await?;
@@ -993,7 +984,7 @@ impl ConnectNetwork {
                             profile: profile.id.clone(),
                             after,
                             setup: stream == SyncStream::Settings,
-                            cache: stream == SyncStream::Cache,
+                            cache: false,
                             roster: self.roster(&profile.id).await?,
                             addresses: self.peer_addresses().await?,
                         },
@@ -1003,7 +994,6 @@ impl ConnectNetwork {
                     let Some(page) = page else {
                         return Ok(());
                     };
-                    cache_supported = page.cache_sync;
                     if !self.merge_roster(&profile.id, &page.roster).await? {
                         return Ok(());
                     }
@@ -1030,15 +1020,7 @@ impl ConnectNetwork {
                         updates.push(update);
                     }
                     let changed = documents.import_updates(&updates).await?;
-                    if changed && stream == SyncStream::Cache {
-                        let _ = self
-                            .events
-                            .send(NetworkEvent::CacheChanged {
-                                profile: profile.id.clone(),
-                            })
-                            .await;
-                    }
-                    if changed && stream != SyncStream::Cache && !receiving {
+                    if changed && !receiving {
                         receiving = true;
                         let _ = self
                             .events
@@ -1079,10 +1061,10 @@ impl ConnectNetwork {
                             .await?;
                     }
                     let complete = page.versions.len() < SYNC_PAGE
-                        && !page.versions.last().is_some_and(|version| {
-                            version.name.starts_with("playlist_artwork:")
-                                || version.name.starts_with("cache_artwork:")
-                        });
+                        && !page
+                            .versions
+                            .last()
+                            .is_some_and(|version| version.name.starts_with("playlist_artwork:"));
                     if complete {
                         break;
                     }
@@ -1176,7 +1158,6 @@ impl ProtocolHandler for SyncProtocol {
                             roster,
                             addresses: Vec::new(),
                             acknowledgements: true,
-                            cache_sync: true,
                         }),
                     )
                     .await?;
@@ -1197,17 +1178,13 @@ impl ProtocolHandler for SyncProtocol {
                     let _ = send.stopped().await;
                     return Ok(());
                 };
-                let versions = documents
-                    .changes_in_stream(
-                        request.after,
-                        SYNC_PAGE,
-                        if request.cache {
-                            SyncStream::Cache
-                        } else {
-                            request.setup.into()
-                        },
-                    )
-                    .await?;
+                let versions = if request.cache {
+                    Vec::new()
+                } else {
+                    documents
+                        .changes_in(request.after, SYNC_PAGE, request.setup)
+                        .await?
+                };
                 let names = versions.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
                 write_frame(
                     &mut send,
@@ -1216,7 +1193,6 @@ impl ProtocolHandler for SyncProtocol {
                         roster: network.roster(&profile.id).await?,
                         addresses: network.peer_addresses().await?,
                         acknowledgements: true,
-                        cache_sync: true,
                     }),
                 )
                 .await?;

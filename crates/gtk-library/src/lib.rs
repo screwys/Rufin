@@ -62,9 +62,5 @@ pub(crate) fn collection_download_change(
 use downloads::{DownloadEvent, DownloadSubject};
 use std::rc::Rc;
 
-pub use album_detail_view::load_album_detail;
-pub use artist::{
-    artist_detail_route, load_artist_discography, load_artist_overview, load_artist_tracks,
-};
-pub use named_detail::{NamedDetailId, load_named_detail};
-pub use playlist_detail::load_smart_playlist_detail;
+pub use artist::artist_detail_route;
+pub use named_detail::NamedDetailId;

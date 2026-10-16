@@ -21,7 +21,7 @@ pub enum DisplayType {
     #[default]
     Application,
     #[serde(rename = "song")]
-    Song,
+    Track,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -140,7 +140,7 @@ impl Activity {
 }
 
 fn duration_millis(media: &CurrentMedia) -> u64 {
-    u64::try_from(media.duration_millis.max(0)).unwrap_or(u64::MAX)
+    u64::try_from(media.row.track.metadata.duration_millis.max(0)).unwrap_or(u64::MAX)
 }
 
 pub fn visible_playback_state(
@@ -167,11 +167,11 @@ fn activity_json(activity: &Activity) -> Value {
         PlaybackState::Paused => ("paused", "Paused"),
     };
     let mut value = json!({
-        "details": discord_text(&track.title, "Idle"),
-        "state": discord_text(&track.artist, "Unknown artist"),
+        "details": discord_text(&track.row.track.metadata.title, "Idle"),
+        "state": discord_text(&track.row.track.metadata.artist, "Unknown artist"),
         "assets": {
             "large_image": activity.large_image,
-            "large_text": discord_text(&track.album, "Unknown album"),
+            "large_text": discord_text(&track.row.track.metadata.album, "Unknown album"),
             "small_image": small_image,
             "small_text": small_text,
         },
@@ -200,15 +200,18 @@ const fn status_display_type(display_type: DisplayType) -> u8 {
     match display_type {
         DisplayType::Application => 0,
         DisplayType::Artist => 1,
-        DisplayType::Song => 2,
+        DisplayType::Track => 2,
     }
 }
 
 fn activity_urls(activity: &Activity) -> (Option<String>, Option<String>) {
     let track = &activity.media;
-    let track_artist = track.artist.trim();
+    let track_artist = track.row.track.metadata.artist.trim();
     let album_artist = activity
         .media
+        .row
+        .track
+        .metadata
         .album_display_artist
         .as_deref()
         .map(str::trim)
@@ -221,7 +224,11 @@ fn activity_urls(activity: &Activity) -> (Option<String>, Option<String>) {
         LinkType::LastFm | LinkType::MusicBrainzLastFm
     ) {
         state = lastfm_artist_url(track_artist);
-        details = lastfm_track_url(album_artist, &track.album, &track.title);
+        details = lastfm_track_url(
+            album_artist,
+            &track.row.track.metadata.album,
+            &track.row.track.metadata.title,
+        );
     }
     if matches!(
         activity.settings.link_type,
@@ -229,16 +236,25 @@ fn activity_urls(activity: &Activity) -> (Option<String>, Option<String>) {
     ) {
         if activity.settings.link_type == LinkType::MusicBrainz {
             state = track
+                .row
+                .track
+                .metadata
                 .primary_artist_musicbrainz_id
                 .as_deref()
                 .and_then(|id| musicbrainz_url("artist", id));
         }
         details = track
+            .row
+            .track
+            .metadata
             .musicbrainz_release_track_id
             .as_deref()
             .and_then(|id| musicbrainz_url("track", id))
             .or_else(|| {
                 track
+                    .row
+                    .track
+                    .metadata
                     .musicbrainz_recording_id
                     .as_deref()
                     .and_then(|id| musicbrainz_url("recording", id))

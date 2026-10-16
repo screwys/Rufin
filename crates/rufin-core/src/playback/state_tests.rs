@@ -7,8 +7,8 @@ use crate::playback::Placement;
 use crate::{
     lyrics::LyricsService, settings::SettingsFile, source::SourceOwner, waveform::WaveformOwner,
 };
-use playback::Provenance;
 use playback::{BackendError, PlaybackBackend};
+use playback::{Provenance, TrackReference};
 use std::sync::Mutex;
 
 pub(in crate::playback) struct IdleBackend(pub(in crate::playback) Arc<Mutex<Vec<BackendCommand>>>);
@@ -23,7 +23,7 @@ impl PlaybackBackend for IdleBackend {
 }
 
 pub(in crate::playback) async fn seeded(
-    items: Vec<(QueueItem, Provenance)>,
+    items: Vec<(TrackReference, Provenance)>,
 ) -> (
     tempfile::TempDir,
     library::Database,
@@ -57,7 +57,7 @@ pub(in crate::playback) async fn seeded(
             .await
             .unwrap()
             .into_iter()
-            .map(|row| row.item.clone());
+            .map(|row| row.track.clone());
         sequence.hydrate(request.into_iter().map(|(id, _)| id).zip(items).collect());
     }
     database.save_queue(&sequence.snapshot()).await.unwrap();
@@ -65,6 +65,11 @@ pub(in crate::playback) async fn seeded(
     let settings = SettingsFile::open(directory.path().join("settings.json")).unwrap();
     let artwork = artwork::Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap();
     let downloads = downloads::Downloads::new(
+        artwork::Artwork::new(
+            (directory.path().join("downloads")).join("artwork"),
+            (runtime.clone()).clone(),
+        )
+        .unwrap(),
         directory.path().join("downloads"),
         database.clone(),
         runtime.clone(),
@@ -84,8 +89,7 @@ pub(in crate::playback) async fn seeded(
             events: async_channel::unbounded().0,
             discovery: async_channel::unbounded().0,
         },
-    )
-    .owner;
+    );
     let waveform = WaveformOwner::new(
         runtime.clone(),
         async_channel::unbounded().0,
@@ -141,9 +145,9 @@ async fn finish_queue(
 ) {
     session.publish(sample);
     while session.pending_queue.is_some() || session.pending_hydration.is_some() {
-        let message = inbox
-            .recv_timeout(std::time::Duration::from_secs(5))
-            .unwrap();
+        let message =
+            tokio::task::block_in_place(|| inbox.recv_timeout(std::time::Duration::from_secs(5)))
+                .unwrap();
         message.apply(session, sample);
         session.publish(sample);
     }
@@ -158,20 +162,20 @@ async fn finish_queue(
         .unwrap();
 }
 
-fn restored_item() -> QueueItem {
-    let mut item = QueueItem::direct(
+fn restored_item() -> TrackReference {
+    let mut item = TrackReference::direct(
         "https://example.test/track-1",
         "Track",
         "Artist",
         "Album",
         180_000,
     );
-    item.disc_number = Some(1);
-    item.track_number = Some(1);
+    item.metadata.disc_number = 1;
+    item.metadata.track_number = 1;
     item
 }
 
-fn batch_item(track: i64, provenance: Provenance) -> (QueueItem, Provenance) {
+fn batch_item(track: i64, provenance: Provenance) -> (TrackReference, Provenance) {
     let mut item = restored_item();
     item.media_uri = format!("https://example.test/track-{track}");
     (item, provenance)
@@ -343,7 +347,7 @@ async fn continuation_preserves_positions_order_and_one_listen_across_devices() 
             },
             PreparedStream::new(
                 playback::ResolvedStream::new("https://example.test/continued.flac"),
-                playback::TrackLoudness::default(),
+                Some(playback::TrackLoudness::default()),
             ),
             Box::new(IdleBackend(destination_commands.clone())),
             &sample,
@@ -359,24 +363,36 @@ async fn continuation_preserves_positions_order_and_one_listen_across_devices() 
     let received = destination.sequence.snapshot();
     assert_eq!(
         destination_database
-            .track_uris(
-                &received
-                    .entries
-                    .iter()
-                    .map(|entry| entry.track_key)
-                    .collect::<Vec<_>>(),
+            .selected_track_uris(
+                &library::CatalogQuery::keys(
+                    library::CatalogKind::Track,
+                    None,
+                    received
+                        .entries
+                        .iter()
+                        .map(|entry| entry.track_key.raw())
+                        .collect()
+                )
+                .selection(),
+                None,
                 &library::ReadCancellation::new()
             )
             .await
             .unwrap(),
         database
-            .track_uris(
-                &first
-                    .queue
-                    .entries
-                    .iter()
-                    .map(|entry| entry.track_key)
-                    .collect::<Vec<_>>(),
+            .selected_track_uris(
+                &library::CatalogQuery::keys(
+                    library::CatalogKind::Track,
+                    None,
+                    first
+                        .queue
+                        .entries
+                        .iter()
+                        .map(|entry| entry.track_key.raw())
+                        .collect()
+                )
+                .selection(),
+                None,
                 &library::ReadCancellation::new()
             )
             .await
@@ -494,7 +510,7 @@ async fn editing_upcoming_queue_does_not_block_continuation() {
             },
             PreparedStream::new(
                 playback::ResolvedStream::new("https://example.test/continued.flac"),
-                playback::TrackLoudness::default(),
+                Some(playback::TrackLoudness::default()),
             ),
             Box::new(IdleBackend(commands.clone())),
             &sample,
@@ -605,7 +621,7 @@ async fn already_qualified_continuation_does_not_create_another_submission() {
             snapshot,
             PreparedStream::new(
                 playback::ResolvedStream::new("https://example.test/continued.flac"),
-                playback::TrackLoudness::default(),
+                Some(playback::TrackLoudness::default()),
             ),
             Box::new(IdleBackend(commands.clone())),
             &sample,
@@ -629,67 +645,6 @@ async fn already_qualified_continuation_does_not_create_another_submission() {
             .await
             .unwrap(),
         0
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn transport_and_prepared_stream_share_queue_facts_and_release_them() {
-    let (_directory, _database, mut session, _owner, commands, _playback, inbox) =
-        active_two_track_session().await;
-    for (_, task) in session.stream_tasks.drain() {
-        task.abort();
-        let _ = task.await;
-    }
-    while inbox.try_recv().is_ok() {}
-    let entry = session
-        .sequence()
-        .selected()
-        .expect("selected position")
-        .clone();
-    let weak = Arc::downgrade(&entry);
-    let view = session.view();
-    assert!(Arc::ptr_eq(
-        &view.transport.current.as_ref().unwrap().row,
-        &entry
-    ));
-    let run = session.current_run().unwrap();
-    session.stream_resolved(
-        run,
-        PreparedStream::new(
-            playback::ResolvedStream::new("https://example.test/audio.flac"),
-            playback::TrackLoudness::default(),
-        )
-        .with_row(entry.clone(), None),
-    );
-    let stream = commands
-        .lock()
-        .unwrap()
-        .iter()
-        .find_map(|command| match command {
-            BackendCommand::Start { current, .. } => Some(current.clone()),
-            _ => None,
-        })
-        .unwrap();
-    assert!(Arc::ptr_eq(stream.row.as_ref().unwrap(), &entry));
-    for _ in 0..1_000 {
-        assert!(Arc::ptr_eq(
-            &session.view().transport.current.unwrap().row,
-            &entry
-        ));
-    }
-    drop(entry);
-    drop(view);
-    drop(session);
-    commands.lock().unwrap().clear();
-    while inbox.try_recv().is_ok() {}
-    assert!(
-        weak.upgrade().is_some(),
-        "prepared stream retains its addressed position"
-    );
-    drop(stream);
-    assert!(
-        weak.upgrade().is_none(),
-        "no projection retains retired Queue facts"
     );
 }
 
@@ -735,10 +690,10 @@ async fn loaded_advancement_reuses_positions_without_a_store_read() {
     for (command, index) in [(Command::Next, 1), (Command::Previous, 0)] {
         session.handle_command(command, &sample).unwrap();
         assert!(session.pending_queue.is_none());
-        assert!(Arc::ptr_eq(
-            session.sequence.selected().unwrap(),
-            &entries[index]
-        ));
+        assert_eq!(
+            session.sequence.selected().unwrap().track.media_uri,
+            entries[index].track.media_uri,
+        );
     }
 }
 
@@ -787,7 +742,7 @@ async fn failed_queue_replacement_keeps_the_existing_run_and_can_be_retried() {
         .unwrap();
     finish_queue(&mut session, &inbox, &sample).await;
     assert_eq!(
-        session.sequence.selected().unwrap().media_uri,
+        session.sequence.selected().unwrap().track.media_uri,
         "https://example.test/track-20"
     );
     assert_ne!(session.current_run(), run);
@@ -872,7 +827,7 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
     let mut first = None;
     for identity in ["first", "latest"] {
         let input = library::QueueLoad::items(vec![(
-            QueueItem::direct(
+            TrackReference::direct(
                 format!("https://example.test/{identity}"),
                 identity,
                 "",
@@ -907,7 +862,10 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
     session.handle_command(Command::Stop, &sample).unwrap();
     finish_queue(&mut session, &inbox, &sample).await;
     assert_eq!(session.current_run(), None);
-    assert_eq!(session.sequence.selected().unwrap().title, "latest");
+    assert_eq!(
+        session.sequence.selected().unwrap().track.metadata.title,
+        "latest"
+    );
 
     session
         .handle_command(
@@ -939,15 +897,16 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
     session.publish(&sample);
     assert!(session.pending_hydration.is_some());
     let old_id = session.sequence.id_at(0).unwrap();
-    let old_item = database
-        .queue_items_for_uris(
-            &["https://example.test/track-0".into()],
-            &library::ReadCancellation::new(),
-        )
-        .await
-        .unwrap()
-        .pop()
-        .unwrap();
+    let library::CatalogRows::Tracks(mut old_rows) = library::CatalogQuery::uris(
+        library::CatalogKind::Track,
+        vec!["https://example.test/track-0".into()],
+    )
+    .rows(&database, 0, 1, &library::ReadCancellation::new())
+    .await
+    .unwrap() else {
+        unreachable!()
+    };
+    let old_item = old_rows.pop().unwrap();
     session
         .handle_command(
             Command::ApplyQueue(crate::playback::PlayRequest::from_input(
@@ -965,14 +924,14 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
     );
     finish_queue(&mut session, &inbox, &sample).await;
     assert_eq!(
-        session.sequence.selected().unwrap().media_uri,
+        session.sequence.selected().unwrap().track.media_uri,
         "https://example.test/track-999"
     );
     assert!(session.current_run().is_some());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn artwork_publication_preserves_run_progress_prepared_next_and_positions() {
+async fn catalog_publication_preserves_run_progress_prepared_next_and_positions() {
     let (_directory, _database, mut session, owner, commands, _playback, _inbox) =
         active_two_track_session().await;
     let sample = ClockSample {
@@ -983,19 +942,35 @@ async fn artwork_publication_preserves_run_progress_prepared_next_and_positions(
     let before = session.view();
     let run = session.current_run();
     let next_run = session.next_plan.as_ref().map(|plan| plan.next_run);
-    let uris = session.sequence.artwork_uris();
     session
         .handle_command(Command::CatalogChanged, &sample)
         .unwrap();
-    let bindings = uris
+    let rows = session
+        .sequence
+        .read_request()
+        .unwrap()
         .into_iter()
-        .map(|uri| (uri, Some(vec![1, 2, 3])))
+        .map(|(id, entry)| {
+            let mut song = before
+                .queue_window
+                .iter()
+                .find(|row| row.track.track_key == entry.track_key)
+                .unwrap()
+                .track
+                .clone();
+            song.artwork_binding = Some(vec![1, 2, 3]);
+            song.state.favorite = true;
+            (id, song)
+        })
         .collect::<Vec<_>>();
     commands.lock().unwrap().clear();
-    session.artwork_refreshed(bindings.clone());
+    session.complete_queue_metadata(Ok(rows.clone()), &sample);
     session.publish(&sample);
     let after = owner.updates.current().unwrap();
-    assert_eq!(after.queue, before.queue);
+    assert_eq!(after.queue.revision, before.queue.revision + 1);
+    assert_eq!(after.queue.total, before.queue.total);
+    assert_eq!(after.queue.current_index, before.queue.current_index);
+    assert_eq!(after.queue.next_index, before.queue.next_index);
     assert_eq!(
         after.transport.position_millis,
         before.transport.position_millis
@@ -1010,14 +985,32 @@ async fn artwork_publication_preserves_run_progress_prepared_next_and_positions(
         next_run
     );
     assert_eq!(
-        after.transport.current.as_ref().unwrap().artwork_binding,
+        after
+            .transport
+            .current
+            .as_ref()
+            .unwrap()
+            .row
+            .track
+            .artwork_binding,
         Some(vec![1, 2, 3])
+    );
+    assert!(
+        after
+            .transport
+            .current
+            .as_ref()
+            .unwrap()
+            .row
+            .track
+            .state
+            .favorite
     );
     assert!(
         commands.lock().unwrap().is_empty(),
         "presentation does not restart or reprepare audio"
     );
-    session.artwork_refreshed(bindings);
+    session.complete_queue_metadata(Ok(rows), &sample);
     assert!(!session.dirty);
     session.publish(&sample);
     assert!(Arc::ptr_eq(&after, &owner.updates.current().unwrap()));
@@ -1179,7 +1172,7 @@ async fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
             .complete_auto_dj_candidates(
                 request.seed_run,
                 &request.seed_media_uri,
-                vec![batch_item(3, Provenance::AutoDj).0],
+                vec![session.sequence.entries()[0].track.track_key],
                 5,
                 &sample,
             )
@@ -1188,7 +1181,7 @@ async fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
     finish_queue(&mut session, &inbox, &sample).await;
     assert_eq!(database.restore_queue().await.unwrap().rows.len(), 1);
     assert_eq!(
-        session.sequence.selected().unwrap().media_uri,
+        session.sequence.selected().unwrap().track.media_uri,
         "https://example.test/track-10"
     );
 }
@@ -1415,14 +1408,18 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
                 .collect::<Vec<_>>();
             let (_directory, database, mut sequence, owner, commands, playback, inbox) =
                 seeded(items.clone()).await;
-            let input = library::SongSelection::Tracks(
+            let input = library::CatalogQuery::keys(
+                library::CatalogKind::Track,
+                None,
                 sequence
                     .snapshot()
                     .entries
                     .iter()
                     .map(|entry| entry.track_key)
+                    .map(|key| key.raw())
                     .collect(),
-            );
+            )
+            .selection();
             sequence.set_progress_millis(42_000);
             let mut session = Player::new(
                 sequence,
@@ -1468,7 +1465,7 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
             let selected = session.sequence().selected().unwrap();
             if !random_start {
                 assert_eq!(
-                    selected.media_uri,
+                    selected.track.media_uri,
                     format!("https://example.test/track-{}", anchor + 1)
                 );
             }
@@ -1549,6 +1546,11 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
     let artwork =
         artwork::Artwork::new(directory.path().join("report-artwork"), runtime.clone()).unwrap();
     let downloads = downloads::Downloads::new(
+        artwork::Artwork::new(
+            (directory.path().join("report-downloads")).join("artwork"),
+            (runtime.clone()).clone(),
+        )
+        .unwrap(),
         directory.path().join("report-downloads"),
         database.clone(),
         runtime.clone(),
@@ -1566,8 +1568,7 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
             events: async_channel::unbounded().0,
             discovery: async_channel::unbounded().0,
         },
-    )
-    .owner;
+    );
     owner.install_source_owner(&source);
     let mut session = Player::new(
         sequence,
@@ -1846,7 +1847,13 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
     assert_eq!(view.transport.position_millis, 90000);
     assert_eq!(
         view.transport.duration_millis,
-        session.sequence.selected().unwrap().duration_millis as u64
+        session
+            .sequence
+            .selected()
+            .unwrap()
+            .track
+            .metadata
+            .duration_millis as u64
     );
     assert!(view.transport.can_seek);
     assert_eq!(view.transport.current.unwrap().row.position, selected + 600);
@@ -1865,13 +1872,13 @@ async fn receiver_observation_keeps_global_queue_facts_without_commands_or_dupli
     assert!(request.seed_run.is_none());
     assert_eq!(
         request.seed_media_uri,
-        session.sequence.selected().unwrap().media_uri
+        session.sequence.selected().unwrap().track.media_uri
     );
     assert!(
         !session
             .complete_auto_dj(
                 None,
-                &session.sequence.selected().unwrap().media_uri.clone(),
+                &session.sequence.selected().unwrap().track.media_uri.clone(),
                 library::QueueLoad::items(vec![batch_item(9, Provenance::AutoDj)]),
                 &sample
             )
@@ -1995,7 +2002,7 @@ async fn auto_dj_refills_after_track_changes_and_delayed_completion() {
             .auto_dj_in_flight
             .clone()
             .expect("playing near the queue end requests Auto DJ before the track ends");
-        assert!(owner.updates.current().unwrap().queue_loading);
+        assert!(!owner.updates.current().unwrap().queue_loading);
         if request_position < queue_length - 1 {
             session
                 .handle_command(Command::Activate(queue_length - 1), &sample)
@@ -2012,10 +2019,17 @@ async fn auto_dj_refills_after_track_changes_and_delayed_completion() {
                 .complete_auto_dj_candidates(
                     request.seed_run,
                     &request.seed_media_uri,
-                    vec![
-                        batch_item(queue_length as i64 + 1, Provenance::AutoDj).0,
-                        batch_item(queue_length as i64 + 2, Provenance::AutoDj).0
-                    ],
+                    database
+                        .remember_media_uris(&[
+                            batch_item(queue_length as i64 + 1, Provenance::AutoDj)
+                                .0
+                                .media_uri,
+                            batch_item(queue_length as i64 + 2, Provenance::AutoDj)
+                                .0
+                                .media_uri,
+                        ])
+                        .await
+                        .unwrap(),
                     5,
                     &sample
                 )
@@ -2036,7 +2050,7 @@ async fn auto_dj_refills_after_track_changes_and_delayed_completion() {
             session.publish(&sample);
         }
         assert_eq!(
-            session.sequence.selected().unwrap().media_uri,
+            session.sequence.selected().unwrap().track.media_uri,
             format!("https://example.test/track-{}", queue_length + 1)
         );
         assert!(session.current_run().is_some());
@@ -2044,7 +2058,7 @@ async fn auto_dj_refills_after_track_changes_and_delayed_completion() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unavailable_auto_dj_publishes_the_end_of_loading() {
+async fn unavailable_auto_dj_keeps_the_ready_queue_visible() {
     let (_directory, _database, mut session, owner, _commands, _playback, _inbox) =
         active_two_track_session().await;
     let sample = ClockSample {
@@ -2056,7 +2070,7 @@ async fn unavailable_auto_dj_publishes_the_end_of_loading() {
     session.set_auto_dj(true, 3);
     session.publish(&sample);
     let request = session.auto_dj_in_flight.clone().unwrap();
-    assert!(session.view().queue_loading);
+    assert!(!session.view().queue_loading);
     assert!(session.auto_dj_unavailable(request.seed_run, &request.seed_media_uri, None));
     session.publish(&sample);
     assert!(!owner.updates.current().unwrap().queue_loading);
@@ -2123,7 +2137,7 @@ async fn playback_crosses_window_edges_and_wraps_without_truncating_the_queue() 
     session.set_playing(true);
     for rank in 0..500 {
         assert_eq!(
-            session.sequence().selected().unwrap().media_uri,
+            session.sequence().selected().unwrap().track.media_uri,
             format!("https://example.test/track-{rank}")
         );
         assert_eq!(session.sequence().total(), 500);
@@ -2132,13 +2146,13 @@ async fn playback_crosses_window_edges_and_wraps_without_truncating_the_queue() 
         finish_queue(&mut session, &inbox, &sample).await;
     }
     assert_eq!(
-        session.sequence().selected().unwrap().media_uri,
+        session.sequence().selected().unwrap().track.media_uri,
         "https://example.test/track-0"
     );
     session.handle_command(Command::Previous, &sample).unwrap();
     finish_queue(&mut session, &inbox, &sample).await;
     assert_eq!(
-        session.sequence().selected().unwrap().media_uri,
+        session.sequence().selected().unwrap().track.media_uri,
         "https://example.test/track-499"
     );
 }
@@ -2178,12 +2192,12 @@ async fn backend_advancing_during_removal_uses_the_exact_surviving_successor() {
         finish_queue(&mut session, &inbox, &sample).await;
         if removed_rank == 1 {
             assert_eq!(
-                session.sequence.selected().unwrap().media_uri,
+                session.sequence.selected().unwrap().track.media_uri,
                 "https://example.test/track-2"
             );
         } else {
             assert_eq!(
-                session.sequence.selected().unwrap().media_uri,
+                session.sequence.selected().unwrap().track.media_uri,
                 "https://example.test/track-1"
             );
             assert!(session.current_run().is_none());
@@ -2217,7 +2231,7 @@ async fn pause_and_stop_during_queue_preparation_apply_to_the_requested_track() 
         }
         finish_queue(&mut session, &inbox, &sample).await;
         assert_eq!(
-            session.sequence.selected().unwrap().media_uri,
+            session.sequence.selected().unwrap().track.media_uri,
             "https://example.test/track-99"
         );
         assert_eq!(
@@ -2241,13 +2255,13 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
         .create_playlist(
             None,
             "Source",
-            &library::SongSelection::Uris(uris.clone().into()),
+            &library::CatalogQuery::uris(library::CatalogKind::Track, uris.to_vec()).selection(),
         )
         .await
         .unwrap()
         .unwrap();
     let page = crate::playback::PlayRequest::ordered(
-        library::SongQuery::new(library::SongScope::Playlist(key)).selection(),
+        library::CatalogQuery::tracks(library::TrackScope::Playlist(key)).selection(),
         0,
         Placement::Now,
         false,
@@ -2279,7 +2293,10 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
         session.handle_command(Command::Next, &sample).unwrap();
         finish_queue(&mut session, &inbox, &sample).await;
     }
-    assert_eq!(session.sequence.selected().unwrap().media_uri, uris[0]);
+    assert_eq!(
+        session.sequence.selected().unwrap().track.media_uri,
+        uris[0]
+    );
     assert!(session.current_run().is_some());
 }
 
@@ -2317,7 +2334,7 @@ async fn removing_the_visible_window_continues_with_the_unbuffered_source() {
     session.remove_many(&crate::playback::QueueSelection::Positions(ids), &sample);
     finish_queue(&mut session, &inbox, &sample).await;
     assert_eq!(
-        session.sequence.selected().unwrap().media_uri,
+        session.sequence.selected().unwrap().track.media_uri,
         "https://example.test/track-100"
     );
     assert!(session.current_run().is_some());

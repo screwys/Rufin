@@ -86,6 +86,7 @@ pub async fn build(
         source_refresh_feedback: gtk::Box,
         source_refresh_feedback_label: gtk::Label,
         source_refresh_feedback_progress: gtk::ProgressBar,
+        source_download_cancel: gtk::Button,
         operation_feedback: gtk::Box,
         operation_feedback_artwork: gtk::Box,
         operation_feedback_title: gtk::Label,
@@ -173,7 +174,6 @@ pub async fn build(
         discovery_provider: Cell::new(rufin_core::runtime::source::DiscoveryProvider::Jellyfin),
         add_server: RefCell::new(None),
         refresh_feedback_generation: Rc::new(Cell::new(0)),
-        artwork_preparation_revision: Cell::new(None),
     });
     let startup = StartupState {
         route_revealed: Cell::new(!defer_initial_route),
@@ -283,6 +283,7 @@ pub async fn build(
         source_refresh_feedback,
         source_refresh_feedback_label,
         source_refresh_feedback_progress,
+        source_download_cancel,
         operation_feedback,
         operation_feedback_artwork,
         operation_feedback_title,
@@ -387,12 +388,13 @@ pub async fn build(
                             target, &shell, selection, position,
                         );
                     } else {
-                        crate::shell::player_menus::present_queue_track_context_menu(
+                        gtk_media_menus::media_menus::present_track_menu(
                             target,
-                            &shell,
-                            row.entry.item.clone(),
-                            (row.position, row.occurrence_id),
+                            &shell.media_menus,
+                            row.track.clone(),
                             position,
+                            None,
+                            Some((row.position, row.occurrence_id)),
                         );
                     }
                 })
@@ -489,6 +491,19 @@ pub async fn build(
     });
 
     shell.connect_operation_feedback();
+    let weak = Rc::downgrade(&shell);
+    shell
+        .chrome
+        .source_download_cancel
+        .connect_clicked(move |_| {
+            let Some(shell) = weak.upgrade() else { return };
+            let operation = shell.source.operation.borrow().clone();
+            if let rufin_core::runtime::source::SourceOperation::Downloading { source_id, .. } =
+                operation
+            {
+                shell.products.source.cancel_source_download(source_id);
+            }
+        });
     shell.preferences.bind_controller_appearance();
     shell.bind_sidebar_settings();
     let weak = Rc::downgrade(&shell);
@@ -515,7 +530,7 @@ pub async fn build(
             };
             let local = shell.products.settings.local_configuration();
             if let Err(error) = rufin_core::open::files(
-                &shell.products.playback,
+                std::sync::Arc::clone(&shell.products.playback),
                 &shell.products.library,
                 local.as_ref(),
                 files,

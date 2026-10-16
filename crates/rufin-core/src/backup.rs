@@ -283,6 +283,75 @@ impl BackupOwner {
         )
     }
 
+    pub(crate) async fn restore_latest(&self) -> Result<(), String> {
+        let stored = self.settings.load();
+        let scheduled = stored.ui.application.backup.clone();
+        if !scheduled.enabled {
+            return Ok(());
+        }
+        let config = self.settings.config_dir().to_path_buf();
+        let default_directory = self.default_directory();
+        let preview = self
+            .stage_input(
+                move || {
+                    let input: Box<dyn std::io::Read> = if let Some(uri) = scheduled
+                        .destination_uri
+                        .as_deref()
+                        .filter(|uri| uri.starts_with("content://"))
+                    {
+                        let receipts =
+                            document_backup_receipts(&config.join("document-backups.json"))?;
+                        let (files, _) =
+                            document_backup_files(&receipts, uri, &scheduled.schedule.schedule_id)?;
+                        let (_, uri) = files
+                            .into_iter()
+                            .next()
+                            .ok_or("No scheduled backup was found")?;
+                        Box::new(
+                            sources::open_document_input(&uri)
+                                .map_err(|error| error.to_string())?,
+                        )
+                    } else {
+                        let directory = scheduled
+                            .destination_uri
+                            .as_deref()
+                            .map(gio::File::for_uri)
+                            .unwrap_or_else(|| gio::File::for_path(default_directory));
+                        let (_, name) =
+                            scheduled_backup_files(&directory, &scheduled.schedule.schedule_id)?
+                                .into_iter()
+                                .next()
+                                .ok_or("No scheduled backup was found")?;
+                        Box::new(
+                            directory
+                                .child(name)
+                                .read(None::<&gio::Cancellable>)
+                                .map_err(|error| error.to_string())?
+                                .into_read(),
+                        )
+                    };
+                    let passphrase = move || {
+                        backup_password_store(&stored, &config)
+                            .load_secret(&backup_password_key())
+                            .unwrap_or_else(|error| {
+                                tracing::warn!(%error, "could not read the saved backup password");
+                                None
+                            })
+                    };
+                    Ok((input, passphrase))
+                },
+                backup::BackupContents::default(),
+            )
+            .recv()
+            .await
+            .map_err(|error| error.to_string())??;
+        let report = self.restore_now(preview).await?;
+        for warning in report.warnings {
+            tracing::warn!(%warning, "automatic backup restore completed with a warning");
+        }
+        Ok(())
+    }
+
     async fn restore_now(
         &self,
         preview: BackupPreview,
@@ -319,49 +388,53 @@ impl BackupOwner {
             None
         };
         self.source
-            .restore_user_state(contents.settings || contents.saved_logins, || async {
-                if contents.queue {
-                    let playback = Arc::clone(&self.playback);
-                    tokio::task::spawn_blocking(move || playback.shutdown())
+            .restore_user_state(
+                contents.settings || contents.saved_logins,
+                contents.saved_logins,
+                || async {
+                    if contents.queue {
+                        let playback = Arc::clone(&self.playback);
+                        tokio::task::spawn_blocking(move || playback.shutdown())
+                            .await
+                            .map_err(|e| e.to_string())?;
+                    }
+                    let result = backup::restore_backup(&self.database, &preview.staged, contents)
+                        .await
+                        .map_err(|e| e.to_string());
+                    if let Err(error) = result {
+                        if contents.queue {
+                            self.playback.start().await?;
+                        }
+                        return Err(error);
+                    }
+                    let mut report = result?;
+                    if contents.settings || contents.saved_logins || contents.playlists {
+                        let owner = self.clone();
+                        report.warnings = tokio::task::spawn_blocking(move || {
+                            restore_preferences_and_logins(
+                                &owner.settings,
+                                &owner.settings_apply,
+                                owner.secrets.as_ref(),
+                                incoming,
+                                pins,
+                                logins,
+                            )
+                        })
                         .await
                         .map_err(|e| e.to_string())?;
-                }
-                let result = backup::restore_backup(&self.database, &preview.staged, contents)
-                    .await
-                    .map_err(|e| e.to_string());
-                if let Err(error) = result {
+                    }
                     if contents.queue {
-                        self.playback.start().await?;
+                        if let Err(error) = self.playback.start().await {
+                            report.warnings.push(format!(
+                                "Queue restored; playback could not resume: {error}"
+                            ));
+                        }
+                    } else {
+                        self.playback.catalog_changed();
                     }
-                    return Err(error);
-                }
-                let mut report = result?;
-                if contents.settings || contents.saved_logins || contents.playlists {
-                    let owner = self.clone();
-                    report.warnings = tokio::task::spawn_blocking(move || {
-                        restore_preferences_and_logins(
-                            &owner.settings,
-                            &owner.settings_apply,
-                            owner.secrets.as_ref(),
-                            incoming,
-                            pins,
-                            logins,
-                        )
-                    })
-                    .await
-                    .map_err(|e| e.to_string())?;
-                }
-                if contents.queue {
-                    if let Err(error) = self.playback.start().await {
-                        report.warnings.push(format!(
-                            "Queue restored; playback could not resume: {error}"
-                        ));
-                    }
-                } else {
-                    self.playback.catalog_changed();
-                }
-                Ok(report)
-            })
+                    Ok(report)
+                },
+            )
             .await
     }
 }
@@ -393,25 +466,26 @@ impl BackupOwner {
         contents: backup::BackupContents,
     ) -> Receiver<Result<BackupPreview, String>> {
         self.stage_input(
-            move || fs::File::open(path).map_err(|error| error.to_string()),
-            passphrase,
+            move || {
+                fs::File::open(path)
+                    .map(|input| (input, move || passphrase))
+                    .map_err(|error| error.to_string())
+            },
             contents,
         )
     }
 
-    fn stage_input<R: std::io::Read + Send + 'static>(
+    fn stage_input<R: std::io::Read, P: FnOnce() -> Option<String>>(
         &self,
-        open: impl FnOnce() -> Result<R, String> + Send + 'static,
-        passphrase: Option<String>,
+        open: impl FnOnce() -> Result<(R, P), String> + Send + 'static,
         contents: backup::BackupContents,
     ) -> Receiver<Result<BackupPreview, String>> {
         let (send, receive) = async_channel::bounded(1);
         let settings = self.settings.clone();
         self.runtime.spawn_blocking(move || {
             let result = (|| {
-                let input = open()?;
-                let staged = backup::stage_backup(input, passphrase.as_deref())
-                    .map_err(|e| e.to_string())?;
+                let (input, passphrase) = open()?;
+                let staged = backup::stage_backup(input, passphrase).map_err(|e| e.to_string())?;
                 let removed_sources = if contents.settings && staged.manifest.contents.settings {
                     let incoming: StoredSettings =
                         serde_json::from_slice(&staged.settings().map_err(|e| e.to_string())?)
@@ -441,8 +515,11 @@ impl BackupOwner {
         contents: backup::BackupContents,
     ) -> Result<Arc<BackupPreview>, backup::BackupError> {
         self.stage_input(
-            move || sources::open_document_input(&uri).map_err(|error| error.to_string()),
-            passphrase,
+            move || {
+                sources::open_document_input(&uri)
+                    .map(|input| (input, move || passphrase))
+                    .map_err(|error| error.to_string())
+            },
             contents,
         )
         .recv()
@@ -641,13 +718,11 @@ fn save_document_backup_receipts(
     Ok(())
 }
 
-fn prune_document_backups(
-    receipts_path: &std::path::Path,
-    mut receipts: Vec<DocumentBackupReceipt>,
+fn document_backup_files(
+    receipts: &[DocumentBackupReceipt],
     directory: &str,
     schedule_id: &str,
-    retention_count: u32,
-) -> Result<(), String> {
+) -> Result<(Vec<(i64, String)>, std::collections::BTreeSet<String>), String> {
     let mut offset = 0;
     let mut owned = Vec::new();
     let mut present = std::collections::BTreeSet::new();
@@ -682,6 +757,17 @@ fn prune_document_backups(
         offset = next;
     }
     owned.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok((owned, present))
+}
+
+fn prune_document_backups(
+    receipts_path: &std::path::Path,
+    mut receipts: Vec<DocumentBackupReceipt>,
+    directory: &str,
+    schedule_id: &str,
+    retention_count: u32,
+) -> Result<(), String> {
+    let (owned, mut present) = document_backup_files(&receipts, directory, schedule_id)?;
     for (_, uri) in owned.into_iter().skip(retention_count.max(1) as usize) {
         sources::delete_document(&uri).map_err(|error| error.to_string())?;
         present.remove(&uri);
@@ -694,11 +780,10 @@ fn prune_document_backups(
     save_document_backup_receipts(receipts_path, &receipts)
 }
 
-fn prune_scheduled_backups(
+fn scheduled_backup_files(
     directory: &gio::File,
     schedule_id: &str,
-    retention_count: u32,
-) -> Result<(), String> {
+) -> Result<Vec<(i64, std::path::PathBuf)>, String> {
     let entries = directory
         .enumerate_children(
             "standard::name,standard::type",
@@ -722,6 +807,15 @@ fn prune_scheduled_backups(
         }
     }
     owned.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(owned)
+}
+
+fn prune_scheduled_backups(
+    directory: &gio::File,
+    schedule_id: &str,
+    retention_count: u32,
+) -> Result<(), String> {
+    let owned = scheduled_backup_files(directory, schedule_id)?;
     for (_, name) in owned.into_iter().skip(retention_count.max(1) as usize) {
         directory
             .child(name)

@@ -225,7 +225,7 @@ impl PlayerUi {
         gtk::glib::spawn_future_local(async move {
             let dialog = gtk::FileDialog::builder()
                 .title(tr("Save Lyrics"))
-                .initial_name(lyrics_save_filename(&current.title))
+                .initial_name(lyrics_save_filename(&current.row.track.metadata.title))
                 .build();
             let Some(window) = shell.window.upgrade() else {
                 return;
@@ -449,8 +449,8 @@ impl PlayerUi {
         dialog.set_content_height(lyrics_popup_content_height(
             self.window.upgrade().map_or(0, |window| window.height()),
         ));
-        artist_entry.set_text(&current.artist);
-        title_entry.set_text(&current.title);
+        artist_entry.set_text(&current.row.track.metadata.artist);
+        title_entry.set_text(&current.row.track.metadata.title);
         for entry in [&artist_entry, &title_entry] {
             entry.set_icon_sensitive(gtk::EntryIconPosition::Secondary, !entry.text().is_empty());
             entry.connect_changed(|entry| {

@@ -76,10 +76,13 @@ mod tests {
         let original = root.path().join("original.flac");
         std::fs::write(&original, b"original").unwrap();
         let uri = url::Url::from_file_path(&original).unwrap().to_string();
-        let item = crate::QueueItem::direct(&uri, "Track", "Artist", "Album", 180_000);
+        let item = crate::TrackReference::direct(&uri, "Track", "Artist", "Album", 180_000);
         let copy = root.path().join("download.mp3");
         std::fs::write(&copy, b"download").unwrap();
-        database.connect_set_queue_file(&item, &copy).await.unwrap();
+        database
+            .connect_set_queue_file(&item.media_uri, &item.metadata, &copy)
+            .await
+            .unwrap();
         let receipt = ConnectMediaFile {
             media_uri: uri.clone(),
             encoding: "mp3".into(),
@@ -94,12 +97,14 @@ mod tests {
             receipt.path
         );
         assert_eq!(
-            database
-                .track_row_by_uri(&uri, &crate::ReadCancellation::new())
+            match crate::CatalogQuery::uris(crate::CatalogKind::Track, vec![uri.clone()])
+                .rows(&database, 0, 1, &crate::ReadCancellation::new())
                 .await
                 .unwrap()
-                .unwrap()
-                .title,
+            {
+                crate::CatalogRows::Tracks(rows) => rows[0].metadata.title.clone(),
+                _ => unreachable!("song query"),
+            },
             "Track"
         );
         assert!(
@@ -112,12 +117,14 @@ mod tests {
         database.connect_forget_media_file(&receipt).await.unwrap();
         assert!(database.playback_access(&uri).await.unwrap().is_none());
         assert_eq!(
-            database
-                .track_row_by_uri(&uri, &crate::ReadCancellation::new())
+            match crate::CatalogQuery::uris(crate::CatalogKind::Track, vec![uri.clone()])
+                .rows(&database, 0, 1, &crate::ReadCancellation::new())
                 .await
                 .unwrap()
-                .unwrap()
-                .title,
+            {
+                crate::CatalogRows::Tracks(rows) => rows[0].metadata.title.clone(),
+                _ => unreachable!("song query"),
+            },
             "Track"
         );
         assert_eq!(std::fs::read(original).unwrap(), b"original");
@@ -135,7 +142,8 @@ impl Database {
     /// A transferred direct queue file has local access without catalog enrollment.
     pub async fn connect_set_queue_file(
         &self,
-        item: &crate::QueueItem,
+        uri: &str,
+        tags: &crate::TrackMetadata,
         path: &std::path::Path,
     ) -> LibraryResult<()> {
         let metadata = std::fs::metadata(path)?;
@@ -143,7 +151,8 @@ impl Database {
             .map_err(|()| LibraryError::InvalidRequest("Media path must be absolute".into()))?
             .to_string();
         self.connect_set_queue_access(
-            item,
+            uri,
+            tags,
             path.to_string_lossy().into_owned(),
             path.parent().unwrap_or(path).to_string_lossy().into_owned(),
             access_uri,
@@ -154,12 +163,14 @@ impl Database {
 
     pub async fn connect_set_queue_document(
         &self,
-        item: &crate::QueueItem,
+        media_uri: &str,
+        tags: &crate::TrackMetadata,
         uri: &str,
         size: Option<u64>,
     ) -> LibraryResult<()> {
         self.connect_set_queue_access(
-            item,
+            media_uri,
+            tags,
             uri.into(),
             uri.into(),
             uri.into(),
@@ -170,7 +181,8 @@ impl Database {
 
     async fn connect_set_queue_access(
         &self,
-        item: &crate::QueueItem,
+        uri: &str,
+        tags: &crate::TrackMetadata,
         path: String,
         root: String,
         access_uri: String,
@@ -179,7 +191,7 @@ impl Database {
         self.write_local_access(
             None,
             &[&crate::LocalAccessWrite {
-                media_uri: item.media_uri.clone(),
+                media_uri: uri.to_string(),
                 origin: crate::LocalAccessOrigin::Download,
                 path,
                 root,
@@ -189,12 +201,12 @@ impl Database {
                 device_id: None,
                 inode: None,
                 parser_version: 1,
-                title: item.title.clone(),
-                album: item.album.clone(),
-                artist: item.artist.clone(),
-                disc_number: item.disc_number.unwrap_or(1),
-                track_number: item.track_number.unwrap_or(1),
-                duration_millis: item.duration_millis,
+                title: tags.title.clone(),
+                album: tags.album.clone(),
+                artist: tags.artist.clone(),
+                disc_number: tags.disc_number.max(1),
+                track_number: tags.track_number.max(1),
+                duration_millis: tags.duration_millis,
                 access_uri,
                 loudness_analysis_key: None,
             }],
@@ -358,17 +370,5 @@ impl Database {
         let mut reader = self.acquire_reader().await?;
         Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM connect_media_files WHERE backing_uri=?1 AND encoding=?2 AND revision=?3 AND path LIKE 'content://%')")
             .bind(backing).bind(encoding).bind(revision).fetch_one(&mut *reader).await?)
-    }
-
-    pub async fn connect_media_window(&self, uri: &str) -> LibraryResult<Option<(u64, u64)>> {
-        if let Some((_, _, start, end)) = crate::cue_media_parts(uri) {
-            return Ok(Some((start as u64, end as u64)));
-        }
-        let reference = self.connect_track_reference(uri).await?;
-        Ok(reference.as_ref().and_then(|value| {
-            let start = value["cue_start_millis"].as_u64()?;
-            let end = value["cue_end_millis"].as_u64()?;
-            (end > start).then_some((start, end))
-        }))
     }
 }

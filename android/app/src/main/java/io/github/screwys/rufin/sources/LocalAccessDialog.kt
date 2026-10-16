@@ -48,7 +48,7 @@ internal fun LocalAccessDialog(model: RufinConnection, sourceId: String, sampleP
                 localPrefix = access.localPrefix.orEmpty()
                 configured = true
             }
-            if (samplePath == null) sample = summary?.status?.sampleSourcePath.orEmpty()
+            if (samplePath == null) sample = setup.localAccessStatus(sourceId).sampleSourcePath.orEmpty()
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { failure = error.userMessage() }
         finally { working = false }

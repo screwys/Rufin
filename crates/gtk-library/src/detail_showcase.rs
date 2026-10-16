@@ -3,7 +3,7 @@ use std::{
     rc::Rc,
 };
 
-use ::library::{AlbumRow, ArtistRow};
+use ::library::{AlbumView, ArtistView};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -12,7 +12,7 @@ use tracing::warn;
 
 use crate::CatalogUi;
 use gtk_widgets::artwork::presentation::add_album_seed_gradient_class;
-use gtk_widgets::artwork::{ArtworkTile, CoverGroupProjection, LARGE_COVER_SIZE};
+use gtk_widgets::artwork::{ArtworkTile, CoverGroupProjection};
 use gtk_widgets::controls::{ActionButtonVariant, configure_action_button, icon_button};
 use gtk_widgets::controls::{PLAY_LATER_ICON, PLAY_NEXT_ICON};
 use gtk_widgets::interactions::{ContextMenuOpen, RADIO_ICON};
@@ -563,12 +563,9 @@ impl MediaCoverProjection {
 
     pub fn replace(&self, shell: &Rc<CatalogUi>, candidates: ArtworkBinding) {
         self.candidates.replace(candidates.clone());
-        shell.artwork.bind_artwork_tile(
-            &self.tile,
-            candidates,
-            detail_cover_render_size(),
-            LARGE_COVER_SIZE,
-        );
+        shell
+            .artwork
+            .bind_artwork_tile(&self.tile, candidates, detail_cover_render_size());
     }
 }
 
@@ -585,7 +582,7 @@ pub fn media_cover_projection(
 
 pub fn home_album_cover_projection(
     shell: &Rc<CatalogUi>,
-    album: &AlbumRow,
+    album: &AlbumView,
     size: i32,
 ) -> MediaCoverProjection {
     let album_uri = album.media_uri.clone();
@@ -610,11 +607,10 @@ fn media_cover_projection_with_open(
     open: impl Fn(&Rc<CatalogUi>, ArtworkBinding) + 'static,
 ) -> MediaCoverProjection {
     let render_size = detail_cover_render_size();
-    let fetch_size = LARGE_COVER_SIZE;
     let tile = ArtworkTile::new_sized(size, size);
     shell
         .artwork
-        .bind_artwork_tile(&tile, candidates.clone(), render_size, fetch_size);
+        .bind_artwork_tile(&tile, candidates.clone(), render_size);
     let cover = tile.widget();
     cover.add_css_class("detail-showcase-cover");
     if !cover_class.is_empty() {
@@ -682,7 +678,7 @@ pub fn fit_detail_text(label: &gtk::Label, text: &str) {
     }
 }
 
-pub fn album_external_links(shell: &Rc<CatalogUi>, album: &AlbumRow) -> Option<gtk::Widget> {
+pub fn album_external_links(shell: &Rc<CatalogUi>, album: &AlbumView) -> Option<gtk::Widget> {
     let settings = shell.settings.current.borrow();
     let source = library::source_entity_parts(&album.media_uri)
         .and_then(|(source_id, _, _)| shell.source.configuration(&source_id));
@@ -700,7 +696,7 @@ pub fn album_external_links(shell: &Rc<CatalogUi>, album: &AlbumRow) -> Option<g
 
 pub fn artist_external_links(
     shell: &Rc<CatalogUi>,
-    artist: &ArtistRow,
+    artist: &ArtistView,
     album_artist: bool,
 ) -> Option<gtk::Widget> {
     let settings = shell.settings.current.borrow();

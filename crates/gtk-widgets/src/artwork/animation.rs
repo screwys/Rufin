@@ -115,13 +115,7 @@ impl Session {
             .borrow()
             .iter()
             .filter(|target| target.mapped())
-            .map(|target| {
-                super::cover_decode_size(
-                    target.size.get(),
-                    super::LARGE_COVER_SIZE,
-                    target.scale.get(),
-                )
-            })
+            .map(|target| super::cover_decode_size(target.size.get(), target.scale.get()))
             .max()
             .unwrap_or(0);
         if self.render_size.replace(size) == size {

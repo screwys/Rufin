@@ -114,7 +114,7 @@ internal fun LyricsActions(player: PlayerConnection) {
                     else {
                         exportToken = captured
                         exportOffset = player.lyricsOffset
-                        export.launch("${player.currentItem?.title.orEmpty()}.lrc")
+                        export.launch("${player.currentItem?.metadata?.title.orEmpty()}.lrc")
                     }
                 }, leadingIcon = { RufinIcon("rufin-download-symbolic", null) })
                 DropdownMenuItem(text = { Text(translate("Lyrics offset (ms)") + " · " + player.lyricsOffset) },
@@ -412,15 +412,15 @@ private fun romanizationText(reading: AndroidJapaneseReading, highlights: List<A
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LyricsSearchSheet(player: PlayerConnection, token: CurrentMediaId, onDismiss: () -> Unit) {
-    var artist by rememberSaveable(token) { mutableStateOf(player.currentItem?.artist.orEmpty()) }
-    var title by rememberSaveable(token) { mutableStateOf(player.currentItem?.title.orEmpty()) }
+    var artist by rememberSaveable(token) { mutableStateOf(player.currentItem?.metadata?.artist.orEmpty()) }
+    var title by rememberSaveable(token) { mutableStateOf(player.currentItem?.metadata?.title.orEmpty()) }
     val matchingSearch = player.lyricsSearch?.let { it.first == token && it.second.artistName == artist.trim() && it.second.trackName == title.trim() } == true
     val results = if (matchingSearch) player.lyricsResults else null
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().imePadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(translate("Search Lyrics"), style = MaterialTheme.typography.titleLarge)
             OutlinedTextField(artist, { artist = it }, label = { Text(translate("Artist")) }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = settingsTextFieldColors())
-            OutlinedTextField(title, { title = it }, label = { Text(translate("Song")) }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = settingsTextFieldColors())
+            OutlinedTextField(title, { title = it }, label = { Text(translate("Track")) }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = settingsTextFieldColors())
             Button({ player.searchLyrics(token, artist, title) }, enabled = player.lyricsToken == token && player.settings?.application?.privateMode != true) { Text(translate("Search")) }
             if (matchingSearch && player.lyricsSearching) CircularProgressIndicator()
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {

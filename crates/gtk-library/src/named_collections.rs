@@ -2,11 +2,7 @@ use gtk_widgets::media_drag::{
     MediaDragSource, install_compact_media_drag_source, install_media_drag_source,
 };
 use gtk_widgets::sparse_model::item_at_from_item;
-use rufin_core::browse::BrowseRequest;
-use rufin_core::route::CollectionCategory;
 use std::cell::RefCell;
-use std::future::Future;
-use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -14,13 +10,14 @@ use adw::prelude::*;
 use gtk::gio;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use library::{
-    GenreKey, GenreRow, MoodKey, MoodRow, PlaylistKey, PlaylistRow, SmartPlaylistKey,
+    GenreKey, GenreView, MoodKey, MoodView, PlaylistKey, PlaylistRow, SmartPlaylistKey,
     SmartPlaylistRow,
 };
 use localization::{album_count_text, msgid, track_count_text};
 
 use crate::CatalogUi;
-use crate::{LibraryLayout, LibraryListKey, LibraryListSettings};
+use crate::routes::{CollectionRead, CollectionReadRequest};
+use crate::{LibraryLayout, LibraryListKey};
 use gtk_widgets::artwork::CoverGroupProjection;
 use gtk_widgets::mounted_route::{LatestMountedRouteRead, MountedRoute};
 
@@ -48,92 +45,28 @@ use gtk_widgets::recycled_cells::{RecycledBadgedTextCell, list_cell};
 use gtk_widgets::route::Route;
 use gtk_widgets::sparse_model::{SparseRouteModel, SparseSource, connect_sparse_bind};
 
-#[derive(Clone)]
-pub struct NamedReadRequest {
-    pub query: String,
-    pub settings: LibraryListSettings,
-}
-
-pub type NamedPageLoad<R> = Arc<
-    dyn Fn(
-            NamedReadRequest,
-            library::ReadCancellation,
-        ) -> Pin<Box<dyn Future<Output = Result<(usize, usize, Vec<R>), String>> + Send>>
-        + Send
-        + Sync,
->;
-
-pub type NamedRowsLoad<R> = gtk_widgets::media_drag::CollectionRowsLoad<NamedReadRequest, R>;
-
 impl CatalogUi {
     pub fn library_genres_route(
         self: &Rc<Self>,
         count: usize,
         first_row_position: usize,
-        first_rows: Vec<GenreRow>,
+        first_rows: Vec<GenreView>,
         selected: rufin_core::runtime::SelectedLibrary,
     ) -> MountedRoute {
-        let source = selected.source_key;
-        let folder = selected.music_folder_key;
-        let rows_database = Arc::clone(&self.library);
-        let row_load = Arc::new(
-            move |request: NamedReadRequest,
-                  range: std::ops::Range<usize>,
-                  cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&rows_database);
-                Box::pin(async move {
-                    BrowseRequest {
-                        filter: &request.query,
-                        ..BrowseRequest::new(
-                            &Route::Genres,
-                            CollectionCategory::Tracks,
-                            Some(source),
-                            folder,
-                            &request.settings,
-                            8,
-                        )
-                    }
-                    .collection()
-                    .expect("collection route")
-                    .rows(&database, range.start, range.len(), &cancellation)
-                    .await
-                    .map(|rows| rows.genres())
-                    .map_err(|error| error.to_string())
-                }) as Pin<Box<dyn Future<Output = _> + Send>>
-            },
-        );
-        let order_database = Arc::clone(&self.library);
-        let order_load: NamedPageLoad<GenreRow> = Arc::new(move |request, cancellation| {
-            let database = Arc::clone(&order_database);
-            Box::pin(async move {
-                BrowseRequest {
-                    filter: &request.query,
-                    ..BrowseRequest::new(
-                        &Route::Genres,
-                        CollectionCategory::Tracks,
-                        Some(source),
-                        folder,
-                        &request.settings,
-                        8,
-                    )
-                }
-                .collection()
-                .expect("collection route")
-                .page(&database, library::RouteSeedWindow::top(), &cancellation)
-                .await
-                .map(|(count, start, rows)| (count, start, rows.genres()))
-                .map_err(|error| error.to_string())
-            })
-        });
         self.named_collection_route(
             LibraryListKey::Genres,
             msgid("Nothing here yet"),
             count,
             first_row_position,
             first_rows,
-            |row: &GenreRow| row.genre_key,
-            row_load,
-            order_load,
+            |row: &GenreView| row.genre_key,
+            CollectionRead::new(
+                &self.library,
+                Route::Genres,
+                Some(selected.source_key),
+                selected.music_folder_key,
+                false,
+            ),
         )
     }
 
@@ -141,75 +74,28 @@ impl CatalogUi {
         self: &Rc<Self>,
         count: usize,
         first_row_position: usize,
-        first_rows: Vec<MoodRow>,
+        first_rows: Vec<MoodView>,
         selected: rufin_core::runtime::SelectedLibrary,
     ) -> MountedRoute {
-        let source = selected.source_key;
-        let folder = selected.music_folder_key;
-        let rows_database = Arc::clone(&self.library);
-        let row_load = Arc::new(
-            move |request: NamedReadRequest,
-                  range: std::ops::Range<usize>,
-                  cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&rows_database);
-                Box::pin(async move {
-                    BrowseRequest {
-                        filter: &request.query,
-                        ..BrowseRequest::new(
-                            &Route::Moods,
-                            CollectionCategory::Tracks,
-                            Some(source),
-                            folder,
-                            &request.settings,
-                            8,
-                        )
-                    }
-                    .collection()
-                    .expect("collection route")
-                    .rows(&database, range.start, range.len(), &cancellation)
-                    .await
-                    .map(|rows| rows.moods())
-                    .map_err(|error| error.to_string())
-                }) as Pin<Box<dyn Future<Output = _> + Send>>
-            },
-        );
-        let order_database = Arc::clone(&self.library);
-        let order_load: NamedPageLoad<MoodRow> = Arc::new(move |request, cancellation| {
-            let database = Arc::clone(&order_database);
-            Box::pin(async move {
-                BrowseRequest {
-                    filter: &request.query,
-                    ..BrowseRequest::new(
-                        &Route::Moods,
-                        CollectionCategory::Tracks,
-                        Some(source),
-                        folder,
-                        &request.settings,
-                        8,
-                    )
-                }
-                .collection()
-                .expect("collection route")
-                .page(&database, library::RouteSeedWindow::top(), &cancellation)
-                .await
-                .map(|(count, start, rows)| (count, start, rows.moods()))
-                .map_err(|error| error.to_string())
-            })
-        });
         self.named_collection_route(
             LibraryListKey::Moods,
             msgid("Nothing here yet"),
             count,
             first_row_position,
             first_rows,
-            |row: &MoodRow| row.mood_key,
-            row_load,
-            order_load,
+            |row: &MoodView| row.mood_key,
+            CollectionRead::new(
+                &self.library,
+                Route::Moods,
+                Some(selected.source_key),
+                selected.music_folder_key,
+                false,
+            ),
         )
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn named_collection_route<K, R>(
+    pub(crate) fn named_collection_route<K, R>(
         self: &Rc<Self>,
         key: LibraryListKey,
         empty_body: &'static str,
@@ -217,14 +103,15 @@ impl CatalogUi {
         first_row_position: usize,
         first_rows: Vec<R>,
         row_key: impl Fn(&R) -> K + 'static,
-        row_load: NamedRowsLoad<R>,
-        order_load: NamedPageLoad<R>,
+        read: CollectionRead,
     ) -> MountedRoute
     where
         K: Clone + Eq + Send + Sync + 'static,
         R: NamedCollectionRow<Key = K> + Send + Sync + 'static,
     {
-        let applied = Rc::new(RefCell::new(NamedReadRequest {
+        let row_load = read.row_load(R::from_catalog);
+        let order_load = read.page_load(R::from_catalog);
+        let applied = Rc::new(RefCell::new(CollectionReadRequest {
             query: String::new(),
             settings: self.settings.current.borrow().library_list(key),
         }));
@@ -275,7 +162,8 @@ impl CatalogUi {
             let content = content.clone();
             let row_key = Rc::clone(&row_key);
             Rc::new(
-                move |request: NamedReadRequest, result: Result<(usize, usize, Vec<R>), String>| {
+                move |request: CollectionReadRequest,
+                      result: Result<(usize, usize, Vec<R>), String>| {
                     let Some(shell) = shell.upgrade() else {
                         return;
                     };
@@ -311,38 +199,15 @@ impl CatalogUi {
             order_load,
             "mounted named collection",
         );
-        {
-            let read = Rc::downgrade(&read);
-            let shell = Rc::downgrade(self);
-            search.connect_search_changed(move |search| {
-                let (Some(read), Some(shell)) = (read.upgrade(), shell.upgrade()) else {
-                    return;
-                };
-                read.request_with(NamedReadRequest {
-                    query: search.text().trim().to_string(),
-                    settings: shell.settings.current.borrow().library_list(key),
-                });
-            });
-        }
-        let resume = {
-            let shell = Rc::downgrade(self);
-            let read = Rc::clone(&read);
-            let search = search.clone();
+        let resume = self.collection_reload(key, &search, &read, {
             let content = content.clone();
             let page = page.clone();
-            Rc::new(move || {
-                let Some(shell) = shell.upgrade() else {
-                    return;
-                };
-                let settings = shell.settings.current.borrow().library_list(key);
-                content.apply_settings(&settings);
-                page.apply_library_list_settings(key, &settings);
-                read.request_with(NamedReadRequest {
-                    query: search.text().trim().to_string(),
-                    settings,
-                });
-            })
-        };
+            move |settings| {
+                content.apply_settings(settings);
+                page.apply_library_list_settings(key, settings);
+                true
+            }
+        });
 
         let download_rows = Rc::clone(&sparse);
         let downloads = crate::collection_download_change(move |identity, downloaded| {
@@ -364,7 +229,10 @@ impl CatalogUi {
 }
 
 pub trait NamedCollectionRow: Clone + PartialEq + 'static {
+    const MOSAIC: bool = true;
     type Key: Clone + Eq + Send + Sync + 'static;
+
+    fn from_catalog(rows: library::CatalogRows) -> Vec<Self>;
 
     fn name(&self) -> &str;
     fn route(&self) -> Route;
@@ -406,15 +274,26 @@ pub trait NamedCollectionRow: Clone + PartialEq + 'static {
     ) -> super::collections::CollectionTableProjection;
 }
 
-impl NamedCollectionRow for GenreRow {
+impl NamedCollectionRow for GenreView {
     type Key = GenreKey;
 
+    fn from_catalog(rows: library::CatalogRows) -> Vec<Self> {
+        match rows {
+            library::CatalogRows::Genres(rows) => rows,
+            _ => unreachable!("catalog collection rows"),
+        }
+    }
+
     fn set_downloaded(&mut self, downloaded: bool) {
-        self.downloaded_count = if downloaded { self.track_count } else { 0 };
+        self.summary.downloaded_count = if downloaded {
+            self.summary.track_count
+        } else {
+            0
+        };
     }
 
     fn name(&self) -> &str {
-        &self.name
+        &self.metadata.name
     }
     fn route(&self) -> Route {
         Route::GenreDetail(self.genre_key)
@@ -430,11 +309,11 @@ impl NamedCollectionRow for GenreRow {
     }
     fn field(&self, field: LibraryField) -> String {
         match field {
-            LibraryField::Title | LibraryField::TitleMerged => self.name.clone(),
-            LibraryField::AlbumCount => album_count_text(self.album_count.max(0) as u64),
-            LibraryField::SongCount => track_count_text(self.track_count.max(0) as u64),
+            LibraryField::Title | LibraryField::TitleMerged => self.metadata.name.clone(),
+            LibraryField::AlbumCount => album_count_text(self.summary.album_count.max(0) as u64),
+            LibraryField::SongCount => track_count_text(self.summary.track_count.max(0) as u64),
             LibraryField::Duration => {
-                format_duration_units((self.duration_millis.max(0) / 1_000) as u32)
+                format_duration_units((self.summary.duration_millis.max(0) / 1_000) as u32)
             }
             _ => String::new(),
         }
@@ -443,10 +322,10 @@ impl NamedCollectionRow for GenreRow {
         &self,
         _selected: Option<&rufin_core::runtime::SelectedLibrary>,
     ) -> rufin_core::playback::PlayRequest {
-        gtk_widgets::selection::collection_play_request(library::SongScope::Genre(self.genre_key))
+        gtk_widgets::selection::collection_play_request(library::TrackScope::Genre(self.genre_key))
     }
     fn downloaded(&self) -> bool {
-        self.track_count > 0 && self.downloaded_count == self.track_count
+        self.summary.track_count > 0 && self.summary.downloaded_count == self.summary.track_count
     }
     fn present_context(
         &self,
@@ -464,15 +343,26 @@ impl NamedCollectionRow for GenreRow {
     }
 }
 
-impl NamedCollectionRow for MoodRow {
+impl NamedCollectionRow for MoodView {
     type Key = MoodKey;
 
+    fn from_catalog(rows: library::CatalogRows) -> Vec<Self> {
+        match rows {
+            library::CatalogRows::Moods(rows) => rows,
+            _ => unreachable!("catalog collection rows"),
+        }
+    }
+
     fn set_downloaded(&mut self, downloaded: bool) {
-        self.downloaded_count = if downloaded { self.track_count } else { 0 };
+        self.summary.downloaded_count = if downloaded {
+            self.summary.track_count
+        } else {
+            0
+        };
     }
 
     fn name(&self) -> &str {
-        &self.name
+        &self.metadata.name
     }
     fn route(&self) -> Route {
         Route::MoodDetail(self.mood_key)
@@ -485,10 +375,10 @@ impl NamedCollectionRow for MoodRow {
     }
     fn field(&self, field: LibraryField) -> String {
         match field {
-            LibraryField::Title | LibraryField::TitleMerged => self.name.clone(),
-            LibraryField::SongCount => track_count_text(self.track_count.max(0) as u64),
+            LibraryField::Title | LibraryField::TitleMerged => self.metadata.name.clone(),
+            LibraryField::SongCount => track_count_text(self.summary.track_count.max(0) as u64),
             LibraryField::Duration => {
-                format_duration_units((self.duration_millis.max(0) / 1_000) as u32)
+                format_duration_units((self.summary.duration_millis.max(0) / 1_000) as u32)
             }
             _ => String::new(),
         }
@@ -497,10 +387,10 @@ impl NamedCollectionRow for MoodRow {
         &self,
         _selected: Option<&rufin_core::runtime::SelectedLibrary>,
     ) -> rufin_core::playback::PlayRequest {
-        gtk_widgets::selection::collection_play_request(library::SongScope::Mood(self.mood_key))
+        gtk_widgets::selection::collection_play_request(library::TrackScope::Mood(self.mood_key))
     }
     fn downloaded(&self) -> bool {
-        self.track_count > 0 && self.downloaded_count == self.track_count
+        self.summary.track_count > 0 && self.summary.downloaded_count == self.summary.track_count
     }
     fn present_context(
         &self,
@@ -519,7 +409,15 @@ impl NamedCollectionRow for MoodRow {
 }
 
 impl NamedCollectionRow for PlaylistRow {
+    const MOSAIC: bool = false;
     type Key = PlaylistKey;
+
+    fn from_catalog(rows: library::CatalogRows) -> Vec<Self> {
+        match rows {
+            library::CatalogRows::Playlists(rows) => rows,
+            _ => unreachable!("catalog collection rows"),
+        }
+    }
 
     fn set_downloaded(&mut self, downloaded: bool) {
         self.downloaded_count = if downloaded { self.track_count } else { 0 };
@@ -541,7 +439,7 @@ impl NamedCollectionRow for PlaylistRow {
         &self,
         _selected: Option<&rufin_core::runtime::SelectedLibrary>,
     ) -> rufin_core::playback::PlayRequest {
-        gtk_widgets::selection::collection_play_request(library::SongScope::Playlist(
+        gtk_widgets::selection::collection_play_request(library::TrackScope::Playlist(
             self.playlist_key,
         ))
     }
@@ -576,7 +474,15 @@ impl NamedCollectionRow for PlaylistRow {
 }
 
 impl NamedCollectionRow for SmartPlaylistRow {
+    const MOSAIC: bool = false;
     type Key = SmartPlaylistKey;
+
+    fn from_catalog(rows: library::CatalogRows) -> Vec<Self> {
+        match rows {
+            library::CatalogRows::SmartPlaylists(rows) => rows,
+            _ => unreachable!("catalog collection rows"),
+        }
+    }
 
     fn set_downloaded(&mut self, downloaded: bool) {
         self.downloaded_count = if downloaded { self.track_count } else { 0 };
@@ -589,7 +495,7 @@ impl NamedCollectionRow for SmartPlaylistRow {
         Route::SmartPlaylistDetail(self.smart_playlist_key)
     }
     fn artwork(&self) -> Vec<artwork::ArtworkBinding> {
-        self.artwork_bindings
+        self.artwork_binding
             .iter()
             .map(|binding| artwork::ArtworkBinding::opaque(binding))
             .collect()
@@ -712,6 +618,7 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
         let cover = shell.artwork.elastic_cover_group_projection_for_artwork(
             &[],
             gtk_widgets::library_fields::COLLECTION_GRID_MAX_CARD_WIDTH,
+            T::MOSAIC,
         );
         cover_host.append(&cover.widget());
         let menu = controls.imp().menu.get();

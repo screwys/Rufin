@@ -16,9 +16,8 @@ use tokio::task::JoinHandle;
 use crate::playback::Placement;
 use playback::{
     BackendCommand, BackendEvent, BackendState, NextTransition, PlaybackOutput, PlaybackSettings,
-    PlaybackTransitionMode, PreparedNext, PreparedStream, Provenance, QueueItem, QueueRow,
-    RepeatMode, RunEndReason, RunId, StreamRequest, manual_end_is_skip,
-    qualified_play_threshold_millis,
+    PlaybackTransitionMode, PreparedNext, PreparedStream, Provenance, QueueRow, RepeatMode,
+    RunEndReason, RunId, StreamRequest, manual_end_is_skip, qualified_play_threshold_millis,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -102,7 +101,7 @@ pub enum Command {
     SetVisualizerEnabled(bool),
     StreamInputsChanged,
     CatalogChanged,
-    RekeySongs(Arc<[(library::TrackKey, library::TrackKey)]>),
+    RekeyTracks(Arc<[(library::TrackKey, library::TrackKey)]>),
 }
 
 impl Command {
@@ -156,7 +155,7 @@ impl RunContext {
             id,
             play_id,
             row: entry.clone(),
-            duration_millis: entry.duration_millis.max(0) as u64,
+            duration_millis: entry.track.metadata.duration_millis.max(0) as u64,
             status: TransportStatus::Resolving,
             audible_millis: 0,
             started_at_unix_seconds: None,
@@ -706,7 +705,7 @@ impl Player {
             .or_else(|| {
                 self.sequence
                     .selected()
-                    .map(|entry| entry.duration_millis.max(0) as u64)
+                    .map(|entry| entry.track.metadata.duration_millis.max(0) as u64)
             })
             .unwrap_or_default()
     }
@@ -809,7 +808,7 @@ impl Player {
         let excluded = self
             .sequence
             .selected()
-            .map(|entry| entry.media_uri.clone())
+            .map(|entry| entry.track.track_key)
             .into_iter()
             .collect::<Vec<_>>();
         self.start_candidates(request.placement, Provenance::Random, async move {
@@ -831,7 +830,9 @@ impl Player {
         &mut self,
         placement: Placement,
         provenance: Provenance,
-        candidates: impl std::future::Future<Output = Result<Vec<String>, String>> + Send + 'static,
+        candidates: impl std::future::Future<Output = Result<Vec<library::TrackKey>, String>>
+        + Send
+        + 'static,
     ) {
         if matches!(placement, Placement::Replace { .. }) {
             self.cancel_candidate_tasks(false);
@@ -857,7 +858,7 @@ impl Player {
     fn complete_candidates(
         &mut self,
         id: u64,
-        result: Result<Vec<String>, String>,
+        result: Result<Vec<library::TrackKey>, String>,
         provenance: Provenance,
         sample: &ClockSample,
     ) -> Result<(), SequenceError> {
@@ -869,7 +870,7 @@ impl Player {
         match result {
             Ok(candidates) if !candidates.is_empty() => self.apply_batch(
                 crate::playback::PlayRequest::from_input(
-                    library::QueueLoad::media_uris(candidates, provenance),
+                    library::QueueLoad::track_keys(candidates, provenance),
                     placement,
                 ),
                 sample,
@@ -994,21 +995,24 @@ impl Player {
                 self.send_backend(BackendCommand::SetVisualizerEnabled(enabled));
             }),
             Command::StreamInputsChanged => Ok(self.stream_inputs_changed()),
-            Command::RekeySongs(pairs) => Ok({
+            Command::RekeyTracks(pairs) => Ok({
                 let mut changed = false;
-                self.edit_queue(|sequence| changed = sequence.rekey_songs(&pairs));
+                self.edit_queue(|sequence| changed = sequence.rekey_tracks(&pairs));
                 self.dirty |= changed;
             }),
-            Command::CatalogChanged => Ok({
-                self.owner()
-                    .refresh_artwork(self.playback.clone(), self.sequence.artwork_uris());
-            }),
+            Command::CatalogChanged => Ok(self.sequence.refresh_metadata()),
         }
     }
 
     pub(super) fn stream_resolved(&mut self, run: RunId, stream: impl Into<PreparedStream>) {
-        self.stream_tasks.remove(&run);
         let mut stream = stream.into();
+        if stream.loudness.is_none()
+            && self.settings.loudness_normalization != playback::LoudnessNormalization::Off
+        {
+            self.resolve_loudness(run, stream);
+            return;
+        }
+        self.stream_tasks.remove(&run);
         if self.current_run.as_ref().is_some_and(|current| {
             current.id == run && current.status == TransportStatus::Resolving
         }) {
@@ -1037,6 +1041,33 @@ impl Player {
                 next: Some(PreparedNext::new(plan.next_run, stream, plan.transition)),
             };
             self.send_backend(command);
+        }
+    }
+
+    pub(super) fn loudness_resolved(&mut self, run: RunId, stream: PreparedStream) {
+        self.stream_tasks.remove(&run);
+        if let Some(current) = self
+            .current_run
+            .as_mut()
+            .filter(|current| current.id == run)
+            && let Some(prepared) = current.resolved_stream.as_mut()
+        {
+            prepared.loudness = stream.loudness.clone();
+            self.send_backend(BackendCommand::UpdateLoudness {
+                run,
+                loudness: stream.loudness.unwrap_or_default(),
+            });
+        } else {
+            self.stream_resolved(run, stream);
+        }
+    }
+
+    fn resolve_loudness(&mut self, run: RunId, stream: PreparedStream) {
+        let task = self
+            .owner()
+            .resolve_loudness(self.playback.clone(), run, stream);
+        if let Some(previous) = self.stream_tasks.insert(run, task) {
+            previous.abort();
         }
     }
 
@@ -1239,22 +1270,18 @@ impl Player {
         &mut self,
         seed_run: Option<RunId>,
         seed_media_uri: &str,
-        candidates: Vec<QueueItem>,
+        mut candidates: Vec<library::TrackKey>,
         requested_count: usize,
         sample: &ClockSample,
     ) -> Result<bool, SequenceError> {
-        let items = candidates
-            .into_iter()
-            .take(requested_count)
-            .map(|media| (media, Provenance::AutoDj))
-            .collect::<Vec<_>>();
-        if items.is_empty() {
+        candidates.truncate(requested_count);
+        if candidates.is_empty() {
             return Ok(self.auto_dj_unavailable(seed_run, seed_media_uri, None));
         }
         self.complete_auto_dj(
             seed_run,
             seed_media_uri,
-            library::QueueLoad::items(items),
+            library::QueueLoad::track_keys(candidates, Provenance::AutoDj),
             sample,
         )
     }
@@ -1319,7 +1346,7 @@ impl Player {
     }
 
     pub(super) fn queue_loading(&self) -> bool {
-        self.queue_loading || self.auto_dj_in_flight.is_some() || !self.candidate_tasks.is_empty()
+        self.queue_loading || !self.candidate_tasks.is_empty()
     }
 
     fn request_queue(
@@ -1351,13 +1378,14 @@ impl Player {
     }
 
     pub(super) fn hydrate_queue(&mut self) {
-        if self.external.is_some()
+        if (self.external.is_some() && !self.sequence.refreshing_metadata())
             || self.pending_queue.is_some()
             || self.pending_hydration.is_some()
         {
             return;
         }
         let Some(entries) = self.sequence.read_request() else {
+            self.dirty |= self.queue_loading;
             self.queue_loading = false;
             return;
         };
@@ -1377,7 +1405,7 @@ impl Player {
                     entries
                         .into_iter()
                         .map(|(id, _)| id)
-                        .zip(rows.into_iter().map(|row| row.item.clone()))
+                        .zip(rows.into_iter().map(|row| row.track.clone()))
                         .collect()
                 })
                 .map_err(super::string_error);
@@ -1387,18 +1415,17 @@ impl Player {
 
     fn complete_queue_metadata(
         &mut self,
-        result: Result<Vec<(OccurrenceId, QueueItem)>, String>,
+        result: Result<Vec<(OccurrenceId, library::TrackView)>, String>,
         _sample: &ClockSample,
     ) {
         self.pending_hydration = None;
+        match result {
+            Ok(rows) => self.dirty |= self.sequence.hydrate(rows),
+            Err(error) => self.report_error(error),
+        }
         if self.external.is_some() {
             return;
         }
-        match result {
-            Ok(rows) => self.sequence.hydrate(rows),
-            Err(error) => self.report_error(error),
-        }
-        self.dirty = true;
         if matches!(self.pending_queue, Some((_, QueueCompletion::Replace, _))) {
             return;
         }
@@ -1413,7 +1440,7 @@ impl Player {
         } else {
             self.replan_next_if_changed();
         }
-        if self.sequence.selected().is_some() {
+        if self.current_run.is_some() {
             self.queue_transport = None;
         }
     }
@@ -1509,7 +1536,7 @@ impl Player {
                 }
             },
         };
-        if self.sequence.selected().is_some() {
+        if self.current_run.is_some() {
             self.queue_transport = None;
         }
         while self.pending_queue.is_none()
@@ -1616,6 +1643,9 @@ impl Player {
         self.changed_queue(false, false, sample)
     }
     fn insert(&mut self, input: library::QueueLoad, target: &QueueReorderTarget) {
+        if self.current_run.is_none() {
+            self.queue_transport.get_or_insert(TransportStatus::Stopped);
+        }
         self.request_queue(
             crate::playback::PlayRequest::from_input(input, Placement::End),
             QueueCompletion::Insert {
@@ -1957,6 +1987,9 @@ impl Player {
             return;
         }
         let stream_changed = settings.stream_quality != self.settings.stream_quality;
+        let normalization_enabled = self.settings.loudness_normalization
+            == playback::LoudnessNormalization::Off
+            && settings.loudness_normalization != playback::LoudnessNormalization::Off;
         let playback_rate_changed = settings.playback_rate != self.settings.playback_rate;
         let playback_rate = settings.playback_rate;
         let output_changed = settings.volume != self.settings.volume
@@ -1975,9 +2008,19 @@ impl Player {
         if self.playback_output.is_local() {
             self.output_volume = settings.volume;
             self.output_muted = settings.muted;
+            if settings.loudness_normalization != playback::LoudnessNormalization::Off
+                && let Some(current) = self.current_run.as_ref()
+                && let Some(stream) = current
+                    .resolved_stream
+                    .as_ref()
+                    .filter(|stream| stream.loudness.is_none())
+                && !self.stream_tasks.contains_key(&current.id)
+            {
+                self.resolve_loudness(current.id, stream.clone());
+            }
         }
         if self.playback_output.is_local() && audio_configuration_changed {
-            self.send_backend(BackendCommand::ConfigureAudio(settings.into()));
+            self.send_backend(BackendCommand::ConfigureAudio(self.settings.clone().into()));
         } else if self.playback_output.is_local() && output_changed {
             self.send_backend(BackendCommand::SetOutputVolume {
                 volume: settings.volume,
@@ -1988,7 +2031,7 @@ impl Player {
         if self.playback_output.is_local() && playback_rate_changed {
             self.send_backend(BackendCommand::SetPlaybackRate(playback_rate));
         }
-        if stream_changed {
+        if stream_changed || normalization_enabled {
             self.replan_next(true);
         } else {
             self.replan_next_if_changed();
@@ -2298,6 +2341,9 @@ impl Player {
     }
 
     fn begin_selected_run(&mut self) {
+        if self.queue_transport == Some(TransportStatus::Stopped) {
+            self.queue_transport = None;
+        }
         self.failed_run = None;
         let Some(entry) = self.sequence.selected().cloned() else {
             self.sequence.need_metadata();
@@ -2345,11 +2391,14 @@ impl Player {
             }
             return;
         };
-        let request = StreamRequest::for_item(&next.item, self.settings.stream_quality);
+        let request = StreamRequest::new(
+            (&next.track).media_uri.clone(),
+            self.settings.stream_quality,
+        );
         let transition = decided_transition(
             &self.settings,
-            self.sequence.selected().map(|entry| &entry.item),
-            &next.item,
+            self.sequence.selected().map(|entry| &entry.track.metadata),
+            &next.track.metadata,
         );
         if !force
             && self.next_plan.as_ref().is_some_and(|plan| {
@@ -2382,7 +2431,10 @@ impl Player {
     }
 
     fn resolve_current(&mut self, run: RunId, entry: &std::sync::Arc<QueueRow>) {
-        let mut request = StreamRequest::for_item(&entry.item, self.settings.stream_quality);
+        let mut request = StreamRequest::new(
+            (&entry.track).media_uri.clone(),
+            self.settings.stream_quality,
+        );
         request.session_identifier = Some(
             self.current_run
                 .as_ref()
@@ -2407,7 +2459,7 @@ impl Player {
             (current.id, current.row.clone())
         };
         self.notices.push(PlaybackNotice::RunStarted(run));
-        self.owner().scrobbler.now_playing(&row.item);
+        self.owner().scrobbler.now_playing(&row.track.metadata);
         if let Some(current) = self.current_run.as_ref() {
             self.owner().report_source(self.source_report(
                 current,
@@ -2474,9 +2526,9 @@ impl Player {
         if let Some((play_id, row, Some(started_at), listened_millis, Some(local_period))) =
             activity
         {
-            let track = row.item.clone();
+            let track = library::TrackReference::from(row.track.clone());
             self.owner().record_activity(
-                row.track_key,
+                row.track.track_key,
                 Box::new(playback::ActivityListen {
                     play_id: play_id.clone(),
                     item: track.clone(),
@@ -2508,7 +2560,7 @@ impl Player {
         let Some(current) = self.current_run.take() else {
             return;
         };
-        let track = current.row.item.clone();
+        let track = library::TrackReference::from(current.row.track.clone());
         self.current_media_changed = true;
         if current.started_at_unix_seconds.is_some() {
             self.owner().report_source(self.source_report(
@@ -2529,7 +2581,7 @@ impl Player {
                 )
             {
                 self.owner().record_activity(
-                    current.row.track_key,
+                    current.row.track.track_key,
                     Box::new(playback::ActivityListen {
                         play_id: current.play_id,
                         item: track,
@@ -2564,7 +2616,7 @@ impl Player {
             session_identifier: current.play_id.clone(),
             queue_id: None,
             queue_item_id: None,
-            media_uri: current.row.media_uri.clone(),
+            media_uri: current.row.track.media_uri.clone(),
             phase,
             started_at_unix_seconds: current.started_at_unix_seconds.unwrap_or_default(),
             position_millis: self.sequence.progress_millis(),
@@ -2607,7 +2659,7 @@ impl Player {
         };
         let request = AutoDjRequest {
             seed_run: self.current_run(),
-            seed_media_uri: seed.media_uri.clone(),
+            seed_media_uri: seed.track.media_uri.clone(),
             requested_count: 5,
         };
         self.auto_dj_in_flight = Some(request.clone());
@@ -2623,8 +2675,8 @@ impl Player {
 
 fn decided_transition(
     settings: &PlaybackSettings,
-    current: Option<&QueueItem>,
-    next: &QueueItem,
+    current: Option<&library::TrackMetadata>,
+    next: &library::TrackMetadata,
 ) -> NextTransition {
     match settings.transition_mode {
         PlaybackTransitionMode::Gapless => NextTransition::Gapless,
@@ -2691,7 +2743,7 @@ impl Player {
                         }),
                     id: CurrentMediaId {
                         run: self.current_run(),
-                        media_uri: entry.media_uri.clone(),
+                        media_uri: entry.track.media_uri.clone(),
                     },
                     row: projected_row(entry),
                 }),
@@ -2745,9 +2797,13 @@ impl Player {
     }
 
     fn resolve_stream(&mut self, run: RunId, row: Arc<QueueRow>, request: StreamRequest) {
-        let task = self
-            .owner()
-            .resolve_stream(self.playback.clone(), run, row, request);
+        let task = self.owner().resolve_stream(
+            self.playback.clone(),
+            run,
+            row,
+            request,
+            self.settings.loudness_normalization,
+        );
         if let Some(previous) = self.stream_tasks.insert(run, task) {
             previous.abort();
         }
@@ -2762,10 +2818,6 @@ impl Player {
     pub(super) fn report_error(&mut self, error: String) {
         tracing::warn!(%error, "Playback operation failed");
         self.notices.push(PlaybackNotice::OperationFailed(error));
-    }
-
-    pub(super) fn artwork_refreshed(&mut self, bindings: Vec<(String, Option<Vec<u8>>)>) {
-        self.dirty |= self.sequence.refresh_artwork(&bindings);
     }
 
     pub(super) fn drive(&mut self, clock: &dyn Fn() -> ClockSample) {

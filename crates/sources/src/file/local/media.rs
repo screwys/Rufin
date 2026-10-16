@@ -16,13 +16,13 @@ pub fn local_media_identity_path(path: &Path) -> PathBuf {
     }
 }
 
-pub fn read_local_queue_item(path: &Path) -> Option<library::QueueItem> {
+pub fn read_local_track_reference(path: &Path) -> Option<library::TrackReference> {
     let MediaRead::Accepted(track) = read_media(&mut Worker::default(), path.to_owned(), None)
     else {
         return None;
     };
     let uri = url::Url::from_file_path(path).ok()?.to_string();
-    Some(crate::file::media::queue_item(*track, uri))
+    Some(crate::file::media::track_reference(*track, uri))
 }
 
 pub(crate) fn read_media(
@@ -60,7 +60,7 @@ pub(crate) fn read_media(
     read
 }
 
-fn audio_revision(access: &str, identity: &Path) -> blake3::Hasher {
+pub(crate) fn audio_revision(access: &str, identity: &Path) -> blake3::Hasher {
     let mut hash = blake3::Hasher::new();
     hash.update(b"rufin-local-audio-v1\0");
     hash.update(identity.to_string_lossy().as_bytes());

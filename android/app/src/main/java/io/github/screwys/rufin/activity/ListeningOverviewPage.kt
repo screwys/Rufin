@@ -108,24 +108,24 @@ internal fun ListeningOverviewPage(model: RufinConnection, more: MoreConnection,
                     if (preferences?.tracks != false && report.tracks.isNotEmpty()) {
                         item { Text(translate("Top tracks"), style = MaterialTheme.typography.titleLarge) }
                         items(report.tracks.take(limit), key = { "track:${it.mediaUri}" }) { row ->
-                            OverviewRow(row.title, "${row.artist} · ${row.album}", row.playCount, row.artworkBinding, player) {
-                                model.openOverview(row.mediaUri, row.title, "track", more.reportPeriod!!.key)
+                            OverviewRow(row.metadata.title, "${row.metadata.artist} · ${row.metadata.album}", row.state.playCount, row.artworkBinding, player) {
+                                model.openOverview(row.mediaUri, row.metadata.title, "track", more.reportPeriod!!.key)
                             }
                         }
                     }
                     if (preferences?.albums != false && report.albums.isNotEmpty()) {
                         item { Text(translate("Top albums"), style = MaterialTheme.typography.titleLarge) }
                         items(report.albums.take(limit), key = { "album:${it.mediaUri}" }) { row ->
-                            OverviewRow(row.title, row.displayArtist, row.playCount, row.artworkBinding, player) {
-                                model.openOverview(row.mediaUri, row.title, "album", more.reportPeriod!!.key)
+                            OverviewRow(row.metadata.title, row.metadata.artist, row.state.playCount, row.artworkBinding, player) {
+                                model.openOverview(row.mediaUri, row.metadata.title, "album", more.reportPeriod!!.key)
                             }
                         }
                     }
                     if (preferences?.artists != false && report.artists.isNotEmpty()) {
                         item { Text(translate("Top artists"), style = MaterialTheme.typography.titleLarge) }
                         items(report.artists.take(limit), key = { "artist:${it.mediaUri}" }) { row ->
-                            OverviewRow(row.name, "", row.playCount, row.artworkBinding, player) {
-                                model.openOverview(row.mediaUri, row.name, "artist", more.reportPeriod!!.key)
+                            OverviewRow(row.metadata.name, "", row.state.playCount, row.artworkBinding, player) {
+                                model.openOverview(row.mediaUri, row.metadata.name, "artist", more.reportPeriod!!.key)
                             }
                         }
                     }

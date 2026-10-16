@@ -59,7 +59,12 @@
     "POST /api/sources/refresh": {
       "id": "source ID"
     },
-    "GET /api/sources/progress": "Check progress while adding, switching or refreshing a source.",
+    "POST /api/sources/download-artwork": "Start downloading artwork from the selected source library with {id:source ID}. Uses the source's artwork and the configured music-folder scope. Does not search external services.",
+    "POST /api/sources/download-lyrics": "Start downloading lyrics from the selected source library with {id:source ID}. Uses embedded, sidecar or source-provided lyrics. Does not search external services.",
+    "POST /api/sources/cancel-download": "Cancel the source artwork or lyrics download with {id:source ID}. Completed downloads are kept.",
+    "POST /api/downloads/clear-artwork-cache": "Clear the artwork cache across sources. Keeps artwork for completed and active music downloads, authored playlist artwork and source files. Takes no body and returns after clearing.",
+    "POST /api/downloads/clear-lyrics-cache": "Clear cached lyrics across sources. Keeps lyrics for completed and active music downloads, edited lyrics and source files. Takes no body and returns after clearing.",
+    "GET /api/sources/progress": "Check progress while adding, switching, refreshing or downloading source artwork and lyrics.",
     "GET /api/sources/events": "Follow source progress, starting with the current status.",
     "POST /api/sources/login/plex": {
       "method": "browser"
@@ -155,7 +160,7 @@
     "GET /api/lyrics": "Lyrics for the current track, with line and word timings when available.",
     "POST /api/lyrics": "Load lyrics for the current track using your lyrics settings.",
     "GET /api/lyrics/events": "Follow lyrics updates. The media_uri and run match the current playback media.",
-    "GET /api/artwork?uri=...": "Track or album cover as PNG. Add original=true for the original format, including animation. Returns 404 if unavailable.",
+    "GET /api/artwork?uri=...": "Track or album cover as PNG. Set size to the displayed physical pixel size. Add original=true for the original format, including animation. Returns 404 if unavailable.",
     "POST /api/queue/reorder": {
       "positions": [0],
       "before": "zero-based queue position, or null for the end"

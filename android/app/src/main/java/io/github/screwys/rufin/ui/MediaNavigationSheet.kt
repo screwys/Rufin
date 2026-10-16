@@ -37,7 +37,6 @@ internal fun MediaNavigationSheet(metadata: AndroidPlayerMetadata?, player: Play
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         val resolved = loaded?.getOrNull()
         val links = resolved?.artistLinks.orEmpty().map { "Artist" to it } + resolved?.albumLinks.orEmpty().map { "Album" to it }
-        ArtworkReadyContent(key = resolved?.mediaUri, modifier = Modifier.fillMaxWidth()) {
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
             if (loaded == null) item {
                 Box(Modifier.fillMaxWidth().height(96.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -56,7 +55,6 @@ internal fun MediaNavigationSheet(metadata: AndroidPlayerMetadata?, player: Play
                     leadingContent = { Artwork(artwork, Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))) },
                     modifier = Modifier.clickable { onDismiss(); onNavigate(link.route, link.title, resolved?.sourceId) })
             }
-        }
         }
     }
 }

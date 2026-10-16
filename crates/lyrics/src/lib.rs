@@ -407,7 +407,27 @@ pub struct LyricsBundle {
     pub content: LyricsContent,
 }
 
+const LYRICS_CACHE_PAYLOAD_VERSION: u32 = 4;
+
+#[derive(Deserialize, Serialize)]
+struct CachedBundle<T> {
+    version: u32,
+    bundle: T,
+}
+
 impl LyricsBundle {
+    pub fn cache_payload(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(&CachedBundle {
+            version: LYRICS_CACHE_PAYLOAD_VERSION,
+            bundle: self,
+        })
+    }
+
+    pub fn from_cache_payload(payload: &str) -> Option<Self> {
+        let cached = serde_json::from_str::<CachedBundle<Self>>(payload).ok()?;
+        (cached.version == LYRICS_CACHE_PAYLOAD_VERSION).then_some(cached.bundle)
+    }
+
     pub fn instrumental(origin: LyricsOrigin) -> Self {
         Self {
             origin,
@@ -495,6 +515,24 @@ impl LyricsBundle {
         self.documents()
             .iter()
             .any(|document| document.role == LyricsRole::Original)
+    }
+
+    pub fn satisfies_preferences(&self, settings: &UserPreferences) -> bool {
+        self.is_instrumental()
+            || if settings.prefer_translations {
+                self.has_preferred_translation(settings)
+            } else {
+                self.has_original()
+            }
+    }
+
+    pub fn acquisition_complete(&self, settings: &UserPreferences) -> bool {
+        self.is_instrumental()
+            || self.satisfies_preferences(settings)
+                && (!settings.karaoke_mode
+                    || self
+                        .selected_document(settings)
+                        .is_some_and(LyricsDocument::has_word_timing))
     }
 }
 
@@ -1023,6 +1061,12 @@ mod tests {
             LyricsOrigin::Native,
             vec![original.clone(), french, english],
         );
+        let payload = bundle.cache_payload().expect("encode native bundle");
+        assert_eq!(
+            LyricsBundle::from_cache_payload(&payload),
+            Some(bundle.clone())
+        );
+        let bundle = LyricsBundle::from_cache_payload(&payload).expect("decode native bundle");
         let settings = UserPreferences {
             prefer_translations: true,
             preferred_translation_language: "en-US".to_string(),

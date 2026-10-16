@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
 use library::ListenWrite;
-use library::QueueItem;
+use library::TrackMetadata;
 use library::{Database, ListenDeliveryTarget, PendingListenDelivery, ReadCancellation};
 use md5_digest::{Digest, Md5};
 use reqwest::blocking::Client;
@@ -35,7 +35,7 @@ pub(crate) struct SubmissionTrack {
 }
 
 impl SubmissionTrack {
-    fn capture(track: &QueueItem) -> Option<Self> {
+    fn capture(track: &TrackMetadata) -> Option<Self> {
         let title = track.title.trim();
         let artist = track.artist.trim();
         if title.is_empty() || artist.is_empty() {
@@ -416,7 +416,7 @@ impl Scrobbler {
         Ok(())
     }
 
-    pub fn now_playing(&self, track: &QueueItem) {
+    pub fn now_playing(&self, track: &TrackMetadata) {
         let enabled = self
             .state
             .lock()
@@ -426,7 +426,7 @@ impl Scrobbler {
         }
     }
 
-    pub fn listen_delivery_targets(&self, track: &QueueItem) -> Vec<ListenDeliveryTarget> {
+    pub fn listen_delivery_targets(&self, duration_millis: i64) -> Vec<ListenDeliveryTarget> {
         let targets = {
             let state = self.state.lock().ok();
             let Some(state) = state else {
@@ -435,7 +435,7 @@ impl Scrobbler {
             if state.private_mode {
                 return Vec::new();
             }
-            if external_scrobble_threshold_millis(track.duration_millis.max(0) as u64).is_some() {
+            if external_scrobble_threshold_millis(duration_millis.max(0) as u64).is_some() {
                 targets(&state.settings, false)
             } else {
                 Vec::new()
@@ -809,7 +809,7 @@ fn unix_seconds() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use library::{Database, ReadCancellation, Scan, SourceId, TrackSort};
+    use library::{CatalogSort, Database, ReadCancellation, SourceId};
 
     use super::*;
 
@@ -874,36 +874,53 @@ mod tests {
         let database = Database::open(directory.path().join("library.sqlite3"))
             .await
             .expect("open Database");
-        let mut scan = Scan::begin(&database, "source", "Source", "source", None)
+        database
+            .reconcile_source(&library::SourceId::new("source"), "server", "Source")
             .await
-            .expect("begin Scan");
-        scan.write_tracks(&[(
-            &library::TrackInput {
-                object_id: "track".into(),
-                title: "Track".into(),
-                display_album: "Album".into(),
-                display_artist: "Artist".into(),
-                sort_text: "track".into(),
-                duration_millis: 180_000,
-                disc_number: 1,
-                track_number: 1,
-                source_format: Some("FLAC".into()),
-                favorite: Some(false),
-                loudness_analysis_key: [1; 32],
-                ..Default::default()
-            },
-            None,
-        )])
-        .await
-        .expect("stage Track");
-        let source = scan.source();
-        scan.finish().await.expect("finish Scan");
+            .unwrap();
+        database
+            .catalog("source", None)
+            .await
+            .unwrap()
+            .apply_catalog(
+                &library::CatalogBatch {
+                    tracks: vec![library::TrackObservation {
+                        object_id: "track".into(),
+                        metadata: library::TrackMetadata {
+                            title: "Track".into(),
+                            artist: "Artist".into(),
+                            album: "Album".into(),
+                            sort_text: "track".into(),
+                            duration_millis: 180_000,
+                            disc_number: 1,
+                            track_number: 1,
+                            source_format: Some("FLAC".into()),
+                            ..Default::default()
+                        },
+                        loudness_analysis_key: [1; 32],
+                        artwork_binding: None,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                true,
+            )
+            .await
+            .unwrap();
+        let source = database
+            .source_identity_key(&library::SourceId::new("source"))
+            .await
+            .unwrap()
+            .unwrap();
         let cancellation = ReadCancellation::new();
         let track_uri = database
             .selected_track_uris(
-                &library::SongQuery {
-                    sort: Some(TrackSort::Title),
-                    ..library::SongQuery::new(library::SongScope::Tracks(source))
+                &library::CatalogQuery {
+                    subject: library::CatalogSubject::Tracks {
+                        scope: library::TrackScope::Tracks(source),
+                        sort: Some(CatalogSort::Title),
+                    },
+                    ..library::CatalogQuery::tracks(library::TrackScope::Tracks(source))
                 }
                 .selection(),
                 None,
@@ -939,27 +956,27 @@ mod tests {
         })
         .expect("start Scrobbler");
         let track = database
-            .queue_items_for_uris(std::slice::from_ref(&track_uri), &cancellation)
+            .track_references_for_uris(std::slice::from_ref(&track_uri), &cancellation)
             .await
             .expect("materialize Track")
             .pop()
             .expect("Track");
-        let deliveries = scrobbler.listen_delivery_targets(&track);
+        let deliveries = scrobbler.listen_delivery_targets(track.metadata.duration_millis);
         assert_eq!(deliveries.len(), 2);
         let listen = ListenWrite {
             external_id: Some("play".to_string()),
             media_uri: track.media_uri.clone(),
-            title: track.title.clone(),
-            artist: track.artist.clone(),
-            album: track.album.clone(),
-            duration_millis: track.duration_millis,
-            disc_number: track.disc_number,
-            track_number: track.track_number,
-            year: track.year,
-            release_date: track.release_date.clone(),
-            source_format: track.source_format.clone(),
-            musicbrainz_recording_id: track.musicbrainz_recording_id.clone(),
-            musicbrainz_release_track_id: track.musicbrainz_release_track_id.clone(),
+            title: track.metadata.title.clone(),
+            artist: track.metadata.artist.clone(),
+            album: track.metadata.album.clone(),
+            duration_millis: track.metadata.duration_millis,
+            disc_number: Some(track.metadata.disc_number),
+            track_number: Some(track.metadata.track_number),
+            year: track.metadata.year,
+            release_date: track.metadata.release_date.clone(),
+            source_format: track.metadata.source_format.clone(),
+            musicbrainz_recording_id: track.metadata.musicbrainz_recording_id.clone(),
+            musicbrainz_release_track_id: track.metadata.musicbrainz_release_track_id.clone(),
             started_at: 100,
             local_period: "1970-01".to_string(),
             listened_millis: 90_000,
@@ -975,21 +992,15 @@ mod tests {
             .expect("record Activity idempotently");
 
         assert_eq!(
-            database
-                .song_history_rows(
-                    &library::SongQuery {
-                        descending: true,
-                        ..library::SongQuery::new(library::SongScope::History {
-                            source: Some(SourceId::new("source"))
-                        })
-                    },
-                    0,
-                    256,
-                    &cancellation,
-                )
-                .await
-                .expect("Activity")
-                .len(),
+            library::CatalogQuery {
+                descending: true,
+                ..library::CatalogQuery::tracks(library::TrackScope::History {
+                    source: Some(SourceId::new("source"))
+                })
+            }
+            .count(&database, &cancellation)
+            .await
+            .expect("Activity"),
             1
         );
         let due = database
@@ -1031,21 +1042,15 @@ mod tests {
             1
         );
         assert_eq!(
-            database
-                .song_history_rows(
-                    &library::SongQuery {
-                        descending: true,
-                        ..library::SongQuery::new(library::SongScope::History {
-                            source: Some(SourceId::new("source"))
-                        })
-                    },
-                    0,
-                    256,
-                    &cancellation,
-                )
-                .await
-                .expect("Activity after account removal")
-                .len(),
+            library::CatalogQuery {
+                descending: true,
+                ..library::CatalogQuery::tracks(library::TrackScope::History {
+                    source: Some(SourceId::new("source"))
+                })
+            }
+            .count(&database, &cancellation)
+            .await
+            .expect("Activity after account removal"),
             1
         );
     }

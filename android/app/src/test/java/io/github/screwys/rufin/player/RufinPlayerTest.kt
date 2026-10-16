@@ -25,13 +25,22 @@ class RufinPlayerTest {
     private lateinit var player: RufinPlayer
     private val row = object : QueueRow(io.github.screwys.rufin.shared.library.NoHandle) {
         override fun sameRow(other: QueueRow) = this === other
-        override fun item() = QueueItem(
-            mediaUri = "file:///test/track.wav", title = "Track", artist = "", album = "",
-            albumDisplayArtist = null, artworkBinding = null, durationMillis = 60_000L,
-            discNumber = null, trackNumber = null, year = null, releaseDate = null, sourceFormat = null,
-            audioProperties = AudioProperties(null, null, null, null),
-            musicbrainzRecordingId = null, musicbrainzReleaseTrackId = null, musicbrainzAlbumId = null,
-            musicbrainzReleaseGroupId = null, primaryArtistMusicbrainzId = null,
+        override fun track() = TrackView(
+            trackKey = 1L, sourceKey = null, sourceId = null, objectId = null,
+            mediaUri = "file:///test/track.wav", artworkBinding = null,
+            metadata = TrackMetadata(
+                title = "Track", artist = "", album = "", albumDisplayArtist = null, sortText = "track",
+                durationMillis = 60_000L, discNumber = 0L, trackNumber = 0L, year = null,
+                releaseDate = null, dateAdded = null, sourceFormat = null,
+                audioProperties = AudioProperties(null, null, null, null), comment = null, bpm = null,
+                musicbrainzRecordingId = null, musicbrainzReleaseTrackId = null, musicbrainzAlbumId = null,
+                musicbrainzReleaseGroupId = null, primaryArtistMusicbrainzId = null,
+                artists = emptyList(), albumArtists = emptyList(), genres = emptyList(), moods = emptyList(),
+                albumTags = null, sourceLoudness = null, albumLoudness = null,
+            ),
+            state = TrackState(false, null, null, 0L, 0L),
+            access = TrackAccess(null, "", null, null, null, false, ByteArray(32)),
+            links = TrackLinks(null, null, emptyList(), emptyList(), emptyList()),
         )
     }
     private val playing = AndroidPlaybackUpdate(
@@ -60,13 +69,15 @@ class RufinPlayerTest {
     @Test
     fun metadataAndFavoriteUpdatesPreserveThePositionClock() {
         player.update(playing)
+        assertEquals("run:1", player.currentMediaItem?.mediaId)
+        assertEquals(null, player.currentMediaItem?.localConfiguration)
         ShadowSystemClock.advanceBy(Duration.ofMillis(250))
         assertEquals(10_250UL, player.positionNow())
         assertEquals(10_250L, player.currentPosition)
 
         val updatedRow = object : QueueRow(io.github.screwys.rufin.shared.library.NoHandle) {
             override fun sameRow(other: QueueRow) = this === other
-            override fun item() = row.item().copy(title = "Updated track")
+            override fun track() = row.track().let { it.copy(metadata = it.metadata.copy(title = "Updated track")) }
         }
         val updated = playing.copy(favorite = true,
             transport = playing.transport.copy(current = playing.transport.current!!.copy(row = updatedRow)))

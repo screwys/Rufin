@@ -149,102 +149,95 @@ function initAppearance() {
   );
 }
 
-const coverUrls = new Map();
+const covers = new Map();
 
-function finishCoverReveal(node) {
-  const image = node.querySelector("img");
-  for (const animation of image?.getAnimations() || []) {
-    if (animation.playState === "finished") {
-      animation.cancel();
-      image.animate(
-        { filter: ["blur(1px)", "blur(0)"] },
-        { duration: 80, easing: "ease-out" },
-      );
-    } else {
-      animation.effect.setKeyframes({ filter: ["blur(4px)", "blur(0)"] });
-      animation.onfinish = () => animation.cancel();
-    }
-  }
-}
-
-async function cover(node, uri, signal, reveal = "none") {
+async function cover(node, uri, signal, preview = null) {
   const query = typeof uri === "string" ? { uri } : uri;
-  const { original, ...still } = query;
-  const preview = original ? cover(node, still, signal, "preview") : false;
-  try {
-    const [response, previewShown] = await Promise.all([
-      fetch(`/api/artwork?${new URLSearchParams(query)}`, { signal }),
-      preview,
-    ]);
-    if (original) reveal = previewShown ? "none" : "ready";
-    if (!response.ok) return previewShown;
-    const blob = await response.blob();
-    if (signal.aborted || !node.isConnected) return false;
-    const url = URL.createObjectURL(blob);
+  const identity = JSON.stringify(query);
+  let fullReady = node.dataset.coverIdentity === identity && node.dataset.coverFull === "true";
+  covers.get(node)?.dispose();
+  if (!fullReady && preview && node.querySelector("img")?.getAttribute("src") !== preview) {
     const image = el("img");
     image.alt = "";
-    image.src = url;
-    try {
-      await image.decode();
-    } catch {
-      URL.revokeObjectURL(url);
-      return previewShown;
-    }
-    if (signal.aborted || !node.isConnected) {
-      URL.revokeObjectURL(url);
-      return false;
-    }
-    const previous = coverUrls.get(node);
-    if (previous) URL.revokeObjectURL(previous);
-    coverUrls.set(node, url);
-    const current = node.querySelector("img");
-    if (previewShown && current) {
-      current.src = url;
-      return true;
-    }
-    for (const animation of node.getAnimations({ subtree: true }))
-      animation.cancel();
+    image.src = preview;
     node.replaceChildren(image);
-    if (
-      reveal !== "none" &&
-      !matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
-      image.animate(
-        { filter: ["blur(4px)", reveal === "preview" ? "blur(1px)" : "blur(0)"] },
-        {
-          duration: 200,
-          easing: "ease-in-out",
-          fill: reveal === "preview" ? "forwards" : "none",
-        },
-      );
-    }
-    return true;
-  } finally {
-    if (original && (await preview) && !signal.aborted && node.isConnected)
-      finishCoverReveal(node);
+  } else if (!fullReady && !preview && node.dataset.coverIdentity && node.dataset.coverIdentity !== identity) {
+    node.replaceChildren(icon("cover-fallback"));
   }
+  node.dataset.coverIdentity = identity;
+  node.dataset.coverFull = String(fullReady);
+  let request, pixels = 0;
+  const entry = { url: null, dispose };
+  const resize = new ResizeObserver(() => {
+    const size = physicalSize();
+    if (!query.original && size > pixels) run(() => load(size));
+  });
+  function physicalSize() {
+    const bounds = node.getBoundingClientRect();
+    return Math.max(1, Math.ceil(Math.max(bounds.width, bounds.height) * devicePixelRatio));
+  }
+  function dispose() {
+    request?.abort();
+    resize.disconnect();
+    signal.removeEventListener("abort", dispose);
+    if (entry.url) URL.revokeObjectURL(entry.url);
+    if (covers.get(node) === entry) covers.delete(node);
+  }
+  async function load(size) {
+    pixels = size;
+    request?.abort();
+    request = new AbortController();
+    const requestSignal = AbortSignal.any([signal, request.signal]);
+    try {
+      const response = await fetch(`/api/artwork?${new URLSearchParams({ ...query, size })}`, { signal: requestSignal });
+      if (!response.ok) return fullReady || !!preview;
+      const image = el("img");
+      const url = URL.createObjectURL(await response.blob());
+      image.alt = "";
+      image.src = url;
+      try { await image.decode(); }
+      catch { URL.revokeObjectURL(url); return fullReady || !!preview; }
+      if (requestSignal.aborted || !node.isConnected) {
+        URL.revokeObjectURL(url);
+        return false;
+      }
+      if (entry.url) URL.revokeObjectURL(entry.url);
+      entry.url = url;
+      fullReady = true;
+      node.dataset.coverFull = "true";
+      node.replaceChildren(image);
+      return true;
+    } catch (error) {
+      if (requestSignal.aborted) throw error;
+      return fullReady || !!preview;
+    }
+  }
+  covers.set(node, entry);
+  signal.addEventListener("abort", dispose, { once: true });
+  resize.observe(node);
+  return load(physicalSize());
 }
 
 function releaseCovers() {
-  for (const [node, url] of coverUrls)
-    if (!node.isConnected) {
-      URL.revokeObjectURL(url);
-      coverUrls.delete(node);
-    }
+  for (const [node, entry] of covers)
+    if (!node.isConnected) entry.dispose();
 }
 
-async function coverGroup(node, query, count, signal) {
+async function coverGroup(node, query, count, signal, previews = []) {
   node.classList.toggle("cover-mosaic", count > 1);
-  if (count <= 1) return cover(node, query, signal);
-  node.replaceChildren();
-  await Promise.all(
-    Array.from({ length: 4 }, (_, index) => {
+  if (count <= 1) return cover(node, query, signal, previews[0]);
+  let tiles = [...node.children].filter((tile) => tile.classList.contains("cover-quadrant"));
+  if (tiles.length !== 4) {
+    node.replaceChildren();
+    tiles = Array.from({ length: 4 }, () => {
       const tile = el("span", "cover-quadrant");
       tile.append(icon("cover-fallback"));
       node.append(tile);
-      return cover(tile, { ...query, part: index % count }, signal);
-    }),
-  );
+      return tile;
+    });
+  }
+  await Promise.all(tiles.map((tile, index) =>
+    cover(tile, { ...query, part: index % count }, signal, previews[index % count])));
 }
 
 function initLayout() {
@@ -404,7 +397,7 @@ export {
   applyColors,
   cover,
   coverGroup,
-  coverUrls,
+  covers,
   releaseCovers,
   bindHoverControls,
   init,

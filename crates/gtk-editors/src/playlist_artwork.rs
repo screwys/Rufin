@@ -49,7 +49,7 @@ impl ArtworkEditor {
             artwork_frame: gtk::AspectFrame, artwork_overlay: gtk::Overlay,
         });
         let fallback = editing
-            .representative_artwork
+            .automatic_binding
             .iter()
             .map(|binding| artwork::ArtworkBinding::opaque(binding))
             .collect::<Vec<_>>();
@@ -58,7 +58,7 @@ impl ArtworkEditor {
             .as_ref()
             .map(|binding| vec![artwork::ArtworkBinding::opaque(binding)])
             .unwrap_or_else(|| fallback.clone());
-        let current = artwork.elastic_cover_group_projection_for_artwork(&bindings, 512);
+        let current = artwork.elastic_cover_group_projection_for_artwork(&bindings, 512, false);
         artwork_current.append(&current.widget());
         let editor = Rc::new(Self {
             frame: artwork_frame,

@@ -27,8 +27,6 @@ pub use settings::SettingsHandle;
 
 pub mod lyrics;
 
-pub mod artwork;
-
 pub mod metadata;
 pub mod open;
 pub mod playlist_files;

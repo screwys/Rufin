@@ -11,7 +11,6 @@ import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.ui.DetailLinkIcon
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 import io.github.screwys.rufin.ui.FallbackCover
-import io.github.screwys.rufin.ui.HoldInitialReveal
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SourceIcon
 import io.github.screwys.rufin.ui.rufinMarquee
@@ -94,7 +93,6 @@ internal fun DetailContent(
                 DetailHeader(summary, headerItem, player, onPlay, onFavorite, onOpenRoute, onLink, onMenu, onRadio)
             }
             if (artist && favorites != null && favoritesPage != null && summary.favoriteTotal > 0UL) item("detail-favorites") {
-                HoldInitialReveal(favoritesPage.loading || favorites.loadState.refresh is LoadState.Loading)
                 Column {
                     DetailSectionHeading(translate("Favorite tracks"))
                     if (summary.showTrackHeader) DetailTrackHeader(favoritesPage.detailTrackFields, favoritesPage.displaySettings?.size)
@@ -124,9 +122,8 @@ internal fun DetailContent(
                     val columns = if (grid) ((width - 32.dp + gap) / (cardSize + gap)).toInt().coerceAtLeast(1) else 1
                     val loading = owner.loading || albums.loadState.refresh is LoadState.Loading
                     val count = if (loading && albums.itemCount == 0) group.total.toInt() else albums.itemCount
-                    item("release-heading:${group.id}") { DetailSectionHeading(group.title) }
+                    item("release-heading:${group.id}") { DetailSectionHeading(translate(group.title)) }
                     items((count + columns - 1) / columns, key = { "release:${group.id}:$it" }) { rowIndex ->
-                            HoldInitialReveal(loading)
                             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
                                 repeat(columns) { column ->
                                     val position = rowIndex * columns + column
@@ -218,7 +215,7 @@ private fun DetailHeader(
                 if (summary.links.isNotEmpty() && item.row.kind !in setOf("playlist", "smart_playlist")) CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
                     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                         summary.links.forEach { link ->
-                            IconButton({ onLink(link) }, Modifier.size(32.dp).semantics { contentDescription = link.title }) {
+                            IconButton({ onLink(link) }, Modifier.size(32.dp).semantics { contentDescription = translate(link.title) }) {
                                 DetailLinkIcon(link.iconId, Modifier.size(20.dp))
                             }
                         }
@@ -227,7 +224,7 @@ private fun DetailHeader(
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(summary.label.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    Text(translate(summary.label).uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     if (item.row.kind in setOf("album", "artist", "genre")) CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
                         PlayerIconButton("rufin-audio-only-symbolic", "Play radio", { onRadio(item) }, Modifier.size(32.dp), iconSize = 16.dp)
                     }

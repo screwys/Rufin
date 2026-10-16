@@ -18,9 +18,48 @@
 
   </object>
 
+  <object class="AdwPreferencesGroup" id="source_downloads_group">
+    <child>
+      <object class="AdwActionRow" id="download_artwork">
+        <property name="title" translatable="yes">Download artwork</property>
+        <property name="activatable">true</property>
+        <child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-download-symbolic</property></object></child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwActionRow" id="download_lyrics">
+        <property name="title" translatable="yes">Download lyrics</property>
+        <property name="activatable">true</property>
+        <child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-download-symbolic</property></object></child>
+      </object>
+    </child>
+  </object>
+
   <object class="AdwPreferencesGroup" id="downloads_group">
     <property name="title" translatable="yes">Downloads</property>
     <property name="description" translatable="yes">Keep music available offline. Folder changes only affect new downloads</property>
+  </object>
+  <object class="AdwPreferencesGroup" id="cache_group">
+    <child>
+      <object class="AdwActionRow" id="clear_artwork_cache">
+        <property name="title" translatable="yes">Clear artwork cache</property>
+        <property name="activatable">true</property>
+        <child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-user-trash-symbolic</property></object></child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwActionRow" id="clear_lyrics_cache">
+        <property name="title" translatable="yes">Clear lyrics cache</property>
+        <property name="activatable">true</property>
+        <child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-user-trash-symbolic</property></object></child>
+      </object>
+    </child>
+  </object>
+  <object class="GtkLabel" id="artwork_cache_cleared">
+    <property name="label" translatable="yes">Artwork cache cleared</property>
+  </object>
+  <object class="GtkLabel" id="lyrics_cache_cleared">
+    <property name="label" translatable="yes">Lyrics cache cleared</property>
   </object>
   <object class="AdwActionRow" id="download_folder_row">
     <property name="title" translatable="yes">Download Folder</property>

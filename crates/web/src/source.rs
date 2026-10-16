@@ -15,6 +15,17 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/sources/library", post(select_library))
         .route("/api/sources/edit", get(editable))
         .route("/api/sources/refresh", post(select))
+        .route("/api/sources/download-artwork", post(source_download))
+        .route("/api/sources/download-lyrics", post(source_download))
+        .route("/api/sources/cancel-download", post(source_download))
+        .route(
+            "/api/downloads/clear-artwork-cache",
+            post(clear_artwork_cache),
+        )
+        .route(
+            "/api/downloads/clear-lyrics-cache",
+            post(clear_lyrics_cache),
+        )
         .route("/api/sources/login/plex", post(plex_login))
         .route("/api/sources/login/emby", post(emby_login))
         .route("/api/sources/login/jellyfin", post(jellyfin_login))
@@ -232,12 +243,57 @@ pub(super) async fn select(
     }
     let id = sources::SourceId::new(input.id);
     if path.ends_with("/refresh") {
-        source.refresh_source(id).await.map_err(bad_request)?;
+        source
+            .refresh_source(id, false)
+            .await
+            .map_err(bad_request)?;
         Ok(json_response(StatusCode::OK, json!({"refreshed":true})))
     } else {
         let selected = source.select_source(id).await.map_err(bad_request)?;
         Ok(json_response(StatusCode::OK, json!({"id":selected})))
     }
+}
+
+async fn source_download(
+    State(products): State<ProductHandles>,
+    request: Request<Body>,
+) -> Result<Response<Body>, Error> {
+    let path = request.uri().path().to_owned();
+    let input: Identifier = body(request).await?;
+    if input.id.is_empty() {
+        return Err(bad_request("id is required"));
+    }
+    let id = sources::SourceId::new(input.id);
+    if path.ends_with("/download-artwork") {
+        products.source.download_artwork(id).map_err(bad_request)?;
+    } else if path.ends_with("/download-lyrics") {
+        products.source.download_lyrics(id).map_err(bad_request)?;
+    } else {
+        products.source.cancel_source_download(id);
+    }
+    Ok(accepted())
+}
+
+async fn clear_artwork_cache(
+    State(products): State<ProductHandles>,
+) -> Result<Response<Body>, Error> {
+    products
+        .downloads
+        .clear_artwork_cache()
+        .await
+        .map_err(bad_request)?;
+    Ok(json_response(StatusCode::OK, json!({"cleared": true})))
+}
+
+async fn clear_lyrics_cache(
+    State(products): State<ProductHandles>,
+) -> Result<Response<Body>, Error> {
+    products
+        .downloads
+        .clear_lyrics_cache()
+        .await
+        .map_err(bad_request)?;
+    Ok(json_response(StatusCode::OK, json!({"cleared": true})))
 }
 
 async fn forget(

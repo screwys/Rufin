@@ -1,6 +1,7 @@
 //! Translates supported released formats into the ordinary user-state writers.
-mod current;
+pub(crate) mod current;
 mod legacy;
+pub(crate) mod snapshots;
 use crate::{Database, LibraryError, LibraryResult, SourceId, source_entity_uri};
 pub(crate) use current::import as import_current;
 use futures_util::TryStreamExt;
@@ -271,10 +272,7 @@ pub(crate) async fn import_released(
     }
     {
         let mut writer = database.writer().await?;
-        crate::collections::refresh_facts_on(
-            writer.as_mut().ok_or(LibraryError::WriterUnavailable)?,
-        )
-        .await?;
+        normalize_stored_artwork(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
     }
     source.close().await?;
     lookup.close().await?;
@@ -348,13 +346,14 @@ async fn import_playlists(
                         let text=|name:&str,track_name:&str| string(&entry,name).or_else(||track.as_ref().and_then(|track|string(track,track_name)));
                         let number=|name:&str| integer(&entry,name).or_else(||track.as_ref().and_then(|track|integer(track,name)));
                         let write=crate::PlaylistEntryWrite {
-                            object_id:string(&entry,"object_id").ok_or_else(||LibraryError::InvalidStore("occurrence ID unreadable".into()))?,media_uri:uri,
-                            title:text("title","title"),artist:text("artist","display_artist"),album:text("album","display_album"),
-                            album_display_artist:text("album_display_artist","album_display_artist"),
-                            duration_millis:number("duration_millis"),disc_number:number("disc_number"),track_number:number("track_number"),year:number("year"),
-                            release_date:text("release_date","release_date"),source_format:text("source_format","source_format"),
-                            musicbrainz_recording_id:text("musicbrainz_recording_id","musicbrainz_recording_id"),
-                            musicbrainz_release_track_id:text("musicbrainz_release_track_id","musicbrainz_release_track_id"),position:after};
+                            object_id:string(&entry,"object_id").ok_or_else(||LibraryError::InvalidStore("occurrence ID unreadable".into()))?,
+                            track:crate::TrackReference{media_uri:uri,metadata:crate::TrackMetadata{
+                                title:text("title","title").unwrap_or_default(),artist:text("artist","display_artist").unwrap_or_default(),album:text("album","display_album").unwrap_or_default(),
+                                album_display_artist:text("album_display_artist","album_display_artist"),
+                                duration_millis:number("duration_millis").unwrap_or_default(),disc_number:number("disc_number").unwrap_or_default(),track_number:number("track_number").unwrap_or_default(),year:number("year"),
+                                release_date:text("release_date","release_date"),source_format:text("source_format","source_format"),
+                                musicbrainz_recording_id:text("musicbrainz_recording_id","musicbrainz_recording_id"),
+                                musicbrainz_release_track_id:text("musicbrainz_release_track_id","musicbrainz_release_track_id"),..Default::default()},artwork_binding:None},position:after};
                         crate::playlists::write_playlist_entry(target,key,&write).await
                     }.await;
                     imported(entry_result,"playlist occurrence")?;
@@ -389,6 +388,7 @@ async fn import_smart(
                 object.remove("source_id");
             }
             let record = crate::SmartPlaylistWrite {
+                artwork_binding: None,
                 artwork_bytes: None,
                 object_id: string(&row, "object_id")
                     .or_else(|| string(&row, "smart_playlist_id"))
@@ -488,7 +488,7 @@ async fn import_listens(
                 release_date:string(&row,"release_date"),source_format:string(&row,"source_format"),
                 musicbrainz_recording_id:string(&row,"musicbrainz_recording_id"),musicbrainz_release_track_id:string(&row,"musicbrainz_release_track_id"),
                 started_at:row.try_get("started_at")?,local_period:row.try_get("local_period")?,listened_millis:row.try_get("listened_millis")?,skipped:row.try_get("skipped")?};
-            let key=crate::activity::write_listen(target,&listen,source_id.as_deref(),None,Some(old_key)).await?;
+            let (key,_)=crate::activity::write_listen(target,&listen,source_id.as_deref(),None,Some(old_key)).await?;
             if has_delivery {
                 let mut deliveries=sqlx::query("SELECT * FROM listen_outbox WHERE listen_key=?1").bind(old_key).fetch(&mut *lookup);
                 while let Some(delivery)=deliveries.try_next().await? {
@@ -613,16 +613,17 @@ async fn import_queue(
                 let number = |name: &str| {
                     integer(&row, name).or_else(|| integer(&row, &format!("fallback_{name}")))
                 };
-                let item = crate::QueueItem {
+                let item = crate::TrackReference {
                     media_uri: uri,
+                    artwork_binding:None,
+                    metadata:crate::TrackMetadata{
                     title: text("title").unwrap_or_default(),
                     artist: text("artist").unwrap_or_default(),
                     album: text("album").unwrap_or_default(),
                     album_display_artist: text("album_display_artist"),
-                    artwork_binding: None,
                     duration_millis: number("duration_millis").unwrap_or(0).max(0),
-                    disc_number: number("disc_number").filter(|value| *value >= 0),
-                    track_number: number("track_number").filter(|value| *value >= 0),
+                    disc_number: number("disc_number").unwrap_or_default().max(0),
+                    track_number: number("track_number").unwrap_or_default().max(0),
                     year: number("year"),
                     release_date: text("release_date"),
                     source_format: text("source_format"),
@@ -632,6 +633,8 @@ async fn import_queue(
                     musicbrainz_album_id: text("musicbrainz_album_id").filter(|value| !value.is_empty()),
                     musicbrainz_release_group_id: text("musicbrainz_release_group_id").filter(|value| !value.is_empty()),
                     primary_artist_musicbrainz_id: text("primary_artist_musicbrainz_id").filter(|value| !value.is_empty()),
+                    ..Default::default()
+                    }
                 };
                 let provenance = match string(&row, "provenance_kind").as_deref() {
                     Some("context") => crate::QueueProvenance::Context {
@@ -693,5 +696,34 @@ async fn import_queue(
     }
     .await;
     imported(result, "Queue")?;
+    Ok(())
+}
+
+async fn normalize_stored_artwork(connection: &mut sqlx::SqliteConnection) -> LibraryResult<()> {
+    for table in ["tracks", "playlists", "smart_playlists"] {
+        let column = if table != "tracks" {
+            "artwork_binding"
+        } else {
+            "native_artwork"
+        };
+        let mut after = 0_i64;
+        loop {
+            let rows: Vec<(i64, Vec<u8>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT rowid,{column} FROM {table} WHERE rowid>?1 AND json_type({column})='object' ORDER BY rowid LIMIT 128"))).bind(after).fetch_all(&mut *connection).await?;
+            if rows.is_empty() {
+                break;
+            }
+            for (key, binding) in rows {
+                after = key;
+                let normalized = crate::normalize_artwork_binding(&binding)?;
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "UPDATE {table} SET {column}=?1 WHERE rowid=?2"
+                )))
+                .bind(normalized)
+                .bind(key)
+                .execute(&mut *connection)
+                .await?;
+            }
+        }
+    }
     Ok(())
 }

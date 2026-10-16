@@ -389,10 +389,10 @@ fn fetch_album_release_metadata(
     release_id: Option<&str>,
 ) -> Result<AlbumReleaseMetadata, String> {
     let client = client()?;
-    if let Some(release_group_id) = release_group_id.and_then(usable_mbid) {
+    if let Some(release_group_id) = release_group_id.and_then(library::AlbumCover::usable_mbid) {
         return fetch_release_group_metadata(client, release_group_id);
     }
-    if let Some(release_id) = release_id.and_then(usable_mbid) {
+    if let Some(release_id) = release_id.and_then(library::AlbumCover::usable_mbid) {
         return fetch_release_metadata(client, release_id);
     }
     Err("album has no MusicBrainz release or release-group id".to_string())
@@ -526,18 +526,6 @@ fn normalize_release_types(types: impl IntoIterator<Item = impl AsRef<str>>) -> 
         }
     }
     values
-}
-
-pub(crate) fn usable_mbid(value: &str) -> Option<&str> {
-    let value = value.trim();
-    if value.is_empty()
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-    {
-        return None;
-    }
-    Some(value)
 }
 
 #[cfg(test)]

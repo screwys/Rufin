@@ -19,6 +19,12 @@ pub(crate) enum SequenceError {
     InvalidEntryIds,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MetadataRead {
+    Missing,
+    Window,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct Sequence {
     members: HashMap<OccurrenceId, library::QueueEntry>,
@@ -32,7 +38,7 @@ pub(super) struct Sequence {
     revision: u64,
     progress_millis: u64,
     dirty: Option<library::QueueUpdate>,
-    window_dirty: bool,
+    metadata_read: Option<MetadataRead>,
 }
 
 impl Sequence {
@@ -49,7 +55,7 @@ impl Sequence {
             revision: 0,
             progress_millis: 0,
             dirty: None,
-            window_dirty: true,
+            metadata_read: Some(MetadataRead::Missing),
         }
     }
     pub(super) fn from_window(
@@ -89,7 +95,7 @@ impl Sequence {
             revision,
             progress_millis: window.progress_millis.max(0) as u64,
             dirty: None,
-            window_dirty: true,
+            metadata_read: Some(MetadataRead::Missing),
         };
         if sequence
             .selected_index
@@ -143,7 +149,9 @@ impl Sequence {
     }
     fn changed(&mut self, contents: bool) {
         self.revision += 1;
-        self.window_dirty |= contents;
+        if contents {
+            self.need_metadata();
+        }
         self.dirty.get_or_insert_default();
     }
     fn save_order(&mut self, ordinary: Option<Range<usize>>, active: Option<Range<usize>>) {
@@ -266,7 +274,7 @@ impl Sequence {
             .iter_mut()
             .find(|row| row.occurrence_id == selected)
         {
-            Arc::make_mut(row).item.duration_millis = millis.min(i64::MAX as u64) as i64;
+            Arc::make_mut(row).track.metadata.duration_millis = millis.min(i64::MAX as u64) as i64;
         }
     }
     pub(super) fn set_repeat_mode(&mut self, value: RepeatMode) {
@@ -315,7 +323,7 @@ impl Sequence {
         }
         self.selected_index = Some(index);
         self.progress_millis = 0;
-        self.window_dirty = true;
+        self.need_metadata();
         true
     }
     pub(super) fn start_next_pass(&mut self) {
@@ -589,44 +597,67 @@ impl Sequence {
         self.rows.sort_by_key(|row| row.position);
     }
     pub(super) fn read_request(&mut self) -> Option<Vec<(OccurrenceId, library::QueueEntry)>> {
-        if !std::mem::take(&mut self.window_dirty) {
-            return None;
-        }
+        let read = self.metadata_read.take()?;
         self.trim_rows();
         let entries = self
             .window_range()
             .map(|i| self.order[i])
-            .filter(|id| self.at_id(*id).is_none())
+            .filter(|id| read == MetadataRead::Window || self.at_id(*id).is_none())
             .map(|id| (id, self.members[&id].clone()))
             .collect::<Vec<_>>();
         (!entries.is_empty()).then_some(entries)
     }
-    pub(super) fn hydrate(&mut self, items: Vec<(OccurrenceId, library::QueueItem)>) {
+    pub(super) fn hydrate(&mut self, items: Vec<(OccurrenceId, library::TrackView)>) -> bool {
+        let mut changed = false;
+        let mut refreshed = false;
         let positions = self
             .window_range()
             .map(|i| (self.order[i], i))
             .collect::<HashMap<_, _>>();
         for (id, item) in items {
-            if self.at_id(id).is_some() {
+            if !self
+                .members
+                .get(&id)
+                .is_some_and(|entry| entry.track_key == item.track_key)
+            {
+                continue;
+            }
+            if let Some(row) = self
+                .rows
+                .iter_mut()
+                .find(|row| row.occurrence_id == Some(id.0))
+            {
+                if row.track != item {
+                    Arc::make_mut(row).track = item;
+                    changed = true;
+                    refreshed = true;
+                }
                 continue;
             }
             let Some(&position) = positions.get(&id) else {
                 continue;
             };
             let entry = &self.members[&id];
+            changed = true;
             self.rows.push(Arc::new(QueueRow {
                 occurrence_id: Some(id.0),
                 position,
-                item,
-                track_key: Some(entry.track_key),
+                track: item,
                 provenance: entry.provenance.clone(),
                 received_from_connect: entry.received_from_connect,
             }));
         }
         self.trim_rows();
-        self.window_dirty = true;
+        self.need_metadata();
+        if refreshed {
+            self.revision += 1;
+        }
+        changed
     }
-    pub(super) fn rekey_songs(&mut self, pairs: &[(library::TrackKey, library::TrackKey)]) -> bool {
+    pub(super) fn rekey_tracks(
+        &mut self,
+        pairs: &[(library::TrackKey, library::TrackKey)],
+    ) -> bool {
         let mut keys = HashMap::new();
         for &(old, new) in pairs.iter().rev() {
             keys.insert(old, keys.get(&new).copied().unwrap_or(new));
@@ -646,32 +677,24 @@ impl Sequence {
         }
         if changed {
             for row in &mut self.rows {
-                if let Some(key) = row.track_key.and_then(|key| keys.get(&key)).copied() {
-                    Arc::make_mut(row).track_key = Some(key);
+                if let Some(key) = keys.get(&row.track.track_key).copied() {
+                    Arc::make_mut(row).track.track_key = key;
                 }
             }
             self.changed(true);
+            self.refresh_metadata();
         }
         changed
     }
 
     pub(super) fn need_metadata(&mut self) {
-        self.window_dirty = true;
+        self.metadata_read.get_or_insert(MetadataRead::Missing);
     }
-    pub(super) fn artwork_uris(&self) -> Vec<String> {
-        self.rows.iter().map(|e| e.media_uri.clone()).collect()
+    pub(super) fn refresh_metadata(&mut self) {
+        self.metadata_read = Some(MetadataRead::Window);
     }
-    pub(super) fn refresh_artwork(&mut self, bindings: &[(String, Option<Vec<u8>>)]) -> bool {
-        let mut changed = false;
-        for row in &mut self.rows {
-            if let Some((_, binding)) = bindings.iter().find(|(u, _)| u == &row.media_uri)
-                && &row.artwork_binding != binding
-            {
-                Arc::make_mut(row).item.artwork_binding = binding.clone();
-                changed = true;
-            }
-        }
-        changed
+    pub(super) fn refreshing_metadata(&self) -> bool {
+        self.metadata_read == Some(MetadataRead::Window)
     }
 }
 
@@ -723,7 +746,7 @@ impl Default for Sequence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::playback::QueueItem;
+    use ::playback::TrackReference;
 
     fn page(start: usize, count: usize) -> super::super::commands::QueueBatch {
         let entries = (start..start + count)
@@ -742,15 +765,28 @@ mod tests {
                     occurrence_id: None,
                     position: i,
                     received_from_connect: false,
-                    item: QueueItem::direct(
-                        format!("https://example.test/{}", e.track_key.raw()),
-                        format!("{i}"),
-                        "",
-                        "",
-                        1000,
-                    ),
-                    track_key: Some(e.track_key),
                     provenance: e.provenance.clone(),
+                    track: {
+                        let reference = TrackReference::direct(
+                            format!("https://example.test/{}", e.track_key.raw()),
+                            format!("{i}"),
+                            "",
+                            "",
+                            1000,
+                        );
+                        library::TrackView {
+                            track_key: e.track_key,
+                            source_key: None,
+                            source_id: None,
+                            object_id: None,
+                            media_uri: reference.media_uri,
+                            metadata: reference.metadata,
+                            artwork_binding: reference.artwork_binding,
+                            state: Default::default(),
+                            access: Default::default(),
+                            links: Default::default(),
+                        }
+                    },
                 })
             })
             .collect();
@@ -785,13 +821,21 @@ mod tests {
                 .map(|(id, entry)| {
                     (
                         id,
-                        QueueItem::direct(
-                            format!("https://example.test/{}", entry.track_key.raw()),
-                            "",
-                            "",
-                            "",
-                            1000,
-                        ),
+                        library::TrackView {
+                            track_key: entry.track_key,
+                            source_key: None,
+                            source_id: None,
+                            object_id: None,
+                            media_uri: format!("https://example.test/{}", entry.track_key.raw()),
+                            metadata: library::TrackMetadata {
+                                duration_millis: 1000,
+                                ..Default::default()
+                            },
+                            state: Default::default(),
+                            access: Default::default(),
+                            links: Default::default(),
+                            artwork_binding: None,
+                        },
                     )
                 })
                 .collect(),

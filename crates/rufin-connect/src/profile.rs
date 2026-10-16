@@ -22,7 +22,7 @@ mod history_tests;
 
 // Wire format, independent of Rufin releases and local database migrations.
 const FORMAT: u32 = 1;
-const SYNC_PRIORITY: &str = "CASE WHEN substr(name,1,instr(name||':',':')-1) IN ('cache_artwork','cache_lyrics') THEN 2 ELSE substr(name,1,instr(name||':',':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage','playlist','playlist_order','smart','smart_order','state') END";
+const SYNC_PRIORITY: &str = "substr(name,1,instr(name||':',':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage','playlist','playlist_order','smart','smart_order','state')";
 pub const INCOMPATIBLE_PROFILE: &str =
     "Devices using Rufin Connect are no longer compatible. Please update Rufin.";
 const PROJECTION_ORDER: &str = "CASE kind WHEN 'source' THEN 0 WHEN 'integration' THEN 0 WHEN 'playlist' THEN 1 WHEN 'native_playlist' THEN 1 WHEN 'album' THEN 2 WHEN 'artist' THEN 2 WHEN 'genre' THEN 2 WHEN 'mood' THEN 2 WHEN 'folder' THEN 2 WHEN 'track' THEN 3 WHEN 'entry' THEN 5 WHEN 'native_entry' THEN 5 WHEN 'playlist_order' THEN 7 WHEN 'smart_order' THEN 7 WHEN 'album_artists' THEN 6 WHEN 'album_genres' THEN 6 WHEN 'track_artists' THEN 6 WHEN 'track_genres' THEN 6 WHEN 'track_moods' THEN 6 WHEN 'track_folders' THEN 6 ELSE 4 END,CASE WHEN kind IN ('entry','native_entry') THEN json_extract(payload,'$.playlist') END,CASE WHEN kind IN ('entry','native_entry','playlist_order','smart_order') THEN json_extract(payload,'$.position') END,object_key";
@@ -56,7 +56,6 @@ pub struct DocumentVersion {
 pub enum SyncStream {
     Catalog = 0,
     Settings = 1,
-    Cache = 2,
 }
 
 impl From<bool> for SyncStream {
@@ -70,20 +69,16 @@ enum SnapshotScope {
     Backup,
     Device,
     Setup,
-    Cache,
 }
 
 impl SnapshotScope {
     fn predicate(self) -> &'static str {
         match self {
             Self::Backup => "1",
-            Self::Device => {
-                "substr(name,1,instr(name,':')-1) NOT IN ('cache_artwork','cache_lyrics')"
-            }
+            Self::Device => "1",
             Self::Setup => {
                 "substr(name,1,instr(name,':')-1) IN ('source','integration','root','preference','scrobbling','device','connect_key','connect_network','connect_storage')"
             }
-            Self::Cache => "substr(name,1,instr(name,':')-1) IN ('cache_artwork','cache_lyrics')",
         }
     }
 
@@ -94,7 +89,6 @@ impl SnapshotScope {
                 "SELECT coalesce(sum(revision),0) FROM snapshot_revisions WHERE stream IN (0,1)"
             }
             Self::Setup => "SELECT revision FROM snapshot_revisions WHERE stream=1",
-            Self::Cache => "SELECT revision FROM snapshot_revisions WHERE stream=2",
         }
     }
 }
@@ -114,6 +108,7 @@ impl ProfileStore {
             CREATE TABLE IF NOT EXISTS file_revision(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL) STRICT;
             CREATE TABLE IF NOT EXISTS file_exchange(id INTEGER PRIMARY KEY CHECK(id=1),state TEXT NOT NULL) STRICT;
             CREATE TABLE IF NOT EXISTS cache_file_exchange(id INTEGER PRIMARY KEY CHECK(id=1),state TEXT NOT NULL) STRICT;
+            CREATE TABLE IF NOT EXISTS cache_assets(path TEXT PRIMARY KEY,version TEXT,fingerprint TEXT) STRICT;
             INSERT OR IGNORE INTO file_revision VALUES(1,0);
             CREATE TRIGGER IF NOT EXISTS file_revision_delete AFTER DELETE ON documents BEGIN UPDATE file_revision SET revision=revision+1; END;
             CREATE INDEX IF NOT EXISTS documents_kind ON documents(substr(name,1,instr(name,':')-1),name);
@@ -124,6 +119,17 @@ impl ProfileStore {
             CREATE TABLE IF NOT EXISTS history_pending(name TEXT PRIMARY KEY) STRICT;
             CREATE TABLE IF NOT EXISTS local_values(kind TEXT NOT NULL,object_key TEXT NOT NULL,payload TEXT,PRIMARY KEY(kind,object_key)) STRICT;")
             .execute(&mut connection).await?;
+        let mut transaction = connection.begin().await?;
+        sqlx::raw_sql(
+            "DELETE FROM documents WHERE (name GLOB 'cache_artwork:*' OR name GLOB 'cache_lyrics:*');
+            DELETE FROM projection WHERE kind IN ('cache_artwork','cache_lyrics');
+            DELETE FROM local_values WHERE kind IN ('cache_artwork','cache_lyrics');
+            DELETE FROM history_pending WHERE (name GLOB 'cache_artwork:*' OR name GLOB 'cache_lyrics:*');
+            DELETE FROM history_acknowledgements WHERE (name GLOB 'cache_artwork:*' OR name GLOB 'cache_lyrics:*');",
+        )
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
         index_documents(&mut connection, &identity).await?;
         sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
             "DROP INDEX IF EXISTS projection_order; CREATE INDEX IF NOT EXISTS projection_order_native ON projection({PROJECTION_ORDER})"
@@ -188,13 +194,6 @@ impl ProfileStore {
             .await?)
     }
 
-    pub async fn cache_revision(&self) -> Result<i64> {
-        let mut connection = database_connection(&self.connection).await?;
-        Ok(sqlx::query_scalar(SnapshotScope::Cache.revision_query())
-            .fetch_one(&mut *connection)
-            .await?)
-    }
-
     pub async fn file_exchange(&self) -> Result<Option<String>> {
         let mut connection = database_connection(&self.connection).await?;
         Ok(
@@ -224,6 +223,32 @@ impl ProfileStore {
         let mut connection = database_connection(&self.connection).await?;
         sqlx::query("INSERT INTO cache_file_exchange(id,state) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET state=excluded.state WHERE state<>excluded.state")
             .bind(state).execute(&mut *connection).await?;
+        Ok(())
+    }
+
+    pub async fn cache_fingerprint(&self, key: &str) -> Result<Option<String>> {
+        let mut connection = database_connection(&self.connection).await?;
+        Ok(
+            sqlx::query_scalar("SELECT fingerprint FROM cache_assets WHERE path=?1")
+                .bind(key)
+                .fetch_optional(&mut *connection)
+                .await?
+                .flatten(),
+        )
+    }
+
+    pub async fn save_cache_fingerprint(&self, key: &str, fingerprint: &str) -> Result<()> {
+        let mut connection = database_connection(&self.connection).await?;
+        sqlx::query("INSERT INTO cache_assets(path,fingerprint) VALUES(?1,?2) ON CONFLICT(path) DO UPDATE SET fingerprint=excluded.fingerprint")
+            .bind(key).bind(fingerprint).execute(&mut *connection).await?;
+        Ok(())
+    }
+
+    pub async fn reset_cache_assets(&self) -> Result<()> {
+        let mut connection = database_connection(&self.connection).await?;
+        sqlx::query("DELETE FROM cache_assets")
+            .execute(&mut *connection)
+            .await?;
         Ok(())
     }
 
@@ -266,7 +291,7 @@ impl ProfileStore {
     /// index entry; their complete Loro history remains available through `updates`.
     pub async fn changes(&self, after: i64, limit: usize) -> Result<Vec<DocumentVersion>> {
         let mut connection = database_connection(&self.connection).await?;
-        Ok(sqlx::query("SELECT name,version,revision FROM documents WHERE revision>?1 AND revision<=coalesce((SELECT min(revision) FROM documents WHERE revision>?1 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),9223372036854775807) ORDER BY revision,name LIMIT ?2")
+        Ok(sqlx::query("SELECT name,version,revision FROM documents WHERE revision>?1 AND revision<=coalesce((SELECT min(revision) FROM documents WHERE revision>?1 AND (name GLOB 'playlist_artwork:*')),9223372036854775807) ORDER BY revision,name LIMIT ?2")
             .bind(after)
             .bind(i64::try_from(limit).unwrap_or(i64::MAX))
             .fetch_all(&mut *connection).await?
@@ -294,7 +319,7 @@ impl ProfileStore {
     ) -> Result<Vec<DocumentVersion>> {
         let mut connection = database_connection(&self.connection).await?;
         Ok(sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT name,version,revision FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 AND revision<=coalesce((SELECT min(revision) FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),9223372036854775807) ORDER BY revision,name LIMIT ?3"
+            "SELECT name,version,revision FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 AND revision<=coalesce((SELECT min(revision) FROM documents WHERE ({SYNC_PRIORITY})=?1 AND revision>?2 AND (name GLOB 'playlist_artwork:*')),9223372036854775807) ORDER BY revision,name LIMIT ?3"
         )))
         .bind(stream as i64).bind(after).bind(i64::try_from(limit).unwrap_or(i64::MAX))
         .fetch_all(&mut *connection).await?
@@ -376,12 +401,7 @@ impl ProfileStore {
         for page in updates.chunks(CONNECT_PAGE_SIZE) {
             let page = page
                 .iter()
-                .map(|bytes| {
-                    let update: Update =
-                        serde_json::from_slice(bytes).context("invalid Connect update")?;
-                    validate_version(update.version)?;
-                    Ok(update)
-                })
+                .filter_map(|bytes| decode_update(bytes).transpose())
                 .collect::<Result<Vec<_>>>()?;
             changed |= self
                 .import_page_on(&mut transaction, page)
@@ -551,8 +571,9 @@ impl ProfileStore {
     }
 
     pub async fn import(&self, bytes: &[u8]) -> Result<bool> {
-        let update: Update = serde_json::from_slice(bytes).context("invalid Connect update")?;
-        validate_version(update.version)?;
+        let Some(update) = decode_update(bytes)? else {
+            return Ok(false);
+        };
         let mut connection = database_connection(&self.connection).await?;
         let mut transaction = connection.begin().await?;
         let changed = self.import_page_on(&mut transaction, vec![update]).await?[0].0;
@@ -565,7 +586,7 @@ impl ProfileStore {
     pub async fn project(&self, database: &Database) -> Result<(Vec<ConnectRecord>, bool)> {
         let records = {
             let mut connection = database_connection(&self.connection).await?;
-            let rows=sqlx::query(sqlx::AssertSqlSafe(format!("SELECT kind,object_key,payload FROM projection WHERE kind NOT IN ('cache_artwork','cache_lyrics') AND (kind!='playlist_artwork' OR NOT EXISTS(SELECT 1 FROM projection WHERE kind NOT IN ('playlist_artwork','cache_artwork','cache_lyrics'))) ORDER BY {PROJECTION_ORDER} LIMIT CASE WHEN EXISTS(SELECT 1 FROM projection WHERE kind NOT IN ('playlist_artwork','cache_artwork','cache_lyrics')) THEN ?1 ELSE 1 END"))).bind(CONNECT_PAGE_SIZE as i64).fetch_all(&mut *connection).await?;
+            let rows=sqlx::query(sqlx::AssertSqlSafe(format!("SELECT kind,object_key,payload FROM projection WHERE kind!='playlist_artwork' OR NOT EXISTS(SELECT 1 FROM projection WHERE kind!='playlist_artwork') ORDER BY {PROJECTION_ORDER} LIMIT CASE WHEN EXISTS(SELECT 1 FROM projection WHERE kind!='playlist_artwork') THEN ?1 ELSE 1 END"))).bind(CONNECT_PAGE_SIZE as i64).fetch_all(&mut *connection).await?;
             rows.into_iter()
                 .map(|row| {
                     let kind: String = row.get(0);
@@ -589,90 +610,10 @@ impl ProfileStore {
     pub async fn projection_pending(&self) -> Result<bool> {
         let mut connection = database_connection(&self.connection).await?;
         Ok(
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection WHERE kind NOT IN ('cache_artwork','cache_lyrics'))")
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection)")
                 .fetch_one(&mut *connection)
                 .await?,
         )
-    }
-
-    /// Cache owners apply their own bounded pages without delaying profile settings.
-    pub async fn project_cache(&self, database: &Database) -> Result<(Vec<ConnectRecord>, bool)> {
-        let records = {
-            let mut connection = database_connection(&self.connection).await?;
-            let mut rows = sqlx::query("SELECT kind,object_key,payload FROM projection WHERE kind='cache_lyrics' ORDER BY object_key LIMIT ?1")
-                .bind(CONNECT_PAGE_SIZE as i64)
-                .fetch_all(&mut *connection).await?;
-            if rows.is_empty() {
-                rows = sqlx::query("SELECT kind,object_key,payload FROM projection WHERE kind='cache_artwork' ORDER BY object_key LIMIT 1")
-                    .fetch_all(&mut *connection).await?;
-            }
-            rows.into_iter()
-                .map(|row| {
-                    Ok(ConnectRecord {
-                        kind: row.get(0),
-                        key: row.get(1),
-                        value: row
-                            .get::<Option<String>, _>(2)
-                            .map(|payload| serde_json::from_str(&payload))
-                            .transpose()?,
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?
-        };
-        let changed = database.connect_apply(&records).await?;
-        Ok((records, changed))
-    }
-
-    pub async fn cache_projection_pending(&self) -> Result<bool> {
-        let mut connection = database_connection(&self.connection).await?;
-        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projection WHERE kind IN ('cache_artwork','cache_lyrics'))")
-            .fetch_one(&mut *connection).await?)
-    }
-
-    /// Page current cache records by their document name, without reading histories.
-    pub async fn cache_records(&self, after: &str, limit: usize) -> Result<Vec<ConnectRecord>> {
-        let mut connection = database_connection(&self.connection).await?;
-        let (kind, key) = after.split_once(':').unwrap_or(("", ""));
-        let rows = sqlx::query("SELECT kind,object_key,payload FROM local_values WHERE kind IN ('cache_artwork','cache_lyrics') AND (kind,object_key)>(?1,?2) AND payload IS NOT NULL ORDER BY kind,object_key LIMIT ?3")
-            .bind(kind).bind(key).bind(i64::try_from(limit).unwrap_or(i64::MAX))
-            .fetch_all(&mut *connection).await?;
-        rows.into_iter()
-            .map(|row| {
-                Ok(ConnectRecord {
-                    kind: row.get(0),
-                    key: row.get(1),
-                    value: Some(serde_json::from_str(row.get(2))?),
-                })
-            })
-            .collect()
-    }
-
-    pub async fn cache_record(&self, kind: &str, key: &str) -> Result<Option<ConnectRecord>> {
-        let mut connection = database_connection(&self.connection).await?;
-        let row = sqlx::query("SELECT payload FROM projection WHERE kind=?1 AND object_key=?2 UNION ALL SELECT payload FROM local_values WHERE kind=?1 AND object_key=?2 LIMIT 1")
-            .bind(kind)
-            .bind(key)
-            .fetch_optional(&mut *connection)
-            .await?;
-        row.map(|row| {
-            Ok(ConnectRecord {
-                kind: kind.into(),
-                key: key.into(),
-                value: row
-                    .get::<Option<String>, _>(0)
-                    .map(|payload| serde_json::from_str(&payload))
-                    .transpose()?,
-            })
-        })
-        .transpose()
-    }
-
-    /// Read artwork identities without loading image payloads during cleanup.
-    pub async fn cache_keys(&self, after: &str, limit: usize) -> Result<Vec<String>> {
-        let mut connection = database_connection(&self.connection).await?;
-        Ok(sqlx::query_scalar("SELECT object_key FROM local_values v WHERE kind='cache_artwork' AND object_key>?1 AND payload IS NOT NULL AND NOT EXISTS(SELECT 1 FROM projection p WHERE p.kind=v.kind AND p.object_key=v.object_key) ORDER BY object_key LIMIT ?2")
-            .bind(after).bind(i64::try_from(limit).unwrap_or(i64::MAX))
-            .fetch_all(&mut *connection).await?)
     }
 
     pub async fn acknowledge_projection(&self, records: &[ConnectRecord]) -> Result<()> {
@@ -779,15 +720,6 @@ impl ProfileStore {
             .await
     }
 
-    pub async fn export_cache_snapshot<W: Write + Send + 'static>(
-        &self,
-        output: W,
-        peer: &str,
-    ) -> Result<(W, i64)> {
-        self.export_documents(output, SnapshotScope::Cache, Some(peer))
-            .await
-    }
-
     async fn export_documents<W: Write + Send + 'static>(
         &self,
         file: W,
@@ -815,7 +747,7 @@ impl ProfileStore {
         loop {
             let predicate = scope.predicate();
             let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "SELECT name,CASE WHEN compressed IS NULL THEN snapshot END,compressed FROM documents WHERE {predicate} AND name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE {predicate} AND name>?1 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),char(1114111)) ORDER BY name LIMIT ?2"
+                "SELECT name,CASE WHEN compressed IS NULL THEN snapshot END,compressed FROM documents WHERE {predicate} AND name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE {predicate} AND name>?1 AND (name GLOB 'playlist_artwork:*')),char(1114111)) ORDER BY name LIMIT ?2"
             )))
                 .bind(&cursor)
                 .bind(CONNECT_PAGE_SIZE as i64)
@@ -883,7 +815,7 @@ impl ProfileStore {
             let rows = {
                 let mut connection = database_connection(&self.connection).await?;
                 let predicate = scope.predicate();
-                sqlx::query(sqlx::AssertSqlSafe(format!("SELECT name,snapshot FROM documents WHERE compressed IS NULL AND {predicate} AND name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE compressed IS NULL AND {predicate} AND name>?1 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),char(1114111)) ORDER BY name LIMIT ?2")))
+                sqlx::query(sqlx::AssertSqlSafe(format!("SELECT name,snapshot FROM documents WHERE compressed IS NULL AND {predicate} AND name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE compressed IS NULL AND {predicate} AND name>?1 AND (name GLOB 'playlist_artwork:*')),char(1114111)) ORDER BY name LIMIT ?2")))
                     .bind(&cursor).bind(CONNECT_PAGE_SIZE as i64)
                     .fetch_all(&mut *connection).await?
             };
@@ -939,70 +871,6 @@ impl ProfileStore {
         self.read_snapshot(input, false).await
     }
 
-    /// Each cache page commits independently so a large file does not hold up settings.
-    pub async fn import_cache_snapshot<R: Read + Send + 'static>(&self, file: R) -> Result<bool> {
-        let mut input = tokio::task::spawn_blocking(move || snapshot_start(file)).await??;
-        let mut peer = None;
-        let mut changed = false;
-        loop {
-            let (reader, page, ended) =
-                tokio::task::spawn_blocking(move || read_update_page(input)).await??;
-            input = reader;
-            if !page.is_empty() {
-                let mut acknowledged = Vec::with_capacity(page.len());
-                for update in &page {
-                    if !update.document.starts_with("cache_artwork:")
-                        && !update.document.starts_with("cache_lyrics:")
-                    {
-                        bail!("Connect cache snapshot contains another document kind");
-                    }
-                    if let Some(author) = &update.author {
-                        peer = Some(author.clone());
-                    }
-                    acknowledged.push((peer.clone(), update.document.clone()));
-                }
-                let mut connection = database_connection(&self.connection).await?;
-                let mut transaction = connection.begin().await?;
-                let versions = self.import_page_on(&mut transaction, page).await?;
-                let acknowledged = acknowledged
-                    .into_iter()
-                    .zip(versions)
-                    .filter_map(|((peer, name), (imported, version))| {
-                        changed |= imported;
-                        peer.map(|peer| (peer, name, version))
-                    })
-                    .collect::<Vec<_>>();
-                history::acknowledge_page_on(&mut transaction, &acknowledged).await?;
-                transaction.commit().await?;
-            }
-            if ended {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-        let has_author = peer.is_some();
-        let mut members: Vec<String> = tokio::task::spawn_blocking(move || -> Result<_> {
-            let members = if has_author {
-                let mut line = String::new();
-                input.read_line(&mut line)?;
-                serde_json::from_str(&line).context("missing Connect snapshot membership")?
-            } else {
-                Vec::new()
-            };
-            std::io::copy(&mut input, &mut std::io::sink())?;
-            Ok(members)
-        })
-        .await??;
-        if let Some(peer) = peer {
-            members.push(peer);
-            let mut connection = database_connection(&self.connection).await?;
-            let mut transaction = connection.begin().await?;
-            history::register_on(&mut transaction, &members).await?;
-            transaction.commit().await?;
-        }
-        Ok(changed)
-    }
-
     /// Check an imported snapshot for local edits it does not contain. Exports
     /// order documents by name, so both histories can be compared a page at a time.
     pub async fn snapshot_contains_current<R: Read + Send + 'static>(
@@ -1018,14 +886,6 @@ impl ProfileStore {
         file: R,
     ) -> Result<bool> {
         self.snapshot_contains_scope(file, SnapshotScope::Device)
-            .await
-    }
-
-    pub async fn cache_snapshot_contains_current<R: Read + Send + 'static>(
-        &self,
-        file: R,
-    ) -> Result<bool> {
-        self.snapshot_contains_scope(file, SnapshotScope::Cache)
             .await
     }
 
@@ -1048,7 +908,7 @@ impl ProfileStore {
         loop {
             let predicate = scope.predicate();
             let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "SELECT name,version,snapshot FROM documents WHERE {predicate} AND name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE {predicate} AND name>?1 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),char(1114111)) ORDER BY name LIMIT ?2"
+                "SELECT name,version,snapshot FROM documents WHERE {predicate} AND name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE {predicate} AND name>?1 AND (name GLOB 'playlist_artwork:*')),char(1114111)) ORDER BY name LIMIT ?2"
             )))
             .bind(&cursor)
             .bind(CONNECT_PAGE_SIZE as i64)
@@ -1118,7 +978,7 @@ impl ProfileStore {
         let mut transaction = connection.begin().await?;
         if replace {
             sqlx::raw_sql(
-                "DELETE FROM documents; DELETE FROM projection; DELETE FROM local_values; DELETE FROM sync_cursors; DELETE FROM file_exchange; DELETE FROM cache_file_exchange; DELETE FROM history_peers; DELETE FROM history_acknowledgements; DELETE FROM history_pending;",
+                "DELETE FROM documents; DELETE FROM projection; DELETE FROM local_values; DELETE FROM sync_cursors; DELETE FROM file_exchange; DELETE FROM cache_file_exchange; DELETE FROM cache_assets; DELETE FROM history_peers; DELETE FROM history_acknowledgements; DELETE FROM history_pending;",
             )
             .execute(&mut *transaction)
             .await?;
@@ -1195,7 +1055,7 @@ impl ProfileStore {
         let mut cursor = String::new();
         loop {
             let rows = sqlx::query(
-                "SELECT name,snapshot FROM documents WHERE name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE name>?1 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),char(1114111)) ORDER BY name LIMIT ?2",
+                "SELECT name,snapshot FROM documents WHERE name>?1 AND name<=coalesce((SELECT min(name) FROM documents WHERE name>?1 AND (name GLOB 'playlist_artwork:*')),char(1114111)) ORDER BY name LIMIT ?2",
             )
             .bind(&cursor)
             .bind(CONNECT_PAGE_SIZE as i64)
@@ -1281,16 +1141,26 @@ fn read_update_page(
         if line.trim_end() == "END" {
             return Ok((input, page, true));
         }
-        let update: Update = serde_json::from_str(&line)?;
-        validate_version(update.version)?;
-        let image = update.document.starts_with("playlist_artwork:")
-            || update.document.starts_with("cache_artwork:");
+        let Some(update) = decode_update(line.as_bytes())? else {
+            continue;
+        };
+        let image = update.document.starts_with("playlist_artwork:");
         page.push(update);
         if image {
             break;
         }
     }
     Ok((input, page, false))
+}
+
+fn decode_update(bytes: &[u8]) -> Result<Option<Update>> {
+    let update: Update = serde_json::from_slice(bytes).context("invalid Connect update")?;
+    if update.document.starts_with("cache_artwork:") || update.document.starts_with("cache_lyrics:")
+    {
+        return Ok(None);
+    }
+    validate_version(update.version)?;
+    Ok(Some(update))
 }
 
 fn validate_version(version: u32) -> Result<()> {
@@ -1464,13 +1334,13 @@ async fn index_documents(
             .await?;
     }
     sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-        "CREATE INDEX IF NOT EXISTS documents_image_revision ON documents(({SYNC_PRIORITY}),revision,name) WHERE name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*';
-        CREATE INDEX IF NOT EXISTS documents_image_name ON documents(name) WHERE name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*';"
+        "CREATE INDEX IF NOT EXISTS documents_image_revision ON documents(({SYNC_PRIORITY}),revision,name) WHERE name GLOB 'playlist_artwork:*';
+        CREATE INDEX IF NOT EXISTS documents_image_name ON documents(name) WHERE name GLOB 'playlist_artwork:*';"
     )))
     .execute(&mut *transaction).await?;
     sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
         "CREATE TABLE IF NOT EXISTS snapshot_revisions(stream INTEGER PRIMARY KEY,revision INTEGER NOT NULL) STRICT;
-        INSERT OR IGNORE INTO snapshot_revisions SELECT stream,coalesce((SELECT max(revision) FROM documents WHERE ({SYNC_PRIORITY})=stream),0) FROM (SELECT 0 AS stream UNION ALL SELECT 1 UNION ALL SELECT 2);"
+        INSERT OR IGNORE INTO snapshot_revisions SELECT stream,coalesce((SELECT max(revision) FROM documents WHERE ({SYNC_PRIORITY})=stream),0) FROM (SELECT 0 AS stream UNION ALL SELECT 1);"
     )))
     .execute(&mut *transaction).await?;
     let new_stream = SYNC_PRIORITY.replace("name", "NEW.name");
@@ -1483,7 +1353,7 @@ async fn index_documents(
     .execute(&mut *transaction).await?;
     loop {
         let rows = sqlx::query(
-            "SELECT name,snapshot FROM documents WHERE revision=0 AND name<=coalesce((SELECT min(name) FROM documents WHERE revision=0 AND (name GLOB 'playlist_artwork:*' OR name GLOB 'cache_artwork:*')),char(1114111)) ORDER BY name LIMIT ?1",
+            "SELECT name,snapshot FROM documents WHERE revision=0 AND name<=coalesce((SELECT min(name) FROM documents WHERE revision=0 AND (name GLOB 'playlist_artwork:*')),char(1114111)) ORDER BY name LIMIT ?1",
         )
         .bind(CONNECT_PAGE_SIZE as i64)
         .fetch_all(&mut *transaction)
@@ -2088,30 +1958,55 @@ mod tests {
         let destination = Database::open(directory.path().join("destination.sqlite"))
             .await
             .unwrap();
-        let art = b"provider artwork binding";
-        let mut scan = library::Scan::begin(&source, "server", "Server", "server", None)
-            .await
-            .unwrap();
-        scan.write_tracks(&[(
-            &library::TrackInput {
-                object_id: "track".into(),
-                title: "Track".into(),
-                display_artist: "Artist".into(),
-                sort_text: "track".into(),
-                artwork_binding: Some(art.to_vec()),
-                ..Default::default()
+        let art = serde_json::to_vec(&[library::ArtworkCandidate::new(
+            library::ArtworkImage::Native {
+                source_id: library::SourceId::new("server"),
+                item_id: "track-cover".into(),
+                tag: None,
             },
             None,
         )])
-        .await
         .unwrap();
-        scan.finish().await.unwrap();
+        source
+            .reconcile_source(&library::SourceId::new("server"), "server", "Server")
+            .await
+            .unwrap();
+        source
+            .catalog("server", None)
+            .await
+            .unwrap()
+            .apply_catalog(
+                &library::CatalogBatch {
+                    tracks: vec![library::TrackObservation {
+                        object_id: "track".into(),
+                        metadata: library::TrackMetadata {
+                            title: "Track".into(),
+                            artist: "Artist".into(),
+                            album: "".into(),
+                            sort_text: "track".into(),
+                            duration_millis: 180_000,
+                            disc_number: 1,
+                            track_number: 1,
+                            source_format: Some("FLAC".into()),
+                            ..Default::default()
+                        },
+                        loudness_analysis_key: [0; 32],
+                        artwork_binding: Some(art.to_vec()),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                true,
+            )
+            .await
+            .unwrap();
         let uri = library::source_entity_uri(&library::SourceId::new("server"), "track", "track");
         source
             .create_playlist(
                 None,
                 "Saved",
-                &library::SongSelection::Uris(vec![uri.clone()].into()),
+                &library::CatalogQuery::uris(library::CatalogKind::Track, vec![uri.clone()])
+                    .selection(),
             )
             .await
             .unwrap();
@@ -2427,7 +2322,15 @@ mod tests {
             .unwrap();
         let id = library::SourceId::new("server");
         let cancel = library::ReadCancellation::new();
-        let art = br#"{"source_id":"server","image":"playlist-cover"}"#;
+        let art = serde_json::to_vec(&[library::ArtworkCandidate::new(
+            library::ArtworkImage::Native {
+                source_id: id.clone(),
+                item_id: "playlist-cover".into(),
+                tag: None,
+            },
+            None,
+        )])
+        .unwrap();
         let sidebar = json!({"pins":[{"Playlist":{"source_id":"server","playlist_id":"mix"}}]});
         for revision in 0..3 {
             for (receiving, database) in [(false, &source), (true, &target)] {
@@ -2474,20 +2377,31 @@ mod tests {
                         );
                     }
                 }
-                let mut scan = library::Scan::begin(database, "server", "Server", "server", None)
+                database
+                    .reconcile_source(&library::SourceId::new("server"), "server", "Server")
                     .await
                     .unwrap();
+                let mut catalog = database.catalog("server", None).await.unwrap();
+                let stamp = catalog.start_observation().await.unwrap();
                 if revision < 2 {
-                    scan.write_playlist(&library::PlaylistInput {
-                        object_id: "mix".into(),
-                        name: "Server mix".into(),
-                        sort_text: "server mix".into(),
-                        artwork_binding: Some(art.to_vec()),
-                        writable: Some(false),
-                        metadata_writable: Some(false),
-                    })
-                    .await
-                    .unwrap();
+                    catalog
+                        .apply_catalog(
+                            &library::CatalogBatch {
+                                playlists: vec![library::PlaylistObservation {
+                                    object_id: "mix".into(),
+                                    name: "Server mix".into(),
+                                    sort_text: "server mix".into(),
+                                    artwork_binding: Some(art.to_vec()),
+                                    writable: Some(false),
+                                    metadata_writable: Some(false),
+                                }],
+                                ..Default::default()
+                            },
+                            true,
+                        )
+                        .await
+                        .unwrap();
+
                     for offset in (0..140).step_by(64) {
                         let entries = (offset..(offset + 64).min(140))
                             .map(|position| {
@@ -2496,23 +2410,30 @@ mod tests {
                                 } else {
                                     139 - position
                                 };
-                                library::PlaylistEntryInput {
+                                library::PlaylistEntryObservation {
                                     object_id: format!("entry-{entry}"),
                                     track_id: format!("track-{entry}"),
                                 }
                             })
                             .collect::<Vec<_>>();
-                        scan.write_playlist_page(
-                            "mix",
-                            offset,
-                            &entries,
-                            offset + entries.len() == 140,
-                        )
-                        .await
-                        .unwrap();
+                        catalog
+                            .write_source_playlist_page(
+                                "mix",
+                                offset,
+                                &entries,
+                                offset + entries.len() == 140,
+                            )
+                            .await
+                            .unwrap();
                     }
                 }
-                scan.finish().await.unwrap();
+                catalog
+                    .complete_source_observation(stamp, &["playlist"], None)
+                    .await
+                    .unwrap();
+                database
+                    .publish_catalog_update("server", catalog.into_changes())
+                    .await;
             }
             let key = target
                 .playlist_key_by_identity(Some(&id), "mix", &cancel)
@@ -2520,43 +2441,58 @@ mod tests {
                 .unwrap();
             if revision == 2 {
                 assert!(
-                    library::CollectionQuery {
-                        kind: library::CollectionKind::Playlists {
+                    library::CatalogQuery {
+                        subject: library::CatalogSubject::Playlists {
                             source: (None).into(),
-                            sort: library::PlaylistSort::Position
+                            sort: library::CatalogSort::Position
                         },
                         folder: None,
                         filter: ("").to_string(),
                         descending: false,
-                        favorites_only: false
+                        favorites_only: false,
+                        downloaded_only: false,
+                        activity: false,
                     }
                     .rows(&target, 0, 140, &cancel)
                     .await
-                    .map(|rows| rows.playlists())
+                    .map(|rows| match rows {
+                        library::CatalogRows::Playlists(rows) => rows,
+                        _ => unreachable!("catalog page projection"),
+                    })
                     .unwrap()
                     .is_empty()
                 );
                 continue;
             }
             let key = key.expect("shared pin resolves from the receiving source cache");
-            let row = target
-                .playlist_rows(&[key], &cancel)
-                .await
-                .unwrap()
-                .pop()
-                .unwrap();
+            let row = library::CatalogQuery::keys(
+                library::CatalogKind::Playlist,
+                None,
+                (&[key]).iter().map(|key| key.raw()).collect(),
+            )
+            .rows(&target, 0, (&[key]).len(), &cancel)
+            .await
+            .map(|rows| match rows {
+                library::CatalogRows::Playlists(rows) => rows,
+                _ => unreachable!("typed catalog projection"),
+            })
+            .unwrap()
+            .pop()
+            .unwrap();
             assert_eq!(row.name, "Server mix");
             assert_eq!(row.track_count, 140);
             assert!(!row.writable);
-            assert_eq!(row.artwork_binding.as_deref(), Some(art.as_slice()));
-            let entries = target
-                .song_playlist_rows(
-                    &library::SongQuery::new(library::SongScope::Playlist(key)),
-                    0,
-                    140,
-                    &cancel,
-                )
+            let candidates: Vec<library::ArtworkCandidate> =
+                serde_json::from_slice(row.artwork_binding.as_deref().unwrap()).unwrap();
+            let native: Vec<library::ArtworkCandidate> = serde_json::from_slice(&art).unwrap();
+            assert_eq!(candidates.first(), native.first());
+            let entries = (&library::CatalogQuery::tracks(library::TrackScope::Playlist(key)))
+                .rows(&target, 0, 140, &cancel)
                 .await
+                .map(|rows| match rows {
+                    library::CatalogRows::PlaylistEntries(rows) => rows,
+                    _ => unreachable!("typed song projection"),
+                })
                 .unwrap();
             let first = if revision == 0 {
                 "track-0"
@@ -2564,7 +2500,7 @@ mod tests {
                 "track-139"
             };
             assert_eq!(
-                entries[0].media_uri,
+                entries[0].track.media_uri,
                 library::source_entity_uri(&id, "track", first)
             );
             assert_eq!(entries.len(), 140);
@@ -2877,21 +2813,72 @@ mod tests {
             .await
             .unwrap();
         profile
-            .write_records(&[ConnectRecord {
-                kind: "preference".into(),
-                key: "theme".into(),
-                value: Some(json!("dark")),
-            }])
+            .write_records(
+                &["preference", "playlist_artwork"].map(|kind| ConnectRecord {
+                    kind: kind.into(),
+                    key: "saved".into(),
+                    value: Some(json!("retained")),
+                }),
+            )
             .await
             .unwrap();
         profile.export_snapshot(&snapshot).await.unwrap();
         assert_eq!(profile.sync_cursor("peer", true).await.unwrap(), 0);
         profile.acknowledge_sync("peer", true, 12).await.unwrap();
         profile.acknowledge_sync("peer", false, 24).await.unwrap();
+        let retained: Vec<(String, Vec<u8>)> = {
+            let mut connection = database_connection(&profile.connection).await.unwrap();
+            let retained = sqlx::query_as("SELECT name,snapshot FROM documents ORDER BY name")
+                .fetch_all(&mut *connection)
+                .await
+                .unwrap();
+            sqlx::raw_sql(
+                "INSERT OR IGNORE INTO projection SELECT kind,object_key,payload FROM local_values;
+                INSERT OR IGNORE INTO history_pending SELECT name FROM documents;
+                INSERT INTO history_acknowledgements SELECT 'peer',name,version FROM documents;
+                INSERT INTO documents(name,snapshot,revision,version) VALUES('cache_artwork:old',X'00',1,X'');
+                INSERT INTO projection VALUES('cache_artwork','old','null');
+                INSERT INTO local_values VALUES('cache_artwork','old','null');
+                INSERT INTO history_pending VALUES('cache_artwork:old');
+                INSERT INTO history_acknowledgements VALUES('peer','cache_artwork:old',X'');
+                INSERT INTO documents(name,snapshot,revision,version) VALUES('cache_lyrics:old',X'00',1,X'');
+                INSERT INTO projection VALUES('cache_lyrics','old','null');
+                INSERT INTO local_values VALUES('cache_lyrics','old','null');
+                INSERT INTO history_pending VALUES('cache_lyrics:old');
+                INSERT INTO history_acknowledgements VALUES('peer','cache_lyrics:old',X'');",
+            )
+            .execute(&mut *connection)
+            .await
+            .unwrap();
+            retained
+        };
         drop(profile);
         let profile = ProfileStore::open(&path, 1, KEY.parse().unwrap())
             .await
             .unwrap();
+        {
+            let mut connection = database_connection(&profile.connection).await.unwrap();
+            let saved: Vec<(String, Vec<u8>)> =
+                sqlx::query_as("SELECT name,snapshot FROM documents ORDER BY name")
+                    .fetch_all(&mut *connection)
+                    .await
+                    .unwrap();
+            assert_eq!(saved, retained);
+            for table in [
+                "projection",
+                "local_values",
+                "history_pending",
+                "history_acknowledgements",
+            ] {
+                let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                    "SELECT count(*) FROM {table}"
+                )))
+                .fetch_one(&mut *connection)
+                .await
+                .unwrap();
+                assert_eq!(count, 2, "{table}");
+            }
+        }
         assert_eq!(profile.sync_cursor("peer", true).await.unwrap(), 12);
         assert_eq!(profile.sync_cursor("peer", false).await.unwrap(), 24);
         profile

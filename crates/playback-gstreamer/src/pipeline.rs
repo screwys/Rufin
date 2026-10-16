@@ -111,7 +111,7 @@ impl PlayerPipeline {
             audio_graph: None,
             visualizer_probe: None,
             current_stream: None,
-            queued_loudness: Arc::new(Mutex::new(TrackLoudness::default())),
+            queued_loudness: Arc::new(Mutex::new(None)),
             gapless: Arc::new(Mutex::new(GaplessPlayback::default())),
             playback_rate: DEFAULT_PLAYBACK_RATE,
             segment: Arc::new(Mutex::new(SegmentPlayback::default())),
@@ -528,6 +528,21 @@ impl PlayerPipeline {
         }));
     }
 
+    pub(super) fn update_loudness(&mut self, loudness: &TrackLoudness) {
+        {
+            let gapless = lock_recover(&self.gapless);
+            if gapless.pending.is_none() {
+                *lock_recover(&self.queued_loudness) = Some(loudness.clone());
+            }
+        }
+        if let Some(stream) = self.current_stream.as_mut() {
+            stream.loudness = Some(loudness.clone());
+        }
+        if let Some(graph) = self.audio_graph.as_mut() {
+            graph.set_loudness(loudness.clone());
+        }
+    }
+
     pub(super) fn configure_audio(
         &mut self,
         settings: &BackendAudioSettings,
@@ -546,8 +561,7 @@ impl PlayerPipeline {
             self.playback_rate,
             self.current_stream
                 .as_ref()
-                .map(|stream| stream.loudness.clone())
-                .unwrap_or_default(),
+                .and_then(|stream| stream.loudness.clone()),
             Arc::clone(&self.queued_loudness),
         )?;
         graph
@@ -756,7 +770,7 @@ impl PlayerPipeline {
         self.id = None;
         self.initial_stream_started = false;
         self.current_stream = None;
-        *lock_recover(&self.queued_loudness) = TrackLoudness::default();
+        *lock_recover(&self.queued_loudness) = None;
         *lock_recover(&self.gapless) = GaplessPlayback::default();
         *lock_recover(&self.segment) = SegmentPlayback::default();
         self.module_decoder.store(false, Ordering::Relaxed);

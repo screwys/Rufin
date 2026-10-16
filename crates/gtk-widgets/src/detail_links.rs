@@ -105,8 +105,8 @@ mod tests {
     use super::*;
 
     use library::{
-        AlbumArtistLink, AlbumKey, AlbumRow, ArtistKey, SourceKey, TrackArtistLink, TrackKey,
-        TrackRow,
+        AlbumArtistLink, AlbumKey, AlbumView, ArtistKey, SourceKey, TrackArtistLink, TrackKey,
+        TrackView,
     };
 
     #[test]
@@ -116,8 +116,8 @@ mod tests {
         assert_eq!(markup(&links), "A label without a relationship");
         assert_eq!(links.route_for_link("0"), None);
 
-        track.artist = "First feat. Second".to_string();
-        track.artists = vec![credit(3, "First"), credit(4, "Second")];
+        track.metadata.artist = "First feat. Second".to_string();
+        track.links.artists = vec![credit(3, "First"), credit(4, "Second")];
         let links = track_artist_links(&track);
         assert_eq!(
             markup(&links),
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn track_artist_links_fall_back_to_album_credits_without_parsing_the_label() {
         let mut track = track("Display name");
-        track.album_artists = vec![credit(4, "Canonical artist")];
+        track.links.album_artists = vec![credit(4, "Canonical artist")];
         let links = track_artist_links(&track);
         assert_eq!(
             markup(&links),
@@ -151,10 +151,10 @@ mod tests {
     #[test]
     fn folder_metadata_links_artist_and_album_destinations() {
         let mut track = track("Artist");
-        track.artists = vec![credit(3, "Artist")];
-        track.album = "Album".to_string();
-        track.album_key = Some(AlbumKey::from_raw(8));
-        track.album_media_uri = Some(uri("album", 8));
+        track.links.artists = vec![credit(3, "Artist")];
+        track.metadata.album = "Album".to_string();
+        track.links.album_key = Some(AlbumKey::from_raw(8));
+        track.links.album_media_uri = Some(uri("album", 8));
         let links = track_artist_album_links(&track);
         assert_eq!(
             links.route_for_link("0"),
@@ -170,7 +170,7 @@ mod tests {
     fn album_and_track_album_artist_links_keep_all_credits() {
         let credits = vec![credit(5, "First"), credit(6, "Second")];
         let mut album = album();
-        album.album_artists = vec![album_credit(5, "First"), album_credit(6, "Second")];
+        album.links.album_artists = vec![album_credit(5, "First"), album_credit(6, "Second")];
         let links = album_artist_links(&album);
         assert_eq!(
             links.route_for_link("0"),
@@ -181,7 +181,7 @@ mod tests {
             Some(Route::AlbumArtistDetail(uri("artist", 6)))
         );
         let mut track = track("First, Second");
-        track.album_artists = credits;
+        track.links.album_artists = credits;
         let links = track_album_artist_links(&track);
         assert_eq!(
             markup(&links),
@@ -226,59 +226,71 @@ mod tests {
         }
     }
 
-    fn track(display_artist: &str) -> TrackRow {
-        TrackRow {
-            audio_properties: Default::default(),
-            source_name: String::new(),
-            source_path: None,
+    fn track(display_artist: &str) -> TrackView {
+        TrackView {
             track_key: TrackKey::from_raw(1),
             source_key: Some(SourceKey::from_raw(1)),
             source_id: Some("source".to_string()),
             object_id: Some("track".to_string()),
-            album_key: Some(AlbumKey::from_raw(1)),
-            album_media_uri: None,
-            title: "Track".to_string(),
-            album: "Album".to_string(),
-            artist: display_artist.to_string(),
-            album_display_artist: None,
-            duration_millis: 1,
-            disc_number: 1,
-            track_number: 1,
-            year: None,
-            release_date: None,
-            date_added: None,
             media_uri: library::source_entity_uri(
                 &library::SourceId::new("source"),
                 "track",
                 "track",
             ),
-            source_format: None,
-            comment: None,
-            bpm: None,
-            musicbrainz_recording_id: None,
-            musicbrainz_release_track_id: None,
-            cue_path: None,
-            cue_start_millis: None,
-            cue_end_millis: None,
-            loudness_analysis_key: [0; 32],
             artwork_binding: None,
-            favorite: false,
-            rating: None,
-            last_played: None,
-            play_count: 0,
-            skip_count: 0,
-            is_downloaded: false,
-            musicbrainz_album_id: None,
-            musicbrainz_release_group_id: None,
-            primary_artist_musicbrainz_id: None,
-            artists: Vec::new(),
-            album_artists: Vec::new(),
-            genres: Vec::new(),
+            metadata: library::TrackMetadata {
+                audio_properties: Default::default(),
+                title: "Track".to_string(),
+                album: "Album".to_string(),
+                artist: display_artist.to_string(),
+                album_display_artist: None,
+                duration_millis: 1,
+                disc_number: 1,
+                track_number: 1,
+                year: None,
+                release_date: None,
+                date_added: None,
+                source_format: None,
+                comment: None,
+                bpm: None,
+                musicbrainz_recording_id: None,
+                musicbrainz_release_track_id: None,
+                musicbrainz_album_id: None,
+                musicbrainz_release_group_id: None,
+                primary_artist_musicbrainz_id: None,
+                ..Default::default()
+            },
+            access: library::TrackAccess {
+                source_name: String::new(),
+                source_path: None,
+                cue_path: None,
+                cue_start_millis: None,
+                cue_end_millis: None,
+                loudness_analysis_key: [0; 32],
+                is_downloaded: false,
+                ..Default::default()
+            },
+            links: library::TrackLinks {
+                album_key: Some(AlbumKey::from_raw(1)),
+                album_media_uri: None,
+                artists: Vec::new(),
+                album_artists: Vec::new(),
+                genres: Vec::new(),
+                ..Default::default()
+            },
+            state: library::TrackState {
+                favorite: false,
+                rating: None,
+                last_played: None,
+                play_count: 0,
+                skip_count: 0,
+                ..Default::default()
+            },
         }
     }
 
-    fn album() -> AlbumRow {
-        AlbumRow {
+    fn album() -> AlbumView {
+        AlbumView {
             album_key: AlbumKey::from_raw(1),
             source_key: SourceKey::from_raw(1),
             object_id: "album".to_string(),
@@ -287,26 +299,38 @@ mod tests {
                 "album",
                 "album",
             ),
-            title: "Album".to_string(),
-            display_artist: "First, Second".to_string(),
-            year: None,
-            release_date: None,
-            date_added: None,
-            musicbrainz_release_id: None,
-            musicbrainz_release_group_id: None,
-            is_compilation: None,
             release_lookup_identity: None,
             artwork_binding: None,
-            favorite: false,
-            rating: None,
-            play_count: 0,
-            last_played: None,
-            track_count: 0,
-            duration_millis: 0,
-            downloaded_count: 0,
-            album_artists: Vec::new(),
-            genres: Vec::new(),
-            release_types: Vec::new(),
+            metadata: library::AlbumMetadata {
+                title: "Album".to_string(),
+                artist: "First, Second".to_string(),
+                year: None,
+                release_date: None,
+                date_added: None,
+                musicbrainz_release_id: None,
+                musicbrainz_release_group_id: None,
+                is_compilation: None,
+                release_types: Vec::new(),
+                ..Default::default()
+            },
+            state: library::TrackState {
+                favorite: false,
+                rating: None,
+                play_count: 0,
+                last_played: None,
+                ..Default::default()
+            },
+            summary: library::CollectionSummary {
+                track_count: 0,
+                duration_millis: 0,
+                downloaded_count: 0,
+                ..Default::default()
+            },
+            links: library::AlbumLinks {
+                album_artists: Vec::new(),
+                genres: Vec::new(),
+                ..Default::default()
+            },
         }
     }
 }

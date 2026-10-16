@@ -14,7 +14,7 @@ use crate::playback::PlaybackOwner;
 use crate::release_update::ReleaseUpdateOwner;
 use crate::scrobbling::ScrobblingOwner;
 use crate::settings::{SettingsFile, SettingsOwner, platform_secret_store};
-use crate::source::{SourceBootstrap, SourceOutputs, SourceOwner};
+use crate::source::{SourceOutputs, SourceOwner};
 use crate::waveform::WaveformOwner;
 
 /// Runs an application host with Rufin's worker runtime available on its calling thread.
@@ -58,38 +58,62 @@ where
         .map(|source| source.configuration.source_id.clone())
         .collect::<Vec<_>>();
     let store_path = paths.store_file();
-    let (database, temporary_store) = match library::Database::open_installation(
-            &store_path, &paths.legacy_store_file(), &paths.catalog_file(),
-            &configured_source_ids, stored.sources.selected_source_id.as_ref(),
-        ).await {
-            Ok(database) => Ok((database, false)),
-            Err(error) if error.is_store_path_io() => {
-                warn!(%error, path=%store_path.display(), "could not use the durable Store path; startup will continue with temporary storage");
-                let directory = tempfile::Builder::new().prefix("rufin-store-").tempdir().map_err(string_error)?.keep();
-                library::Database::open_with_legacy_catalog(
-                    directory.join("store.sqlite"), paths.catalog_file(),
-                    &configured_source_ids,stored.sources.selected_source_id.as_ref(),
-                ).await.map(|database|(database,true))
-            }
-            Err(error) => Err(error),
-    }.map_err(string_error)?;
-    let library = Arc::new(database);
-    library.set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers);
-    for configured in &stored.sources.configured {
-        if let Err(error) = library
-            .reconcile_source(
-                &configured.configuration.source_id,
-                &configured.configuration.kind,
-                &configured.configuration.name,
-            )
-            .await
-        {
-            warn!(%error, source_id=%configured.configuration.source_id, "could not reconcile configured source mapping");
+    let (database, temporary_store, replaced_store) = match library::Database::open_installation(
+        &store_path,
+        &paths.legacy_store_file(),
+        &paths.catalog_file(),
+        &configured_source_ids,
+        stored.sources.selected_source_id.as_ref(),
+    )
+    .await
+    {
+        Ok(database) => (database, false, false),
+        Err(error) => {
+            let replaced = !error.is_store_unavailable();
+            let replacement = if replaced {
+                warn!(%error, path=%store_path.display(), "could not open the Store; replacing it");
+                async {
+                    for suffix in ["", "-wal", "-shm"] {
+                        let mut file = store_path.as_os_str().to_os_string();
+                        file.push(suffix);
+                        match tokio::fs::remove_file(std::path::PathBuf::from(file)).await {
+                            Ok(()) => {}
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(error) => return Err(library::LibraryError::Io(error)),
+                        }
+                    }
+                    library::Database::open(&store_path).await
+                }
+                .await
+            } else {
+                Err(error)
+            };
+            let (database, temporary) = match replacement {
+                Ok(database) => (database, false),
+                Err(error) if error.is_store_unavailable() => {
+                    warn!(%error, path=%store_path.display(), "could not access the durable Store; startup will continue with temporary storage");
+                    let directory = tempfile::Builder::new()
+                        .prefix("rufin-store-")
+                        .tempdir()
+                        .map_err(string_error)?
+                        .keep();
+                    (
+                        library::Database::open(directory.join("store.sqlite"))
+                            .await
+                            .map_err(string_error)?,
+                        true,
+                    )
+                }
+                Err(error) => return Err(string_error(error)),
+            };
+            (database, temporary, replaced)
         }
-    }
-    if let Err(error) = library.ensure_default_smart_playlists().await {
-        warn!(%error, "could not initialize default Smart playlists; startup will continue");
-    }
+    };
+    let library = Arc::new(database);
+    library
+        .set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers)
+        .await
+        .map_err(string_error)?;
     let scrobbling_library = library.as_ref().clone();
     let scrobbling_runtime = runtime.clone();
     let scrobbling_settings = stored.scrobbling_runtime_settings();
@@ -123,6 +147,7 @@ where
         }
     };
     let downloads = downloads::Downloads::new(
+        artwork.clone(),
         paths.downloads_dir(),
         library.as_ref().clone(),
         runtime.clone(),
@@ -138,11 +163,7 @@ where
     );
     let release_history = release_updates.initial_history();
 
-    let SourceBootstrap {
-        owner: source,
-        configured,
-        operation,
-    } = SourceOwner::open_dormant(
+    let source = SourceOwner::open_dormant(
         artwork.clone(),
         library.clone(),
         downloads.clone(),
@@ -154,7 +175,37 @@ where
             discovery: discovery_events,
         },
     );
-    artwork.install_database(Arc::clone(&library));
+    if let Err(error) = artwork.install_database(Arc::clone(&library)).await {
+        warn!(%error, "could not import cached artwork previews");
+    }
+    if !stored.ui.recent_search_results.is_empty() {
+        let uris = stored
+            .ui
+            .recent_search_results
+            .iter()
+            .map(|row| row.media_uri.clone())
+            .collect::<Vec<_>>();
+        match library
+            .artwork_bindings(&uris, &library::ReadCancellation::new())
+            .await
+        {
+            Ok(bindings) => {
+                if let Err(error) = settings.update(|stored| {
+                    for (recent, binding) in
+                        stored.ui.recent_search_results.iter_mut().zip(bindings)
+                    {
+                        if binding.is_some() {
+                            recent.artwork_binding = binding;
+                        }
+                    }
+                    Ok(())
+                }) {
+                    warn!(%error, "could not update recent search artwork");
+                }
+            }
+            Err(error) => warn!(%error, "could not read recent search artwork"),
+        }
+    }
     let artwork_source = Arc::downgrade(&source);
     artwork.install_source_resolver(move |source_id| {
         artwork_source
@@ -214,6 +265,7 @@ where
     let settings_downloads = downloads.clone();
     let settings_scrobbling = Arc::clone(&scrobbling);
     let settings_library = Arc::clone(&library);
+    let settings_runtime = runtime.clone();
     let settings_handle = SettingsOwner::new(
         settings.clone(),
         Arc::clone(&secrets),
@@ -221,8 +273,13 @@ where
             if previous.ui.application.prefer_distinct_track_covers
                 != current.ui.application.prefer_distinct_track_covers
             {
-                settings_library
-                    .set_distinct_track_covers(current.ui.application.prefer_distinct_track_covers);
+                let library = Arc::clone(&settings_library);
+                let enabled = current.ui.application.prefer_distinct_track_covers;
+                settings_runtime.spawn(async move {
+                    if let Err(error) = library.set_distinct_track_covers(enabled).await {
+                        warn!(%error, "could not update artwork preference");
+                    }
+                });
             }
             if previous.ui.rich_presence != current.ui.rich_presence
                 || previous.ui.application.private_mode != current.ui.application.private_mode
@@ -287,7 +344,30 @@ where
         runtime.clone(),
         paths.data_dir().join("backups"),
     );
+    if replaced_store
+        && !temporary_store
+        && let Err(error) = backup.restore_latest().await
+    {
+        warn!(%error, "could not restore the latest scheduled backup; startup will continue with the new Store");
+    }
     backup.start();
+    let stored = settings.load();
+
+    for configured in &stored.sources.configured {
+        if let Err(error) = library
+            .reconcile_source(
+                &configured.configuration.source_id,
+                &configured.configuration.kind,
+                &configured.configuration.name,
+            )
+            .await
+        {
+            warn!(%error, source_id=%configured.configuration.source_id, "could not reconcile configured source mapping");
+        }
+    }
+    if let Err(error) = library.ensure_default_smart_playlists().await {
+        warn!(%error, "could not initialize default Smart playlists; startup will continue");
+    }
 
     let connect = crate::connect::ConnectOwner::new(
         paths.data_dir().join("connect"),
@@ -336,8 +416,8 @@ where
             lyrics: lyrics_receiver,
             release_updates: release_update_receiver,
         },
-        configured_sources: configured,
-        source_operation: operation,
+        configured_sources: source.list_sources(),
+        source_operation: source.operation().borrow().clone(),
         release_history,
     })
 }

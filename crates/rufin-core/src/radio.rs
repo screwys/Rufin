@@ -1,13 +1,13 @@
 //! Provider-first Radio/AutoDJ with bounded Database fallback; Random is Database-owned.
 
-use std::sync::{Arc, Weak};
+use std::sync::Weak;
 
 use crate::playback::RandomPlayRequest;
 use library::{Database, RadioSeed, ReadCancellation, SourceKey};
 use playback::Provenance;
 use sources::{Source, SourceRadioSeed};
 
-use crate::playback::{actor::Playback, random_u64, state::AutoDjRequest};
+use crate::playback::random_u64;
 use crate::runtime::SelectedLibrary;
 use crate::source::SourceOwner;
 
@@ -55,54 +55,10 @@ pub async fn queue_random(
         return Ok(true);
     }
     queue.play_selection(crate::playback::PlayRequest::from_input(
-        library::QueueLoad::media_uris(order, Provenance::Random),
+        library::QueueLoad::track_keys(order, Provenance::Random),
         request.placement,
     ));
     Ok(false)
-}
-
-pub(crate) fn request_auto_dj(
-    runtime: tokio::runtime::Handle,
-    database: Arc<Database>,
-    source_owner: Weak<SourceOwner>,
-    playback: Playback,
-    request: AutoDjRequest,
-) {
-    let selected = source_owner
-        .upgrade()
-        .and_then(|owner| owner.selected_library());
-    runtime.spawn(async move {
-        let candidates = radio_candidates(
-            &database,
-            source_owner,
-            selected,
-            RadioSeed::Track(request.seed_media_uri.clone()),
-            request.requested_count,
-            &ReadCancellation::new(),
-        )
-        .await;
-        match candidates {
-            Ok(candidates) => {
-                let media = database
-                    .queue_items_for_uris(&candidates, &ReadCancellation::new())
-                    .await
-                    .unwrap_or_default();
-                let _ = playback.complete_auto_dj_candidates(
-                    request.seed_run,
-                    request.seed_media_uri,
-                    media,
-                    request.requested_count,
-                );
-            }
-            Err(error) => {
-                let _ = playback.auto_dj_unavailable(
-                    request.seed_run,
-                    request.seed_media_uri,
-                    Some(error),
-                );
-            }
-        }
-    });
 }
 
 pub(crate) async fn radio_candidates(
@@ -112,7 +68,7 @@ pub(crate) async fn radio_candidates(
     seed: RadioSeed,
     requested: usize,
     cancellation: &ReadCancellation,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<library::TrackKey>, String> {
     let requested = requested.min(library::QUEUE_CONTEXT_LIMIT);
     let owner = source_owner.upgrade();
     let seed_source = database
@@ -134,7 +90,7 @@ pub(crate) async fn radio_candidates(
                 .await
         {
             candidates = database
-                .admit_radio_candidates(source_key, &seed, &ids, cancellation)
+                .recommended_track_keys(source_key, &seed, &ids, cancellation)
                 .await
                 .map_err(|error| error.to_string())?;
         }

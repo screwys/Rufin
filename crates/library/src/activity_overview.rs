@@ -1,8 +1,8 @@
 //! Calendar reports over the existing accepted-listen history.
 
 use crate::{
-    AlbumRow, ArtistRow, CalendarActivityPeriod, Database, HistoryRow, LibraryResult,
-    ReadCancellation,
+    AlbumView, ArtistView, CalendarActivityPeriod, Database, LibraryResult, ReadCancellation,
+    TrackView,
 };
 
 // Released versions also stored monthly counts. Keep those in the same report;
@@ -33,9 +33,9 @@ pub struct ActivityTotals {
 pub struct ActivityOverview {
     pub totals: ActivityTotals,
     pub previous: ActivityTotals,
-    pub tracks: Vec<HistoryRow>,
-    pub albums: Vec<AlbumRow>,
-    pub artists: Vec<ArtistRow>,
+    pub tracks: Vec<TrackView>,
+    pub albums: Vec<AlbumView>,
+    pub artists: Vec<ArtistView>,
     pub genres: Vec<GenreActivity>,
 }
 
@@ -110,26 +110,28 @@ impl Database {
                 .fetch_all(&mut *connection)
                 .await?;
         let album_sql = format!(
-            "{PERIOD_ACTIVITY} SELECT album.media_uri,sum(plays) plays FROM period_activity listen
+            "{PERIOD_ACTIVITY} SELECT album.album_key,sum(plays) plays FROM period_activity listen
              JOIN tracks track USING(media_uri) JOIN albums album USING(album_key)
              GROUP BY album.album_key ORDER BY plays DESC,album.sort_text,album.album_key LIMIT ?3"
         );
-        let albums = sqlx::query_as::<_, (String, i64)>(sqlx::AssertSqlSafe(album_sql.as_str()))
-            .bind(&from)
-            .bind(&until)
-            .bind(limit as i64)
-            .fetch_all(&mut *connection)
-            .await?;
-        let artist_sql = format!("{PERIOD_ACTIVITY} SELECT artist.media_uri,sum(plays) plays FROM period_activity listen
+        let albums =
+            sqlx::query_as::<_, (crate::AlbumKey, i64)>(sqlx::AssertSqlSafe(album_sql.as_str()))
+                .bind(&from)
+                .bind(&until)
+                .bind(limit as i64)
+                .fetch_all(&mut *connection)
+                .await?;
+        let artist_sql = format!("{PERIOD_ACTIVITY} SELECT artist.artist_key,sum(plays) plays FROM period_activity listen
              JOIN tracks track USING(media_uri) JOIN track_artists credit USING(track_key)
              JOIN artists artist USING(artist_key)
              GROUP BY artist.artist_key ORDER BY plays DESC,artist.sort_text,artist.artist_key LIMIT ?3");
-        let artists = sqlx::query_as::<_, (String, i64)>(sqlx::AssertSqlSafe(artist_sql.as_str()))
-            .bind(&from)
-            .bind(&until)
-            .bind(limit as i64)
-            .fetch_all(&mut *connection)
-            .await?;
+        let artists =
+            sqlx::query_as::<_, (crate::ArtistKey, i64)>(sqlx::AssertSqlSafe(artist_sql.as_str()))
+                .bind(&from)
+                .bind(&until)
+                .bind(limit as i64)
+                .fetch_all(&mut *connection)
+                .await?;
         let genre_sql = format!(
             "{PERIOD_ACTIVITY} SELECT genre.name,sum(plays) plays FROM period_activity listen
              JOIN tracks track USING(media_uri) JOIN track_genres credit USING(track_key)
@@ -142,39 +144,23 @@ impl Database {
             .bind(limit as i64)
             .fetch_all(&mut *connection)
             .await?;
-        drop(connection);
-        drop(_permit);
         let keys = tracks.iter().map(|(key, _)| *key).collect::<Vec<_>>();
-        let mut history = self.history_rows(&keys, cancellation).await?;
-        let mut track_rows = Vec::new();
-        for (key, count) in tracks {
-            let row = if let Some(index) = history.iter().position(|row| row.track_key == key) {
-                Some(history.remove(index))
-            } else {
-                // A monthly baseline predates individual listen records.
-                self.track_rows(&[key], cancellation)
-                    .await?
-                    .pop()
-                    .map(history_from_track)
-            };
-            if let Some(mut row) = row {
-                row.play_count = count;
-                track_rows.push(row);
-            }
+        let mut track_rows = crate::tracks::load_track_rows(&mut connection, &keys).await?;
+        crate::activity::overlay_history(&mut connection, &mut track_rows, None).await?;
+        for (row, (_, count)) in track_rows.iter_mut().zip(tracks) {
+            row.state.play_count = count;
         }
-        let mut album_rows = Vec::new();
-        for (uri, count) in albums {
-            if let Some(mut row) = self.album_row_by_media_uri(&uri, cancellation).await? {
-                row.play_count = count;
-                album_rows.push(row);
-            }
+        let keys = albums.iter().map(|(key, _)| *key).collect::<Vec<_>>();
+        let mut album_rows =
+            crate::collections::load_album_rows(&mut connection, &keys, false).await?;
+        for (row, (_, count)) in album_rows.iter_mut().zip(albums) {
+            row.state.play_count = count;
         }
-        let mut artist_rows = Vec::new();
-        for (uri, count) in artists {
-            if let Some(mut row) = self.artist_row_by_media_uri(&uri, cancellation).await? {
-                row.play_count = count;
-                artist_rows.push(row);
-            }
+        let keys = artists.iter().map(|(key, _)| *key).collect::<Vec<_>>();
+        let mut artist_rows =
+            crate::collections::load_artist_rows(&mut connection, &keys, false, false).await?;
+        for (row, (_, count)) in artist_rows.iter_mut().zip(artists) {
+            row.state.play_count = count;
         }
         Ok(ActivityOverview {
             totals,
@@ -192,45 +178,6 @@ impl Database {
             UNION SELECT period FROM legacy_activity WHERE length(period)=7 AND item_kind='track' AND play_count>0
             ORDER BY 1 DESC")
             .fetch_all(&mut *connection).await?)
-    }
-}
-
-fn history_from_track(row: crate::TrackRow) -> HistoryRow {
-    HistoryRow {
-        track_key: row.track_key,
-        audio_properties: row.audio_properties,
-        source_path: row.source_path,
-        source_name: Some(row.source_name),
-        media_uri: row.media_uri,
-        title: row.title,
-        artist: row.artist,
-        album: row.album,
-        album_media_uri: row.album_media_uri,
-        artists: row.artists,
-        album_artists: row.album_artists,
-        album_display_artist: row.album_display_artist,
-        artwork_binding: row.artwork_binding,
-        duration_millis: row.duration_millis,
-        disc_number: Some(row.disc_number),
-        track_number: Some(row.track_number),
-        year: row.year,
-        release_date: row.release_date,
-        date_added: row.date_added,
-        bpm: row.bpm,
-        genre: row
-            .genres
-            .iter()
-            .map(|genre| genre.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
-        play_count: row.play_count,
-        source_format: row.source_format,
-        musicbrainz_recording_id: row.musicbrainz_recording_id,
-        musicbrainz_release_track_id: row.musicbrainz_release_track_id,
-        last_played: row.last_played,
-        favorite: row.favorite,
-        rating: row.rating,
-        is_downloaded: row.is_downloaded,
     }
 }
 

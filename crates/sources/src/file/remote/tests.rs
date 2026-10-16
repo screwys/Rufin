@@ -3,7 +3,8 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use library::{Database, ReadCancellation, Scan, SourceId};
+use library::{Database, ReadCancellation, SourceId};
+use sqlx::Connection as _;
 use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::any};
 
 use super::{FileAuthentication, FileCredentials, FileSource, FileSourceSettings};
@@ -56,6 +57,9 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
     Mock::given(any())
         .respond_with(move |request: &Request| match request.method.as_str() {
             "PROPFIND" => {
+                if request.url.path() != "/" {
+                    return ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>{}</d:href><d:propstat><d:prop><d:resourcetype/><d:getcontentlength>{}</d:getcontentlength></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>", request.url.path(), audio.len()));
+                }
                 let mut entries = String::new();
                 if request.headers.get("depth").unwrap() == "1" {
                     for name in ["a.wav", "b.wav", "c.wav", "c.lrc"].into_iter().chain((response_cue.load(Ordering::Relaxed) == 1).then_some("album.cue")) {
@@ -95,25 +99,30 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
         let database = Database::open(directory.path().join("library.sqlite3"))
             .await
             .unwrap();
-        let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |update| {
-            let _ = sender.send(update);
+        let (sender, mut emit) = tokio::sync::mpsc::unbounded_channel();
+        database.observe_catalog(move |identity, update| {
+            let source_key = identity.unwrap().1;
+            let _ = sender.send((source_key, update));
             std::future::ready(())
         });
+        database
+            .reconcile_source(source.source_id(), "webdav", "DAV")
+            .await
+            .unwrap();
         let progress = std::sync::Mutex::new(Vec::new());
         source
-            .manual_refresh(
+            .acquire_catalog(
                 &database,
-                "DAV",
                 &|value| progress.lock().unwrap().push(value),
                 Arc::new(false.into()),
+                true,
             )
             .await
             .unwrap();
-        let publication = updates.try_recv().expect("catalog update");
+        let (catalog_source, publication) = emit.try_recv().expect("catalog update");
         assert!(publication.metadata);
         let rows = database
-            .mapping_track_page(publication.source, None, None, 10, &ReadCancellation::new())
+            .mapping_track_page(catalog_source, None, None, 10, &ReadCancellation::new())
             .await
             .unwrap();
         assert_eq!(rows.len(), 2);
@@ -206,28 +215,33 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
     let database = Database::open(directory.path().join("library.sqlite3"))
         .await
         .unwrap();
-    let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    database.observe_catalog(move |update| {
-        let _ = sender.send(update);
+    let (sender, mut emit) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |identity, update| {
+        let source_key = identity.unwrap().1;
+        let _ = sender.send((source_key, update));
         std::future::ready(())
     });
     let mut identities = Vec::new();
+    database
+        .reconcile_source(source.source_id(), "webdav", "Nextcloud")
+        .await
+        .unwrap();
     for round in 0..3 {
         let before = server.received_requests().await.unwrap().len();
         if round == 2 {
             generation.store(1, Ordering::Relaxed);
         }
         source
-            .refresh_if_needed(
+            .acquire_catalog(
                 &database,
-                "Nextcloud",
                 &|_| panic!("automatic inventory must not replace artwork progress"),
                 Arc::new(false.into()),
+                false,
             )
             .await
             .unwrap();
         let publication = if round == 1 {
-            assert!(updates.try_recv().is_err());
+            assert!(emit.try_recv().is_err());
             database
                 .cached_source(source.source_id().as_str(), &ReadCancellation::new())
                 .await
@@ -235,9 +249,9 @@ async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_id
                 .unwrap()
                 .source
         } else {
-            let update = updates.try_recv().expect("catalog update");
+            let (catalog_source, update) = emit.try_recv().expect("catalog update");
             assert!(update.metadata);
-            update.source
+            catalog_source
         };
         let requests = server.received_requests().await.unwrap();
         assert!(
@@ -347,55 +361,89 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
     })
     .unwrap();
     let source = FileSource::open(&configuration, Some(credential)).unwrap();
+    let source_owner = crate::Source::new(
+        configuration.source_id.clone(),
+        crate::Implementation::Files(source),
+    );
+    let crate::Implementation::Files(source) = &source_owner.implementation else {
+        unreachable!()
+    };
     let directory = tempfile::tempdir().unwrap();
-    let database = Database::open(directory.path().join("library.sqlite3"))
-        .await
-        .unwrap();
-    let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    database.observe_catalog(move |update| {
-        let _ = sender.send(update);
+    let database_path = directory.path().join("library.sqlite3");
+    let database = Database::open(&database_path).await.unwrap();
+    let (sender, mut emit) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |identity, update| {
+        let source_key = identity.unwrap().1;
+        let _ = sender.send((source_key, update));
         std::future::ready(())
     });
     let mut first_uri = String::new();
     let mut reads_after_first = 0;
-    for round in 0..4 {
+    for round in 0..5 {
         let before = server.received_requests().await.unwrap().len();
-        if round == 3 {
+        if round == 4 {
             expired.store(true, Ordering::Relaxed);
         }
-        if round == 2 {
+        if round == 3 {
             *path.write().unwrap() = "renamed.wav".into();
-            let mut interrupted = Scan::begin(
-                &database,
-                configuration.source_id.as_str(),
-                "DAV",
+            database
+                .reconcile_source(
+                    &library::SourceId::new(configuration.source_id.as_str()),
+                    "dav",
+                    "DAV",
+                )
+                .await
+                .unwrap();
+            let catalog_source_id = (configuration.source_id.as_str()).to_string();
+            let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+            catalog.start_observation().await.unwrap();
+            let cancelled = std::sync::atomic::AtomicBool::new(false);
+            let interrupted = source
+                .acquire_catalog(
+                    &mut catalog,
+                    &|progress| {
+                        if progress.stage == crate::SourceReadStage::Tracks {
+                            cancelled.store(true, Ordering::Relaxed);
+                        }
+                    },
+                    &|| cancelled.load(Ordering::Relaxed),
+                )
+                .await;
+            assert!(
+                matches!(interrupted, Err(crate::SourceError::Cancelled)),
+                "interrupted after native listing, before metadata"
+            );
+        }
+        database
+            .reconcile_source(
+                &library::SourceId::new(configuration.source_id.as_str()),
                 "dav",
-                None,
+                "DAV",
             )
             .await
             .unwrap();
-            source
-                .stage_inventory(&mut interrupted, &|_| {}, &|| false)
-                .await
-                .unwrap();
-            drop(interrupted);
-        }
-        let mut scan = Scan::begin(
-            &database,
-            configuration.source_id.as_str(),
-            "DAV",
-            "dav",
-            None,
-        )
-        .await
-        .unwrap();
+        let catalog_source_id = (configuration.source_id.as_str()).to_string();
+        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+        let stamp = catalog.start_observation().await.unwrap();
+        let catalog_source = catalog.source;
         source
-            .stage_catalog(&database, &mut scan, &|_| {}, &|| false)
+            .acquire_catalog(&mut catalog, &|_| {}, &|| false)
             .await
             .unwrap();
-        scan.finish().await.unwrap();
-        let publication = updates.try_recv().expect("catalog update");
-        if sync_supported && matches!(round, 1 | 3) {
+        catalog.purge_source_file_absences(stamp).await.unwrap();
+        let changes = catalog.into_changes();
+        database
+            .publish_catalog_update(&catalog_source_id, changes.clone())
+            .await;
+        if changes.changed() || !changes.track_rekeys.is_empty() {
+            let (published_source, publication) = emit.try_recv().expect("catalog update");
+            assert_eq!(published_source, catalog_source);
+            assert_eq!(publication, changes);
+        } else {
+            assert!(emit.try_recv().is_err());
+        }
+        let publication = changes;
+        if sync_supported && matches!(round, 1 | 2 | 4) {
             let requests = server.received_requests().await.unwrap();
             let current = &requests[before..];
             assert!(current.iter().any(|r| r.method.as_str() == "REPORT"));
@@ -404,11 +452,11 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
                     .iter()
                     .filter(|r| r.headers.get("depth").is_some_and(|depth| depth == "1"))
                     .count(),
-                usize::from(round == 3),
+                usize::from(round == 4),
                 "Unchanged sync reuses listings; expired tokens reacquire them"
             );
         }
-        if round == 1 {
+        if matches!(round, 1 | 2) {
             assert!(
                 !publication.changed(),
                 "unchanged inventory: {publication:?}"
@@ -420,13 +468,31 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
             );
         }
         let tracks = database
-            .mapping_track_page(publication.source, None, None, 10, &ReadCancellation::new())
+            .mapping_track_page(catalog_source, None, None, 10, &ReadCancellation::new())
             .await
             .unwrap();
-        assert_eq!(tracks.len(), 1);
+        assert_eq!(
+            tracks.len(),
+            1,
+            "sync={sync_supported} round={round} {tracks:?}"
+        );
         if round == 0 {
             first_uri = tracks[0].media_uri.clone();
             reads_after_first = gets.load(Ordering::Relaxed);
+            let mut stored = sqlx::SqliteConnection::connect_with(
+                &sqlx::sqlite::SqliteConnectOptions::new().filename(&database_path),
+            )
+            .await
+            .unwrap();
+            sqlx::query("UPDATE local_files SET parse_version=7,parsed_stamp=json_set(parsed_stamp,'$[3]',7) WHERE kind IN ('media','cue')")
+                .execute(&mut stored)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE tracks SET metadata=jsonb_remove(metadata,'$.album_tags')")
+                .execute(&mut stored)
+                .await
+                .unwrap();
+            stored.close().await.unwrap();
         } else {
             assert_eq!(tracks[0].media_uri, first_uri);
         }
@@ -434,7 +500,19 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
             library::source_entity_parts(&first_uri).unwrap().0,
             configuration.source_id
         );
-        if round == 2 {
+        if matches!(round, 1 | 2) {
+            let observation = database
+                .local_file_page(catalog_source, None, 10, &ReadCancellation::new())
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|file| file.kind == library::LocalFileKind::Media)
+                .unwrap();
+            assert_eq!(observation.parse_version, Some(7));
+            assert_eq!(observation.state, library::LocalFileState::Accepted);
+        }
+        if round == 3 {
+            assert!(gets.load(Ordering::Relaxed) > reads_after_first);
             let observation = database
                 .observed_media_file(&first_uri)
                 .await
@@ -443,7 +521,7 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
             assert!(observation.path.ends_with("/renamed.wav"));
             assert!(
                 database
-                    .local_file_page(publication.source, None, 128, &ReadCancellation::new())
+                    .local_file_page(catalog_source, None, 128, &ReadCancellation::new())
                     .await
                     .unwrap()
                     .iter()
@@ -494,6 +572,14 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
         let audio = wave();
         match request.method.as_str() {
             "PROPFIND" => {
+                if request.url.path() != "/music/" {
+                    let name = request.url.path().rsplit('/').next().unwrap();
+                    let (native_id, current_revision, size) = if name == "audio.wav" { ("audio-id", revision, audio.len()) }
+                        else if round != 4 && name == cue_name { ("cue-id", "cue-1", cue.len()) }
+                        else if round != 4 && name == "second.cue" { ("second-cue-id", "cue-1", cue.len()) }
+                        else { return ResponseTemplate::new(404); };
+                    return ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\" xmlns:o=\"http://owncloud.org/ns\"><d:response><d:href>{}</d:href><d:propstat><d:prop><d:getcontentlength>{size}</d:getcontentlength><d:getetag>&quot;{current_revision}&quot;</d:getetag><o:fileid>{native_id}</o:fileid><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>",request.url.path()));
+                }
                 let mut files = String::new();
                 if request.headers.get("depth").unwrap() == "1" {
                     for (name, id, revision, size) in [("audio.wav", "audio-id", revision, audio.len()), (cue_name, "cue-id", "cue-1", cue.len()), ("second.cue", "second-cue-id", "cue-1", cue.len())] {
@@ -536,13 +622,21 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
         .configuration(SourceId::new("webdav:cue-test"), "webdav", "DAV".into())
         .unwrap();
     let source = FileSource::open(&configuration, None).unwrap();
+    let source_owner = crate::Source::new(
+        configuration.source_id.clone(),
+        crate::Implementation::Files(source),
+    );
+    let crate::Implementation::Files(source) = &source_owner.implementation else {
+        unreachable!()
+    };
     let folder = tempfile::tempdir().unwrap();
     let database = Database::open(folder.path().join("library.sqlite3"))
         .await
         .unwrap();
-    let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    database.observe_catalog(move |update| {
-        let _ = sender.send(update);
+    let (sender, mut emit) = tokio::sync::mpsc::unbounded_channel();
+    database.observe_catalog(move |identity, update| {
+        let source_key = identity.unwrap().1;
+        let _ = sender.send((source_key, update));
         std::future::ready(())
     });
     let mut original_uris = Vec::new();
@@ -550,21 +644,35 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
     for pass in 0..5 {
         round.store(pass, Ordering::Relaxed);
         let before = server.received_requests().await.unwrap().len();
-        let mut scan = Scan::begin(
-            &database,
-            configuration.source_id.as_str(),
-            "DAV",
-            "dav",
-            None,
-        )
-        .await
-        .unwrap();
-        source
-            .stage_catalog(&database, &mut scan, &|_| {}, &|| false)
+        database
+            .reconcile_source(
+                &library::SourceId::new(configuration.source_id.as_str()),
+                "dav",
+                "DAV",
+            )
             .await
             .unwrap();
-        scan.finish().await.unwrap();
-        let publication = updates.try_recv().expect("catalog update");
+        let catalog_source_id = (configuration.source_id.as_str()).to_string();
+        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+        let stamp = catalog.start_observation().await.unwrap();
+        let catalog_source = catalog.source;
+        source
+            .acquire_catalog(&mut catalog, &|_| {}, &|| false)
+            .await
+            .unwrap();
+        catalog.purge_source_file_absences(stamp).await.unwrap();
+        let changes = catalog.into_changes();
+        database
+            .publish_catalog_update(&catalog_source_id, changes.clone())
+            .await;
+        if changes.changed() || !changes.track_rekeys.is_empty() {
+            let (published_source, publication) = emit.try_recv().expect("catalog update");
+            assert_eq!(published_source, catalog_source);
+            assert_eq!(publication, changes);
+        } else {
+            assert!(emit.try_recv().is_err());
+        }
+        let publication = changes;
         if pass == 1 {
             assert!(!publication.changed(), "{publication:?}");
             assert_eq!(
@@ -586,7 +694,7 @@ async fn dav_cue_inventory_preserves_segments_and_refreshes_backing_audio() {
         }
         previous_reads = reads.load(Ordering::Relaxed);
         let rows = database
-            .mapping_track_page(publication.source, None, None, 10, &ReadCancellation::new())
+            .mapping_track_page(catalog_source, None, None, 10, &ReadCancellation::new())
             .await
             .unwrap();
         assert_eq!(

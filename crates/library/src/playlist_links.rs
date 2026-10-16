@@ -3,6 +3,7 @@ use crate::{Database, LibraryError, LibraryResult, PlaylistKey, PlaylistPathMode
 use sqlx::{Connection, Row, SqliteConnection};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlaylistFileLink {
     pub playlist: PlaylistKey,
     pub source_id: Option<SourceId>,
@@ -66,7 +67,8 @@ mod tests {
                 .create_playlist(
                     None,
                     &format!("Root {index}"),
-                    &crate::SongSelection::Uris((&[]).to_vec().into()),
+                    &crate::CatalogQuery::uris(crate::CatalogKind::Track, (&[]).to_vec())
+                        .selection(),
                 )
                 .await?
                 .unwrap()
@@ -191,11 +193,11 @@ mod tests {
             .create_playlist(
                 None,
                 "Music",
-                &crate::SongSelection::Uris(
-                    (&["file:///song.flac".into(), "file:///two.flac".into()])
-                        .to_vec()
-                        .into(),
-                ),
+                &crate::CatalogQuery::uris(
+                    crate::CatalogKind::Track,
+                    (&["file:///song.flac".into(), "file:///two.flac".into()]).to_vec(),
+                )
+                .selection(),
             )
             .await?
             .unwrap()
@@ -218,7 +220,7 @@ mod tests {
             .create_playlist(
                 None,
                 "Second",
-                &crate::SongSelection::Uris((&[]).to_vec().into()),
+                &crate::CatalogQuery::uris(crate::CatalogKind::Track, (&[]).to_vec()).selection(),
             )
             .await?
             .unwrap()
@@ -247,10 +249,14 @@ mod tests {
         );
         check_eq!(
             database
-                .add_playlist_songs(
+                .add_playlist_tracks(
                     None,
                     playlist,
-                    &crate::SongSelection::Uris((&["file:///song.flac".into()]).to_vec().into()),
+                    &crate::CatalogQuery::uris(
+                        crate::CatalogKind::Track,
+                        (&["file:///song.flac".into()]).to_vec()
+                    )
+                    .selection(),
                     true
                 )
                 .await?,
@@ -277,10 +283,14 @@ mod tests {
             .mark_playlist_file_synced(playlist, "second")
             .await?;
         database
-            .add_playlist_songs(
+            .add_playlist_tracks(
                 None,
                 playlist,
-                &crate::SongSelection::Uris((&["file:///three.flac".into()]).to_vec().into()),
+                &crate::CatalogQuery::uris(
+                    crate::CatalogKind::Track,
+                    (&["file:///three.flac".into()]).to_vec(),
+                )
+                .selection(),
                 false,
             )
             .await?;
@@ -297,9 +307,12 @@ mod tests {
         let entries = database
             .playlist_edit_entries(
                 playlist,
-                &crate::SongQuery {
-                    sort: Some(crate::TrackSort::Position),
-                    ..crate::SongQuery::new(crate::SongScope::Playlist(playlist))
+                &crate::CatalogQuery {
+                    subject: crate::CatalogSubject::Tracks {
+                        scope: crate::TrackScope::Playlist(playlist),
+                        sort: Some(crate::CatalogSort::Position),
+                    },
+                    ..crate::CatalogQuery::tracks(crate::TrackScope::Playlist(playlist))
                 }
                 .selection(),
                 &crate::ReadCancellation::default(),
@@ -387,7 +400,7 @@ mod tests {
             .create_playlist(
                 None,
                 "Playlist",
-                &crate::SongSelection::Uris((&[]).to_vec().into()),
+                &crate::CatalogQuery::uris(crate::CatalogKind::Track, (&[]).to_vec()).selection(),
             )
             .await?
             .unwrap()

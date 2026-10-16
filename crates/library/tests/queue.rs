@@ -1,14 +1,12 @@
 use library::{
-    QueueItem, QueueProvenance, QueueRepeatMode, QueueRow, ReadCancellation,
-    SmartPlaylistDefinition, TrackSort,
+    CatalogSort, QueueProvenance, QueueRepeatMode, QueueTransferRow, ReadCancellation,
+    SmartPlaylistDefinition, TrackReference,
 };
 
 use super::support::{connection, fixture, persist_queue};
 
-fn queue_row(item: QueueItem, position: usize) -> QueueRow {
-    QueueRow {
-        occurrence_id: None,
-        track_key: None,
+fn queue_row(item: TrackReference, position: usize) -> QueueTransferRow {
+    QueueTransferRow {
         received_from_connect: false,
         item,
         position,
@@ -26,7 +24,7 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
                 (0..205)
                     .map(|index| {
                         (
-                            QueueItem::direct(
+                            TrackReference::direct(
                                 format!("https://example.test/{}", index % 3),
                                 format!("Occurrence {index}"),
                                 "Artist",
@@ -76,23 +74,41 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
         .unwrap();
     assert_eq!(
         receiver
-            .track_uris(
-                &prepared
-                    .entries
-                    .iter()
-                    .map(|entry| entry.track_key)
-                    .collect::<Vec<_>>(),
+            .selected_track_uris(
+                &library::CatalogQuery::keys(
+                    library::CatalogKind::Track,
+                    None,
+                    (&prepared
+                        .entries
+                        .iter()
+                        .map(|entry| entry.track_key)
+                        .collect::<Vec<_>>())
+                        .iter()
+                        .map(|key| key.raw())
+                        .collect()
+                )
+                .selection(),
+                None,
                 &ReadCancellation::new()
             )
             .await
             .unwrap(),
         database
-            .track_uris(
-                &queue
-                    .entries
-                    .iter()
-                    .map(|entry| entry.track_key)
-                    .collect::<Vec<_>>(),
+            .selected_track_uris(
+                &library::CatalogQuery::keys(
+                    library::CatalogKind::Track,
+                    None,
+                    (&queue
+                        .entries
+                        .iter()
+                        .map(|entry| entry.track_key)
+                        .collect::<Vec<_>>())
+                        .iter()
+                        .map(|key| key.raw())
+                        .collect()
+                )
+                .selection(),
+                None,
                 &ReadCancellation::new()
             )
             .await
@@ -151,28 +167,55 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
             .all(|entry| entry.received_from_connect)
     );
     let final_page = receiver.queue_transfer_page(&restored, 200).await.unwrap();
-    assert_eq!(final_page.rows[4].title, "Occurrence 0");
+    assert_eq!(final_page.rows[4].item.metadata.title, "Occurrence 204");
 }
 
 #[tokio::test]
 async fn continuation_uses_local_artwork_before_starting_the_current_track() {
     let fixture = fixture().await;
     let mut connection = connection(&fixture.path).await;
-    let local_binding = vec![4, 5, 6];
-    sqlx::query("UPDATE tracks SET artwork_binding=?1 WHERE media_uri=?2")
-        .bind(&local_binding)
-        .bind(&fixture.track_uris[0])
-        .execute(&mut connection)
-        .await
-        .unwrap();
-    let mut item = QueueItem::direct(
+    let [local_binding, transferred_binding] =
+        ["local-cover", "transferred-cover"].map(|item_id| {
+            serde_json::to_vec(&[library::ArtworkCandidate::new(
+                library::ArtworkImage::Native {
+                    source_id: library::SourceId::new("source"),
+                    item_id: item_id.into(),
+                    tag: None,
+                },
+                None,
+            )])
+            .unwrap()
+        });
+    {
+        let objects =
+            sqlx::query_scalar::<_, String>("SELECT object_id FROM tracks WHERE media_uri=?1")
+                .bind(&fixture.track_uris[0])
+                .fetch_all(&mut connection)
+                .await
+                .unwrap();
+        fixture
+            .database
+            .catalog("source", None)
+            .await
+            .unwrap()
+            .set_source_artwork(
+                "track",
+                &objects
+                    .into_iter()
+                    .map(|id| (id, Some((&local_binding).to_vec())))
+                    .collect::<Vec<_>>(),
+            )
+            .await
+            .unwrap();
+    };
+    let mut item = TrackReference::direct(
         &fixture.track_uris[0],
         "Transferred title",
         "Artist",
         "Album",
         180_000,
     );
-    item.artwork_binding = Some(vec![1, 2, 3]);
+    item.artwork_binding = Some(transferred_binding);
     let page = library::QueueTransferPage {
         offset: 0,
         rows: vec![queue_row(item, 0)],
@@ -189,10 +232,10 @@ async fn continuation_uses_local_artwork_before_starting_the_current_track() {
         .await
         .unwrap();
     assert_eq!(
-        prepared.rows[0].artwork_binding.as_ref(),
+        prepared.rows[0].track.artwork_binding.as_ref(),
         Some(&local_binding)
     );
-    assert_eq!(prepared.rows[0].title, "Alpha");
+    assert_eq!(prepared.rows[0].track.metadata.title, "Alpha");
 }
 
 #[tokio::test]
@@ -201,7 +244,7 @@ async fn interrupted_or_invalid_continuation_retains_saved_queue() {
     let database = &fixture.database;
     let before = database.restore_queue().await.unwrap();
     let row = queue_row(
-        QueueItem::direct(
+        TrackReference::direct(
             "https://example.test/track",
             "Track",
             "Artist",
@@ -241,21 +284,24 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
     let cancel = ReadCancellation::new();
     let mut media = fixture
         .database
-        .queue_items_for_uris(&fixture.track_uris[..2], &cancel)
+        .track_references_for_uris(&fixture.track_uris[..2], &cancel)
         .await
         .expect("materialize catalog media");
-    media[0].artwork_binding = Some(b"shared-art".to_vec());
+    media[0].artwork_binding = Some(br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/72fc22518d84ba750d9fd4179a8fd2c4","image":{"kind":"native","source_id":"source","item_id":"shared-art","tag":null},"blur_hash":null}]"#.to_vec());
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE tracks SET artwork_binding=?1 WHERE media_uri=?2")
-        .bind(b"shared-art".as_slice())
-        .bind(&media[0].media_uri)
-        .execute(&mut raw)
-        .await
-        .expect("publish effective catalog artwork");
+    {
+        let objects =
+            sqlx::query_scalar::<_, String>("SELECT object_id FROM tracks WHERE media_uri=?1")
+                .bind(&media[0].media_uri)
+                .fetch_all(&mut raw)
+                .await
+                .unwrap();
+        fixture.database.catalog("source", None).await.unwrap().set_source_artwork("track", &objects.into_iter().map(|id|(id,Some((br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/72fc22518d84ba750d9fd4179a8fd2c4","image":{"kind":"native","source_id":"source","item_id":"shared-art","tag":null},"blur_hash":null}]"#.as_slice()).to_vec()))).collect::<Vec<_>>()).await.unwrap();
+    };
     let mut unavailable = media[1].clone();
     unavailable.media_uri = "https://example.invalid/offline.flac".to_string();
-    unavailable.title = "Offline".to_string();
-    unavailable.artwork_binding = Some(b"saved-art".to_vec());
+    unavailable.metadata.title = "Offline".to_string();
+    unavailable.artwork_binding = Some(br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/071c303459c767b7d3d7208c71f5bbf6","image":{"kind":"native","source_id":"source","item_id":"saved-art","tag":null},"blur_hash":null}]"#.to_vec());
 
     let occurrences = vec![
         queue_row(unavailable, 2),
@@ -264,7 +310,6 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
     ];
     persist_queue(
         &fixture.database,
-        fixture.source,
         &occurrences,
         Some(0),
         1_500,
@@ -290,21 +335,20 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
     assert_eq!(restored.progress_millis, 1_500);
     assert_eq!(restored.repeat_mode, QueueRepeatMode::All);
     assert!(restored.shuffled);
-    assert_eq!(restored.rows[0].title, "Offline");
-    assert_eq!(restored.rows[0].artwork_binding.as_deref(), None);
+    assert_eq!(restored.rows[0].track.metadata.title, "Offline");
+    assert_eq!(
+        restored.rows[0].track.artwork_binding,
+        occurrences[0].item.artwork_binding
+    );
 
-    let page = fixture
-        .database
-        .prepared_queue_page(&restored.rows)
-        .await
-        .unwrap();
-    assert_eq!(page[1].media_uri, page[2].media_uri);
+    let page = &restored.rows;
+    assert_eq!(page[1].track.media_uri, page[2].track.media_uri);
     assert_ne!(page[1].position, page[2].position);
     assert_eq!(
-        page[1].artwork_binding.as_deref(),
-        Some(b"shared-art".as_slice())
+        page[1].track.artwork_binding.as_deref(),
+        Some(br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/72fc22518d84ba750d9fd4179a8fd2c4","image":{"kind":"native","source_id":"source","item_id":"shared-art","tag":null},"blur_hash":null}]"#.as_slice())
     );
-    assert_eq!(page[0].title, "Offline");
+    assert_eq!(page[0].track.metadata.title, "Offline");
 }
 
 #[tokio::test]
@@ -312,7 +356,7 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
     let fixture = fixture().await;
     let mut media = fixture
         .database
-        .queue_items_for_uris(&fixture.track_uris[..3], &ReadCancellation::new())
+        .track_references_for_uris(&fixture.track_uris[..3], &ReadCancellation::new())
         .await
         .expect("materialize media");
     for (position, media) in media.iter_mut().enumerate() {
@@ -325,7 +369,6 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
         .collect::<Vec<_>>();
     persist_queue(
         &fixture.database,
-        fixture.source,
         &occurrences,
         Some(0),
         0,
@@ -355,11 +398,11 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
             .find(|candidate| candidate.position == position)
             .expect("restore occurrence");
         assert_eq!(
-            restored_occurrence.media_uri,
+            restored_occurrence.track.media_uri,
             format!("file:///transition-{position}.flac")
         );
         assert_eq!(
-            restored_occurrence.title,
+            restored_occurrence.track.metadata.title,
             ["Alpha", "Beta", "Gamma"][position]
         );
         assert_eq!(restored.current_index, Some(position));
@@ -371,28 +414,34 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
 async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
-    let album = fixture
-        .database
-        .song_route_page(
-            &library::SongQuery {
-                sort: Some(TrackSort::TrackNumber),
-                ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
-            },
-            library::RouteSeedWindow::top(),
-            &cancel,
-        )
+    let album = (match (&library::CatalogQuery {
+        subject: library::CatalogSubject::Tracks {
+            scope: library::TrackScope::Album(fixture.albums[0]),
+            sort: Some(CatalogSort::TrackNumber),
+        },
+        ..library::CatalogQuery::tracks(library::TrackScope::Album(fixture.albums[0]))
+    })
+        .page(&fixture.database, library::RouteSeedWindow::top(), &cancel)
         .await
         .expect("Album Track order")
-        .first_rows
-        .into_iter()
-        .map(|row| row.media_uri)
-        .collect::<Vec<_>>();
+        .rows
+    {
+        library::CatalogRows::Tracks(rows) => rows,
+        _ => unreachable!(),
+    })
+    .into_iter()
+    .map(|row| row.media_uri)
+    .collect::<Vec<_>>();
     let playlist_key = fixture
         .database
         .create_playlist(
             Some(fixture.source),
             "Collection",
-            &library::SongSelection::Uris((&fixture.track_uris[..3]).to_vec().into()),
+            &library::CatalogQuery::uris(
+                library::CatalogKind::Track,
+                (&fixture.track_uris[..3]).to_vec(),
+            )
+            .selection(),
         )
         .await
         .expect("create Playlist")
@@ -401,7 +450,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
     let playlist = fixture
         .database
         .selected_track_uris(
-            &library::SongQuery::new(library::SongScope::Playlist(playlist_key)).selection(),
+            &library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist_key)).selection(),
             None,
             &cancel,
         )
@@ -415,7 +464,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
     let smart = fixture
         .database
         .selected_track_uris(
-            &library::SongQuery::new(library::SongScope::Smart {
+            &library::CatalogQuery::tracks(library::TrackScope::Smart {
                 key: smart_key,
                 source: Some(fixture.source),
                 now: 0,
@@ -431,7 +480,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
         assert!(!order.is_empty(), "{name} order");
         let media = fixture
             .database
-            .queue_items_for_uris(&order, &cancel)
+            .track_references_for_uris(&order, &cancel)
             .await
             .expect("materialize URI order");
         assert_eq!(
@@ -448,7 +497,7 @@ async fn source_items(
     database: &library::Database,
     input: library::QueueLoad,
     seed: Option<u64>,
-) -> Vec<QueueItem> {
+) -> Vec<TrackReference> {
     let page = database.queue_entries(input, None).await.unwrap();
     let mut entries = page.entries;
     if seed.is_some() {
@@ -463,7 +512,10 @@ async fn source_items(
             )
             .await
             .unwrap();
-        items.extend(page.into_iter().map(|row| row.item.clone()));
+        items.extend(
+            page.into_iter()
+                .map(|row| library::TrackReference::from(row.track.clone())),
+        );
     }
     items
 }
@@ -472,44 +524,49 @@ async fn source_items(
 async fn source_membership_matches_track_view_sort_filter_and_null_order() {
     let fixture = fixture().await;
     for sort in [
-        TrackSort::Title,
-        TrackSort::TrackNumber,
-        TrackSort::Artist,
-        TrackSort::AlbumArtist,
-        TrackSort::Album,
-        TrackSort::Year,
-        TrackSort::ReleaseDate,
-        TrackSort::DateAdded,
-        TrackSort::LastPlayed,
-        TrackSort::PlayCount,
-        TrackSort::UserRating,
-        TrackSort::Genre,
-        TrackSort::Bpm,
-        TrackSort::Duration,
-        TrackSort::Favorite,
+        CatalogSort::Title,
+        CatalogSort::TrackNumber,
+        CatalogSort::Artist,
+        CatalogSort::AlbumArtist,
+        CatalogSort::Album,
+        CatalogSort::Year,
+        CatalogSort::ReleaseDate,
+        CatalogSort::DateAdded,
+        CatalogSort::LastPlayed,
+        CatalogSort::PlayCount,
+        CatalogSort::UserRating,
+        CatalogSort::Genre,
+        CatalogSort::Bpm,
+        CatalogSort::Duration,
+        CatalogSort::Favorite,
     ] {
         for descending in [false, true] {
             for filter in ["", "a"] {
-                let view = fixture
-                    .database
-                    .song_route_page(
-                        &library::SongQuery {
-                            filter: (filter).into(),
-                            sort: Some(sort),
-                            descending: descending,
-                            ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
-                        },
+                let view = (&library::CatalogQuery {
+                    subject: library::CatalogSubject::Tracks {
+                        scope: library::TrackScope::Tracks(fixture.source),
+                        sort: Some(sort),
+                    },
+                    filter: (filter).into(),
+                    descending: descending,
+                    ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
+                })
+                    .page(
+                        &fixture.database,
                         library::RouteSeedWindow::top(),
                         &ReadCancellation::new(),
                     )
                     .await
                     .unwrap();
-                let input = library::QueueLoad::Songs(vec![(
-                    library::SongQuery {
+                let input = library::QueueLoad::Tracks(vec![(
+                    library::CatalogQuery {
                         filter: filter.into(),
-                        sort: Some(sort),
                         descending: descending,
-                        ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+                        subject: library::CatalogSubject::Tracks {
+                            scope: library::TrackScope::Tracks(fixture.source),
+                            sort: Some(sort),
+                        },
+                        ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
                     }
                     .selection(),
                     library::QueueProvenance::Context {
@@ -521,10 +578,13 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
                 let items = source_items(&fixture.database, input, None).await;
                 assert_eq!(
                     items.iter().map(|row| &row.media_uri).collect::<Vec<_>>(),
-                    view.first_rows
-                        .iter()
-                        .map(|row| &row.media_uri)
-                        .collect::<Vec<_>>(),
+                    (match &view.rows {
+                        library::CatalogRows::Tracks(rows) => rows,
+                        _ => unreachable!(),
+                    })
+                    .iter()
+                    .map(|row| &row.media_uri)
+                    .collect::<Vec<_>>(),
                     "{sort:?}, descending={descending}, filter={filter}"
                 );
             }
@@ -547,8 +607,9 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
         .unwrap();
     let mut raw = connection(&fixture.path).await;
     for seed in [None, Some(71)] {
-        let input = library::QueueLoad::Songs(vec![(
-            library::SongQuery::new(library::SongScope::Playlist(imported.playlist)).selection(),
+        let input = library::QueueLoad::Tracks(vec![(
+            library::CatalogQuery::tracks(library::TrackScope::Playlist(imported.playlist))
+                .selection(),
             library::QueueProvenance::Context {
                 context_id: "duplicates".into(),
                 context_title: None,
@@ -579,8 +640,8 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
         let items = source_items(&fixture.database, input, seed).await;
         assert_eq!(items.len(), 140);
         assert!(items.iter().all(|item| item == &items[0]));
-        assert_eq!(items[0].title, "Repeated");
-        assert_eq!(items[0].duration_millis, 3000);
+        assert_eq!(items[0].metadata.title, "Repeated");
+        assert_eq!(items[0].metadata.duration_millis, 3000);
         let queue = library::QueueRestore {
             order: (0..page.entries.len() as u32).rev().collect(),
             entries: page.entries.into(),
@@ -588,7 +649,7 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
         };
         let (positions, count) = fixture
             .database
-            .queue_search_page(&queue, &items[0].title, 100, 40)
+            .queue_search_page(&queue, &items[0].metadata.title, 100, 40)
             .await
             .unwrap();
         assert_eq!(positions, (100..140).collect::<Vec<_>>());
@@ -630,16 +691,6 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
         500
     );
     assert_eq!(restored.entries.len(), 500);
-    let rows = fixture
-        .database
-        .prepared_queue_page(&restored.rows)
-        .await
-        .unwrap();
-    assert_eq!(rows.len(), restored.rows.len());
-    for (row, occurrence) in rows.iter().zip(&restored.rows) {
-        assert_eq!(row.position, occurrence.position);
-        assert_eq!(row.title, occurrence.title);
-    }
     let mut exported = Vec::new();
     fixture
         .database
@@ -658,24 +709,24 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
 #[tokio::test]
 async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_formats() {
     let fixture = fixture().await;
-    let mut unavailable = QueueItem::direct(
+    let mut unavailable = TrackReference::direct(
         "https://example.test/İstanbul/%2Fduplicate?name=\"a\"",
         "Unavailable title",
         "Saved artist",
         "Saved album",
         12345,
     );
-    unavailable.album_display_artist = Some("Saved album artist".into());
-    unavailable.disc_number = Some(2);
-    unavailable.track_number = Some(7);
-    unavailable.year = Some(1998);
-    unavailable.release_date = Some("1998-04-03".into());
-    unavailable.source_format = Some("flac".into());
-    unavailable.musicbrainz_recording_id = Some("recording".into());
-    unavailable.musicbrainz_release_track_id = Some("release-track".into());
-    unavailable.musicbrainz_album_id = Some("album".into());
-    unavailable.musicbrainz_release_group_id = Some("release-group".into());
-    unavailable.primary_artist_musicbrainz_id = Some("artist".into());
+    unavailable.metadata.album_display_artist = Some("Saved album artist".into());
+    unavailable.metadata.disc_number = 2;
+    unavailable.metadata.track_number = 7;
+    unavailable.metadata.year = Some(1998);
+    unavailable.metadata.release_date = Some("1998-04-03".into());
+    unavailable.metadata.source_format = Some("flac".into());
+    unavailable.metadata.musicbrainz_recording_id = Some("recording".into());
+    unavailable.metadata.musicbrainz_release_track_id = Some("release-track".into());
+    unavailable.metadata.musicbrainz_album_id = Some("album".into());
+    unavailable.metadata.musicbrainz_release_group_id = Some("release-group".into());
+    unavailable.metadata.primary_artist_musicbrainz_id = Some("artist".into());
     let rows = [
         QueueProvenance::Context {
             context_title: None,
@@ -688,7 +739,10 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
             source_rank: 2,
         },
         QueueProvenance::Context {
-            context_title: None,
+            context_title: Some(std::sync::Arc::new(library::QueueContextTitle {
+                kind: Some("Playlist".into()),
+                title: "Saved playlist".into(),
+            })),
             context_id: "other \"context\"".into(),
             source_rank: 900,
         },
@@ -708,7 +762,6 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
     .collect::<Vec<_>>();
     persist_queue(
         &fixture.database,
-        fixture.source,
         &rows,
         Some(4),
         42000,
@@ -728,7 +781,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         .database
         .queue_entries(
             library::QueueLoad::items(vec![(
-                QueueItem::direct(&missing_uri, "Missing", "", "", 0),
+                TrackReference::direct(&missing_uri, "Missing", "", "", 0),
                 QueueProvenance::Legacy,
             )]),
             None,
@@ -754,8 +807,11 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
                 restored.source_rank(),
                 [Some(900), Some(2), Some(37), None, None, None, None, None][restored.position]
             );
-            if restored.media_uri == unavailable.media_uri {
-                assert_eq!(restored.item, unavailable);
+            if restored.track.media_uri == unavailable.media_uri {
+                assert_eq!(
+                    library::TrackReference::from(restored.track.clone()),
+                    unavailable
+                );
             }
         }
         let mut source_members = fixture
@@ -804,6 +860,47 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         target
             .database
             .import_queue_jsonl(std::io::Cursor::new(exported))
+            .await
+            .unwrap();
+        assert_eq!(target.database.restore_queue().await.unwrap(), restored);
+        let mut released = header["queue"].clone();
+        for (index, entry) in released["entries"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .enumerate()
+        {
+            entry["occurrence"] = format!("queue:batch{}:{}", index % 2, index / 2).into();
+            entry["playlist_entry_id"] = serde_json::Value::Null;
+            entry
+                .as_object_mut()
+                .unwrap()
+                .remove("received_from_connect");
+        }
+        released["next_id"] = 0.into();
+        let snapshots = restored
+            .rows
+            .iter()
+            .map(|row| {
+                let canonical = state.order[row.position] as usize;
+                serde_json::json!({
+                    "occurrence":released["entries"][canonical]["occurrence"],
+                    "item":TrackReference::from(row.track.clone()),
+                    "canonical_position":canonical,
+                    "playlist_entry_id":null,
+                    "source_index":null,
+                    "provenance":row.provenance,
+                })
+            })
+            .collect::<Vec<_>>();
+        target
+            .database
+            .import_queue_jsonl(std::io::Cursor::new(
+                serde_json::to_vec(&serde_json::json!({
+                    "version":3,"queue":released,"snapshots":snapshots,
+                }))
+                .unwrap(),
+            ))
             .await
             .unwrap();
         assert_eq!(target.database.restore_queue().await.unwrap(), restored);
@@ -862,7 +959,7 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
     let mut rows = (0..205)
         .map(|index| {
             let mut row = queue_row(
-                QueueItem::direct(
+                TrackReference::direct(
                     format!("https://example.test/duplicate/{}", index % 3),
                     format!("Saved title {index}"),
                     "Artist",
@@ -881,7 +978,6 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
         .collect::<Vec<_>>();
     persist_queue(
         &fixture.database,
-        fixture.source,
         &rows,
         Some(150),
         900,
@@ -899,25 +995,24 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
     let metadata = records
         .lines()
         .skip(1)
-        .map(|line| serde_json::from_str::<QueueItem>(line).unwrap())
+        .map(|line| serde_json::from_str::<TrackReference>(line).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(metadata.len(), 3);
     assert_eq!(
         metadata
             .iter()
-            .map(|item| item.title.as_str())
+            .map(|item| item.metadata.title.as_str())
             .collect::<Vec<_>>(),
-        ["Saved title 0", "Saved title 1", "Saved title 2"]
+        ["Saved title 204", "Saved title 202", "Saved title 203"]
     );
     rows.reverse();
     for (position, row) in rows.iter_mut().enumerate() {
         row.position = position;
-        row.item.title = "Changed supplied metadata".into();
+        row.item.metadata.title = "Changed supplied metadata".into();
         row.provenance = QueueProvenance::Radio;
     }
     persist_queue(
         &fixture.database,
-        fixture.source,
         &rows,
         Some(54),
         1200,
@@ -929,18 +1024,27 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
     assert_eq!(
         fixture
             .database
-            .track_uris(
-                &restored
-                    .entries
-                    .iter()
-                    .map(|entry| entry.track_key)
-                    .collect::<Vec<_>>(),
+            .selected_track_uris(
+                &library::CatalogQuery::keys(
+                    library::CatalogKind::Track,
+                    None,
+                    (&restored
+                        .entries
+                        .iter()
+                        .map(|entry| entry.track_key)
+                        .collect::<Vec<_>>())
+                        .iter()
+                        .map(|key| key.raw())
+                        .collect()
+                )
+                .selection(),
+                None,
                 &ReadCancellation::new()
             )
             .await
             .unwrap(),
         rows.iter()
-            .map(|row| row.media_uri.clone())
+            .map(|row| row.item.media_uri.clone())
             .collect::<Vec<_>>()
     );
     assert!(
@@ -951,20 +1055,23 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
     );
     assert_eq!(restored.current_index, Some(54));
     assert_eq!(restored.progress_millis, 1200);
-    assert!(restored.rows.iter().all(
-        |row| row.title == format!("Saved title {}", row.media_uri.rsplit('/').next().unwrap())
-    ));
+    assert!(
+        restored
+            .rows
+            .iter()
+            .all(|row| row.track.metadata.title == "Changed supplied metadata")
+    );
 }
 
 #[tokio::test]
 async fn installed_cursor_queue_retains_displaced_entries_and_play_last() {
     let fixture = fixture().await;
-    let row = |id: &str, uri: &str, source| serde_json::json!({"occurrence":id,"item":QueueItem::direct(uri,uri,"","",1000),"canonical_position":0,"source_index":source,"playlist_entry_id":null,"provenance":"Manual"});
-    let rows = vec![row("old-a", "a", 0), row("old-x", "x", 1)];
+    let row = |id: &str, uri: &str, source| serde_json::json!({"occurrence":id,"item":TrackReference::direct(uri,uri,"","",1000),"canonical_position":0,"source_index":source,"playlist_entry_id":null,"provenance":"Manual"});
+    let rows = vec![row("old-a", "a", 0), row("old-duplicate", "a", 1)];
     let choice = |uri: &str, origin: Option<(usize, usize)>| serde_json::json!({"origin":origin,"media_uri":uri,"fallback":null,"provenance":"Manual"});
     let instruction = |choices: Vec<serde_json::Value>, repeat| serde_json::json!({"input":{"Choices":choices},"repeat":repeat,"seed":null});
-    let saved = serde_json::json!({"occurrences":rows,"current_index":0,"progress_millis":42000,"repeat_mode":"All","shuffled":false,"next_id":20,
-        "sources":[instruction(vec![choice("a",None),choice("b",None),choice("c",None),choice("d",None)],true),instruction(vec![choice("x",None)],true),instruction(vec![choice("b",Some((0,1))),choice("c",Some((0,2)))],false),instruction(vec![choice("z",None)],true)],
+    let saved = serde_json::json!({"occurrences":rows,"current_index":1,"progress_millis":42000,"repeat_mode":"All","shuffled":false,"next_id":20,
+        "sources":[instruction(vec![choice("a",None),choice("b",None),choice("c",None),choice("d",None)],true),instruction(vec![choice("a",None)],true),instruction(vec![choice("b",Some((0,1))),choice("c",Some((0,2)))],false),instruction(vec![choice("z",None)],true)],
         "pending":[{"source":2,"offset":0},{"source":0,"offset":3},{"source":3,"offset":0}]});
     fixture
         .database
@@ -977,19 +1084,28 @@ async fn installed_cursor_queue_retains_displaced_entries_and_play_last() {
     assert_eq!(
         fixture
             .database
-            .track_uris(
-                &restored
-                    .order
-                    .iter()
-                    .map(|index| restored.entries[*index as usize].track_key)
-                    .collect::<Vec<_>>(),
+            .selected_track_uris(
+                &library::CatalogQuery::keys(
+                    library::CatalogKind::Track,
+                    None,
+                    (&restored
+                        .order
+                        .iter()
+                        .map(|index| restored.entries[*index as usize].track_key)
+                        .collect::<Vec<_>>())
+                        .iter()
+                        .map(|key| key.raw())
+                        .collect()
+                )
+                .selection(),
+                None,
                 &ReadCancellation::new()
             )
             .await
             .unwrap(),
-        ["a", "x", "b", "c", "d", "z"]
+        ["a", "a", "b", "c", "d", "z"]
     );
-    assert_eq!(restored.current_index, Some(0));
+    assert_eq!(restored.current_index, Some(1));
     assert_eq!(restored.progress_millis, 42000);
     assert_eq!(restored.repeat_mode, QueueRepeatMode::All);
 }
@@ -1006,7 +1122,7 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
                     (0..2)
                         .map(|index| {
                             (
-                                QueueItem::direct(
+                                TrackReference::direct(
                                     format!("https://example.test/{activation}/{index}"),
                                     format!("Title {index}"),
                                     "",
@@ -1105,7 +1221,7 @@ async fn installed_shuffled_source_keeps_its_exact_pending_order() {
         .iter()
         .take(2)
         .enumerate()
-        .map(|(index, uri)| serde_json::json!({"occurrence":format!("old:{index}"),"item":QueueItem::direct(uri.clone(),uri.clone(),"","",1000),"canonical_position":index,"source_index":0,"playlist_entry_id":null,"provenance":{"Context":{"context_id":"source","context_title":null,"source_rank":index}}}))
+        .map(|(index, uri)| serde_json::json!({"occurrence":format!("old:{index}"),"item":TrackReference::direct(uri.clone(),uri.clone(),"","",1000),"canonical_position":index,"source_index":0,"playlist_entry_id":null,"provenance":{"Context":{"context_id":"source","context_title":null,"source_rank":index}}}))
         .collect::<Vec<_>>();
     let reference = serde_json::json!({
         "scope": {"Tracks": {"source":"source","folder":null,"downloaded_only":false,"favorites_only":false,"recursive":false}},
@@ -1125,12 +1241,21 @@ async fn installed_shuffled_source_keeps_its_exact_pending_order() {
     assert_eq!(
         fixture
             .database
-            .track_uris(
-                &restored
-                    .order
-                    .iter()
-                    .map(|index| restored.entries[*index as usize].track_key)
-                    .collect::<Vec<_>>(),
+            .selected_track_uris(
+                &library::CatalogQuery::keys(
+                    library::CatalogKind::Track,
+                    None,
+                    (&restored
+                        .order
+                        .iter()
+                        .map(|index| restored.entries[*index as usize].track_key)
+                        .collect::<Vec<_>>())
+                        .iter()
+                        .map(|key| key.raw())
+                        .collect()
+                )
+                .selection(),
+                None,
                 &ReadCancellation::new()
             )
             .await
@@ -1145,9 +1270,7 @@ async fn installed_shuffled_source_keeps_its_exact_pending_order() {
 async fn large_source_membership_keeps_metadata_reads_bounded() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("WITH RECURSIVE n(i) AS(VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<20000)
-        INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis)
-        SELECT ?1,'bulk-'||i,'https://example.test/bulk/'||i,'Bulk '||i,'bulk','','',printf('%06d',i),1000 FROM n")
+    sqlx::query("WITH RECURSIVE n(i) AS(VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<20000)\n        INSERT INTO tracks(source_key,object_id,media_uri,metadata,normalized_search,indexed) SELECT ?1,'bulk-'||i,'https://example.test/bulk/'||i,jsonb(json_object('title',COALESCE('Bulk '||i,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE(printf('%06d',i),''),'duration_millis',COALESCE(1000,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('Bulk '||i,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE(printf('%06d',i),''),'duration_millis',COALESCE(1000,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Bulk '||i,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE(printf('%06d',i),''),'duration_millis',COALESCE(1000,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Bulk '||i,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE(printf('%06d',i),''),'duration_millis',COALESCE(1000,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Bulk '||i,''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE(printf('%06d',i),''),'duration_millis',COALESCE(1000,0))),'$.comment'),'')),1 FROM n")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
     for activation in 0..6_usize {
         let selected_index = (activation * 7919) % 20000;
@@ -1162,11 +1285,14 @@ async fn large_source_membership_keeps_metadata_reads_bounded() {
         let page = fixture
             .database
             .queue_entries(
-                library::QueueLoad::Songs(vec![(
-                    library::SongQuery {
+                library::QueueLoad::Tracks(vec![(
+                    library::CatalogQuery {
                         filter: "bulk".into(),
-                        sort: Some(TrackSort::Title),
-                        ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+                        subject: library::CatalogSubject::Tracks {
+                            scope: library::TrackScope::Tracks(fixture.source),
+                            sort: Some(CatalogSort::Title),
+                        },
+                        ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
                     }
                     .selection(),
                     library::QueueProvenance::Context {

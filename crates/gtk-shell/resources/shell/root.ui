@@ -154,6 +154,14 @@
                     </child>
                   </object>
                 </child>
+                <child>
+                  <object class="GtkButton" id="source_download_cancel">
+                    <property name="label" translatable="yes">Cancel</property>
+                    <property name="visible">false</property>
+                    <property name="valign">center</property>
+                    <style><class name="flat"/></style>
+                  </object>
+                </child>
               </object>
             </child>
             <child type="overlay">

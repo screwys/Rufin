@@ -55,7 +55,6 @@ pub struct SourceLocalAccess {
 pub struct SourceLocalAccessSummary {
     pub source_id: SourceId,
     pub access: Option<SourceLocalAccess>,
-    pub status: LocalAccessStatus,
     pub selected_music_folder_name: Option<String>,
     pub album_count: usize,
     pub track_count: usize,
@@ -109,6 +108,7 @@ pub enum SourceProgressStage {
     Playlists,
     Home,
     Artwork,
+    Lyrics,
     Files,
     Finalizing,
 }
@@ -137,6 +137,10 @@ pub enum SourceOperation {
         source_id: SourceId,
         progress: SourceProgress,
     },
+    Downloading {
+        source_id: SourceId,
+        progress: SourceProgress,
+    },
     Failed {
         source_id: Option<SourceId>,
         message: String,
@@ -162,6 +166,7 @@ pub fn source_progress_text(progress: &SourceProgress) -> String {
         SourceProgressStage::Playlists => "playlists",
         SourceProgressStage::Home => "Home",
         SourceProgressStage::Artwork => "artwork",
+        SourceProgressStage::Lyrics => "lyrics",
         SourceProgressStage::Files => "files",
         SourceProgressStage::Finalizing => return localization::tr("Preparing library..."),
     };
@@ -177,10 +182,22 @@ pub fn source_progress_text(progress: &SourceProgress) -> String {
     }
 }
 
+pub fn source_download_text(progress: &SourceProgress) -> String {
+    let message = match progress.stage {
+        SourceProgressStage::Artwork => {
+            localization::msgid("Downloading artwork... {count} checked")
+        }
+        SourceProgressStage::Lyrics => localization::msgid("Downloading lyrics... {count} checked"),
+        _ => return source_progress_text(progress),
+    };
+    localization::tr_with(message, &[("count", &progress.completed.to_string())])
+}
+
 #[cfg_attr(feature = "bindings", uniffi::export)]
 pub fn source_operation_text(operation: &SourceOperation) -> Option<String> {
     match operation {
         SourceOperation::Idle => None,
+        SourceOperation::Downloading { progress, .. } => Some(source_download_text(progress)),
         SourceOperation::Adding { progress } | SourceOperation::Refreshing { progress, .. } => {
             Some(source_progress_text(progress))
         }
@@ -255,11 +272,6 @@ pub enum PlaylistExport {
 }
 
 pub type SourceHandle = Arc<crate::source::SourceOwner>;
-
-/// Commands whose validity is owned by one selected source session.
-///
-/// Rufin embeds this handle in the corresponding [`SelectedLibrary`](super::SelectedLibrary), so
-/// callers cannot pair an operation with a different source or session.
 
 #[cfg(test)]
 mod tests {

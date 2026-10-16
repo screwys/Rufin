@@ -8,13 +8,13 @@ mod records;
 mod search;
 pub use records::{
     AndroidArtistLink, AndroidArtistReleaseGroup, AndroidBreadcrumb, AndroidBrowseDisplay,
-    AndroidBrowseItem, AndroidBrowseRow, AndroidCollectionCategory, AndroidDetailSummary,
-    AndroidFieldValue, AndroidMusicFolder, AndroidMusicFolderState, AndroidPinPage,
-    AndroidPlaylistImport, AndroidRouteDescriptor, AndroidRouteSetting, AndroidScrollSection,
-    AndroidSortField,
+    AndroidBrowseItem, AndroidBrowsePage, AndroidBrowseRow, AndroidCollectionCategory,
+    AndroidDetailSummary, AndroidFieldValue, AndroidMusicFolder, AndroidMusicFolderState,
+    AndroidPinPage, AndroidPlaylistImport, AndroidRouteDescriptor, AndroidRouteSetting,
+    AndroidScrollSection, AndroidSortField,
 };
 
-use library::{CollectionRows, ReadCancellation, SongQuery, SongScope, SongSelection};
+use library::{CatalogQuery, CatalogRows, ReadCancellation, TrackScope, TrackSelection};
 use rufin_core::browse::{BrowseQuery, BrowseRequest, library_list_key};
 use rufin_core::source::folders::FolderProjection;
 use rufin_core::{
@@ -138,7 +138,7 @@ fn home_section(row: &mut AndroidBrowseRow, block: library::HomeBlockKind) {
     row.section_refreshable = block.section_kind().is_some();
 }
 
-fn artist_row(row: library::ArtistRow, album_artist: bool) -> AndroidBrowseRow {
+fn artist_row(row: library::ArtistView, album_artist: bool) -> AndroidBrowseRow {
     let pin = library::source_entity_parts(&row.media_uri).map(|(source_id, _, artist_id)| {
         SidebarPin::Artist {
             source_id,
@@ -169,7 +169,7 @@ pub struct AndroidBrowseQuery {
     favorites_only: bool,
     downloaded_only: bool,
     home_variations: (i64, i64),
-    home_snapshot: tokio::sync::OnceCell<Vec<(AndroidBrowseRow, SongSelection)>>,
+    home_snapshot: tokio::sync::OnceCell<Vec<(AndroidBrowseRow, TrackSelection)>>,
     display: LibraryListSettings,
     album_tracks: LibraryListSettings,
     artist_tracks: LibraryListSettings,
@@ -256,13 +256,6 @@ impl AndroidBrowseQuery {
     }
     fn request(&self) -> BrowseRequest<'_> {
         BrowseRequest {
-            route: &self.route,
-            category: self.category,
-            source: self.selected.as_ref().map(|selected| selected.source_key),
-            folder: self
-                .selected
-                .as_ref()
-                .and_then(|selected| selected.music_folder_key),
             history_source: self
                 .history_current_only
                 .then(|| self.selected().source_id.clone()),
@@ -273,6 +266,16 @@ impl AndroidBrowseQuery {
             downloaded_only: self.downloaded(),
             now: self.now,
             inline_tracks: self.album_detail_layout().then_some(0),
+            ..BrowseRequest::new(
+                &self.route,
+                self.category,
+                self.selected.as_ref().map(|selected| selected.source_key),
+                self.selected
+                    .as_ref()
+                    .and_then(|selected| selected.music_folder_key),
+                &self.display,
+                0,
+            )
         }
     }
 
@@ -291,8 +294,8 @@ impl AndroidBrowseQuery {
             .await
     }
 
-    async fn song_query(&self) -> library::LibraryResult<Option<&SongQuery>> {
-        Ok(self.query().await?.songs())
+    async fn track_query(&self) -> library::LibraryResult<Option<&CatalogQuery>> {
+        Ok(self.query().await?.tracks())
     }
 
     fn downloaded(&self) -> bool {
@@ -312,7 +315,7 @@ impl AndroidBrowseQuery {
 
 #[uniffi::export]
 impl AndroidBrowseQuery {
-    pub async fn selection(self: Arc<Self>) -> Result<Arc<SongSelection>, AndroidError> {
+    pub async fn selection(self: Arc<Self>) -> Result<Arc<TrackSelection>, AndroidError> {
         let runtime = self.runtime.clone();
         runtime
             .spawn(async move {

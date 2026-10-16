@@ -97,7 +97,11 @@ function showPlayback(value) {
     showLyrics({ state: "empty" });
     coverRequest?.abort();
     coverRequest = new AbortController();
-    if (!track) $("mini-cover").replaceChildren(icon("cover-fallback"));
+    if (!track) {
+      $("mini-cover").replaceChildren(icon("cover-fallback"));
+      delete $("mini-cover").dataset.coverIdentity;
+      delete $("mini-cover").dataset.coverFull;
+    }
     if (track) {
       const mediaUri = state.currentMediaUri;
       const mediaRun = state.currentRun;
@@ -116,6 +120,7 @@ function showPlayback(value) {
           $("mini-cover"),
           { uri: track.uri, original: true },
           signal,
+          track.artwork_previews?.[0],
         );
         if (!shown && !signal.aborted)
           $("mini-cover").replaceChildren(icon("cover-fallback"));

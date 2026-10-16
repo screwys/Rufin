@@ -14,11 +14,11 @@ use crate::shell::playlist_picker::refresh_context_playlist_picker;
 use gtk_player::fullscreen::{FullscreenPlaybackRefresh, fullscreen_playback_refresh};
 use gtk_player::state::{NowPlayingPresentation, current_playback_media_id};
 use gtk_widgets::route::Route;
-use rufin_core::runtime::source::source_progress_text;
 use rufin_core::runtime::source::{
     ConfiguredSources, DiscoveryStatus, DiscoveryUpdate, LocalFolder, SourceOperation,
     SourceProgress,
 };
+use rufin_core::runtime::source::{source_download_text, source_progress_text};
 use rufin_core::runtime::{
     CatalogChange, CatalogPublication, ProductReceivers, SourceEvent, SourceNotice,
     SourceNoticeKind, WaveformProjection,
@@ -138,11 +138,6 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
             }
         }
         SourceEvent::Operation(operation) => apply_source_operation(shell, operation),
-        SourceEvent::ArtworkPreparation {
-            source_key,
-            revision,
-            progress,
-        } => apply_source_artwork_preparation(shell, source_key, revision, progress),
         SourceEvent::CatalogPublished(publication) => apply_catalog_publication(shell, publication),
         SourceEvent::Notice(notice) => apply_source_notice(shell, notice),
         SourceEvent::PlaylistSourceMismatch(source_id) => {
@@ -287,7 +282,7 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
     let mut scope_changed = false;
     if matches!(
         publication.change,
-        CatalogChange::Acquired | CatalogChange::Scope
+        CatalogChange::Broad | CatalogChange::Scope
     ) && let Some(selected) = shell.products.source.selected_library()
         && publication.source_key == Some(selected.source_key)
         && shell
@@ -306,18 +301,9 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
     }
     if matches!(
         publication.change,
-        CatalogChange::Acquired | CatalogChange::Broad | CatalogChange::Playlists(_)
+        CatalogChange::Broad | CatalogChange::Playlists(_)
     ) {
         shell.import_remote_playlist_pins_once();
-    }
-    if matches!(
-        publication.change,
-        CatalogChange::Acquired
-            | CatalogChange::Scope
-            | CatalogChange::Broad
-            | CatalogChange::Album(_)
-    ) {
-        shell.player_ui.refresh_queue_window();
     }
     if let Some(favorite) = publication.favorite {
         shell.apply_favorite_settlement(
@@ -339,25 +325,24 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
             .selected_library()
             .as_deref()
             .is_some_and(|selected| Some(selected.source_key) == publication.source_key);
+    let source_scoped = matches!(
+        current,
+        Route::Home
+            | Route::Search
+            | Route::Favorites
+            | Route::Albums
+            | Route::Tracks
+            | Route::Artists
+            | Route::AlbumArtists
+            | Route::Genres
+            | Route::Moods
+            | Route::Folders { .. }
+    );
     match publication.change {
-        CatalogChange::Acquired | CatalogChange::Broad => {
+        CatalogChange::Broad => {
             refresh_context_playlist_picker(shell);
             super::navigation::refresh_sidebar_pins(shell);
-            if !affects_current
-                && matches!(
-                    current,
-                    Route::Home
-                        | Route::Search
-                        | Route::Favorites
-                        | Route::Albums
-                        | Route::Tracks
-                        | Route::Artists
-                        | Route::AlbumArtists
-                        | Route::Genres
-                        | Route::Moods
-                        | Route::Folders { .. }
-                )
-            {
+            if !affects_current && source_scoped {
                 return;
             }
             if scope_changed {
@@ -367,6 +352,52 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
                 shell.refresh_mounted_home();
             } else {
                 shell.refresh_mounted_catalog();
+            }
+        }
+        CatalogChange::Activity => {
+            if shell.settings.current.borrow().sidebar.pins_use_activity() {
+                super::navigation::refresh_sidebar_pins(shell);
+            }
+            if !affects_current && source_scoped {
+                return;
+            }
+            let settings = shell.settings.current.borrow();
+            let category = if current == Route::Favorites {
+                shell.navigation.favorite_category.get()
+            } else {
+                rufin_core::route::CollectionCategory::Tracks
+            };
+            let sensitive = [category, rufin_core::route::CollectionCategory::Albums]
+                .into_iter()
+                .take(
+                    if matches!(
+                        current,
+                        Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
+                    ) {
+                        2
+                    } else {
+                        1
+                    },
+                )
+                .any(|category| {
+                    rufin_core::browse::BrowseRequest::new(
+                        &current,
+                        category,
+                        None,
+                        None,
+                        &settings
+                            .library_list(rufin_core::browse::library_list_key(&current, category)),
+                        0,
+                    )
+                    .activity_sensitive()
+                });
+            drop(settings);
+            if sensitive {
+                if current == Route::Home {
+                    shell.refresh_mounted_home();
+                } else {
+                    shell.refresh_mounted_catalog();
+                }
             }
         }
         CatalogChange::Scope => {
@@ -429,7 +460,6 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
     let started_blocking = source_operation_started_blocking(&previous_operation, &operation);
     *shell.source.operation.borrow_mut() = operation.clone();
     if operation.blocks_library() {
-        shell.source.artwork_preparation_revision.set(None);
         shell.chrome.source_refresh_feedback.set_visible(false);
     }
     apply_source_refresh_feedback(shell, &previous_operation, &operation);
@@ -446,7 +476,7 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
                 shell.enter_startup_loading();
             }
         }
-        SourceOperation::Refreshing { .. } => {}
+        SourceOperation::Refreshing { .. } | SourceOperation::Downloading { .. } => {}
         SourceOperation::Failed {
             message, add_form, ..
         } => {
@@ -476,15 +506,27 @@ fn apply_source_refresh_feedback(
     previous: &SourceOperation,
     operation: &SourceOperation,
 ) {
+    let downloading = matches!(operation, SourceOperation::Downloading { .. });
+    shell.chrome.source_download_cancel.set_visible(downloading);
+    shell
+        .chrome
+        .source_refresh_feedback
+        .set_can_target(downloading);
     match operation {
         SourceOperation::Refreshing {
             source_id,
             progress,
+        }
+        | SourceOperation::Downloading {
+            source_id,
+            progress,
         } => {
-            shell.source.artwork_preparation_revision.set(None);
             let continues = matches!(
                 previous,
                 SourceOperation::Refreshing {
+                    source_id: previous_source_id,
+                    progress: previous_progress,
+                } | SourceOperation::Downloading {
                     source_id: previous_source_id,
                     progress: previous_progress,
                 } if previous_source_id == source_id && previous_progress.stage == progress.stage
@@ -502,7 +544,11 @@ fn apply_source_refresh_feedback(
             shell
                 .chrome
                 .source_refresh_feedback_label
-                .set_text(&source_progress_text(progress));
+                .set_text(&if downloading {
+                    source_download_text(progress)
+                } else {
+                    source_progress_text(progress)
+                });
             let next_fraction = source_progress_fraction(progress);
             let fraction = if continues {
                 shell
@@ -523,14 +569,23 @@ fn apply_source_refresh_feedback(
                 .set_visible(progress.total.is_some());
             shell.chrome.source_refresh_feedback.set_visible(true);
         }
-        SourceOperation::Idle if matches!(previous, SourceOperation::Refreshing { .. }) => {
+        SourceOperation::Idle
+            if matches!(
+                previous,
+                SourceOperation::Refreshing { .. } | SourceOperation::Downloading { .. }
+            ) =>
+        {
             finish_source_refresh_feedback(shell, None, Duration::from_millis(1_200));
         }
         SourceOperation::Failed {
             message,
             add_form: false,
             ..
-        } if matches!(previous, SourceOperation::Refreshing { .. }) => {
+        } if matches!(
+            previous,
+            SourceOperation::Refreshing { .. } | SourceOperation::Downloading { .. }
+        ) =>
+        {
             finish_source_refresh_feedback(shell, Some(message), Duration::from_secs(5));
         }
         SourceOperation::Failed {
@@ -541,7 +596,10 @@ fn apply_source_refresh_feedback(
             shell.control_feedback.show_feedback_toast(message.clone());
         }
         SourceOperation::Adding { .. } | SourceOperation::Switching { .. }
-            if matches!(previous, SourceOperation::Refreshing { .. }) =>
+            if matches!(
+                previous,
+                SourceOperation::Refreshing { .. } | SourceOperation::Downloading { .. }
+            ) =>
         {
             shell.source.refresh_feedback_generation.set(
                 shell
@@ -553,56 +611,6 @@ fn apply_source_refresh_feedback(
             shell.chrome.source_refresh_feedback.set_visible(false);
         }
         _ => {}
-    }
-}
-
-fn apply_source_artwork_preparation(
-    shell: &Rc<Shell>,
-    source_key: library::SourceKey,
-    revision: u64,
-    progress: Option<SourceProgress>,
-) {
-    let matches_selected = shell
-        .selected_library()
-        .as_deref()
-        .is_some_and(|selected| selected.source_key == source_key);
-    if !matches_selected
-        || matches!(
-            *shell.source.operation.borrow(),
-            SourceOperation::Refreshing { .. }
-        )
-    {
-        return;
-    }
-    match progress {
-        Some(progress) => {
-            shell
-                .source
-                .artwork_preparation_revision
-                .set(Some(revision));
-            shell
-                .chrome
-                .source_refresh_feedback
-                .remove_css_class("error");
-            shell
-                .chrome
-                .source_refresh_feedback_label
-                .set_text(&source_progress_text(&progress));
-            shell
-                .chrome
-                .source_refresh_feedback_progress
-                .set_fraction(source_progress_fraction(&progress));
-            shell
-                .chrome
-                .source_refresh_feedback_progress
-                .set_visible(progress.total.is_some());
-            shell.chrome.source_refresh_feedback.set_visible(true);
-        }
-        None if shell.source.artwork_preparation_revision.get() == Some(revision) => {
-            shell.source.artwork_preparation_revision.set(None);
-            finish_source_refresh_feedback(shell, None, Duration::from_millis(1_200));
-        }
-        None => {}
     }
 }
 
@@ -835,7 +843,7 @@ fn unavailable_local_folder_for_failed_playback(
     {
         return None;
     }
-    let media_uri = &next.transport.current.as_ref()?.media_uri;
+    let media_uri = &next.transport.current.as_ref()?.row.track.media_uri;
     let cue = library::cue_media_parts(media_uri);
     let media_uri = cue
         .as_ref()
@@ -1091,7 +1099,7 @@ mod tests {
         let folders = [LocalFolder {
             path: root_text.clone(),
         }];
-        let track = root.join("ArtistRow").join("TrackRow.flac");
+        let track = root.join("ArtistView").join("SongView.flac");
 
         assert_eq!(
             unavailable_local_folder_for_path(&folders, &track.to_string_lossy()),

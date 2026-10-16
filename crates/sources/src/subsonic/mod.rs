@@ -28,16 +28,16 @@ use crate::{NativeImageRef as ImageRef, SourceId};
 
 type PlaylistId = String;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Playlist {
-    header: library::PlaylistInput,
+    header: library::PlaylistObservation,
     revision: Option<String>,
     valid_until: Option<i64>,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct PlaylistSnapshot {
     playlist: Playlist,
-    entries: Vec<library::PlaylistEntryInput>,
+    entries: Vec<library::PlaylistEntryObservation>,
 }
 
 fn normalize_release_types(values: Vec<String>) -> Vec<String> {
@@ -276,6 +276,7 @@ pub struct SubsonicSource {
     navidrome_session: navidrome::NavidromeSession,
     trust_invalid_cert: bool,
     metadata_editing: AtomicBool,
+    song_lyrics_version: tokio::sync::OnceCell<u64>,
 }
 impl SubsonicSource {
     fn open(
@@ -317,6 +318,7 @@ impl SubsonicSource {
             navidrome_session: navidrome::NavidromeSession::default(),
             trust_invalid_cert: config.trust_invalid_cert,
             metadata_editing: AtomicBool::new(false),
+            song_lyrics_version: tokio::sync::OnceCell::new(),
         })
     }
 
@@ -438,6 +440,7 @@ impl SubsonicSource {
             navidrome_session: navidrome::NavidromeSession::default(),
             trust_invalid_cert,
             metadata_editing: AtomicBool::new(metadata_editing),
+            song_lyrics_version: tokio::sync::OnceCell::new(),
         };
         Ok(AuthenticatedSubsonic {
             configuration,

@@ -2,7 +2,7 @@ use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::{gio, glib};
 use gtk_widgets::{
-    artwork::{ArtworkTileWeak, THUMB_COVER_SIZE},
+    artwork::ArtworkTileWeak,
     favorites::{favorite_button_is_active, row_favorite_icon_button, set_favorite_button_active},
     interactions::install_context_menu_openers,
     library_fields::TrackPresentation,
@@ -12,7 +12,7 @@ use gtk_widgets::{
     recycled_cells::{RecycledMergedCell, set_track_row_index_text, track_list_row_index_cell},
     sparse_model::{SparseObjectItem, connect_sparse_bind},
 };
-use library::QueuePageRow;
+use library::QueueRow;
 use localization::tr;
 use rufin_core::playback::{QueueReorderTarget, QueueSelection};
 use rufin_core::settings::layout::{LibraryField, LibraryListKey, LibraryListSettings};
@@ -26,16 +26,14 @@ use std::{
 const ROW_INDEX_COLUMN_TITLE: &str = "\u{2003}#";
 
 pub struct QueueState {
-    pub window: RefCell<Vec<Arc<QueuePageRow>>>,
-    pub rows: RefCell<Vec<Arc<QueuePageRow>>>,
+    pub window: RefCell<Vec<Arc<QueueRow>>>,
+    pub rows: RefCell<Vec<Arc<QueueRow>>>,
     pub model: gio::ListStore,
     pub selection: RefCell<Option<gtk::MultiSelection>>,
     pub filter: RefCell<String>,
-    pub generation: Cell<u64>,
     pub current: RefCell<Option<usize>>,
     pub render_queued: Cell<bool>,
     reveal_current: [Cell<bool>; 2],
-    hydration: RefCell<Option<tokio::task::AbortHandle>>,
 }
 
 impl QueueState {
@@ -47,21 +45,10 @@ impl QueueState {
             model,
             selection: RefCell::new(None),
             filter: RefCell::new(String::new()),
-            generation: Cell::new(0),
             current: RefCell::new(None),
             render_queued: Cell::new(false),
             reveal_current: Default::default(),
-            hydration: RefCell::new(None),
         }
-    }
-
-    pub fn begin(&self) -> u64 {
-        if let Some(task) = self.hydration.take() {
-            task.abort();
-        }
-        let generation = self.generation.get().wrapping_add(1);
-        self.generation.set(generation);
-        generation
     }
 
     pub fn selection_model(&self) -> gtk::MultiSelection {
@@ -73,10 +60,7 @@ impl QueueState {
         selection
     }
 
-    pub fn accept(&self, generation: u64, rows: Vec<QueuePageRow>) -> bool {
-        if self.generation.get() != generation {
-            return false;
-        }
+    pub fn install(&self, rows: Vec<Arc<QueueRow>>) {
         let current_appeared = self.current.borrow().is_some_and(|current| {
             !self
                 .window
@@ -101,13 +85,12 @@ impl QueueState {
                 .map(|row| {
                     previous
                         .remove(&row.position)
-                        .filter(|previous| previous.as_ref() == &row)
-                        .unwrap_or_else(|| Arc::new(row))
+                        .filter(|previous| previous.as_ref() == row.as_ref())
+                        .unwrap_or(row)
                 })
                 .collect(),
         );
         self.apply_filter();
-        true
     }
 
     pub fn apply_filter(&self) {
@@ -128,7 +111,7 @@ impl QueueState {
         let mut existing = previous
             .iter()
             .map(|object| {
-                let row = object.value::<Arc<QueuePageRow>>().expect("Queue row");
+                let row = object.value::<Arc<QueueRow>>().expect("Queue row");
                 (row.position, object.clone())
             })
             .collect::<HashMap<_, _>>();
@@ -137,7 +120,7 @@ impl QueueState {
             .map(|row| existing.remove(&row.position))
             .collect::<Vec<_>>();
         let mut retired = previous.iter().filter(|object| {
-            let row = object.value::<Arc<QueuePageRow>>().expect("Queue row");
+            let row = object.value::<Arc<QueueRow>>().expect("Queue row");
             existing.contains_key(&row.position)
         });
         let objects = rows
@@ -147,7 +130,7 @@ impl QueueState {
                 let object = object
                     .or_else(|| retired.next().cloned())
                     .unwrap_or_else(|| SparseObjectItem::new(Arc::clone(row), true));
-                let previous = object.value::<Arc<QueuePageRow>>().expect("Queue row");
+                let previous = object.value::<Arc<QueueRow>>().expect("Queue row");
                 if !Arc::ptr_eq(&previous, row) {
                     object.replace(Arc::clone(row), true);
                 }
@@ -185,7 +168,8 @@ impl QueueState {
                     match (row.occurrence_id, previous.occurrence_id) {
                         (Some(id), Some(previous)) => id == previous,
                         (None, None) => {
-                            row.position == previous.position && row.media_uri == previous.media_uri
+                            row.position == previous.position
+                                && row.track.media_uri == previous.track.media_uri
                         }
                         _ => false,
                     }
@@ -248,14 +232,6 @@ impl QueueState {
     }
 }
 
-impl Drop for QueueState {
-    fn drop(&mut self) {
-        if let Some(task) = self.hydration.get_mut().take() {
-            task.abort();
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct QueueSelectionSnapshot {
     pub selection: QueueSelection,
@@ -263,7 +239,7 @@ pub struct QueueSelectionSnapshot {
 }
 
 impl QueueSelectionSnapshot {
-    pub fn new(rows: Vec<Arc<QueuePageRow>>) -> Self {
+    pub fn new(rows: Vec<Arc<QueueRow>>) -> Self {
         let selection = if let Some(ids) = rows.iter().map(|row| row.occurrence_id).collect() {
             QueueSelection::Occurrences(ids)
         } else {
@@ -271,7 +247,7 @@ impl QueueSelectionSnapshot {
         };
         let media_uris = rows
             .iter()
-            .map(|row| row.media_uri.clone())
+            .map(|row| row.track.media_uri.clone())
             .collect::<Vec<_>>()
             .into();
         Self {
@@ -281,10 +257,7 @@ impl QueueSelectionSnapshot {
     }
 }
 
-fn queue_rows_at_positions(
-    rows: &[Arc<QueuePageRow>],
-    positions: &gtk::Bitset,
-) -> Vec<Arc<QueuePageRow>> {
+fn queue_rows_at_positions(rows: &[Arc<QueueRow>], positions: &gtk::Bitset) -> Vec<Arc<QueueRow>> {
     let Some((iter, first)) = gtk::BitsetIter::init_first(positions) else {
         return Vec::new();
     };
@@ -292,15 +265,15 @@ fn queue_rows_at_positions(
 }
 
 pub fn queue_rows_for_indexes(
-    rows: &[Arc<QueuePageRow>],
+    rows: &[Arc<QueueRow>],
     positions: impl Iterator<Item = u32>,
-) -> Vec<Arc<QueuePageRow>> {
+) -> Vec<Arc<QueueRow>> {
     positions
         .filter_map(|position| rows.get(position as usize).cloned())
         .collect()
 }
 
-fn filter_queue_window(rows: &[Arc<QueuePageRow>], filter: &str) -> Vec<Arc<QueuePageRow>> {
+fn filter_queue_window(rows: &[Arc<QueueRow>], filter: &str) -> Vec<Arc<QueueRow>> {
     let filter: String = filter.trim().chars().take(256).collect();
     if filter.is_empty() {
         return rows.to_vec();
@@ -311,20 +284,24 @@ fn filter_queue_window(rows: &[Arc<QueuePageRow>], filter: &str) -> Vec<Arc<Queu
         .expect("Literal queue search");
     rows.iter()
         .filter(|row| {
-            [&row.title, &row.artist, &row.album]
-                .iter()
-                .any(|text| pattern.is_match(text))
+            [
+                &row.track.metadata.title,
+                &row.track.metadata.artist,
+                &row.track.metadata.album,
+            ]
+            .iter()
+            .any(|text| pattern.is_match(text))
         })
         .cloned()
         .collect()
 }
 
-fn queue_row_from_item(item: &glib::WeakRef<gtk::ListItem>) -> Option<Arc<QueuePageRow>> {
+fn queue_row_from_item(item: &glib::WeakRef<gtk::ListItem>) -> Option<Arc<QueueRow>> {
     item.upgrade()?
         .item()?
         .downcast::<SparseObjectItem>()
         .ok()
-        .and_then(|object| object.value::<Arc<QueuePageRow>>())
+        .and_then(|object| object.value::<Arc<QueueRow>>())
 }
 
 fn install_queue_row_interactions(
@@ -352,7 +329,7 @@ fn install_queue_row_interactions(
             .as_ref()
             .and_then(|weak| weak.upgrade())
             .and_then(|tile| tile.drag_paintable_source().paintable());
-        drag_preview.prepare(row.title.clone(), artwork);
+        drag_preview.prepare(row.track.metadata.title.clone(), artwork);
         Some(media_drag_content_provider(MediaDragSource::Queue {
             selection: selection.selection,
             media_uris: selection.media_uris,
@@ -395,12 +372,12 @@ fn install_queue_row_interactions(
             let selection = shell
                 .selected_queue()
                 .and_then(|queue| queue.selected_rows_for(&queue_position));
-            (shell.open_queue_menu)(target, row.as_ref().clone(), selection, position);
+            (shell.open_queue_menu)(target, row.clone(), selection, position);
         }),
     );
 }
 
-fn queue_row_drop_target(row: &QueuePageRow, y: f64, height: i32) -> QueueReorderTarget {
+fn queue_row_drop_target(row: &QueueRow, y: f64, height: i32) -> QueueReorderTarget {
     match (row.occurrence_id, y < f64::from(height) / 2.0) {
         (Some(id), true) => QueueReorderTarget::BeforeOccurrence(id),
         (Some(id), false) => QueueReorderTarget::AfterOccurrence(id),
@@ -447,7 +424,7 @@ fn enqueue_media_drop(
     }
     let database = shell.database.clone();
     shell.runtime.spawn(async move {
-        let Ok(input) = source.song_selection(&database).await else {
+        let Ok(input) = source.track_selection(&database).await else {
             return;
         };
         queue.insert(input, target);
@@ -555,7 +532,7 @@ fn queue_title_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         else {
             return;
         };
-        let row = object.value::<Arc<QueuePageRow>>().expect("Queue row");
+        let row = object.value::<Arc<QueueRow>>().expect("Queue row");
         let Some(shell) = bind_shell.upgrade() else {
             return;
         };
@@ -565,24 +542,24 @@ fn queue_title_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
             .and_then(|player| player.queue.current_index);
         let is_current = current.as_ref() == Some(&row.position);
         let title = cell.title();
-        title.set_text(&row.title);
+        title.set_text(&row.track.metadata.title);
         let paused = shell
             .selected_playback()
             .as_ref()
             .is_some_and(|p| !p.transport.desired_playing);
         gtk_widgets::recycled_cells::set_track_playing(title.upcast_ref(), is_current, paused);
         let subtitle = cell.subtitle();
-        subtitle.set_visible(!row.artist.is_empty());
+        subtitle.set_visible(!row.track.metadata.artist.is_empty());
         cell.bind_subtitle(row.links(LibraryField::Artist));
         let cover = cell.cover();
         shell.artwork.bind_artwork_tile(
             &cover,
-            row.artwork_binding
+            row.track
+                .artwork_binding
                 .as_deref()
                 .map(ArtworkBinding::opaque)
                 .unwrap_or_default(),
             48,
-            THUMB_COVER_SIZE,
         );
     });
     let unbind_shell = Rc::downgrade(shell);
@@ -634,8 +611,9 @@ fn queue_duration_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         else {
             return;
         };
-        let row = object.value::<Arc<QueuePageRow>>().expect("Queue row");
-        let text = gtk_widgets::format_duration((row.duration_millis.max(0) / 1000) as u32);
+        let row = object.value::<Arc<QueueRow>>().expect("Queue row");
+        let text =
+            gtk_widgets::format_duration((row.track.metadata.duration_millis.max(0) / 1000) as u32);
         label.label().set_text(&text);
     });
     factory.connect_unbind(|_, item| {
@@ -677,7 +655,7 @@ fn queue_favorite_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
                 return;
             };
             let favorite = !favorite_button_is_active(button);
-            (click_shell.set_track_favorite)(row.media_uri.clone(), favorite, button);
+            (click_shell.set_track_favorite)(row.track.media_uri.clone(), favorite, button);
             set_favorite_button_active(button, favorite);
         });
         item.set_child(Some(&actions));
@@ -695,8 +673,8 @@ fn queue_favorite_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         else {
             return;
         };
-        let row = object.value::<Arc<QueuePageRow>>().expect("Queue row");
-        set_favorite_button_active(&button, row.favorite);
+        let row = object.value::<Arc<QueueRow>>().expect("Queue row");
+        set_favorite_button_active(&button, row.track.state.favorite);
     });
     factory.connect_unbind(|_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>()
@@ -739,8 +717,14 @@ fn queue_year_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         else {
             return;
         };
-        let row = object.value::<Arc<QueuePageRow>>().expect("Queue row");
-        label.set_text(&row.year.map(|y| y.to_string()).unwrap_or_default());
+        let row = object.value::<Arc<QueueRow>>().expect("Queue row");
+        label.set_text(
+            &row.track
+                .metadata
+                .year
+                .map(|y| y.to_string())
+                .unwrap_or_default(),
+        );
     });
     factory.connect_unbind(|_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>()
@@ -814,7 +798,7 @@ fn build_queue_table(
                     .clamp(adjustment.lower(), maximum),
             );
         }
-        let row = object.value::<Arc<QueuePageRow>>().expect("Queue row");
+        let row = object.value::<Arc<QueueRow>>().expect("Queue row");
         let activate = activate.clone();
         glib::idle_add_local_once(move || match row.occurrence_id {
             Some(id) => activate.activate_occurrence(id),
@@ -1101,8 +1085,7 @@ impl crate::PlayerUi {
         };
         let loading = self
             .selected_playback()
-            .is_some_and(|player| player.queue_loading)
-            || (queue.hydration.borrow().is_some() && !self.queue_has_current());
+            .is_some_and(|player| player.queue_loading);
         self.set_queue_loading(false, loading);
         self.set_queue_loading(true, loading);
         if loading && queue.window.borrow().is_empty() {
@@ -1139,7 +1122,6 @@ impl crate::PlayerUi {
         let Some(queue) = self.selected_queue() else {
             return;
         };
-        let generation = queue.begin();
         if !self.queue_is_mapped() {
             return;
         }
@@ -1161,32 +1143,9 @@ impl crate::PlayerUi {
             .as_deref()
             .map(|player| player.queue_window.clone())
             .unwrap_or_default();
-        let database = Arc::clone(&self.database);
-        let task = self
-            .runtime
-            .spawn(async move { database.prepared_queue_page(&window).await });
-        queue.hydration.replace(Some(task.abort_handle()));
+        queue.install(window);
         drop(queue);
         self.render_queue_panel();
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let rows = task.await.ok().and_then(Result::ok);
-            let Some(shell) = shell.upgrade() else {
-                return;
-            };
-            let Some(queue) = shell.selected_queue() else {
-                return;
-            };
-            if queue.generation.get() != generation {
-                return;
-            }
-            queue.hydration.take();
-            if let Some(rows) = rows {
-                queue.accept(generation, rows);
-            }
-            drop(queue);
-            shell.render_queue_panel();
-        });
     }
 
     fn queue_loading_icon(&self, fullscreen: bool) -> &adw::Spinner {
@@ -1460,49 +1419,43 @@ pub fn connect_queue_panel_controls(shell: &Rc<crate::PlayerUi>) {
 mod tests {
     use super::*;
 
-    fn row(position: usize, title: &str) -> QueuePageRow {
-        QueuePageRow {
-            entry: Arc::new(library::QueueRow {
-                occurrence_id: None,
-                position,
-                item: library::QueueItem::direct(
-                    format!("https://example.test/{position}"),
-                    title,
-                    "",
-                    "",
-                    0,
-                ),
-                received_from_connect: false,
-                track_key: None,
-                provenance: library::QueueProvenance::Manual,
-            }),
-            source_path: None,
-            source_name: None,
-            primary_artist_media_uri: None,
-            favorite: false,
-        }
+    fn row(position: usize, title: &str) -> Arc<QueueRow> {
+        Arc::new(QueueRow {
+            occurrence_id: None,
+            position,
+            track: library::TrackView {
+                track_key: library::TrackKey::from_raw(position as i64 + 1),
+                source_key: None,
+                source_id: None,
+                object_id: None,
+                media_uri: format!("https://example.test/{position}"),
+                metadata: library::TrackMetadata {
+                    title: title.to_string(),
+                    ..Default::default()
+                },
+                state: Default::default(),
+                access: Default::default(),
+                links: Default::default(),
+                artwork_binding: None,
+            },
+            received_from_connect: false,
+            provenance: library::QueueProvenance::Manual,
+        })
     }
 
     #[test]
     fn queue_search_filters_the_retained_window_and_keeps_duplicate_entries() {
         let state = QueueState::new();
         let mut first = row(0, "Été [live]");
-        Arc::make_mut(&mut first.entry).item.artist = "Artist".to_string();
+        Arc::make_mut(&mut first).track.metadata.artist = "Artist".to_string();
         let mut second = first.clone();
-        Arc::make_mut(&mut second.entry).position = 1;
+        Arc::make_mut(&mut second).position = 1;
         let mut third = row(2, "Other");
-        Arc::make_mut(&mut third.entry).item.album = "Summer".to_string();
-        let generation = state.begin();
-        assert!(state.accept(
-            generation,
-            vec![first.clone(), second.clone(), third.clone()]
-        ));
+        Arc::make_mut(&mut third).track.metadata.album = "Summer".to_string();
+        state.install(vec![first.clone(), second.clone(), third.clone()]);
         state.filter.replace("  ÉTÉ [live]  ".to_string());
         state.apply_filter();
-        assert_eq!(
-            *state.rows.borrow(),
-            vec![Arc::new(first), Arc::new(second)]
-        );
+        assert_eq!(*state.rows.borrow(), vec![first, second]);
         for position in 0..2 {
             let window = state.window.borrow();
             let rows = state.rows.borrow();
@@ -1511,34 +1464,23 @@ mod tests {
                 .item(position as u32)
                 .and_downcast::<SparseObjectItem>()
                 .unwrap();
-            let payload = object.value::<Arc<QueuePageRow>>().unwrap();
+            let payload = object.value::<Arc<QueueRow>>().unwrap();
             assert!(Arc::ptr_eq(&window[position], &rows[position]));
             assert!(Arc::ptr_eq(&rows[position], &payload));
         }
         state.filter.replace("SUMMER".to_string());
         state.apply_filter();
-        assert_eq!(*state.rows.borrow(), vec![Arc::new(third)]);
+        assert_eq!(*state.rows.borrow(), vec![third]);
         state.filter.replace(String::new());
         state.apply_filter();
         assert_eq!(state.rows.borrow().len(), 3);
     }
 
     #[test]
-    fn stale_window_projection_cannot_replace_newer_rows() {
-        let state = QueueState::new();
-        let stale = state.begin();
-        let current = state.begin();
-        assert!(state.accept(current, vec![row(1, "New")]));
-        assert!(!state.accept(stale, vec![row(0, "Old")]));
-        assert_eq!(state.rows.borrow()[0].position, 1);
-    }
-
-    #[test]
     fn changing_the_queue_window_keeps_the_playing_row_without_another_reveal() {
         let state = QueueState::new();
         let current = row(10, "Playing");
-        let generation = state.begin();
-        assert!(state.accept(generation, vec![current.clone()]));
+        state.install(vec![current.clone()]);
         state.update_current(Some(current.position));
         let object = state.model.item(0).unwrap();
         for pending in &state.reveal_current {
@@ -1547,21 +1489,14 @@ mod tests {
 
         let mut window = (0..10).map(|i| row(i, "Previous")).collect::<Vec<_>>();
         window.push(current);
-        let generation = state.begin();
-        assert!(state.accept(generation, window));
+        state.install(window);
         assert!(!state.reveal_current[0].get());
         assert!(!state.reveal_current[1].get());
         assert_eq!(object, state.model.item(10).unwrap());
 
-        let mut window = state
-            .window
-            .borrow()
-            .iter()
-            .map(|row| (**row).clone())
-            .collect::<Vec<_>>();
+        let mut window = state.window.borrow().iter().cloned().collect::<Vec<_>>();
         window.extend((11..16).map(|i| row(i, "Upcoming")));
-        let generation = state.begin();
-        assert!(state.accept(generation, window));
+        state.install(window);
         assert!(!state.reveal_current[0].get());
         assert!(!state.reveal_current[1].get());
         assert_eq!(object, state.model.item(10).unwrap());

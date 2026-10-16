@@ -317,6 +317,16 @@ impl SettingsFile {
         let mut value = read_startup_settings(&path)?;
         value.migrate_defaults();
         let mut changed = false;
+        for recent in &mut value.ui.recent_search_results {
+            if let Some(binding) = &mut recent.artwork_binding {
+                let normalized = library::normalize_artwork_binding(binding)
+                    .map_err(|error| error.to_string())?;
+                if *binding != normalized {
+                    *binding = normalized;
+                    changed = true;
+                }
+            }
+        }
         if value.jellyfin_device_id.trim().is_empty() {
             match random_identity("rufin-") {
                 Ok(identity) => {

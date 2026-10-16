@@ -173,37 +173,37 @@ impl PlexSource {
     }
     pub async fn read_track_metadata(
         &self,
-        track: library::TrackRow,
+        track: library::TrackView,
     ) -> Result<MetadataDraft, Error> {
         self.read_metadata(
             track.object_id.as_deref().ok_or(Error::Unavailable)?,
             SourceEntityKind::Track,
-            &track.title,
+            &track.metadata.title,
             1,
         )
         .await
     }
     pub async fn read_album_metadata(
         &self,
-        album: library::AlbumRow,
+        album: library::AlbumView,
     ) -> Result<MetadataDraft, Error> {
         self.read_metadata(
             &album.object_id,
             SourceEntityKind::Album,
-            &album.title,
-            album.track_count.max(0) as usize,
+            &album.metadata.title,
+            album.summary.track_count.max(0) as usize,
         )
         .await
     }
     pub async fn read_artist_metadata(
         &self,
-        artist: library::ArtistRow,
+        artist: library::ArtistView,
     ) -> Result<MetadataDraft, Error> {
         self.read_metadata(
             &artist.object_id,
             SourceEntityKind::Artist,
-            &artist.name,
-            artist.track_count.max(0) as usize,
+            &artist.metadata.name,
+            artist.summary.track_count.max(0) as usize,
         )
         .await
     }

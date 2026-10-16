@@ -21,7 +21,6 @@ pub struct SourceState {
     pub discovery_provider: Cell<rufin_core::runtime::source::DiscoveryProvider>,
     pub add_server: RefCell<Option<login::SourceSetupViewHandle>>,
     pub refresh_feedback_generation: Rc<Cell<u64>>,
-    pub artwork_preparation_revision: Cell<Option<u64>>,
 }
 
 pub fn configured_source_kind_display_name(kind: &str) -> String {

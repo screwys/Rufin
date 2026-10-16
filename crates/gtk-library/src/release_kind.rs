@@ -1,4 +1,4 @@
-use ::library::AlbumRow;
+use ::library::AlbumView;
 
 use localization::msgid;
 
@@ -11,12 +11,13 @@ pub enum AlbumReleaseKind {
     Other,
 }
 
-pub fn album_release_kind(album: &AlbumRow) -> AlbumReleaseKind {
-    if album.is_compilation == Some(true) {
+pub fn album_release_kind(album: &AlbumView) -> AlbumReleaseKind {
+    if album.metadata.is_compilation == Some(true) {
         return AlbumReleaseKind::Collection;
     }
 
     let types = album
+        .metadata
         .release_types
         .iter()
         .map(|value| value.trim().to_lowercase())
@@ -46,7 +47,7 @@ pub fn album_release_kind(album: &AlbumRow) -> AlbumReleaseKind {
     AlbumReleaseKind::Other
 }
 
-pub fn album_release_kind_label(album: &AlbumRow) -> &'static str {
+pub fn album_release_kind_label(album: &AlbumView) -> &'static str {
     album_release_kind(album).detail_label()
 }
 

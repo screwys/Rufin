@@ -280,7 +280,7 @@ impl AndroidRuntime {
             .runtime
             .spawn(async move {
                 rufin_core::open::arguments(
-                    &queue,
+                    queue,
                     &database,
                     local.as_ref(),
                     uris.into_iter().map(Into::into).collect(),

@@ -26,12 +26,12 @@ pub struct PreparedFolderRoute {
 }
 
 struct FolderPageData {
-    query: library::SongQuery,
+    query: library::CatalogQuery,
     folder_count: usize,
     track_count: usize,
     first_position: usize,
     first_folders: Vec<FolderLink>,
-    first_tracks: Vec<library::TrackRow>,
+    first_tracks: Vec<library::TrackView>,
 }
 
 type FolderResume = Rc<dyn Fn()>;
@@ -147,7 +147,7 @@ pub async fn prepare_folder_route(
     .resolve(database, Some(&source), cancellation)
     .await
     .map_err(|error| error.to_string())?
-    .songs()
+    .tracks()
     .expect("folder song route")
     .clone();
     let page = load_folder_page(
@@ -167,7 +167,7 @@ async fn load_child_folders(
     database: &library::Database,
     source_key: library::SourceKey,
     source: &FolderProjection,
-    query: &library::SongQuery,
+    query: &library::CatalogQuery,
     range: std::ops::Range<usize>,
     cancellation: &ReadCancellation,
 ) -> library::LibraryResult<(usize, Vec<FolderLink>)> {
@@ -189,14 +189,14 @@ async fn load_folder_page(
     database: &library::Database,
     source_key: library::SourceKey,
     source: &FolderProjection,
-    query: library::SongQuery,
+    query: library::CatalogQuery,
     window: library::RouteSeedWindow,
     cancellation: &ReadCancellation,
 ) -> library::LibraryResult<FolderPageData> {
     let folder_count = load_child_folders(database, source_key, source, &query, 0..0, cancellation)
         .await?
         .0;
-    let track_count = database.song_count(&query, cancellation).await? as usize;
+    let track_count = (&query).count(&database, cancellation).await? as usize;
     let range = window.range(folder_count + track_count);
     let first_folders = if range.start < folder_count {
         load_child_folders(
@@ -212,14 +212,18 @@ async fn load_folder_page(
     } else {
         Vec::new()
     };
-    let first_tracks = database
-        .song_rows(
-            &query,
+    let first_tracks = (&query)
+        .rows(
+            &database,
             range.start.saturating_sub(folder_count),
             range.len().saturating_sub(first_folders.len()),
             cancellation,
         )
-        .await?;
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!("typed song projection"),
+        })?;
     Ok(FolderPageData {
         query,
         folder_count,
@@ -237,7 +241,7 @@ async fn load_folder_page(
 )]
 enum FolderTableRow {
     Folder(FolderLink),
-    Track(library::TrackRow),
+    Track(library::TrackView),
 }
 
 fn folder_page(
@@ -328,9 +332,13 @@ fn folder_page(
             let database = Arc::clone(&row_database);
             let query = load_input.borrow().clone();
             Box::pin(async move {
-                Ok(database
-                    .song_rows(&query, range.start, range.len(), &cancellation)
+                Ok((&query)
+                    .rows(&database, range.start, range.len(), &cancellation)
                     .await
+                    .map(|rows| match rows {
+                        library::CatalogRows::Tracks(rows) => rows,
+                        _ => unreachable!("typed song projection"),
+                    })
                     .map_err(|error| error.to_string())?
                     .into_iter()
                     .map(FolderTableRow::Track)
@@ -396,7 +404,7 @@ fn folder_page(
         let track_sparse = Rc::clone(&track_sparse);
         let stack = table_stack.clone();
         Rc::new(
-            move |_: (library::SongQuery, library::RouteSeedWindow),
+            move |_: (library::CatalogQuery, library::RouteSeedWindow),
                   result: library::LibraryResult<FolderPageData>| {
                 let Ok(page) = result else { return };
                 stack.set_visible_child_name(if page.folder_count + page.track_count == 0 {
@@ -440,7 +448,7 @@ fn folder_page(
     };
     let database = Arc::clone(&shell.library);
     let load = Arc::new(
-        move |(query, window): (library::SongQuery, library::RouteSeedWindow),
+        move |(query, window): (library::CatalogQuery, library::RouteSeedWindow),
               cancellation: ReadCancellation| {
             let database = Arc::clone(&database);
             let source = source.clone();
@@ -468,12 +476,12 @@ fn folder_page(
                 .current
                 .borrow()
                 .library_list(LibraryListKey::Folders);
-            let request = library::SongQuery {
-                filter: query,
-                sort: Some(settings.sort_key.track_sort()),
-                descending: settings.descending,
-                ..previous.borrow().clone()
-            };
+            let mut request = previous.borrow().clone();
+            request.filter = query;
+            request.descending = settings.descending;
+            if let library::CatalogSubject::Tracks { sort, .. } = &mut request.subject {
+                *sort = Some(settings.sort_key.catalog_sort());
+            }
             let name_changed = folder_name_field(&previous_fields.borrow())
                 != folder_name_field(&settings.row_fields);
             table.apply_fields(&settings.row_fields);
@@ -536,11 +544,11 @@ fn folder_page(
         track_sparse.update_matching(
             |row| {
                 matches!(row, FolderTableRow::Track(track)
-                if track.media_uri == media_uri && track.is_downloaded != downloaded)
+                if track.media_uri == media_uri && track.access.is_downloaded != downloaded)
             },
             |row| {
                 if let FolderTableRow::Track(track) = row {
-                    track.is_downloaded = downloaded;
+                    track.access.is_downloaded = downloaded;
                 }
             },
         );
@@ -561,7 +569,7 @@ fn folder_table(
     tracks: Rc<gtk_widgets::sparse_model::SparseRouteModel<library::TrackKey, FolderTableRow>>,
     path: Vec<FolderPathItem>,
     initial_width: i32,
-    applied_query: Rc<RefCell<library::SongQuery>>,
+    applied_query: Rc<RefCell<library::CatalogQuery>>,
     fields: &[LibraryField],
 ) -> crate::collections::CollectionTableProjection {
     let selection = gtk::SingleSelection::new(Some(rows.clone()));
@@ -786,9 +794,8 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
                     &cover,
                     gtk_widgets::library_fields::opaque_artwork(track.artwork_binding.as_deref()),
                     48,
-                    gtk_widgets::artwork::THUMB_COVER_SIZE,
                 );
-                cell.title().set_text(&track.title);
+                cell.title().set_text(&track.metadata.title);
                 cell.bind_subtitle(gtk_widgets::detail_links::track_artist_links(&track));
                 cell.subtitle().set_visible(true);
                 if let Some(downloaded) = cell.downloaded() {
@@ -796,7 +803,7 @@ fn folder_merged_column(shell: &Rc<CatalogUi>, path: Vec<FolderPathItem>) -> gtk
                         &downloaded,
                         gtk_widgets::downloads::media_download_badge(
                             &track.media_uri,
-                            track.is_downloaded,
+                            track.access.is_downloaded,
                         ),
                     );
                 }
@@ -871,7 +878,9 @@ fn folder_column(
                     FolderTableRow::Folder(_) => None,
                 },
                 |row| match row {
-                    FolderTableRow::Track(track) => Some((track.media_uri.clone(), track.favorite)),
+                    FolderTableRow::Track(track) => {
+                        Some((track.media_uri.clone(), track.state.favorite))
+                    }
                     FolderTableRow::Folder(_) => None,
                 },
             );

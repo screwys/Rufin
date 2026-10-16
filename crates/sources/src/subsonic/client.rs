@@ -1,3 +1,4 @@
+use super::refresh::check_cancelled;
 use super::*;
 
 use crate::remote_http::{self, BodyLimit, RemoteHttpPolicy, RemoteTimeouts};
@@ -24,12 +25,16 @@ const SUBSONIC_HTTP: RemoteHttpPolicy = RemoteHttpPolicy {
 };
 
 impl SubsonicSource {
-    pub(crate) async fn stage_items(
+    pub(crate) async fn acquire_items(
         &self,
-        scan: &mut library::Scan,
+        catalog: &mut library::Catalog<'_>,
         objects: Vec<String>,
         refresh_parents: bool,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
+        let database = catalog.database;
+        let source_id = catalog.source_id;
+
         for (kind, entity, method) in [
             ("album", "album", "getAlbum"),
             ("song", "track", "getSong"),
@@ -45,10 +50,6 @@ impl SubsonicSource {
             let mut values = Vec::with_capacity(ids.len());
             let mut removed = Vec::new();
             for raw in &ids {
-                if kind == "album" {
-                    scan.replace_album_membership(&self.id("album", raw))
-                        .await?;
-                }
                 if self.has_navidrome_library() {
                     values.push(serde_json::json!({"id":raw}));
                 } else {
@@ -59,67 +60,79 @@ impl SubsonicSource {
                     }
                 }
             }
-            let mut observed = std::collections::HashSet::new();
+            let mut batch = library::CatalogBatch::default();
             match kind {
-                "album" => {
-                    let albums = self.read_albums(scan.source_id(), &values).await?;
-                    scan.write_albums(&albums.iter().collect::<Vec<_>>())
-                        .await?;
-                    for album in albums {
-                        let id = album.object_id;
-                        observed.insert(id.clone());
-                        if self.has_navidrome_library() {
-                            match self
-                                .get_json("getAlbum", &[("id", raw_item_id(&id).to_string())])
-                                .await
-                            {
-                                Ok(body) => {
-                                    self.stage_album_tracks(scan, &id, &body["album"]).await?
-                                }
-                                Err(error) => crate::source::optional_collection_error(error)?,
-                            }
-                        } else if let Some(value) = values.iter().find(|value| {
-                            json::id(&value["id"]).as_deref() == Some(raw_item_id(&id))
-                        }) {
-                            self.stage_album_tracks(scan, &id, value).await?;
-                        }
-                    }
-                }
+                "album" => batch.albums = self.read_albums(source_id, &values).await?,
                 "song" => {
-                    let tracks = self.read_tracks(scan.source_id(), &values).await?;
-                    for track in &tracks {
-                        observed.insert(track.object_id.clone());
-                        if let Some(album) = &track.album_object_id {
-                            if !scan
-                                .contains_entity("album", album, !refresh_parents)
-                                .await?
-                            {
-                                if let Err(error) = self
-                                    .stage_collection(
-                                        scan,
-                                        &crate::SourceCollection::Album(album.clone()),
-                                    )
-                                    .await
-                                {
-                                    crate::source::optional_collection_error(error)?;
-                                }
-                            }
+                    batch.tracks = self.read_tracks(source_id, &values).await?;
+                    let mut refreshed_albums = std::collections::HashSet::new();
+                    for track in &batch.tracks {
+                        if let Some(album) = &track.album_object_id
+                            && refreshed_albums.insert(album.clone())
+                            && (refresh_parents
+                                || !database
+                                    .source_contains_entity(source_id, "album", album, true)
+                                    .await?)
+                            && let Err(error) = self
+                                .acquire_collection(
+                                    catalog,
+                                    &crate::SourceCollection::Album(album.clone()),
+                                    false,
+                                    cancelled,
+                                )
+                                .await
+                        {
+                            crate::source::optional_collection_error(error)?;
                         }
                     }
-                    scan.begin_batch().await?;
-                    scan.write_tracks(
-                        &tracks.iter().map(|track| (track, None)).collect::<Vec<_>>(),
-                    )
-                    .await?;
-                    scan.finish_batch().await?;
                 }
-                _ => {
-                    let artists = self.read_artists(scan.source_id(), &values).await?;
-                    scan.begin_batch().await?;
-                    observed.extend(artists.iter().map(|artist| artist.object_id.clone()));
-                    scan.write_artists(&artists.iter().collect::<Vec<_>>())
+                _ => batch.artists = self.read_artists(source_id, &values).await?,
+            }
+            check_cancelled(cancelled)?;
+            catalog.apply_catalog(&batch, true).await?;
+            let observed = match kind {
+                "album" => batch
+                    .albums
+                    .iter()
+                    .map(|row| row.object_id.clone())
+                    .collect::<std::collections::HashSet<_>>(),
+                "song" => batch
+                    .tracks
+                    .iter()
+                    .map(|row| row.object_id.clone())
+                    .collect(),
+                _ => batch
+                    .artists
+                    .iter()
+                    .map(|row| row.object_id.clone())
+                    .collect(),
+            };
+            for album in batch.albums {
+                if self.has_navidrome_library() {
+                    match self
+                        .get_json(
+                            "getAlbum",
+                            &[("id", raw_item_id(&album.object_id).to_owned())],
+                        )
+                        .await
+                    {
+                        Ok(body) => {
+                            self.acquire_album_tracks(
+                                catalog,
+                                &album.object_id,
+                                &body["album"],
+                                true,
+                                cancelled,
+                            )
+                            .await?
+                        }
+                        Err(error) => crate::source::optional_collection_error(error)?,
+                    }
+                } else if let Some(value) = values.iter().find(|value| {
+                    json::id(&value["id"]).as_deref() == Some(raw_item_id(&album.object_id))
+                }) {
+                    self.acquire_album_tracks(catalog, &album.object_id, value, true, cancelled)
                         .await?;
-                    scan.finish_batch().await?;
                 }
             }
             if self.has_navidrome_library() {
@@ -129,12 +142,10 @@ impl SubsonicSource {
                         .filter(|id| !observed.contains(id)),
                 );
             }
-            for id in removed {
-                match entity {
-                    "album" => scan.remove_album(&id).await?,
-                    "track" => scan.remove_track(&id).await?,
-                    _ => scan.remove_artist(&id).await?,
-                }
+
+            for page in removed.chunks(128) {
+                check_cancelled(cancelled)?;
+                catalog.remove_source_items(entity, page).await?;
             }
         }
         for raw in objects
@@ -142,9 +153,17 @@ impl SubsonicSource {
             .filter_map(|object| object.strip_prefix("playlist:"))
         {
             let id = self.id("playlist", raw);
-            match self.stage_playlist_snapshot(scan, &id).await {
+            match self
+                .acquire_playlist_snapshot(catalog, &id, cancelled)
+                .await
+            {
                 Ok(()) => {}
-                Err(SourceError::NotFound) => scan.remove_playlist(&id).await?,
+                Err(SourceError::NotFound) => {
+                    check_cancelled(cancelled)?;
+                    catalog
+                        .remove_source_items("playlist", &[(&id).to_owned()])
+                        .await?;
+                }
                 Err(error) => return Err(error),
             }
         }
@@ -247,16 +266,16 @@ impl SubsonicSource {
 
     pub(crate) async fn live_search(
         &self,
-        source_id: &SourceId,
-        database: &library::Database,
+        source_id: &str,
         query: &str,
         limit: usize,
-    ) -> SourceResult<library::SearchResults> {
+    ) -> SourceResult<library::CatalogBatch> {
         if query.trim().is_empty() {
-            return Ok(library::SearchResults::default());
+            return Ok(library::CatalogBatch::default());
         }
-        let count = limit.clamp(1, 100).to_string();
-        let body: serde_json::Value = self
+        let limit = limit.clamp(1, 100);
+        let count = limit.to_string();
+        let body: Value = self
             .get_json(
                 "search3",
                 &[
@@ -271,56 +290,33 @@ impl SubsonicSource {
             )
             .await?;
         let results = &body["searchResult3"];
-        let mut scan = library::Scan::begin_items(database, source_id.as_str()).await?;
-        let source = scan.source();
-        let result = async {
-            let (artists, albums, tracks) = tokio::try_join!(
-                self.read_artists(source_id.as_str(), json::items(&results["artist"])),
-                self.read_albums(source_id.as_str(), json::items(&results["album"])),
-                self.read_tracks(source_id.as_str(), json::items(&results["song"])),
-            )?;
-            scan.begin_batch().await?;
-            let mut artist_ids = Vec::new();
-            let mut album_ids = Vec::new();
-            let mut track_ids = Vec::new();
-            let artists = &artists[..artists.len().min(limit.clamp(1, 100))];
-            artist_ids.extend(artists.iter().map(|artist| artist.object_id.clone()));
-            scan.write_artists(&artists.iter().collect::<Vec<_>>())
-                .await?;
-            let albums = &albums[..albums.len().min(limit.clamp(1, 100))];
-            album_ids.extend(albums.iter().map(|album| album.object_id.clone()));
-            scan.write_albums(&albums.iter().collect::<Vec<_>>())
-                .await?;
-            let tracks = &tracks[..tracks.len().min(limit.clamp(1, 100))];
-            track_ids.extend(tracks.iter().map(|track| track.object_id.clone()));
-            scan.write_tracks(&tracks.iter().map(|track| (track, None)).collect::<Vec<_>>())
-                .await?;
-            scan.finish_batch().await?;
-            Ok((track_ids, album_ids, artist_ids))
-        }
-        .await;
-        let (track_ids, album_ids, artist_ids) = crate::finish_scan(scan, result).await?;
-        let rows = database
-            .search_rows_by_objects(
-                source,
-                None,
-                false,
-                &track_ids,
-                &album_ids,
-                &artist_ids,
-                &library::ReadCancellation::new(),
-            )
-            .await?;
-        Ok(rows)
+        let (mut artists, mut albums, mut songs) = tokio::try_join!(
+            self.read_artists(source_id, json::items(&results["artist"])),
+            self.read_albums(source_id, json::items(&results["album"])),
+            self.read_tracks(source_id, json::items(&results["song"]))
+        )?;
+        artists.truncate(limit);
+        albums.truncate(limit);
+        songs.truncate(limit);
+        Ok(library::CatalogBatch {
+            artists,
+            albums,
+            tracks: songs,
+            ..Default::default()
+        })
     }
 }
 
 impl SubsonicSource {
-    pub(crate) async fn stage_collection(
+    pub(crate) async fn acquire_collection(
         &self,
-        scan: &mut library::Scan,
+        catalog: &mut library::Catalog<'_>,
         collection: &crate::SourceCollection,
+        complete_membership: bool,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
+        let source_id = catalog.source_id;
+
         let albums = match collection {
             crate::SourceCollection::Album(id) => vec![serde_json::json!({"id": raw_item_id(id)})],
             crate::SourceCollection::Artist(id) => {
@@ -343,35 +339,80 @@ impl SubsonicSource {
                 album.as_object_mut().expect("album summary").extend(detail);
             }
             let metadata = self
-                .read_albums(scan.source_id(), std::slice::from_ref(&album))
+                .read_albums(source_id, std::slice::from_ref(&album))
                 .await?;
-            scan.write_albums(&metadata.iter().collect::<Vec<_>>())
-                .await?;
-            self.stage_album_tracks(scan, &self.id("album", &album_id), &album)
-                .await?;
+            let mut batch = library::CatalogBatch::default();
+            batch.albums = metadata;
+            check_cancelled(cancelled)?;
+            catalog.apply_catalog(&batch, true).await?;
+            self.acquire_album_tracks(
+                catalog,
+                &self.id("album", &album_id),
+                &album,
+                complete_membership,
+                cancelled,
+            )
+            .await?;
         }
         Ok(())
     }
 
-    async fn stage_album_tracks(
+    async fn acquire_album_tracks(
         &self,
-        scan: &mut library::Scan,
+        catalog: &mut library::Catalog<'_>,
         album_id: &str,
         album: &Value,
+        complete_membership: bool,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
+        let database = catalog.database;
+        let source_id = catalog.source_id;
+        let stamp = catalog.observed;
+
+        let stamp = if complete_membership && stamp.is_none() {
+            Some(catalog.start_observation().await?)
+        } else {
+            stamp
+        };
         for page in json::items(&album["song"]).chunks(100) {
-            let mut tracks = self.read_tracks(scan.source_id(), page).await?;
+            let mut tracks = self.read_tracks(source_id, page).await?;
             for song in &mut tracks {
                 if song.album_object_id.is_none() {
                     song.album_object_id = Some(album_id.to_string());
                 }
             }
-            scan.begin_batch().await?;
-            scan.write_tracks(&tracks.iter().map(|track| (track, None)).collect::<Vec<_>>())
-                .await?;
-            scan.finish_batch().await?;
+            let mut batch = library::CatalogBatch::default();
+            batch.tracks = tracks;
+            check_cancelled(cancelled)?;
+            catalog.apply_catalog(&batch, true).await?;
         }
-        scan.replace_album_membership(album_id).await?;
+        if complete_membership {
+            let mut after = None;
+            loop {
+                let missing = database
+                    .omitted_album_track_page(
+                        source_id,
+                        album_id,
+                        stamp.unwrap(),
+                        after.as_deref(),
+                        100,
+                    )
+                    .await?;
+                if missing.is_empty() {
+                    break;
+                }
+                after = missing.last().cloned();
+                let ids = missing
+                    .iter()
+                    .map(|id| format!("song:{}", raw_item_id(id)))
+                    .collect();
+                Box::pin(self.acquire_items(catalog, ids, false, cancelled)).await?;
+            }
+            check_cancelled(cancelled)?;
+            catalog
+                .complete_album_observation(&album_id, stamp.unwrap())
+                .await?;
+        }
         Ok(())
     }
 }
@@ -615,19 +656,27 @@ impl SubsonicSource {
 
 impl SubsonicSource {
     pub(crate) async fn lyrics(&self, track_id: &str) -> SourceResult<Option<LyricsBundle>> {
-        let extensions: Value = self
-            .get_json("getOpenSubsonicExtensions", &[])
-            .await
-            .unwrap_or_default();
-        let song_lyrics_version = json::items(&extensions["openSubsonicExtensions"])
-            .iter()
-            .find(|extension| extension["name"].as_str() == Some("songLyrics"))
-            .and_then(|extension| {
-                json::items(&extension["versions"])
+        let song_lyrics_version = self
+            .song_lyrics_version
+            .get_or_try_init(|| async {
+                let extensions = match self.get_json("getOpenSubsonicExtensions", &[]).await {
+                    Ok(extensions) => extensions,
+                    Err(SourceError::NotFound) => return Ok(0),
+                    Err(error) => return Err(error),
+                };
+                Ok(json::items(&extensions["openSubsonicExtensions"])
                     .iter()
-                    .filter_map(Value::as_u64)
-                    .max()
+                    .find(|extension| extension["name"].as_str() == Some("songLyrics"))
+                    .and_then(|extension| {
+                        json::items(&extension["versions"])
+                            .iter()
+                            .filter_map(Value::as_u64)
+                            .max()
+                    })
+                    .unwrap_or_default())
             })
+            .await
+            .copied()
             .unwrap_or_default();
         if song_lyrics_version >= 1 {
             let mut extra = vec![("id", raw_item_id(track_id).to_string())];
@@ -1240,7 +1289,7 @@ impl SubsonicSource {
         self.flavor.source_id()
     }
 
-    pub(super) fn id(&self, kind: &str, raw_id: &str) -> String {
+    pub(crate) fn id(&self, kind: &str, raw_id: &str) -> String {
         format!("{}:{kind}:{raw_id}", self.source_id())
     }
 
@@ -1445,22 +1494,29 @@ mod tests {
         let track = super::track_from_json(&source, "source", &body["song"])
             .unwrap()
             .unwrap();
-        assert_eq!(track.title, "Playable");
-        assert_eq!(track.duration_millis, 42_000);
-        assert_eq!(track.year, Some(2024));
-        assert_eq!(track.artists.len(), 1);
+        assert_eq!(track.metadata.title, "Playable");
+        assert_eq!(track.metadata.duration_millis, 42_000);
+        assert_eq!(track.metadata.year, Some(2024));
+        assert_eq!(track.metadata.artists.len(), 1);
         assert_eq!(
-            track.source_loudness.and_then(|value| value.replay_gain_db),
+            track
+                .metadata
+                .source_loudness
+                .and_then(|value| value.replay_gain_db),
             Some(-4.25)
         );
         assert_eq!(
             track
+                .metadata
                 .source_loudness
                 .and_then(|value| value.replay_gain_peak),
             Some(0.91)
         );
         assert_eq!(
-            track.album_loudness.and_then(|value| value.replay_gain_db),
+            track
+                .metadata
+                .album_loudness
+                .and_then(|value| value.replay_gain_db),
             None
         );
         let playlist = source.read_playlist("source", "list").await.unwrap();
@@ -1487,20 +1543,27 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(
-            song.source_loudness.and_then(|value| value.replay_gain_db),
+            song.metadata
+                .source_loudness
+                .and_then(|value| value.replay_gain_db),
             Some(-4.25)
         );
         assert_eq!(
-            song.album_loudness.and_then(|value| value.replay_gain_db),
+            song.metadata
+                .album_loudness
+                .and_then(|value| value.replay_gain_db),
             Some(-3.5)
         );
         assert_eq!(
-            song.source_loudness
+            song.metadata
+                .source_loudness
                 .and_then(|value| value.replay_gain_peak),
             Some(0.91)
         );
         assert_eq!(
-            song.album_loudness.and_then(|value| value.replay_gain_peak),
+            song.metadata
+                .album_loudness
+                .and_then(|value| value.replay_gain_peak),
             Some(0.95)
         );
     }
@@ -1553,6 +1616,7 @@ mod tests {
                     null, {"name":"songLyrics","versions":[{},2]}
                 ]}
             })))
+            .expect(1)
             .mount(&server)
             .await;
         Mock::given(method("GET"))
@@ -1569,9 +1633,12 @@ mod tests {
                     ]}]
                 }]}}
             })))
+            .expect(2)
             .mount(&server)
             .await;
-        let lyrics = source(&server.uri()).lyrics("one").await.unwrap().unwrap();
+        let source = source(&server.uri());
+        let lyrics = source.lyrics("one").await.unwrap().unwrap();
+        assert_eq!(source.lyrics("two").await.unwrap(), Some(lyrics.clone()));
         let document = &lyrics.documents()[0];
         assert_eq!(document.role, LyricsRole::Original);
         assert_eq!(document.language.as_deref(), Some("en"));
@@ -1720,12 +1787,13 @@ mod tests {
                 .unwrap()
                 .expect("OpenSubsonic song without optional metadata");
 
-            assert!(song.artists.is_empty());
-            assert!(song.album_artists.is_empty());
-            assert!(song.genres.is_empty());
-            assert!(song.moods.is_empty());
+            assert!(song.metadata.artists.is_empty());
+            assert!(song.metadata.album_artists.is_empty());
+            assert!(song.metadata.genres.is_empty());
+            assert!(song.metadata.moods.is_empty());
             assert!(
-                song.source_loudness
+                song.metadata
+                    .source_loudness
                     .and_then(|value| value.replay_gain_db)
                     .is_none()
             );
@@ -1756,24 +1824,29 @@ mod tests {
             SubsonicCredential::from_password("password").serialize(),
         )
         .unwrap();
+        let source_owner = crate::Source::new(
+            library::SourceId::new("search-source"),
+            crate::Implementation::OpenSubsonic(source),
+        );
+        let crate::Implementation::OpenSubsonic(source) = &source_owner.implementation else {
+            unreachable!()
+        };
         let directory = tempfile::tempdir().unwrap();
         let database = library::Database::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let source_id = crate::SourceId::new("search-source");
-        library::Scan::begin(&database, source_id.as_str(), "Search", "search", None)
-            .await
-            .unwrap()
-            .finish()
+        database
+            .reconcile_source(&source_id, "search", "Search")
             .await
             .unwrap();
         let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |update| {
+        database.observe_catalog(move |_, update| {
             let _ = sender.send(update);
             std::future::ready(())
         });
-        let results = source
-            .live_search(&source_id, &database, "Track", 60)
+        let results = source_owner
+            .live_search(&database, "Track", 60)
             .await
             .unwrap();
         assert!(updates.try_recv().expect("catalog update").metadata);
@@ -1790,18 +1863,27 @@ mod tests {
             row.media_uri,
             library::source_entity_uri(&source_id, "track", "subsonic:track:track-one")
         );
-        let stored = database
-            .track_row_by_uri(&row.media_uri, &library::ReadCancellation::new())
-            .await
-            .unwrap()
-            .unwrap();
+        let stored = library::CatalogQuery::uris(
+            library::CatalogKind::Track,
+            vec![(&row.media_uri).to_owned()],
+        )
+        .rows(&database, 0, 256, &library::ReadCancellation::new())
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+            _ => unreachable!(),
+        })
+        .unwrap()
+        .unwrap();
         assert_eq!(row, &stored);
         assert_eq!(row.artwork_binding, results.albums[0].artwork_binding);
         assert!(row.artwork_binding.is_some());
         let album = database
             .selected_track_uris(
-                &library::SongQuery::new(library::SongScope::Album(results.albums[0].album_key))
-                    .selection(),
+                &library::CatalogQuery::tracks(library::TrackScope::Album(
+                    results.albums[0].album_key,
+                ))
+                .selection(),
                 None,
                 &library::ReadCancellation::new(),
             )
@@ -1817,21 +1899,33 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "subsonic-response":{"status":"ok","version":"1.16.1","album":{"id":"album-one","name":"Album","artistId":"artist-one","artist":"Artist","song":songs}}
             }))).mount(&server).await;
-        let mut scan = library::Scan::begin_items(&database, source_id.as_str())
-            .await
-            .unwrap();
-        source
-            .stage_collection(
-                &mut scan,
-                &crate::SourceCollection::Album("subsonic:album:album-one".to_string()),
-            )
-            .await
-            .unwrap();
-        scan.finish().await.unwrap();
+        let catalog_source_id = (source_id.as_str()).to_string();
+        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+        {
+            let result = source
+                .acquire_collection(
+                    &mut catalog,
+                    &crate::SourceCollection::Album("subsonic:album:album-one".to_string()),
+                    false,
+                    &|| false,
+                )
+                .await;
+            result
+        }
+        .unwrap();
+        {
+            database
+                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+                .await;
+            Ok::<_, crate::SourceError>(())
+        }
+        .unwrap();
         let album = database
             .selected_track_uris(
-                &library::SongQuery::new(library::SongScope::Album(results.albums[0].album_key))
-                    .selection(),
+                &library::CatalogQuery::tracks(library::TrackScope::Album(
+                    results.albums[0].album_key,
+                ))
+                .selection(),
                 None,
                 &library::ReadCancellation::new(),
             )
@@ -1865,35 +1959,58 @@ mod tests {
             SubsonicCredential::from_password("password").serialize(),
         )
         .unwrap();
+        let source_owner = crate::Source::new(
+            crate::SourceId::new("song-search"),
+            crate::Implementation::OpenSubsonic(source),
+        );
+        let crate::Implementation::OpenSubsonic(source) = &source_owner.implementation else {
+            unreachable!()
+        };
         for cached in [false, true] {
             let root = tempfile::tempdir().unwrap();
             let database = library::Database::open(root.path().join("library.sqlite"))
                 .await
                 .unwrap();
             let source_id = crate::SourceId::new("song-search");
-            let mut scan =
-                library::Scan::begin(&database, source_id.as_str(), "Search", "search", None)
-                    .await
-                    .unwrap();
+            database
+                .reconcile_source(
+                    &library::SourceId::new(source_id.as_str()),
+                    "search",
+                    "Search",
+                )
+                .await
+                .unwrap();
+            let catalog_source_id = (source_id.as_str()).to_string();
+            let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+            catalog.start_observation().await.unwrap();
             if cached {
-                scan.write_albums(&[&super::album_from_json(&source, source_id.as_str(), &serde_json::json!({"id":"album","name":"Nonmatching album","coverArt":"album-cover"})).unwrap().unwrap()]).await.unwrap();
+                (async { let mut batch = library::CatalogBatch::default(); let result = batch.albums.extend_from_slice(&[(super::album_from_json(&source, source_id.as_str(), &serde_json::json!({"id":"album","name":"Nonmatching album","coverArt":"album-cover"})).unwrap().unwrap()).clone()]); catalog.apply_catalog(&batch, true).await?; Ok::<_,library::LibraryError>(result) }).await.unwrap();
             }
-            scan.finish().await.unwrap();
+            {
+                database
+                    .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+                    .await;
+                Ok::<_, crate::SourceError>(())
+            }
+            .unwrap();
             let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-            database.observe_catalog(move |update| {
+            database.observe_catalog(move |_, update| {
                 let _ = sender.send(update);
                 std::future::ready(())
             });
-            let results = source
-                .live_search(&source_id, &database, "Match", 10)
+            let results = source_owner
+                .live_search(&database, "Match", 10)
                 .await
                 .unwrap();
             assert!(updates.try_recv().expect("catalog update").metadata);
             assert!(results.albums.is_empty());
             assert_eq!(results.tracks.len(), 1);
             let track = &results.tracks[0];
-            assert_eq!(track.album, "Nonmatching album");
-            assert_eq!(track.album_key.is_some(), cached);
+            assert_eq!(track.metadata.album, "Nonmatching album");
+            assert!(
+                track.links.album_key.is_some(),
+                "native album identity remains navigable"
+            );
             assert!(track.artwork_binding.is_some());
         }
     }

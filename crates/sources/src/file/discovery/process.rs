@@ -377,7 +377,7 @@ mod tests {
         let slow_uri = format!("{}/slow", server.uri());
         let audio_uri = format!("{}/audio", server.uri());
         tokio::task::spawn_blocking(move || {
-            let mut reader = Reader::network();
+            let mut reader = Reader::default();
             let network_timeout = reader.timeout_seconds.replace(1);
             let mut input = std::io::Cursor::new(bytes);
             let error = reader.read_input(&mut input, &slow_uri).unwrap_err();
@@ -406,7 +406,7 @@ mod tests {
             .await;
         let uri = format!("{}/stream?token=private-stream", server.uri());
         tokio::task::spawn_blocking(move || {
-            Reader::network().read_input(&mut std::io::Cursor::new(bytes), &uri)
+            Reader::default().read_input(&mut std::io::Cursor::new(bytes), &uri)
         })
         .await
         .unwrap()

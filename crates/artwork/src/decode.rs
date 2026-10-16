@@ -3,7 +3,9 @@ use std::path::Path;
 use std::sync::{Arc, Once};
 
 use fast_image_resize::FilterType;
-use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, metadata::Orientation};
+use image::{
+    DynamicImage, ImageDecoder, ImageEncoder, ImageFormat, ImageReader, metadata::Orientation,
+};
 
 use crate::{ArtworkError, ArtworkKey};
 
@@ -16,6 +18,25 @@ impl NormalizedImage {
     pub(crate) fn bytes(&self) -> Option<&[u8]> {
         self.bytes.as_deref()
     }
+
+    pub(crate) fn blur_hash(&self) -> Result<String, ArtworkError> {
+        let (width, height) = preview_dimensions(self.image.width(), self.image.height());
+        rgba_image(resize_exact(
+            &self.image,
+            width,
+            height,
+            FilterType::Bilinear,
+        )?)?
+        .blur_hash()
+    }
+}
+
+fn preview_dimensions(width: u32, height: u32) -> (u32, u32) {
+    let longest = width.max(height).max(32);
+    (
+        ((u64::from(width) * 32) / u64::from(longest)).max(1) as u32,
+        ((u64::from(height) * 32) / u64::from(longest)).max(1) as u32,
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -33,6 +54,40 @@ impl AsRef<[u8]> for RgbaImage {
 }
 
 impl RgbaImage {
+    pub fn encode_png(&self) -> Result<Vec<u8>, ArtworkError> {
+        let mut bytes = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut bytes)
+            .write_image(
+                self.rgba(),
+                self.width,
+                self.height,
+                image::ExtendedColorType::Rgba8,
+            )
+            .map_err(decode_error)?;
+        Ok(bytes)
+    }
+
+    pub(crate) fn from_blur_hash(hash: &str) -> Result<Self, ArtworkError> {
+        Ok(Self {
+            width: 32,
+            height: 32,
+            row_stride: 128,
+            rgba: Arc::new(blurhash::decode(hash, 32, 32, 1.0).map_err(decode_error)?),
+        })
+    }
+
+    pub(crate) fn blur_hash(&self) -> Result<String, ArtworkError> {
+        let resized;
+        let image = if self.width.max(self.height) > 32 {
+            let (width, height) = preview_dimensions(self.width, self.height);
+            resized = self.resized_exact(width, height)?;
+            &resized
+        } else {
+            self
+        };
+        blurhash::encode(4, 3, image.width, image.height, image.rgba()).map_err(decode_error)
+    }
+
     pub const fn width(&self) -> u32 {
         self.width
     }
@@ -86,12 +141,16 @@ impl RgbaImage {
 #[derive(Clone, Debug)]
 pub struct DecodedImage {
     key: ArtworkKey,
-    pixels: RgbaImage,
+    pub(crate) pixels: RgbaImage,
     original: Option<Arc<[u8]>>,
     animated: bool,
 }
 
 impl DecodedImage {
+    pub(crate) fn blur_hash(&self) -> Result<String, ArtworkError> {
+        self.pixels.blur_hash()
+    }
+
     pub fn original(&self) -> Option<&Arc<[u8]>> {
         self.original.as_ref()
     }
@@ -418,6 +477,14 @@ mod tests {
             decode_rgba(normalized.bytes().unwrap(), 100).expect("decode normalized image");
         assert_eq!((decoded.width(), decoded.height()), (100, 50));
         assert_eq!(decoded.row_stride(), 400);
+        let preview = RgbaImage::from_blur_hash(&normalized.blur_hash().unwrap()).unwrap();
+        assert_eq!(
+            (preview.width(), preview.height(), preview.row_stride()),
+            (32, 32, 128)
+        );
+        let encoded = preview.encode_png().unwrap();
+        assert_eq!(decode_rgba(&encoded, 32).unwrap().rgba(), preview.rgba());
+        assert!(RgbaImage::from_blur_hash("invalid").is_err());
     }
 
     #[test]

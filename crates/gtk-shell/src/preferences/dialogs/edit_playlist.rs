@@ -327,14 +327,22 @@ impl Shell {
                                         }
                                     }
                                     if completed
-                                        && let Ok(rows) = shell
-                                            .products
-                                            .library
-                                            .playlist_rows(
-                                                &[playlist_id],
-                                                &library::ReadCancellation::new(),
-                                            )
-                                            .await
+                                        && let Ok(rows) = library::CatalogQuery::keys(
+                                            library::CatalogKind::Playlist,
+                                            None,
+                                            (&[playlist_id]).iter().map(|key| key.raw()).collect(),
+                                        )
+                                        .rows(
+                                            &shell.products.library,
+                                            0,
+                                            (&[playlist_id]).len(),
+                                            &library::ReadCancellation::new(),
+                                        )
+                                        .await
+                                        .map(|rows| match rows {
+                                            library::CatalogRows::Playlists(rows) => rows,
+                                            _ => unreachable!("typed catalog projection"),
+                                        })
                                         && let Some(row) = rows.first()
                                     {
                                         entry.set_text(&row.name);

@@ -19,8 +19,8 @@ pub use downloads::{
 };
 pub use events::ProductReceivers;
 pub use inputs::{
-    CatalogChange, CatalogPublication, FavoriteSettlement, RuntimeInputs, SelectedLibrary,
-    SourceEvent, SourceNotice, SourceNoticeKind, VisualizerPublication,
+    CatalogChange, CatalogPublication, CatalogRevision, FavoriteSettlement, RuntimeInputs,
+    SelectedLibrary, SourceEvent, SourceNotice, SourceNoticeKind, VisualizerPublication,
 };
 pub use release_update::{ReleaseHistory, ReleaseNote, ReleaseUpdate, ReleaseUpdateHandle};
 pub use scrobbling::{

@@ -41,7 +41,7 @@ pub struct ArtistReleaseProjections {
     query: Rc<RefCell<ArtistReleaseQuery>>,
     counts: Rc<Cell<[usize; 6]>>,
     selection: gtk::SelectionModel,
-    pub sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
+    pub sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumView>>,
     lane: Rc<super::named_detail::NamedOrderLane>,
     surface: gtk::Widget,
     scroll: gtk_widgets::mounted_route::NativeListScroll,
@@ -55,7 +55,7 @@ pub struct ArtistReleaseProjections {
 }
 
 struct ArtistAlbumProjection {
-    sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
+    sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumView>>,
     start: Cell<usize>,
     count: Cell<usize>,
     source_present: Cell<bool>,
@@ -446,7 +446,7 @@ impl ArtistAlbumProjection {
     fn new(
         shell: &Rc<CatalogUi>,
         title: &'static str,
-        sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
+        sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumView>>,
         start: usize,
         count: usize,
         layout: Rc<Cell<LibraryLayout>>,
@@ -805,7 +805,7 @@ impl ArtistReleaseProjections {
         let mut query = self.query.borrow().clone();
         query.filters =
             std::array::from_fn(|index| self.sections[index].search.text().trim().to_string());
-        query.sort = settings.sort_key.album_sort();
+        query.sort = settings.sort_key.catalog_sort();
         query.descending = settings.descending;
         query
     }
@@ -940,10 +940,14 @@ fn artist_route_list(
     let selection = gtk_widgets::selection::PositionSelectionModel::new(model);
     let database = Arc::clone(&shell.library);
     selection.set_collection_selection(Box::new(move |target, positions| {
-        let Some(library::SongSelection::Query {
+        let Some(library::TrackSelection::Query {
             query:
-                library::SongQuery {
-                    scope: library::SongScope::Album(key),
+                library::CatalogQuery {
+                    subject:
+                        library::CatalogSubject::Tracks {
+                            scope: library::TrackScope::Album(key),
+                            ..
+                        },
                     ..
                 },
             ..
@@ -997,7 +1001,7 @@ fn artist_route_list(
                         .into_iter()
                         .map(|row| {
                             gtk_widgets::selection::collection_play_request(
-                                library::SongScope::Album(row.album_key),
+                                library::TrackScope::Album(row.album_key),
                             )
                         })
                         .collect())
@@ -1079,7 +1083,7 @@ fn artist_route_list(
                     .and_downcast::<SparseObjectItem>();
                 let row = value
                     .as_ref()
-                    .and_then(|item| item.value::<Arc<library::AlbumRow>>());
+                    .and_then(|item| item.value::<Arc<library::AlbumView>>());
                 for cell in state.imp().table_cells.borrow().iter() {
                     cell.downcast_ref::<AlbumTableCell>()
                         .unwrap()
@@ -1161,7 +1165,7 @@ fn artist_route_list(
                         .and_downcast::<SparseObjectItem>();
                     if let Some(album) = value
                         .as_ref()
-                        .and_then(|item| item.value::<Arc<library::AlbumRow>>())
+                        .and_then(|item| item.value::<Arc<library::AlbumView>>())
                     {
                         slot.cell.bind(position as u32, (*album).clone());
                         slot.widget.remove_css_class("row-pending");

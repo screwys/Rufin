@@ -1,477 +1,35 @@
-use std::sync::Arc;
-
-use futures_util::TryStreamExt;
-use tokio::io::AsyncReadExt;
-
 use super::FileSource;
 use crate::file::remote::input::{FileInput, FileInputServer};
-use crate::{MetadataDraft, SourceError, SourceMetadataError, SourceResult};
-
-pub(crate) use crate::file::metadata::WorkingFile;
+use crate::{SourceError, SourceMetadataError, SourceResult};
+use std::sync::Arc;
+use tokio::io::AsyncReadExt;
 
 impl FileSource {
-    pub(crate) async fn write_tags(
-        &self,
-        database: &library::Database,
-        track: &library::TrackRow,
-        write: impl FnOnce(&std::path::Path, Option<&str>) -> Result<(), SourceMetadataError>
-        + Send
-        + 'static,
-    ) -> Result<(), SourceMetadataError> {
-        let copy = self.working_file(database, track).await?;
-        let format = track.source_format.clone();
-        let copy = tokio::task::spawn_blocking(move || {
-            write(&copy.file, format.as_deref())?;
-            Ok::<_, SourceMetadataError>(copy)
-        })
-        .await
-        .map_err(|e| SourceMetadataError::Write(e.to_string()))??;
-        self.save_file(&copy).await?;
-        self.publish_saved_file(database, &track.media_uri, &copy)
-            .await
-            .map_err(crate::operations::metadata_refresh_error)
-    }
-
-    pub(crate) async fn read_track_metadata(
-        &self,
-        database: &library::Database,
-        track: &library::TrackRow,
-    ) -> Result<MetadataDraft, SourceMetadataError> {
-        if track.cue_path.is_some()
-            || track.source_format.as_deref().is_some_and(|format| {
-                !crate::file::metadata::metadata_file_available(
-                    std::path::Path::new(""),
-                    Some(format),
-                )
-            })
-        {
-            let input = self.input().await.map_err(metadata_error)?;
-            let revision = self
-                .track_revision(database, &input, &track.media_uri)
-                .await?;
-            return Ok(crate::file::metadata::readonly_track_metadata(
-                track, revision,
-            ));
-        }
-        let copy = self.working_file(database, track).await?;
-        let format = track.source_format.clone();
-        let (copy, mut metadata) = tokio::task::spawn_blocking(move || {
-            let metadata =
-                crate::file::metadata::read_track_metadata(&copy.file, format.as_deref())?;
-            Ok::<_, SourceMetadataError>((copy, metadata))
-        })
-        .await
-        .map_err(|e| SourceMetadataError::Write(e.to_string()))??;
-        if let FileInput::Documents(access) = copy.input.input() {
-            let access = Arc::clone(access);
-            let relative = copy.relative.clone();
-            let entry = tokio::task::spawn_blocking(move || access.resolve(&relative))
-                .await
-                .map_err(|error| SourceMetadataError::Write(error.to_string()))?
-                .map_err(metadata_error)?;
-            if !entry.writable {
-                metadata
-                    .fields
-                    .iter_mut()
-                    .for_each(|field| field.writable = false);
-                metadata.artwork.can_embed = false;
-            }
-        }
-        metadata.revision = copy.revision;
-        if !metadata.fields.iter().any(|field| field.writable) {
-            return Ok(crate::file::metadata::readonly_track_metadata(
-                track,
-                metadata.revision,
-            ));
-        }
-        Ok(metadata)
-    }
-
-    pub(crate) async fn write_track_metadata(
-        &self,
-        database: &library::Database,
-        track: &library::TrackRow,
-        expected: &str,
-        mut edit: crate::MetadataEdit,
-        previous_artist: &str,
-        folder_image: Option<String>,
-    ) -> Result<(), SourceMetadataError> {
-        let uri = &track.media_uri;
-        let folder_image = folder_image
-            .as_deref()
-            .map(|path| self.relative(path).map_err(metadata_error))
-            .transpose()?;
-        let input = self.input().await.map_err(metadata_error)?;
-        let current = self
-            .track_revision(database, &input, uri)
-            .await?
-            .unwrap_or_default();
-        if current != expected {
-            return Err(SourceMetadataError::Conflict);
-        }
-        if crate::file::metadata::artist_image_needs_rename(
-            &edit,
-            previous_artist,
-            folder_image.as_deref().map(std::path::Path::new),
-        ) {
-            let path = folder_image.as_deref().unwrap();
-            let input = self.input().await.map_err(metadata_error)?;
-            let bytes = self
-                .small_file(&input, path, 32 * 1024 * 1024)
-                .await
-                .map_err(metadata_error)?;
-            edit.artwork = Some(crate::ArtworkEdit {
-                change: crate::ArtworkChange::Replace(Arc::new(crate::ImageBytes {
-                    bytes,
-                    content_type: crate::file::artwork::content_type(std::path::Path::new(path)),
-                })),
-                storage: crate::ArtworkStorage::Folder,
-            });
-        }
-        let folder_artwork = if edit
-            .artwork
-            .as_ref()
-            .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
-        {
-            edit.artwork.take()
-        } else {
-            None
-        };
-        let changed = !edit.changes.is_empty() || edit.artwork.as_ref().is_some();
-        let edit = Arc::new(edit);
-        let mut scan = library::Scan::begin_items(database, self.source_id.as_str())
-            .await
-            .map_err(|error| metadata_error(error.into()))?;
-        let mut saved = false;
-        let result = async {
-            if !changed && folder_artwork.is_none() {
-                return Ok(());
-            }
-            let relative = if changed {
-                let copy = self.working_file(database, track).await?;
-                // The single-track revision describes this exact copy, including a race after the initial stat.
-                if copy.revision.as_deref().unwrap_or_default() != expected {
-                    return Err(SourceMetadataError::Conflict);
-                }
-                let edit = Arc::clone(&edit);
-                let previous_artist = previous_artist.to_string();
-                let format = track.source_format.clone();
-                let copy = tokio::task::spawn_blocking(move || {
-                    crate::file::metadata::write_metadata_copy(
-                        &copy.file,
-                        format.as_deref(),
-                        &edit,
-                        &previous_artist,
-                        &mut None,
-                    )?;
-                    Ok::<_, SourceMetadataError>(copy)
-                })
-                .await
-                .map_err(|error| SourceMetadataError::Write(error.to_string()))??;
-                self.save_file(&copy).await?;
-                saved = true;
-                self.stage_saved_file(&mut scan, uri, &copy)
-                    .await
-                    .map_err(crate::operations::metadata_refresh_error)?;
-                copy.relative
-            } else {
-                let file = database
-                    .observed_media_file(uri)
-                    .await
-                    .map_err(|error| metadata_error(error.into()))?
-                    .ok_or(SourceMetadataError::Unavailable)?;
-                self.retain_artwork_track(&mut scan, track, &file.path)
-                    .await?;
-                self.relative(&file.path).map_err(metadata_error)?
-            };
-            if let Some(artwork) = &folder_artwork {
-                self.save_folder_artwork(
-                    &mut scan,
-                    &relative,
-                    artwork,
-                    crate::file::metadata::artist_name(&edit, previous_artist),
-                    folder_image.as_deref(),
-                )
-                .await?;
-                saved = true;
-            }
-            Ok(())
-        }
-        .await;
-        if result.is_err() {
-            scan.incomplete();
-        }
-        let refresh = crate::file::artwork::ArtworkFiles::Remote(self)
-            .stage(database, &mut scan, &|| false)
-            .await;
-        let refresh = crate::finish_scan(scan, refresh)
-            .await
-            .map_err(crate::operations::metadata_refresh_error);
-        crate::operations::finish_metadata_save(result, refresh, saved)
-    }
-
-    pub(crate) async fn save_folder_artwork(
-        &self,
-        scan: &mut library::Scan,
-        audio: &str,
-        edit: &crate::ArtworkEdit,
-        artist_name: Option<&str>,
-        folder_image: Option<&str>,
-    ) -> Result<(), SourceMetadataError> {
-        let directory = audio.rsplit_once('/').map_or("", |(parent, _)| parent);
-        let current = if let Some(path) = folder_image {
-            Some(path.to_string())
-        } else {
-            let prefix = format!(
-                "{}/",
-                self.location(directory)
-                    .map_err(metadata_error)?
-                    .trim_end_matches('/')
-            );
-            let image = if let Some(name) = artist_name {
-                self.directory_artist_image_for(scan, &prefix, name, false)
-                    .await
-            } else {
-                self.directory_image(scan, &prefix).await
-            }
-            .map_err(metadata_error)?;
-            match image {
-                Some(crate::LocalImageRef::File { path, .. }) => {
-                    Some(self.relative(&path).map_err(metadata_error)?)
-                }
-                _ => None,
-            }
-        };
-        let crate::ArtworkChange::Replace(image) = &edit.change else {
-            if let Some(current) = current {
-                self.remove_folder_artwork(scan, &current).await?;
-            }
-            return Ok(());
-        };
-        let extension = crate::file::metadata::artwork_extension(image)?;
-        let (parent, current_name) = current
-            .as_deref()
-            .map(|path| crate::file::documents::relative_parts(path).0)
-            .map_or((directory, None), |path| {
-                path.rsplit_once('/')
-                    .map_or(("", Some(path)), |(parent, name)| (parent, Some(name)))
-            });
-        let filename = crate::file::metadata::folder_artwork_filename(
-            current_name.map(std::ffi::OsStr::new),
-            artist_name,
-            extension,
-        );
-        let filename = filename.to_str().ok_or(SourceMetadataError::Unavailable)?;
-        let relative = if parent.is_empty() {
-            filename.to_string()
-        } else {
-            format!("{parent}/{filename}")
-        };
-        let relative = current
-            .as_ref()
-            .filter(|current| crate::file::documents::relative_parts(current).0 == relative)
-            .cloned()
-            .unwrap_or(relative);
-        let file = tempfile::NamedTempFile::new()
-            .map_err(|e| SourceMetadataError::Write(e.to_string()))?
-            .into_temp_path();
-        tokio::fs::write(&file, &image.bytes)
-            .await
-            .map_err(|e| SourceMetadataError::Write(e.to_string()))?;
-        self.save_contents(relative.clone(), file).await?;
-        let input = self
-            .input()
-            .await
-            .map_err(crate::operations::metadata_refresh_error)?;
-        let mut observation = self
-            .stat(&input, &relative)
-            .await
-            .map_err(crate::operations::metadata_refresh_error)?;
-        let saved_path = observation.path.clone();
-        observation.state = library::LocalFileState::Accepted;
-        scan.write_local_files(&[(observation, Vec::new())])
-            .await
-            .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?;
-        if let Some(current) = current {
-            if self.location(&current).map_err(metadata_error)? != saved_path {
-                self.remove_folder_artwork(scan, &current).await?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn remove_folder_artwork(
-        &self,
-        scan: &mut library::Scan,
-        current: &str,
-    ) -> Result<(), SourceMetadataError> {
-        let input = self.input().await.map_err(metadata_error)?;
-        match input.input() {
-            FileInput::Documents(access) => {
-                let access = Arc::clone(access);
-                let current = current.to_owned();
-                tokio::task::spawn_blocking(move || access.remove(&current))
-                    .await
-                    .map_err(|error| SourceMetadataError::Write(error.to_string()))?
-            }
-            FileInput::Smb(client) => client.remove(current).await,
-            FileInput::WebDav(client) => {
-                let url = url::Url::parse(
-                    &self
-                        .input_path(input.input(), current)
-                        .map_err(metadata_error)?,
-                )
-                .map_err(|e| SourceMetadataError::Write(e.to_string()))?;
-                client.remove(&url).await
-            }
-        }
-        .map_err(|error| SourceMetadataError::PartiallySaved {
-            reason: format!("The previous artwork image could not be removed: {error}"),
-        })?;
-        scan.remove_local_file_paths(&[self.location(current).map_err(metadata_error)?])
-            .await
-            .map_err(|e| metadata_error(e.into()))?;
-        Ok(())
-    }
-
-    pub(crate) async fn retain_artwork_track(
-        &self,
-        scan: &mut library::Scan,
-        track: &library::TrackRow,
-        path: &str,
-    ) -> Result<(), SourceMetadataError> {
-        if let Some(cue) = &track.cue_path {
-            scan.retain_local_cue_paths(&[cue]).await
-        } else {
-            scan.retain_local_media_paths(&[path.to_string()]).await
-        }
-        .map_err(|e| SourceMetadataError::SavedRefreshFailed(e.to_string()))
-    }
-
-    pub(crate) async fn working_file(
-        &self,
-        database: &library::Database,
-        track: &library::TrackRow,
-    ) -> Result<WorkingFile, SourceMetadataError> {
-        if track.cue_path.is_some()
-            || library::source_entity_parts(&track.media_uri)
-                .is_none_or(|(source, _, _)| source != self.source_id)
-        {
-            return Err(SourceMetadataError::Unavailable);
-        }
-        let observation = database
-            .observed_media_file(&track.media_uri)
-            .await
-            .map_err(|e| SourceMetadataError::Write(e.to_string()))?
-            .ok_or(SourceMetadataError::Unavailable)?;
-        let relative = self.relative(&observation.path).map_err(metadata_error)?;
-        self.working_copy(&relative, &track.media_uri).await
-    }
-
-    pub(super) async fn working_copy(
+    pub(crate) async fn commit_file(
         &self,
         relative: &str,
-        identity: &str,
-    ) -> Result<WorkingFile, SourceMetadataError> {
-        let input = self.input().await.map_err(metadata_error)?;
-        let before = self.stat(&input, &relative).await.map_err(metadata_error)?;
-        let file = tempfile::NamedTempFile::new()
-            .map_err(|e| SourceMetadataError::Write(e.to_string()))?;
-        let path = self
-            .input_path(input.input(), relative)
-            .map_err(metadata_error)?;
-        let stream = if matches!(input.input(), FileInput::Documents(_)) {
-            input
-                .playback_stream(
-                    &path,
-                    before.revision.as_deref().unwrap_or_default(),
-                    identity,
-                )
-                .await
-                .map_err(metadata_error)?
-        } else {
-            input.stream(&path, identity)
-        };
-        let response = reqwest::Client::builder()
-            .no_proxy()
-            .read_timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| SourceMetadataError::Write(e.to_string()))?
-            .get(stream.uri())
-            .send()
-            .await
-            .map_err(|e| SourceMetadataError::Write(e.without_url().to_string()))?;
-        if !response.status().is_success() {
-            return Err(SourceMetadataError::Write(format!(
-                "File read failed with status {}",
-                response.status()
-            )));
-        }
-        let mut reader = tokio_util::io::StreamReader::new(
-            response.bytes_stream().map_err(std::io::Error::other),
-        );
-        let mut output = tokio::fs::File::from_std(
-            file.reopen()
-                .map_err(|e| SourceMetadataError::Write(e.to_string()))?,
-        );
-        tokio::io::copy(&mut reader, &mut output)
-            .await
-            .map_err(|e| SourceMetadataError::Write(e.to_string()))?;
-        drop(output);
-        let after = self.stat(&input, &relative).await.map_err(metadata_error)?;
-        if before.revision != after.revision {
-            return Err(SourceMetadataError::Conflict);
-        }
-        Ok(WorkingFile {
-            file: file.into_temp_path(),
-            relative: relative.into(),
-            revision: after.revision,
-            existed: true,
-            input,
-        })
-    }
-
-    pub(super) async fn save_contents(
-        &self,
-        relative: String,
-        file: tempfile::TempPath,
+        file: &std::path::Path,
+        revision: Option<&str>,
+        existed: bool,
     ) -> Result<(), SourceMetadataError> {
         let input = self.input().await.map_err(metadata_error)?;
-        let (existed, revision) = match self.stat(&input, &relative).await {
-            Ok(file) => (true, file.revision),
-            Err(SourceError::NotFound) => (false, None),
-            Err(error) => return Err(metadata_error(error)),
-        };
-        self.save_file(&WorkingFile {
-            file,
-            relative,
-            revision,
-            existed,
-            input,
-        })
-        .await
-    }
-
-    pub(crate) async fn save_file(&self, copy: &WorkingFile) -> Result<(), SourceMetadataError> {
-        self.check_file_revision(copy)
+        self.check_file_revision(&input, relative, revision, existed)
             .await
             .map_err(metadata_error)?;
         let mut random = [0_u8; 24];
         getrandom::fill(&mut random).map_err(|e| SourceMetadataError::Write(e.to_string()))?;
         let token: String = random.iter().map(|b| format!("{b:02x}")).collect();
-        let parent = copy
-            .relative
+        let parent = relative
             .rsplit_once('/')
             .map(|(parent, _)| format!("{parent}/"))
             .unwrap_or_default();
         let temporary = format!("{parent}.rufin-write-{token}.tmp");
-        match copy.input.input() {
+        match input.input() {
             FileInput::Documents(access) => {
                 let access = Arc::clone(access);
-                let relative = copy.relative.clone();
-                let file = copy.file.to_path_buf();
-                let revision = copy.revision.clone();
-                let existed = copy.existed;
+                let relative = relative.to_owned();
+                let file = file.to_path_buf();
+                let revision = revision.map(str::to_owned);
                 tokio::task::spawn_blocking(move || {
                     access.save(&relative, &file, revision.as_deref(), existed)
                 })
@@ -482,7 +40,7 @@ impl FileSource {
             FileInput::Smb(client) => {
                 let result: SourceResult<()> = async {
                     let destination = client.create(&temporary).await?;
-                    let mut file = tokio::fs::File::open(&copy.file)
+                    let mut file = tokio::fs::File::open(&file)
                         .await
                         .map_err(|e| SourceError::Other(e.to_string()))?;
                     let mut bytes = vec![0; 65536];
@@ -508,10 +66,9 @@ impl FileSource {
                     }
                     destination.flush().await?;
                     destination.close().await?;
-                    self.check_file_revision(copy).await?;
-                    client
-                        .rename(&temporary, &copy.relative, copy.existed)
-                        .await
+                    self.check_file_revision(&input, relative, revision, existed)
+                        .await?;
+                    client.rename(&temporary, &relative, existed).await
                 }
                 .await;
                 let cleanup = client.remove(&temporary).await;
@@ -525,21 +82,22 @@ impl FileSource {
             FileInput::WebDav(client) => {
                 let destination = url::Url::parse(
                     &self
-                        .input_path(copy.input.input(), &copy.relative)
+                        .input_path(input.input(), &relative)
                         .map_err(metadata_error)?,
                 )
                 .map_err(|e| SourceMetadataError::Write(e.to_string()))?;
                 let temporary = url::Url::parse(
                     &self
-                        .input_path(copy.input.input(), &temporary)
+                        .input_path(input.input(), &temporary)
                         .map_err(metadata_error)?,
                 )
                 .map_err(|e| SourceMetadataError::Write(e.to_string()))?;
                 let result: SourceResult<()> = async {
-                    client.upload(&temporary, &copy.file, true).await?;
-                    let lock = if copy.existed {
-                        self.check_file_revision(copy).await?;
-                        client.lock(&destination, copy.revision.as_deref()).await?
+                    client.upload(&temporary, &file, true).await?;
+                    let lock = if existed {
+                        self.check_file_revision(&input, relative, revision, existed)
+                            .await?;
+                        client.lock(&destination, revision.as_deref()).await?
                     } else {
                         None
                     };
@@ -550,11 +108,10 @@ impl FileSource {
                             // lock acquired above now protects this replacement.
                             conditions.push(lock.clone());
                         } else {
-                            self.check_file_revision(copy).await?;
-                            if let Some(etag) = copy
-                                .revision
-                                .as_deref()
-                                .filter(|value| value.starts_with('"'))
+                            self.check_file_revision(&input, relative, revision, existed)
+                                .await?;
+                            if let Some(etag) =
+                                revision.as_deref().filter(|value| value.starts_with('"'))
                             {
                                 conditions.push(format!("[{etag}]"));
                             }
@@ -562,7 +119,7 @@ impl FileSource {
                         let condition = (!conditions.is_empty())
                             .then(|| format!("<{}> ({})", destination, conditions.join(" ")));
                         client
-                            .move_file(&temporary, &destination, copy.existed, condition.as_deref())
+                            .move_file(&temporary, &destination, existed, condition.as_deref())
                             .await
                     }
                     .await;
@@ -585,10 +142,16 @@ impl FileSource {
         }
     }
 
-    async fn check_file_revision(&self, copy: &WorkingFile) -> SourceResult<()> {
-        let same = match self.stat(&copy.input, &copy.relative).await {
-            Ok(file) => copy.existed && file.revision == copy.revision,
-            Err(SourceError::NotFound) => !copy.existed,
+    pub(crate) async fn check_file_revision(
+        &self,
+        input: &Arc<FileInputServer>,
+        relative: &str,
+        revision: Option<&str>,
+        existed: bool,
+    ) -> SourceResult<()> {
+        let same = match self.stat(&input, &relative).await {
+            Ok(file) => existed && file.revision.as_deref() == revision,
+            Err(SourceError::NotFound) => !existed,
             Err(error) => return Err(error),
         };
         if same {
@@ -598,51 +161,6 @@ impl FileSource {
                 status: 412,
                 message: "The file changed before replacement".into(),
             })
-        }
-    }
-
-    pub(crate) async fn write_lyrics(
-        &self,
-        database: &library::Database,
-        track: &library::TrackRow,
-        lyrics: &str,
-        sidecar: bool,
-    ) -> Result<(), SourceMetadataError> {
-        if track.cue_path.is_some()
-            || library::source_entity_parts(&track.media_uri)
-                .is_none_or(|(source, _, _)| source != self.source_id)
-        {
-            return Err(SourceMetadataError::Unavailable);
-        }
-        if sidecar {
-            let observation = database
-                .observed_media_file(&track.media_uri)
-                .await
-                .map_err(|e| SourceMetadataError::Write(e.to_string()))?
-                .ok_or(SourceMetadataError::Unavailable)?;
-            let audio = self.relative(&observation.path).map_err(metadata_error)?;
-            let relative = sidecar_path(crate::file::documents::relative_parts(&audio).0);
-            let file = tempfile::NamedTempFile::new()
-                .map_err(|e| SourceMetadataError::Write(e.to_string()))?
-                .into_temp_path();
-            tokio::fs::write(&file, lyrics)
-                .await
-                .map_err(|e| SourceMetadataError::Write(e.to_string()))?;
-            self.save_contents(relative, file).await
-        } else {
-            let copy = self.working_file(database, track).await?;
-            let lyrics = lyrics.to_string();
-            let copy = tokio::task::spawn_blocking(move || {
-                crate::file::metadata::write_embedded_lyrics(&copy.file, &lyrics)?;
-                Ok::<_, SourceMetadataError>(copy)
-            })
-            .await
-            .map_err(|e| SourceMetadataError::Write(e.to_string()))??;
-            self.save_file(&copy).await?;
-            self.publish_saved_file(database, &track.media_uri, &copy)
-                .await
-                .map_err(crate::operations::metadata_refresh_error)?;
-            Ok(())
         }
     }
 
@@ -656,10 +174,15 @@ impl FileSource {
         {
             return Err(SourceError::NotFound);
         }
-        let track = database
-            .track_row_by_uri(media_uri, &library::ReadCancellation::new())
-            .await?
-            .ok_or(SourceError::NotFound)?;
+        let track =
+            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(media_uri).to_owned()])
+                .rows(&database, 0, 256, &library::ReadCancellation::new())
+                .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+                    _ => unreachable!(),
+                })?
+                .ok_or(SourceError::NotFound)?;
         let file = database
             .observed_media_file(media_uri)
             .await?
@@ -667,7 +190,7 @@ impl FileSource {
         let relative = self.relative(&file.path)?;
         let input = self.input().await?;
         let mut candidates = Vec::new();
-        if track.cue_path.is_none() {
+        if track.access.cue_path.is_none() {
             let sidecar = sidecar_path(crate::file::documents::relative_parts(&relative).0);
             candidates.push(sidecar.clone());
             candidates.push(format!(
@@ -675,15 +198,15 @@ impl FileSource {
                 sidecar.strip_suffix(".lrc").unwrap_or(&sidecar)
             ));
         }
-        if !track.title.is_empty()
-            && !matches!(track.title.as_str(), "." | "..")
-            && !track.title.contains(['/', '\\', '\0'])
+        if !track.metadata.title.is_empty()
+            && !matches!(track.metadata.title.as_str(), "." | "..")
+            && !track.metadata.title.contains(['/', '\\', '\0'])
         {
             let parent = relative
                 .rsplit_once('/')
                 .map_or(String::new(), |(parent, _)| format!("{parent}/"));
             for extension in ["lrc", "LRC"] {
-                let path = format!("{parent}{}.{extension}", track.title);
+                let path = format!("{parent}{}.{extension}", track.metadata.title);
                 if !candidates.contains(&path) {
                     candidates.push(path);
                 }
@@ -702,7 +225,7 @@ impl FileSource {
                 Err(error) => return Err(error),
             }
         }
-        if track.cue_path.is_some() {
+        if track.access.cue_path.is_some() {
             return Ok(None);
         }
         let reader = crate::file::remote::reader::FileReader::open(
@@ -755,44 +278,4 @@ pub(crate) fn is_write_temporary(relative: &str) -> bool {
         .and_then(|name| name.strip_prefix(".rufin-write-"))
         .and_then(|name| name.strip_suffix(".tmp"))
         .is_some_and(|name| name.len() == 48 && name.bytes().all(|b| b.is_ascii_hexdigit()))
-}
-
-impl FileSource {
-    pub(crate) async fn track_revision(
-        &self,
-        database: &library::Database,
-        input: &Arc<FileInputServer>,
-        uri: &str,
-    ) -> Result<Option<String>, SourceMetadataError> {
-        let file = database
-            .observed_media_file(uri)
-            .await
-            .map_err(|error| metadata_error(error.into()))?
-            .ok_or(SourceMetadataError::Unavailable)?;
-        let relative = self.relative(&file.path).map_err(metadata_error)?;
-        Ok(self
-            .stat(input, &relative)
-            .await
-            .map_err(metadata_error)?
-            .revision)
-    }
-
-    pub(crate) async fn refresh(
-        &self,
-        database: &library::Database,
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<()> {
-        let mut scan = library::Scan::begin(
-            database,
-            self.source_id.as_str(),
-            &self.name,
-            &self.name.to_lowercase(),
-            None,
-        )
-        .await?;
-        let result = self
-            .stage_catalog(database, &mut scan, &|_| {}, cancelled)
-            .await;
-        crate::finish_scan(scan, result).await
-    }
 }

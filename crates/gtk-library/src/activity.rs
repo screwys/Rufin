@@ -1,14 +1,14 @@
 //! The overview uses the same cells as the library, with period-specific counts.
 use crate::{
     CatalogUi,
-    columns::{TrackRowPlayingIndicator, song_column_for_key},
+    columns::{TrackRowPlayingIndicator, track_column_for_key},
     grid_cells::{AlbumGridCell, ArtistGridCell, ReusableCollectionGridCell},
 };
 use adw::prelude::*;
 use gtk::{gio, glib};
 use gtk_widgets::selection::track_play_request;
 use gtk_widgets::{mounted_route::RouteCurrentTrack, route::Route};
-use library::{ActivityOverview, HistoryRow};
+use library::{ActivityOverview, TrackView};
 use rufin_core::settings::{LibraryField, LibraryListKey};
 use std::{cell::RefCell, rc::Rc};
 
@@ -38,7 +38,7 @@ impl ActivityCollections {
             LibraryField::TitleMerged,
             LibraryField::PlayCount,
         ] {
-            let column = song_column_for_key::<HistoryRow>(
+            let column = track_column_for_key::<TrackView>(
                 &catalog,
                 LibraryListKey::History,
                 field,
@@ -57,7 +57,7 @@ impl ActivityCollections {
                 return;
             };
             if let Some(item) = rows.item(position).and_downcast::<glib::BoxedAnyObject>() {
-                let row = item.borrow::<HistoryRow>();
+                let row = item.borrow::<TrackView>();
                 (shell.media_menus.play_target)(
                     &track_play_request(row.track_key),
                     rufin_core::playback::QueuePlacement::Now,
@@ -148,7 +148,7 @@ impl ActivityCollections {
         for (position, row) in data.artists.iter().take(limit).enumerate() {
             let cell = ArtistGridCell::new(&self.catalog, &[LibraryField::PlayCount], false);
             cell.bind(position as u32, row.clone());
-            cell.set_play_count_caption(row.play_count);
+            cell.set_play_count_caption(row.state.play_count);
             let widget = crate::cards::collection_grid_card_inset(&cell.widget(), 120);
             self.artists.insert(&widget, -1);
             self.artist_cells.borrow_mut().push(cell);
@@ -156,7 +156,7 @@ impl ActivityCollections {
         for (position, row) in data.albums.iter().take(limit).enumerate() {
             let cell = AlbumGridCell::new(&self.catalog, &[LibraryField::PlayCount], None);
             cell.bind(position as u32, row.clone());
-            cell.set_play_count_caption(row.play_count);
+            cell.set_play_count_caption(row.state.play_count);
             let widget = crate::cards::collection_grid_card_inset(&cell.widget(), 120);
             self.albums.insert(&widget, -1);
             self.album_cells.borrow_mut().push(cell);

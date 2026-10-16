@@ -1,8 +1,7 @@
 use crate::route::{CollectionCategory, Route};
 use crate::settings::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
 use library::{
-    CollectionKind, CollectionQuery, Database, ReadCancellation, SongQuery, SongScope,
-    SongSelection,
+    CatalogQuery, CatalogSubject, Database, ReadCancellation, TrackScope, TrackSelection,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -11,7 +10,7 @@ pub struct ArtistReleasePage {
     pub counts: [usize; 6],
     pub source_counts: [usize; 6],
     pub first_row_position: usize,
-    pub first_rows: Vec<library::AlbumRow>,
+    pub first_rows: Vec<library::AlbumView>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,8 +20,9 @@ pub struct ArtistReleaseQuery {
     pub artist: library::ArtistKey,
     pub album_artist: bool,
     pub filters: [String; 6],
-    pub sort: library::AlbumSort,
+    pub sort: library::CatalogSort,
     pub descending: bool,
+    pub activity: bool,
 }
 
 const ARTIST_RELEASE_CLASSES: [library::AlbumReleaseClass; 5] = [
@@ -40,7 +40,7 @@ impl ArtistReleaseQuery {
         counts: [usize; 6],
         range: std::ops::Range<usize>,
         cancellation: &ReadCancellation,
-    ) -> library::LibraryResult<Vec<library::AlbumRow>> {
+    ) -> library::LibraryResult<Vec<library::AlbumView>> {
         if self.filters[..ARTIST_RELEASE_CLASSES.len()]
             .iter()
             .all(|filter| filter == &self.filters[0])
@@ -125,7 +125,7 @@ impl crate::source::folders::FolderProjection {
         &self,
         database: &Database,
         source: library::SourceKey,
-        query: &SongQuery,
+        query: &CatalogQuery,
         range: std::ops::Range<usize>,
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<(usize, Vec<FolderEntry>)> {
@@ -159,7 +159,7 @@ impl crate::source::folders::FolderProjection {
                     rows.into_iter()
                         .map(|row| FolderEntry {
                             object_id: row.object_id,
-                            name: row.name,
+                            name: row.metadata.name.unwrap_or_default(),
                             artwork_binding: row.artwork_binding,
                         })
                         .collect(),
@@ -172,7 +172,7 @@ impl crate::source::folders::FolderProjection {
         &self,
         database: &Database,
         source: library::SourceKey,
-        query: &SongQuery,
+        query: &CatalogQuery,
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<Vec<library::ScrollSection>> {
         let mut sections = match self {
@@ -201,7 +201,7 @@ impl crate::source::folders::FolderProjection {
             .child_page(database, source, query, 0..0, cancel)
             .await?
             .0;
-        for mut section in database.song_sections(query, cancel).await? {
+        for mut section in query.sections(database, cancel).await? {
             section.index += folders as u64;
             if let Some(existing) = sections
                 .iter_mut()
@@ -268,13 +268,36 @@ pub struct BrowseRequest<'a> {
     pub downloaded_only: bool,
     pub now: i64,
     pub inline_tracks: Option<usize>,
+    pub activity: bool,
 }
 
 pub enum BrowseQuery {
-    Songs(SongQuery),
-    Collection(CollectionQuery),
+    Tracks(CatalogQuery),
+    Collection(CatalogQuery),
     Releases(ArtistReleaseQuery),
     Empty,
+}
+
+pub enum DetailSummary {
+    Album(Box<library::AlbumView>),
+    Artist(library::ArtistView),
+    Playlist(library::PlaylistRow),
+    SmartPlaylist(library::SmartPlaylistRow),
+    Genre(library::GenreView),
+    Mood(library::MoodView),
+}
+
+pub enum DetailContent {
+    Tracks(library::CatalogPage),
+    Releases {
+        page: Box<ArtistReleasePage>,
+        favorites: Option<library::CatalogPage>,
+    },
+}
+
+pub struct DetailPage {
+    pub summary: DetailSummary,
+    pub content: DetailContent,
 }
 
 impl<'a> BrowseRequest<'a> {
@@ -301,74 +324,293 @@ impl<'a> BrowseRequest<'a> {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |duration| duration.as_secs() as i64),
             inline_tracks: (settings.layout == LibraryLayout::Detail).then_some(inline_tracks),
+            activity: match settings.layout {
+                LibraryLayout::Grid => &settings.grid_fields,
+                _ => &settings.row_fields,
+            }
+            .iter()
+            .chain(if settings.layout == LibraryLayout::Detail {
+                settings.detail_track_fields.as_slice()
+            } else {
+                &[]
+            })
+            .any(|field| field.catalog_sort().activity_sensitive()),
         }
     }
 
-    pub fn collection(&self) -> Option<CollectionQuery> {
+    pub async fn detail_page(
+        &self,
+        database: &Database,
+        track_settings: &LibraryListSettings,
+        window: library::RouteSeedWindow,
+        cancel: &ReadCancellation,
+    ) -> library::LibraryResult<Option<DetailPage>> {
+        use library::{CatalogKind, CatalogRows};
+        let album_artist = matches!(
+            self.route,
+            Route::AlbumArtistDetail(_)
+                | Route::AlbumArtistDiscography(_)
+                | Route::AlbumArtistTracks(_)
+                | Route::AlbumArtistFavoriteTracks(_)
+        );
+        if matches!(
+            self.route,
+            Route::ArtistDetail(_)
+                | Route::AlbumArtistDetail(_)
+                | Route::ArtistDiscography(_)
+                | Route::AlbumArtistDiscography(_)
+        ) {
+            let Some(releases) = self.artist(database, cancel).await? else {
+                return Ok(None);
+            };
+            let favorites = matches!(
+                self.route,
+                Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
+            )
+            .then(|| {
+                BrowseRequest {
+                    filter: self.filter,
+                    favorites_only: true,
+                    ..BrowseRequest::new(
+                        self.route,
+                        CollectionCategory::Tracks,
+                        Some(releases.source),
+                        self.folder,
+                        track_settings,
+                        0,
+                    )
+                }
+                .artist_tracks(&releases)
+            });
+            return releases
+                .detail_page(database, favorites, window, cancel)
+                .await;
+        }
+        let mut summary_query = match self.route {
+            Route::AlbumDetail(uri) => CatalogQuery::uris(CatalogKind::Album, vec![uri.clone()]),
+            Route::ArtistDetail(uri)
+            | Route::AlbumArtistDetail(uri)
+            | Route::ArtistDiscography(uri)
+            | Route::AlbumArtistDiscography(uri)
+            | Route::ArtistTracks(uri)
+            | Route::AlbumArtistTracks(uri)
+            | Route::ArtistFavoriteTracks(uri)
+            | Route::AlbumArtistFavoriteTracks(uri) => {
+                let mut query = CatalogQuery::uris(CatalogKind::Artist, vec![uri.clone()]);
+                if let CatalogSubject::Uris {
+                    album_artist: role, ..
+                } = &mut query.subject
+                {
+                    *role = album_artist;
+                }
+                query
+            }
+            Route::PlaylistDetail(key) => {
+                CatalogQuery::keys(CatalogKind::Playlist, None, vec![key.raw()])
+            }
+            Route::SmartPlaylistDetail(key) => {
+                CatalogQuery::keys(CatalogKind::SmartPlaylist, self.source, vec![key.raw()])
+            }
+            Route::GenreDetail(key) => {
+                CatalogQuery::keys(CatalogKind::Genre, self.source, vec![key.raw()])
+            }
+            Route::MoodDetail(key) => {
+                CatalogQuery::keys(CatalogKind::Mood, self.source, vec![key.raw()])
+            }
+            _ => return Ok(None),
+        };
+        summary_query.folder = self.folder;
+        let rows = if let Route::SmartPlaylistDetail(key) = self.route {
+            CatalogRows::SmartPlaylists(
+                database
+                    .smart_playlist_rows(self.source, &[*key], self.folder, self.now, cancel)
+                    .await?,
+            )
+        } else {
+            summary_query.rows(database, 0, 1, cancel).await?
+        };
+        let (summary, query, total) = match rows {
+            CatalogRows::Albums(mut rows) => {
+                let Some(row) = rows.pop() else {
+                    return Ok(None);
+                };
+                let query = self.query_for_scope(TrackScope::Album(row.album_key));
+                let total = row.summary.track_count;
+                (DetailSummary::Album(Box::new(row)), query, total)
+            }
+            CatalogRows::Artists(mut rows) => {
+                let Some(row) = rows.pop() else {
+                    return Ok(None);
+                };
+                let releases = ArtistReleaseQuery {
+                    source: row.source_key,
+                    folder: self.folder,
+                    artist: row.artist_key,
+                    album_artist,
+                    filters: std::array::from_fn(|_| self.filter.to_string()),
+                    sort: self.sort.catalog_sort(),
+                    descending: self.descending,
+                    activity: self.activity,
+                };
+                let query = self.artist_tracks(&releases);
+                let total = row.summary.track_count;
+                (DetailSummary::Artist(row), query, total)
+            }
+            CatalogRows::Playlists(mut rows) => {
+                let Some(mut row) = rows.pop() else {
+                    return Ok(None);
+                };
+                row.genres = database.playlist_genres(row.playlist_key, cancel).await?;
+                let total = row.track_count;
+                (
+                    DetailSummary::Playlist(row),
+                    self.tracks().expect("playlist detail"),
+                    total,
+                )
+            }
+            CatalogRows::SmartPlaylists(mut rows) => {
+                let Some(row) = rows.pop() else {
+                    return Ok(None);
+                };
+                let total = row.track_count;
+                (
+                    DetailSummary::SmartPlaylist(row),
+                    self.tracks().expect("smart playlist detail"),
+                    total,
+                )
+            }
+            CatalogRows::Genres(mut rows) => {
+                let Some(row) = rows.pop().filter(|row| row.summary.track_count > 0) else {
+                    return Ok(None);
+                };
+                let total = row.summary.track_count;
+                (
+                    DetailSummary::Genre(row),
+                    self.tracks().expect("genre detail"),
+                    total,
+                )
+            }
+            CatalogRows::Moods(mut rows) => {
+                let Some(row) = rows.pop().filter(|row| row.summary.track_count > 0) else {
+                    return Ok(None);
+                };
+                let total = row.summary.track_count;
+                (
+                    DetailSummary::Mood(row),
+                    self.tracks().expect("mood detail"),
+                    total,
+                )
+            }
+            _ => unreachable!("detail summary"),
+        };
+        let count = if query.filter.is_empty()
+            && !query.favorites_only
+            && !query.downloaded_only
+            && (query.folder.is_none()
+                || matches!(
+                    self.route,
+                    Route::SmartPlaylistDetail(_) | Route::GenreDetail(_) | Route::MoodDetail(_)
+                )) {
+            total.max(0) as usize
+        } else {
+            query.count(database, cancel).await?
+        };
+        let range = window.range(count);
+        let rows = query
+            .rows(database, range.start, range.len(), cancel)
+            .await?;
+        let disc_sections = if matches!(self.route, Route::AlbumDetail(_)) {
+            query.disc_sections(database, cancel).await?
+        } else {
+            Vec::new()
+        };
+        Ok(Some(DetailPage {
+            summary,
+            content: DetailContent::Tracks(library::CatalogPage {
+                query,
+                count,
+                first_row_position: range.start,
+                rows,
+                disc_sections,
+            }),
+        }))
+    }
+
+    pub fn activity_sensitive(&self) -> bool {
+        matches!(
+            self.route,
+            Route::Home | Route::SmartPlaylists | Route::SmartPlaylistDetail(_) | Route::History
+        ) || self.activity
+            || self.sort.catalog_sort().activity_sensitive()
+    }
+
+    pub fn collection(&self) -> Option<CatalogQuery> {
         let source = || self.source.expect("source-scoped collection has a source");
         let kind = match self.route {
-            Route::Albums => CollectionKind::Albums {
-                sort: self.sort.album_sort(),
+            Route::Albums => CatalogSubject::Albums {
+                sort: self.sort.catalog_sort(),
                 source: source(),
                 inline_tracks: self.inline_tracks,
             },
             Route::Favorites if self.category == CollectionCategory::Albums => {
-                CollectionKind::Albums {
-                    sort: self.sort.album_sort(),
+                CatalogSubject::Albums {
+                    sort: self.sort.catalog_sort(),
                     source: source(),
                     inline_tracks: self.inline_tracks,
                 }
             }
             Route::Favorites if self.category == CollectionCategory::Tracks => return None,
-            Route::Artists | Route::AlbumArtists | Route::Favorites => CollectionKind::Artists {
-                sort: self.sort.artist_sort(),
+            Route::Artists | Route::AlbumArtists | Route::Favorites => CatalogSubject::Artists {
+                sort: self.sort.catalog_sort(),
                 source: source(),
                 album_artist: matches!(self.route, Route::AlbumArtists),
             },
-            Route::Genres => CollectionKind::Genres {
+            Route::Genres => CatalogSubject::Genres {
                 source: source(),
-                sort: self.sort.genre_sort(),
+                sort: self.sort.catalog_sort(),
             },
-            Route::Moods => CollectionKind::Moods {
+            Route::Moods => CatalogSubject::Moods {
                 source: source(),
-                sort: self.sort.mood_sort(),
+                sort: self.sort.catalog_sort(),
             },
-            Route::Playlists => CollectionKind::Playlists {
+            Route::Playlists => CatalogSubject::Playlists {
                 source: self.source,
-                sort: self.sort.playlist_sort(),
+                sort: self.sort.catalog_sort(),
             },
-            Route::SmartPlaylists => CollectionKind::SmartPlaylists {
-                sort: self.sort.smart_playlist_sort(),
+            Route::SmartPlaylists => CatalogSubject::SmartPlaylists {
+                sort: self.sort.catalog_sort(),
                 source: self.source,
                 now: self.now,
             },
             _ => return None,
         };
-        Some(CollectionQuery {
-            kind,
+        Some(CatalogQuery {
+            subject: kind,
             folder: self.folder,
             filter: self.filter.to_string(),
             descending: self.descending,
             favorites_only: self.favorites_only || matches!(self.route, Route::Favorites),
+            downloaded_only: false,
+            activity: self.activity,
         })
     }
 
-    pub fn songs(&self) -> Option<SongQuery> {
+    pub fn tracks(&self) -> Option<CatalogQuery> {
         let source = || self.source.expect("source-scoped song route has a source");
         let scope = match self.route {
-            Route::Tracks => Some(SongScope::Tracks(source())),
+            Route::Tracks => Some(TrackScope::Tracks(source())),
             Route::Favorites if self.category == CollectionCategory::Tracks => {
-                Some(SongScope::Tracks(source()))
+                Some(TrackScope::Tracks(source()))
             }
-            Route::GenreDetail(key) => Some(SongScope::Genre(*key)),
-            Route::MoodDetail(key) => Some(SongScope::Mood(*key)),
-            Route::PlaylistDetail(key) => Some(SongScope::Playlist(*key)),
-            Route::SmartPlaylistDetail(key) => Some(SongScope::Smart {
+            Route::GenreDetail(key) => Some(TrackScope::Genre(*key)),
+            Route::MoodDetail(key) => Some(TrackScope::Mood(*key)),
+            Route::PlaylistDetail(key) => Some(TrackScope::Playlist(*key)),
+            Route::SmartPlaylistDetail(key) => Some(TrackScope::Smart {
                 key: *key,
                 source: self.source,
                 now: self.now,
             }),
-            Route::History => Some(SongScope::History {
+            Route::History => Some(TrackScope::History {
                 source: self.history_source.clone(),
             }),
             _ => None,
@@ -376,11 +618,14 @@ impl<'a> BrowseRequest<'a> {
         Some(self.query_for_scope(scope))
     }
 
-    fn query_for_scope(&self, scope: SongScope) -> SongQuery {
-        SongQuery {
+    fn query_for_scope(&self, scope: TrackScope) -> CatalogQuery {
+        CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope,
+                sort: Some(self.sort.catalog_sort()),
+            },
             folder: self.folder,
             filter: self.filter.to_string(),
-            sort: Some(self.sort.track_sort()),
             descending: self.descending,
             favorites_only: self.favorites_only
                 || matches!(
@@ -390,25 +635,8 @@ impl<'a> BrowseRequest<'a> {
                         | Route::AlbumArtistFavoriteTracks(_)
                 ),
             downloaded_only: self.downloaded_only,
-            ..SongQuery::new(scope)
+            activity: self.activity,
         }
-    }
-
-    pub async fn album(
-        &self,
-        database: &Database,
-        cancel: &ReadCancellation,
-    ) -> library::LibraryResult<Option<(library::AlbumRow, SongQuery)>> {
-        let Route::AlbumDetail(uri) = self.route else {
-            return Ok(None);
-        };
-        Ok(database
-            .album_row_by_media_uri(uri, cancel)
-            .await?
-            .map(|album| {
-                let query = self.query_for_scope(SongScope::Album(album.album_key));
-                (album, query)
-            }))
     }
 
     pub async fn artist(
@@ -427,10 +655,14 @@ impl<'a> BrowseRequest<'a> {
             | Route::AlbumArtistFavoriteTracks(uri) => uri,
             _ => return Ok(None),
         };
-        let Some((source, artist)) = database.artist_identity_by_media_uri(uri, cancel).await?
+        let Some(identity) = database
+            .catalog_identity(library::CatalogKind::Artist, uri, cancel)
+            .await?
         else {
             return Ok(None);
         };
+        let source = identity.source_key.expect("native artist source");
+        let artist = library::ArtistKey::from_raw(identity.key);
         let album_artist = matches!(
             self.route,
             Route::AlbumArtistDetail(_)
@@ -444,13 +676,14 @@ impl<'a> BrowseRequest<'a> {
             artist,
             album_artist,
             filters: std::array::from_fn(|_| self.filter.to_string()),
-            sort: self.sort.album_sort(),
+            sort: self.sort.catalog_sort(),
             descending: self.descending,
+            activity: self.activity,
         }))
     }
 
-    pub fn artist_songs(&self, artist: &ArtistReleaseQuery) -> SongQuery {
-        self.query_for_scope(SongScope::Artist {
+    pub fn artist_tracks(&self, artist: &ArtistReleaseQuery) -> CatalogQuery {
+        self.query_for_scope(TrackScope::Artist {
             key: artist.artist,
             album_artist: artist.album_artist,
         })
@@ -469,11 +702,21 @@ impl<'a> BrowseRequest<'a> {
             self.source
                 .ok_or_else(|| library::LibraryError::InvalidRequest("No source selected".into()))
         };
-        if let Some(query) = self.songs() {
-            return Ok(BrowseQuery::Songs(query));
+        if let Some(query) = self.tracks() {
+            return Ok(BrowseQuery::Tracks(query));
         }
-        if let Some((_, query)) = self.album(database, cancel).await? {
-            return Ok(BrowseQuery::Songs(query));
+        if let Route::AlbumDetail(uri) = self.route {
+            return Ok(
+                match database
+                    .catalog_identity(library::CatalogKind::Album, uri, cancel)
+                    .await?
+                {
+                    Some(album) => BrowseQuery::Tracks(self.query_for_scope(TrackScope::Album(
+                        library::AlbumKey::from_raw(album.key),
+                    ))),
+                    None => BrowseQuery::Empty,
+                },
+            );
         }
         if let Some(artist) = self.artist(database, cancel).await? {
             return Ok(
@@ -487,7 +730,7 @@ impl<'a> BrowseRequest<'a> {
                 {
                     BrowseQuery::Releases(artist)
                 } else {
-                    BrowseQuery::Songs(self.artist_songs(&artist))
+                    BrowseQuery::Tracks(self.artist_tracks(&artist))
                 },
             );
         }
@@ -496,43 +739,54 @@ impl<'a> BrowseRequest<'a> {
             Route::Folders { .. } => {
                 let query = folder_projection
                     .expect("resolved folder route")
-                    .song_query(source()?);
+                    .track_query(source()?);
                 folder = query.folder;
-                Some(query.scope)
+                match query.subject {
+                    CatalogSubject::Tracks { scope, .. } => Some(scope),
+                    _ => unreachable!("folder song query"),
+                }
             }
             _ => None,
         };
         if let Some(scope) = scope {
             let mut query = self.query_for_scope(scope);
             query.folder = folder;
-            return Ok(BrowseQuery::Songs(query));
+            return Ok(BrowseQuery::Tracks(query));
         }
         Ok(BrowseQuery::Empty)
     }
 }
 
 impl BrowseQuery {
-    pub fn songs(&self) -> Option<&SongQuery> {
+    pub fn tracks(&self) -> Option<&CatalogQuery> {
         match self {
-            Self::Songs(query) => Some(query),
+            Self::Tracks(query) => Some(query),
             _ => None,
         }
     }
 
-    pub fn collection_selection(&self, folder_route: bool) -> Option<SongSelection> {
+    pub fn collection_selection(&self, folder_route: bool) -> Option<TrackSelection> {
         let mut query = match self {
-            Self::Songs(query) => query.clone(),
-            Self::Releases(query) => SongQuery::new(SongScope::Artist {
+            Self::Tracks(query) => query.clone(),
+            Self::Releases(query) => CatalogQuery::tracks(TrackScope::Artist {
                 key: query.artist,
                 album_artist: query.album_artist,
             }),
             _ => return None,
         };
         if !folder_route {
-            if !matches!(query.scope, SongScope::Smart { .. }) {
+            if !matches!(
+                query.subject,
+                library::CatalogSubject::Tracks {
+                    scope: library::TrackScope::Smart { .. },
+                    ..
+                }
+            ) {
                 query.folder = None;
             }
-            query.sort = None;
+            if let CatalogSubject::Tracks { sort, .. } = &mut query.subject {
+                *sort = None;
+            }
             query.descending = false;
         }
         Some(query.selection())
@@ -540,6 +794,46 @@ impl BrowseQuery {
 }
 
 impl ArtistReleaseQuery {
+    pub async fn detail_page(
+        self,
+        database: &Database,
+        favorites: Option<CatalogQuery>,
+        window: library::RouteSeedWindow,
+        cancel: &ReadCancellation,
+    ) -> library::LibraryResult<Option<DetailPage>> {
+        let mut query = CatalogQuery::keys(
+            library::CatalogKind::Artist,
+            Some(self.source),
+            vec![self.artist.raw()],
+        );
+        query.folder = self.folder;
+        if let CatalogSubject::Keys { album_artist, .. } = &mut query.subject {
+            *album_artist = self.album_artist;
+        }
+        let library::CatalogRows::Artists(mut rows) = query.rows(database, 0, 1, cancel).await?
+        else {
+            unreachable!("artist summary")
+        };
+        let Some(summary) = rows.pop() else {
+            return Ok(None);
+        };
+        let favorites = match favorites {
+            Some(query) => Some(
+                query
+                    .page(database, library::RouteSeedWindow::top(), cancel)
+                    .await?,
+            ),
+            None => None,
+        };
+        Ok(Some(DetailPage {
+            summary: DetailSummary::Artist(summary),
+            content: DetailContent::Releases {
+                page: Box::new(self.page(database, window, cancel).await?),
+                favorites,
+            },
+        }))
+    }
+
     pub async fn counts(
         &self,
         database: &Database,
@@ -581,7 +875,7 @@ impl ArtistReleaseQuery {
         offset: usize,
         limit: usize,
         cancel: &ReadCancellation,
-    ) -> library::LibraryResult<Vec<(library::AlbumReleaseClass, library::AlbumRow)>> {
+    ) -> library::LibraryResult<Vec<(library::AlbumReleaseClass, library::AlbumView)>> {
         let index = class
             .and_then(|class| {
                 ARTIST_RELEASE_CLASSES
@@ -601,6 +895,7 @@ impl ArtistReleaseQuery {
                 class,
                 offset,
                 limit,
+                self.activity,
                 cancel,
             )
             .await

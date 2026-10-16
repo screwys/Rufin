@@ -48,14 +48,14 @@ pub(super) fn add_current_to_playlist(
     let Some(media) = current_playback_track(shell.player_ui.selected_playback().as_deref()) else {
         return;
     };
-    let title = media.title.clone();
+    let title = media.metadata.title.clone();
     let feedback_shell = Rc::downgrade(shell);
     let destination = destination.clone();
     let preview_uris = vec![media.media_uri.clone()];
     gtk_widgets::playlists::add_media_to_playlist(
         &shell.products.source,
         playlist,
-        library::SongSelection::Uris(vec![media.media_uri].into()),
+        library::CatalogQuery::uris(library::CatalogKind::Track, vec![media.media_uri]).selection(),
         false,
         Rc::new(move |accepted| {
             if accepted > 0

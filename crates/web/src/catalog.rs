@@ -1,12 +1,12 @@
 use super::*;
-use library::{AlbumSort, FolderKey, ReadCancellation, SourceKey};
+use library::{CatalogSort, FolderKey, ReadCancellation, SourceKey};
 
-pub(super) async fn song_query(
+pub(super) async fn track_query(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
     kind: &str,
-) -> Result<library::SongQuery, Error> {
-    use library::{SongQuery, SongScope};
+) -> Result<library::CatalogQuery, Error> {
+    use library::{CatalogQuery, TrackScope};
     if parameters.contains_key("folder") && !parameters.contains_key("source") {
         return Err(bad_request("source is required with folder"));
     }
@@ -28,69 +28,70 @@ pub(super) async fn song_query(
     };
     let scope = match kind {
         "source" | "tracks" => {
-            SongScope::Tracks(source.ok_or_else(|| bad_request("Source not found"))?)
+            TrackScope::Tracks(source.ok_or_else(|| bad_request("Source not found"))?)
         }
-        "album" | "album-tracks" => SongScope::Album(key(parameters, "id")?),
-        "artist" | "artist-tracks" => SongScope::Artist {
+        "album" | "album-tracks" => TrackScope::Album(key(parameters, "id")?),
+        "artist" | "artist-tracks" => TrackScope::Artist {
             key: key(parameters, "id")?,
             album_artist: boolean(parameters, "album_artists")?,
         },
-        "genre" | "genre-tracks" => SongScope::Genre(key(parameters, "id")?),
-        "playlist" | "entries" => SongScope::Playlist(key(parameters, "id")?),
-        "smart-playlist" | "smart-tracks" => SongScope::Smart {
+        "genre" | "genre-tracks" => TrackScope::Genre(key(parameters, "id")?),
+        "playlist" | "entries" => TrackScope::Playlist(key(parameters, "id")?),
+        "smart-playlist" | "smart-tracks" => TrackScope::Smart {
             key: key(parameters, "id")?,
             source,
             now: now(),
         },
         _ => return Err(bad_request("Unknown media kind")),
     };
-    let mut query = SongQuery::new(scope);
+    let mut query = CatalogQuery::tracks(scope);
     query.folder = folder;
     query.filter = parameters.get("q").cloned().unwrap_or_default();
-    query.sort = if matches!(query.scope, SongScope::Smart { .. }) {
-        smart_track_sort(parameters.get("sort").map(String::as_str))?
-    } else {
-        Some(track_sort(
-            parameters
-                .get("sort")
-                .map(String::as_str)
-                .unwrap_or(match query.scope {
-                    SongScope::Playlist(_) => "position",
-                    SongScope::Album(_) => "track_number",
-                    _ => "title",
-                }),
-        )?)
-    };
+    if let library::CatalogSubject::Tracks { scope, sort } = &mut query.subject {
+        *sort = if matches!(scope, TrackScope::Smart { .. }) {
+            smart_track_sort(parameters.get("sort").map(String::as_str))?
+        } else {
+            Some(track_sort(
+                parameters
+                    .get("sort")
+                    .map(String::as_str)
+                    .unwrap_or(match scope {
+                        TrackScope::Playlist(_) => "position",
+                        TrackScope::Album(_) => "track_number",
+                        _ => "title",
+                    }),
+            )?)
+        };
+    }
     query.descending = boolean(parameters, "descending")?;
     query.favorites_only = boolean(parameters, "favorites")?;
     Ok(query)
 }
 
-pub(super) async fn song_total(
+pub(super) async fn track_total(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
-    query: &library::SongQuery,
+    query: &library::CatalogQuery,
 ) -> Result<Option<i64>, Error> {
     if !boolean(parameters, "total")? {
         return Ok(None);
     }
-    products
-        .library
-        .song_count(query, &ReadCancellation::new())
+    (query)
+        .count(&products.library, &ReadCancellation::new())
         .await
-        .map(Some)
+        .map(|count| Some(count as i64))
         .map_err(internal)
 }
 
 pub(super) async fn page_total(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
-    query: &library::CollectionQuery,
+    query: &library::CatalogQuery,
 ) -> Result<Option<i64>, Error> {
     if !boolean(parameters, "total")? {
         return Ok(None);
     }
-    if matches!(query.kind, library::CollectionKind::Albums { .. })
+    if matches!(query.subject, library::CatalogSubject::Albums { .. })
         && query.folder.is_none()
         && query.filter.trim().is_empty()
         && !query.favorites_only
@@ -127,8 +128,14 @@ pub(super) async fn scope(
         Some(
             products
                 .library
-                .folder_key_by_object(source, folder, &ReadCancellation::new())
+                .catalog_keys(
+                    library::CatalogKind::Folder,
+                    Some(source),
+                    &[(folder).to_string()],
+                    &ReadCancellation::new(),
+                )
                 .await
+                .map(|keys| keys.into_iter().next().map(library::FolderKey::from_raw))
                 .map_err(internal)?
                 .ok_or_else(|| bad_request("Folder not found"))?,
         )
@@ -198,23 +205,24 @@ async fn refresh_home(
     Ok(accepted())
 }
 
-fn home_album(row: &library::HomeAlbumRow) -> Value {
+fn home_album(products: &ProductHandles, row: &library::HomeAlbumRow) -> Value {
     let album = &row.album;
-    json!({"kind":"album","id":album.album_key,"object_id":album.object_id,"uri":album.media_uri,"title":row.title,"artist":album.display_artist,"favorite":album.favorite,"track_count":album.track_count,"year":album.year,"duration_ms":album.duration_millis})
+    json!({"kind":"album","id":album.album_key,"object_id":album.object_id,"uri":album.media_uri,"title":row.title,"artist":album.metadata.artist,"favorite":album.state.favorite,"track_count":album.summary.track_count,"year":album.metadata.year,"duration_ms":album.summary.duration_millis,"artwork_previews":artwork_previews(products, album.artwork_binding.iter())})
 }
 
-fn home_track(row: &library::HomeTrackRow) -> Value {
+fn home_track(products: &ProductHandles, row: &library::HomeTrackRow) -> Value {
     let mut value = track_row_json(&row.track);
+    value["artwork_previews"] = json!(artwork_previews(products, row.track.artwork_binding.iter()));
     value["kind"] = "track".into();
     value["title"] = row.title.clone().into();
     value
 }
 
-fn home_rows(rows: &library::HomeSectionRows) -> Vec<Value> {
+fn home_rows(products: &ProductHandles, rows: &library::HomeSectionRows) -> Vec<Value> {
     rows.albums
         .iter()
-        .map(home_album)
-        .chain(rows.tracks.iter().map(home_track))
+        .map(|row| home_album(products, row))
+        .chain(rows.tracks.iter().map(|row| home_track(products, row)))
         .collect()
 }
 
@@ -263,13 +271,13 @@ pub(super) async fn home_data(
     let mut sections = Vec::new();
     for block in blocks {
         let (title, items) = match block {
-            HomeBlockKind::Showcase => ("Showcase", page.showcase.iter().map(home_album).collect()),
-            HomeBlockKind::Explore => ("Explore", page.explore.iter().map(home_album).collect()),
-            HomeBlockKind::MostPlayed => ("Most played", home_rows(&page.most_played)),
-            HomeBlockKind::NewlyAdded => ("Newly added", home_rows(&page.newly_added)),
-            HomeBlockKind::RecentlyPlayed => ("Recently played", home_rows(&page.recently_played)),
-            HomeBlockKind::RecentlyReleased => ("Recently released", home_rows(&page.recently_released)),
-            HomeBlockKind::Genres => ("Featured genres", page.genres.iter().map(|row|json!({"kind":"genre","id":row.genre_key,"object_id":row.object_id,"name":row.name,"track_count":row.track_count})).collect()),
+            HomeBlockKind::Showcase => ("Showcase", page.showcase.iter().map(|row| home_album(products, row)).collect()),
+            HomeBlockKind::Explore => ("Explore", page.explore.iter().map(|row| home_album(products, row)).collect()),
+            HomeBlockKind::MostPlayed => ("Most played", home_rows(products, &page.most_played)),
+            HomeBlockKind::NewlyAdded => ("Newly added", home_rows(products, &page.newly_added)),
+            HomeBlockKind::RecentlyPlayed => ("Recently played", home_rows(products, &page.recently_played)),
+            HomeBlockKind::RecentlyReleased => ("Recently released", home_rows(products, &page.recently_released)),
+            HomeBlockKind::Genres => ("Featured genres", page.genres.iter().map(|row|json!({"kind":"genre","id":row.genre_key,"object_id":row.object_id,"name":row.metadata.name,"track_count":row.summary.track_count})).collect()),
         };
         if !items.is_empty() {
             sections.push(json!({"block":block,"title":title,"items":items}));
@@ -279,7 +287,7 @@ pub(super) async fn home_data(
         if parameters.contains_key("block") {
             break;
         }
-        let items = home_rows(&section.rows);
+        let items = home_rows(products, &section.rows);
         if !items.is_empty() {
             sections.push(json!({"title":section.title.unwrap_or_else(||"From your server".into()),"items":items}));
         }
@@ -303,17 +311,20 @@ pub(super) async fn genre_tracks_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let query = song_query(products, parameters, "genre-tracks").await?;
+    let query = track_query(products, parameters, "genre-tracks").await?;
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(256);
-    let rows = products
-        .library
-        .song_rows(&query, offset, limit, &ReadCancellation::new())
+    let rows = (&query)
+        .rows(&products.library, offset, limit, &ReadCancellation::new())
         .await
+        .map(|rows| match rows {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!("typed song projection"),
+        })
         .map_err(internal)?;
-    let total = song_total(products, parameters, &query).await?;
+    let total = track_total(products, parameters, &query).await?;
     Ok(
-        json!({"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
+        json!({"activity_sensitive":query.activity_sensitive(),"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
 }
 
@@ -344,19 +355,19 @@ pub(super) async fn artists_data(
         .map(String::as_str)
         .unwrap_or("title")
     {
-        "title" => library::ArtistSort::Title,
-        "album_count" => library::ArtistSort::AlbumCount,
-        "track_count" => library::ArtistSort::TrackCount,
-        "last_played" => library::ArtistSort::LastPlayed,
-        "play_count" => library::ArtistSort::PlayCount,
-        "rating" => library::ArtistSort::Rating,
-        "favorite" => library::ArtistSort::Favorite,
+        "title" => library::CatalogSort::Title,
+        "album_count" => library::CatalogSort::AlbumCount,
+        "track_count" => library::CatalogSort::TrackCount,
+        "last_played" => library::CatalogSort::LastPlayed,
+        "play_count" => library::CatalogSort::PlayCount,
+        "rating" => library::CatalogSort::UserRating,
+        "favorite" => library::CatalogSort::Favorite,
         _ => return Err(bad_request("Unknown artist sort")),
     };
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(128);
-    let query = library::CollectionQuery {
-        kind: library::CollectionKind::Artists {
+    let query = library::CatalogQuery {
+        subject: library::CatalogSubject::Artists {
             source: source,
             sort: sort,
             album_artist: boolean(parameters, "album_artists")?,
@@ -365,15 +376,20 @@ pub(super) async fn artists_data(
         filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
         descending: boolean(parameters, "descending")?,
         favorites_only: boolean(parameters, "favorites")?,
+        downloaded_only: false,
+        activity: false,
     };
     let rows = query
         .rows(&products.library, offset, limit, &ReadCancellation::new())
         .await
-        .map(|rows| rows.artists())
+        .map(|rows| match rows {
+            library::CatalogRows::Artists(rows) => rows,
+            _ => unreachable!("catalog page projection"),
+        })
         .map_err(internal)?;
     let total = page_total(products, parameters, &query).await?;
     Ok(
-        json!({"total":total,"offset":offset,"limit":limit,"artists":rows.iter().map(|row|json!({"id":row.artist_key,"object_id":row.object_id,"album_artists":boolean(parameters,"album_artists").unwrap_or(false),"uri":row.media_uri,"name":row.name,"favorite":row.favorite,"album_count":row.album_count,"track_count":row.track_count})).collect::<Vec<_>>()}),
+        json!({"activity_sensitive":query.activity_sensitive(),"total":total,"offset":offset,"limit":limit,"artists":rows.iter().map(|row|json!({"id":row.artist_key,"object_id":row.object_id,"album_artists":boolean(parameters,"album_artists").unwrap_or(false),"uri":row.media_uri,"name":row.metadata.name,"favorite":row.state.favorite,"album_count":row.summary.album_count,"track_count":row.summary.track_count,"artwork_previews":artwork_previews(products, row.artwork_binding.iter())})).collect::<Vec<_>>()}),
     )
 }
 
@@ -393,17 +409,20 @@ pub(super) async fn artist_tracks_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let query = song_query(products, parameters, "artist-tracks").await?;
+    let query = track_query(products, parameters, "artist-tracks").await?;
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(256);
-    let rows = products
-        .library
-        .song_rows(&query, offset, limit, &ReadCancellation::new())
+    let rows = (&query)
+        .rows(&products.library, offset, limit, &ReadCancellation::new())
         .await
+        .map(|rows| match rows {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!("typed song projection"),
+        })
         .map_err(internal)?;
-    let total = song_total(products, parameters, &query).await?;
+    let total = track_total(products, parameters, &query).await?;
     Ok(
-        json!({"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
+        json!({"activity_sensitive":query.activity_sensitive(),"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
 }
 
@@ -445,16 +464,16 @@ pub(super) async fn smart_playlists_data(
         .map(String::as_str)
         .unwrap_or("position")
     {
-        "position" => library::SmartPlaylistListSort::Position,
-        "title" => library::SmartPlaylistListSort::Title,
-        "track_count" => library::SmartPlaylistListSort::TrackCount,
-        "duration" => library::SmartPlaylistListSort::Duration,
+        "position" => library::CatalogSort::Position,
+        "title" => library::CatalogSort::Title,
+        "track_count" => library::CatalogSort::TrackCount,
+        "duration" => library::CatalogSort::Duration,
         _ => return Err(bad_request("Unknown smart playlist sort")),
     };
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(64);
-    let query = library::CollectionQuery {
-        kind: library::CollectionKind::SmartPlaylists {
+    let query = library::CatalogQuery {
+        subject: library::CatalogSubject::SmartPlaylists {
             source: (source).into(),
             sort: sort,
             now: now(),
@@ -463,15 +482,20 @@ pub(super) async fn smart_playlists_data(
         filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
         descending: boolean(parameters, "descending")?,
         favorites_only: false,
+        downloaded_only: false,
+        activity: false,
     };
     let rows = query
         .rows(&products.library, offset, limit, &ReadCancellation::new())
         .await
-        .map(|rows| rows.smart_playlists())
+        .map(|rows| match rows {
+            library::CatalogRows::SmartPlaylists(rows) => rows,
+            _ => unreachable!("catalog page projection"),
+        })
         .map_err(internal)?;
     let total = page_total(products, parameters, &query).await?;
     Ok(
-        json!({"total":total,"offset":offset,"limit":limit,"smart_playlists":rows.iter().map(|row|json!({"id":row.smart_playlist_key,"object_id":row.object_id,"name":rufin_core::playlists::smart_playlist_display_name(row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_bindings.len()})).collect::<Vec<_>>()}),
+        json!({"activity_sensitive":query.activity_sensitive(),"total":total,"offset":offset,"limit":limit,"smart_playlists":rows.iter().map(|row|json!({"id":row.smart_playlist_key,"object_id":row.object_id,"name":rufin_core::playlists::smart_playlist_display_name(row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_previews":artwork_previews(products, row.artwork_binding.as_slice())})).collect::<Vec<_>>()}),
     )
 }
 
@@ -491,17 +515,20 @@ pub(super) async fn smart_tracks_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let query = song_query(products, parameters, "smart-tracks").await?;
+    let query = track_query(products, parameters, "smart-tracks").await?;
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(256);
-    let rows = products
-        .library
-        .song_rows(&query, offset, limit, &ReadCancellation::new())
+    let rows = (&query)
+        .rows(&products.library, offset, limit, &ReadCancellation::new())
         .await
+        .map(|rows| match rows {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!("typed song projection"),
+        })
         .map_err(internal)?;
-    let total = song_total(products, parameters, &query).await?;
+    let total = track_total(products, parameters, &query).await?;
     Ok(
-        json!({"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
+        json!({"activity_sensitive":query.activity_sensitive(),"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
 }
 
@@ -538,21 +565,21 @@ pub(super) async fn albums_data(
         .map(String::as_str)
         .unwrap_or("title")
     {
-        "title" => AlbumSort::Title,
-        "album_artist" => AlbumSort::AlbumArtist,
-        "year" => AlbumSort::Year,
-        "release_date" => AlbumSort::ReleaseDate,
-        "date_added" => AlbumSort::DateAdded,
-        "last_played" => AlbumSort::LastPlayed,
-        "play_count" => AlbumSort::PlayCount,
-        "rating" => AlbumSort::Rating,
-        "track_count" => AlbumSort::TrackCount,
-        "duration" => AlbumSort::Duration,
-        "favorite" => AlbumSort::Favorite,
+        "title" => CatalogSort::Title,
+        "album_artist" => CatalogSort::AlbumArtist,
+        "year" => CatalogSort::Year,
+        "release_date" => CatalogSort::ReleaseDate,
+        "date_added" => CatalogSort::DateAdded,
+        "last_played" => CatalogSort::LastPlayed,
+        "play_count" => CatalogSort::PlayCount,
+        "rating" => CatalogSort::UserRating,
+        "track_count" => CatalogSort::TrackCount,
+        "duration" => CatalogSort::Duration,
+        "favorite" => CatalogSort::Favorite,
         _ => return Err(bad_request("Unknown album sort")),
     };
-    let query = library::CollectionQuery {
-        kind: library::CollectionKind::Albums {
+    let query = library::CatalogQuery {
+        subject: library::CatalogSubject::Albums {
             source: source,
             sort: sort,
             inline_tracks: None,
@@ -561,17 +588,22 @@ pub(super) async fn albums_data(
         filter: (filter).to_string(),
         descending: descending,
         favorites_only: favorites,
+        downloaded_only: false,
+        activity: false,
     };
     let rows = query
         .rows(&products.library, offset, limit, &cancellation)
         .await
-        .map(|rows| rows.albums())
+        .map(|rows| match rows {
+            library::CatalogRows::Albums(rows) => rows,
+            _ => unreachable!("catalog page projection"),
+        })
         .map_err(internal)?;
     let total = page_total(products, parameters, &query).await?;
     Ok(
-        json!({"total":total,"offset":offset,"limit":limit,"albums":rows.iter().map(|row| json!({
-                "id":row.album_key,"object_id":row.object_id,"uri":row.media_uri,"title":row.title,"artist":row.display_artist,
-                "year":row.year,"track_count":row.track_count,"duration_ms":row.duration_millis,"favorite":row.favorite,"rating":row.rating
+        json!({"activity_sensitive":query.activity_sensitive(),"total":total,"offset":offset,"limit":limit,"albums":rows.iter().map(|row| json!({
+                "id":row.album_key,"object_id":row.object_id,"uri":row.media_uri,"title":row.metadata.title,"artist":row.metadata.artist,
+                "year":row.metadata.year,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"favorite":row.state.favorite,"rating":row.state.rating,"artwork_previews":artwork_previews(products, row.artwork_binding.iter())
             })).collect::<Vec<_>>()}),
     )
 }
@@ -592,22 +624,24 @@ pub(super) async fn album_tracks_data(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
 ) -> Result<Value, Error> {
-    let query = song_query(products, parameters, "album-tracks").await?;
+    let query = track_query(products, parameters, "album-tracks").await?;
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(128);
-    let rows = products
-        .library
-        .song_rows(&query, offset, limit, &ReadCancellation::new())
+    let rows = (&query)
+        .rows(&products.library, offset, limit, &ReadCancellation::new())
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!("typed song projection"),
+        })
+        .map_err(internal)?;
+    let disc_sections = (&query)
+        .disc_sections(&products.library, &ReadCancellation::new())
         .await
         .map_err(internal)?;
-    let disc_sections = products
-        .library
-        .song_disc_sections(&query, &ReadCancellation::new())
-        .await
-        .map_err(internal)?;
-    let total = song_total(products, parameters, &query).await?;
+    let total = track_total(products, parameters, &query).await?;
     Ok(
-        json!({"album_tracks":true,"disc_sections":disc_sections,"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
+        json!({"activity_sensitive":query.activity_sensitive(),"album_tracks":true,"disc_sections":disc_sections,"total":total,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
 }
 
@@ -630,8 +664,14 @@ async fn folders(
         Some(
             products
                 .library
-                .folder_key_by_object(source, parent, &cancellation)
+                .catalog_keys(
+                    library::CatalogKind::Folder,
+                    Some(source),
+                    &[(parent).to_string()],
+                    &cancellation,
+                )
                 .await
+                .map(|keys| keys.into_iter().next().map(library::FolderKey::from_raw))
                 .map_err(internal)?
                 .ok_or_else(|| bad_request("Folder not found"))?,
         )
@@ -645,7 +685,7 @@ async fn folders(
         .map_err(internal)?;
     Ok(json_response(
         StatusCode::OK,
-        json!({"offset":offset,"limit":limit,"folders":rows.iter().map(|row| json!({"id":row.object_id,"name":row.name,"track_count":row.track_count})).collect::<Vec<_>>()}),
+        json!({"offset":offset,"limit":limit,"folders":rows.iter().map(|row| json!({"id":row.object_id,"name":row.metadata.name,"track_count":row.track_count})).collect::<Vec<_>>()}),
     ))
 }
 

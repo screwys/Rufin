@@ -174,8 +174,8 @@ pub(super) fn png(
         if settings.artists {
             let entries = data.artists.iter().take(limit).map(|row| {
                 (
-                    row.name.as_str(),
-                    row.play_count,
+                    row.metadata.name.as_str(),
+                    row.state.play_count,
                     row.artwork_binding.as_deref(),
                 )
             });
@@ -186,8 +186,8 @@ pub(super) fn png(
             let x = MARGIN + if settings.artists { COLUMN + GAP } else { 0.0 };
             let entries = data.albums.iter().take(limit).map(|row| {
                 (
-                    row.title.as_str(),
-                    row.play_count,
+                    row.metadata.title.as_str(),
+                    row.state.play_count,
                     row.artwork_binding.as_deref(),
                 )
             });
@@ -237,7 +237,7 @@ pub(super) fn png(
                     row_y + 30.0,
                     23.0,
                     400,
-                    &row.title,
+                    &row.metadata.title,
                     width - 306.0,
                 );
                 svg.text(
@@ -245,7 +245,7 @@ pub(super) fn png(
                     row_y + 62.0,
                     21.0,
                     400,
-                    &row.artist,
+                    &row.metadata.artist,
                     width - 306.0,
                 );
                 svg.text(
@@ -253,7 +253,7 @@ pub(super) fn png(
                     row_y + 46.0,
                     23.0,
                     400,
-                    &row.play_count.to_string(),
+                    &row.state.play_count.to_string(),
                     90.0,
                 );
                 if index + 1 < data.tracks.len().min(limit) {

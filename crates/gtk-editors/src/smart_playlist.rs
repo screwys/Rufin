@@ -1068,8 +1068,20 @@ pub fn build_dialog(
             owner,
             artwork_state,
             rufin_core::playlists::PlaylistArtworkEditing {
-                binding: playlist.artwork_binding.clone(),
-                representative_artwork: playlist.representative_artwork.clone(),
+                binding: playlist
+                    .artwork_binding
+                    .as_deref()
+                    .map(library::authored_playlist_artwork)
+                    .transpose()
+                    .expect("accepted playlist artwork")
+                    .flatten(),
+                automatic_binding: playlist
+                    .artwork_binding
+                    .as_deref()
+                    .map(library::automatic_playlist_artwork)
+                    .transpose()
+                    .expect("accepted playlist artwork")
+                    .flatten(),
                 writable: true,
             },
             &surface.editor_content,

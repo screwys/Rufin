@@ -62,8 +62,12 @@ impl ReadCancellation {
     }
 }
 
-type CatalogObserver =
-    dyn Fn(crate::CatalogUpdate) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync;
+type CatalogObserver = dyn Fn(
+        Option<(crate::SourceId, crate::SourceKey)>,
+        crate::CatalogUpdate,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>>
+    + Send
+    + Sync;
 
 struct DatabaseInner {
     writer: Arc<Mutex<Option<SqliteConnection>>>,
@@ -71,9 +75,9 @@ struct DatabaseInner {
     export_readers: SqlitePool,
     export_read: tokio::sync::Mutex<()>,
     general_read: Arc<Semaphore>,
-    acquisition: Arc<Mutex<()>>,
     distinct_track_covers: AtomicBool,
     catalog_observer: std::sync::Mutex<Option<Arc<CatalogObserver>>>,
+    lyrics_writes: tokio::sync::watch::Sender<()>,
 }
 
 /// Final ownership of one fixed writer and the bounded read-only pool.
@@ -83,26 +87,72 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn observe_catalog<F, Work>(&self, observer: F)
-    where
-        F: Fn(crate::CatalogUpdate) -> Work + Send + Sync + 'static,
-        Work: Future<Output = ()> + Send + 'static,
-    {
-        *self.inner.catalog_observer.lock().unwrap() =
-            Some(Arc::new(move |update| Box::pin(observer(update))));
+    pub fn subscribe_lyrics_cache_writes(&self) -> tokio::sync::watch::Receiver<()> {
+        self.inner.lyrics_writes.subscribe()
     }
 
-    pub(crate) async fn catalog_updated(&self, update: crate::CatalogUpdate) {
+    pub(crate) fn lyrics_cache_written(&self) {
+        self.inner.lyrics_writes.send_replace(());
+    }
+
+    pub fn observe_catalog<F, Work>(&self, observer: F)
+    where
+        F: Fn(Option<(crate::SourceId, crate::SourceKey)>, crate::CatalogUpdate) -> Work
+            + Send
+            + Sync
+            + 'static,
+        Work: Future<Output = ()> + Send + 'static,
+    {
+        *self.inner.catalog_observer.lock().unwrap() = Some(Arc::new(move |source, update| {
+            Box::pin(observer(source, update))
+        }));
+    }
+
+    pub(crate) async fn catalog_updated(
+        &self,
+        source: Option<(crate::SourceId, crate::SourceKey)>,
+        update: crate::CatalogUpdate,
+    ) {
+        let changed = update.metadata || update.artwork || update.playlists;
+        if (changed || update.activity)
+            && let Err(error) = self.mark_playlist_artwork_pending(None, !changed).await
+        {
+            tracing::warn!(%error, "could not update incomplete playlist artwork");
+        }
         let observer = self.inner.catalog_observer.lock().unwrap().clone();
         if let Some(observer) = observer {
-            observer(update).await;
+            observer(source, update).await;
         }
     }
 
-    pub fn set_distinct_track_covers(&self, enabled: bool) {
+    pub async fn set_distinct_track_covers(&self, enabled: bool) -> LibraryResult<()> {
+        let mut writer = self.writer().await?;
+        let changed:Vec<(crate::SourceKey,String)>=sqlx::query_as("UPDATE sources SET distinct_track_covers=?1 WHERE distinct_track_covers<>?1 RETURNING source_key,object_id").bind(enabled).fetch_all(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
         self.inner
             .distinct_track_covers
             .store(enabled, Ordering::Release);
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        for (source, _) in &changed {
+            let mut after = 0;
+            loop {
+                let keys: Vec<i64> = sqlx::query_scalar("SELECT track_key FROM tracks WHERE source_key=?1 AND track_key>?2 ORDER BY track_key LIMIT 128")
+                    .bind(source).bind(after).fetch_all(&mut *connection).await?;
+                let Some(last) = keys.last() else { break };
+                after = *last;
+                if crate::catalog::artwork::refresh_track_choices(connection, &keys, &[], &[])
+                    .await?
+                {
+                    crate::artwork::refresh_mosaics(connection, &keys, &[], &[]).await?;
+                }
+            }
+        }
+        drop(writer);
+        for (_source, id) in changed {
+            let mut update = crate::CatalogUpdate::default();
+            update.artwork = true;
+            self.publish_catalog_update(&id, update).await;
+        }
+        Ok(())
     }
 
     pub fn distinct_track_covers(&self) -> bool {
@@ -204,8 +254,8 @@ impl Database {
                 crate::migration::import_released(input, destination, catalog, configured, selected)
                     .await?
             }
-            44..=47 => crate::migration::import_current(input, destination, catalog).await?,
-            0 | 56 | 57 | 58 => {
+            44..=46 => crate::migration::import_current(input, destination, catalog).await?,
+            0 | 47 => {
                 if input != destination {
                     Self::relocate(input, destination).await?;
                 }
@@ -235,7 +285,6 @@ impl Database {
         let initialized = async {
             schema::initialize_durable(&mut writer).await?;
             crate::connect::initialize(&mut writer).await?;
-            crate::collections::refresh_facts_on(&mut writer).await?;
             sqlx::raw_sql("PRAGMA optimize=0x10002")
                 .execute(&mut writer)
                 .await?;
@@ -246,8 +295,8 @@ impl Database {
             writer.close().await?;
             return Err(error);
         }
-        let readers = open_readers(path, MIN_READERS, MAX_READERS).await?;
-        let export_readers = open_readers(path, 0, 1).await?;
+        let readers = open_readers(path, MIN_READERS, MAX_READERS, ROW_BUFFER).await?;
+        let export_readers = open_readers(path, 0, 1, 1).await?;
         Ok(Self {
             inner: Arc::new(DatabaseInner {
                 writer: Arc::new(Mutex::new(Some(writer))),
@@ -255,9 +304,9 @@ impl Database {
                 export_readers,
                 export_read: tokio::sync::Mutex::new(()),
                 general_read: Arc::new(Semaphore::new(1)),
-                acquisition: Arc::new(Mutex::new(())),
                 distinct_track_covers: AtomicBool::new(false),
                 catalog_observer: std::sync::Mutex::new(None),
+                lyrics_writes: tokio::sync::watch::channel(()).0,
             }),
         })
     }
@@ -266,7 +315,7 @@ impl Database {
         &self,
         source_id: &crate::SourceId,
     ) -> LibraryResult<Option<crate::SourceKey>> {
-        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let mut connection = self.acquire_reader().await?;
         Ok(
             sqlx::query_scalar("SELECT source_key FROM sources WHERE object_id=?1")
                 .bind(source_id.as_str())
@@ -284,11 +333,13 @@ impl Database {
                 .bind(source_id.as_str())
                 .fetch_optional(&mut *transaction)
                 .await?;
-        for kind in ["track", "album", "artist"] {
+        sqlx::query("UPDATE sources SET observation_stamp=observation_stamp+1,freshness=NULL WHERE object_id=?1").bind(source_id.as_str()).execute(&mut *transaction).await?;
+        for kind in ["track", "album", "artist", "genre", "mood", "folder"] {
             let prefix = crate::keys::source_entity_prefix(source_id, kind);
             for query in [
                 "DELETE FROM lyrics_cache WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
                 "DELETE FROM user_media_state WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
+                "DELETE FROM native_media_state WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
                 "DELETE FROM favorite_outbox WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
             ] {
                 sqlx::query(query)
@@ -300,7 +351,7 @@ impl Database {
         }
         sqlx::query("DELETE FROM local_access_metadata WHERE access_uri IN (SELECT access_uri FROM main.local_locators locator JOIN sources identity USING(source_key) WHERE identity.object_id=?1) AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND other.source_key IS NOT ?2)").bind(source_id.as_str()).bind(source).execute(&mut *transaction).await?;
         // Referenced metadata survives source removal.
-        sqlx::query("UPDATE tracks SET indexed=0 WHERE source_key=?1")
+        sqlx::query("UPDATE tracks SET indexed=0,artwork_kind=CASE WHEN native_artwork IS NULL THEN 0 ELSE 1 END,artwork_artist_key=NULL WHERE source_key=?1")
             .bind(source)
             .execute(&mut *transaction)
             .await?;
@@ -332,16 +383,6 @@ impl Database {
         Ok(writer)
     }
 
-    pub(crate) async fn writer_owned(
-        &self,
-    ) -> LibraryResult<tokio::sync::OwnedMutexGuard<Option<SqliteConnection>>> {
-        let writer = Arc::clone(&self.inner.writer).lock_owned().await;
-        if writer.is_none() {
-            return Err(LibraryError::WriterUnavailable);
-        }
-        Ok(writer)
-    }
-
     pub(crate) async fn acquire_general(
         &self,
         cancellation: &ReadCancellation,
@@ -367,7 +408,7 @@ impl Database {
         Ok((permit, connection))
     }
 
-    // Playback point reads bypass the route-read permit.
+    // Point reads bypass the route-read permit.
     pub(crate) async fn acquire_reader(&self) -> LibraryResult<PoolConnection<Sqlite>> {
         Ok(self.inner.readers.acquire().await?)
     }
@@ -379,26 +420,9 @@ impl Database {
         Ok((permit, self.inner.export_readers.acquire().await?))
     }
 
-    pub(crate) fn acquire_scan(&self) -> LibraryResult<tokio::sync::OwnedMutexGuard<()>> {
-        self.inner
-            .acquisition
-            .clone()
-            .try_lock_owned()
-            .map_err(|_| LibraryError::ScanInProgress)
-    }
-
     #[cfg(test)]
     pub(crate) fn reader_pool(&self) -> &SqlitePool {
         &self.inner.readers
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn fail_writer(&self) -> LibraryResult<()> {
-        let mut writer = self.inner.writer.lock().await;
-        if let Some(connection) = writer.take() {
-            connection.close().await?;
-        }
-        Ok(())
     }
 }
 
@@ -458,7 +482,12 @@ fn base_options(path: &Path) -> SqliteConnectOptions {
         .row_buffer_size(ROW_BUFFER)
 }
 
-async fn open_readers(path: &Path, minimum: u32, maximum: u32) -> LibraryResult<SqlitePool> {
+async fn open_readers(
+    path: &Path,
+    minimum: u32,
+    maximum: u32,
+    row_buffer: usize,
+) -> LibraryResult<SqlitePool> {
     let options = SqlitePoolOptions::new()
         .min_connections(minimum)
         .max_connections(maximum)
@@ -481,9 +510,11 @@ async fn open_readers(path: &Path, minimum: u32, maximum: u32) -> LibraryResult<
             })
         });
     if minimum == 0 {
-        Ok(options.connect_lazy_with(reader_options(path)))
+        Ok(options.connect_lazy_with(reader_options(path).row_buffer_size(row_buffer)))
     } else {
-        Ok(options.connect_with(reader_options(path)).await?)
+        Ok(options
+            .connect_with(reader_options(path).row_buffer_size(row_buffer))
+            .await?)
     }
 }
 
@@ -622,6 +653,10 @@ mod tests {
     #[tokio::test]
     async fn playback_bypass_uses_second_slot_but_third_general_read_waits_fairly() {
         let (_directory, database) = database().await;
+        let mut writer = database.writer().await.unwrap();
+        sqlx::raw_sql("INSERT INTO sources(object_id,kind) VALUES('source','local'); INSERT INTO tracks(source_key,object_id,media_uri) SELECT source_key,'track','file:///point.flac' FROM sources WHERE object_id='source'")
+            .execute(writer.as_mut().unwrap()).await.unwrap();
+        drop(writer);
         let cancellation = ReadCancellation::new();
         let (permit, general) = database
             .acquire_general(&cancellation)
@@ -653,11 +688,34 @@ mod tests {
             "a third general read bypassed the permit"
         );
         drop(playback);
+        assert_eq!(
+            timeout(
+                Duration::from_secs(1),
+                database.playback_loudness("file:///not-present", &cancellation)
+            )
+            .await
+            .expect("cached gain bypasses the browsing permit")
+            .expect("cached gain read"),
+            (None, None)
+        );
         sleep(Duration::from_millis(50)).await;
         assert!(
             !waiting.is_finished(),
             "a free pool slot bypassed the permit"
         );
+
+        let listen: crate::ListenWrite = serde_json::from_value(serde_json::json!({
+            "external_id":"direct", "media_uri":"file:///point.flac",
+            "title":"Direct", "artist":"", "album":"", "duration_millis":1000,
+            "started_at":1_700_000_000,"local_period":"2023-11","listened_millis":1000,"skipped":false
+        })).unwrap();
+        timeout(
+            Duration::from_secs(1),
+            database.record_listen(&listen, Some(crate::TrackKey::from_raw(1)), &[]),
+        )
+        .await
+        .expect("accepted listen does not wait on the browsing permit")
+        .unwrap();
 
         drop(general);
         drop(permit);

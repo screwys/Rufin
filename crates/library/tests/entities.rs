@@ -1,6 +1,6 @@
 use library::{
-    AlbumReleaseResult, AlbumSort, ArtistSort, FavoriteTarget, GenreSort, MoodSort,
-    ReadCancellation, RouteSeedWindow, SearchRequest, TrackSort,
+    AlbumReleaseResult, CatalogSort, FavoriteTarget, ReadCancellation, RouteSeedWindow,
+    SearchRequest,
 };
 
 use super::support::{connection, fixture};
@@ -12,7 +12,7 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
     let mut raw = connection(&fixture.path).await;
     for (index, disc) in [(0, 1), (1, 2), (2, 0)] {
         sqlx::query(
-            "UPDATE tracks SET album_key=?1,disc_number=?2,track_number=1 WHERE track_key=?3",
+            "UPDATE tracks SET album_key=?1,metadata=jsonb(json_set(metadata,'$.disc_number',?2,'$.track_number',1)) WHERE track_key=?3",
         )
         .bind(fixture.albums[0])
         .bind(disc)
@@ -25,81 +25,94 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
         (false, vec![(0, 0), (1, 1), (2, 2)]),
         (true, vec![(0, 2), (1, 1), (2, 0)]),
     ] {
-        let route = fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    sort: Some(TrackSort::TrackNumber),
-                    descending: descending,
-                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
-                },
-                RouteSeedWindow::top(),
-                &cancel,
-            )
+        let route = (&library::CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Album(fixture.albums[0]),
+                sort: Some(CatalogSort::TrackNumber),
+            },
+            descending: descending,
+            ..library::CatalogQuery::tracks(library::TrackScope::Album(fixture.albums[0]))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap();
         assert_eq!(route.disc_sections, expected);
         assert_eq!(route.count, 3);
-        assert_eq!(route.first_rows.len(), 3);
+        assert_eq!(
+            (match &route.rows {
+                library::CatalogRows::Tracks(rows) => rows,
+                library::CatalogRows::PlaylistEntries(_) => unreachable!(),
+                _ => unreachable!(),
+            })
+            .len(),
+            3
+        );
         for offset in 0..3 {
-            let rows = fixture
-                .database
-                .song_rows(
-                    &library::SongQuery {
-                        sort: Some(TrackSort::TrackNumber),
-                        descending: descending,
-                        ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
-                    },
-                    offset,
-                    1,
-                    &cancel,
-                )
+            let rows = (&library::CatalogQuery {
+                subject: library::CatalogSubject::Tracks {
+                    scope: library::TrackScope::Album(fixture.albums[0]),
+                    sort: Some(CatalogSort::TrackNumber),
+                },
+                descending: descending,
+                ..library::CatalogQuery::tracks(library::TrackScope::Album(fixture.albums[0]))
+            })
+                .rows(&fixture.database, offset, 1, &cancel)
                 .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Tracks(rows) => rows,
+                    _ => unreachable!("typed song projection"),
+                })
                 .unwrap();
             assert_eq!(
-                fixture
-                    .database
-                    .song_disc_sections(&route.query, &cancel)
+                (&route.query)
+                    .disc_sections(&fixture.database, &cancel)
                     .await
                     .unwrap(),
                 expected
             );
             assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].media_uri, route.first_rows[offset].media_uri);
+            assert_eq!(
+                rows[0].media_uri,
+                (match &route.rows {
+                    library::CatalogRows::Tracks(rows) => rows,
+                    library::CatalogRows::PlaylistEntries(_) => unreachable!(),
+                    _ => unreachable!(),
+                })[offset]
+                    .media_uri
+            );
         }
     }
-    for (filter, sort) in [("Alpha", TrackSort::TrackNumber), ("", TrackSort::Title)] {
-        let route = fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    filter: (filter).into(),
-                    sort: Some(sort),
-                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
-                },
-                RouteSeedWindow::top(),
-                &cancel,
-            )
+    for (filter, sort) in [
+        ("Alpha", CatalogSort::TrackNumber),
+        ("", CatalogSort::Title),
+    ] {
+        let route = (&library::CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Album(fixture.albums[0]),
+                sort: Some(sort),
+            },
+            filter: (filter).into(),
+            ..library::CatalogQuery::tracks(library::TrackScope::Album(fixture.albums[0]))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap();
         assert!(route.disc_sections.is_empty());
     }
     // One known disc, even if numbered 2 or accompanied by unknown tracks, needs no heading.
-    sqlx::query("UPDATE tracks SET disc_number=2 WHERE album_key=?1 AND disc_number>0")
+    sqlx::query("UPDATE tracks SET metadata=jsonb(json_set(metadata,'$.disc_number',2)) WHERE album_key=?1 AND disc_number>0")
         .bind(fixture.albums[0])
         .execute(&mut raw)
         .await
         .unwrap();
-    let detail = fixture
-        .database
-        .song_route_page(
-            &library::SongQuery {
-                sort: Some(TrackSort::TrackNumber),
-                ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
-            },
-            RouteSeedWindow::top(),
-            &cancel,
-        )
+    let detail = (&library::CatalogQuery {
+        subject: library::CatalogSubject::Tracks {
+            scope: library::TrackScope::Album(fixture.albums[0]),
+            sort: Some(CatalogSort::TrackNumber),
+        },
+        ..library::CatalogQuery::tracks(library::TrackScope::Album(fixture.albums[0]))
+    })
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
         .unwrap();
     assert!(detail.disc_sections.is_empty());
@@ -109,7 +122,7 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
 async fn track_sorts_keep_nulls_last_and_title_ties_in_both_directions() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE tracks SET year=CASE object_id WHEN 'track-0' THEN NULL WHEN 'track-1' THEN 0 ELSE 2000 END")
+    sqlx::query("UPDATE tracks SET metadata=jsonb(json_set(metadata,'$.year',CASE object_id WHEN 'track-0' THEN NULL WHEN 'track-1' THEN 0 ELSE 2000 END)) ")
         .execute(&mut raw).await.unwrap();
     sqlx::query("DELETE FROM track_genres WHERE track_key=?1")
         .bind(fixture.tracks[0])
@@ -117,7 +130,7 @@ async fn track_sorts_keep_nulls_last_and_title_ties_in_both_directions() {
         .await
         .unwrap();
     let empty_genre = sqlx::query_scalar::<_, library::GenreKey>(
-        "INSERT INTO genres(source_key,object_id,name,normalized_name,sort_text) VALUES(?1,'empty','','','') RETURNING genre_key",
+        "INSERT INTO genres(source_key,object_id,metadata,media_uri,normalized_name) VALUES (?1,'empty',jsonb(json_object('name','','sort_text','')),'genre:'||COALESCE(?1,0)||':'||'empty',lower(COALESCE(json_extract(jsonb(json_object('name','','sort_text','')),'$.name'),''))) RETURNING genre_key",
     ).bind(fixture.source).fetch_one(&mut raw).await.unwrap();
     sqlx::query("UPDATE track_genres SET genre_key=?1 WHERE track_key=?2")
         .bind(empty_genre)
@@ -126,26 +139,32 @@ async fn track_sorts_keep_nulls_last_and_title_ties_in_both_directions() {
         .await
         .unwrap();
     drop(raw);
-    for sort in [TrackSort::Year, TrackSort::Genre] {
+    for sort in [CatalogSort::Year, CatalogSort::Genre] {
         for (descending, expected) in [(false, [1, 3, 2, 0]), (true, [3, 2, 1, 0])] {
-            let page = fixture
-                .database
-                .song_route_page(
-                    &library::SongQuery {
-                        sort: Some(sort),
-                        descending: descending,
-                        ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
-                    },
+            let page = (&library::CatalogQuery {
+                subject: library::CatalogSubject::Tracks {
+                    scope: library::TrackScope::Tracks(fixture.source),
+                    sort: Some(sort),
+                },
+                descending: descending,
+                ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
+            })
+                .page(
+                    &fixture.database,
                     RouteSeedWindow::top(),
                     &ReadCancellation::new(),
                 )
                 .await
                 .unwrap();
             assert_eq!(
-                page.first_rows
-                    .into_iter()
-                    .map(|row| row.media_uri)
-                    .collect::<Vec<_>>(),
+                (match &page.rows {
+                    library::CatalogRows::Tracks(rows) => rows,
+                    library::CatalogRows::PlaylistEntries(_) => unreachable!(),
+                    _ => unreachable!(),
+                })
+                .into_iter()
+                .map(|row| row.media_uri.clone())
+                .collect::<Vec<_>>(),
                 expected.map(|i| fixture.track_uris[i].clone()),
                 "{sort:?}, descending={descending}"
             );
@@ -157,30 +176,34 @@ async fn track_sorts_keep_nulls_last_and_title_ties_in_both_directions() {
 async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
-    sqlx::raw_sql("UPDATE sources SET kind='subsonic';
-      INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
-      VALUES('source','lifetime','track','track-0',7,0,100),('source','lifetime','track','track-1',99,0,900);
-      UPDATE tracks SET source_play_count=3,source_last_played=200 WHERE object_id='track-1';")
+    sqlx::raw_sql("UPDATE sources SET kind='subsonic';\n      INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)\n      VALUES('source','lifetime','track','track-0',7,0,100),('source','lifetime','track','track-1',99,0,900);\n      INSERT INTO native_media_state(media_uri,play_count,last_played) SELECT media_uri,3,200 FROM tracks WHERE object_id='track-1' ON CONFLICT(media_uri) DO UPDATE SET play_count=excluded.play_count,last_played=excluded.last_played;")
         .execute(&mut raw).await.unwrap();
-    library::Scan::begin_items(&fixture.database, "source")
-        .await
-        .unwrap()
-        .finish()
-        .await
-        .unwrap();
+
     let cancel = ReadCancellation::new();
     let keys = [fixture.albums[0], fixture.albums[0]];
-    let rows = fixture
-        .database
-        .album_rows(fixture.source, &keys, None, &cancel)
-        .await
-        .unwrap();
+    let rows = {
+        let mut query = library::CatalogQuery::keys(
+            library::CatalogKind::Album,
+            Some(fixture.source),
+            (&keys).iter().map(|key| key.raw()).collect(),
+        );
+        query.activity = true;
+        query.folder = None;
+        query
+            .rows(&fixture.database, 0, (&keys).len(), &cancel)
+            .await
+            .map(|rows| match rows {
+                library::CatalogRows::Albums(rows) => rows,
+                _ => unreachable!("typed catalog projection"),
+            })
+    }
+    .unwrap();
     assert_eq!(rows.len(), 2);
     for row in &rows {
-        assert_eq!(row.track_count, 2);
-        assert_eq!(row.play_count, 3);
-        assert_eq!(row.last_played, Some(200));
-        assert_eq!(row.album_artists.len(), 1);
+        assert_eq!(row.summary.track_count, 2);
+        assert_eq!(row.state.play_count, 3);
+        assert_eq!(row.state.last_played, Some(200));
+        assert_eq!(row.links.album_artists.len(), 1);
     }
     sqlx::query("UPDATE sources SET kind='local'")
         .execute(&mut raw)
@@ -191,44 +214,95 @@ async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {
         .execute(&mut raw)
         .await
         .unwrap();
-    let rows = fixture
-        .database
-        .album_rows(fixture.source, &keys, Some(fixture.folder), &cancel)
-        .await
-        .unwrap();
-    for row in &rows {
-        assert_eq!(row.track_count, 2);
-        assert_eq!(row.play_count, 106);
-        assert_eq!(row.last_played, Some(900));
+    let rows = {
+        let mut query = library::CatalogQuery::keys(
+            library::CatalogKind::Album,
+            Some(fixture.source),
+            (&keys).iter().map(|key| key.raw()).collect(),
+        );
+        query.activity = true;
+        query.folder = Some(fixture.folder);
+        query
+            .rows(&fixture.database, 0, (&keys).len(), &cancel)
+            .await
+            .map(|rows| match rows {
+                library::CatalogRows::Albums(rows) => rows,
+                _ => unreachable!("typed catalog projection"),
+            })
     }
-    let artist = fixture
-        .database
-        .artist_rows(
-            fixture.source,
-            &[fixture.artists[0]],
-            false,
-            Some(fixture.folder),
-            &cancel,
-        )
-        .await
-        .unwrap();
-    assert_eq!(artist[0].play_count, 106);
-    assert_eq!(artist[0].last_played, Some(900));
+    .unwrap();
+    for row in &rows {
+        assert_eq!(row.summary.track_count, 2);
+        assert_eq!(row.state.play_count, 106);
+        assert_eq!(row.state.last_played, Some(900));
+    }
+    let artist = {
+        let mut query = library::CatalogQuery::keys(
+            library::CatalogKind::Artist,
+            Some(fixture.source),
+            (&[fixture.artists[0]])
+                .iter()
+                .map(|key| key.raw())
+                .collect(),
+        );
+        query.activity = true;
+        query.folder = Some(fixture.folder);
+        if let library::CatalogSubject::Keys { album_artist, .. } = &mut query.subject {
+            *album_artist = false;
+        }
+        query
+            .rows(&fixture.database, 0, (&[fixture.artists[0]]).len(), &cancel)
+            .await
+            .map(|rows| match rows {
+                library::CatalogRows::Artists(rows) => rows,
+                _ => unreachable!("typed catalog projection"),
+            })
+    }
+    .unwrap();
+    assert_eq!(artist[0].state.play_count, 106);
+    assert_eq!(artist[0].state.last_played, Some(900));
 }
 
 #[tokio::test]
 async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
+    let covers = ["first-album", "second-album"].map(|item_id| {
+        serde_json::to_vec(&[library::ArtworkCandidate::new(
+            library::ArtworkImage::Native {
+                source_id: library::SourceId::new("source"),
+                item_id: item_id.into(),
+                tag: None,
+            },
+            None,
+        )])
+        .unwrap()
+    });
     for (index, album) in fixture.albums.iter().enumerate() {
-        sqlx::query("UPDATE albums SET artwork_binding=?1 WHERE album_key=?2")
-            .bind(vec![index as u8 + 1])
-            .bind(album)
-            .execute(&mut raw)
-            .await
-            .unwrap();
+        {
+            let objects =
+                sqlx::query_scalar::<_, String>("SELECT object_id FROM albums WHERE album_key=?1")
+                    .bind(album)
+                    .fetch_all(&mut raw)
+                    .await
+                    .unwrap();
+            fixture
+                .database
+                .catalog("source", None)
+                .await
+                .unwrap()
+                .set_source_artwork(
+                    "album",
+                    &objects
+                        .into_iter()
+                        .map(|id| (id, Some((&covers[index]).to_vec())))
+                        .collect::<Vec<_>>(),
+                )
+                .await
+                .unwrap();
+        };
     }
-    sqlx::query("UPDATE tracks SET date_added=CASE WHEN album_key=?1 THEN '2026-09-08' END")
+    sqlx::query("UPDATE tracks SET metadata=jsonb(json_set(metadata,'$.date_added',CASE WHEN album_key=?1 THEN '2026-09-08' END)) ")
         .bind(fixture.albums[1])
         .execute(&mut raw)
         .await
@@ -237,54 +311,116 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
         .bind(fixture.albums[1]).execute(&mut raw).await.unwrap();
     drop(raw);
     let cancel = ReadCancellation::new();
-    for (folder, covers, count) in [
-        (None, vec![vec![1], vec![2]], 4),
-        (Some(fixture.folder), vec![vec![1], vec![2]], 4),
-    ] {
-        let genres = fixture
-            .database
-            .genre_rows(
-                fixture.source,
-                &[
+    for (folder, count) in [(None, 4), (Some(fixture.folder), 4)] {
+        let genres = {
+            let mut query = library::CatalogQuery::keys(
+                library::CatalogKind::Genre,
+                Some(fixture.source),
+                (&[
                     fixture.genre,
                     library::GenreKey::from_raw(-100),
                     fixture.genre,
-                ],
-                folder,
-                &cancel,
-            )
-            .await
-            .unwrap();
+                ])
+                    .iter()
+                    .map(|key| key.raw())
+                    .collect(),
+            );
+            query.activity = true;
+            query.folder = folder;
+            query
+                .rows(
+                    &fixture.database,
+                    0,
+                    (&[
+                        fixture.genre,
+                        library::GenreKey::from_raw(-100),
+                        fixture.genre,
+                    ])
+                        .len(),
+                    &cancel,
+                )
+                .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Genres(rows) => rows,
+                    _ => unreachable!("typed catalog projection"),
+                })
+        }
+        .unwrap();
         assert_eq!(genres.len(), 2);
         assert_eq!(genres[0], genres[1]);
-        assert_eq!(genres[0].track_count, count);
+        assert_eq!(genres[0].summary.track_count, count);
         assert_eq!(genres[0].representative_artwork, covers);
-        let single = fixture
-            .database
-            .genre_rows(fixture.source, &[fixture.genre], folder, &cancel)
-            .await
-            .unwrap();
-        assert_eq!(genres[0].duration_millis, single[0].duration_millis);
-        let moods = fixture
-            .database
-            .mood_rows(
-                fixture.source,
-                &[fixture.mood, fixture.mood],
-                folder,
-                &cancel,
-            )
-            .await
-            .unwrap();
+        let single = {
+            let mut query = library::CatalogQuery::keys(
+                library::CatalogKind::Genre,
+                Some(fixture.source),
+                (&[fixture.genre]).iter().map(|key| key.raw()).collect(),
+            );
+            query.activity = true;
+            query.folder = folder;
+            query
+                .rows(&fixture.database, 0, (&[fixture.genre]).len(), &cancel)
+                .await
+                .map(|rows| match rows {
+                    library::CatalogRows::Genres(rows) => rows,
+                    _ => unreachable!("typed catalog projection"),
+                })
+        }
+        .unwrap();
+        assert_eq!(
+            genres[0].summary.duration_millis,
+            single[0].summary.duration_millis
+        );
+        let moods = {
+            let mut query = library::CatalogQuery::keys(
+                library::CatalogKind::Mood,
+                Some(fixture.source),
+                (&[fixture.mood, fixture.mood])
+                    .iter()
+                    .map(|key| key.raw())
+                    .collect(),
+            );
+            query.activity = true;
+            query.folder = folder;
+            query
+        }
+        .rows(
+            &fixture.database,
+            0,
+            (&[fixture.mood, fixture.mood]).len(),
+            &cancel,
+        )
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Moods(rows) => rows,
+            _ => unreachable!(),
+        })
+        .unwrap();
         assert_eq!(moods.len(), 2);
         assert_eq!(moods[0], moods[1]);
-        assert_eq!(moods[0].track_count, count);
+        assert_eq!(moods[0].summary.track_count, count);
         assert_eq!(moods[0].representative_artwork, covers);
-        let single = fixture
-            .database
-            .mood_rows(fixture.source, &[fixture.mood], folder, &cancel)
-            .await
-            .unwrap();
-        assert_eq!(moods[0].duration_millis, single[0].duration_millis);
+        let single = {
+            let mut query = library::CatalogQuery::keys(
+                library::CatalogKind::Mood,
+                Some(fixture.source),
+                (&[fixture.mood]).iter().map(|key| key.raw()).collect(),
+            );
+            query.activity = true;
+            query.folder = folder;
+            query
+        }
+        .rows(&fixture.database, 0, (&[fixture.mood]).len(), &cancel)
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Moods(rows) => rows,
+            _ => unreachable!(),
+        })
+        .unwrap();
+        assert_eq!(
+            moods[0].summary.duration_millis,
+            single[0].summary.duration_millis
+        );
     }
 }
 
@@ -299,61 +435,116 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
         .unwrap();
     drop(raw);
     let folder = Some(fixture.folder);
-    let genre = fixture
-        .database
-        .genre_rows(fixture.source, &[fixture.genre], folder, &cancel)
-        .await
-        .unwrap()
-        .pop()
-        .expect("existing genre");
+    let genre = {
+        let mut query = library::CatalogQuery::keys(
+            library::CatalogKind::Genre,
+            Some(fixture.source),
+            (&[fixture.genre]).iter().map(|key| key.raw()).collect(),
+        );
+        query.activity = true;
+        query.folder = folder;
+        query
+            .rows(&fixture.database, 0, (&[fixture.genre]).len(), &cancel)
+            .await
+            .map(|rows| match rows {
+                library::CatalogRows::Genres(rows) => rows,
+                _ => unreachable!("typed catalog projection"),
+            })
+    }
+    .unwrap()
+    .pop()
+    .expect("existing genre");
     assert_eq!(
         (
-            genre.track_count,
-            genre.album_count,
-            genre.duration_millis,
-            genre.downloaded_count
+            genre.summary.track_count,
+            genre.summary.album_count,
+            genre.summary.duration_millis,
+            genre.summary.downloaded_count
         ),
         (4, 2, 726000, 0)
     );
     assert!(genre.representative_artwork.is_empty());
-    let mood = fixture
-        .database
-        .mood_rows(fixture.source, &[fixture.mood], folder, &cancel)
-        .await
-        .unwrap()
-        .pop()
-        .expect("existing mood");
+    let mood = {
+        let mut query = library::CatalogQuery::keys(
+            library::CatalogKind::Mood,
+            Some(fixture.source),
+            (&[fixture.mood]).iter().map(|key| key.raw()).collect(),
+        );
+        query.activity = true;
+        query.folder = folder;
+        query
+    }
+    .rows(&fixture.database, 0, (&[fixture.mood]).len(), &cancel)
+    .await
+    .map(|rows| match rows {
+        library::CatalogRows::Moods(rows) => rows,
+        _ => unreachable!(),
+    })
+    .unwrap()
+    .pop()
+    .expect("existing mood");
     assert_eq!(
         (
-            mood.track_count,
-            mood.duration_millis,
-            mood.downloaded_count
+            mood.summary.track_count,
+            mood.summary.duration_millis,
+            mood.summary.downloaded_count
         ),
         (4, 726000, 0)
     );
     assert!(mood.representative_artwork.is_empty());
-    let genre = fixture
-        .database
-        .genre_detail(fixture.source, fixture.genre, folder, &cancel)
-        .await
-        .unwrap()
-        .expect("existing genre detail");
+    let genre = {
+        let mut query = library::CatalogQuery::keys(
+            library::CatalogKind::Genre,
+            Some(fixture.source),
+            vec![(fixture.genre).raw()],
+        );
+        query.activity = true;
+        query.folder = folder;
+        query
+    }
+    .rows(&fixture.database, 0, 1, &cancel)
+    .await
+    .map(|rows| match rows {
+        library::CatalogRows::Genres(mut rows) => rows.pop(),
+        _ => unreachable!(),
+    })
+    .unwrap()
+    .expect("existing genre detail");
     assert_eq!(
-        (genre.track_count, genre.album_count, genre.duration_millis),
+        (
+            genre.summary.track_count,
+            genre.summary.album_count,
+            genre.summary.duration_millis
+        ),
         (4, 2, 726000)
     );
     assert!(genre.representative_artwork.is_empty());
-    let mood = fixture
-        .database
-        .mood_detail(fixture.source, fixture.mood, folder, &cancel)
-        .await
-        .unwrap()
-        .expect("existing mood detail");
-    assert_eq!((mood.track_count, mood.duration_millis), (4, 726000));
+    let mood = {
+        let mut query = library::CatalogQuery::keys(
+            library::CatalogKind::Mood,
+            Some(fixture.source),
+            vec![(fixture.mood).raw()],
+        );
+        query.activity = true;
+        query.folder = folder;
+        query
+    }
+    .rows(&fixture.database, 0, 1, &cancel)
+    .await
+    .map(|rows| match rows {
+        library::CatalogRows::Moods(mut rows) => rows.pop(),
+        _ => unreachable!(),
+    })
+    .unwrap()
+    .expect("existing mood detail");
+    assert_eq!(
+        (mood.summary.track_count, mood.summary.duration_millis),
+        (4, 726000)
+    );
     assert!(mood.representative_artwork.is_empty());
-    for sort in [GenreSort::Title, GenreSort::TrackCount] {
-        let (count, _, rows) = library::CollectionQuery {
-            kind: library::CollectionKind::Genres {
+    for sort in [CatalogSort::Title, CatalogSort::TrackCount] {
+        let (count, _, rows) = library::CatalogQuery {
+            subject: library::CatalogSubject::Genres {
                 source: fixture.source,
                 sort: sort,
             },
@@ -361,18 +552,29 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
+            downloaded_only: false,
+            activity: true,
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.genres()))
+        .map(|page| {
+            (
+                page.count,
+                page.first_row_position,
+                match page.rows {
+                    library::CatalogRows::Genres(rows) => rows,
+                    _ => unreachable!(),
+                },
+            )
+        })
         .unwrap();
         let order = rows.iter().map(|row| row.genre_key).collect::<Vec<_>>();
         assert_eq!(count, order.len());
         assert!(order.is_empty());
     }
-    for sort in [MoodSort::Title, MoodSort::TrackCount] {
-        let (count, _, rows) = library::CollectionQuery {
-            kind: library::CollectionKind::Moods {
+    for sort in [CatalogSort::Title, CatalogSort::TrackCount] {
+        let (count, _, rows) = library::CatalogQuery {
+            subject: library::CatalogSubject::Moods {
                 source: fixture.source,
                 sort: sort,
             },
@@ -380,10 +582,21 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
+            downloaded_only: false,
+            activity: true,
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.moods()))
+        .map(|page| {
+            (
+                page.count,
+                page.first_row_position,
+                match page.rows {
+                    library::CatalogRows::Moods(rows) => rows,
+                    _ => unreachable!(),
+                },
+            )
+        })
         .unwrap();
         let order = rows.iter().map(|row| row.mood_key).collect::<Vec<_>>();
         assert_eq!(count, order.len());
@@ -477,7 +690,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
         let id = format!("extra-{position:03}");
         let uri = library::source_entity_uri(&library::SourceId::new("source"), "track", &id);
         let key: library::TrackKey = sqlx::query_scalar(
-            "INSERT INTO tracks(source_key,object_id,album_key,title,normalized_search,display_album,display_artist,sort_text,duration_millis,disc_number,track_number,media_uri) VALUES(?1,?2,?3,?2,?2,'Album A','Artist A',?2,1000,1,?4,?5) RETURNING track_key",
+            "INSERT INTO tracks(source_key,object_id,album_key,media_uri,metadata,normalized_search,indexed) VALUES (?1,?2,?3,?5,jsonb(json_object('title',COALESCE(?2,''),'album',COALESCE('Album A',''),'artist',COALESCE('Artist A',''),'sort_text',COALESCE(?2,''),'duration_millis',COALESCE(1000,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?4,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE(?2,''),'album',COALESCE('Album A',''),'artist',COALESCE('Artist A',''),'sort_text',COALESCE(?2,''),'duration_millis',COALESCE(1000,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?4,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE(?2,''),'album',COALESCE('Album A',''),'artist',COALESCE('Artist A',''),'sort_text',COALESCE(?2,''),'duration_millis',COALESCE(1000,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?4,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE(?2,''),'album',COALESCE('Album A',''),'artist',COALESCE('Artist A',''),'sort_text',COALESCE(?2,''),'duration_millis',COALESCE(1000,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?4,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE(?2,''),'album',COALESCE('Album A',''),'artist',COALESCE('Artist A',''),'sort_text',COALESCE(?2,''),'duration_millis',COALESCE(1000,0),'disc_number',COALESCE(1,0),'track_number',COALESCE(?4,0))),'$.comment'),'')),1) RETURNING track_key",
         ).bind(fixture.source).bind(&id).bind(fixture.albums[0]).bind(position + 10).bind(uri)
             .fetch_one(&mut raw).await.expect("extend collection");
         sqlx::query("INSERT INTO track_artists VALUES(?1,?2,0)")
@@ -502,105 +715,109 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
     drop(raw);
     let cancel = ReadCancellation::new();
     let pages = [
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    sort: Some(TrackSort::TrackNumber),
-                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
-                },
-                RouteSeedWindow::top(),
-                &cancel,
-            )
+        (&library::CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Album(fixture.albums[0]),
+                sort: Some(CatalogSort::TrackNumber),
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Album(fixture.albums[0]))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap(),
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    sort: Some(TrackSort::Title),
-                    ..library::SongQuery::new(library::SongScope::Artist {
-                        key: fixture.artists[0],
-                        album_artist: false,
-                    })
+        (&library::CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Artist {
+                    key: fixture.artists[0],
+                    album_artist: false,
                 },
-                RouteSeedWindow::top(),
-                &cancel,
-            )
+                sort: Some(CatalogSort::Title),
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Artist {
+                key: fixture.artists[0],
+                album_artist: false,
+            })
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap(),
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    sort: Some(TrackSort::Title),
-                    ..library::SongQuery::new(library::SongScope::Artist {
-                        key: fixture.artists[0],
-                        album_artist: true,
-                    })
+        (&library::CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Artist {
+                    key: fixture.artists[0],
+                    album_artist: true,
                 },
-                RouteSeedWindow::top(),
-                &cancel,
-            )
+                sort: Some(CatalogSort::Title),
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Artist {
+                key: fixture.artists[0],
+                album_artist: true,
+            })
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap(),
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    sort: Some(TrackSort::Title),
-                    ..library::SongQuery::new(library::SongScope::Genre(fixture.genre))
-                },
-                RouteSeedWindow::top(),
-                &cancel,
-            )
+        (&library::CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Genre(fixture.genre),
+                sort: Some(CatalogSort::Title),
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Genre(fixture.genre))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap(),
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    sort: Some(TrackSort::Title),
-                    ..library::SongQuery::new(library::SongScope::Mood(fixture.mood))
-                },
-                RouteSeedWindow::top(),
-                &cancel,
-            )
+        (&library::CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Mood(fixture.mood),
+                sort: Some(CatalogSort::Title),
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Mood(fixture.mood))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap(),
     ];
     assert!(
-        pages[0]
-            .first_rows
-            .windows(2)
-            .all(|pair| pair[0].track_number < pair[1].track_number)
+        (match &pages[0].rows {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!(),
+        })
+        .windows(2)
+        .all(|pair| pair[0].metadata.track_number < pair[1].metadata.track_number)
     );
     assert!(
-        pages[1]
-            .first_rows
-            .windows(2)
-            .all(|pair| pair[0].title.to_lowercase() <= pair[1].title.to_lowercase())
+        (match &pages[1].rows {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!(),
+        })
+        .windows(2)
+        .all(|pair| pair[0].metadata.title.to_lowercase() <= pair[1].metadata.title.to_lowercase())
     );
     let collections = [
-        library::SongScope::Album(fixture.albums[0]),
-        library::SongScope::Artist {
+        library::TrackScope::Album(fixture.albums[0]),
+        library::TrackScope::Artist {
             key: fixture.artists[0],
             album_artist: false,
         },
-        library::SongScope::Artist {
+        library::TrackScope::Artist {
             key: fixture.artists[0],
             album_artist: true,
         },
-        library::SongScope::Genre(fixture.genre),
-        library::SongScope::Mood(fixture.mood),
+        library::TrackScope::Genre(fixture.genre),
+        library::TrackScope::Mood(fixture.mood),
     ];
     for (page, collection) in pages.into_iter().zip(collections) {
         let total = page.count;
         assert!(total > 100);
         assert!(
-            page.first_rows
-                .iter()
-                .all(|row| row.source_key == Some(fixture.source))
+            (match &page.rows {
+                library::CatalogRows::Tracks(rows) => rows,
+                library::CatalogRows::PlaylistEntries(_) => unreachable!(),
+                _ => unreachable!(),
+            })
+            .iter()
+            .all(|row| row.source_key == Some(fixture.source))
         );
         assert_eq!(
             fixture
@@ -613,7 +830,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
         let order = fixture
             .database
             .selected_track_uris(
-                &library::SongQuery::new(collection.clone()).selection(),
+                &library::CatalogQuery::tracks(collection.clone()).selection(),
                 None,
                 &cancel,
             )
@@ -621,16 +838,27 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             .unwrap();
         assert_eq!(order.len(), total);
         assert_eq!(
-            &order[page.first_row_position..page.first_row_position + page.first_rows.len()],
-            page.first_rows
-                .iter()
-                .map(|row| row.media_uri.clone())
-                .collect::<Vec<_>>()
+            &order[page.first_row_position
+                ..page.first_row_position
+                    + (match &page.rows {
+                        library::CatalogRows::Tracks(rows) => rows,
+                        library::CatalogRows::PlaylistEntries(_) => unreachable!(),
+                        _ => unreachable!(),
+                    })
+                    .len()],
+            (match &page.rows {
+                library::CatalogRows::Tracks(rows) => rows,
+                library::CatalogRows::PlaylistEntries(_) => unreachable!(),
+                _ => unreachable!(),
+            })
+            .iter()
+            .map(|row| row.media_uri.clone())
+            .collect::<Vec<_>>()
         );
         let state = super::support::resolve_queue(
             &fixture.database,
-            library::QueueLoad::Songs(vec![(
-                library::SongQuery::new(collection).selection(),
+            library::QueueLoad::Tracks(vec![(
+                library::CatalogQuery::tracks(collection).selection(),
                 library::QueueProvenance::Context {
                     context_id: "collection".into(),
                     context_title: None,
@@ -644,12 +872,21 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
         assert_eq!(
             fixture
                 .database
-                .track_uris(
-                    &state
-                        .entries
-                        .iter()
-                        .map(|entry| entry.track_key)
-                        .collect::<Vec<_>>(),
+                .selected_track_uris(
+                    &library::CatalogQuery::keys(
+                        library::CatalogKind::Track,
+                        None,
+                        (&state
+                            .entries
+                            .iter()
+                            .map(|entry| entry.track_key)
+                            .collect::<Vec<_>>())
+                            .iter()
+                            .map(|key| key.raw())
+                            .collect()
+                    )
+                    .selection(),
+                    None,
                     &ReadCancellation::new()
                 )
                 .await
@@ -659,42 +896,42 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
         assert!(state.rows.len() <= 100);
     }
     assert_eq!(
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    folder: Some(fixture.folder),
-                    sort: Some(TrackSort::TrackNumber),
-                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
-                },
-                RouteSeedWindow::top(),
-                &cancel
-            )
+        (&library::CatalogQuery {
+            folder: Some(fixture.folder),
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Album(fixture.albums[0]),
+                sort: Some(CatalogSort::TrackNumber)
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Album(fixture.albums[0]))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap()
             .count,
         2
     );
     assert!(
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    sort: Some(TrackSort::TrackNumber),
-                    ..library::SongQuery::new(library::SongScope::Album(
-                        library::AlbumKey::from_raw(999)
-                    ))
-                },
-                RouteSeedWindow::top(),
-                &cancel
-            )
+        (match (&library::CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Album(library::AlbumKey::from_raw(999)),
+                sort: Some(CatalogSort::TrackNumber)
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Album(
+                library::AlbumKey::from_raw(999)
+            ))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap()
-            .first_rows
-            .into_iter()
-            .map(|row| row.media_uri)
-            .collect::<Vec<_>>()
-            .is_empty()
+            .rows
+        {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!(),
+        })
+        .into_iter()
+        .map(|row| row.media_uri.clone())
+        .collect::<Vec<_>>()
+        .is_empty()
     );
 }
 
@@ -717,20 +954,29 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
         .expect("favorite Artist");
 
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Albums {
-                source: fixture.source,
-                sort: AlbumSort::Title,
-                inline_tracks: None,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("").to_string(),
             descending: false,
             favorites_only: true,
+            subject: library::CatalogSubject::Albums {
+                source: fixture.source,
+                sort: CatalogSort::Title,
+                inline_tracks: None
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancellation)
         .await
-        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Albums(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("favorite Album order")
         .2
         .into_iter()
@@ -739,20 +985,29 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
         [fixture.albums[0]]
     );
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Artists {
-                source: fixture.source,
-                sort: ArtistSort::Title,
-                album_artist: false,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("").to_string(),
             descending: false,
             favorites_only: true,
+            subject: library::CatalogSubject::Artists {
+                source: fixture.source,
+                sort: CatalogSort::Title,
+                album_artist: false
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancellation)
         .await
-        .map(|(count, start, rows)| (count, start, rows.artists()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Artists(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("favorite Artist order")
         .2
         .into_iter()
@@ -761,20 +1016,25 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
         [fixture.artists[1]]
     );
 
-    let rows = library::CollectionQuery {
-        kind: library::CollectionKind::Albums {
+    let rows = library::CatalogQuery {
+        subject: library::CatalogSubject::Albums {
             source: fixture.source,
-            sort: AlbumSort::Title,
+            sort: CatalogSort::Title,
             inline_tracks: Some(0),
         },
         folder: None,
         filter: ("").to_string(),
         descending: false,
         favorites_only: true,
+        downloaded_only: false,
+        activity: true,
     }
     .rows(&fixture.database, 0, 64, &cancellation)
     .await
-    .map(|rows| rows.album_details())
+    .map(|rows| match rows {
+        library::CatalogRows::AlbumDetails(rows) => rows,
+        _ => unreachable!(),
+    })
     .expect("favorite Album detail page");
     assert_eq!(
         rows.iter()
@@ -786,7 +1046,7 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
         [fixture.album_uris[0].as_str()]
     );
     assert!(
-        matches!(&rows[0], library::AlbumDetailRow::Album { album, .. } if !album.genres.is_empty())
+        matches!(&rows[0], library::AlbumDetailRow::Album { album, .. } if !album.links.genres.is_empty())
     );
     assert_eq!(
         rows.iter()
@@ -806,9 +1066,12 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     let title = fixture
         .database
         .selected_track_uris(
-            &library::SongQuery {
-                sort: Some(TrackSort::Title),
-                ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+            &library::CatalogQuery {
+                subject: library::CatalogSubject::Tracks {
+                    scope: library::TrackScope::Tracks(fixture.source),
+                    sort: Some(CatalogSort::Title),
+                },
+                ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
             }
             .selection(),
             None,
@@ -819,14 +1082,17 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(title.len(), 4);
     for (ranges, expected) in [
         (None, vec![title[0].clone(), title[1].clone()]),
-        (Some(vec![1..4]), vec![title[1].clone(), title[2].clone()]),
+        (
+            Some(std::iter::once(1..4).collect()),
+            vec![title[1].clone(), title[2].clone()],
+        ),
         (
             Some(vec![0..1, 2..4]),
             vec![title[0].clone(), title[2].clone()],
         ),
     ] {
-        let selection = library::SongSelection::Query {
-            query: library::SongQuery::new(library::SongScope::Tracks(fixture.source)),
+        let selection = library::TrackSelection::Query {
+            query: library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source)),
             ranges,
         };
         assert_eq!(
@@ -838,10 +1104,14 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             expected,
         );
     }
-    let combined = library::SongSelection::Concat(vec![
-        library::SongSelection::Uris(vec![title[3].clone(), title[3].clone()].into()),
-        library::SongSelection::Query {
-            query: library::SongQuery::new(library::SongScope::Tracks(fixture.source)),
+    let combined = library::TrackSelection::Concat(vec![
+        library::CatalogQuery::uris(
+            library::CatalogKind::Track,
+            vec![title[3].clone(), title[3].clone()],
+        )
+        .selection(),
+        library::TrackSelection::Query {
+            query: library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source)),
             ranges: Some(vec![1..2, 3..4]),
         },
     ]);
@@ -864,10 +1134,13 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     let numbered = fixture
         .database
         .selected_track_uris(
-            &library::SongQuery {
-                sort: Some(TrackSort::TrackNumber),
+            &library::CatalogQuery {
+                subject: library::CatalogSubject::Tracks {
+                    scope: library::TrackScope::Tracks(fixture.source),
+                    sort: Some(CatalogSort::TrackNumber),
+                },
                 descending: true,
-                ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+                ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
             }
             .selection(),
             None,
@@ -882,10 +1155,13 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     let favorites = fixture
         .database
         .selected_track_uris(
-            &library::SongQuery {
-                sort: Some(TrackSort::Title),
+            &library::CatalogQuery {
+                subject: library::CatalogSubject::Tracks {
+                    scope: library::TrackScope::Tracks(fixture.source),
+                    sort: Some(CatalogSort::Title),
+                },
                 favorites_only: true,
-                ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+                ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
             }
             .selection(),
             None,
@@ -897,10 +1173,13 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     let folder = fixture
         .database
         .selected_track_uris(
-            &library::SongQuery {
+            &library::CatalogQuery {
+                subject: library::CatalogSubject::Tracks {
+                    scope: library::TrackScope::Tracks(fixture.source),
+                    sort: Some(CatalogSort::Title),
+                },
                 folder: Some(fixture.folder),
-                sort: Some(TrackSort::Title),
-                ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
+                ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
             }
             .selection(),
             None,
@@ -911,10 +1190,13 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(folder.len(), 4);
 
     let supplied = [title[2].clone(), title[0].clone()];
-    let rows = fixture
-        .database
-        .track_rows_by_uri(&supplied, &cancel)
+    let rows = library::CatalogQuery::uris(library::CatalogKind::Track, (&supplied).to_vec())
+        .rows(&fixture.database, 0, (&supplied).len(), &cancel)
         .await
+        .map(|rows| match rows {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!("typed catalog projection"),
+        })
         .expect("bounded Track rows");
     assert_eq!(
         rows.iter()
@@ -922,36 +1204,58 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             .collect::<Vec<_>>(),
         supplied
     );
-    assert_eq!(rows[0].artists[0].name, rows[0].artist);
-    assert_eq!(rows[0].album_artists[0].name, rows[0].artist);
-    assert_eq!(rows[0].genres[0].name, "Rock");
-    assert_eq!(rows[0].rating, Some(8));
-    assert_eq!(rows[0].play_count, 0);
-    assert_eq!(rows[0].skip_count, 0);
-    assert_eq!(rows[0].last_played, None);
-    assert!(
-        fixture
-            .database
-            .track_rows_by_uri(&vec![title[0].clone(); 257], &cancel)
-            .await
-            .is_err(),
-        "Track row bound was not enforced"
+    assert_eq!(rows[0].links.artists[0].name, rows[0].metadata.artist);
+    assert_eq!(rows[0].links.album_artists[0].name, rows[0].metadata.artist);
+    assert_eq!(rows[0].links.genres[0].name, "Rock");
+    assert_eq!(rows[0].state.rating, Some(8));
+    assert_eq!(rows[0].state.play_count, 0);
+    assert_eq!(rows[0].state.skip_count, 0);
+    assert_eq!(rows[0].state.last_played, None);
+    assert_eq!(
+        library::CatalogQuery::uris(
+            library::CatalogKind::Track,
+            (&vec![title[0].clone(); 257]).to_vec()
+        )
+        .rows(
+            &fixture.database,
+            0,
+            (&vec![title[0].clone(); 257]).len(),
+            &cancel
+        )
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!(),
+        })
+        .unwrap()
+        .len(),
+        256,
+        "Track row window remains bounded"
     );
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Albums {
-                source: fixture.source,
-                sort: AlbumSort::Title,
-                inline_tracks: None,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
+            subject: library::CatalogSubject::Albums {
+                source: fixture.source,
+                sort: CatalogSort::Title,
+                inline_tracks: None
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Albums(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("Album order")
         .2
         .into_iter()
@@ -960,20 +1264,29 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         fixture.albums
     );
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Albums {
-                source: fixture.source,
-                sort: AlbumSort::DateAdded,
-                inline_tracks: None,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("").to_string(),
             descending: true,
             favorites_only: false,
+            subject: library::CatalogSubject::Albums {
+                source: fixture.source,
+                sort: CatalogSort::DateAdded,
+                inline_tracks: None
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Albums(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("sorted Album order")
         .2
         .into_iter()
@@ -982,20 +1295,29 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         fixture.albums
     );
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Artists {
-                source: fixture.source,
-                sort: ArtistSort::Title,
-                album_artist: true,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
+            subject: library::CatalogSubject::Artists {
+                source: fixture.source,
+                sort: CatalogSort::Title,
+                album_artist: true
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.artists()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Artists(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("Album Artist order")
         .2
         .into_iter()
@@ -1004,20 +1326,29 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         fixture.artists
     );
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Artists {
-                source: fixture.source,
-                sort: ArtistSort::Title,
-                album_artist: false,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
+            subject: library::CatalogSubject::Artists {
+                source: fixture.source,
+                sort: CatalogSort::Title,
+                album_artist: false
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.artists()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Artists(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("sorted Artist order")
         .2
         .into_iter()
@@ -1026,19 +1357,28 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         fixture.artists
     );
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Genres {
-                source: fixture.source,
-                sort: GenreSort::Title,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
+            subject: library::CatalogSubject::Genres {
+                source: fixture.source,
+                sort: CatalogSort::Title
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.genres()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Genres(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("Genre order")
         .2
         .into_iter()
@@ -1047,19 +1387,28 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         [fixture.genre]
     );
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Genres {
-                source: fixture.source,
-                sort: GenreSort::TrackCount,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("").to_string(),
             descending: true,
             favorites_only: false,
+            subject: library::CatalogSubject::Genres {
+                source: fixture.source,
+                sort: CatalogSort::TrackCount
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.genres()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Genres(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("sorted Genre order")
         .2
         .into_iter()
@@ -1068,19 +1417,28 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         [fixture.genre]
     );
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Moods {
-                source: fixture.source,
-                sort: MoodSort::Duration,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("").to_string(),
             descending: true,
             favorites_only: false,
+            subject: library::CatalogSubject::Moods {
+                source: fixture.source,
+                sort: CatalogSort::Duration
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.moods()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Moods(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("sorted Mood order")
         .2
         .into_iter()
@@ -1088,59 +1446,73 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         .collect::<Vec<_>>(),
         [fixture.mood]
     );
-    let album_rows = fixture
-        .database
-        .album_rows(fixture.source, &fixture.albums, None, &cancel)
-        .await
-        .expect("bounded Album rows");
-    assert_eq!(album_rows[0].track_count, 2);
-    assert_eq!(album_rows[0].album_artists[0].name, "Artist A");
-    assert_eq!(album_rows[0].genres[0].name, "Rock");
-    let album_detail = fixture
-        .database
-        .song_route_page(
-            &library::SongQuery {
-                sort: Some(library::TrackSort::TrackNumber),
-                ..library::SongQuery::new(library::SongScope::Album(album_rows[0].album_key))
-            },
-            RouteSeedWindow::top(),
-            &cancel,
-        )
+    let album_rows = {
+        let mut query = library::CatalogQuery::keys(
+            library::CatalogKind::Album,
+            Some(fixture.source),
+            (&fixture.albums).iter().map(|key| key.raw()).collect(),
+        );
+        query.activity = true;
+        query.folder = None;
+        query
+            .rows(&fixture.database, 0, (&fixture.albums).len(), &cancel)
+            .await
+            .map(|rows| match rows {
+                library::CatalogRows::Albums(rows) => rows,
+                _ => unreachable!("typed catalog projection"),
+            })
+    }
+    .expect("bounded Album rows");
+    assert_eq!(album_rows[0].summary.track_count, 2);
+    assert_eq!(album_rows[0].links.album_artists[0].name, "Artist A");
+    assert_eq!(album_rows[0].links.genres[0].name, "Rock");
+    let album_detail = (&library::CatalogQuery {
+        subject: library::CatalogSubject::Tracks {
+            scope: library::TrackScope::Album(album_rows[0].album_key),
+            sort: Some(library::CatalogSort::TrackNumber),
+        },
+        ..library::CatalogQuery::tracks(library::TrackScope::Album(album_rows[0].album_key))
+    })
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
         .expect("Album detail");
     assert_eq!(album_detail.count, 2);
-    let reversed = fixture
-        .database
-        .song_route_page(
-            &library::SongQuery {
-                sort: Some(library::TrackSort::TrackNumber),
-                descending: true,
-                ..library::SongQuery::new(library::SongScope::Album(album_rows[0].album_key))
-            },
-            RouteSeedWindow::top(),
-            &cancel,
-        )
+    let reversed = (&library::CatalogQuery {
+        subject: library::CatalogSubject::Tracks {
+            scope: library::TrackScope::Album(album_rows[0].album_key),
+            sort: Some(library::CatalogSort::TrackNumber),
+        },
+        descending: true,
+        ..library::CatalogQuery::tracks(library::TrackScope::Album(album_rows[0].album_key))
+    })
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
         .expect("descending Album detail");
     assert_eq!(
-        reversed.first_rows,
-        album_detail
-            .first_rows
-            .iter()
-            .rev()
-            .cloned()
-            .collect::<Vec<_>>()
+        (match reversed.rows {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!(),
+        }),
+        (match &album_detail.rows {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!(),
+        })
+        .iter()
+        .rev()
+        .cloned()
+        .collect::<Vec<_>>()
     );
     assert_eq!(
         album_rows[0]
+            .links
             .album_artists
             .iter()
             .map(|artist| artist.artist_key)
             .collect::<Vec<_>>(),
         [fixture.artists[0]]
     );
-    assert_eq!(album_rows[0].is_compilation, Some(true));
-    assert_eq!(album_rows[0].release_types, ["Album".to_string()]);
+    assert_eq!(album_rows[0].metadata.is_compilation, Some(true));
+    assert_eq!(album_rows[0].metadata.release_types, ["Album".to_string()]);
     let candidates = fixture
         .database
         .album_release_candidates(fixture.source, 100, &cancel)
@@ -1172,53 +1544,80 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             .expect("accept missing Album release"),
         Some(first.album_key)
     );
-    let missing_row = fixture
-        .database
-        .album_rows(fixture.source, &[first.album_key], None, &cancel)
-        .await
-        .unwrap()
-        .pop()
-        .unwrap();
-    assert_eq!(missing_row.release_types, ["Album".to_string()]);
+    let missing_row = {
+        let mut query = library::CatalogQuery::keys(
+            library::CatalogKind::Album,
+            Some(fixture.source),
+            (&[first.album_key]).iter().map(|key| key.raw()).collect(),
+        );
+        query.activity = true;
+        query.folder = None;
+        query
+            .rows(&fixture.database, 0, (&[first.album_key]).len(), &cancel)
+            .await
+            .map(|rows| match rows {
+                library::CatalogRows::Albums(rows) => rows,
+                _ => unreachable!("typed catalog projection"),
+            })
+    }
+    .unwrap()
+    .pop()
+    .unwrap();
+    assert_eq!(missing_row.metadata.release_types, ["Album".to_string()]);
     assert_eq!(
         missing_row.release_lookup_identity.as_deref(),
         Some("release-group:group-a")
     );
-    let mut scan = library::Scan::begin_items(&fixture.database, "source")
-        .await
-        .unwrap();
-    scan.write_albums(&[&library::AlbumInput {
-        object_id: "album-a".into(),
-        title: "Album A".into(),
-        display_artist: "Artist A".into(),
-        sort_text: "album a".into(),
-        year: Some(2024),
-        release_date: Some("2024-01-02".into()),
-        date_added: Some("2024-01-02".into()),
-        musicbrainz_release_group_id: Some("group-a2".into()),
-        is_compilation: Some(true),
-        favorite: Some(false),
-        artists: vec![library::ArtistInput {
-            object_id: "artist-a".into(),
-            name: "Artist A".into(),
+
+    let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+    {
+        let write = library::CatalogBatch {
+            albums: vec![library::AlbumObservation {
+                user_data: library::NativeUserState {
+                    favorite: Some(false),
+                    ..Default::default()
+                },
+                metadata: library::AlbumMetadata {
+                    title: "Album A".into(),
+                    artist: "Artist A".into(),
+                    sort_text: "album a".into(),
+                    year: Some(2024),
+                    release_date: Some("2024-01-02".into()),
+                    date_added: Some("2024-01-02".into()),
+                    musicbrainz_release_group_id: Some("group-a2".into()),
+                    is_compilation: Some(true),
+                    album_artists: vec![library::ArtistCredit {
+                        object_id: "artist-a".into(),
+                        name: "Artist A".into(),
+                        ..Default::default()
+                    }],
+                    genres: vec![library::TagReference {
+                        object_id: "genre".into(),
+                        name: "Rock".into(),
+                        ..Default::default()
+                    }],
+                    release_types: vec!["Album".into()],
+                    ..Default::default()
+                },
+                object_id: "album-a".into(),
+                ..Default::default()
+            }],
             ..Default::default()
-        }],
-        genres: vec![library::GenreInput {
-            object_id: "genre".into(),
-            name: "Rock".into(),
-            ..Default::default()
-        }],
-        release_types: vec!["Album".into()],
-        ..Default::default()
-    }])
-    .await
-    .unwrap();
+        };
+
+        scan_catalog.apply_catalog(&write, true).await.unwrap();
+    };
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    fixture.database.observe_catalog(move |update| {
+    fixture.database.observe_catalog(move |_, update| {
         let _ = updates_tx.send(update);
         std::future::ready(())
     });
-    scan.finish().await.unwrap();
+    {
+        let update = scan_catalog.into_changes();
+        (&fixture.database)
+            .publish_catalog_update("source", update)
+            .await;
+    };
     let update = updates.try_recv().unwrap();
     assert!(update.metadata);
     let changed = fixture
@@ -1260,15 +1659,27 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             .unwrap(),
         Some(changed.album_key)
     );
-    let found = fixture
-        .database
-        .album_rows(fixture.source, &[changed.album_key], None, &cancel)
-        .await
-        .unwrap()
-        .pop()
-        .unwrap();
+    let found = {
+        let mut query = library::CatalogQuery::keys(
+            library::CatalogKind::Album,
+            Some(fixture.source),
+            (&[changed.album_key]).iter().map(|key| key.raw()).collect(),
+        );
+        query.activity = true;
+        query.folder = None;
+        query
+            .rows(&fixture.database, 0, (&[changed.album_key]).len(), &cancel)
+            .await
+            .map(|rows| match rows {
+                library::CatalogRows::Albums(rows) => rows,
+                _ => unreachable!("typed catalog projection"),
+            })
+    }
+    .unwrap()
+    .pop()
+    .unwrap();
     assert_eq!(
-        found.release_types,
+        found.metadata.release_types,
         ["Compilation".to_string(), "Remix".to_string()]
     );
     assert_eq!(
@@ -1288,204 +1699,309 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         .execute(&mut raw)
         .await
         .expect("separate direct Track Artist from Album Artist");
-    library::Scan::begin_items(&fixture.database, "source")
-        .await
-        .unwrap()
-        .finish()
-        .await
-        .unwrap();
+
     let album_artist_uri: String =
         sqlx::query_scalar("SELECT media_uri FROM artists WHERE artist_key=?1")
             .bind(fixture.artists[0])
             .fetch_one(&mut raw)
             .await
             .unwrap();
-    let resolved = fixture
-        .database
-        .artist_row_by_media_uri(&album_artist_uri, &cancel)
-        .await
-        .expect("resolve an artist credited only on albums")
-        .unwrap();
+    let resolved = library::CatalogQuery::uris(
+        library::CatalogKind::Artist,
+        vec![(&album_artist_uri).to_string()],
+    )
+    .rows(&fixture.database, 0, 1, &cancel)
+    .await
+    .map(|rows| match rows {
+        library::CatalogRows::Artists(mut rows) => rows.pop(),
+        _ => unreachable!("typed catalog projection"),
+    })
+    .expect("resolve an artist credited only on albums")
+    .unwrap();
     assert_eq!(resolved.artist_key, fixture.artists[0]);
     assert_eq!(resolved.source_key, fixture.source);
-    let detail = fixture
-        .database
-        .artist_rows(fixture.source, &[resolved.artist_key], false, None, &cancel)
-        .await
-        .expect("known artist can open with no tracks in the requested role")
-        .pop()
-        .unwrap();
-    assert_eq!(detail.artist_key, resolved.artist_key);
-    assert_eq!(detail.track_count, 0);
-    assert_eq!(
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    sort: Some(TrackSort::Title),
-                    ..library::SongQuery::new(library::SongScope::Artist {
-                        key: fixture.artists[0],
-                        album_artist: true
-                    })
-                },
-                RouteSeedWindow::top(),
-                &cancel
+    let detail = {
+        let mut query = library::CatalogQuery::keys(
+            library::CatalogKind::Artist,
+            Some(fixture.source),
+            (&[resolved.artist_key])
+                .iter()
+                .map(|key| key.raw())
+                .collect(),
+        );
+        query.activity = true;
+        query.folder = None;
+        if let library::CatalogSubject::Keys { album_artist, .. } = &mut query.subject {
+            *album_artist = false;
+        }
+        query
+            .rows(
+                &fixture.database,
+                0,
+                (&[resolved.artist_key]).len(),
+                &cancel,
             )
+            .await
+            .map(|rows| match rows {
+                library::CatalogRows::Artists(rows) => rows,
+                _ => unreachable!("typed catalog projection"),
+            })
+    }
+    .expect("known artist can open with no tracks in the requested role")
+    .pop()
+    .unwrap();
+    assert_eq!(detail.artist_key, resolved.artist_key);
+    assert_eq!(detail.summary.track_count, 0);
+    assert_eq!(
+        (&library::CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Artist {
+                    key: fixture.artists[0],
+                    album_artist: true
+                },
+                sort: Some(CatalogSort::Title)
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Artist {
+                key: fixture.artists[0],
+                album_artist: true
+            })
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .expect("Album Artist Tracks")
             .count,
         2
     );
     assert_eq!(
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    sort: Some(TrackSort::Title),
-                    ..library::SongQuery::new(library::SongScope::Artist {
-                        key: fixture.artists[0],
-                        album_artist: false
-                    })
+        (&library::CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Artist {
+                    key: fixture.artists[0],
+                    album_artist: false
                 },
-                RouteSeedWindow::top(),
-                &cancel
-            )
+                sort: Some(CatalogSort::Title)
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Artist {
+                key: fixture.artists[0],
+                album_artist: false
+            })
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .expect("direct Artist Tracks")
             .count,
         0
     );
     assert_eq!(
-        fixture
-            .database
-            .artist_rows(fixture.source, &[fixture.artists[0]], true, None, &cancel)
-            .await
-            .expect("Album Artist row")[0]
+        {
+            let mut query = library::CatalogQuery::keys(
+                library::CatalogKind::Artist,
+                Some(fixture.source),
+                (&[fixture.artists[0]])
+                    .iter()
+                    .map(|key| key.raw())
+                    .collect(),
+            );
+            query.activity = true;
+            query.folder = None;
+            if let library::CatalogSubject::Keys { album_artist, .. } = &mut query.subject {
+                *album_artist = true;
+            }
+            query
+        }
+        .rows(&fixture.database, 0, (&[fixture.artists[0]]).len(), &cancel)
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Artists(rows) => rows,
+            _ => unreachable!(),
+        })
+        .expect("Album Artist row")[0]
+            .summary
             .track_count,
         2
     );
     assert_eq!(
-        fixture
-            .database
-            .artist_rows(fixture.source, &[fixture.artists[0]], false, None, &cancel)
-            .await
-            .expect("known artist without direct track credits")[0]
+        {
+            let mut query = library::CatalogQuery::keys(
+                library::CatalogKind::Artist,
+                Some(fixture.source),
+                (&[fixture.artists[0]])
+                    .iter()
+                    .map(|key| key.raw())
+                    .collect(),
+            );
+            query.activity = true;
+            query.folder = None;
+            if let library::CatalogSubject::Keys { album_artist, .. } = &mut query.subject {
+                *album_artist = false;
+            }
+            query
+        }
+        .rows(&fixture.database, 0, (&[fixture.artists[0]]).len(), &cancel)
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Artists(rows) => rows,
+            _ => unreachable!(),
+        })
+        .expect("known artist without direct track credits")[0]
+            .summary
             .track_count,
         0
     );
     assert_eq!(
-        fixture
-            .database
-            .artist_rows(fixture.source, &[fixture.artists[0]], true, None, &cancel)
-            .await
-            .expect("Album Artist detail")
-            .pop()
-            .unwrap()
-            .track_count,
+        {
+            let mut query = library::CatalogQuery::keys(
+                library::CatalogKind::Artist,
+                Some(fixture.source),
+                (&[fixture.artists[0]])
+                    .iter()
+                    .map(|key| key.raw())
+                    .collect(),
+            );
+            query.activity = true;
+            query.folder = None;
+            if let library::CatalogSubject::Keys { album_artist, .. } = &mut query.subject {
+                *album_artist = true;
+            }
+            query
+        }
+        .rows(&fixture.database, 0, (&[fixture.artists[0]]).len(), &cancel)
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Artists(rows) => rows,
+            _ => unreachable!(),
+        })
+        .expect("Album Artist detail")
+        .pop()
+        .unwrap()
+        .summary
+        .track_count,
         2
     );
     assert_eq!(
-        fixture
-            .database
-            .genre_detail(fixture.source, fixture.genre, Some(fixture.folder), &cancel)
-            .await
-            .expect("scoped Genre detail")
-            .unwrap()
-            .track_count,
+        {
+            let mut query = library::CatalogQuery::keys(
+                library::CatalogKind::Genre,
+                Some(fixture.source),
+                vec![(fixture.genre).raw()],
+            );
+            query.activity = true;
+            query.folder = Some(fixture.folder);
+            query
+        }
+        .rows(&fixture.database, 0, 1, &cancel)
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Genres(mut rows) => rows.pop(),
+            _ => unreachable!(),
+        })
+        .expect("scoped Genre detail")
+        .unwrap()
+        .summary
+        .track_count,
         4
     );
     assert_eq!(
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    folder: Some(fixture.folder),
-                    filter: ("beta").into(),
-                    sort: Some(TrackSort::Title),
-                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
-                },
-                RouteSeedWindow::top(),
-                &cancel
-            )
+        (match (&library::CatalogQuery {
+            folder: Some(fixture.folder),
+            filter: ("beta").into(),
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Album(fixture.albums[0]),
+                sort: Some(CatalogSort::Title)
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Album(fixture.albums[0]))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .expect("scoped filtered Album Tracks")
-            .first_rows
-            .into_iter()
-            .map(|row| row.media_uri)
-            .collect::<Vec<_>>(),
+            .rows
+        {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!(),
+        })
+        .into_iter()
+        .map(|row| row.media_uri.clone())
+        .collect::<Vec<_>>(),
         [fixture.track_uris[1].clone()]
     );
     assert_eq!(
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    sort: Some(TrackSort::LastPlayed),
-                    descending: true,
-                    ..library::SongQuery::new(library::SongScope::Album(fixture.albums[0]))
-                },
-                RouteSeedWindow::top(),
-                &cancel
-            )
+        (&library::CatalogQuery {
+            descending: true,
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Album(fixture.albums[0]),
+                sort: Some(CatalogSort::LastPlayed)
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Album(fixture.albums[0]))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .expect("Activity-sorted Album Tracks")
             .count,
         2
     );
     assert_eq!(
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    folder: Some(fixture.folder),
-                    filter: ("artist b").into(),
-                    sort: Some(TrackSort::Album),
-                    descending: true,
-                    ..library::SongQuery::new(library::SongScope::Genre(fixture.genre))
-                },
-                RouteSeedWindow::top(),
-                &cancel
-            )
+        (&library::CatalogQuery {
+            folder: Some(fixture.folder),
+            filter: ("artist b").into(),
+            descending: true,
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Genre(fixture.genre),
+                sort: Some(CatalogSort::Album)
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Genre(fixture.genre))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .expect("scoped filtered Genre Tracks")
             .count,
         2
     );
     assert_eq!(
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    filter: ("2023").into(),
-                    sort: Some(TrackSort::Year),
-                    ..library::SongQuery::new(library::SongScope::Mood(fixture.mood))
-                },
-                RouteSeedWindow::top(),
-                &cancel
-            )
+        (match (&library::CatalogQuery {
+            filter: ("2023").into(),
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Mood(fixture.mood),
+                sort: Some(CatalogSort::Year)
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Mood(fixture.mood))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .expect("filtered Mood Tracks")
-            .first_rows
-            .into_iter()
-            .map(|row| row.media_uri)
-            .collect::<Vec<_>>(),
+            .rows
+        {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!(),
+        })
+        .into_iter()
+        .map(|row| row.media_uri.clone())
+        .collect::<Vec<_>>(),
         [fixture.track_uris[3].clone()]
     );
     assert!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Artists {
-                source: fixture.source,
-                sort: ArtistSort::Title,
-                album_artist: false,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("artist a").to_string(),
             descending: false,
             favorites_only: false,
+            subject: library::CatalogSubject::Artists {
+                source: fixture.source,
+                sort: CatalogSort::Title,
+                album_artist: false
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.artists()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Artists(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("direct Artist filter")
         .2
         .into_iter()
@@ -1494,20 +2010,29 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         .is_empty()
     );
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Artists {
-                source: fixture.source,
-                sort: ArtistSort::Title,
-                album_artist: true,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("artist a").to_string(),
             descending: false,
             favorites_only: false,
+            subject: library::CatalogSubject::Artists {
+                source: fixture.source,
+                sort: CatalogSort::Title,
+                album_artist: true
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.artists()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Artists(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("Album Artist filter")
         .2
         .into_iter()
@@ -1529,7 +2054,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             .expect("multi-term Artist Search")
             .artists
             .into_iter()
-            .map(|artist| artist.name)
+            .map(|artist| artist.metadata.name)
             .collect::<Vec<_>>(),
         ["Artist B"]
     );
@@ -1550,32 +2075,54 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         fixture.artists[0]
     );
     assert_eq!(
-        fixture
-            .database
-            .mood_detail(fixture.source, fixture.mood, Some(fixture.folder), &cancel)
-            .await
-            .expect("scoped Mood detail")
-            .unwrap()
-            .track_count,
+        {
+            let mut query = library::CatalogQuery::keys(
+                library::CatalogKind::Mood,
+                Some(fixture.source),
+                vec![(fixture.mood).raw()],
+            );
+            query.activity = true;
+            query.folder = Some(fixture.folder);
+            query
+        }
+        .rows(&fixture.database, 0, 1, &cancel)
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Moods(mut rows) => rows.pop(),
+            _ => unreachable!(),
+        })
+        .expect("scoped Mood detail")
+        .unwrap()
+        .summary
+        .track_count,
         4
     );
-    let empty_folder = sqlx::query_scalar("INSERT INTO folders(source_key,object_id,name,normalized_name,sort_text) VALUES (?1,'empty-folder','Empty','empty','empty') RETURNING folder_key")
+    let empty_folder = sqlx::query_scalar("INSERT INTO folders(source_key,object_id,metadata,media_uri,normalized_name) VALUES (?1,'empty-folder',jsonb(json_object('name','Empty','sort_text','empty')),'folder:'||COALESCE(?1,0)||':'||'empty-folder',lower(COALESCE(json_extract(jsonb(json_object('name','Empty','sort_text','empty')),'$.name'),''))) RETURNING folder_key")
         .bind(fixture.source).fetch_one(&mut raw).await.expect("insert empty Folder");
     assert!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Albums {
-                source: fixture.source,
-                sort: AlbumSort::Title,
-                inline_tracks: None,
-            },
+        library::CatalogQuery {
             folder: Some(empty_folder),
             filter: ("").to_string(),
             descending: false,
             favorites_only: false,
+            subject: library::CatalogSubject::Albums {
+                source: fixture.source,
+                sort: CatalogSort::Title,
+                inline_tracks: None
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Albums(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("empty Folder scope")
         .2
         .into_iter()
@@ -1602,33 +2149,55 @@ async fn empty_named_collection_routes_return_empty_pages() {
     let source = fixture.source;
     let cancellation = ReadCancellation::new();
 
-    let genres = library::CollectionQuery {
-        kind: library::CollectionKind::Genres {
+    let genres = library::CatalogQuery {
+        subject: library::CatalogSubject::Genres {
             source: source,
-            sort: GenreSort::TrackCount,
+            sort: CatalogSort::TrackCount,
         },
         folder: None,
         filter: ("").to_string(),
         descending: false,
         favorites_only: false,
+        downloaded_only: false,
+        activity: true,
     }
     .page(&fixture.database, RouteSeedWindow::top(), &cancellation)
     .await
-    .map(|(count, start, rows)| (count, start, rows.genres()))
+    .map(|page| {
+        (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Genres(rows) => rows,
+                _ => unreachable!(),
+            },
+        )
+    })
     .expect("empty Genre route");
-    let moods = library::CollectionQuery {
-        kind: library::CollectionKind::Moods {
+    let moods = library::CatalogQuery {
+        subject: library::CatalogSubject::Moods {
             source: source,
-            sort: MoodSort::Duration,
+            sort: CatalogSort::Duration,
         },
         folder: None,
         filter: ("").to_string(),
         descending: false,
         favorites_only: false,
+        downloaded_only: false,
+        activity: true,
     }
     .page(&fixture.database, RouteSeedWindow::top(), &cancellation)
     .await
-    .map(|(count, start, rows)| (count, start, rows.moods()))
+    .map(|page| {
+        (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Moods(rows) => rows,
+                _ => unreachable!(),
+            },
+        )
+    })
     .expect("empty Mood route");
 
     assert_eq!(genres, (0, 0, Vec::new()));
@@ -1641,155 +2210,214 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
     let cancel = ReadCancellation::new();
     let track = fixture.tracks[0];
     for refresh in 0..2 {
-        let mut scan = library::Scan::begin_items(&fixture.database, "source")
-            .await
-            .unwrap();
-        scan.write_tracks(&[(
-            &library::TrackInput {
-                object_id: "track-0".into(),
-                album_object_id: Some("album-a".into()),
-                title: "Edited".into(),
-                display_album: "Album A".into(),
-                display_artist: "Artist A".into(),
-                sort_text: "edited".into(),
-                duration_millis: 181_000,
-                disc_number: 1,
-                track_number: 1,
-                year: Some(2025),
-                date_added: Some("2025-01-01".into()),
-                source_format: Some("FLAC".into()),
-                comment: Some("Changed".into()),
-                bpm: Some(121),
-                favorite: Some(false),
-                rating: Some(5),
-                loudness_analysis_key: [1; 32],
-                artists: vec![library::ArtistInput {
+        let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+        {
+            let write = library::CatalogBatch {
+                tracks: vec![library::TrackObservation {
+                    user_data: library::NativeUserState {
+                        favorite: Some(false),
+                        rating: (Some(Some(5))).map(|rating| rating.map(|value| value * 10)),
+                        ..Default::default()
+                    },
+                    metadata: library::TrackMetadata {
+                        title: "Edited".into(),
+                        album: "Album A".into(),
+                        artist: "Artist A".into(),
+                        sort_text: "edited".into(),
+                        duration_millis: 181_000,
+                        disc_number: 1,
+                        track_number: 1,
+                        year: Some(2025),
+                        date_added: Some("2025-01-01".into()),
+                        source_format: Some("FLAC".into()),
+                        comment: Some("Changed".into()),
+                        bpm: Some(121),
+                        artists: vec![library::ArtistCredit {
+                            object_id: "artist-a".into(),
+                            name: "Edited Artist".into(),
+                            ..Default::default()
+                        }],
+                        genres: vec![library::TagReference {
+                            object_id: "genre".into(),
+                            name: "Rock".into(),
+                            ..Default::default()
+                        }],
+                        moods: vec![library::TagReference {
+                            object_id: "mood".into(),
+                            name: "Energetic".into(),
+                            sort_text: Some("energetic".into()),
+                        }],
+                        ..Default::default()
+                    },
+                    object_id: "track-0".into(),
+                    album_object_id: Some("album-a".into()),
+                    loudness_analysis_key: [1; 32],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+
+            scan_catalog.apply_catalog(&write, true).await.unwrap();
+        };
+        {
+            let write = library::CatalogBatch {
+                albums: vec![library::AlbumObservation {
+                    user_data: library::NativeUserState {
+                        favorite: Some(false),
+                        ..Default::default()
+                    },
+                    metadata: library::AlbumMetadata {
+                        title: "Edited Album".into(),
+                        artist: "Artist A".into(),
+                        sort_text: "edited album".into(),
+                        year: Some(2025),
+                        is_compilation: Some(true),
+                        album_artists: vec![library::ArtistCredit {
+                            object_id: "artist-a".into(),
+                            name: "Edited Artist".into(),
+                            ..Default::default()
+                        }],
+                        genres: vec![library::TagReference {
+                            object_id: "genre".into(),
+                            name: "Rock".into(),
+                            ..Default::default()
+                        }],
+                        release_types: vec!["Album".into()],
+                        ..Default::default()
+                    },
+                    object_id: "album-a".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+
+            scan_catalog.apply_catalog(&write, true).await.unwrap();
+        };
+        {
+            let write = library::CatalogBatch {
+                artists: vec![library::ArtistObservation {
+                    user_data: library::NativeUserState {
+                        favorite: Some(false),
+                        ..Default::default()
+                    },
+                    metadata: library::ArtistMetadata {
+                        name: "Edited Artist".into(),
+                        sort_text: Some("edited artist".into()),
+                        ..Default::default()
+                    },
                     object_id: "artist-a".into(),
-                    name: "Edited Artist".into(),
                     ..Default::default()
                 }],
-                genres: vec![library::GenreInput {
-                    object_id: "genre".into(),
-                    name: "Rock".into(),
-                    ..Default::default()
-                }],
-                moods: vec![library::MoodInput {
-                    object_id: "mood".into(),
-                    name: "Energetic".into(),
-                    sort_text: "energetic".into(),
-                }],
                 ..Default::default()
-            },
-            None,
-        )])
-        .await
-        .expect("refresh Track metadata");
-        scan.write_albums(&[&library::AlbumInput {
-            object_id: "album-a".into(),
-            title: "Edited Album".into(),
-            display_artist: "Artist A".into(),
-            sort_text: "edited album".into(),
-            year: Some(2025),
-            is_compilation: Some(true),
-            favorite: Some(false),
-            artists: vec![library::ArtistInput {
-                object_id: "artist-a".into(),
-                name: "Edited Artist".into(),
-                ..Default::default()
-            }],
-            genres: vec![library::GenreInput {
-                object_id: "genre".into(),
-                name: "Rock".into(),
-                ..Default::default()
-            }],
-            release_types: vec!["Album".into()],
-            ..Default::default()
-        }])
-        .await
-        .expect("refresh Album metadata");
-        scan.write_artists(&[&library::ArtistInput {
-            object_id: "artist-a".into(),
-            name: "Edited Artist".into(),
-            sort_text: Some("edited artist".into()),
-            favorite: Some(false),
-            ..Default::default()
-        }])
-        .await
-        .expect("refresh Artist metadata");
+            };
+
+            scan_catalog.apply_catalog(&write, true).await.unwrap();
+        };
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        fixture.database.observe_catalog(move |update| {
+        fixture.database.observe_catalog(move |_, update| {
             let _ = updates_tx.send(update);
             std::future::ready(())
         });
-        scan.finish().await.unwrap();
-        let update = updates.try_recv().unwrap();
+        {
+            let update = scan_catalog.into_changes();
+            (&fixture.database)
+                .publish_catalog_update("source", update)
+                .await;
+        };
+        let update = updates
+            .try_recv()
+            .map(|update| {
+                assert!(update.changed() || !update.track_rekeys.is_empty());
+                update
+            })
+            .unwrap_or_default();
         assert_eq!(update.metadata, refresh == 0);
         if refresh == 1 {
             assert!(!update.playlists && !update.artwork && !update.home);
         }
     }
-    let row = fixture
-        .database
-        .track_rows(&[track], &cancel)
-        .await
-        .unwrap()
-        .pop()
-        .unwrap();
-    assert_eq!(row.title, "Edited");
-    assert_eq!(row.comment.as_deref(), Some("Changed"));
-    let filtered = fixture
-        .database
-        .song_route_page(
-            &library::SongQuery {
-                filter: ("changed").into(),
-                sort: Some(library::TrackSort::Title),
-                ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
-            },
-            RouteSeedWindow::top(),
-            &cancel,
-        )
+    let row = library::CatalogQuery::keys(
+        library::CatalogKind::Track,
+        None,
+        (&[track]).iter().map(|key| key.raw()).collect(),
+    )
+    .rows(&fixture.database, 0, (&[track]).len(), &cancel)
+    .await
+    .map(|rows| match rows {
+        library::CatalogRows::Tracks(rows) => rows,
+        _ => unreachable!("typed catalog projection"),
+    })
+    .unwrap()
+    .pop()
+    .unwrap();
+    assert_eq!(row.metadata.title, "Edited");
+    assert_eq!(row.metadata.comment.as_deref(), Some("Changed"));
+    let filtered = (match (&library::CatalogQuery {
+        subject: library::CatalogSubject::Tracks {
+            scope: library::TrackScope::Tracks(fixture.source),
+            sort: Some(library::CatalogSort::Title),
+        },
+        filter: ("changed").into(),
+        ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
+    })
+        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
         .expect("filter edited Track")
-        .first_rows
-        .into_iter()
-        .map(|row| row.media_uri)
-        .collect::<Vec<_>>();
+        .rows
+    {
+        library::CatalogRows::Tracks(rows) => rows,
+        _ => unreachable!(),
+    })
+    .into_iter()
+    .map(|row| row.media_uri.clone())
+    .collect::<Vec<_>>();
     assert_eq!(filtered, [fixture.track_uris[0].clone()]);
     assert_eq!(
-        fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    filter: ("2025").into(),
-                    sort: Some(library::TrackSort::Title),
-                    ..library::SongQuery::new(library::SongScope::Tracks(fixture.source))
-                },
-                RouteSeedWindow::top(),
-                &cancel
-            )
+        (match (&library::CatalogQuery {
+            filter: ("2025").into(),
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Tracks(fixture.source),
+                sort: Some(library::CatalogSort::Title)
+            },
+            ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .expect("Track Year filter")
-            .first_rows
-            .into_iter()
-            .map(|row| row.media_uri)
-            .collect::<Vec<_>>(),
+            .rows
+        {
+            library::CatalogRows::Tracks(rows) => rows,
+            _ => unreachable!(),
+        })
+        .into_iter()
+        .map(|row| row.media_uri.clone())
+        .collect::<Vec<_>>(),
         [fixture.track_uris[0].clone()]
     );
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Albums {
-                source: fixture.source,
-                sort: AlbumSort::Title,
-                inline_tracks: None,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("rock").to_string(),
             descending: false,
             favorites_only: false,
+            subject: library::CatalogSubject::Albums {
+                source: fixture.source,
+                sort: CatalogSort::Title,
+                inline_tracks: None
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Albums(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("Album Genre filter")
         .2
         .into_iter()
@@ -1798,20 +2426,29 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         [fixture.albums[1], fixture.albums[0]]
     );
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Albums {
-                source: fixture.source,
-                sort: AlbumSort::Title,
-                inline_tracks: None,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("artist b").to_string(),
             descending: false,
             favorites_only: false,
+            subject: library::CatalogSubject::Albums {
+                source: fixture.source,
+                sort: CatalogSort::Title,
+                inline_tracks: None
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Albums(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("Album Artist filter")
         .2
         .into_iter()
@@ -1820,20 +2457,29 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         [fixture.albums[1]]
     );
     assert_eq!(
-        library::CollectionQuery {
-            kind: library::CollectionKind::Albums {
-                source: fixture.source,
-                sort: AlbumSort::Title,
-                inline_tracks: None,
-            },
+        library::CatalogQuery {
             folder: None,
             filter: ("2024").to_string(),
             descending: false,
             favorites_only: false,
+            subject: library::CatalogSubject::Albums {
+                source: fixture.source,
+                sort: CatalogSort::Title,
+                inline_tracks: None
+            },
+            activity: true,
+            downloaded_only: false
         }
         .page(&fixture.database, RouteSeedWindow::top(), &cancel)
         .await
-        .map(|(count, start, rows)| (count, start, rows.albums()))
+        .map(|page| (
+            page.count,
+            page.first_row_position,
+            match page.rows {
+                library::CatalogRows::Albums(rows) => rows,
+                _ => unreachable!(),
+            }
+        ))
         .expect("Album Year filter")
         .2
         .into_iter()
@@ -1841,111 +2487,6 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         .collect::<Vec<_>>(),
         [fixture.albums[1]]
     );
-
-    let mut raw = connection(&fixture.path).await;
-    let plan = sqlx::query_as::<_, (i64, i64, i64, String)>(
-        "EXPLAIN QUERY PLAN
-         SELECT track_key FROM tracks
-         WHERE source_key=?1 ORDER BY sort_text, track_key",
-    )
-    .bind(fixture.source)
-    .fetch_one(&mut raw)
-    .await
-    .expect("Track order plan")
-    .3;
-    assert!(plan.contains("tracks_order_idx"), "{plan}");
-    let album_plan = sqlx::query_as::<_, (i64, i64, i64, String)>(
-        "EXPLAIN QUERY PLAN
-         SELECT album_key FROM albums
-         WHERE source_key=?1 ORDER BY sort_text, album_key",
-    )
-    .bind(fixture.source)
-    .fetch_one(&mut raw)
-    .await
-    .expect("Album order plan")
-    .3;
-    assert!(album_plan.contains("albums_order_idx"), "{album_plan}");
-    for (sql, expected) in [
-        (
-            "EXPLAIN QUERY PLAN SELECT track.track_key FROM tracks track WHERE track.source_key=?1 AND (?2 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite)=1) AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders relation WHERE relation.track_key=track.track_key AND relation.folder_key=?3)) ORDER BY track.sort_text,track.track_key",
-            "tracks_order_idx",
-        ),
-        (
-            "EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?3)) AND (?2=0 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) ORDER BY album.sort_text,album.album_key",
-            "albums_order_idx",
-        ),
-        (
-            "EXPLAIN QUERY PLAN SELECT genre.genre_key FROM genres genre WHERE genre.source_key=?1 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_genres credit JOIN track_folders scope USING(track_key) WHERE credit.genre_key=genre.genre_key AND scope.folder_key=?3)) ORDER BY genre.sort_text,genre.genre_key",
-            "genres_order_idx",
-        ),
-        (
-            "EXPLAIN QUERY PLAN SELECT mood.mood_key FROM moods mood WHERE mood.source_key=?1 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_moods credit JOIN track_folders scope USING(track_key) WHERE credit.mood_key=mood.mood_key AND scope.folder_key=?3)) ORDER BY mood.sort_text,mood.mood_key",
-            "moods_order_idx",
-        ),
-    ] {
-        let details = sqlx::query_as::<_, (i64, i64, i64, String)>(sql)
-            .bind(fixture.source)
-            .bind(false)
-            .bind(Option::<i64>::None)
-            .fetch_all(&mut raw)
-            .await
-            .expect("production default order plan")
-            .into_iter()
-            .map(|row| row.3)
-            .collect::<Vec<_>>()
-            .join(" | ");
-        assert!(details.contains(expected), "{expected}: {details}");
-        assert!(
-            !details.contains("USE TEMP B-TREE FOR ORDER BY"),
-            "{details}"
-        );
-    }
-    let artist_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT artist.artist_key FROM artists artist WHERE artist.source_key=?1 AND (?2 OR EXISTS (SELECT 1 FROM album_artists relation WHERE relation.artist_key=artist.artist_key)) AND (?3 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=artist.media_uri),artist.source_favorite)=1) AND (?4 IS NULL OR ((?5 AND EXISTS (SELECT 1 FROM track_artists credit JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?6)) OR (?7 AND EXISTS (SELECT 1 FROM album_artists credit JOIN tracks track USING(album_key) JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?8)))) ORDER BY artist.sort_text,artist.artist_key")
-        .bind(fixture.source).bind(true).bind(true).bind(Option::<i64>::None).bind(true).bind(Option::<i64>::None).bind(false).bind(Option::<i64>::None).fetch_all(&mut raw).await.expect("production Artist title plan").into_iter().map(|row| row.3).collect::<Vec<_>>().join(" | ");
-    assert!(artist_plan.contains("artists_order_idx"), "{artist_plan}");
-    assert!(
-        !artist_plan.contains("USE TEMP B-TREE FOR ORDER BY"),
-        "{artist_plan}"
-    );
-    let direct_album_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album WHERE album.source_key=?1 ORDER BY (album.album_artist_sort IS NULL),album.album_artist_sort ASC,(album.year IS NULL),album.year,album.sort_text,album.album_key")
-        .bind(fixture.source).fetch_all(&mut raw).await.expect("actual direct Album sort plan").into_iter().map(|row| row.3).collect::<Vec<_>>().join(" | ");
-    assert!(
-        direct_album_plan.contains("albums_artist_order_idx"),
-        "{direct_album_plan}"
-    );
-    assert!(
-        !direct_album_plan.contains("USE TEMP B-TREE"),
-        "{direct_album_plan}"
-    );
-    assert!(
-        !direct_album_plan.contains("listens"),
-        "{direct_album_plan}"
-    );
-    let counted_album_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album WHERE album.source_key=?1 ORDER BY (SELECT count(*) FROM tracks item WHERE item.album_key=album.album_key) DESC NULLS LAST,album.sort_text,album.album_key")
-        .bind(fixture.source).fetch_all(&mut raw).await.expect("actual counted Album sort plan").into_iter().map(|row| row.3).collect::<Vec<_>>().join(" | ");
-    assert!(
-        counted_album_plan.contains("tracks_album_order_idx"),
-        "{counted_album_plan}"
-    );
-    assert!(
-        !counted_album_plan.contains("listens"),
-        "{counted_album_plan}"
-    );
-    assert!(
-        !counted_album_plan.contains("activity_baseline"),
-        "{counted_album_plan}"
-    );
-    let point_plan = sqlx::query_as::<_, (i64, i64, i64, String)>(
-        "EXPLAIN QUERY PLAN
-         SELECT * FROM tracks WHERE source_key=?1 AND track_key=?2",
-    )
-    .bind(fixture.source)
-    .bind(track)
-    .fetch_one(&mut raw)
-    .await
-    .expect("bounded Track row plan")
-    .3;
-    assert!(point_plan.contains("INTEGER PRIMARY KEY"), "{point_plan}");
 }
 
 #[tokio::test]
@@ -1970,59 +2511,93 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
     .execute(&mut raw)
     .await
     .unwrap();
-    sqlx::query("UPDATE albums SET artwork_binding=?1 WHERE album_key=?2")
-        .bind(vec![1u8])
-        .bind(fixture.albums[0])
-        .execute(&mut raw)
-        .await
-        .unwrap();
-    library::Scan::begin_items(&fixture.database, "source")
-        .await
-        .unwrap()
-        .finish()
-        .await
-        .unwrap();
-    let cancel = ReadCancellation::new();
-    for folder in [None, Some(fixture.folder)] {
-        let detail = fixture
+    let cover = serde_json::to_vec(&[library::ArtworkCandidate::new(
+        library::ArtworkImage::Native {
+            source_id: library::SourceId::new("source"),
+            item_id: "album-cover".into(),
+            tag: None,
+        },
+        None,
+    )])
+    .unwrap();
+    {
+        let objects =
+            sqlx::query_scalar::<_, String>("SELECT object_id FROM albums WHERE album_key=?1")
+                .bind(fixture.albums[0])
+                .fetch_all(&mut raw)
+                .await
+                .unwrap();
+        fixture
             .database
-            .genre_detail(fixture.source, fixture.genre, folder, &cancel)
+            .catalog("source", None)
             .await
             .unwrap()
-            .unwrap();
-        assert_eq!(detail.track_count, 2);
-        assert_eq!(detail.album_count, 1);
-        assert_eq!(detail.representative_artwork, [vec![1u8]]);
-        let route = fixture
-            .database
-            .song_route_page(
-                &library::SongQuery {
-                    folder: folder,
-                    sort: Some(TrackSort::Title),
-                    ..library::SongQuery::new(library::SongScope::Genre(fixture.genre))
-                },
-                RouteSeedWindow::top(),
-                &cancel,
+            .set_source_artwork(
+                "album",
+                &objects
+                    .into_iter()
+                    .map(|id| (id, Some((&cover).to_vec())))
+                    .collect::<Vec<_>>(),
             )
+            .await
+            .unwrap();
+    };
+
+    let cancel = ReadCancellation::new();
+    for folder in [None, Some(fixture.folder)] {
+        let detail = {
+            let mut query = library::CatalogQuery::keys(
+                library::CatalogKind::Genre,
+                Some(fixture.source),
+                vec![(fixture.genre).raw()],
+            );
+            query.activity = true;
+            query.folder = folder;
+            query
+        }
+        .rows(&fixture.database, 0, 1, &cancel)
+        .await
+        .map(|rows| match rows {
+            library::CatalogRows::Genres(mut rows) => rows.pop(),
+            _ => unreachable!(),
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(detail.summary.track_count, 2);
+        assert_eq!(detail.summary.album_count, 1);
+        assert_eq!(
+            detail.representative_artwork.as_slice(),
+            std::slice::from_ref(&cover)
+        );
+        let route = (&library::CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Genre(fixture.genre),
+                sort: Some(CatalogSort::Title),
+            },
+            folder: folder,
+            ..library::CatalogQuery::tracks(library::TrackScope::Genre(fixture.genre))
+        })
+            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap();
         assert_eq!(route.count, 2);
-        let tracks = fixture
-            .database
-            .song_rows(
-                &library::SongQuery {
-                    folder: folder,
-                    sort: Some(TrackSort::Title),
-                    ..library::SongQuery::new(library::SongScope::Genre(fixture.genre))
-                },
-                0,
-                10,
-                &cancel,
-            )
+        let tracks = (&library::CatalogQuery {
+            subject: library::CatalogSubject::Tracks {
+                scope: library::TrackScope::Genre(fixture.genre),
+                sort: Some(CatalogSort::Title),
+            },
+            folder: folder,
+            ..library::CatalogQuery::tracks(library::TrackScope::Genre(fixture.genre))
+        })
+            .rows(&fixture.database, 0, 10, &cancel)
             .await
+            .map(|rows| match rows {
+                library::CatalogRows::Tracks(rows) => rows,
+                _ => unreachable!("typed song projection"),
+            })
             .unwrap();
         assert_eq!(tracks.len(), 2);
-        assert!(tracks.iter().any(|track| track.genres.is_empty()));
+        assert!(tracks.iter().any(|track| track.links.genres.is_empty()));
         let home = fixture
             .database
             .home_page(
@@ -2035,7 +2610,7 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
             )
             .await
             .unwrap();
-        assert_eq!(home.genres[0].track_count, 2);
+        assert_eq!(home.genres[0].summary.track_count, 2);
     }
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM track_genres")

@@ -3,21 +3,15 @@
 pub(crate) mod legacy;
 
 use std::collections::{HashMap, HashSet};
-use std::ops::Deref;
 use std::sync::Arc;
 
-use sqlx::{Connection, FromRow, Row, Sqlite, SqliteConnection};
+use sqlx::{Connection, Row, SqliteConnection};
 
-use crate::{Database, LibraryError, LibraryResult, ReadCancellation, SourceId, SourceKey};
+use crate::{
+    Database, LibraryError, LibraryResult, ReadCancellation, SourceId, SourceKey, TrackReference,
+};
 
 pub const QUEUE_CONTEXT_LIMIT: usize = 100;
-const QUEUE_PRIMARY_ARTIST_SQL: &str = "COALESCE(
-    (SELECT artist.media_uri FROM track_artists credit
-     JOIN artists artist USING(artist_key)
-     WHERE credit.track_key=track.track_key ORDER BY credit.position LIMIT 1),
-    (SELECT artist.media_uri FROM album_artists credit
-     JOIN artists artist USING(artist_key)
-     WHERE credit.album_key=track.album_key ORDER BY credit.position LIMIT 1))";
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct QueueContextTitle {
@@ -50,107 +44,16 @@ pub enum QueueRepeatMode {
     All,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, FromRow)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct QueueItem {
-    pub media_uri: String,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub album_display_artist: Option<String>,
-    /// Effective catalog artwork carried by a runtime projection, never persisted by Queue.
-    #[serde(skip)]
-    pub artwork_binding: Option<Vec<u8>>,
-    pub duration_millis: i64,
-    pub disc_number: Option<i64>,
-    pub track_number: Option<i64>,
-    pub year: Option<i64>,
-    pub release_date: Option<String>,
-    pub source_format: Option<String>,
-    #[serde(default)]
-    pub audio_properties: crate::AudioProperties,
-    pub musicbrainz_recording_id: Option<String>,
-    pub musicbrainz_release_track_id: Option<String>,
-    pub musicbrainz_album_id: Option<String>,
-    pub musicbrainz_release_group_id: Option<String>,
-    pub primary_artist_musicbrainz_id: Option<String>,
-}
-
-impl QueueItem {
-    pub fn direct(
-        media_uri: impl Into<String>,
-        title: impl Into<String>,
-        artist: impl Into<String>,
-        album: impl Into<String>,
-        duration_millis: i64,
-    ) -> Self {
-        Self {
-            media_uri: media_uri.into(),
-            title: title.into(),
-            artist: artist.into(),
-            album: album.into(),
-            album_display_artist: None,
-            artwork_binding: None,
-            duration_millis: duration_millis.max(0),
-            disc_number: None,
-            track_number: None,
-            year: None,
-            release_date: None,
-            source_format: None,
-            audio_properties: Default::default(),
-            musicbrainz_recording_id: None,
-            musicbrainz_release_track_id: None,
-            musicbrainz_album_id: None,
-            musicbrainz_release_group_id: None,
-            primary_artist_musicbrainz_id: None,
-        }
-    }
-}
-
-impl From<crate::PlaylistEntryRow> for QueueItem {
-    fn from(entry: crate::PlaylistEntryRow) -> Self {
-        Self {
-            album_display_artist: entry.album_display_artist,
-            artwork_binding: entry.artwork_binding,
-            disc_number: entry.disc_number,
-            track_number: entry.track_number,
-            year: entry.year,
-            release_date: entry.release_date,
-            source_format: entry.source_format,
-            audio_properties: entry.audio_properties,
-            musicbrainz_recording_id: entry.musicbrainz_recording_id,
-            musicbrainz_release_track_id: entry.musicbrainz_release_track_id,
-            ..Self::direct(
-                entry.media_uri,
-                entry.title,
-                entry.artist,
-                entry.album,
-                entry.duration_millis,
-            )
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct QueueRow {
     #[serde(skip)]
-    pub track_key: Option<crate::TrackKey>,
-    #[serde(skip)]
     pub occurrence_id: Option<u64>,
     pub position: usize,
-    pub item: QueueItem,
+    pub track: crate::TrackView,
     pub provenance: QueueProvenance,
     #[serde(default)]
     pub received_from_connect: bool,
-}
-
-impl Deref for QueueRow {
-    type Target = QueueItem;
-
-    fn deref(&self) -> &Self::Target {
-        &self.item
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -269,15 +172,28 @@ impl QueueUpdate {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct QueueTransferPage {
     pub offset: usize,
-    pub rows: Vec<QueueRow>,
+    pub rows: Vec<QueueTransferRow>,
     pub order: Vec<u32>,
 }
 
-// The old JSON membership shares context titles through a separate array.
-#[derive(serde::Serialize, serde::Deserialize)]
-struct SavedQueue<E, C> {
-    entries: E,
-    contexts: C,
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct QueueTransferRow {
+    pub position: usize,
+    pub item: TrackReference,
+    pub provenance: QueueProvenance,
+    #[serde(default)]
+    pub received_from_connect: bool,
+}
+
+impl From<&QueueRow> for QueueTransferRow {
+    fn from(row: &QueueRow) -> Self {
+        Self {
+            position: row.position,
+            item: row.track.clone().into(),
+            provenance: row.provenance.clone(),
+            received_from_connect: row.received_from_connect,
+        }
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -290,64 +206,24 @@ enum SavedContext<S> {
     Legacy(S),
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
-enum SavedProvenance<P> {
-    Context(usize, usize),
-    Other(P),
-}
-
-pub(crate) async fn decode_saved_queue(
+async fn decode_queue_export(
     connection: &mut SqliteConnection,
     mut value: serde_json::Value,
 ) -> LibraryResult<QueueRestore> {
-    if value.get("contexts").is_some() {
-        type SavedEntry = (
-            String,
-            SavedProvenance<QueueProvenance>,
-            Option<String>,
-            bool,
-        );
-        let saved: SavedQueue<Vec<SavedEntry>, Vec<SavedContext<Arc<str>>>> =
-            serde_json::from_value(value)?;
-        let mut entries = Vec::with_capacity(saved.entries.len());
-        for (uri, provenance, _, received_from_connect) in saved.entries {
-            let provenance = match provenance {
-                SavedProvenance::Context(context, source_rank) => {
-                    let (id, title) = match saved.contexts.get(context).ok_or_else(|| {
-                        LibraryError::InvalidStore("saved Queue context is missing".into())
-                    })? {
-                        SavedContext::Titled { id, title } => (id.clone(), Some(title.clone())),
-                        SavedContext::Legacy(id) => (id.clone(), None),
-                    };
-                    QueueProvenance::Context {
-                        context_id: id,
-                        context_title: title,
-                        source_rank,
-                    }
-                }
-                SavedProvenance::Other(value) => value,
-            };
-            let track_key =
-                crate::tracks::remember_song(connection, &uri, Default::default()).await?;
-            entries.push(QueueEntry {
-                track_key,
-                provenance,
-                received_from_connect,
-            });
-        }
-        return Ok(QueueRestore {
-            entries: entries.into(),
-            ..Default::default()
-        });
-    }
     if let Some(entries) = value
         .get_mut("entries")
         .and_then(serde_json::Value::as_array_mut)
     {
         for entry in entries {
             if let Some(uri) = entry.get("media_uri").and_then(serde_json::Value::as_str) {
-                let key = crate::tracks::remember_song(connection, uri, Default::default()).await?;
+                let key = crate::catalog::remember_track(
+                    connection,
+                    &TrackReference {
+                        media_uri: uri.to_owned(),
+                        ..Default::default()
+                    },
+                )
+                .await?;
                 entry["track_key"] = serde_json::to_value(key)?;
             }
         }
@@ -357,17 +233,28 @@ pub(crate) async fn decode_saved_queue(
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum QueueLoad {
-    Songs(Vec<(crate::SongSelection, QueueProvenance)>),
-    Items(Vec<(QueueItem, QueueProvenance)>),
+    Tracks(Vec<(crate::TrackSelection, QueueProvenance)>),
+    Items(Vec<(TrackReference, QueueProvenance)>),
     Uris(Vec<String>, QueueProvenance),
     Captured(Arc<[QueueEntry]>),
 }
 
 impl QueueLoad {
-    pub fn songs(selection: crate::SongSelection) -> Self {
-        Self::Songs(vec![(selection, QueueProvenance::Manual)])
+    pub fn tracks(selection: crate::TrackSelection) -> Self {
+        Self::Tracks(vec![(selection, QueueProvenance::Manual)])
     }
-    pub fn items(items: Vec<(QueueItem, QueueProvenance)>) -> Self {
+    pub fn track_keys(keys: Vec<crate::TrackKey>, provenance: QueueProvenance) -> Self {
+        Self::Captured(
+            keys.into_iter()
+                .map(|track_key| QueueEntry {
+                    track_key,
+                    provenance: provenance.clone(),
+                    received_from_connect: false,
+                })
+                .collect(),
+        )
+    }
+    pub fn items(items: Vec<(TrackReference, QueueProvenance)>) -> Self {
         Self::Items(items)
     }
     pub fn media_uris(uris: impl IntoIterator<Item = String>, provenance: QueueProvenance) -> Self {
@@ -396,24 +283,6 @@ pub enum QueueReorderTarget {
     AfterOccurrence(u64),
     End,
 }
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct QueuePageRow {
-    pub entry: Arc<QueueRow>,
-    pub source_path: Option<String>,
-    pub source_name: Option<String>,
-    pub favorite: bool,
-    pub primary_artist_media_uri: Option<String>,
-}
-
-impl Deref for QueuePageRow {
-    type Target = QueueRow;
-
-    fn deref(&self) -> &Self::Target {
-        &self.entry
-    }
-}
-
 impl QueueRepeatMode {
     fn as_str(self) -> &'static str {
         match self {
@@ -436,78 +305,18 @@ impl QueueRepeatMode {
 }
 
 impl Database {
-    pub async fn queue_artwork_for_uris(
-        &self,
-        media_uris: &[String],
-    ) -> LibraryResult<Vec<(String, Option<Vec<u8>>)>> {
-        if media_uris.len() > QUEUE_CONTEXT_LIMIT {
-            return Err(LibraryError::InvalidRequest(
-                "Queue artwork window exceeds 100".into(),
-            ));
-        }
-        let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_as("SELECT requested.value,track.artwork_binding FROM json_each(?1) requested LEFT JOIN tracks track ON track.media_uri=requested.value")
-            .bind(serde_json::to_string(media_uris)?).fetch_all(&mut *connection).await?)
-    }
-
-    pub async fn queue_items_for_uris(
+    pub async fn track_references_for_uris(
         &self,
         media_uris: &[String],
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<QueueItem>> {
+    ) -> LibraryResult<Vec<TrackReference>> {
         if media_uris.len() > QUEUE_CONTEXT_LIMIT {
             return Err(LibraryError::InvalidRequest(format!(
                 "Queue materialization is limited to {QUEUE_CONTEXT_LIMIT} media URIs"
             )));
         }
         let mut connection = tokio::select! {result=self.acquire_reader()=>result?,()=cancellation.cancelled()=>return Err(LibraryError::ReadCancelled)};
-        queue_items_for_uris_on(&mut connection, media_uris).await
-    }
-
-    pub async fn prepared_queue_page(
-        &self,
-        window: &[Arc<QueueRow>],
-    ) -> LibraryResult<Vec<QueuePageRow>> {
-        if window.len() > QUEUE_CONTEXT_LIMIT {
-            return Err(LibraryError::InvalidStore(
-                "Queue window exceeds its context".into(),
-            ));
-        }
-        if window.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut query = sqlx::QueryBuilder::<Sqlite>::new("WITH requested(ordinal,media_uri) AS (");
-        query.push_values(window.iter().enumerate(), |mut row, (ordinal, entry)| {
-            row.push_bind(ordinal as i64).push_bind(&entry.media_uri);
-        });
-        query.push(
-            ") SELECT ordinal,COALESCE(
-                (SELECT state.favorite FROM user_media_state state WHERE state.media_uri=requested.media_uri),
-                track.source_favorite,0),",
-        );
-        query
-            .push(QUEUE_PRIMARY_ARTIST_SQL)
-            .push(",track.source_path,(SELECT display_name FROM sources WHERE source_key=track.source_key)")
-            .push(" FROM requested LEFT JOIN tracks track ON track.media_uri=requested.media_uri ORDER BY ordinal");
-        let mut connection = self.acquire_reader().await?;
-        let facts = query
-            .build_query_as::<(i64, bool, Option<String>, Option<String>, Option<String>)>()
-            .fetch_all(&mut *connection)
-            .await?;
-        Ok(facts
-            .into_iter()
-            .map(
-                |(ordinal, favorite, primary_artist_media_uri, source_path, source_name)| {
-                    QueuePageRow {
-                        entry: Arc::clone(&window[ordinal as usize]),
-                        source_path,
-                        source_name,
-                        favorite,
-                        primary_artist_media_uri,
-                    }
-                },
-            )
-            .collect())
+        track_references_for_uris_on(&mut connection, media_uris).await
     }
 }
 
@@ -561,7 +370,7 @@ impl Database {
             .queue_rows_for_entries(&requested, &ReadCancellation::new())
             .await?
             .into_iter()
-            .map(|row| (*row).clone())
+            .map(|row| QueueTransferRow::from(row.as_ref()))
             .collect();
         Ok(QueueTransferPage {
             offset,
@@ -644,14 +453,19 @@ impl Database {
                     track_key: persist_metadata(&mut *reader, &row.item).await?,
                     provenance: row.provenance.clone(),
                 });
-                row.track_key = slot.as_ref().map(|entry| entry.track_key);
                 if row.position == current {
-                    let uris = track_uris_on(reader, &[slot.as_ref().unwrap().track_key]).await?;
-                    row.item = queue_items_for_uris_on(reader, &uris)
-                        .await?
-                        .pop()
-                        .expect("requested canonical queue song");
-                    rows.push(Arc::new(row));
+                    let song =
+                        crate::tracks::load_track_rows(reader, &[slot.as_ref().unwrap().track_key])
+                            .await?
+                            .pop()
+                            .expect("requested canonical queue song");
+                    rows.push(Arc::new(QueueRow {
+                        position: row.position,
+                        track: song,
+                        provenance: row.provenance,
+                        received_from_connect: true,
+                        occurrence_id: None,
+                    }));
                 }
             }
             order.extend(page.order);
@@ -750,7 +564,14 @@ impl Database {
         let mut keys = Vec::with_capacity(uris.len());
         for uri in uris {
             keys.push(
-                crate::tracks::remember_song(&mut transaction, uri, Default::default()).await?,
+                crate::catalog::remember_track(
+                    &mut transaction,
+                    &TrackReference {
+                        media_uri: uri.clone(),
+                        ..Default::default()
+                    },
+                )
+                .await?,
             );
         }
         transaction.commit().await?;
@@ -765,13 +586,13 @@ impl Database {
         let mut entries = Vec::new();
         let mut anchor = None;
         match input {
-            QueueLoad::Songs(groups) => {
+            QueueLoad::Tracks(groups) => {
                 let mut reader = self.acquire_reader().await?;
                 let mut transaction = reader.begin().await?;
                 for (selection, provenance) in groups {
-                    let resolve_anchor = matches!(selection, crate::SongSelection::Query { .. });
+                    let resolve_anchor = matches!(selection, crate::TrackSelection::Query { .. });
                     let songs =
-                        crate::selection::selected_songs_on(&mut transaction, &selection).await?;
+                        crate::selection::selected_tracks_on(&mut transaction, &selection).await?;
                     for (rank, (track_key, entry_key)) in songs.into_iter().enumerate() {
                         if resolve_anchor
                             && selected.is_some_and(|(key, entry)| {
@@ -813,10 +634,12 @@ impl Database {
                     }
                     QueueLoad::Uris(uris, provenance) => {
                         for (rank, uri) in uris.iter().enumerate() {
-                            let track_key = crate::tracks::remember_song(
+                            let track_key = crate::catalog::remember_track(
                                 &mut transaction,
-                                uri,
-                                Default::default(),
+                                &TrackReference {
+                                    media_uri: uri.clone(),
+                                    ..Default::default()
+                                },
                             )
                             .await?;
                             let mut provenance = provenance.clone();
@@ -857,17 +680,15 @@ impl Database {
             .iter()
             .map(|(_, entry)| entry.track_key)
             .collect::<Vec<_>>();
-        let uris = track_uris_on(&mut connection, &keys).await?;
-        let items = queue_items_for_uris_on(&mut connection, &uris).await?;
+        let songs = crate::tracks::load_track_rows(&mut connection, &keys).await?;
         Ok(entries
             .iter()
-            .zip(items)
-            .map(|((position, entry), item)| {
+            .zip(songs)
+            .map(|((position, entry), song)| {
                 Arc::new(QueueRow {
                     occurrence_id: None,
-                    track_key: Some(entry.track_key),
                     position: *position,
-                    item,
+                    track: song,
                     provenance: entry.provenance.clone(),
                     received_from_connect: entry.received_from_connect,
                 })
@@ -1217,7 +1038,7 @@ pub(crate) struct LegacyQueueRow {
     #[serde(default)]
     pub playlist_entry_id: Option<String>,
     pub occurrence: String,
-    pub item: QueueItem,
+    pub item: TrackReference,
     pub canonical_position: usize,
     #[serde(default)]
     pub source_index: Option<usize>,
@@ -1225,7 +1046,7 @@ pub(crate) struct LegacyQueueRow {
 }
 
 impl LegacyQueueRow {
-    fn entry(&self, track_key: crate::TrackKey) -> QueueEntry {
+    pub(crate) fn entry(&self, track_key: crate::TrackKey) -> QueueEntry {
         QueueEntry {
             track_key,
             provenance: self.provenance.clone(),
@@ -1259,7 +1080,7 @@ pub(crate) async fn export_queue_jsonl_on(
     output.write_all(b"\n")?;
     let mut seen = HashSet::new();
     for page in uris.chunks(QUEUE_CONTEXT_LIMIT) {
-        for item in queue_items_for_uris_on(connection, page).await? {
+        for item in track_references_for_uris_on(connection, page).await? {
             if seen.insert(item.media_uri.clone()) {
                 serde_json::to_writer(&mut output, &item)?;
                 output.write_all(b"\n")?;
@@ -1282,11 +1103,11 @@ pub(crate) async fn import_queue_jsonl_on(
                 input.read_line(&mut line)? != 0
             } {
                 if !line.trim().is_empty() {
-                    persist_metadata(connection, &serde_json::from_str::<QueueItem>(&line)?)
+                    persist_metadata(connection, &serde_json::from_str::<TrackReference>(&line)?)
                         .await?;
                 }
             }
-            decode_saved_queue(connection, header["queue"].clone()).await?
+            decode_queue_export(connection, header["queue"].clone()).await?
         }
         Some(version @ 1..=3) => {
             let mut rows: Vec<LegacyQueueRow> = if version == 3 {
@@ -1311,14 +1132,15 @@ pub(crate) async fn import_queue_jsonl_on(
                 keys.push(persist_metadata(connection, &row.item).await?);
             }
             match version {
-                3 => decode_saved_queue(connection, header["queue"].clone()).await?,
+                3 => {
+                    legacy::decode_saved(connection, header["queue"].clone())
+                        .await?
+                        .0
+                }
                 2 => {
-                    let mut transaction = connection.begin().await?;
-                    let state =
-                        legacy::migrate_saved(&mut transaction, header["queue"].clone(), &rows)
-                            .await?;
-                    transaction.commit().await?;
-                    state
+                    legacy::migrate_saved(connection, header["queue"].clone(), &rows)
+                        .await?
+                        .0
                 }
                 _ => QueueRestore {
                     current_index: header["current_occurrence"]
@@ -1360,32 +1182,9 @@ impl QueuePlacement {
 
 async fn persist_metadata(
     connection: &mut SqliteConnection,
-    item: &QueueItem,
+    item: &TrackReference,
 ) -> LibraryResult<crate::TrackKey> {
-    crate::tracks::remember_song(
-        connection,
-        &item.media_uri,
-        crate::tracks::SongMetadata {
-            title: Some(&item.title),
-            artist: Some(&item.artist),
-            album: Some(&item.album),
-            album_display_artist: item.album_display_artist.as_deref(),
-            duration_millis: Some(item.duration_millis),
-            disc_number: item.disc_number,
-            track_number: item.track_number,
-            year: item.year,
-            release_date: item.release_date.as_deref(),
-            source_format: item.source_format.as_deref(),
-            audio_properties: (item.audio_properties != crate::AudioProperties::default())
-                .then_some(&item.audio_properties),
-            musicbrainz_recording_id: item.musicbrainz_recording_id.as_deref(),
-            musicbrainz_release_track_id: item.musicbrainz_release_track_id.as_deref(),
-            musicbrainz_album_id: item.musicbrainz_album_id.as_deref(),
-            musicbrainz_release_group_id: item.musicbrainz_release_group_id.as_deref(),
-            primary_artist_musicbrainz_id: item.primary_artist_musicbrainz_id.as_deref(),
-        },
-    )
-    .await
+    crate::catalog::remember_track(connection, item).await
 }
 
 /// Fisher-Yates shuffle with SplitMix64, shared by queue capture and playback order.
@@ -1408,17 +1207,26 @@ async fn track_uris_on(
         .bind(serde_json::to_string(keys)?).fetch_all(connection).await?)
 }
 
-async fn queue_items_for_uris_on(
+async fn track_references_for_uris_on(
     connection: &mut SqliteConnection,
     uris: &[String],
-) -> LibraryResult<Vec<QueueItem>> {
-    Ok(sqlx::query_as("SELECT requested.value media_uri,COALESCE(track.title,requested.value) title,COALESCE(track.display_artist,'') artist,COALESCE(track.display_album,'') album,
-        COALESCE(album.display_artist,track.album_display_artist) album_display_artist,track.artwork_binding,COALESCE(track.duration_millis,0) duration_millis,track.disc_number,track.track_number,
-        track.year,track.release_date,track.source_format,COALESCE(track.audio_properties,'{}') audio_properties,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,
-        COALESCE(album.musicbrainz_release_id,track.musicbrainz_album_id) musicbrainz_album_id,COALESCE(album.musicbrainz_release_group_id,track.musicbrainz_release_group_id) musicbrainz_release_group_id,
-        COALESCE((SELECT artist.musicbrainz_artist_id FROM track_artists credit JOIN artists artist USING(artist_key) WHERE credit.track_key=track.track_key ORDER BY credit.position LIMIT 1),track.primary_artist_musicbrainz_id) primary_artist_musicbrainz_id
-        FROM json_each(?1) requested LEFT JOIN tracks track ON track.media_uri=requested.value LEFT JOIN albums album USING(album_key) ORDER BY CAST(requested.key AS INTEGER)")
-        .bind(serde_json::to_string(uris)?).fetch_all(connection).await?)
+) -> LibraryResult<Vec<TrackReference>> {
+    let keys = sqlx::query_scalar::<_, crate::TrackKey>("SELECT track_key FROM json_each(?1) requested JOIN tracks ON media_uri=requested.value ORDER BY CAST(requested.key AS INTEGER)")
+        .bind(serde_json::to_string(uris)?).fetch_all(&mut *connection).await?;
+    let songs = crate::tracks::load_track_rows(connection, &keys).await?;
+    let songs = songs
+        .into_iter()
+        .map(|song| (song.media_uri.clone(), TrackReference::from(song)))
+        .collect::<HashMap<_, _>>();
+    Ok(uris
+        .iter()
+        .map(|uri| {
+            songs
+                .get(uri)
+                .cloned()
+                .unwrap_or_else(|| TrackReference::direct(uri.clone(), uri.clone(), "", "", 0))
+        })
+        .collect())
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
@@ -1427,8 +1235,8 @@ impl QueueRow {
         std::ptr::eq(self, other.as_ref()) || self == other.as_ref()
     }
 
-    pub fn item(&self) -> QueueItem {
-        self.item.clone()
+    pub fn track(&self) -> crate::TrackView {
+        self.track.clone()
     }
     pub fn position(&self) -> usize {
         self.position

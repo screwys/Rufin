@@ -140,10 +140,9 @@ impl QueuedMedia {
             .end_millis()
             .map(|end| end.saturating_sub(stream.start_millis()))
             .or_else(|| {
-                stream
-                    .row
-                    .as_ref()
-                    .and_then(|occurrence| u64::try_from(occurrence.item.duration_millis).ok())
+                stream.row.as_ref().and_then(|occurrence| {
+                    u64::try_from(occurrence.track.metadata.duration_millis).ok()
+                })
             });
         let metadata = didl_metadata(&stream, &published);
         Self {
@@ -319,6 +318,7 @@ impl UpnpController {
             }
             BackendCommand::PrepareNext { .. }
             | BackendCommand::ConfigureAudio(_)
+            | BackendCommand::UpdateLoudness { .. }
             | BackendCommand::SetPlaybackRate(_)
             | BackendCommand::SetVisualizerEnabled(_)
             | BackendCommand::Play { .. }
@@ -1057,7 +1057,7 @@ fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
     let Some(occurrence) = stream.row.as_ref() else {
         return String::new();
     };
-    let track = &occurrence.item;
+    let track = &occurrence.track.metadata;
     let duration_millis = media
         .resource_duration_millis
         .unwrap_or_else(|| u64::try_from(track.duration_millis).unwrap_or_default());
@@ -1068,7 +1068,8 @@ fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
         xml_escape(&track.artist),
         xml_escape(&track.album),
     );
-    if let Some(track_number) = track.track_number.filter(|number| *number > 0) {
+    if track.track_number > 0 {
+        let track_number = track.track_number;
         fields.push_str(&format!(
             "<upnp:originalTrackNumber>{}</upnp:originalTrackNumber>",
             track_number
@@ -1109,7 +1110,7 @@ fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
             "<res protocolInfo=\"http-get:*:{}:{}\" duration=\"{}\"{}>{}</res>",
             "</item></DIDL-Lite>"
         ),
-        xml_escape(&track.media_uri),
+        occurrence.track.track_key,
         fields,
         xml_escape(&media.content_type),
         protocol_info,
@@ -1815,8 +1816,15 @@ mod tests {
 
     #[test]
     fn didl_metadata_carries_standard_music_facts_artwork_and_resource() {
-        let stream = PreparedStream::from(playback::ResolvedStream::new("file:///track.flac"))
-            .with_row(test_row().into(), Some("audio/flac".to_string()));
+        let private = "https://user:secret@example.test/track?token=secret&signature=opaque";
+        let mut row = test_row();
+        row.track.media_uri = private.into();
+        let resolved = playback::ResolvedStream::new(private);
+        assert_eq!(resolved.uri(), private);
+        assert!(!format!("{resolved:?}").contains("secret"));
+        assert!(!format!("{resolved:?}").contains("opaque"));
+        let stream =
+            PreparedStream::from(resolved).with_row(row.into(), Some("audio/flac".to_string()));
         let media = PublishedResource {
             uri: "http://192.0.2.10:4000/media".to_string(),
             content_type: "audio/flac".to_string(),
@@ -1829,6 +1837,8 @@ mod tests {
         };
 
         let metadata = didl_metadata(&stream, &media);
+        assert!(!metadata.contains(private));
+        assert!(!metadata.contains("secret"));
 
         assert!(metadata.contains("<dc:title>Track &amp; Title</dc:title>"));
         assert!(metadata.contains("<upnp:artist>Artist</upnp:artist>"));
@@ -1846,31 +1856,47 @@ mod tests {
             occurrence_id: None,
             position: 0,
             received_from_connect: false,
-            track_key: None,
             provenance: playback::Provenance::Manual,
-            item: playback::QueueItem {
-                audio_properties: Default::default(),
-                media_uri: library::source_entity_uri(
-                    &library::SourceId::new("source"),
-                    "track",
-                    "track-1",
-                ),
-                title: "Track & Title".to_string(),
-                artist: "Artist".to_string(),
-                album: "Album".to_string(),
-                album_display_artist: Some("Album Artist".to_string()),
-                artwork_binding: None,
-                duration_millis: 300_000,
-                disc_number: Some(1),
-                track_number: Some(2),
-                year: Some(2026),
-                release_date: Some("2026-08-17".to_string()),
-                source_format: Some("flac".to_string()),
-                musicbrainz_recording_id: None,
-                musicbrainz_release_track_id: None,
-                musicbrainz_album_id: None,
-                musicbrainz_release_group_id: None,
-                primary_artist_musicbrainz_id: None,
+            track: {
+                let reference = playback::TrackReference {
+                    media_uri: library::source_entity_uri(
+                        &library::SourceId::new("source"),
+                        "track",
+                        "track-1",
+                    ),
+                    artwork_binding: None,
+                    metadata: library::TrackMetadata {
+                        audio_properties: Default::default(),
+                        title: "Track & Title".to_string(),
+                        artist: "Artist".to_string(),
+                        album: "Album".to_string(),
+                        album_display_artist: Some("Album Artist".to_string()),
+                        duration_millis: 300_000,
+                        disc_number: 1,
+                        track_number: 2,
+                        year: Some(2026),
+                        release_date: Some("2026-08-17".to_string()),
+                        source_format: Some("flac".to_string()),
+                        musicbrainz_recording_id: None,
+                        musicbrainz_release_track_id: None,
+                        musicbrainz_album_id: None,
+                        musicbrainz_release_group_id: None,
+                        primary_artist_musicbrainz_id: None,
+                        ..Default::default()
+                    },
+                };
+                library::TrackView {
+                    track_key: library::TrackKey::from_raw(1),
+                    source_key: None,
+                    source_id: None,
+                    object_id: None,
+                    media_uri: reference.media_uri,
+                    metadata: reference.metadata,
+                    artwork_binding: reference.artwork_binding,
+                    state: Default::default(),
+                    access: Default::default(),
+                    links: Default::default(),
+                }
             },
         }
     }

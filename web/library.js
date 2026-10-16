@@ -952,6 +952,7 @@ function loadCardCovers(host, signal) {
           query,
           row.artwork_count || 1,
           signal,
+          row.artwork_previews,
         );
       }
     });

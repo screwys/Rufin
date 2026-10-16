@@ -14,7 +14,7 @@ pub(crate) async fn pragma(
 }
 pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 58;
+PRAGMA user_version = 47;
 
 CREATE TABLE IF NOT EXISTS queue_contexts (
     context_key INTEGER PRIMARY KEY,
@@ -39,10 +39,8 @@ CREATE TABLE IF NOT EXISTS queue_positions (
 ) STRICT, WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS playlists (
-    track_count INTEGER NOT NULL DEFAULT 0,
-    duration_millis INTEGER NOT NULL DEFAULT 0,
-    downloaded_count INTEGER NOT NULL DEFAULT 0,
     playlist_key INTEGER PRIMARY KEY,
+    observed_stamp INTEGER NOT NULL DEFAULT 0,
     owner TEXT NOT NULL DEFAULT 'rufin' CHECK(owner IN ('rufin','source')),
     indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
     source_key INTEGER REFERENCES sources ON DELETE CASCADE,
@@ -66,6 +64,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS playlists_global_object_idx ON playlists(objec
     WHERE source_key IS NULL;
 
 CREATE INDEX IF NOT EXISTS playlists_order_idx ON playlists(source_key, sort_text, playlist_key);
+CREATE INDEX IF NOT EXISTS playlists_membership_idx ON playlists(source_key,indexed,playlist_key);
 
 CREATE INDEX IF NOT EXISTS playlists_title_idx ON playlists(source_key, sort_text, playlist_key);
 
@@ -116,6 +115,7 @@ CREATE TABLE IF NOT EXISTS smart_playlists (
     definition_json TEXT NOT NULL CHECK (json_valid(definition_json)),
     artwork_bytes BLOB,
     artwork_revision TEXT,
+    artwork_binding BLOB,
     position INTEGER NOT NULL CHECK (position >= 0),
     UNIQUE (object_id),
     UNIQUE (position)
@@ -140,6 +140,8 @@ CREATE TABLE IF NOT EXISTS user_media_state (
     favorite INTEGER CHECK (favorite IS NULL OR favorite IN (0,1)),
     rating INTEGER CHECK (rating IS NULL OR rating BETWEEN 0 AND 100)
 ) STRICT;
+
+CREATE INDEX IF NOT EXISTS user_media_favorite_idx ON user_media_state(favorite,media_uri) WHERE favorite=1;
 
 CREATE TABLE IF NOT EXISTS listens (
     listen_key INTEGER PRIMARY KEY,
@@ -166,7 +168,7 @@ CREATE TABLE IF NOT EXISTS listens (
 CREATE INDEX IF NOT EXISTS listens_history_idx ON listens(source_id, started_at DESC, listen_key DESC);
 CREATE INDEX IF NOT EXISTS listens_recent_idx ON listens(started_at DESC, listen_key DESC);
 
-CREATE INDEX IF NOT EXISTS listens_media_idx ON listens(media_uri, started_at DESC,listen_key DESC);
+CREATE INDEX IF NOT EXISTS listens_media_activity_idx ON listens(media_uri, started_at DESC,listen_key DESC,skipped);
 CREATE INDEX IF NOT EXISTS listens_period_idx ON listens(local_period) WHERE skipped=0;
 
 CREATE TABLE IF NOT EXISTS listen_outbox (
@@ -246,245 +248,196 @@ CREATE TABLE IF NOT EXISTS sources (
     distinct_track_covers INTEGER NOT NULL DEFAULT 0 CHECK (distinct_track_covers IN (0,1)),
     catalog_revision INTEGER NOT NULL DEFAULT 0 CHECK (catalog_revision >= 0),
     catalog_complete INTEGER NOT NULL DEFAULT 0 CHECK (catalog_complete IN (0,1)),
-    track_count INTEGER NOT NULL DEFAULT 0 CHECK (track_count >= 0)
+    observation_stamp INTEGER NOT NULL DEFAULT 0
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS native_media_state (
+    media_uri TEXT PRIMARY KEY,
+    favorite INTEGER, rating INTEGER, play_count INTEGER, skip_count INTEGER, last_played INTEGER
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS native_media_favorite_idx ON native_media_state(favorite,media_uri) WHERE favorite=1;
 
 CREATE TABLE IF NOT EXISTS albums (
-    derived_source_play_count INTEGER NOT NULL DEFAULT 0,
-    activity_play_count INTEGER NOT NULL DEFAULT 0,
-    derived_source_last_played INTEGER,
-    activity_last_played INTEGER,
-    track_count INTEGER NOT NULL DEFAULT 0,
-    duration_millis INTEGER NOT NULL DEFAULT 0,
-    downloaded_count INTEGER NOT NULL DEFAULT 0,
     album_key INTEGER PRIMARY KEY,
-    source_play_count INTEGER,
-    source_skip_count INTEGER,
-    source_last_played INTEGER,
-    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
-    object_id TEXT NOT NULL CHECK (object_id <> ''),
-    media_uri TEXT NOT NULL UNIQUE CHECK (media_uri <> ''),
-    title TEXT NOT NULL,
-    normalized_title TEXT NOT NULL,
-    display_artist TEXT NOT NULL,
-    album_artist_sort TEXT,
-    sort_text TEXT NOT NULL,
-    year INTEGER,
-    release_date TEXT,
-    date_added TEXT,
-    musicbrainz_release_id TEXT,
-    musicbrainz_release_group_id TEXT,
-    is_compilation INTEGER CHECK (is_compilation IS NULL OR is_compilation IN (0,1)),
-    release_lookup_identity TEXT CHECK (
-        release_lookup_identity IS NULL OR release_lookup_identity <> ''
-    ),
-    artwork_binding BLOB,
-    source_favorite INTEGER NOT NULL DEFAULT 0 CHECK (source_favorite IN (0, 1)),
-    source_rating INTEGER CHECK (source_rating IS NULL OR source_rating BETWEEN 0 AND 100),
+    object_id TEXT NOT NULL, media_uri TEXT NOT NULL UNIQUE,
+    indexed INTEGER NOT NULL DEFAULT 0,
+    observed_stamp INTEGER NOT NULL DEFAULT 0,
+    metadata BLOB,
+    native_metadata INTEGER NOT NULL DEFAULT 0,
+    cached_local INTEGER NOT NULL DEFAULT 0,
+    normalized_title TEXT,
+    native_artwork BLOB,
+    artwork_binding BLOB, artwork_track_key INTEGER, artwork_artist_key INTEGER,
     first_seen_at INTEGER,
-    source_loudness_analysis_key BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000'
-        CHECK (length(source_loudness_analysis_key) = 32),
-    loudness_analysis_key BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000'
-        CHECK (length(loudness_analysis_key) = 32),
-    CHECK (musicbrainz_release_id IS NULL OR musicbrainz_release_id <> ''),
-    CHECK (
-        musicbrainz_release_group_id IS NULL OR musicbrainz_release_group_id <> ''
-    ),
-    UNIQUE (source_key, object_id)
+    release_lookup_identity TEXT,
+    source_loudness_analysis_key BLOB NOT NULL DEFAULT (zeroblob(32)),
+    loudness_analysis_key BLOB NOT NULL DEFAULT (zeroblob(32)),
+    accepted_audio BLOB,
+    title TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.title')) VIRTUAL,
+    display_artist TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.artist')) VIRTUAL,
+    sort_text TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.sort_text')) VIRTUAL,
+    year INTEGER GENERATED ALWAYS AS (json_extract(metadata,'$.year')) VIRTUAL,
+    release_date TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.release_date')) VIRTUAL,
+    date_added TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.date_added')) VIRTUAL,
+    musicbrainz_release_id TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.musicbrainz_release_id')) VIRTUAL,
+    musicbrainz_release_group_id TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.musicbrainz_release_group_id')) VIRTUAL,
+    is_compilation INTEGER GENERATED ALWAYS AS (json_extract(metadata,'$.is_compilation')) VIRTUAL,
+    UNIQUE(source_key,object_id)
 ) STRICT;
-
-CREATE INDEX IF NOT EXISTS albums_artist_order_idx ON albums(source_key,(album_artist_sort IS NULL),album_artist_sort,(year IS NULL),year,sort_text,album_key);
-CREATE INDEX IF NOT EXISTS albums_artist_desc_order_idx ON albums(source_key,(album_artist_sort IS NULL),album_artist_sort DESC,(year IS NULL),year,sort_text,album_key);
-CREATE INDEX IF NOT EXISTS albums_year_order_idx ON albums(source_key,year,sort_text,album_key);
-CREATE INDEX IF NOT EXISTS albums_release_order_idx ON albums(source_key,release_date DESC,year DESC,sort_text,album_key) WHERE indexed=1;
-CREATE INDEX IF NOT EXISTS albums_order_idx ON albums(source_key, sort_text, album_key);
-CREATE INDEX IF NOT EXISTS albums_source_favorites_idx ON albums(source_key, object_id) WHERE source_favorite=1;
-
-CREATE INDEX IF NOT EXISTS albums_key_idx ON albums(source_key, album_key);
-CREATE INDEX IF NOT EXISTS albums_shuffle_idx ON albums(source_key,((album_key*1103515245)%2147483647),album_key);
-
-CREATE INDEX IF NOT EXISTS albums_artwork_idx ON albums(source_key, artwork_binding)
-    WHERE artwork_binding IS NOT NULL;
+CREATE INDEX IF NOT EXISTS albums_native_artwork_idx ON albums(source_key,native_artwork) WHERE native_artwork IS NOT NULL;
+CREATE INDEX IF NOT EXISTS albums_artwork_track_idx ON albums(artwork_track_key) WHERE artwork_track_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS albums_artwork_artist_idx ON albums(artwork_artist_key) WHERE artwork_artist_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS albums_source_idx ON albums(source_key,indexed,album_key);
 
 CREATE TABLE IF NOT EXISTS tracks (
     track_key INTEGER PRIMARY KEY,
-    source_play_count INTEGER,
-    source_skip_count INTEGER,
-    source_last_played INTEGER,
-    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
     source_key INTEGER REFERENCES sources ON DELETE SET NULL,
-    object_id TEXT CHECK (object_id <> ''),
+    object_id TEXT,
+    media_uri TEXT NOT NULL UNIQUE,
     album_key INTEGER REFERENCES albums ON DELETE SET NULL,
-    title TEXT,
-    normalized_search TEXT,
-    display_album TEXT,
-    display_artist TEXT,
-    album_display_artist TEXT,
-    musicbrainz_album_id TEXT,
-    musicbrainz_release_group_id TEXT,
-    primary_artist_musicbrainz_id TEXT,
-    sort_text TEXT,
-    sort_album_artist TEXT,
-    sort_album_year INTEGER,
-    sort_album TEXT,
-    duration_millis INTEGER CHECK (duration_millis >= 0),
-    disc_number INTEGER CHECK (disc_number >= 0),
-    track_number INTEGER CHECK (track_number >= 0),
-    year INTEGER,
-    release_date TEXT,
-    date_added TEXT,
-    media_uri TEXT NOT NULL UNIQUE CHECK (media_uri <> ''),
+    local_file_key INTEGER REFERENCES local_files ON DELETE SET NULL,
+    indexed INTEGER NOT NULL DEFAULT 0,
+    observed_stamp INTEGER NOT NULL DEFAULT 0,
+    metadata BLOB NOT NULL DEFAULT (jsonb('{}')),
+    native_metadata INTEGER NOT NULL DEFAULT 0,
     source_path TEXT,
-    source_format TEXT,
-    audio_properties TEXT NOT NULL DEFAULT '{}',
-    comment TEXT,
-    bpm INTEGER,
-    musicbrainz_recording_id TEXT,
-    musicbrainz_release_track_id TEXT,
-    cue_path TEXT,
-    cue_start_millis INTEGER,
-    cue_end_millis INTEGER,
-    artwork_binding BLOB,
-    source_favorite INTEGER NOT NULL DEFAULT 0 CHECK (source_favorite IN (0, 1)),
-    source_rating INTEGER CHECK (source_rating IS NULL OR source_rating BETWEEN 0 AND 100),
+    cue_path TEXT, cue_start_millis INTEGER, cue_end_millis INTEGER,
     first_seen_at INTEGER,
-    local_play_count INTEGER NOT NULL DEFAULT 0 CHECK (local_play_count >= 0),
-    source_loudness_analysis_key BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000'
-        CHECK (length(source_loudness_analysis_key) = 32),
-    loudness_analysis_key BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000'
-        CHECK (length(loudness_analysis_key) = 32),
-    CHECK (bpm IS NULL OR bpm BETWEEN 0 AND 65535),
-    CHECK (
-        (cue_path IS NULL AND cue_start_millis IS NULL AND cue_end_millis IS NULL)
-        OR (
-            cue_path IS NOT NULL AND cue_path <> ''
-            AND cue_start_millis IS NOT NULL AND cue_start_millis >= 0
-            AND cue_end_millis IS NOT NULL AND cue_end_millis > cue_start_millis
-        )
-    ),
-    UNIQUE (source_key, object_id)
+    native_artwork BLOB,
+    artwork_kind INTEGER NOT NULL DEFAULT 0, artwork_artist_key INTEGER,
+    source_loudness_analysis_key BLOB NOT NULL DEFAULT (zeroblob(32)),
+    loudness_analysis_key BLOB NOT NULL DEFAULT (zeroblob(32)),
+    local_play_count INTEGER NOT NULL DEFAULT 0,
+    title TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.title')) VIRTUAL,
+    display_artist TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.artist')) VIRTUAL,
+    display_album TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.album')) VIRTUAL,
+    sort_text TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.sort_text')) VIRTUAL,
+    normalized_search TEXT NOT NULL DEFAULT '',
+    duration_millis INTEGER GENERATED ALWAYS AS (coalesce(json_extract(metadata,'$.duration_millis'),0)) STORED,
+    disc_number INTEGER GENERATED ALWAYS AS (coalesce(json_extract(metadata,'$.disc_number'),0)) VIRTUAL,
+    track_number INTEGER GENERATED ALWAYS AS (coalesce(json_extract(metadata,'$.track_number'),0)) VIRTUAL,
+    year INTEGER GENERATED ALWAYS AS (json_extract(metadata,'$.year')) VIRTUAL,
+    release_date TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.release_date')) VIRTUAL,
+    date_added TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.date_added')) VIRTUAL,
+    source_format TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.source_format')) VIRTUAL,
+    bpm INTEGER GENERATED ALWAYS AS (json_extract(metadata,'$.bpm')) VIRTUAL,
+    UNIQUE(source_key,object_id)
 ) STRICT;
-
-CREATE INDEX IF NOT EXISTS tracks_order_idx ON tracks(source_key, sort_text, track_key);
-CREATE INDEX IF NOT EXISTS tracks_source_favorites_idx ON tracks(source_key, object_id) WHERE source_favorite=1;
-
-CREATE INDEX IF NOT EXISTS tracks_key_idx ON tracks(source_key, track_key);
-CREATE INDEX IF NOT EXISTS tracks_source_path_idx ON tracks(source_key, source_path, album_key);
-
-CREATE INDEX IF NOT EXISTS tracks_source_cue_idx ON tracks(source_key, cue_path, object_id) WHERE cue_path IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS tracks_artwork_idx ON tracks(source_key, artwork_binding)
-    WHERE artwork_binding IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS tracks_source_album_order_idx ON tracks(source_key,album_key,disc_number,track_number,sort_text,track_key);
+CREATE INDEX IF NOT EXISTS tracks_native_artwork_idx ON tracks(source_key,native_artwork) WHERE native_artwork IS NOT NULL;
+CREATE INDEX IF NOT EXISTS tracks_artwork_artist_idx ON tracks(artwork_artist_key) WHERE artwork_artist_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS tracks_order_idx ON tracks(source_key,indexed,sort_text,track_key);
+CREATE INDEX IF NOT EXISTS tracks_duration_idx ON tracks(track_key,duration_millis);
+CREATE INDEX IF NOT EXISTS tracks_local_file_idx ON tracks(local_file_key) WHERE local_file_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS tracks_source_path_idx ON tracks(source_key,source_path,album_key);
+CREATE INDEX IF NOT EXISTS tracks_source_cue_idx ON tracks(source_key,cue_path,object_id) WHERE cue_path IS NOT NULL;
 CREATE INDEX IF NOT EXISTS tracks_album_order_idx ON tracks(album_key,disc_number,track_number,sort_text,track_key);
-CREATE INDEX IF NOT EXISTS tracks_artist_sort_asc_idx ON tracks(source_key,display_artist,(sort_album_year IS NULL),sort_album_year,sort_album,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
-CREATE INDEX IF NOT EXISTS tracks_artist_sort_desc_idx ON tracks(source_key,display_artist DESC,(sort_album_year IS NULL),sort_album_year,sort_album,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
-CREATE INDEX IF NOT EXISTS tracks_album_artist_sort_asc_idx ON tracks(source_key,(sort_album_artist IS NULL),sort_album_artist,(sort_album_year IS NULL),sort_album_year,sort_album,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
-CREATE INDEX IF NOT EXISTS tracks_album_artist_sort_desc_idx ON tracks(source_key,(sort_album_artist IS NULL),sort_album_artist DESC,(sort_album_year IS NULL),sort_album_year,sort_album,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
-CREATE INDEX IF NOT EXISTS tracks_album_sort_asc_idx ON tracks(source_key,sort_album,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
-CREATE INDEX IF NOT EXISTS tracks_album_sort_desc_idx ON tracks(source_key,sort_album DESC,(album_key IS NULL),album_key,disc_number,track_number,sort_text,track_key);
+CREATE INDEX IF NOT EXISTS tracks_artist_order_idx ON tracks(source_key,indexed,display_artist,album_key,disc_number,track_number,sort_text,track_key);
+CREATE INDEX IF NOT EXISTS tracks_year_idx ON tracks(source_key,indexed,year,sort_text,track_key);
+CREATE INDEX IF NOT EXISTS tracks_release_idx ON tracks(source_key,indexed,release_date,sort_text,track_key);
+CREATE INDEX IF NOT EXISTS tracks_added_idx ON tracks(source_key,indexed,date_added,first_seen_at,track_key);
+CREATE INDEX IF NOT EXISTS tracks_raw_album_year_idx ON tracks(album_key,coalesce(cue_path,source_path),disc_number,track_number,object_id) WHERE indexed=1 AND year IS NOT NULL;
+CREATE INDEX IF NOT EXISTS tracks_raw_album_release_idx ON tracks(album_key,coalesce(cue_path,source_path),disc_number,track_number,object_id) WHERE indexed=1 AND release_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS tracks_local_play_order_idx ON tracks(source_key,indexed,local_play_count DESC,sort_text,media_uri);
+CREATE INDEX IF NOT EXISTS tracks_global_play_order_idx ON tracks(indexed,local_play_count DESC,sort_text,media_uri);
+CREATE INDEX IF NOT EXISTS tracks_local_shuffle_idx ON tracks(source_key,local_play_count,((track_key*1103515245)%2147483647),media_uri);
+CREATE INDEX IF NOT EXISTS tracks_global_local_shuffle_idx ON tracks(local_play_count,((track_key*1103515245)%2147483647),media_uri);
+CREATE INDEX IF NOT EXISTS tracks_shuffle_idx ON tracks(source_key,((track_key*1103515245)%2147483647),media_uri);
+CREATE INDEX IF NOT EXISTS tracks_global_shuffle_idx ON tracks(((track_key*1103515245)%2147483647),media_uri);
+CREATE INDEX IF NOT EXISTS tracks_album_local_audio_idx ON tracks(album_key) WHERE indexed=1 AND source_loudness_analysis_key<>loudness_analysis_key;
+CREATE INDEX IF NOT EXISTS tracks_indexed_idx ON tracks(indexed,source_key,track_key);
 
 CREATE TABLE IF NOT EXISTS artists (
-    derived_source_play_count INTEGER NOT NULL DEFAULT 0,
-    activity_play_count INTEGER NOT NULL DEFAULT 0,
-    derived_source_last_played INTEGER,
-    activity_last_played INTEGER,
-    album_artist_derived_source_play_count INTEGER NOT NULL DEFAULT 0,
-    album_artist_activity_play_count INTEGER NOT NULL DEFAULT 0,
-    album_artist_derived_source_last_played INTEGER,
-    album_artist_activity_last_played INTEGER,
-    album_count INTEGER NOT NULL DEFAULT 0,
-    track_count INTEGER NOT NULL DEFAULT 0,
-    duration_millis INTEGER NOT NULL DEFAULT 0,
-    downloaded_count INTEGER NOT NULL DEFAULT 0,
-    album_artist_album_count INTEGER NOT NULL DEFAULT 0,
-    album_artist_track_count INTEGER NOT NULL DEFAULT 0,
-    album_artist_duration_millis INTEGER NOT NULL DEFAULT 0,
-    album_artist_downloaded_count INTEGER NOT NULL DEFAULT 0,
     artist_key INTEGER PRIMARY KEY,
-    source_play_count INTEGER,
-    source_skip_count INTEGER,
-    source_last_played INTEGER,
-    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
-    object_id TEXT NOT NULL CHECK (object_id <> ''),
-    media_uri TEXT NOT NULL UNIQUE CHECK (media_uri <> ''),
-    name TEXT NOT NULL,
-    normalized_name TEXT NOT NULL,
-    sort_text TEXT NOT NULL,
-    musicbrainz_artist_id TEXT,
-    artwork_binding BLOB,
-    source_favorite INTEGER NOT NULL DEFAULT 0 CHECK (source_favorite IN (0, 1)),
-    source_rating INTEGER CHECK (source_rating IS NULL OR source_rating BETWEEN 0 AND 100),
-    CHECK (musicbrainz_artist_id IS NULL OR musicbrainz_artist_id <> ''),
-    UNIQUE (source_key, object_id)
+    object_id TEXT NOT NULL,
+    media_uri TEXT NOT NULL UNIQUE,
+    indexed INTEGER NOT NULL DEFAULT 0,
+    observed_stamp INTEGER NOT NULL DEFAULT 0,
+    metadata BLOB NOT NULL DEFAULT (jsonb('{}')),
+    native_metadata INTEGER NOT NULL DEFAULT 0,
+    native_artwork BLOB,
+    artwork_binding BLOB, artwork_album_key INTEGER, artwork_track_key INTEGER,
+    name TEXT GENERATED ALWAYS AS (coalesce(json_extract(metadata,'$.name'),object_id)) VIRTUAL,
+    normalized_name TEXT NOT NULL DEFAULT '',
+    sort_text TEXT GENERATED ALWAYS AS (coalesce(json_extract(metadata,'$.sort_text'),normalized_name)) VIRTUAL,
+    musicbrainz_artist_id TEXT GENERATED ALWAYS AS (json_extract(metadata,'$.musicbrainz_artist_id')) VIRTUAL,
+    UNIQUE(source_key,object_id)
 ) STRICT;
-
-CREATE INDEX IF NOT EXISTS artists_order_idx ON artists(source_key, sort_text, artist_key);
-CREATE INDEX IF NOT EXISTS artists_source_favorites_idx ON artists(source_key, object_id) WHERE source_favorite=1;
-
-CREATE INDEX IF NOT EXISTS artists_artwork_idx ON artists(source_key, artwork_binding)
-    WHERE artwork_binding IS NOT NULL;
+CREATE INDEX IF NOT EXISTS artists_native_artwork_idx ON artists(source_key,native_artwork) WHERE native_artwork IS NOT NULL;
+CREATE INDEX IF NOT EXISTS artists_artwork_album_idx ON artists(artwork_album_key) WHERE artwork_album_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS artists_artwork_track_idx ON artists(artwork_track_key) WHERE artwork_track_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS artists_order_idx ON artists(source_key,sort_text,artist_key);
+CREATE INDEX IF NOT EXISTS artists_membership_idx ON artists(source_key,indexed,artist_key);
 
 CREATE TABLE IF NOT EXISTS genres (
-    album_count INTEGER NOT NULL DEFAULT 0,
-    track_count INTEGER NOT NULL DEFAULT 0,
-    duration_millis INTEGER NOT NULL DEFAULT 0,
-    downloaded_count INTEGER NOT NULL DEFAULT 0,
     genre_key INTEGER PRIMARY KEY,
-    source_play_count INTEGER,
-    source_skip_count INTEGER,
-    source_last_played INTEGER,
-    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
-    object_id TEXT NOT NULL CHECK (object_id <> ''),
-    name TEXT NOT NULL,
-    normalized_name TEXT NOT NULL,
-    sort_text TEXT NOT NULL,
-    artwork_binding BLOB,
-    UNIQUE (source_key, object_id)
+    object_id TEXT NOT NULL,
+    media_uri TEXT NOT NULL UNIQUE,
+    indexed INTEGER NOT NULL DEFAULT 0,
+    observed_stamp INTEGER NOT NULL DEFAULT 0,
+    metadata BLOB NOT NULL DEFAULT (jsonb('{}')),
+    native_metadata INTEGER NOT NULL DEFAULT 0,
+    native_artwork BLOB,
+    name TEXT GENERATED ALWAYS AS (coalesce(json_extract(metadata,'$.name'),object_id)) VIRTUAL,
+    normalized_name TEXT NOT NULL DEFAULT '',
+    sort_text TEXT GENERATED ALWAYS AS (coalesce(json_extract(metadata,'$.sort_text'),normalized_name)) VIRTUAL,
+    UNIQUE(source_key,object_id)
 ) STRICT;
-
-CREATE INDEX IF NOT EXISTS genres_order_idx ON genres(source_key, sort_text, genre_key);
-CREATE INDEX IF NOT EXISTS genres_track_count_order_idx ON genres(source_key,track_count DESC,sort_text,genre_key) WHERE indexed=1;
-
-CREATE INDEX IF NOT EXISTS genres_artwork_idx ON genres(source_key, artwork_binding)
-    WHERE artwork_binding IS NOT NULL;
+CREATE INDEX IF NOT EXISTS genres_native_artwork_idx ON genres(source_key,native_artwork) WHERE native_artwork IS NOT NULL;
+CREATE INDEX IF NOT EXISTS genres_order_idx ON genres(source_key,sort_text,genre_key);
+CREATE INDEX IF NOT EXISTS genres_membership_idx ON genres(source_key,indexed,genre_key);
 
 CREATE TABLE IF NOT EXISTS moods (
-    track_count INTEGER NOT NULL DEFAULT 0,
-    duration_millis INTEGER NOT NULL DEFAULT 0,
-    downloaded_count INTEGER NOT NULL DEFAULT 0,
     mood_key INTEGER PRIMARY KEY,
-    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
-    object_id TEXT NOT NULL CHECK (object_id <> ''),
-    name TEXT NOT NULL,
-    normalized_name TEXT NOT NULL,
-    sort_text TEXT NOT NULL,
-    UNIQUE (source_key, object_id)
+    object_id TEXT NOT NULL,
+    media_uri TEXT NOT NULL UNIQUE,
+    indexed INTEGER NOT NULL DEFAULT 0,
+    observed_stamp INTEGER NOT NULL DEFAULT 0,
+    metadata BLOB NOT NULL DEFAULT (jsonb('{}')),
+    native_metadata INTEGER NOT NULL DEFAULT 0,
+    native_artwork BLOB,
+    name TEXT GENERATED ALWAYS AS (coalesce(json_extract(metadata,'$.name'),object_id)) VIRTUAL,
+    normalized_name TEXT NOT NULL DEFAULT '',
+    sort_text TEXT GENERATED ALWAYS AS (coalesce(json_extract(metadata,'$.sort_text'),normalized_name)) VIRTUAL,
+    UNIQUE(source_key,object_id)
 ) STRICT;
-
-CREATE INDEX IF NOT EXISTS moods_order_idx ON moods(source_key, sort_text, mood_key);
+CREATE INDEX IF NOT EXISTS moods_order_idx ON moods(source_key,sort_text,mood_key);
+CREATE INDEX IF NOT EXISTS moods_membership_idx ON moods(source_key,indexed,mood_key);
 
 CREATE TABLE IF NOT EXISTS folders (
     folder_key INTEGER PRIMARY KEY,
-    indexed INTEGER NOT NULL DEFAULT 1 CHECK(indexed IN (0,1)),
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
-    object_id TEXT NOT NULL CHECK (object_id <> ''),
-    name TEXT NOT NULL,
-    normalized_name TEXT NOT NULL,
-    sort_text TEXT NOT NULL,
-    artwork_binding BLOB,
-    UNIQUE (source_key, object_id)
+    object_id TEXT NOT NULL,
+    media_uri TEXT NOT NULL UNIQUE,
+    indexed INTEGER NOT NULL DEFAULT 0,
+    observed_stamp INTEGER NOT NULL DEFAULT 0,
+    metadata BLOB NOT NULL DEFAULT (jsonb('{}')),
+    native_metadata INTEGER NOT NULL DEFAULT 0,
+    native_artwork BLOB,
+    name TEXT GENERATED ALWAYS AS (coalesce(json_extract(metadata,'$.name'),object_id)) VIRTUAL,
+    normalized_name TEXT NOT NULL DEFAULT '',
+    sort_text TEXT GENERATED ALWAYS AS (coalesce(json_extract(metadata,'$.sort_text'),normalized_name)) VIRTUAL,
+    UNIQUE(source_key,object_id)
 ) STRICT;
+CREATE INDEX IF NOT EXISTS folders_native_artwork_idx ON folders(source_key,native_artwork) WHERE native_artwork IS NOT NULL;
+CREATE INDEX IF NOT EXISTS folders_order_idx ON folders(source_key,sort_text,folder_key);
+CREATE INDEX IF NOT EXISTS folders_membership_idx ON folders(source_key,indexed,folder_key);
 
-CREATE INDEX IF NOT EXISTS folders_order_idx ON folders(source_key, sort_text, folder_key);
-
-CREATE INDEX IF NOT EXISTS folders_artwork_idx ON folders(source_key, artwork_binding)
-    WHERE artwork_binding IS NOT NULL;
+CREATE TABLE IF NOT EXISTS album_order (
+    album_key INTEGER PRIMARY KEY REFERENCES albums ON DELETE CASCADE,
+    source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
+    title_sort TEXT NOT NULL, title_search TEXT NOT NULL DEFAULT '', artist_search TEXT NOT NULL DEFAULT '', album_artist_sort TEXT,
+    year_sort INTEGER, release_sort TEXT, added_sort INTEGER
+) STRICT;
+CREATE INDEX IF NOT EXISTS album_order_title_idx ON album_order(source_key,title_sort,album_key);
+CREATE INDEX IF NOT EXISTS album_order_artist_idx ON album_order(source_key,(album_artist_sort IS NULL),album_artist_sort,(year_sort IS NULL),year_sort,title_sort,album_key);
+CREATE INDEX IF NOT EXISTS album_order_year_idx ON album_order(source_key,year_sort,title_sort,album_key);
+CREATE INDEX IF NOT EXISTS album_order_release_idx ON album_order(source_key,release_sort,title_sort,album_key);
+CREATE INDEX IF NOT EXISTS album_order_added_idx ON album_order(source_key,added_sort,title_sort,album_key);
 
 CREATE TABLE IF NOT EXISTS album_artists (
     album_key INTEGER NOT NULL REFERENCES albums ON DELETE CASCADE,
@@ -495,6 +448,15 @@ CREATE TABLE IF NOT EXISTS album_artists (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS album_artists_artist_idx ON album_artists(artist_key, album_key);
+
+CREATE TABLE IF NOT EXISTS track_album_artists (
+    track_key INTEGER NOT NULL REFERENCES tracks ON DELETE CASCADE,
+    artist_key INTEGER NOT NULL REFERENCES artists ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    PRIMARY KEY(track_key,artist_key),
+    UNIQUE(track_key,position)
+) STRICT;
+CREATE INDEX IF NOT EXISTS track_album_artists_artist_idx ON track_album_artists(artist_key,track_key);
 
 CREATE TABLE IF NOT EXISTS track_artists (
     track_key INTEGER NOT NULL REFERENCES tracks ON DELETE CASCADE,
@@ -539,6 +501,7 @@ CREATE INDEX IF NOT EXISTS track_moods_mood_idx ON track_moods(mood_key, track_k
 CREATE TABLE IF NOT EXISTS track_folders (
     track_key INTEGER NOT NULL REFERENCES tracks ON DELETE CASCADE,
     folder_key INTEGER NOT NULL REFERENCES folders ON DELETE CASCADE,
+    observed_stamp INTEGER NOT NULL DEFAULT 0,
     position INTEGER NOT NULL CHECK (position >= 0),
     PRIMARY KEY (track_key, position),
     UNIQUE (track_key, folder_key)
@@ -554,6 +517,56 @@ CREATE TABLE IF NOT EXISTS album_release_types (
     UNIQUE (album_key, release_type)
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS album_release_observations (
+    album_key INTEGER PRIMARY KEY REFERENCES albums ON DELETE CASCADE,
+    lookup_identity TEXT NOT NULL,
+    release_types BLOB NOT NULL
+) STRICT;
+CREATE VIEW IF NOT EXISTS effective_album_artists AS
+    SELECT album.album_key,CAST(item.value AS INTEGER) artist_key,CAST(item.key AS INTEGER) position
+    FROM albums album JOIN json_each(CASE WHEN album.metadata IS NOT NULL THEN
+        (SELECT json_group_array(artist_key ORDER BY position) FROM album_artists WHERE album_key=album.album_key)
+    ELSE
+        (SELECT json_group_array(artist_key ORDER BY member_path,disc_number,track_number,object_id,position)
+         FROM (
+            SELECT credit.artist_key,coalesce(member.cue_path,member.source_path) member_path,
+                   member.disc_number,member.track_number,member.object_id,credit.position,
+                   row_number() OVER(PARTITION BY credit.artist_key ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id,credit.position) first_credit
+            FROM tracks member INDEXED BY tracks_album_order_idx JOIN track_album_artists credit USING(track_key)
+            WHERE member.album_key=album.album_key AND member.indexed=1
+         ) WHERE first_credit=1)
+    END) item;
+CREATE VIEW IF NOT EXISTS effective_album_genres AS
+    SELECT album.album_key,CAST(item.value AS INTEGER) genre_key,CAST(item.key AS INTEGER) position
+    FROM albums album JOIN json_each(CASE WHEN album.metadata IS NOT NULL THEN
+        (SELECT json_group_array(genre_key ORDER BY position) FROM album_genres WHERE album_key=album.album_key)
+    ELSE
+        (SELECT json_group_array(genre_key ORDER BY member_path,disc_number,track_number,object_id,position)
+         FROM (
+            SELECT credit.genre_key,coalesce(member.cue_path,member.source_path) member_path,
+                   member.disc_number,member.track_number,member.object_id,credit.position,
+                   row_number() OVER(PARTITION BY credit.genre_key ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id,credit.position) first_credit
+            FROM tracks member INDEXED BY tracks_album_order_idx JOIN track_genres credit USING(track_key)
+            WHERE member.album_key=album.album_key AND member.indexed=1
+         ) WHERE first_credit=1)
+    END) item;
+CREATE VIEW IF NOT EXISTS effective_album_release_types AS
+    SELECT album.album_key,item.value release_type,CAST(item.key AS INTEGER) position
+    FROM albums album JOIN json_each(COALESCE(
+        (SELECT release_types FROM album_release_observations accepted WHERE accepted.album_key=album.album_key AND accepted.lookup_identity=album.release_lookup_identity),
+        CASE WHEN album.metadata IS NOT NULL THEN
+            (SELECT json_group_array(release_type ORDER BY position) FROM album_release_types WHERE album_key=album.album_key)
+        ELSE
+            (SELECT json_group_array(release_type ORDER BY member_path,disc_number,track_number,object_id,position)
+             FROM (
+                SELECT item.value release_type,coalesce(member.cue_path,member.source_path) member_path,
+                       member.disc_number,member.track_number,member.object_id,CAST(item.key AS INTEGER) position,
+                       row_number() OVER(PARTITION BY item.value ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id,item.key) first_credit
+                FROM tracks member INDEXED BY tracks_album_order_idx JOIN json_each(member.metadata,'$.album_tags.release_types') item
+                WHERE member.album_key=album.album_key AND member.indexed=1
+             ) WHERE first_credit=1)
+        END)) item;
+
 CREATE TABLE IF NOT EXISTS home_entries (
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     section_id TEXT NOT NULL CHECK (section_id <> ''),
@@ -568,23 +581,10 @@ CREATE TABLE IF NOT EXISTS home_entries (
 
 CREATE TABLE IF NOT EXISTS loudness_measurements (
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
-    entity_kind TEXT NOT NULL CHECK (entity_kind IN ('track', 'album')),
-    entity_key INTEGER NOT NULL,
-    analysis_key BLOB NOT NULL CHECK (length(analysis_key) = 32),
-    integrated_lufs REAL,
-    true_peak REAL CHECK (true_peak IS NULL OR true_peak >= 0),
-    origin TEXT NOT NULL DEFAULT 'source' CHECK (origin IN ('source', 'analysis')),
-    PRIMARY KEY (source_key, entity_kind, entity_key, origin)
-) STRICT;
-
-CREATE TABLE IF NOT EXISTS replay_gain_measurements (
-    source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
-    entity_kind TEXT NOT NULL CHECK (entity_kind IN ('track', 'album')),
-    entity_key INTEGER NOT NULL,
-    analysis_key BLOB NOT NULL CHECK (length(analysis_key) = 32),
-    gain_db REAL NOT NULL,
-    peak REAL CHECK (peak IS NULL OR peak >= 0),
-    PRIMARY KEY (source_key, entity_kind, entity_key)
+    entity_kind TEXT NOT NULL, entity_key INTEGER NOT NULL,
+    analysis_key BLOB NOT NULL,
+    integrated_lufs REAL, true_peak REAL,
+    PRIMARY KEY(source_key,entity_kind,entity_key)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS lyrics_cache (
@@ -596,8 +596,17 @@ CREATE TABLE IF NOT EXISTS lyrics_cache (
     cache_input_digest BLOB NOT NULL CHECK (length(cache_input_digest) = 32),
     lyrics TEXT NOT NULL,
     updated_at INTEGER NOT NULL CHECK (updated_at >= 0),
+    cache_revision INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (media_uri, authority, role, language, script)
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS lyrics_cache_revision(singleton INTEGER PRIMARY KEY CHECK(singleton=1),revision INTEGER NOT NULL) STRICT;
+INSERT OR IGNORE INTO lyrics_cache_revision VALUES(1,0);
+CREATE INDEX IF NOT EXISTS lyrics_cache_changes ON lyrics_cache(cache_revision);
+CREATE TRIGGER IF NOT EXISTS lyrics_cache_insert AFTER INSERT ON lyrics_cache WHEN NEW.cache_revision>=0 BEGIN UPDATE lyrics_cache_revision SET revision=revision+1; UPDATE lyrics_cache SET cache_revision=(SELECT revision FROM lyrics_cache_revision) WHERE rowid=NEW.rowid; END;
+CREATE TRIGGER IF NOT EXISTS lyrics_cache_update AFTER UPDATE OF lyrics,cache_input_digest ON lyrics_cache WHEN NEW.cache_revision>=0 AND (NEW.lyrics IS NOT OLD.lyrics OR NEW.cache_input_digest IS NOT OLD.cache_input_digest) BEGIN UPDATE lyrics_cache_revision SET revision=revision+1; UPDATE lyrics_cache SET cache_revision=(SELECT revision FROM lyrics_cache_revision) WHERE rowid=NEW.rowid; END;
+CREATE TRIGGER IF NOT EXISTS lyrics_cache_delete AFTER DELETE ON lyrics_cache BEGIN UPDATE lyrics_cache_revision SET revision=revision+1; END;
+CREATE TABLE IF NOT EXISTS artwork_previews(family TEXT PRIMARY KEY,hash TEXT NOT NULL) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS local_files (
     local_file_key INTEGER PRIMARY KEY,
@@ -615,6 +624,9 @@ CREATE TABLE IF NOT EXISTS local_files (
     artist_pictures TEXT,
     revision TEXT,
     parse_version INTEGER,
+    observed_stamp INTEGER NOT NULL DEFAULT 0,
+    parent_path TEXT NOT NULL DEFAULT '',
+    parsed_stamp TEXT,
     state TEXT NOT NULL CHECK (state IN ('accepted', 'rejected', 'unreadable', 'observed')),
     UNIQUE (source_key, path)
 ) STRICT;
@@ -624,6 +636,8 @@ CREATE INDEX IF NOT EXISTS local_files_identity_idx ON local_files(source_key, d
 CREATE INDEX IF NOT EXISTS local_files_native_id_idx ON local_files(source_key, native_id) WHERE native_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS local_files_kind_path_idx ON local_files(source_key, kind, path);
+CREATE INDEX IF NOT EXISTS local_files_parent_idx ON local_files(source_key,parent_path,observed_stamp,path);
+CREATE INDEX IF NOT EXISTS local_files_root_path_idx ON local_files(source_key,root,relative_path);
 
 CREATE INDEX IF NOT EXISTS local_files_playlist_idx ON local_files(source_key, local_file_key)
     WHERE lower(path) LIKE '%.m3u' OR lower(path) LIKE '%.m3u8' OR lower(path) LIKE '%.pls' OR lower(path) LIKE '%.xspf';
@@ -632,6 +646,7 @@ CREATE TABLE IF NOT EXISTS local_file_dependencies (
     local_file_key INTEGER NOT NULL REFERENCES local_files ON DELETE CASCADE,
     dependency_path TEXT NOT NULL CHECK (dependency_path <> ''),
     position INTEGER NOT NULL CHECK (position >= 0),
+    accepted_inputs TEXT,
     PRIMARY KEY (local_file_key, position),
     UNIQUE (local_file_key, dependency_path)
 ) STRICT;
@@ -648,76 +663,6 @@ CREATE TABLE IF NOT EXISTS local_access_metadata (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS local_access_match_uri_idx ON local_access_metadata(normalized_title,normalized_album,normalized_artist,disc_number,track_number,duration_millis,access_uri);
-
-CREATE TRIGGER IF NOT EXISTS album_artist_insert AFTER INSERT ON album_artists BEGIN
-    UPDATE albums SET album_artist_sort=credit.sort_text
-    FROM (SELECT (SELECT artist.sort_text FROM album_artists relation JOIN artists artist USING(artist_key)
-        WHERE relation.album_key=NEW.album_key ORDER BY relation.position LIMIT 1) sort_text) credit
-    WHERE album_key=NEW.album_key AND album_artist_sort IS NOT credit.sort_text;
-END;
-CREATE TRIGGER IF NOT EXISTS album_artist_delete AFTER DELETE ON album_artists BEGIN
-    UPDATE albums SET album_artist_sort=credit.sort_text
-    FROM (SELECT (SELECT artist.sort_text FROM album_artists relation JOIN artists artist USING(artist_key)
-        WHERE relation.album_key=OLD.album_key ORDER BY relation.position LIMIT 1) sort_text) credit
-    WHERE album_key=OLD.album_key AND album_artist_sort IS NOT credit.sort_text;
-END;
-CREATE TRIGGER IF NOT EXISTS album_artist_update AFTER UPDATE OF artist_key,album_key,position ON album_artists BEGIN
-    UPDATE albums SET album_artist_sort=(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key)
-        WHERE credit.album_key=albums.album_key ORDER BY credit.position LIMIT 1)
-    WHERE album_key IN (OLD.album_key,NEW.album_key) AND album_artist_sort IS NOT (
-        SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key)
-        WHERE credit.album_key=albums.album_key ORDER BY credit.position LIMIT 1);
-END;
-CREATE TRIGGER IF NOT EXISTS album_artist_name AFTER UPDATE OF sort_text ON artists WHEN OLD.sort_text IS NOT NEW.sort_text BEGIN
-    UPDATE albums SET album_artist_sort=NEW.sort_text
-    WHERE album_key IN (SELECT album_key FROM album_artists WHERE artist_key=NEW.artist_key)
-      AND NEW.artist_key=(SELECT artist_key FROM album_artists WHERE album_key=albums.album_key ORDER BY position LIMIT 1);
-END;
-
-CREATE TRIGGER IF NOT EXISTS track_sort_insert AFTER INSERT ON tracks BEGIN
-    UPDATE tracks SET sort_album_artist=album.album_artist_sort,sort_album_year=album.year,
-        sort_album=COALESCE(album.sort_text,NEW.display_album)
-    FROM (SELECT 1) LEFT JOIN albums album ON album.album_key=NEW.album_key
-    WHERE track_key=NEW.track_key AND (tracks.sort_album_artist,tracks.sort_album_year,tracks.sort_album)
-        IS NOT (album.album_artist_sort,album.year,COALESCE(album.sort_text,NEW.display_album));
-END;
-CREATE TRIGGER IF NOT EXISTS track_sort_update AFTER UPDATE OF album_key,display_album ON tracks
-WHEN (OLD.album_key,OLD.display_album) IS NOT (NEW.album_key,NEW.display_album) BEGIN
-    UPDATE tracks SET sort_album_artist=album.album_artist_sort,sort_album_year=album.year,
-        sort_album=COALESCE(album.sort_text,NEW.display_album)
-    FROM (SELECT 1) LEFT JOIN albums album ON album.album_key=NEW.album_key
-    WHERE track_key=NEW.track_key AND (tracks.sort_album_artist,tracks.sort_album_year,tracks.sort_album)
-        IS NOT (album.album_artist_sort,album.year,COALESCE(album.sort_text,NEW.display_album));
-END;
-CREATE TRIGGER IF NOT EXISTS album_track_sort_update AFTER UPDATE OF album_artist_sort,year,sort_text ON albums
-WHEN (OLD.album_artist_sort,OLD.year,OLD.sort_text) IS NOT (NEW.album_artist_sort,NEW.year,NEW.sort_text) BEGIN
-    UPDATE tracks SET sort_album_artist=NEW.album_artist_sort,sort_album_year=NEW.year,sort_album=NEW.sort_text
-    WHERE album_key=NEW.album_key AND (sort_album_artist,sort_album_year,sort_album)
-        IS NOT (NEW.album_artist_sort,NEW.year,NEW.sort_text);
-END;
-CREATE TRIGGER IF NOT EXISTS source_track_insert AFTER INSERT ON tracks WHEN NEW.indexed=1 BEGIN
-    UPDATE sources SET track_count=track_count+1 WHERE source_key=NEW.source_key;
-END;
-CREATE TRIGGER IF NOT EXISTS source_track_delete AFTER DELETE ON tracks WHEN OLD.indexed=1 BEGIN
-    UPDATE sources SET track_count=track_count-1 WHERE source_key=OLD.source_key;
-END;
-CREATE TRIGGER IF NOT EXISTS source_track_update AFTER UPDATE OF source_key,indexed ON tracks
-WHEN (OLD.source_key,OLD.indexed) IS NOT (NEW.source_key,NEW.indexed) BEGIN
-    UPDATE sources SET track_count=track_count-OLD.indexed WHERE source_key=OLD.source_key;
-    UPDATE sources SET track_count=track_count+NEW.indexed WHERE source_key=NEW.source_key;
-END;
-
-CREATE INDEX IF NOT EXISTS tracks_source_play_count_idx ON tracks(source_key,source_play_count DESC,sort_text,track_key) WHERE indexed=1 AND source_play_count>0;
-CREATE INDEX IF NOT EXISTS tracks_source_last_played_idx ON tracks(source_key,source_last_played DESC,track_key) WHERE indexed=1 AND source_last_played IS NOT NULL;
-CREATE INDEX IF NOT EXISTS tracks_local_play_order_idx ON tracks(source_key,indexed,local_play_count DESC,sort_text,media_uri);
-CREATE INDEX IF NOT EXISTS tracks_global_play_order_idx ON tracks(indexed,local_play_count DESC,sort_text,media_uri);
-DROP INDEX IF EXISTS tracks_local_play_count_idx;
-DROP INDEX IF EXISTS tracks_global_local_play_count_idx;
-CREATE INDEX IF NOT EXISTS tracks_local_shuffle_idx ON tracks(source_key,local_play_count,((track_key*1103515245)%2147483647),media_uri);
-CREATE INDEX IF NOT EXISTS tracks_global_local_shuffle_idx ON tracks(local_play_count,((track_key*1103515245)%2147483647),media_uri);
-CREATE INDEX IF NOT EXISTS tracks_shuffle_idx ON tracks(source_key,((track_key*1103515245)%2147483647),media_uri);
-CREATE INDEX IF NOT EXISTS tracks_global_shuffle_idx ON tracks(((track_key*1103515245)%2147483647),media_uri);
-CREATE INDEX IF NOT EXISTS tracks_indexed_idx ON tracks(indexed,source_key,track_key);
 
 CREATE TRIGGER IF NOT EXISTS local_play_count_listen_insert AFTER INSERT ON listens BEGIN
              UPDATE tracks SET local_play_count=local_play_count+1 WHERE media_uri=NEW.media_uri;
@@ -749,78 +694,25 @@ CREATE VIEW IF NOT EXISTS local_access_files AS
           FROM main.local_locators locator
           LEFT JOIN local_access_metadata metadata USING(access_uri);
 
+CREATE TABLE IF NOT EXISTS native_playlist_pending (
+    playlist_key INTEGER NOT NULL REFERENCES playlists ON DELETE CASCADE,
+    object_id TEXT NOT NULL, track_key INTEGER NOT NULL REFERENCES tracks,
+    position INTEGER NOT NULL,
+    PRIMARY KEY(playlist_key,object_id)
+) STRICT;
 "#;
 
 pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
     let version = pragma(connection, "user_version").await?;
-    if !matches!(version, 0 | 56 | 57 | 58) {
+    if !matches!(version, 0 | 47) {
         return Err(crate::LibraryError::Migration(format!(
             "unsupported library schema {version}"
         )));
     }
     let mut transaction = connection.begin().await?;
-    if matches!(version, 56 | 57) {
-        sqlx::query("ALTER TABLE loudness_measurements RENAME TO previous_loudness_measurements")
-            .execute(&mut *transaction)
-            .await?;
-    }
     sqlx::raw_sql(STORE_SCHEMA)
         .execute(&mut *transaction)
         .await?;
-    if matches!(version, 56 | 57) {
-        sqlx::raw_sql(
-            "INSERT INTO loudness_measurements SELECT * FROM previous_loudness_measurements;
-            DROP TABLE previous_loudness_measurements;",
-        )
-        .execute(&mut *transaction)
-        .await?;
-    }
-    if version == 56 {
-        // Connect accepted listens without admitting their songs in version 56.
-        let mut after = String::new();
-        loop {
-            let missing = sqlx::query_as::<_, crate::ListenWrite>(
-                "SELECT listen.external_id,listen.media_uri,listen.track_title title,listen.artist_name artist,listen.album_title album,
-                    listen.duration_millis,listen.disc_number,listen.track_number,listen.year,listen.release_date,listen.source_format,
-                    listen.musicbrainz_recording_id,listen.musicbrainz_release_track_id,listen.started_at,listen.local_period,
-                    listen.listened_millis,listen.skipped
-                 FROM listens listen WHERE listen.media_uri>?1
-                    AND NOT EXISTS(SELECT 1 FROM tracks WHERE tracks.media_uri=listen.media_uri)
-                    AND listen.listen_key=(SELECT latest.listen_key FROM listens latest WHERE latest.media_uri=listen.media_uri
-                        ORDER BY latest.started_at DESC,latest.listen_key DESC LIMIT 1)
-                 ORDER BY listen.media_uri LIMIT 256",
-            ).bind(&after).fetch_all(&mut *transaction).await?;
-            if missing.is_empty() {
-                break;
-            }
-            for listen in missing {
-                crate::tracks::remember_song(
-                    &mut transaction,
-                    &listen.media_uri,
-                    crate::tracks::SongMetadata {
-                        title: Some(&listen.title),
-                        artist: Some(&listen.artist),
-                        album: Some(&listen.album),
-                        duration_millis: Some(listen.duration_millis),
-                        disc_number: listen.disc_number,
-                        track_number: listen.track_number,
-                        year: listen.year,
-                        release_date: listen.release_date.as_deref(),
-                        source_format: listen.source_format.as_deref(),
-                        musicbrainz_recording_id: listen.musicbrainz_recording_id.as_deref(),
-                        musicbrainz_release_track_id: listen
-                            .musicbrainz_release_track_id
-                            .as_deref(),
-                        ..Default::default()
-                    },
-                )
-                .await?;
-                after = listen.media_uri;
-            }
-        }
-    }
     transaction.commit().await?;
-    crate::collections::install_collection_facts_on(connection).await?;
-    crate::playlists::install_playlist_facts_on(connection).await?;
     Ok(())
 }

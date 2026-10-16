@@ -209,7 +209,7 @@ function render() {
           : item.kind === "genre"
             ? { genre: item.id, source: item.source }
             : { uri: item.uri };
-    run(() => coverGroup(artwork, query, item.artwork_count || 1, signal));
+    run(() => coverGroup(artwork, query, item.artwork_count || 1, signal, item.artwork_previews));
   }
   bindCards(list);
   releaseCovers();

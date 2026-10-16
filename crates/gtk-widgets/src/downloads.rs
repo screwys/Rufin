@@ -158,7 +158,7 @@ pub fn media_artwork(
     media_uris: &[String],
     size: i32,
 ) -> gtk::Widget {
-    let projection = artwork.cover_group_projection_for_artwork(&[], size, size);
+    let projection = artwork.cover_group_projection_for_artwork(&[], size, size, true);
     let widget = projection.widget();
     let database = Arc::clone(database);
     let media_uris = media_uris.iter().take(4).cloned().collect::<Vec<_>>();
@@ -193,7 +193,7 @@ pub fn download_rule_artwork(
     rule: downloads::DownloadRule,
     size: i32,
 ) -> gtk::Widget {
-    let projection = artwork.cover_group_projection_for_artwork(&[], size, size);
+    let projection = artwork.cover_group_projection_for_artwork(&[], size, size, true);
     let widget = projection.widget();
     let database = Arc::clone(database);
     let task = runtime.spawn(async move {

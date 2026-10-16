@@ -72,15 +72,6 @@ pub(crate) fn directory_artist_image_for(
         .map(|(_, path)| path)
 }
 
-pub(crate) fn inspect_artist_pictures(path: &Path) -> Vec<crate::file::artwork::ArtistPicture> {
-    read_lofty(path, true)
-        .ok()
-        .flatten()
-        .map_or_else(Vec::new, |file| {
-            crate::file::artwork::artist_pictures(&file)
-        })
-}
-
 pub(crate) fn file_reference(source_id: &str, path: &Path, revision: String) -> LocalImageRef {
     LocalImageRef::File {
         source_id: crate::SourceId::new(source_id),

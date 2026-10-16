@@ -4,7 +4,7 @@ use std::path::Path;
 use library::{Database, PlaylistFile, PlaylistImportReport, PlaylistKey, PlaylistPathMode};
 use url::Url;
 
-use super::{FileSource, input::FileInput, metadata::WorkingFile};
+use super::{FileSource, input::FileInput};
 use crate::{SourceError, SourceResult};
 
 impl FileSource {
@@ -14,15 +14,18 @@ impl FileSource {
         path: &str,
         target: Option<PlaylistKey>,
     ) -> SourceResult<PlaylistImportReport> {
-        let location = self.location(path)?;
+        self.location(path)?;
         let display_path = if self.document_access().is_some() {
             crate::file::documents::display_path(path)
         } else {
             path.to_owned()
         };
-        let copy = self.working_copy(path, &location).await.map_err(error)?;
+        let copy = tempfile::NamedTempFile::new().map_err(error)?;
+        self.copy_file(path, copy.path())
+            .await?
+            .ok_or(SourceError::NotFound)?;
         let mut playlist = PlaylistFile::read(
-            BufReader::new(std::fs::File::open(&copy.file).map_err(error)?),
+            BufReader::new(std::fs::File::open(copy.path()).map_err(error)?),
             Path::new(&display_path),
         )?;
         if target.is_none() {
@@ -160,21 +163,15 @@ impl FileSource {
         playlist.write(Path::new(&display_path), mode, &mut output)?;
         output.flush().map_err(error)?;
         drop(output);
-        self.save_file(&WorkingFile {
-            file: prepared.into_temp_path(),
-            relative: path.into(),
-            revision,
-            existed,
-            input,
-        })
-        .await
-        .map_err(|failure| match failure {
-            crate::SourceMetadataError::Conflict => SourceError::Server {
-                status: 412,
-                message: "The playlist file changed before saving".into(),
-            },
-            failure => error(failure),
-        })
+        self.commit_file(path, prepared.path(), revision.as_deref(), existed)
+            .await
+            .map_err(|failure| match failure {
+                crate::SourceMetadataError::Conflict => SourceError::Server {
+                    status: 412,
+                    message: "The playlist file changed before saving".into(),
+                },
+                failure => error(failure),
+            })
     }
 
     async fn playlist_location(&self, playlist: &str, value: &str) -> SourceResult<Option<String>> {
@@ -264,7 +261,7 @@ impl FileSource {
         ))
     }
 
-    pub(crate) async fn delete_playlist_file(&self, path: &str) -> SourceResult<()> {
+    pub(crate) async fn remove_file(&self, path: &str) -> SourceResult<()> {
         self.location(path)?;
         let input = self.input().await?;
         match input.input() {

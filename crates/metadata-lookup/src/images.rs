@@ -4,7 +4,7 @@ use reqwest::Url;
 use serde_json::Value;
 
 use crate::http::{client, download, fetch_json, fetch_optional_json, ipv4_client};
-use crate::musicbrainz::{fetch_musicbrainz_entity, fetch_musicbrainz_json, usable_mbid};
+use crate::musicbrainz::{fetch_musicbrainz_entity, fetch_musicbrainz_json};
 
 #[derive(Clone, Debug)]
 pub enum ArtworkQuery {
@@ -45,7 +45,7 @@ pub fn search_artwork(query: &ArtworkQuery) -> Result<Vec<ArtworkResult>, String
             let mut identities = Vec::new();
             let mut failure = None;
             for (kind, id) in [("release", release_id), ("release-group", release_group_id)] {
-                if let Some(id) = id.as_deref().and_then(usable_mbid) {
+                if let Some(id) = id.as_deref().and_then(library::AlbumCover::usable_mbid) {
                     identities.push((kind, id.to_string(), album.clone(), artist.clone()));
                 }
             }
@@ -71,7 +71,10 @@ pub fn search_artwork(query: &ArtworkQuery) -> Result<Vec<ArtworkResult>, String
                         }
                     };
                 for release in data["releases"].as_array().into_iter().flatten() {
-                    let Some(id) = release["id"].as_str().and_then(usable_mbid) else {
+                    let Some(id) = release["id"]
+                        .as_str()
+                        .and_then(library::AlbumCover::usable_mbid)
+                    else {
                         continue;
                     };
                     if identities
@@ -164,19 +167,19 @@ pub fn search_artwork(query: &ArtworkQuery) -> Result<Vec<ArtworkResult>, String
         ArtworkQuery::Artist {
             name,
             musicbrainz_id,
-        } => artist_results(name, musicbrainz_id.as_deref(), false),
+        } => artist_results(name, musicbrainz_id.as_deref(), false, Some(512)),
     }
 }
 
 pub fn lookup_artist_image(
     name: &str,
     musicbrainz_id: Option<&str>,
-    original: bool,
+    size: Option<u32>,
 ) -> Result<Option<Vec<u8>>, String> {
-    for result in artist_results(name, musicbrainz_id, true)? {
+    for result in artist_results(name, musicbrainz_id, true, size)? {
         if let Some(bytes) = download(
             client()?,
-            if original {
+            if size.is_none() {
                 &result.image_url
             } else {
                 &result.thumbnail_url
@@ -193,9 +196,10 @@ fn artist_results(
     name: &str,
     musicbrainz_id: Option<&str>,
     automatic: bool,
+    size: Option<u32>,
 ) -> Result<Vec<ArtworkResult>, String> {
     let mut artists = Vec::new();
-    if let Some(id) = musicbrainz_id.and_then(usable_mbid) {
+    if let Some(id) = musicbrainz_id.and_then(library::AlbumCover::usable_mbid) {
         artists.push((id.to_string(), name.to_string(), String::new()));
     }
     if (!automatic || artists.is_empty()) && !name.trim().is_empty() {
@@ -211,7 +215,10 @@ fn artist_results(
         .map_err(|error| error.to_string())?;
         let data = fetch_musicbrainz_json(ipv4_client()?, url, "MusicBrainz artist search")?;
         for artist in data["artists"].as_array().into_iter().flatten() {
-            let Some(id) = artist["id"].as_str().and_then(usable_mbid) else {
+            let Some(id) = artist["id"]
+                .as_str()
+                .and_then(library::AlbumCover::usable_mbid)
+            else {
                 continue;
             };
             if artists.iter().any(|(current, _, _)| current == id) {
@@ -227,7 +234,7 @@ fn artist_results(
     let mut results = Vec::new();
     let mut failure = None;
     for (id, title, detail) in artists {
-        match artist_images(&id, &title, &detail) {
+        match artist_images(&id, &title, &detail, size) {
             Ok(images) => results.extend(images),
             Err(error) => failure = Some(error),
         }
@@ -240,7 +247,12 @@ fn artist_results(
     Ok(results)
 }
 
-fn artist_images(id: &str, title: &str, detail: &str) -> Result<Vec<ArtworkResult>, String> {
+fn artist_images(
+    id: &str,
+    title: &str,
+    detail: &str,
+    size: Option<u32>,
+) -> Result<Vec<ArtworkResult>, String> {
     let mut results = Vec::new();
     let Some(artist) = fetch_musicbrainz_entity(
         "https://musicbrainz.org/ws/2/artist/",
@@ -288,18 +300,7 @@ fn artist_images(id: &str, title: &str, detail: &str) -> Result<Vec<ArtworkResul
                 continue;
             };
             let file = format!("File:{file}");
-            let url = Url::parse_with_params(
-                "https://commons.wikimedia.org/w/api.php",
-                [
-                    ("action", "query"),
-                    ("format", "json"),
-                    ("prop", "imageinfo"),
-                    ("titles", file.as_str()),
-                    ("iiprop", "url"),
-                    ("iiurlwidth", "512"),
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            let url = artist_image_url(&file, size)?;
             let image = fetch_json(client()?, url, "Wikimedia artist image")?;
             for page in image["query"]["pages"]
                 .as_object()
@@ -324,6 +325,25 @@ fn artist_images(id: &str, title: &str, detail: &str) -> Result<Vec<ArtworkResul
         }
     }
     Ok(results)
+}
+
+pub(super) fn artist_image_url(file: &str, size: Option<u32>) -> Result<Url, String> {
+    let mut url = Url::parse_with_params(
+        "https://commons.wikimedia.org/w/api.php",
+        [
+            ("action", "query"),
+            ("format", "json"),
+            ("prop", "imageinfo"),
+            ("titles", file),
+            ("iiprop", "url"),
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    if let Some(size) = size {
+        url.query_pairs_mut()
+            .append_pair("iiurlwidth", &size.to_string());
+    }
+    Ok(url)
 }
 
 fn phrase(value: &str) -> String {

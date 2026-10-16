@@ -4,7 +4,6 @@
 //! away from GTK, then builds and mounts its GTK model. Home and playlist
 //! detail have narrow point-update hooks because those operations are
 //! intentionally visible without remounting the whole page.
-
 use rufin_core::browse::{BrowseRequest, library_list_key};
 use std::cell::{Cell, RefCell};
 use std::future::Future;
@@ -24,16 +23,13 @@ use super::route_position::{
     RoutePosition, RoutePositionKey, RoutePositionMemory, RouteSurface, mount_route_surface,
 };
 use crate::{LibraryListKey, LibraryListSettings};
+use gtk_library::NamedDetailId;
 use gtk_library::route_layout::{primary_route_scroll_adjustment, route_boundary};
-use gtk_library::{
-    NamedDetailId, load_artist_discography, load_artist_overview, load_artist_tracks,
-    load_named_detail, load_smart_playlist_detail,
-};
 use gtk_widgets::mounted_route::*;
 use gtk_widgets::route::{CollectionCategory, Route};
 use gtk_widgets::selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
 
-const SLOW_ROUTE_RENDER_MS: u64 = 250;
+const SLOW_ROUTE_REVEAL_MS: u64 = 250;
 
 type RouteTiming = Option<Instant>;
 
@@ -571,7 +567,7 @@ impl Shell {
 
         self.cancel_route_loading();
         self.show_route_loading();
-        let render_started = tracing::enabled!(tracing::Level::DEBUG).then(Instant::now);
+        let render_started = tracing::enabled!(tracing::Level::WARN).then(Instant::now);
         match route.clone() {
             Route::History => {
                 self.queue_history_route(route, render_started);
@@ -843,21 +839,17 @@ impl Shell {
             render_started,
             "Track route",
             move |window, cancellation| async move {
-                database
-                    .song_route_page(
-                        &BrowseRequest::new(
-                            &route,
-                            CollectionCategory::Tracks,
-                            Some(source_key),
-                            folder,
-                            &settings,
-                            8,
-                        )
-                        .songs()
-                        .expect("song route"),
-                        window,
-                        &cancellation,
-                    )
+                (&BrowseRequest::new(
+                    &route,
+                    CollectionCategory::Tracks,
+                    Some(source_key),
+                    folder,
+                    &settings,
+                    8,
+                )
+                .tracks()
+                .expect("song route"))
+                    .page(&database, window, &cancellation)
                     .await
             },
             move |shell, page, selected| match build_route {
@@ -881,13 +873,15 @@ impl Shell {
             render_started,
             "Album detail route",
             move |window, cancellation| async move {
-                gtk_library::load_album_detail(
-                    &database,
-                    &album_uri,
+                BrowseRequest::new(
+                    &Route::AlbumDetail(album_uri),
+                    CollectionCategory::Tracks,
+                    None,
+                    None,
                     &settings,
-                    window,
-                    &cancellation,
+                    8,
                 )
+                .detail_page(&database, &settings, window, &cancellation)
                 .await
             },
             move |shell, detail| shell.album_detail_view(detail),
@@ -926,11 +920,20 @@ impl Shell {
                 .expect("collection route")
                 .page(&database, window, &cancellation)
                 .await
-                .map(|(count, start, rows)| match rows {
-                    library::CollectionRows::Albums(rows) => (count, start, rows, Vec::new()),
-                    library::CollectionRows::AlbumDetails(rows) => (count, start, Vec::new(), rows),
-                    _ => unreachable!("album query"),
-                })
+                .map(
+                    |library::CatalogPage {
+                         count,
+                         first_row_position: start,
+                         rows,
+                         ..
+                     }| match rows {
+                        library::CatalogRows::Albums(rows) => (count, start, rows, Vec::new()),
+                        library::CatalogRows::AlbumDetails(rows) => {
+                            (count, start, Vec::new(), rows)
+                        }
+                        _ => unreachable!("album query"),
+                    },
+                )
             },
             move |shell, (order, first_row_position, first_rows, first_detail_rows), selected| {
                 shell.library_albums_route(
@@ -978,7 +981,23 @@ impl Shell {
                 .expect("collection route")
                 .page(&database, window, &cancellation)
                 .await
-                .map(|(count, start, rows)| (count, start, rows.artists()))
+                .map(
+                    |library::CatalogPage {
+                         count,
+                         first_row_position: start,
+                         rows,
+                         ..
+                     }| {
+                        (
+                            count,
+                            start,
+                            match rows {
+                                library::CatalogRows::Artists(rows) => rows,
+                                _ => unreachable!("catalog page projection"),
+                            },
+                        )
+                    },
+                )
             },
             move |shell, (order, first_row_position, first_rows), selected| {
                 shell.library_artist_list_route(
@@ -1016,15 +1035,15 @@ impl Shell {
             render_started,
             "Smart Playlist detail route",
             move |window, cancellation| async move {
-                load_smart_playlist_detail(
-                    &database,
+                BrowseRequest::new(
+                    &Route::SmartPlaylistDetail(key),
+                    CollectionCategory::Tracks,
                     source,
                     folder,
-                    key,
-                    settings,
-                    window,
-                    &cancellation,
+                    &settings,
+                    8,
                 )
+                .detail_page(&database, &settings, window, &cancellation)
                 .await
             },
             move |shell, detail| shell.smart_playlist_detail_route(key, detail),
@@ -1044,21 +1063,8 @@ impl Shell {
             render_started,
             "Playlist detail route",
             move |window, cancellation| async move {
-                database
-                    .playlist_detail_page(
-                        &BrowseRequest::new(
-                            &route,
-                            CollectionCategory::Tracks,
-                            None,
-                            None,
-                            &settings,
-                            8,
-                        )
-                        .songs()
-                        .expect("song route"),
-                        window,
-                        &cancellation,
-                    )
+                BrowseRequest::new(&route, CollectionCategory::Tracks, None, None, &settings, 8)
+                    .detail_page(&database, &settings, window, &cancellation)
                     .await
             },
             move |shell, detail| shell.playlist_detail_route(key, detail),
@@ -1079,27 +1085,18 @@ impl Shell {
             render_started,
             "Artist overview route",
             move |window, cancellation| async move {
-                load_artist_overview(
-                    &database,
+                BrowseRequest::new(
                     &route,
-                    &track_settings,
+                    CollectionCategory::Albums,
+                    None,
+                    None,
                     &album_settings,
-                    window,
-                    &cancellation,
+                    8,
                 )
+                .detail_page(&database, &track_settings, window, &cancellation)
                 .await
             },
-            move |shell, detail| {
-                let Some(detail) = detail else {
-                    return MountedRoute::static_widget(
-                        gtk_library::route_layout::route_empty_view(localization::msgid(
-                            "This isn't available",
-                        )),
-                    );
-                };
-                let artist = detail.summary.artist_key;
-                shell.artist_detail_view(artist, album_artist, Some(detail))
-            },
+            move |shell, detail| shell.artist_detail_view(album_artist, detail),
         );
     }
 
@@ -1115,18 +1112,11 @@ impl Shell {
             render_started,
             "Artist discography route",
             move |window, cancellation| async move {
-                load_artist_discography(&database, &route, &settings, window, &cancellation).await
+                BrowseRequest::new(&route, CollectionCategory::Albums, None, None, &settings, 8)
+                    .detail_page(&database, &settings, window, &cancellation)
+                    .await
             },
-            move |shell, detail| {
-                let Some(detail) = detail else {
-                    return MountedRoute::static_widget(
-                        gtk_library::route_layout::route_empty_view(localization::msgid(
-                            "This isn't available",
-                        )),
-                    );
-                };
-                shell.artist_discography_view(Some(detail))
-            },
+            move |shell, detail| shell.artist_discography_view(detail),
         );
     }
 
@@ -1144,21 +1134,15 @@ impl Shell {
             render_started,
             "Artist tracks route",
             move |window, cancellation| async move {
-                load_artist_tracks(&database, &route, &settings, window, &cancellation).await
+                BrowseRequest::new(&route, CollectionCategory::Tracks, None, None, &settings, 8)
+                    .detail_page(&database, &settings, window, &cancellation)
+                    .await
             },
             move |shell, detail| {
-                let Some(detail) = detail else {
-                    return MountedRoute::static_widget(
-                        gtk_library::route_layout::route_empty_view(localization::msgid(
-                            "This isn't available",
-                        )),
-                    );
-                };
-                let artist = detail.summary.artist_key;
                 if favorites_only {
-                    shell.artist_favorite_tracks_view(artist, album_artist, Some(detail))
+                    shell.artist_favorite_tracks_view(album_artist, detail)
                 } else {
-                    shell.artist_tracks_view(artist, album_artist, Some(detail))
+                    shell.artist_tracks_view(album_artist, detail)
                 }
             },
         );
@@ -1177,7 +1161,13 @@ impl Shell {
             render_started,
             "Named detail route",
             move |window, cancellation| async move {
-                load_named_detail(&database, id, &settings, window, &cancellation).await
+                let route = match id {
+                    NamedDetailId::Genre(key) => Route::GenreDetail(key),
+                    NamedDetailId::Mood(key) => Route::MoodDetail(key),
+                };
+                BrowseRequest::new(&route, CollectionCategory::Tracks, None, None, &settings, 8)
+                    .detail_page(&database, &settings, window, &cancellation)
+                    .await
             },
             move |shell, detail| shell.named_detail_view(id, detail),
         );
@@ -1213,7 +1203,23 @@ impl Shell {
                 .expect("collection route")
                 .page(&database, window, &cancellation)
                 .await
-                .map(|(count, start, rows)| (count, start, rows.playlists()))
+                .map(
+                    |library::CatalogPage {
+                         count,
+                         first_row_position: start,
+                         rows,
+                         ..
+                     }| {
+                        (
+                            count,
+                            start,
+                            match rows {
+                                library::CatalogRows::Playlists(rows) => rows,
+                                _ => unreachable!("catalog page projection"),
+                            },
+                        )
+                    },
+                )
             },
             move |shell, (order, first_row_position, first_rows)| {
                 shell.library_playlists_route(order, first_row_position, first_rows, source, folder)
@@ -1257,7 +1263,23 @@ impl Shell {
                 .expect("collection route")
                 .page(&database, window, &cancellation)
                 .await
-                .map(|(count, start, rows)| (count, start, rows.smart_playlists()))
+                .map(
+                    |library::CatalogPage {
+                         count,
+                         first_row_position: start,
+                         rows,
+                         ..
+                     }| {
+                        (
+                            count,
+                            start,
+                            match rows {
+                                library::CatalogRows::SmartPlaylists(rows) => rows,
+                                _ => unreachable!("catalog page projection"),
+                            },
+                        )
+                    },
+                )
             },
             move |shell, (order, first_row_position, first_rows)| {
                 shell.library_smart_playlists_route(
@@ -1291,13 +1313,11 @@ impl Shell {
                     &settings,
                     8,
                 )
-                .songs()
+                .tracks()
                 .expect("song route");
-                let count = database.song_count(&query, &cancellation).await?.max(0) as usize;
-                let rows = database
-                    .song_history_rows(&query, 0, 64, &cancellation)
-                    .await?;
-                Ok::<_, library::LibraryError>((query, count, rows))
+                query
+                    .page(&database, library::RouteSeedWindow::top(), &cancellation)
+                    .await
             },
             |shell, rows| shell.history_route(rows),
         );
@@ -1331,7 +1351,23 @@ impl Shell {
                 .expect("collection route")
                 .page(&database, window, &cancellation)
                 .await
-                .map(|(count, start, rows)| (count, start, rows.genres()))
+                .map(
+                    |library::CatalogPage {
+                         count,
+                         first_row_position: start,
+                         rows,
+                         ..
+                     }| {
+                        (
+                            count,
+                            start,
+                            match rows {
+                                library::CatalogRows::Genres(rows) => rows,
+                                _ => unreachable!("catalog page projection"),
+                            },
+                        )
+                    },
+                )
             },
             |shell, (order, first_row_position, first_rows), selected| {
                 shell.library_genres_route(order, first_row_position, first_rows, selected)
@@ -1367,7 +1403,23 @@ impl Shell {
                 .expect("collection route")
                 .page(&database, window, &cancellation)
                 .await
-                .map(|(count, start, rows)| (count, start, rows.moods()))
+                .map(
+                    |library::CatalogPage {
+                         count,
+                         first_row_position: start,
+                         rows,
+                         ..
+                     }| {
+                        (
+                            count,
+                            start,
+                            match rows {
+                                library::CatalogRows::Moods(rows) => rows,
+                                _ => unreachable!("catalog page projection"),
+                            },
+                        )
+                    },
+                )
             },
             |shell, (order, first_row_position, first_rows), selected| {
                 shell.library_moods_route(order, first_row_position, first_rows, selected)
@@ -1504,12 +1556,6 @@ impl Shell {
                 ?route,
                 teardown_ms, model_ms, mount_ms, total_ms, "route render timing"
             );
-            if total_ms >= SLOW_ROUTE_RENDER_MS {
-                warn!(
-                    ?route,
-                    teardown_ms, model_ms, mount_ms, total_ms, "slow route render"
-                );
-            }
         }
     }
 
@@ -1564,22 +1610,24 @@ impl Shell {
         if self.route_viewport.order_cancellation.borrow().is_some() {
             return;
         }
-        let ready = self
+        let route = self
             .route_viewport
             .mounted_route
             .borrow()
             .as_ref()
-            .is_some_and(|entry| {
+            .filter(|entry| {
                 entry.surface.upcast_ref::<gtk::Widget>() == surface
                     && entry.route == *self.navigation.routes.borrow().current()
-            });
-        if ready {
+            })
+            .map(|entry| entry.route.clone());
+        if let Some(route) = route {
             self.route_viewport.route_loading.set_visible(false);
             self.try_reveal_startup_route();
-            debug!(
-                total_ms = started.map(elapsed_ms),
-                "visible route window ready"
-            );
+            let total_ms = started.map(elapsed_ms);
+            debug!(?route, total_ms, "visible route window ready");
+            if let Some(total_ms) = total_ms.filter(|elapsed| *elapsed >= SLOW_ROUTE_REVEAL_MS) {
+                warn!(?route, total_ms, "slow route reveal");
+            }
         }
     }
 

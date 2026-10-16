@@ -100,8 +100,32 @@ function renderSources(configured) {
       action.append(el("span", "", action.getAttribute("aria-label")));
     actions.lastElementChild.classList.add("destructive");
     card.append(sourceIcon(item.kind), label, edit, actions);
+    if (item.id === state.source) {
+      const downloads = el("div", "source-actions");
+      downloads.append(
+        button(tr("Download artwork"), () => api("/sources/download-artwork", "POST", { id: item.id }), null, ""),
+        button(tr("Download lyrics"), () => api("/sources/download-lyrics", "POST", { id: item.id }), null, ""),
+      );
+      card.append(downloads);
+    }
     $("content").append(card);
   }
+  const cacheActions = el("div", "source-actions");
+  for (const [path, title, success] of [
+    ["clear-artwork-cache", tr("Clear artwork cache"), tr("Artwork cache cleared")],
+    ["clear-lyrics-cache", tr("Clear lyrics cache"), tr("Lyrics cache cleared")],
+  ]) {
+    cacheActions.append(button(title, async () => {
+      for (const action of cacheActions.children) action.disabled = true;
+      try {
+        await api(`/downloads/${path}`, "POST");
+        notice(success);
+      } finally {
+        for (const action of cacheActions.children) action.disabled = false;
+      }
+    }, null, ""));
+  }
+  $("content").append(cacheActions);
   const integrations = el("section", "");
   $("content").append(integrations);
   run(() => renderIntegrations(integrations));
@@ -110,17 +134,23 @@ function renderSources(configured) {
 let previousOperation = "";
 
 function showSourceProgress(value) {
-  const active = ["adding", "switching", "refreshing"].includes(value.state);
+  const active = ["adding", "switching", "refreshing", "downloading"].includes(value.state);
   $("source-progress").hidden = !active;
+  const cancel = $("source-download-cancel");
+  cancel.hidden = value.state !== "downloading";
+  cancel.onclick = value.state === "downloading"
+    ? () => run(() => api("/sources/cancel-download", "POST", { id: value.source_id }))
+    : null;
   if (active) {
     const progress = value.progress;
-    $("source-progress").textContent = tr(
+    $("source-progress-label").textContent = tr(
       "{status} · {stage} {completed}{total}",
       {
         status: {
           adding: tr("Adding source"),
           switching: tr("Changing source"),
           refreshing: tr("Refreshing"),
+          downloading: tr("Downloading"),
         }[value.state],
         stage: {
           connecting: tr("Connecting"),
@@ -131,6 +161,7 @@ function showSourceProgress(value) {
           playlists: tr("Playlists"),
           home: tr("Home"),
           artwork: tr("Artwork"),
+          lyrics: tr("Lyrics"),
           files: tr("Files"),
           finalizing: tr("Preparing library..."),
         }[progress.stage],
@@ -143,7 +174,8 @@ function showSourceProgress(value) {
   if (
     value.state === "idle" &&
     previousOperation &&
-    previousOperation !== "idle"
+    previousOperation !== "idle" &&
+    previousOperation !== "downloading"
   )
     run(async () => {
       const source = state.source, library = state.selectedLibrary;

@@ -81,7 +81,10 @@ impl PlaybackOwner {
             .map_err(string_error)?;
         Ok(library::QueueTransferPage {
             offset,
-            rows: rows.into_iter().map(|row| (*row).clone()).collect(),
+            rows: rows
+                .iter()
+                .map(|row| library::QueueTransferRow::from(row.as_ref()))
+                .collect(),
             order: snapshot.queue.order[offset..end].to_vec(),
         })
     }
@@ -122,8 +125,10 @@ impl PlaybackOwner {
             .first()
             .cloned()
             .ok_or("The current track is unavailable")?;
-        let mut request =
-            StreamRequest::for_item(&occurrence.item, self.settings.playback_stream_quality());
+        let mut request = StreamRequest::new(
+            (&occurrence.track).media_uri.clone(),
+            self.settings.playback_stream_quality(),
+        );
         request.session_identifier = header.listen.as_ref().map(|listen| listen.play_id.clone());
         let connect = self
             .connect
@@ -150,19 +155,13 @@ impl PlaybackOwner {
             },
         )
         .await?;
-        let (track, album) = self
-            .database
-            .playback_loudness(&occurrence.media_uri, &ReadCancellation::new())
-            .await
-            .map_err(string_error)?;
-        let stream = prepare_media_stream(
-            stream,
-            playback::TrackLoudness {
-                track: track.map(Box::new),
-                album: album.map(Box::new),
-            },
-            occurrence,
-        );
+        let loudness = super::cached_loudness(
+            &self.database,
+            &occurrence.track.media_uri,
+            self.settings.load().ui.playback.loudness_normalization,
+        )
+        .await;
+        let stream = prepare_media_stream(stream, loudness, occurrence);
         let backend = (self.start_backend)()?;
         Ok(PreparedContinuation {
             transfer,

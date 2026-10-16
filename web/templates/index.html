@@ -178,7 +178,10 @@
             <span class="icon" data-icon="add"></span>{{ localization::tr("New Playlist") }}</button>
           <button type="button" id="import-playlist" {% if page.view() != "playlists" %}hidden{% endif %}>{{ localization::tr("Import Playlist") }}</button>
         </form>
-        <div id="source-progress" role="status" hidden></div>
+        <div id="source-progress" role="status" hidden>
+          <span id="source-progress-label"></span>
+          <button type="button" id="source-download-cancel" hidden>{{ localization::tr("Cancel") }}</button>
+        </div>
         <div id="content" data-rendered="{{ page.connected && page.error.is_empty() }}" data-source="{{ page.source }}" data-folder="{{ page.folder() }}" tabindex="-1" aria-busy="false" hx-sync="this:replace">
           {% if !page.error.is_empty() %}<p class="empty-note" role="alert">{{ page.error }}</p>{% endif %}
           {% if page.connected && page.needs_source() %}
@@ -253,7 +256,7 @@
       <footer class="player" aria-label="{{ localization::tr("Playback controls") }}">
         <div class="player-track">
           <div class="cover mini" id="mini-cover">
-            <span class="icon" data-icon="cover-fallback"></span>
+            {% if page.preview.is_empty() %}<span class="icon" data-icon="cover-fallback"></span>{% else %}<img src="{{ page.preview }}" alt="" />{% endif %}
           </div>
           <div>
             <div class="player-title-row">

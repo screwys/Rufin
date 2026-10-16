@@ -153,8 +153,11 @@ impl Notifications {
         let Some(entry) = player.transport.current.as_ref() else {
             return;
         };
-        let title = entry.title.clone();
-        let body = format!("{} - {}", entry.artist, entry.album);
+        let title = entry.row.track.metadata.title.clone();
+        let body = format!(
+            "{} - {}",
+            entry.row.track.metadata.artist, entry.row.track.metadata.album
+        );
         let notifications = Rc::clone(self);
         glib::spawn_future_local(async move {
             if !notifications.matches(run) {

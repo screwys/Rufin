@@ -1,41 +1,6 @@
 use super::*;
 
 impl AndroidBrowseQuery {
-    pub(super) async fn history_rows(
-        &self,
-        offset: usize,
-        limit: usize,
-    ) -> library::LibraryResult<Vec<AndroidBrowseRow>> {
-        let query = self.song_query().await?.expect("History query");
-        let rows = self
-            .database
-            .song_history_rows(query, offset, limit, &ReadCancellation::new())
-            .await?;
-        Ok(rows
-            .into_iter()
-            .enumerate()
-            .map(|(index, row)| {
-                let fields = self
-                    .display
-                    .row_fields
-                    .iter()
-                    .map(|field| AndroidFieldValue {
-                        id: *field,
-                        text: if *field == LibraryField::RowIndex {
-                            (offset + index + 1).to_string()
-                        } else {
-                            rufin_core::settings::presentation::history_field(&row, *field)
-                        },
-                    })
-                    .collect();
-                AndroidBrowseRow {
-                    fields,
-                    ..AndroidBrowseRow::new(AndroidBrowseItem::History { row })
-                }
-            })
-            .collect())
-    }
-
     fn track_field_values(
         &self,
         index: usize,
@@ -54,7 +19,7 @@ impl AndroidBrowseQuery {
             .collect()
     }
 
-    pub(super) fn track_row(&self, track: library::TrackRow, index: usize) -> AndroidBrowseRow {
+    pub(super) fn track_row(&self, track: library::TrackView, index: usize) -> AndroidBrowseRow {
         let fields = self.track_field_values(index, |field| {
             rufin_core::settings::presentation::track_field(&track, field)
         });
@@ -74,7 +39,7 @@ impl AndroidBrowseQuery {
 
     pub(super) async fn home_rows(
         &self,
-    ) -> library::LibraryResult<&Vec<(AndroidBrowseRow, SongSelection)>> {
+    ) -> library::LibraryResult<&Vec<(AndroidBrowseRow, TrackSelection)>> {
         self.home_snapshot
             .get_or_try_init(|| async {
                 let db = &self.database;
@@ -95,14 +60,14 @@ impl AndroidBrowseQuery {
                 let mut rows = Vec::new();
                 if let Some(row) = home.showcase {
                     let selection =
-                        SongQuery::new(SongScope::Album(row.album.album_key)).selection();
+                        CatalogQuery::tracks(TrackScope::Album(row.album.album_key)).selection();
                     let mut row: AndroidBrowseRow = row.into();
                     home_section(&mut row, library::HomeBlockKind::Showcase);
                     rows.push((row, selection));
                 }
                 for row in home.explore {
                     let selection =
-                        SongQuery::new(SongScope::Album(row.album.album_key)).selection();
+                        CatalogQuery::tracks(TrackScope::Album(row.album.album_key)).selection();
                     let mut row: AndroidBrowseRow = row.into();
                     home_section(&mut row, library::HomeBlockKind::Explore);
                     rows.push((row, selection));
@@ -117,14 +82,20 @@ impl AndroidBrowseQuery {
                     ),
                 ] {
                     for row in section.tracks {
-                        let selection = SongSelection::Tracks(Arc::from([row.track.track_key]));
+                        let selection = library::CatalogQuery::keys(
+                            library::CatalogKind::Track,
+                            None,
+                            vec![row.track.track_key.raw()],
+                        )
+                        .selection();
                         let mut row: AndroidBrowseRow = row.into();
                         home_section(&mut row, block);
                         rows.push((row, selection));
                     }
                     for row in section.albums {
                         let selection =
-                            SongQuery::new(SongScope::Album(row.album.album_key)).selection();
+                            CatalogQuery::tracks(TrackScope::Album(row.album.album_key))
+                                .selection();
                         let mut row: AndroidBrowseRow = row.into();
                         home_section(&mut row, block);
                         rows.push((row, selection));
@@ -137,7 +108,12 @@ impl AndroidBrowseQuery {
                         section.title.as_deref(),
                     );
                     for row in section.rows.tracks {
-                        let selection = SongSelection::Tracks(Arc::from([row.track.track_key]));
+                        let selection = library::CatalogQuery::keys(
+                            library::CatalogKind::Track,
+                            None,
+                            vec![row.track.track_key.raw()],
+                        )
+                        .selection();
                         let mut row: AndroidBrowseRow = row.into();
                         row.section = title.clone();
                         row.section_id = id.clone();
@@ -146,7 +122,8 @@ impl AndroidBrowseQuery {
                     }
                     for row in section.rows.albums {
                         let selection =
-                            SongQuery::new(SongScope::Album(row.album.album_key)).selection();
+                            CatalogQuery::tracks(TrackScope::Album(row.album.album_key))
+                                .selection();
                         let mut row: AndroidBrowseRow = row.into();
                         row.section = title.clone();
                         row.section_id = id.clone();
@@ -155,13 +132,14 @@ impl AndroidBrowseQuery {
                     }
                 }
                 for row in home.genres {
-                    let selection = SongQuery::new(SongScope::Genre(row.genre_key)).selection();
+                    let selection =
+                        CatalogQuery::tracks(TrackScope::Genre(row.genre_key)).selection();
                     rows.push((
                         AndroidBrowseRow {
                             section: localization::tr("Featured genres"),
                             section_id: "Genres".into(),
                             section_kind: "genres".into(),
-                            ..AndroidBrowseRow::new(AndroidBrowseItem::HomeGenre { row })
+                            ..AndroidBrowseRow::new(AndroidBrowseItem::Genre { row })
                         },
                         selection,
                     ));
@@ -195,75 +173,66 @@ impl AndroidBrowseQuery {
             .await
     }
 
+    pub(super) fn catalog_rows(&self, rows: CatalogRows, offset: usize) -> Vec<AndroidBrowseRow> {
+        match rows {
+            CatalogRows::Tracks(rows) => rows
+                .into_iter()
+                .enumerate()
+                .map(|(index, row)| self.track_row(row, offset + index))
+                .collect(),
+            CatalogRows::PlaylistEntries(rows) => rows
+                .into_iter()
+                .enumerate()
+                .map(|(index, row)| {
+                    let fields = self.track_field_values(offset + index, |field| {
+                        rufin_core::settings::presentation::track_field(&row.track, field)
+                    });
+                    AndroidBrowseRow {
+                        fields,
+                        ..AndroidBrowseRow::new(AndroidBrowseItem::PlaylistEntry { row })
+                    }
+                })
+                .collect(),
+            CatalogRows::Folders(_) => unreachable!("folder projection is handled above"),
+            CatalogRows::Albums(rows) => rows.into_iter().map(Into::into).collect(),
+            CatalogRows::AlbumDetails(rows) => rows
+                .into_iter()
+                .map(|item| match item {
+                    library::AlbumDetailRow::Album { album, .. } => {
+                        let mut row: AndroidBrowseRow = album.into();
+                        row.album_header = true;
+                        row
+                    }
+                    library::AlbumDetailRow::Track { track, index, .. } => {
+                        self.track_row(track, index)
+                    }
+                })
+                .collect(),
+            CatalogRows::Artists(rows) => rows
+                .into_iter()
+                .map(|row| artist_row(row, matches!(self.route, Route::AlbumArtists)))
+                .collect(),
+            CatalogRows::Genres(rows) => rows.into_iter().map(Into::into).collect(),
+            CatalogRows::Moods(rows) => rows.into_iter().map(Into::into).collect(),
+            CatalogRows::Playlists(rows) => rows.into_iter().map(Into::into).collect(),
+            CatalogRows::SmartPlaylists(rows) => rows.into_iter().map(Into::into).collect(),
+        }
+    }
+
     pub(super) async fn rows(
         &self,
         offset: usize,
         limit: usize,
     ) -> Result<Vec<AndroidBrowseRow>, library::LibraryError> {
-        if matches!(self.route, Route::History) {
-            return self.history_rows(offset, limit).await;
-        }
         if matches!(self.route, Route::Folders { .. }) {
             return self.folder_rows(offset, limit).await;
         }
-        if let Some(query) = self.song_query().await? {
-            if matches!(query.scope, SongScope::Playlist(_)) {
-                return Ok(self
-                    .database
-                    .song_playlist_rows(query, offset, limit, &ReadCancellation::new())
-                    .await?
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, row)| {
-                        let fields = self.track_field_values(offset + index, |field| {
-                            rufin_core::settings::presentation::playlist_entry_field(&row, field)
-                        });
-                        AndroidBrowseRow {
-                            fields,
-                            ..AndroidBrowseRow::new(AndroidBrowseItem::PlaylistEntry { row })
-                        }
-                    })
-                    .collect());
-            }
-            return Ok(self
-                .database
-                .song_rows(query, offset, limit, &ReadCancellation::new())
-                .await?
-                .into_iter()
-                .enumerate()
-                .map(|(index, row)| self.track_row(row, offset + index))
-                .collect());
-        }
         let cancel = ReadCancellation::new();
         match self.query().await? {
-            BrowseQuery::Collection(query) => Ok(
-                match query.rows(&self.database, offset, limit, &cancel).await? {
-                    CollectionRows::Albums(rows) => rows.into_iter().map(Into::into).collect(),
-                    CollectionRows::AlbumDetails(rows) => rows
-                        .into_iter()
-                        .map(|item| match item {
-                            library::AlbumDetailRow::Album { album, .. } => {
-                                let mut row: AndroidBrowseRow = album.into();
-                                row.album_header = true;
-                                row
-                            }
-                            library::AlbumDetailRow::Track { track, index, .. } => {
-                                self.track_row(track, index)
-                            }
-                        })
-                        .collect(),
-                    CollectionRows::Artists(rows) => rows
-                        .into_iter()
-                        .map(|row| artist_row(row, matches!(self.route, Route::AlbumArtists)))
-                        .collect(),
-                    CollectionRows::Genres(rows) => rows.into_iter().map(Into::into).collect(),
-                    CollectionRows::Moods(rows) => rows.into_iter().map(Into::into).collect(),
-                    CollectionRows::Playlists(rows) => rows.into_iter().map(Into::into).collect(),
-                    CollectionRows::SmartPlaylists(rows) => {
-                        rows.into_iter().map(Into::into).collect()
-                    }
-                },
-            ),
+            BrowseQuery::Tracks(query) | BrowseQuery::Collection(query) => Ok(self.catalog_rows(
+                query.rows(&self.database, offset, limit, &cancel).await?,
+                offset,
+            )),
             BrowseQuery::Releases(query) => {
                 if matches!(self.release_section, Some(ArtistReleaseSection::AppearsOn)) {
                     return Ok(Vec::new());

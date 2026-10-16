@@ -318,8 +318,14 @@ pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
         let cancellation = ReadCancellation::new();
         let genre = match genre_object_id {
             Some(object_id) => database
-                .genre_key_by_object(source, &object_id, &cancellation)
+                .catalog_keys(
+                    library::CatalogKind::Genre,
+                    Some(source),
+                    &[(&object_id).to_string()],
+                    &cancellation,
+                )
                 .await
+                .map(|keys| keys.into_iter().next().map(library::GenreKey::from_raw))
                 .ok()
                 .flatten(),
             None => None,

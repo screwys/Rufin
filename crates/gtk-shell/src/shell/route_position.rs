@@ -331,11 +331,9 @@ impl Drop for VisibleContent {
     }
 }
 
-// These classes belong to the row and cover presentation owners, not the theme.
+// Row data must be ready. Artwork tiles can display a placeholder while loading.
 fn presentation_pending(widget: &gtk::Widget) -> bool {
-    widget.has_css_class("row-pending")
-        || widget.has_css_class("track-skeleton")
-        || widget.has_css_class("cover-pending")
+    widget.has_css_class("row-pending") || widget.has_css_class("track-skeleton")
 }
 
 fn visible_pending(

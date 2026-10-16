@@ -168,16 +168,15 @@ mod tests {
             .await
             .unwrap();
         let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |update| {
+        database.observe_catalog(move |_, update| {
             let _ = sender.send(update);
             std::future::ready(())
         });
-        let scan = Scan::begin(&database, "source", "Source", "source", None)
+        database
+            .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
             .unwrap();
-        scan.finish().await.unwrap();
-        let publication = updates.try_recv().expect("catalog update");
-        assert!(publication.metadata);
+
         let cancellation = library::ReadCancellation::new();
         for (id, status, empty, identical, expected) in [
             ("old", 200, false, false, vec!["old"]),
@@ -218,11 +217,21 @@ mod tests {
                 .apply_items(&database, vec![format!("album:{id}")], vec![])
                 .await
                 .unwrap();
-            let outcome = updates.try_recv().expect("catalog update");
-            assert_eq!(!outcome.changed(), identical);
+            if identical {
+                assert!(
+                    updates.try_recv().is_err(),
+                    "unchanged native data stays quiet"
+                );
+            } else {
+                assert!(updates.try_recv().expect("catalog update").changed());
+            }
             let home = database
                 .home_page(
-                    publication.source,
+                    database
+                        .source_identity_key(&crate::SourceId::new("source"))
+                        .await
+                        .unwrap()
+                        .unwrap(),
                     None,
                     0,
                     0,
@@ -235,7 +244,7 @@ mod tests {
                 home.newly_added
                     .albums
                     .iter()
-                    .all(|album| album.album.track_count == 1)
+                    .all(|album| album.album.summary.track_count == 1)
             );
             let mut titles = home
                 .newly_added
@@ -272,34 +281,70 @@ mod tests {
             .await
             .unwrap();
         let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |update| {
+        database.observe_catalog(move |_, update| {
             let _ = sender.send(update);
             std::future::ready(())
         });
         let marker = library::Freshness::new(b"catalog".to_vec()).unwrap();
-        let mut scan = Scan::begin(
-            &database,
-            "source",
-            "Source",
-            "source",
-            Some(marker.clone()),
-        )
-        .await
-        .unwrap();
-        scan.write_tracks(&[(&track_from_navidrome(&baseline, "track", &item), None)])
+        database
+            .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
             .unwrap();
-        scan.write_tracks(&[(
-            &track_from_navidrome(
+        let catalog_source_id = ("source").to_string();
+        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+        let stamp = Some(catalog.start_observation().await.unwrap());
+        (async {
+            let mut batch = library::CatalogBatch::default();
+            let result = batch
+                .tracks
+                .extend_from_slice(&[(track_from_navidrome(&baseline, "track", &item)).clone()]);
+            catalog.apply_catalog(&batch, true).await?;
+            Ok::<_, library::LibraryError>(result)
+        })
+        .await
+        .unwrap();
+        (async {
+            let mut batch = library::CatalogBatch::default();
+            let result = batch.tracks.extend_from_slice(&[(track_from_navidrome(
                 &baseline,
                 "second",
                 &serde_json::json!({"id":"second","title":"Second"}),
-            ),
-            None,
-        )])
+            ))
+            .clone()]);
+            catalog.apply_catalog(&batch, true).await?;
+            Ok::<_, library::LibraryError>(result)
+        })
         .await
         .unwrap();
-        scan.finish().await.unwrap();
+        (async {
+            let update = {
+                if let Some(stamp) = stamp {
+                    catalog
+                        .complete_source_observation(
+                            stamp,
+                            &[
+                                "track", "album", "artist", "genre", "mood", "folder", "playlist",
+                            ],
+                            (Some(marker.clone())).as_ref(),
+                        )
+                        .await
+                        .unwrap();
+                }
+                if let Some(stamp) = stamp {
+                    catalog
+                        .complete_source_observation(stamp, &[], Some(&marker))
+                        .await
+                        .unwrap();
+                }
+                Ok::<_, library::LibraryError>(catalog.changes().clone())
+            }?;
+            database
+                .publish_catalog_update(&catalog_source_id, update)
+                .await;
+            Ok::<_, library::LibraryError>(())
+        })
+        .await
+        .unwrap();
         assert!(updates.try_recv().expect("catalog update").metadata);
         item["starred"] = true.into();
         item["rating"] = 4.into();
@@ -352,16 +397,21 @@ mod tests {
             "track",
             "navidrome:track:track",
         );
-        let row = database
-            .track_row_by_uri(&uri, &cancellation)
+        let row = library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
+            .rows(&database, 0, 256, &cancellation)
             .await
+            .map(|rows| match rows {
+                library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
+                _ => unreachable!(),
+            })
             .unwrap()
             .unwrap();
-        assert!(row.favorite);
-        assert_eq!(row.rating, Some(8));
-        assert_eq!(row.title, "Track");
+        assert!(row.state.favorite);
+        assert_eq!(row.state.rating, Some(8));
+        assert_eq!(row.metadata.title, "Track");
         assert!(
-            Scan::accept_freshness(&database, "source", &marker, &cancellation)
+            database
+                .accept_freshness("source", &marker, &cancellation)
                 .await
                 .unwrap()
         );

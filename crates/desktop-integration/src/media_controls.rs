@@ -1,7 +1,6 @@
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
 mod freedesktop {
     use std::cell::{Cell, RefCell};
-    use std::fmt::Write as _;
     use std::rc::Rc;
 
     use app_identity::{APP_ID, DISPLAY_NAME};
@@ -389,11 +388,16 @@ mod freedesktop {
         };
         let mut builder = Metadata::builder()
             .trackid(mpris_track_id(&entry.id))
-            .title(entry.title.clone())
-            .artist([entry.artist.clone()])
-            .album(entry.album.clone())
+            .title(entry.row.track.metadata.title.clone())
+            .artist([entry.row.track.metadata.artist.clone()])
+            .album(entry.row.track.metadata.album.clone())
             .length(Time::from_micros(
-                entry.duration_millis.saturating_mul(1_000),
+                entry
+                    .row
+                    .track
+                    .metadata
+                    .duration_millis
+                    .saturating_mul(1_000),
             ));
         if let Some(art_url) = art_url {
             builder = builder.art_url(art_url);
@@ -402,10 +406,7 @@ mod freedesktop {
     }
 
     fn mpris_track_id(media: &playback::CurrentMediaId) -> MprisTrackId {
-        let mut encoded = String::with_capacity(media.media_uri.len() * 2);
-        for byte in media.media_uri.as_bytes() {
-            let _written = write!(&mut encoded, "{byte:02x}");
-        }
+        let encoded = blake3::hash(media.media_uri.as_bytes()).to_hex();
         MprisTrackId::try_from(format!(
             "/io/github/screwys/Rufin/track/{}/{encoded}",
             media.run.map_or(0, playback::RunId::get)
@@ -479,6 +480,17 @@ mod freedesktop {
             let first_id = mpris_track_id(&first);
             let second_id = mpris_track_id(&second);
             assert_ne!(first_id, second_id);
+            let private = CurrentMediaId {
+                run: first.run,
+                media_uri: "https://user:secret@example.test/track?token=secret".into(),
+            };
+            let encoded = private
+                .media_uri
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            assert!(!mpris_track_id(&private).to_string().contains(&encoded));
 
             assert!(mpris_set_position_matches(Some(&playback), &first_id));
             assert!(!mpris_set_position_matches(Some(&playback), &second_id));

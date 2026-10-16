@@ -1,6 +1,5 @@
 package io.github.screwys.rufin.player
 
-import io.github.screwys.rufin.ui.PlayerArtwork
 import io.github.screwys.rufin.ui.ArtworkCache
 import io.github.screwys.rufin.app.RufinConnection
 
@@ -20,7 +19,7 @@ import io.github.screwys.rufin.core.AndroidVisualizerDrawing
 import io.github.screwys.rufin.core.AndroidRgb
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.shared.playback.*
-import io.github.screwys.rufin.shared.library.QueueItem
+import io.github.screwys.rufin.shared.library.TrackView
 import io.github.screwys.rufin.shared.library.FavoriteTarget
 import io.github.screwys.rufin.shared.library.QueueReorderTarget
 import io.github.screwys.rufin.shared.rufin_core.*
@@ -56,7 +55,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         private set
     var playback by mutableStateOf<AndroidPlaybackUpdate?>(null)
         private set
-    var currentItem by mutableStateOf<QueueItem?>(null)
+    var currentItem by mutableStateOf<TrackView?>(null)
         private set
     var favorite by mutableStateOf(false)
         private set
@@ -74,9 +73,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         playback?.transport?.takeIf { it.desiredPlaying }?.current?.id?.mediaUri
     }
     val currentId get() = playback?.transport?.current?.id
-    private var displayedArtwork by mutableStateOf<Pair<List<Byte>, PlayerArtwork>?>(null)
-    val artwork: PlayerArtwork? get() = displayedArtwork?.second
-    val displayedArtworkIdentity: List<Byte>? get() = displayedArtwork?.first
     var metadataLinks by mutableStateOf<AndroidPlayerMetadata?>(null)
         private set
     var outputChoices by mutableStateOf<List<RemoteOutput>>(emptyList())
@@ -115,7 +111,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
             currentContextId = null
             currentSourceRank = null
             currentContext = null
-            displayedArtwork = null
             metadataLinks = null
             if (service == null) return@collectLatest
             service.runtime.collectLatest { result ->
@@ -194,34 +189,17 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                                 val rowChanged = if (row == null) previousRow != null else previousRow == null ||
                                     row !== previousRow && !row.sameRow(previousRow)
                                 if (rowChanged) {
-                                    currentItem = row?.item()
+                                    currentItem = row?.track()
                                     currentContextId = row?.contextId()
                                     currentSourceRank = row?.sourceRank()
                                     currentContext = row?.let { Triple(it.contextTitle(), it.contextKind(), it.contextCategory()) }
                                 }
-                                val identity = currentItem?.artworkBinding?.toList()
                                 artworkRevision = update?.artworkRevision ?: 0UL
                                 artworkCache.updateRevision(artworkRevision)
-                                if (identity != null && rowChanged)
-                                    artworkCache.peek(identity, 1024)?.let { displayedArtwork = identity to it }
                                 favorite = update?.favorite ?: false
                                 sourceLabels = update?.sourceLabels.orEmpty()
                                 playback = update
                                 if (changed) refreshLyrics(player)
-                            }
-                        }
-                        snapshotFlow { currentItem?.artworkBinding?.toList()?.let { it to artworkRevision } }.collectLatest { key ->
-                            if (key == null) displayedArtwork = null
-                            else {
-                                val (identity, revision) = key
-                                artworkCache.peek(identity, 1024)?.let { displayedArtwork = identity to it }
-                                try {
-                                    val loaded = artworkCache.load(player, identity, 1024)
-                                    if (currentItem?.artworkBinding?.toList() == identity && artworkRevision == revision)
-                                        displayedArtwork = loaded?.let { identity to it }
-                                }
-                                catch (cancelled: CancellationException) { throw cancelled }
-                                catch (error: Exception) { reportError(error) }
                             }
                         }
                     }

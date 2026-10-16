@@ -95,7 +95,7 @@ pub async fn json<T: DeserializeOwned>(
     let checked = checked_response(request, policy).await?;
     let body =
         response_body_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
-    deserialize_json(body.reader(), &checked.request)
+    deserialize_json(body, &checked.request)
 }
 
 pub async fn json_with_header<T: DeserializeOwned>(
@@ -113,14 +113,17 @@ pub async fn json_with_header<T: DeserializeOwned>(
         .map(str::to_string);
     let body =
         response_body_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
-    Ok((deserialize_json(body.reader(), &checked.request)?, value))
+    Ok((deserialize_json(body, &checked.request)?, value))
 }
 
 fn deserialize_json<T: DeserializeOwned>(
-    body: impl std::io::Read,
+    mut body: impl Buf,
     request: &RequestMetadata,
 ) -> SourceResult<T> {
-    let mut deserializer = serde_json::Deserializer::from_reader(std::io::BufReader::new(body));
+    let bytes = body.copy_to_bytes(body.remaining());
+    let text = String::from_utf8_lossy(&bytes);
+    let text = replace_unpaired_surrogates(&text);
+    let mut deserializer = serde_json::Deserializer::from_str(&text);
     serde_path_to_error::deserialize::<_, T>(&mut deserializer).map_err(|error| {
         let field = error.path().to_string();
         warn!(
@@ -140,6 +143,40 @@ fn deserialize_json<T: DeserializeOwned>(
             error.inner()
         ))
     })
+}
+
+fn replace_unpaired_surrogates(text: &str) -> std::borrow::Cow<'_, str> {
+    let code = |offset| {
+        text.get(offset..offset + 6)
+            .and_then(|escape| escape.strip_prefix("\\u"))
+            .and_then(|hex| u16::from_str_radix(hex, 16).ok())
+    };
+    let mut result = std::borrow::Cow::Borrowed(text);
+    let mut position = 0;
+    while position + 1 < text.len() {
+        if text.as_bytes()[position] != b'\\' {
+            position += 1;
+            continue;
+        }
+        if let Some(value) = code(position)
+            && (0xd800..=0xdfff).contains(&value)
+        {
+            if value <= 0xdbff
+                && code(position + 6).is_some_and(|low| (0xdc00..=0xdfff).contains(&low))
+            {
+                position += 12;
+                continue;
+            }
+            result
+                .to_mut()
+                .replace_range(position..position + 6, "\\ufffd");
+            position += 6;
+        } else {
+            // Skip the escaped character, including a literal backslash before `u`.
+            position += 2;
+        }
+    }
+    result
 }
 
 pub async fn unit(request: reqwest::RequestBuilder, policy: RemoteHttpPolicy) -> SourceResult<()> {
@@ -515,8 +552,8 @@ mod tests {
 
     #[derive(Debug, Deserialize)]
     #[expect(dead_code, reason = "the fixture must fail before producing Songs")]
-    struct Songs {
-        songs: Vec<Song>,
+    struct Tracks {
+        songs: Vec<Track>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -524,35 +561,73 @@ mod tests {
         dead_code,
         reason = "the invalid duration is the deserialization boundary"
     )]
-    struct Song {
+    struct Track {
         duration: u32,
     }
 
     #[tokio::test]
     async fn json_reads_bounded_body() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/payload"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "value": "ok"
-            })))
-            .mount(&server)
-            .await;
-
         let client = Client::new();
-        let url = format!("{}/payload", server.uri());
-        let payload: Payload = json(
-            client.get(url),
-            POLICY,
-            BodyLimit {
-                max_bytes: 32,
-                context: "test JSON response",
-            },
-        )
-        .await
-        .expect("payload");
-
-        assert_eq!(payload.value, "ok");
+        for (body, expected) in [
+            (br#"{"value":"ok"}"#.to_vec(), "ok"),
+            (
+                serde_json::to_vec(
+                    &serde_json::json!({"value":"İstanbul; 東京; العربية; Ёжик; Édith"}),
+                )
+                .unwrap(),
+                "İstanbul; 東京; العربية; Ёжик; Édith",
+            ),
+            (b"{\"value\":\"Bad \xff title\"}".to_vec(), "Bad � title"),
+            (br#"{"value":"a\uD800b\udfff"}"#.to_vec(), "a�b�"),
+            (
+                br#"{"value":"\ud83d\ude00 \u00e9 \\uD800"}"#.to_vec(),
+                "😀 é \\uD800",
+            ),
+            (br#"{"value":"\ud800\ud800\udc00"}"#.to_vec(), "�𐀀"),
+        ] {
+            server.reset().await;
+            Mock::given(method("GET"))
+                .and(path("/payload"))
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+                .mount(&server)
+                .await;
+            let payload: Payload = json(
+                client.get(format!("{}/payload", server.uri())),
+                POLICY,
+                BodyLimit {
+                    max_bytes: 256,
+                    context: "test JSON response",
+                },
+            )
+            .await
+            .expect("payload");
+            assert_eq!(payload.value, expected);
+        }
+        for body in [
+            r#"{"value":"broken""#,
+            r#"{"value":"\ud80x"}"#,
+            r#"{"value":"\u123"}"#,
+        ] {
+            server.reset().await;
+            Mock::given(method("GET"))
+                .and(path("/payload"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(body))
+                .mount(&server)
+                .await;
+            assert!(
+                json::<Payload>(
+                    client.get(format!("{}/payload", server.uri())),
+                    POLICY,
+                    BodyLimit {
+                        max_bytes: 256,
+                        context: "test JSON response"
+                    }
+                )
+                .await
+                .is_err()
+            );
+        }
     }
 
     #[tokio::test]
@@ -567,7 +642,7 @@ mod tests {
             .await;
 
         let client = Client::new();
-        let error = json::<Songs>(
+        let error = json::<Tracks>(
             client.get(format!("{}/songs", server.uri())),
             POLICY,
             BodyLimit {

@@ -1,4 +1,5 @@
 {% import "macros.html" as m %}
+<div data-activity-sensitive="true">
 {% for section in sections %}
 {% if section.block == "Showcase" %}
   {% for row in section.items %}
@@ -30,3 +31,4 @@
   </section>
 {% endif %}
 {% endfor %}
+</div>

@@ -9,9 +9,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import io.github.screwys.rufin.ui.Artwork
-import io.github.screwys.rufin.ui.HoldInitialReveal
-import io.github.screwys.rufin.ui.ArtworkReadyContent
-import io.github.screwys.rufin.ui.ArtworkScene
 import io.github.screwys.rufin.ui.rememberArtwork
 import io.github.screwys.rufin.player.PlayerConnection
 import io.github.screwys.rufin.player.PlayerIconButton
@@ -45,10 +42,6 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
-    val artworkScene = page.artworkScene?.takeIf { it.key == page.contentKey }
-        ?: ArtworkScene(page.contentKey).also { page.artworkScene = it }
-    ArtworkReadyContent(modifier = Modifier.fillMaxSize(), owner = artworkScene) {
-    HoldInitialReveal(page.loading || rows.loadState.refresh is LoadState.Loading)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp + LocalPlayerBottomPadding.current)) {
         items(rows.itemCount, key = rows.itemKey { it.row.pin.toString() }) { index ->
             val item = rows[index]
@@ -75,7 +68,6 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
         }
         val failure = (rows.loadState.refresh as? LoadState.Error)?.error ?: (rows.loadState.append as? LoadState.Error)?.error
         failure?.let { error -> item { ErrorRow(error, translate("Retry"), rows::retry) } }
-    }
     }
     action?.let { item -> BrowseMenuSheet(model, browse, item, player, { action = null },
         { playlist = item; action = null }, { metadata = item; action = null },

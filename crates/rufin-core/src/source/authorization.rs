@@ -86,7 +86,7 @@ pub enum SourceAuthorizationMethod {
 pub(super) enum LoginEvent {
     Code { code: String, url: String },
     OpenBrowser(String),
-    Authorized(Authorization),
+    Authorized(Box<Authorization>),
 }
 
 #[derive(Clone, Default)]
@@ -129,6 +129,7 @@ impl SourceAuthorization {
             LoginEvent::Code { code, url } => SourceAuthorizationEvent::Code { code, url },
             LoginEvent::OpenBrowser(url) => SourceAuthorizationEvent::OpenBrowser { url },
             LoginEvent::Authorized(authorization) => {
+                let authorization = *authorization;
                 let kind = match &authorization {
                     Authorization::Jellyfin(_) => "jellyfin",
                     Authorization::Emby(_) => "emby",

@@ -1,31 +1,31 @@
-use library::Scan;
-
 use super::FileSource;
 use crate::{LocalImageRef, SourceResult};
 
 impl FileSource {
     pub(crate) async fn directory_image(
         &self,
-        scan: &Scan,
+        database: &library::Database,
+        source_id: &str,
         prefix: &str,
     ) -> SourceResult<Option<LocalImageRef>> {
-        directory_image_by_role(&self.source_id, scan, prefix, None).await
+        directory_image_by_role(database, source_id, prefix, None).await
     }
 
     pub(crate) async fn directory_artist_image_for(
         &self,
-        scan: &Scan,
+        database: &library::Database,
+        source_id: &str,
         prefix: &str,
         artist: &str,
         allow_generic: bool,
     ) -> SourceResult<Option<LocalImageRef>> {
-        directory_image_by_role(&self.source_id, scan, prefix, Some((artist, allow_generic))).await
+        directory_image_by_role(database, source_id, prefix, Some((artist, allow_generic))).await
     }
 }
 
 pub(crate) async fn directory_image_by_role(
-    source_id: &crate::SourceId,
-    scan: &Scan,
+    database: &library::Database,
+    source_id: &str,
     prefix: &str,
     artist: Option<(&str, bool)>,
 ) -> SourceResult<Option<LocalImageRef>> {
@@ -33,7 +33,9 @@ pub(crate) async fn directory_image_by_role(
     let mut best = None;
     let mut count = 0;
     loop {
-        let page = scan.file_artwork_image_page(prefix, &after).await?;
+        let page = database
+            .file_artwork_image_page(source_id, prefix, &after)
+            .await?;
         if page.is_empty() {
             break;
         }
@@ -70,7 +72,7 @@ pub(crate) async fn directory_image_by_role(
     Ok(best
         .filter(|(rank, _, _)| *rank != usize::MAX || artist.is_none() && count == 1)
         .map(|(_, path, revision)| LocalImageRef::File {
-            source_id: source_id.clone(),
+            source_id: crate::SourceId::new(source_id),
             path,
             revision: revision.unwrap_or_default(),
         }))

@@ -615,7 +615,7 @@ pub(super) async fn run_transfer(
     stream: &ResolvedStream,
     paths: &DownloadPaths,
     transfers: &TransferClients,
-    mut cancellation: oneshot::Receiver<()>,
+    cancellation: &mut oneshot::Receiver<()>,
 ) -> SourceResult<()> {
     prepare_download_directories(paths).await?;
     remove_file_if_present(&paths.record_part)
@@ -623,7 +623,7 @@ pub(super) async fn run_transfer(
         .map_err(SourceError::Other)?;
     let representation = representation_key(source_id, request, stream.redacted_uri());
     transfers
-        .download_cancellable(stream, &representation, paths, &mut cancellation)
+        .download_cancellable(stream, &representation, paths, cancellation)
         .await
 }
 
@@ -963,7 +963,16 @@ async fn migrate_released_download_records(
             && released.source_id == *source_id
         {
             let Some(media_uri) = database
-                .track_uris_for_source(source_key, &[released.track_id], &cancellation)
+                .selected_track_uris(
+                    &library::CatalogQuery::keys(
+                        library::CatalogKind::Track,
+                        Some(source_key),
+                        (&[released.track_id]).iter().map(|key| key.raw()).collect(),
+                    )
+                    .selection(),
+                    None,
+                    &cancellation,
+                )
                 .await
                 .map_err(|error| error.to_string())?
                 .pop()
@@ -1005,8 +1014,14 @@ async fn migrate_released_download_records(
             _ => continue,
         };
         let Some(track_id) = database
-            .track_key_by_object(source_key, &released.track_id, &cancellation)
+            .catalog_keys(
+                library::CatalogKind::Track,
+                Some(source_key),
+                &[(&released.track_id).to_string()],
+                &cancellation,
+            )
             .await
+            .map(|keys| keys.into_iter().next().map(library::TrackKey::from_raw))
             .map_err(|error| error.to_string())?
         else {
             continue;
@@ -1036,7 +1051,16 @@ async fn migrate_released_download_records(
             .map_err(|error| format!("could not inspect {}: {error}", audio.display()))?
             .len();
         let Some(media_uri) = database
-            .track_uris_for_source(source_key, &[track_id], &cancellation)
+            .selected_track_uris(
+                &library::CatalogQuery::keys(
+                    library::CatalogKind::Track,
+                    Some(source_key),
+                    (&[track_id]).iter().map(|key| key.raw()).collect(),
+                )
+                .selection(),
+                None,
+                &cancellation,
+            )
             .await
             .map_err(|error| error.to_string())?
             .pop()
@@ -1165,9 +1189,13 @@ pub(super) async fn attach_downloaded_files(
         .collect::<HashMap<_, _>>();
     let uris = by_media.keys().cloned().collect::<Vec<_>>();
     for page in uris.chunks(256) {
-        for track in database
-            .track_rows_by_uri(page, &cancellation)
+        for track in library::CatalogQuery::uris(library::CatalogKind::Track, (page).to_vec())
+            .rows(&database, 0, (page).len(), &cancellation)
             .await
+            .map(|rows| match rows {
+                library::CatalogRows::Tracks(rows) => rows,
+                _ => unreachable!("typed catalog projection"),
+            })
             .map_err(|error| error.to_string())?
         {
             if track.source_key != Some(source_key) {
@@ -1209,14 +1237,14 @@ pub(super) async fn attach_downloaded_files(
                         device_id: None,
                         inode: None,
                         parser_version: RECORD_VERSION as i64,
-                        title: track.title.clone(),
-                        album: track.album.clone(),
-                        artist: track.artist.clone(),
-                        disc_number: track.disc_number,
-                        track_number: track.track_number,
-                        duration_millis: track.duration_millis,
+                        title: track.metadata.title.clone(),
+                        album: track.metadata.album.clone(),
+                        artist: track.metadata.artist.clone(),
+                        disc_number: track.metadata.disc_number,
+                        track_number: track.metadata.track_number,
+                        duration_millis: track.metadata.duration_millis,
                         access_uri: paths.audio.access_uri()?,
-                        loudness_analysis_key: Some(track.loudness_analysis_key),
+                        loudness_analysis_key: Some(track.access.loudness_analysis_key),
                     }],
                 )
                 .await

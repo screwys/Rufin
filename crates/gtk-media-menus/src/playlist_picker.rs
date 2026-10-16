@@ -31,7 +31,7 @@ struct PlaylistChoice {
 
 #[derive(Clone)]
 struct ReadyPlaylistTracks {
-    selection: library::SongSelection,
+    selection: library::TrackSelection,
     title: String,
     preview_uris: Vec<String>,
 }
@@ -41,7 +41,7 @@ pub fn populate_context_playlist_picker(
     source: rufin_core::runtime::SourceHandle,
     feedback: Rc<dyn Fn(&OperationFeedback)>,
     popover: &gtk::PopoverMenu,
-) -> Rc<dyn Fn(Vec<library::PlaylistRow>, library::SongSelection, String, Vec<String>)> {
+) -> Rc<dyn Fn(Vec<library::PlaylistRow>, library::TrackSelection, String, Vec<String>)> {
     let resource = crate::ui_resource::PLAYLIST_PICKER_CONTEXT_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
@@ -196,10 +196,10 @@ struct PickerRow {
 pub fn playlist_picker_dialog(
     source: rufin_core::runtime::SourceHandle,
     artwork: Rc<gtk_widgets::artwork::ArtworkState>,
-    create_playlist: Rc<dyn Fn(String, library::SongSelection)>,
+    create_playlist: Rc<dyn Fn(String, library::TrackSelection)>,
     feedback: Rc<dyn Fn(&OperationFeedback)>,
     playlists: Vec<library::PlaylistRow>,
-    selection: library::SongSelection,
+    selection: library::TrackSelection,
     title: String,
     preview_uris: Vec<String>,
 ) -> (adw::Dialog, Rc<dyn Fn(Vec<library::PlaylistRow>)>) {
@@ -326,11 +326,7 @@ fn replace_picker_rows(
         let check = row.imp().check.get();
         let bindings = playlist_artwork(&playlist);
         let cover = artwork
-            .cover_group_projection_for_artwork(
-                &bindings,
-                48,
-                gtk_widgets::artwork::THUMB_COVER_SIZE as i32,
-            )
+            .cover_group_projection_for_artwork(&bindings, 48, 48, false)
             .widget();
         cover.add_css_class("context-playlist-cover");
         row.imp().cover_host.append(&cover);

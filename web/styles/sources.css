@@ -5,6 +5,16 @@
   font-size: 12px;
 }
 
+#source-progress:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#source-progress-label {
+  flex: 1;
+}
+
 .list-card {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;

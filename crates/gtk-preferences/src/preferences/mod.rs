@@ -1104,7 +1104,7 @@ fn general_page(
             {
                 let source = distinct_track_covers_shell.products.source.clone();
                 gtk::glib::spawn_future_local(async move {
-                    let _ = source.refresh_source(selected.source_id).await;
+                    let _ = source.refresh_source(selected.source_id, false).await;
                 });
             }
         }

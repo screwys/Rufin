@@ -1,5 +1,5 @@
 use super::Route;
-use library::{AlbumArtistLink, AlbumRow, TrackArtistLink, TrackRow};
+use library::{AlbumArtistLink, AlbumView, TrackArtistLink, TrackView};
 use std::ops::Range;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -147,15 +147,15 @@ impl DetailLinks {
     }
 }
 
-pub fn track_artist_links(track: &TrackRow) -> DetailLinks {
-    let album_artist = track.artists.is_empty();
-    let credits = if track.artists.is_empty() {
-        &track.album_artists
+pub fn track_artist_links(track: &TrackView) -> DetailLinks {
+    let album_artist = track.links.artists.is_empty();
+    let credits = if track.links.artists.is_empty() {
+        &track.links.album_artists
     } else {
-        &track.artists
+        &track.links.artists
     };
     DetailLinks::artist_text(
-        &track.artist,
+        &track.metadata.artist,
         credits,
         |credit: &TrackArtistLink| credit.media_uri.clone(),
         |credit| credit.name.as_str(),
@@ -193,28 +193,28 @@ pub fn metadata_links(
 
 pub use crate::settings::presentation::joined_credits;
 
-pub fn track_album_artist_links(track: &TrackRow) -> DetailLinks {
-    let text = joined_credits(&track.album_artists);
+pub fn track_album_artist_links(track: &TrackView) -> DetailLinks {
+    let text = joined_credits(&track.links.album_artists);
     DetailLinks::artist_text(
         &text,
-        &track.album_artists,
+        &track.links.album_artists,
         |credit: &TrackArtistLink| credit.media_uri.clone(),
         |credit| credit.name.as_str(),
         true,
     )
 }
 
-pub fn track_artist_album_links(track: &TrackRow) -> DetailLinks {
+pub fn track_artist_album_links(track: &TrackView) -> DetailLinks {
     let mut links = track_artist_links(track);
-    if track.album.trim().is_empty() {
+    if track.metadata.album.trim().is_empty() {
         return links;
     }
     if !links.text.is_empty() {
         links.text.push_str(" / ");
     }
     let start = links.text.len();
-    links.text.push_str(&track.album);
-    if let Some(album_uri) = &track.album_media_uri {
+    links.text.push_str(&track.metadata.album);
+    if let Some(album_uri) = &track.links.album_media_uri {
         links.links.push(DetailLink {
             range: start..links.text.len(),
             route: Route::AlbumDetail(album_uri.clone()),
@@ -223,10 +223,10 @@ pub fn track_artist_album_links(track: &TrackRow) -> DetailLinks {
     links
 }
 
-pub fn album_artist_links(album: &AlbumRow) -> DetailLinks {
+pub fn album_artist_links(album: &AlbumView) -> DetailLinks {
     DetailLinks::artist_text(
-        &album.display_artist,
-        &album.album_artists,
+        &album.metadata.artist,
+        &album.links.album_artists,
         |credit: &AlbumArtistLink| credit.media_uri.clone(),
         |credit| credit.name.as_str(),
         true,

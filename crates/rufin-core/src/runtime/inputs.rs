@@ -1,8 +1,8 @@
 use crate::SettingsHandle;
-use library::{FolderKey, FolderRow, PlaylistKey, SourceKey};
+use library::{FolderChoice, FolderKey, PlaylistKey, SourceKey};
 use std::sync::Arc;
 
-use super::source::{ConfiguredSources, SourceOperation, SourceProgress};
+use super::source::{ConfiguredSources, SourceOperation};
 use super::{DiagnosticsHandle, ProductHandles, ProductReceivers};
 
 #[derive(Clone)]
@@ -11,9 +11,7 @@ pub struct SelectedLibrary {
     pub source_key: SourceKey,
     pub music_folder_key: Option<FolderKey>,
     pub music_folder_object_id: Option<String>,
-    pub music_folders: Arc<[FolderRow]>,
-    pub(crate) artwork_digest: [u8; 32],
-    pub(crate) local_access_status: super::source::LocalAccessStatus,
+    pub music_folders: Arc<[FolderChoice]>,
 }
 
 pub enum SourceEvent {
@@ -23,11 +21,6 @@ pub enum SourceEvent {
         selected: SelectedLibrary,
     },
     Operation(SourceOperation),
-    ArtworkPreparation {
-        source_key: SourceKey,
-        revision: u64,
-        progress: Option<SourceProgress>,
-    },
     CatalogPublished(CatalogPublication),
     Notice(SourceNotice),
     PlaylistSourceMismatch(sources::SourceId),
@@ -47,14 +40,22 @@ pub struct CatalogPublication {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum CatalogChange {
-    /// Completed source acquisition; refresh selected folder/count summaries too.
-    Acquired,
+    Activity,
     Scope,
     Broad,
     Home,
     Playlists(Option<PlaylistKey>),
     Album(String),
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct CatalogRevision {
+    pub catalog: u64,
+    pub activity: u64,
+    pub change: Option<CatalogChange>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

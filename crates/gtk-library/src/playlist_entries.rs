@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-use library::{PlaylistEntryRow, PlaylistKey};
+use library::{PlaylistEntryView, PlaylistKey};
 use localization::msgid;
 use std::sync::Arc;
 
@@ -43,7 +43,7 @@ use gtk_widgets::recycled_cells::{
     RecycledArtworkCell, RecycledMergedCell, RecycledTextCell, list_cell,
 };
 use gtk_widgets::sparse_model::connect_sparse_bind;
-use rufin_core::settings::presentation::playlist_entry_field;
+use rufin_core::settings::presentation::track_field;
 
 #[derive(Clone)]
 pub struct PlaylistEntriesView {
@@ -110,7 +110,7 @@ impl PlaylistEntriesView {
         &self,
         request: PlaylistEntryProjectionRequest,
         count: usize,
-        rows: Vec<PlaylistEntryRow>,
+        rows: Vec<PlaylistEntryView>,
     ) {
         let empty = count == 0;
         self.model.replace_prepared(count, request, rows);
@@ -144,7 +144,7 @@ impl CatalogUi {
         writable: bool,
         count: usize,
         first_row_position: usize,
-        first_rows: Vec<PlaylistEntryRow>,
+        first_rows: Vec<PlaylistEntryView>,
     ) -> PlaylistEntriesView {
         let settings = self
             .settings
@@ -288,7 +288,7 @@ fn playlist_entry_table(
         move |field| playlist_entry_column(&column_shell, field, playlist, playing.clone()),
         playlist_entry_column_width,
         false,
-        Some(Box::new(move |position, _: PlaylistEntryRow| {
+        Some(Box::new(move |position, _: PlaylistEntryView| {
             activate_model.activate(position, queue.clone());
         })),
         Some(selection.selection_model()),
@@ -341,7 +341,7 @@ fn playlist_entry_number_column(
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let entry = item_at_from_item::<PlaylistEntryRow>(item);
+        let entry = item_at_from_item::<PlaylistEntryView>(item);
         let Some(entry) = entry else {
             return;
         };
@@ -349,7 +349,7 @@ fn playlist_entry_number_column(
             return;
         };
         set_track_row_index_text(&cell, &playlist_entry_number(item.position(), true));
-        bind_playing.bind(cell.upcast_ref(), item.position(), &entry.media_uri);
+        bind_playing.bind(cell.upcast_ref(), item.position(), &entry.track.media_uri);
     });
     factory.connect_unbind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -388,7 +388,7 @@ fn playlist_entry_image_column(
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let entry = item_at_from_item::<PlaylistEntryRow>(item);
+        let entry = item_at_from_item::<PlaylistEntryView>(item);
         let Some(entry) = entry else {
             return;
         };
@@ -398,9 +398,8 @@ fn playlist_entry_image_column(
         let cover = cell.artwork();
         bind_shell.artwork.bind_artwork_tile(
             &cover,
-            opaque_artwork(entry.artwork_binding.as_deref()),
+            opaque_artwork(entry.track.artwork_binding.as_deref()),
             width,
-            gtk_widgets::artwork::THUMB_COVER_SIZE,
         );
     });
     let clear_shell = Rc::clone(shell);
@@ -436,7 +435,7 @@ fn playlist_entry_favorite_column(
             Rc::new(move || {
                 favorite_current()
                     .as_ref()
-                    .map(|entry| track_favorite_key(&entry.media_uri))
+                    .map(|entry| track_favorite_key(&entry.track.media_uri))
             }),
             &button,
         );
@@ -447,7 +446,7 @@ fn playlist_entry_favorite_column(
                 return;
             };
             click_shell.set_favorite_with_feedback(
-                library::FavoriteTarget::Track(entry.media_uri.clone()),
+                library::FavoriteTarget::Track(entry.track.media_uri.clone()),
                 !favorite_button_is_active(button),
                 Some(button),
             );
@@ -458,14 +457,14 @@ fn playlist_entry_favorite_column(
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let entry = item_at_from_item::<PlaylistEntryRow>(item);
+        let entry = item_at_from_item::<PlaylistEntryView>(item);
         let Some(entry) = entry else {
             return;
         };
         let Some(button) = gtk_widgets::recycled_cells::row_favorite_button(item) else {
             return;
         };
-        set_favorite_button_active(&button, entry.favorite);
+        set_favorite_button_active(&button, entry.track.state.favorite);
         button.set_sensitive(true);
     });
     factory.connect_unbind(move |_, item| {
@@ -520,7 +519,7 @@ fn playlist_entry_title_column(
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let entry = item_at_from_item::<PlaylistEntryRow>(item);
+        let entry = item_at_from_item::<PlaylistEntryView>(item);
         let Some(entry) = entry else {
             return;
         };
@@ -531,18 +530,20 @@ fn playlist_entry_title_column(
         let title = cell.title();
         bind_shell.artwork.bind_artwork_tile(
             &cover,
-            opaque_artwork(entry.artwork_binding.as_deref()),
+            opaque_artwork(entry.track.artwork_binding.as_deref()),
             36,
-            gtk_widgets::artwork::THUMB_COVER_SIZE,
         );
-        title.set_text(&entry.title);
+        title.set_text(&entry.track.metadata.title);
         cell.bind_subtitle(playlist_entry_field_links(&entry, LibraryField::Artist));
         cell.subtitle().set_visible(true);
         bind_shell.downloads.bind_download_badge(
             &cell.downloaded().expect("playlist title badge"),
-            gtk_widgets::downloads::media_download_badge(&entry.media_uri, entry.is_downloaded),
+            gtk_widgets::downloads::media_download_badge(
+                &entry.track.media_uri,
+                entry.track.access.is_downloaded,
+            ),
         );
-        bind_playing.bind(title.upcast_ref(), item.position(), &entry.media_uri);
+        bind_playing.bind(title.upcast_ref(), item.position(), &entry.track.media_uri);
     });
     let clear_shell = Rc::clone(shell);
     factory.connect_unbind(move |_, item| {
@@ -609,7 +610,7 @@ fn playlist_entry_text_column(
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let entry = item_at_from_item::<PlaylistEntryRow>(item);
+        let entry = item_at_from_item::<PlaylistEntryView>(item);
         let Some(entry) = entry else {
             return;
         };
@@ -618,7 +619,7 @@ fn playlist_entry_text_column(
         };
         let label = cell.label();
         if field == LibraryField::Title {
-            bind_playing.bind(label.upcast_ref(), item.position(), &entry.media_uri);
+            bind_playing.bind(label.upcast_ref(), item.position(), &entry.track.media_uri);
         }
         if matches!(
             field,
@@ -626,7 +627,7 @@ fn playlist_entry_text_column(
         ) {
             cell.bind_links(playlist_entry_field_links(&entry, field));
         } else {
-            label.set_text(&playlist_entry_field(&entry, field));
+            label.set_text(&track_field(&entry.track, field));
         }
     });
     factory.connect_unbind(move |_, item| {
@@ -645,11 +646,11 @@ fn playlist_entry_text_column(
     column
 }
 
-fn list_item_entry(item: &gtk::ListItem) -> Rc<dyn Fn() -> Option<PlaylistEntryRow>> {
+fn list_item_entry(item: &gtk::ListItem) -> Rc<dyn Fn() -> Option<PlaylistEntryView>> {
     let item = item.downgrade();
     Rc::new(move || {
         item.upgrade()
-            .and_then(|item| item_at_from_item::<PlaylistEntryRow>(&item))
+            .and_then(|item| item_at_from_item::<PlaylistEntryView>(&item))
     })
 }
 
@@ -657,7 +658,7 @@ fn install_playlist_entry_context(
     target: &impl IsA<gtk::Widget>,
     shell: &Rc<CatalogUi>,
     playlist: PlaylistKey,
-    current: Rc<dyn Fn() -> Option<PlaylistEntryRow>>,
+    current: Rc<dyn Fn() -> Option<PlaylistEntryView>>,
 ) {
     let shell = Rc::downgrade(shell);
     install_context_menu_openers(
@@ -685,7 +686,7 @@ fn install_playlist_entry_drag(
     target: &impl IsA<gtk::Widget>,
     shell: &Rc<CatalogUi>,
     playlist: PlaylistKey,
-    current: Rc<dyn Fn() -> Option<PlaylistEntryRow>>,
+    current: Rc<dyn Fn() -> Option<PlaylistEntryView>>,
 ) {
     target.as_ref().set_valign(gtk::Align::Fill);
     let drag_source = gtk::DragSource::builder()
@@ -701,8 +702,9 @@ fn install_playlist_entry_drag(
         drag_preview.clear();
         let shell = drag_shell.upgrade()?;
         let entry = drag_current()?;
-        let title = entry.title.clone();
+        let title = entry.track.metadata.title.clone();
         let artwork = entry
+            .track
             .artwork_binding
             .as_deref()
             .map(artwork::ArtworkBinding::opaque)
@@ -742,7 +744,15 @@ fn install_playlist_entry_drag(
         if selection.playlist != playlist || !selection.writable || selection.count != 1 {
             return false;
         }
-        let library::SongSelection::PlaylistEntries(order) = &selection.input else {
+        let library::TrackSelection::Query {
+            query:
+                library::CatalogQuery {
+                    subject: library::CatalogSubject::PlaylistEntries { keys: order },
+                    ..
+                },
+            ranges: None,
+        } = &selection.input
+        else {
             return false;
         };
         let Some(entry) = order.first().copied() else {
@@ -767,12 +777,21 @@ fn install_playlist_entry_drag(
             .library_list(LibraryListKey::PlaylistTracks);
         let after = after
             != (settings.descending
-                && settings.sort_key.track_sort() == library::TrackSort::Position);
+                && settings.sort_key.catalog_sort() == library::CatalogSort::Position);
         let database = Arc::clone(&shell.library);
         let task = shell.runtime.spawn(async move {
-            database
-                .playlist_entry_rows(&[entry], &library::ReadCancellation::new())
+            library::CatalogQuery::playlist_entries((&[entry]).to_vec())
+                .rows(
+                    &database,
+                    0,
+                    (&[entry]).len(),
+                    &library::ReadCancellation::new(),
+                )
                 .await
+                .map(|rows| match rows {
+                    library::CatalogRows::PlaylistEntries(rows) => rows,
+                    _ => unreachable!("typed catalog projection"),
+                })
         });
         let weak = Rc::downgrade(&shell);
         glib::spawn_future_local(async move {
@@ -802,7 +821,7 @@ struct PlaylistEntryGridCell {
     body: CollectionGridCardCell,
     shell: Rc<CatalogUi>,
     cover: gtk_widgets::artwork::ArtworkTile,
-    current: Rc<RefCell<Option<PlaylistEntryRow>>>,
+    current: Rc<RefCell<Option<PlaylistEntryView>>>,
     playing: TrackRowPlayingIndicator,
 }
 
@@ -851,9 +870,8 @@ impl PlaylistEntryGridCell {
             .remove_css_class("collection-grid-cover-skeleton");
         self.shell.artwork.bind_artwork_tile(
             &self.cover,
-            opaque_artwork(entry.artwork_binding.as_deref()),
+            opaque_artwork(entry.track.artwork_binding.as_deref()),
             COLLECTION_GRID_MAX_CARD_WIDTH,
-            gtk_widgets::artwork::LARGE_COVER_SIZE,
         );
     }
 
@@ -866,20 +884,26 @@ impl PlaylistEntryGridCell {
     }
 }
 
-impl ReusableCollectionGridCell<PlaylistEntryRow> for PlaylistEntryGridCell {
+impl ReusableCollectionGridCell<PlaylistEntryView> for PlaylistEntryGridCell {
     fn widget(&self) -> gtk::Widget {
         self.body.widget()
     }
 
-    fn bind(&self, position: u32, entry: PlaylistEntryRow) {
-        self.playing
-            .bind(self.body.title.upcast_ref(), position, &entry.media_uri);
-        self.body.bind(&entry.title, |field| {
+    fn bind(&self, position: u32, entry: PlaylistEntryView) {
+        self.playing.bind(
+            self.body.title.upcast_ref(),
+            position,
+            &entry.track.media_uri,
+        );
+        self.body.bind(&entry.track.metadata.title, |field| {
             playlist_entry_field_links(&entry, field)
         });
         self.body.set_download_target(
             &self.shell,
-            gtk_widgets::downloads::media_download_badge(&entry.media_uri, entry.is_downloaded),
+            gtk_widgets::downloads::media_download_badge(
+                &entry.track.media_uri,
+                entry.track.access.is_downloaded,
+            ),
         );
         self.current.replace(Some(entry));
         self.bind_current_artwork();
@@ -899,7 +923,7 @@ impl ReusableCollectionGridCell<PlaylistEntryRow> for PlaylistEntryGridCell {
     fn apply_fields(&self, fields: &[LibraryField]) {
         self.body.replace_fields(&self.shell, fields);
         if let Some(entry) = self.current.borrow().as_ref() {
-            self.body.bind(&entry.title, |field| {
+            self.body.bind(&entry.track.metadata.title, |field| {
                 playlist_entry_field_links(entry, field)
             });
         }
@@ -929,18 +953,18 @@ fn playlist_entry_grid(
         move |fields| {
             PlaylistEntryGridCell::new(Rc::clone(&cell_shell), fields, playlist, playing.clone())
         },
-        move |position, _: PlaylistEntryRow| activate_model.activate(position, queue.clone()),
+        move |position, _: PlaylistEntryView| activate_model.activate(position, queue.clone()),
         |_| {},
     )
 }
 
-fn playlist_entry_field_links(entry: &PlaylistEntryRow, field: LibraryField) -> DetailLinks {
+fn playlist_entry_field_links(entry: &PlaylistEntryView, field: LibraryField) -> DetailLinks {
     gtk_widgets::detail_links::metadata_links(
         field,
-        &playlist_entry_field(entry, field),
-        entry.album_media_uri.as_deref(),
-        &entry.artists,
-        &entry.album_artists,
+        &track_field(&entry.track, field),
+        entry.track.links.album_media_uri.as_deref(),
+        &entry.track.links.artists,
+        &entry.track.links.album_artists,
     )
 }
 

@@ -5,14 +5,14 @@ import androidx.paging.*
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
 import io.github.screwys.rufin.shared.downloads.*
-import io.github.screwys.rufin.shared.library.TrackRow
+import io.github.screwys.rufin.shared.library.TrackView
 import io.github.screwys.rufin.shared.rufin_core.SettingsOwner
 import io.github.screwys.rufin.shared.rufin_core.SourceSummary
 import io.github.screwys.rufin.shared.playback.StreamQuality
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
-internal data class DownloadRow(val job: DownloadQueueItem, val preview: TrackRow?)
+internal data class DownloadRow(val job: DownloadQueueItem, val preview: TrackView?)
 internal data class DownloadSource(val source: SourceSummary, val settings: SourceDownloadSettings)
 internal fun DownloadRule.title() = translate(when (this) {
     DownloadRule.ENTIRE_LIBRARY -> "Entire Library"

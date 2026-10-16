@@ -5,7 +5,205 @@ use std::{
     fs::File,
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
+
+pub(super) enum ExchangeFolder {
+    Local(PathBuf),
+    Remote {
+        source: Arc<sources::Source>,
+        path: String,
+    },
+    Document(Box<sources::FileSource>),
+}
+
+pub(super) struct ExchangeFile {
+    pub path: String,
+    pub version: Option<String>,
+}
+
+impl ExchangeFile {
+    pub fn name(&self) -> &str {
+        sources::FileSource::file_name(&self.path)
+    }
+}
+
+impl ExchangeFolder {
+    pub fn new(owner: &super::ConnectOwner, destination: Destination) -> Result<Self, String> {
+        Ok(match destination {
+            Destination::Local { path } => Self::Local(path),
+            Destination::Remote { source_id, path } => Self::Remote {
+                source: owner.source.client(&source_id)?,
+                path,
+            },
+            Destination::Document { uri } => {
+                Self::Document(Box::new(sources::FileSource::document_profile(
+                    sources::DocumentRoot::new(uri, "").map_err(error)?,
+                )))
+            }
+        })
+    }
+
+    fn native(&self) -> Result<&sources::FileSource, String> {
+        match self {
+            Self::Remote { source, .. } => source.profile_file_source().map_err(error),
+            Self::Document(source) => Ok(source),
+            Self::Local(_) => unreachable!("Local exchange uses filesystem operations"),
+        }
+    }
+
+    fn remote_path(&self, relative: &str) -> String {
+        let Self::Remote { path, .. } = self else {
+            return relative.into();
+        };
+        [path.trim_matches('/'), relative.trim_matches('/')]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
+    pub async fn ensure(&self, relative: &str) -> Result<(), String> {
+        match self {
+            Self::Local(path) => tokio::fs::create_dir_all(path.join(relative))
+                .await
+                .map_err(error),
+            _ => self
+                .native()?
+                .ensure_profile_folder(&self.remote_path(relative))
+                .await
+                .map_err(error),
+        }
+    }
+
+    pub async fn visit<F, Fut>(&self, relative: &str, mut visit: F) -> Result<(), String>
+    where
+        F: FnMut(ExchangeFile) -> Fut + Send,
+        Fut: std::future::Future<Output = Result<(), String>> + Send,
+    {
+        match self {
+            Self::Local(path) => {
+                let mut directory = match tokio::fs::read_dir(path.join(relative)).await {
+                    Ok(directory) => directory,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                    Err(failure) => return Err(error(failure)),
+                };
+                while let Some(entry) = directory.next_entry().await.map_err(error)? {
+                    let name = entry.file_name();
+                    let Some(name) = name
+                        .to_str()
+                        .filter(|name| name.ends_with(".rufin-connect"))
+                    else {
+                        continue;
+                    };
+                    let metadata = entry.metadata().await.map_err(error)?;
+                    if metadata.is_file() {
+                        visit(ExchangeFile {
+                            path: if relative.is_empty() {
+                                name.into()
+                            } else {
+                                format!("{relative}/{name}")
+                            },
+                            version: Some(format!(
+                                "{:?}:{}",
+                                metadata.modified().map_err(error)?,
+                                metadata.len()
+                            )),
+                        })
+                        .await?;
+                    }
+                }
+                Ok(())
+            }
+            _ => match self
+                .native()?
+                .visit_files(
+                    &self.remote_path(relative),
+                    ".rufin-connect",
+                    |(path, version)| {
+                        let next = visit(ExchangeFile { path, version });
+                        async move { next.await.map_err(sources::SourceError::Other) }
+                    },
+                )
+                .await
+            {
+                Ok(()) | Err(sources::SourceError::NotFound) => Ok(()),
+                Err(failure) => Err(error(failure)),
+            },
+        }
+    }
+
+    pub async fn read(
+        &self,
+        file: &ExchangeFile,
+        target: &Path,
+    ) -> Result<Option<PathBuf>, String> {
+        match self {
+            Self::Local(path) => Ok(Some(path.join(&file.path))),
+            _ => self
+                .native()?
+                .copy_file(&file.path, target)
+                .await
+                .map(|file| file.map(|_| target.into()))
+                .map_err(error),
+        }
+    }
+
+    pub async fn read_named(
+        &self,
+        relative: &str,
+        target: &Path,
+    ) -> Result<Option<PathBuf>, String> {
+        if let Self::Local(path) = self {
+            let path = path.join(relative);
+            return tokio::fs::try_exists(&path)
+                .await
+                .map(|exists| exists.then_some(path))
+                .map_err(error);
+        }
+        self.read(
+            &ExchangeFile {
+                path: self.remote_path(relative),
+                version: None,
+            },
+            target,
+        )
+        .await
+    }
+
+    pub async fn write(
+        &self,
+        relative: &str,
+        output: tempfile::NamedTempFile,
+    ) -> Result<ExchangeFile, String> {
+        let (path, version) = match self {
+            Self::Local(path) => {
+                let path = path.join(relative);
+                install(output, path.clone()).await?;
+                let metadata = tokio::fs::metadata(path).await.map_err(error)?;
+                (
+                    relative.into(),
+                    Some(format!(
+                        "{:?}:{}",
+                        metadata.modified().map_err(error)?,
+                        metadata.len()
+                    )),
+                )
+            }
+            _ => {
+                let path = self.remote_path(relative);
+                let source = self.native()?;
+                source
+                    .write_profile_file(&path, output, Some(None))
+                    .await
+                    .map_err(error)?;
+                let version = source.profile_file_version(&path).await.map_err(error)?;
+                (path, version)
+            }
+        };
+        Ok(ExchangeFile { path, version })
+    }
+}
 
 const MAGIC: &[u8; 8] = b"RUFINCX2";
 const UNCOMPRESSED_MAGIC: &[u8; 8] = b"RUFINCX1";

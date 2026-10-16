@@ -456,9 +456,8 @@ fn install(root: &Path) -> Result<()> {
     let online = devices
         .lines()
         .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let id = fields.next()?;
-            (fields.next()? == "device").then_some(id)
+            let (id, status) = line.split_once('\t')?;
+            (status.trim() == "device").then_some(id)
         })
         .collect::<Vec<_>>();
     let requested = env::var("ANDROID_SERIAL").ok();

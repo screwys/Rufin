@@ -4,7 +4,7 @@ use adw::prelude::*;
 use artwork::ArtworkBinding;
 
 use super::ArtworkState;
-use super::{ArtworkTile, LARGE_COVER_SIZE, THUMB_COVER_SIZE, cover_fetch_size_for_display};
+use super::ArtworkTile;
 
 #[derive(Clone)]
 pub struct CoverGroupProjection {
@@ -14,7 +14,6 @@ pub struct CoverGroupProjection {
     quadrants: Rc<Vec<ArtworkTile>>,
     size: Rc<Cell<i32>>,
     render_size: i32,
-    fetch_sizes: (u32, u32),
 }
 
 impl CoverGroupProjection {
@@ -31,7 +30,6 @@ impl CoverGroupProjection {
                 &self.single,
                 artwork.first().cloned().unwrap_or_else(ArtworkBinding::new),
                 self.render_size,
-                self.fetch_sizes.0,
             );
             self.root.set_visible_child_name("single");
             return;
@@ -40,12 +38,7 @@ impl CoverGroupProjection {
         shell.clear_artwork_tile(&self.single);
         let cell_size = (self.render_size / 2).max(1);
         for (index, tile) in self.quadrants.iter().enumerate() {
-            shell.bind_artwork_tile(
-                tile,
-                artwork[index % artwork.len()].clone(),
-                cell_size,
-                self.fetch_sizes.1,
-            );
+            shell.bind_artwork_tile(tile, artwork[index % artwork.len()].clone(), cell_size);
         }
         self.root.set_visible_child_name("grid");
     }
@@ -78,28 +71,19 @@ impl ArtworkState {
         artwork: &[ArtworkBinding],
         size: i32,
         render_size: i32,
+        mosaic: bool,
     ) -> CoverGroupProjection {
         let render_size = render_size.max(1);
-        let fetch_size = cover_fetch_size_for_display(render_size);
-        self.cover_group_projection(
-            artwork,
-            Some(size.max(1)),
-            render_size,
-            (fetch_size, fetch_size),
-        )
+        self.cover_group_projection(artwork, Some(size.max(1)), render_size, mosaic)
     }
 
     pub fn elastic_cover_group_projection_for_artwork(
         self: &Rc<Self>,
         artwork: &[ArtworkBinding],
         render_size: i32,
+        mosaic: bool,
     ) -> CoverGroupProjection {
-        self.cover_group_projection(
-            artwork,
-            None,
-            render_size.max(1),
-            (LARGE_COVER_SIZE, THUMB_COVER_SIZE),
-        )
+        self.cover_group_projection(artwork, None, render_size.max(1), mosaic)
     }
 
     fn cover_group_projection(
@@ -107,7 +91,7 @@ impl ArtworkState {
         artwork: &[ArtworkBinding],
         size: Option<i32>,
         render_size: i32,
-        fetch_sizes: (u32, u32),
+        mosaic: bool,
     ) -> CoverGroupProjection {
         let root = gtk::Stack::new();
         if let Some(size) = size {
@@ -141,7 +125,7 @@ impl ArtworkState {
         }
         let cell_size = size.map(|size| (size / 2).max(1));
         let quadrants = Rc::new(
-            (0..4)
+            (0..if mosaic { 4 } else { 0 })
                 .map(|index| {
                     let tile = cell_size
                         .map(ArtworkTile::new)
@@ -165,7 +149,6 @@ impl ArtworkState {
             quadrants,
             size: Rc::new(Cell::new(size.unwrap_or(1))),
             render_size,
-            fetch_sizes,
         };
         projection.replace(self, artwork);
         projection

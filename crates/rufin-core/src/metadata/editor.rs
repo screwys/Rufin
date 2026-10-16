@@ -41,7 +41,7 @@ pub struct MetadataEditorSnapshot {
 pub struct MetadataEditor {
     pub draft: Arc<MetadataDraft>,
     source: Arc<SourceOwner>,
-    item: MetadataItemId,
+    session: Arc<super::EditSession>,
     external_lookup_allowed: bool,
     state: Mutex<Editing>,
 }
@@ -53,10 +53,7 @@ impl MetadataEditor {
         source: Arc<SourceOwner>,
         item: MetadataItemId,
     ) -> Result<Arc<Self>, SourceMetadataError> {
-        let draft = super::read_metadata(&source, item.clone())
-            .recv()
-            .await
-            .unwrap_or(Err(SourceMetadataError::Unavailable))?;
+        let (session, draft) = super::EditSession::open(&source, &item).await?;
         let state = Mutex::new(Editing::new(&draft));
         let external_lookup_allowed = source
             .shared
@@ -67,7 +64,7 @@ impl MetadataEditor {
         Ok(Arc::new(Self {
             draft: Arc::new(draft),
             source,
-            item,
+            session,
             external_lookup_allowed,
             state,
         }))
@@ -155,7 +152,8 @@ impl MetadataEditor {
         }
         if let Some(identified) = super::identify_metadata(
             &self.source,
-            self.item.media_uri().into(),
+            self.session.source().cloned(),
+            self.session.object().map(str::to_owned),
             self.draft.kind,
             values,
         )
@@ -180,17 +178,7 @@ impl MetadataEditor {
                 state.token.clone(),
             )
         };
-        let result = super::write_reviewed_metadata(
-            &self.source,
-            self.item.media_uri().into(),
-            self.draft.revision.clone(),
-            token,
-            edit,
-            self.draft.artwork.binding.clone(),
-        )
-        .recv()
-        .await
-        .unwrap_or(Err(SourceMetadataError::Unavailable));
+        let result = self.session.save(&self.source, edit, token).await;
         self.state().record_save_result(&result);
         result
     }

@@ -10,10 +10,8 @@ use super::{
     queue::{Sequence, SequenceError},
     state::{ClockSample, Command, ExternalPlayback, Player},
 };
-use crate::playback::PlayRequest;
 use playback::{
-    PlaybackBackend, PlaybackOutput, PlaybackProjection, PlaybackSettings, PreparedStream,
-    QueueItem, RunId,
+    PlaybackBackend, PlaybackOutput, PlaybackProjection, PlaybackSettings, PreparedStream, RunId,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -177,9 +175,6 @@ impl Playback {
     pub(crate) fn command(&self, command: Command) -> PlaybackResult<()> {
         self.request(move |player, sample| Ok(player.handle_command(command, sample)?))
     }
-    pub(crate) fn play(&self, request: PlayRequest) -> PlaybackResult<()> {
-        self.request(move |player, sample| Ok(player.play(request, sample)?))
-    }
     pub(crate) fn page_entries(
         &self,
         offset: usize,
@@ -237,23 +232,6 @@ impl Playback {
         backend: Box<dyn PlaybackBackend>,
     ) -> PlaybackResult<()> {
         self.request(move |player, _| player.adopt_local(queue, stream, playing, backend))
-    }
-    pub(crate) fn complete_auto_dj_candidates(
-        &self,
-        seed_run: Option<RunId>,
-        seed_media_uri: String,
-        candidates: Vec<QueueItem>,
-        requested_count: usize,
-    ) -> PlaybackResult<bool> {
-        self.request(move |player, sample| {
-            Ok(player.complete_auto_dj_candidates(
-                seed_run,
-                &seed_media_uri,
-                candidates,
-                requested_count,
-                sample,
-            )?)
-        })
     }
     pub(crate) fn auto_dj_unavailable(
         &self,

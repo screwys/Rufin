@@ -276,8 +276,8 @@ name = "artwork"
 version = "0.16.6"
 dependencies = [
  "async-trait",
+ "blurhash",
  "fast_image_resize",
- "futures-util",
  "gif",
  "image",
  "jxl",
@@ -291,7 +291,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "tokio-util",
  "tracing",
 ]
 
@@ -917,6 +916,12 @@ dependencies = [
  "futures-lite",
  "piper",
 ]
+
+[[package]]
+name = "blurhash"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e79769241dcd44edf79a732545e8b5cec84c247ac060f5252cd51885d093a8fc"
 
 [[package]]
 name = "bumpalo"
@@ -1794,6 +1799,7 @@ dependencies = [
  "apple-cf",
  "artwork",
  "async-channel",
+ "blake3",
  "gio",
  "glib",
  "ksni",
@@ -1946,6 +1952,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 name = "downloads"
 version = "0.16.6"
 dependencies = [
+ "artwork",
  "async-channel",
  "blake3",
  "httpdate",
@@ -3346,6 +3353,7 @@ dependencies = [
  "playback",
  "rufin-core",
  "sources",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -4908,6 +4916,8 @@ dependencies = [
  "blake3",
  "chrono",
  "futures-util",
+ "libsqlite3-sys",
+ "md-5 0.10.6",
  "percent-encoding",
  "process-memory",
  "proptest",
@@ -5482,6 +5492,7 @@ dependencies = [
 name = "metadata-lookup"
 version = "0.16.6"
 dependencies = [
+ "library",
  "reqwest 0.13.5",
  "serde_json",
  "sources",
@@ -6889,6 +6900,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "uniffi",
+ "url",
 ]
 
 [[package]]
@@ -8981,6 +8993,7 @@ dependencies = [
  "smb",
  "smb-fscc",
  "smb-msg",
+ "sqlx",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -10547,6 +10560,7 @@ dependencies = [
  "askama",
  "async-channel",
  "axum",
+ "base64 0.23.1",
  "blake3",
  "bytes",
  "constant_time_eq 0.6.0",

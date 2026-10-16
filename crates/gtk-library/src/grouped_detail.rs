@@ -30,7 +30,7 @@ pub struct GroupedDetailData {
     pub seed: u32,
     pub summary_items: Vec<(&'static str, String)>,
     pub context_menu: Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>>,
-    pub tracks: library::TrackRoutePage,
+    pub tracks: library::CatalogPage,
     pub table_context: &'static str,
     pub playback_context: String,
     pub play_label: &'static str,
@@ -99,6 +99,7 @@ impl CatalogUi {
             &artwork,
             cover_size,
             playlist_cover_size(i32::MAX),
+            true,
         );
         let showcase_view =
             DetailShowcaseView::new("playlist-detail-showcase", seed, kind, genre_kind, &title);

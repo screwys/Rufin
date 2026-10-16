@@ -104,7 +104,7 @@ impl TextureCache {
             .retain(|_, entry| entry.texture.upgrade().is_some());
     }
 
-    fn cached_texture(&mut self, key: &ArtworkKey) -> Option<gdk::Texture> {
+    pub(super) fn cached_texture(&mut self, key: &ArtworkKey) -> Option<gdk::Texture> {
         if let Some(texture) = self.get(key) {
             return Some(texture);
         }
@@ -190,6 +190,23 @@ fn texture_from_decoded(image: Arc<DecodedImage>) -> Option<gdk::Texture> {
     let height = i32::try_from(image.height()).ok()?;
     let row_stride = usize::try_from(image.row_stride()).ok()?;
     let bytes = glib::Bytes::from_owned(TexturePixels(image));
+    Some(
+        gdk::MemoryTexture::new(
+            width,
+            height,
+            gdk::MemoryFormat::R8g8b8a8,
+            &bytes,
+            row_stride,
+        )
+        .upcast(),
+    )
+}
+
+pub(super) fn texture_from_preview(image: artwork::RgbaImage) -> Option<gdk::Texture> {
+    let width = i32::try_from(image.width()).ok()?;
+    let height = i32::try_from(image.height()).ok()?;
+    let row_stride = usize::try_from(image.row_stride()).ok()?;
+    let bytes = glib::Bytes::from_owned(image);
     Some(
         gdk::MemoryTexture::new(
             width,

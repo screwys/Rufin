@@ -14,11 +14,11 @@ pub(crate) mod artwork;
 pub(crate) mod changes;
 mod cue;
 pub(crate) mod input;
-mod metadata;
+pub(crate) mod metadata;
 mod playlist;
 mod profile_file;
 pub(crate) mod reader;
-mod scan;
+pub(crate) mod scan;
 pub(crate) mod smb;
 #[cfg(test)]
 mod tests;
@@ -211,6 +211,8 @@ pub(crate) fn detail_folder_uri(
     Ok(url.into())
 }
 
+const DIRECTORY_VERSION: i64 = 8;
+
 pub struct FileSource {
     source_id: SourceId,
     kind: String,
@@ -311,7 +313,7 @@ impl FileSource {
         source
     }
 
-    pub(crate) fn document_profile(root: crate::DocumentRoot) -> Self {
+    pub fn document_profile(root: crate::DocumentRoot) -> Self {
         let namespace_url = format!("rufin-document://{}/", root.id);
         Self {
             source_id: SourceId::new(root.id.clone()),
@@ -321,7 +323,7 @@ impl FileSource {
             backend: FileBackend::Documents(Arc::new(crate::file::documents::DocumentAccess::new(
                 root,
             ))),
-            directory_version: scan::PARSER_VERSION,
+            directory_version: DIRECTORY_VERSION,
             input: Mutex::new(None),
         }
     }
@@ -393,11 +395,11 @@ impl FileSource {
             .collect();
         let payload: Payload = crate::config::decode_provider_payload(configuration)?;
         let directory_version = if settings.excluded_folders.is_empty() {
-            scan::PARSER_VERSION
+            DIRECTORY_VERSION
         } else {
             // A directory listing depends on both the reader and the excluded paths.
             let mut hash = blake3::Hasher::new();
-            hash.update(&scan::PARSER_VERSION.to_le_bytes());
+            hash.update(&DIRECTORY_VERSION.to_le_bytes());
             for folder in &settings.excluded_folders {
                 hash.update(&(folder.len() as u64).to_le_bytes());
                 hash.update(folder.as_bytes());
@@ -581,7 +583,7 @@ impl FileSource {
             })
     }
 
-    pub(super) fn location(&self, relative: &str) -> SourceResult<String> {
+    pub(crate) fn location(&self, relative: &str) -> SourceResult<String> {
         let (relative, document) = if self.document_access().is_some() {
             crate::file::documents::relative_parts(relative)
         } else {
@@ -631,7 +633,7 @@ impl FileSource {
         )
     }
 
-    fn input_path(&self, input: &FileInput, relative: &str) -> SourceResult<String> {
+    pub(crate) fn input_path(&self, input: &FileInput, relative: &str) -> SourceResult<String> {
         match input {
             FileInput::Smb(_) | FileInput::Documents(_) => Ok(relative.into()),
             FileInput::WebDav(client) => {
@@ -739,6 +741,7 @@ impl FileSource {
                 source_id,
                 path,
                 revision,
+                ..
             }
             | crate::LocalImageRef::Embedded {
                 source_id,
@@ -768,7 +771,7 @@ impl FileSource {
                 let uri = reader.uri().to_owned();
                 tokio::task::spawn_blocking(move || {
                     crate::file::artwork::read_image_input(
-                        &mut crate::file::discovery::Reader::network(),
+                        &mut crate::file::discovery::Reader::default(),
                         &mut reader,
                         &uri,
                         picture_index,

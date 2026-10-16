@@ -3,7 +3,7 @@ use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk_media_menus::media_menus::present_album_context_menu;
-use gtk_widgets::artwork::{ArtworkTile, LARGE_COVER_SIZE};
+use gtk_widgets::artwork::ArtworkTile;
 use gtk_widgets::controls::{ActionButtonVariant, configure_action_button};
 use gtk_widgets::cover_controls::{
     COVER_CORNER_HORIZONTAL_INSET, COVER_CORNER_VERTICAL_INSET, showcase_cover_overlay,
@@ -23,12 +23,12 @@ pub struct AlbumCover {
     button: gtk::Button,
     tile: ArtworkTile,
     favorite: gtk::Button,
-    current: Rc<std::cell::RefCell<Option<library::AlbumRow>>>,
+    current: Rc<std::cell::RefCell<Option<library::AlbumView>>>,
 }
 
 impl AlbumCover {
     pub fn new(shell: &Rc<CatalogUi>) -> Self {
-        let current = Rc::new(std::cell::RefCell::new(None::<library::AlbumRow>));
+        let current = Rc::new(std::cell::RefCell::new(None::<library::AlbumView>));
         let button = gtk::Button::new();
         button.add_css_class("album-cover-button");
         button.add_css_class("flat");
@@ -112,7 +112,7 @@ impl AlbumCover {
         }
     }
 
-    pub fn bind(&self, shell: &CatalogUi, album: Option<&library::AlbumRow>) {
+    pub fn bind(&self, shell: &CatalogUi, album: Option<&library::AlbumView>) {
         self.current.replace(album.cloned());
         if let Some(album) = album {
             shell.artwork.bind_artwork_tile(
@@ -123,9 +123,11 @@ impl AlbumCover {
                     .map(ArtworkBinding::opaque)
                     .unwrap_or_default(),
                 crate::route_layout::detail_showcase_cover_size(i32::MAX),
-                LARGE_COVER_SIZE,
             );
-            gtk_widgets::favorites::set_favorite_button_active(&self.favorite, album.favorite);
+            gtk_widgets::favorites::set_favorite_button_active(
+                &self.favorite,
+                album.state.favorite,
+            );
         } else {
             shell.artwork.clear_artwork_tile(&self.tile);
         }

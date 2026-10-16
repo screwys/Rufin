@@ -1,5 +1,6 @@
 package io.github.screwys.rufin.browse
 
+import io.github.screwys.rufin.shared.rufin_core.ConfiguredSources
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.app.RufinConnection
 
@@ -91,7 +92,7 @@ internal class BrowseConnection(private val connection: RufinConnection, scope: 
         ?.let { BrowseLocation(it.route, it.title, it.id, optionsFor(it.id)) }
 
     private data class SearchContext(val section: AppSection, val text: String,
-        val library: AndroidLibrary?, val source: String?, val revision: ULong?)
+        val library: AndroidLibrary?, val source: ConfiguredSources?, val revision: ULong?)
 
     init {
         scope.launch {
@@ -114,7 +115,7 @@ internal class BrowseConnection(private val connection: RufinConnection, scope: 
         }
         scope.launch {
             snapshotFlow { SearchContext(section, searchText, library,
-                connection.sources?.selectedSourceId, connection.catalogRevision) }
+                connection.sources, connection.catalogRevision?.catalog) }
                 .debounce(250).collectLatest { context ->
                     if (context.section != AppSection.Search || context.text.isBlank() || context.library == null) {
                         searchRows = emptyList()
@@ -126,7 +127,7 @@ internal class BrowseConnection(private val connection: RufinConnection, scope: 
                         searchRows = withContext(Dispatchers.Default) {
                             val rows = context.library.search(context.text)
                             val order = rows.filter { it.kind == "track" }.map { it.mediaUri }
-                            val capture = "search:${context.source}:${context.text}"
+                            val capture = "search:${context.source?.selectedSourceId}:${context.text}"
                             rows.mapIndexed { index, row ->
                                 BrowseItem(row, index.toULong(), null, searchOrder = order, searchContext = capture, contextTitle = context.text)
                             }

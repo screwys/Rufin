@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use ::library::FolderRow;
+use ::library::FolderChoice;
 use adw::prelude::*;
 use gtk::{gio, glib};
 use localization::tr;
@@ -28,7 +28,7 @@ struct SourceMenuContent<'a> {
     selected_source_id: Option<SourceId>,
     sources: &'a [SourceSummary],
     local_folders: &'a [LocalFolder],
-    music_folders: &'a [FolderRow],
+    music_folders: &'a [FolderChoice],
     selected_music_folder_id: Option<String>,
 }
 
@@ -146,7 +146,7 @@ pub(crate) fn source_submenu(shell: &Rc<Shell>) -> (String, &'static str, gio::M
         );
         for (index, folder) in content.music_folders.iter().enumerate() {
             folders.append(
-                Some(&folder.name),
+                Some(folder.name.as_str()),
                 Some(&format!(
                     "win.{MUSIC_FOLDER_CHOICE_ACTION_PREFIX}{}",
                     index + 1

@@ -8,10 +8,15 @@ use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
 impl FileSource {
-    pub(crate) async fn profile_files(
-        &self,
-        relative: &str,
-    ) -> SourceResult<Vec<(String, Option<String>)>> {
+    pub fn file_name(path: &str) -> &str {
+        crate::file::documents::relative_parts(path)
+            .0
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+    }
+
+    pub async fn ensure_profile_folder(&self, relative: &str) -> SourceResult<()> {
         self.location(relative)?;
         let input = self.input().await?;
         // Create each missing parent, using the existing account's root.
@@ -63,32 +68,59 @@ impl FileSource {
                 }
             }
         }
-        self.list_profile_files(relative).await
+        Ok(())
     }
 
-    pub(crate) async fn list_profile_files(
+    pub async fn list_profile_files(
         &self,
         relative: &str,
     ) -> SourceResult<Vec<(String, Option<String>)>> {
+        let mut files = Vec::new();
+        self.visit_files(relative, ".rufin-connect", |entry| {
+            files.push(entry);
+            std::future::ready(Ok(()))
+        })
+        .await?;
+        Ok(files)
+    }
+
+    pub async fn visit_files<F, Fut>(
+        &self,
+        relative: &str,
+        suffix: &str,
+        mut visit: F,
+    ) -> SourceResult<()>
+    where
+        F: FnMut((String, Option<String>)) -> Fut + Send,
+        Fut: std::future::Future<Output = SourceResult<()>> + Send,
+    {
         self.location(relative)?;
         let input = self.input().await?;
-        let mut files = Vec::new();
         match input.input() {
             FileInput::Documents(access) => {
-                let entry = access.resolve(relative)?;
+                let access = std::sync::Arc::clone(access);
+                let relative_path = relative.to_owned();
+                let entry = tokio::task::spawn_blocking(move || access.resolve(&relative_path))
+                    .await
+                    .map_err(error)??;
                 let mut offset = 0;
                 loop {
-                    let page = crate::list_documents(&entry.uri, offset)?;
+                    let uri = entry.uri.clone();
+                    let page =
+                        tokio::task::spawn_blocking(move || crate::list_documents(&uri, offset))
+                            .await
+                            .map_err(error)??;
                     for child in page.entries {
-                        if !child.directory && child.name.ends_with(".rufin-connect") {
-                            files.push((
+                        if !child.directory && child.name.ends_with(suffix) {
+                            visit((
                                 crate::file::documents::document_relative(
                                     &format!("{}/{}", relative.trim_end_matches('/'), child.name),
                                     &child.native_id,
                                     &child.uri,
                                 ),
                                 child.revision,
-                            ));
+                            ))
+                            .await?;
                         }
                     }
                     match page.next {
@@ -100,10 +132,14 @@ impl FileSource {
             FileInput::Smb(client) => {
                 client
                     .list(relative.trim_matches('/'), |entry| {
-                        if !entry.directory && entry.path.ends_with(".rufin-connect") {
-                            files.push((entry.path, Some(entry.revision)));
+                        let next = (!entry.directory && entry.path.ends_with(suffix))
+                            .then(|| visit((entry.path, Some(entry.revision))));
+                        async move {
+                            match next {
+                                Some(next) => next.await,
+                                None => Ok(()),
+                            }
                         }
-                        std::future::ready(Ok(()))
                     })
                     .await?;
             }
@@ -119,7 +155,7 @@ impl FileSource {
                     .list(&url, 1, |entry| {
                         let result = (|| {
                             if entry.directory {
-                                return Ok(());
+                                return Ok(None);
                             }
                             let child = client.resolve_href(&url, &entry.href)?;
                             let encoded = child
@@ -129,20 +165,32 @@ impl FileSource {
                             let path = percent_encoding::percent_decode_str(encoded)
                                 .decode_utf8()
                                 .map_err(error)?;
-                            if path.ends_with(".rufin-connect") {
-                                files.push((path.into_owned(), entry.revision()));
-                            }
-                            Ok(())
+                            Ok::<_, SourceError>(
+                                path.ends_with(suffix)
+                                    .then(|| (path.into_owned(), entry.revision())),
+                            )
                         })();
-                        std::future::ready(result)
+                        let next = result.map(|entry| entry.map(&mut visit));
+                        async move {
+                            match next? {
+                                Some(next) => next.await,
+                                None => Ok(()),
+                            }
+                        }
                     })
                     .await?;
             }
         }
-        Ok(files)
+        Ok(())
     }
 
-    pub(crate) async fn read_profile_file(
+    pub async fn profile_file_version(&self, relative: &str) -> SourceResult<Option<String>> {
+        self.location(relative)?;
+        let input = self.input().await?;
+        Ok(self.stat(&input, relative).await?.revision)
+    }
+
+    pub async fn copy_file(
         &self,
         relative: &str,
         destination: &Path,
@@ -150,13 +198,20 @@ impl FileSource {
         self.location(relative)?;
         let input = self.input().await?;
         if let FileInput::Documents(access) = input.input() {
-            let entry = match access.resolve(relative) {
-                Ok(entry) => entry,
-                Err(SourceError::NotFound) => return Ok(None),
-                Err(error) => return Err(error),
-            };
-            crate::copy_document(&entry.uri, destination)?;
-            return Ok(Some(entry.revision));
+            let access = std::sync::Arc::clone(access);
+            let relative = relative.to_owned();
+            let destination = destination.to_owned();
+            return tokio::task::spawn_blocking(move || {
+                let entry = match access.resolve(&relative) {
+                    Ok(entry) => entry,
+                    Err(SourceError::NotFound) => return Ok(None),
+                    Err(error) => return Err(error),
+                };
+                crate::copy_document(&entry.uri, &destination)?;
+                Ok(Some(entry.revision))
+            })
+            .await
+            .map_err(error)?;
         }
         if let FileInput::Smb(client) = input.input() {
             let (file, entry) = match client.open_read(relative).await {
@@ -212,7 +267,7 @@ impl FileSource {
         Ok(Some(etag))
     }
 
-    pub(crate) async fn write_profile_file(
+    pub async fn write_profile_file(
         &self,
         relative: &str,
         file: tempfile::NamedTempFile,
@@ -231,13 +286,12 @@ impl FileSource {
                 previous
             };
             return self
-                .save_file(&super::metadata::WorkingFile {
-                    file: file.into_temp_path(),
-                    relative: relative.into(),
-                    existed: previous.is_some(),
-                    revision: previous.flatten(),
-                    input,
-                })
+                .commit_file(
+                    relative,
+                    file.path(),
+                    previous.as_ref().and_then(|value| value.as_deref()),
+                    previous.is_some(),
+                )
                 .await
                 .map_err(error);
         }
@@ -326,7 +380,7 @@ mod tests {
         let source = FileSource::open(&config, None).unwrap();
         let file = tempfile::NamedTempFile::new().unwrap();
         let version = source
-            .read_profile_file("profile.rufin-connect", file.path())
+            .copy_file("profile.rufin-connect", file.path())
             .await
             .unwrap();
         assert_eq!(version, Some(Some("\"v1\"".into())));

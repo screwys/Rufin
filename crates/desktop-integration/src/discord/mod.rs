@@ -82,7 +82,7 @@ fn latest_slot<T>() -> (LatestSender<T>, LatestReceiver<T>) {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ArtworkKey {
-    album: metadata_lookup::AlbumCover,
+    album: library::AlbumCover,
     lastfm_api_key: String,
 }
 
@@ -370,16 +370,24 @@ impl ArtworkKey {
     fn from_view(view: &PlaybackView, lastfm_api_key: &str) -> Option<Self> {
         let track = &view.transport.current.as_ref()?;
         let album_artist = track
+            .row
+            .track
+            .metadata
             .album_display_artist
             .as_deref()
             .filter(|artist| !artist.trim().is_empty())
-            .unwrap_or(&track.artist);
+            .unwrap_or(&track.row.track.metadata.artist);
         Some(Self {
-            album: metadata_lookup::AlbumCover::new(
+            album: library::AlbumCover::new(
                 album_artist,
-                &track.album,
-                track.musicbrainz_release_group_id.as_deref(),
-                track.musicbrainz_album_id.as_deref(),
+                &track.row.track.metadata.album,
+                track
+                    .row
+                    .track
+                    .metadata
+                    .musicbrainz_release_group_id
+                    .as_deref(),
+                track.row.track.metadata.musicbrainz_album_id.as_deref(),
             )?,
             lastfm_api_key: lastfm_api_key.to_string(),
         })
@@ -414,8 +422,8 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use playback::{
-        ControlsView, CurrentMedia, CurrentMediaId, PlaybackView, Provenance, QueueItem, QueueRow,
-        QueueSummaryView, RepeatMode, RunId, TransportStatus, TransportView,
+        ControlsView, CurrentMedia, CurrentMediaId, PlaybackView, Provenance, QueueRow,
+        QueueSummaryView, RepeatMode, RunId, TrackReference, TransportStatus, TransportView,
     };
 
     pub(crate) fn test_view(
@@ -435,33 +443,49 @@ pub(crate) mod tests {
             row: Arc::new(QueueRow {
                 occurrence_id: None,
                 position: 0,
-                item: QueueItem {
-                    audio_properties: Default::default(),
-                    media_uri: library::source_entity_uri(
-                        &library::SourceId::new("source"),
-                        "track",
-                        "track",
-                    ),
-                    title: "Track".to_string(),
-                    artist: "Artist".to_string(),
-                    album: album.to_string(),
-                    album_display_artist: Some("Album Artist".to_string()),
-                    artwork_binding: None,
-                    duration_millis: 42_500,
-                    disc_number: Some(1),
-                    track_number: Some(1),
-                    year: Some(2026),
-                    release_date: None,
-                    source_format: None,
-                    musicbrainz_recording_id: Some("recording-id".to_string()),
-                    musicbrainz_release_track_id: Some("track-id".to_string()),
-                    musicbrainz_album_id: Some("album-id".to_string()),
-                    musicbrainz_release_group_id: Some("release-group-id".to_string()),
-                    primary_artist_musicbrainz_id: Some("artist-id".to_string()),
-                },
                 received_from_connect: false,
-                track_key: None,
                 provenance: Provenance::Manual,
+                track: {
+                    let reference = TrackReference {
+                        media_uri: library::source_entity_uri(
+                            &library::SourceId::new("source"),
+                            "track",
+                            "track",
+                        ),
+                        artwork_binding: None,
+                        metadata: library::TrackMetadata {
+                            audio_properties: Default::default(),
+                            title: "Track".to_string(),
+                            artist: "Artist".to_string(),
+                            album: album.to_string(),
+                            album_display_artist: Some("Album Artist".to_string()),
+                            duration_millis: 42_500,
+                            disc_number: 1,
+                            track_number: 1,
+                            year: Some(2026),
+                            release_date: None,
+                            source_format: None,
+                            musicbrainz_recording_id: Some("recording-id".to_string()),
+                            musicbrainz_release_track_id: Some("track-id".to_string()),
+                            musicbrainz_album_id: Some("album-id".to_string()),
+                            musicbrainz_release_group_id: Some("release-group-id".to_string()),
+                            primary_artist_musicbrainz_id: Some("artist-id".to_string()),
+                            ..Default::default()
+                        },
+                    };
+                    library::TrackView {
+                        track_key: library::TrackKey::from_raw(1),
+                        source_key: None,
+                        source_id: None,
+                        object_id: None,
+                        media_uri: reference.media_uri,
+                        metadata: reference.metadata,
+                        artwork_binding: reference.artwork_binding,
+                        state: Default::default(),
+                        access: Default::default(),
+                        links: Default::default(),
+                    }
+                },
             }),
         };
         PlaybackView {

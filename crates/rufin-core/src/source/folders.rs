@@ -13,13 +13,13 @@ pub enum FolderProjection {
 }
 
 impl FolderProjection {
-    pub fn song_query(&self, source: library::SourceKey) -> library::SongQuery {
-        let mut query = library::SongQuery::new(match self {
-            Self::Live { objects, .. } => library::SongScope::Objects {
+    pub fn track_query(&self, source: library::SourceKey) -> library::CatalogQuery {
+        let mut query = library::CatalogQuery::tracks(match self {
+            Self::Live { objects, .. } => library::TrackScope::Objects {
                 source,
                 ids: Arc::clone(objects),
             },
-            Self::Cached(_) => library::SongScope::Tracks(source),
+            Self::Cached(_) => library::TrackScope::Tracks(source),
         });
         if let Self::Cached(folder) = self {
             query.folder = *folder;
@@ -74,9 +74,12 @@ pub async fn resolve_folder(
     };
     match live {
         Ok(page) => {
-            let known = database
-                .track_object_count(selected.source_key, &page.tracks, cancellation)
-                .await?;
+            let known = library::CatalogQuery::tracks(library::TrackScope::Objects {
+                source: selected.source_key,
+                ids: page.tracks.clone().into(),
+            })
+            .count(database, cancellation)
+            .await?;
             if known as usize == page.tracks.len() {
                 let mut folders = page.folders;
                 folders.sort_by_cached_key(|folder| folder.name.to_lowercase());
@@ -92,11 +95,15 @@ pub async fn resolve_folder(
         }
     }
     let resolved = match folder_object_id {
-        Some(object) => {
-            database
-                .folder_key_by_object(selected.source_key, object, cancellation)
-                .await?
-        }
+        Some(object) => database
+            .catalog_keys(
+                library::CatalogKind::Folder,
+                Some(selected.source_key),
+                &[(object).to_owned()],
+                cancellation,
+            )
+            .await
+            .map(|keys| keys.into_iter().next().map(library::FolderKey::from_raw))?,
         None => None,
     };
     exact_cached_folder_scope(

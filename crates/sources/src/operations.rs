@@ -129,6 +129,12 @@ pub enum SourceMetadataError {
     Write(String),
 }
 
+impl From<crate::SourceError> for SourceMetadataError {
+    fn from(error: crate::SourceError) -> Self {
+        Self::Write(error.to_string())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct ImageBytes {
@@ -178,19 +184,20 @@ pub struct ArtworkEditing {
 
 impl ArtworkEditing {
     pub fn with_binding(mut self, binding: Option<Vec<u8>>, server: bool) -> Self {
-        let source = binding
+        let image = binding
             .as_deref()
-            .and_then(|bytes| serde_json::from_slice::<library::ArtistArtworkBinding>(bytes).ok());
-        let image = source
-            .as_ref()
-            .map_or(binding.as_deref(), |artist| artist.source.as_deref());
+            .and_then(|bytes| serde_json::from_slice::<Vec<library::ArtworkCandidate>>(bytes).ok())
+            .and_then(|images| images.into_iter().next());
         self.storage = if server {
             ArtworkStorage::Server
         } else if self.can_embed
-            && image.is_some_and(|bytes| {
+            && image.is_some_and(|image| {
                 matches!(
-                    serde_json::from_slice::<crate::LocalImageRef>(bytes),
-                    Ok(crate::LocalImageRef::Embedded { .. })
+                    image.image,
+                    library::ArtworkImage::Local {
+                        picture_index: Some(_),
+                        ..
+                    }
                 )
             })
         {
@@ -201,10 +208,6 @@ impl ArtworkEditing {
         self.binding = binding;
         self
     }
-}
-
-pub(crate) fn metadata_refresh_error(error: crate::SourceError) -> SourceMetadataError {
-    SourceMetadataError::SavedRefreshFailed(error.to_string())
 }
 
 pub fn finish_metadata_save(
@@ -232,12 +235,16 @@ pub fn finish_metadata_save(
 }
 
 pub fn artwork_file(binding: Option<&[u8]>) -> Option<String> {
-    let binding = binding?;
-    if let Ok(artist) = serde_json::from_slice::<library::ArtistArtworkBinding>(binding) {
-        return artwork_file(artist.source.as_deref());
-    }
-    match serde_json::from_slice::<crate::LocalImageRef>(binding).ok()? {
-        crate::LocalImageRef::File { path, .. } => Some(path),
-        crate::LocalImageRef::Embedded { .. } => None,
+    let image = serde_json::from_slice::<Vec<library::ArtworkCandidate>>(binding?)
+        .ok()?
+        .into_iter()
+        .next()?;
+    match image.image {
+        library::ArtworkImage::Local {
+            path,
+            picture_index: None,
+            ..
+        } => Some(path),
+        _ => None,
     }
 }

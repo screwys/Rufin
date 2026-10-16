@@ -15,6 +15,7 @@ bindings = ["dep:uniffi"]
 
 [dependencies]
 uniffi = { workspace = true, optional = true }
+artwork.workspace = true
 async-channel.workspace = true
 blake3.workspace = true
 httpdate.workspace = true

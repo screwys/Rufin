@@ -16,12 +16,9 @@ use super::collections::{
     album_collection_projection, artist_collection_projection, library_route_inset,
     track_collection_projection,
 };
-use super::named_collections::{NamedPageLoad, NamedReadRequest};
 use super::route_shell::{LibraryPageShellOptions, LibraryToolbarProjection};
-use crate::track_model::CollectionTrack;
 use crate::track_model::TrackCollectionModel;
 use gtk_widgets::route::{CollectionCategory, Route};
-use gtk_widgets::sparse_model::SparseSource;
 
 const TRACK_FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
 
@@ -37,6 +34,99 @@ pub(crate) struct CollectionReadRequest {
     pub settings: LibraryListSettings,
 }
 
+pub(crate) type CollectionPageLoad<R> = Arc<
+    dyn Fn(
+            CollectionReadRequest,
+            library::ReadCancellation,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<(usize, usize, R), String>> + Send>,
+        > + Send
+        + Sync,
+>;
+
+#[derive(Clone)]
+pub(crate) struct CollectionRead {
+    database: Arc<library::Database>,
+    route: Route,
+    source: Option<library::SourceKey>,
+    folder: Option<library::FolderKey>,
+    favorites_only: bool,
+}
+
+impl CollectionRead {
+    pub(crate) fn new(
+        database: &Arc<library::Database>,
+        route: Route,
+        source: Option<library::SourceKey>,
+        folder: Option<library::FolderKey>,
+        favorites_only: bool,
+    ) -> Self {
+        Self {
+            database: Arc::clone(database),
+            route,
+            source,
+            folder,
+            favorites_only,
+        }
+    }
+
+    fn query(&self, request: &CollectionReadRequest) -> library::CatalogQuery {
+        BrowseRequest {
+            filter: &request.query,
+            favorites_only: self.favorites_only,
+            ..BrowseRequest::new(
+                &self.route,
+                CollectionCategory::Tracks,
+                self.source,
+                self.folder,
+                &request.settings,
+                8,
+            )
+        }
+        .collection()
+        .expect("collection route")
+    }
+
+    pub(crate) fn row_load<R: Send + 'static>(
+        &self,
+        project: fn(library::CatalogRows) -> Vec<R>,
+    ) -> gtk_widgets::media_drag::CollectionRowsLoad<CollectionReadRequest, R> {
+        let read = self.clone();
+        Arc::new(move |request, range, cancellation| {
+            let read = read.clone();
+            Box::pin(async move {
+                read.query(&request)
+                    .rows(&read.database, range.start, range.len(), &cancellation)
+                    .await
+                    .map(project)
+                    .map_err(|error| error.to_string())
+            })
+        })
+    }
+
+    pub(crate) fn page_load<R: Send + 'static>(
+        &self,
+        project: fn(library::CatalogRows) -> R,
+    ) -> CollectionPageLoad<R> {
+        let read = self.clone();
+        Arc::new(move |request, cancellation| {
+            let read = read.clone();
+            Box::pin(async move {
+                let page = read
+                    .query(&request)
+                    .page(
+                        &read.database,
+                        library::RouteSeedWindow::top(),
+                        &cancellation,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok((page.count, page.first_row_position, project(page.rows)))
+            })
+        })
+    }
+}
+
 pub struct SearchableTrackOptions {
     pub context_id: String,
     pub content_inset: i32,
@@ -45,15 +135,15 @@ pub struct SearchableTrackOptions {
 }
 
 #[derive(Clone)]
-pub struct TrackListProjection<T: CollectionTrack = library::TrackRow> {
+pub struct TrackListProjection {
     key: LibraryListKey,
     search: gtk::SearchEntry,
     collection: super::collections::LibraryCollectionProjection,
-    model: TrackCollectionModel<T>,
+    model: TrackCollectionModel,
     fixed_layout: Option<LibraryLayout>,
 }
 
-impl<T: CollectionTrack> TrackListProjection<T> {
+impl TrackListProjection {
     pub fn download_change(&self) -> gtk_widgets::mounted_route::MountedDownloadChange {
         let model = self.model.clone();
         Rc::new(move |event| {
@@ -102,11 +192,11 @@ impl<T: CollectionTrack> TrackListProjection<T> {
             .play_source(queue, placement, context_id, shuffled);
     }
 
-    pub fn query(&self) -> library::SongQuery {
+    pub fn query(&self) -> library::CatalogQuery {
         self.model.query()
     }
 
-    pub fn connect_search_request(&self, callback: impl Fn(library::SongQuery) + 'static) {
+    pub fn connect_search_request(&self, callback: impl Fn(library::CatalogQuery) + 'static) {
         let model = self.model.clone();
         let callback = Rc::new(callback);
         let pending = Rc::new(RefCell::new(None::<glib::SourceId>));
@@ -132,7 +222,7 @@ impl<T: CollectionTrack> TrackListProjection<T> {
         });
     }
 
-    pub fn replace_page(&self, prepared: library::TrackRoutePage<T>) -> bool {
+    pub fn replace_page(&self, prepared: library::CatalogPage) -> bool {
         self.model.replace_page(prepared)
     }
 
@@ -163,7 +253,7 @@ impl TrackListProjection {
         shell: &Rc<CatalogUi>,
         context: &'static str,
         changed: impl Fn() + 'static,
-    ) -> Rc<LatestMountedRouteRead<Result<library::TrackRoutePage, String>, library::SongQuery>>
+    ) -> Rc<LatestMountedRouteRead<Result<library::CatalogPage, String>, library::CatalogQuery>>
     {
         let runtime = shell.runtime.clone();
         let database = Arc::clone(&shell.library);
@@ -184,11 +274,11 @@ impl TrackListProjection {
             }
         });
         let load = Arc::new(
-            move |query: library::SongQuery, cancellation: library::ReadCancellation| {
+            move |query: library::CatalogQuery, cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&database);
                 Box::pin(async move {
-                    database
-                        .song_route_page(&query, library::RouteSeedWindow::top(), &cancellation)
+                    (&query)
+                        .page(&database, library::RouteSeedWindow::top(), &cancellation)
                         .await
                         .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
@@ -211,19 +301,48 @@ impl TrackListProjection {
 }
 
 impl CatalogUi {
-    pub fn scrolling_track_projection<T: CollectionTrack>(
+    pub(crate) fn collection_reload<T: Send + 'static>(
         self: &Rc<Self>,
-        model: TrackCollectionModel<T>,
+        key: LibraryListKey,
+        search: &gtk::SearchEntry,
+        read: &Rc<LatestMountedRouteRead<T, CollectionReadRequest>>,
+        apply_settings: impl Fn(&LibraryListSettings) -> bool + 'static,
+    ) -> Rc<dyn Fn()> {
+        let shell = Rc::downgrade(self);
+        let search_read = Rc::downgrade(read);
+        search.connect_search_changed(move |search| {
+            let (Some(shell), Some(read)) = (shell.upgrade(), search_read.upgrade()) else {
+                return;
+            };
+            read.request_with(CollectionReadRequest {
+                query: search.text().trim().to_string(),
+                settings: shell.settings.current.borrow().library_list(key),
+            });
+        });
+        let shell = Rc::downgrade(self);
+        let read = Rc::clone(read);
+        let search = search.clone();
+        Rc::new(move || {
+            let Some(shell) = shell.upgrade() else { return };
+            let settings = shell.settings.current.borrow().library_list(key);
+            if apply_settings(&settings) {
+                read.request_with(CollectionReadRequest {
+                    query: search.text().trim().to_string(),
+                    settings,
+                });
+            }
+        })
+    }
+
+    pub fn scrolling_track_projection(
+        self: &Rc<Self>,
+        model: TrackCollectionModel,
         key: LibraryListKey,
         context: &str,
         context_id: String,
-    ) -> (
-        gtk::Widget,
-        TrackListProjection<T>,
-        LibraryToolbarProjection,
-    ) {
+    ) -> (gtk::Widget, TrackListProjection, LibraryToolbarProjection) {
         let settings = self.settings.current.borrow().library_list(key);
-        let projection = self.searchable_song_collection(
+        let projection = self.build_track_collection(
             model,
             key,
             settings,
@@ -250,7 +369,7 @@ impl CatalogUi {
         favorites_only: bool,
         order: usize,
         first_row_position: usize,
-        first_rows: Vec<library::AlbumRow>,
+        first_rows: Vec<library::AlbumView>,
         first_detail_rows: Vec<library::AlbumDetailRow>,
         selected: rufin_core::runtime::SelectedLibrary,
     ) -> MountedRoute {
@@ -278,7 +397,6 @@ impl CatalogUi {
         let search = gtk::SearchEntry::new();
         gtk_widgets::controls::configure_search_entry(&search);
         bind_search_placeholder(&search, "Search");
-        let query = Rc::new(RefCell::new(String::new()));
         let content = album_collection_projection(self, models.clone(), key);
         let mut page = self.library_page_shell(LibraryPageShellOptions {
             key,
@@ -308,8 +426,7 @@ impl CatalogUi {
                     (
                         usize,
                         usize,
-                        Vec<library::AlbumRow>,
-                        Vec<library::AlbumDetailRow>,
+                        (Vec<library::AlbumView>, Vec<library::AlbumDetailRow>),
                     ),
                     String,
                 >| {
@@ -320,7 +437,7 @@ impl CatalogUi {
                         return;
                     }
                     match result {
-                        Ok((order, first_row_position, first_rows, first_detail_rows)) => {
+                        Ok((order, first_row_position, (first_rows, first_detail_rows))) => {
                             applied_query.replace(request);
                             let settings = shell.settings.current.borrow().library_list(key);
                             let current_models = models.borrow().clone();
@@ -362,94 +479,43 @@ impl CatalogUi {
                 },
             )
         };
-        let database = Arc::clone(&self.library);
-        let source = selected.source_key;
-        let folder = selected.music_folder_key;
-        let load = Arc::new(
-            move |request: CollectionReadRequest, cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&database);
-                Box::pin(async move {
-                    BrowseRequest {
-                        filter: &request.query,
-                        favorites_only: favorites_only,
-                        ..BrowseRequest::new(
-                            &Route::Albums,
-                            CollectionCategory::Albums,
-                            Some(source),
-                            folder,
-                            &request.settings,
-                            8,
-                        )
-                    }
-                    .collection()
-                    .expect("collection route")
-                    .page(&database, library::RouteSeedWindow::top(), &cancellation)
-                    .await
-                    .map(|(count, start, rows)| match rows {
-                        library::CollectionRows::Albums(rows) => (count, start, rows, Vec::new()),
-                        library::CollectionRows::AlbumDetails(rows) => {
-                            (count, start, Vec::new(), rows)
-                        }
-                        _ => unreachable!("album query"),
-                    })
-                    .map_err(|error| error.to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            },
-        );
+        let load = CollectionRead::new(
+            &self.library,
+            Route::Albums,
+            Some(selected.source_key),
+            selected.music_folder_key,
+            favorites_only,
+        )
+        .page_load(|rows| match rows {
+            library::CatalogRows::Albums(rows) => (rows, Vec::new()),
+            library::CatalogRows::AlbumDetails(rows) => (Vec::new(), rows),
+            _ => unreachable!("catalog album rows"),
+        });
         let read = LatestMountedRouteRead::new_with_request(
             self.runtime.clone(),
             apply,
             load,
             "mounted Albums route",
         );
-        {
-            let read = Rc::downgrade(&read);
-            let shell = Rc::downgrade(self);
-            let query_state = Rc::clone(&query);
-            search.connect_search_changed(move |search| {
-                let (Some(read), Some(shell)) = (read.upgrade(), shell.upgrade()) else {
-                    return;
-                };
-                let text = search.text().trim().to_string();
-                query_state.replace(text.clone());
-                let settings = shell.settings.current.borrow().library_list(key);
-                read.request_with(CollectionReadRequest {
-                    query: text,
-                    settings,
-                });
-            });
-        }
-        let resume = {
-            let shell = Rc::downgrade(self);
-            let query = Rc::clone(&query);
+        let resume = self.collection_reload(key, &search, &read, {
             let content = content.clone();
             let models = models.clone();
             let page = page.clone();
             let applied_settings = Rc::clone(&applied_settings);
-            let read = Rc::clone(&read);
-            Rc::new(move || {
-                let Some(shell) = shell.upgrade() else {
-                    return;
-                };
-                let settings = shell.settings.current.borrow().library_list(key);
+            move |settings| {
                 let previous = applied_settings.borrow().clone();
                 if models.borrow().rows.is_none() == (settings.layout == LibraryLayout::Detail) {
-                    content.apply_settings(&settings);
+                    content.apply_settings(settings);
                 }
-                page.apply_library_list_settings(key, &settings);
-                if (previous.layout == LibraryLayout::Detail)
+                page.apply_library_list_settings(key, settings);
+                let reload = (previous.layout == LibraryLayout::Detail)
                     != (settings.layout == LibraryLayout::Detail)
                     || previous.sort_key != settings.sort_key
-                    || previous.descending != settings.descending
-                {
-                    read.request_with(CollectionReadRequest {
-                        query: query.borrow().clone(),
-                        settings: settings.clone(),
-                    });
-                }
-                applied_settings.replace(settings);
-            })
-        };
+                    || previous.descending != settings.descending;
+                applied_settings.replace(settings.clone());
+                reload
+            }
+        });
         let favorite_models = models.clone();
 
         let download_models = models.clone();
@@ -462,14 +528,21 @@ impl CatalogUi {
                 rows.update_matching(
                     |row| {
                         row.media_uri == uri
-                            && (row.downloaded_count == row.track_count) != downloaded
+                            && (row.summary.downloaded_count == row.summary.track_count)
+                                != downloaded
                     },
-                    |row| row.downloaded_count = if downloaded { row.track_count } else { 0 },
+                    |row| {
+                        row.summary.downloaded_count = if downloaded {
+                            row.summary.track_count
+                        } else {
+                            0
+                        }
+                    },
                 );
             }
         });
         let favorite_read = Rc::clone(&read);
-        let favorite_query = Rc::clone(&query);
+        let favorite_search = search.clone();
         if favorites_only {
             self.install_favorite_category_tabs(CollectionCategory::Albums, &mut page);
         }
@@ -493,7 +566,7 @@ impl CatalogUi {
                 let settings = applied_settings.borrow().clone();
                 if favorites_only || settings.sort_key == crate::LibraryField::Favorite {
                     favorite_read.request_with(CollectionReadRequest {
-                        query: favorite_query.borrow().clone(),
+                        query: favorite_search.text().trim().to_string(),
                         settings,
                     });
                 }
@@ -502,7 +575,7 @@ impl CatalogUi {
 
     pub fn library_tracks_route(
         self: &Rc<Self>,
-        page: library::TrackRoutePage,
+        page: library::CatalogPage,
         selected: rufin_core::runtime::SelectedLibrary,
     ) -> MountedRoute {
         self.root_track_route(
@@ -519,7 +592,7 @@ impl CatalogUi {
 
     pub fn favorites_route(
         self: &Rc<Self>,
-        page: library::TrackRoutePage,
+        page: library::CatalogPage,
         selected: rufin_core::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let key = LibraryListKey::FavoriteTracks;
@@ -538,7 +611,7 @@ impl CatalogUi {
     fn root_track_route(
         self: &Rc<Self>,
         options: RootTrackRouteOptions,
-        page: library::TrackRoutePage,
+        page: library::CatalogPage,
         selected: rufin_core::runtime::SelectedLibrary,
         favorites_only: bool,
     ) -> MountedRoute {
@@ -559,47 +632,11 @@ impl CatalogUi {
         self.track_page_route(options, projection, favorites_only)
     }
 
-    pub fn history_route(
-        self: &Rc<Self>,
-        initial: (library::SongQuery, usize, Vec<library::HistoryRow>),
-    ) -> MountedRoute {
-        let (query, count, rows) = initial;
+    pub fn history_route(self: &Rc<Self>, initial: library::CatalogPage) -> MountedRoute {
         let key = LibraryListKey::History;
-        let database = Arc::clone(&self.library);
-        let runtime = self.runtime.clone();
-        let settings = self.settings.current.borrow().library_list(key);
-        let rows_database = database.clone();
-        let load = Rc::new(
-            move |_: Vec<library::TrackKey>,
-                  range: std::ops::Range<usize>,
-                  request: Option<library::SongQuery>,
-                  cancellation: library::ReadCancellation| {
-                let database = rows_database.clone();
-                Box::pin(async move {
-                    database
-                        .song_history_rows(
-                            request.as_ref().expect("history query"),
-                            range.start,
-                            range.len(),
-                            &cancellation,
-                        )
-                        .await
-                        .map_err(|error| error.to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            },
-        );
-        let model = TrackCollectionModel::with_load(
-            runtime.clone(),
-            SparseSource::Query { count },
-            Some(query),
-            0,
-            rows,
-            load,
-        );
-        let projection = self.searchable_song_collection(
-            model,
+        let projection = self.searchable_track_collection(
+            initial,
             key,
-            settings,
             SearchableTrackOptions {
                 context_id: "history:all".to_string(),
                 content_inset: 0,
@@ -610,41 +647,9 @@ impl CatalogUi {
         let page = self.track_page_shell(key, msgid("Nothing played yet"), &projection);
         let apply_page = page.clone();
         let apply_projection = projection.clone();
-        let apply = Rc::new(move |_, result| {
-            let Ok(prepared) = result else { return };
-            if apply_projection.replace_page(prepared) {
-                apply_page.set_empty(apply_projection.source_is_empty());
-            }
+        let read = projection.page_read(self, "History filter", move || {
+            apply_page.set_empty(apply_projection.source_is_empty());
         });
-        let load = Arc::new(
-            move |request: library::SongQuery, cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&database);
-                Box::pin(async move {
-                    let count = database
-                        .song_count(&request, &cancellation)
-                        .await
-                        .map_err(|error| error.to_string())?
-                        .max(0) as usize;
-                    let rows = database
-                        .song_history_rows(&request, 0, 64, &cancellation)
-                        .await
-                        .map_err(|error| error.to_string())?;
-                    Ok::<_, String>(library::TrackRoutePage {
-                        disc_sections: Vec::new(),
-                        count,
-                        first_row_position: 0,
-                        first_rows: rows,
-                        query: request,
-                    })
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            },
-        );
-        let read = LatestMountedRouteRead::new_with_request(
-            self.runtime.clone(),
-            apply,
-            load,
-            "History filter",
-        );
         let filter_read = Rc::downgrade(&read);
         let filter_projection = projection.clone();
         let filter_shell = Rc::downgrade(self);
@@ -659,7 +664,7 @@ impl CatalogUi {
                 .flatten();
             filter_projection
                 .model
-                .set_scope(library::SongScope::History {
+                .set_scope(library::TrackScope::History {
                     source: source.clone(),
                 });
             let Some(read) = filter_read.upgrade() else {
@@ -677,7 +682,7 @@ impl CatalogUi {
         favorites_only: bool,
         count: usize,
         first_row_position: usize,
-        first_rows: Vec<library::ArtistRow>,
+        first_rows: Vec<library::ArtistView>,
         selected: rufin_core::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let key = if album_artist {
@@ -685,7 +690,6 @@ impl CatalogUi {
         } else {
             LibraryListKey::Artists
         };
-        let database = Arc::clone(&self.library);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         let applied = Rc::new(RefCell::new(CollectionReadRequest {
@@ -693,41 +697,22 @@ impl CatalogUi {
             settings: self.settings.current.borrow().library_list(key),
         }));
         let load_request = Rc::clone(&applied);
-        let row_database = Arc::clone(&database);
-        let row_load: gtk_widgets::media_drag::CollectionRowsLoad<
-            CollectionReadRequest,
-            library::ArtistRow,
-        > = Arc::new(
-            move |request: CollectionReadRequest,
-                  range: std::ops::Range<usize>,
-                  cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&row_database);
-                Box::pin(async move {
-                    BrowseRequest {
-                        filter: &request.query,
-                        favorites_only: favorites_only,
-                        ..BrowseRequest::new(
-                            &if album_artist {
-                                Route::AlbumArtists
-                            } else {
-                                Route::Artists
-                            },
-                            CollectionCategory::Artists,
-                            Some(source),
-                            folder,
-                            &request.settings,
-                            8,
-                        )
-                    }
-                    .collection()
-                    .expect("collection route")
-                    .rows(&database, range.start, range.len(), &cancellation)
-                    .await
-                    .map(|rows| rows.artists())
-                    .map_err(|error| error.to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+        let collection_read = CollectionRead::new(
+            &self.library,
+            if album_artist {
+                Route::AlbumArtists
+            } else {
+                Route::Artists
             },
+            Some(source),
+            folder,
+            favorites_only,
         );
+        let project = |rows| match rows {
+            library::CatalogRows::Artists(rows) => rows,
+            _ => unreachable!("catalog artist rows"),
+        };
+        let row_load = collection_read.row_load(project);
         let sparse = gtk_widgets::sparse_model::SparseRouteModel::new(
             gtk_widgets::sparse_model::SparseSource::Query { count },
             32,
@@ -757,7 +742,6 @@ impl CatalogUi {
         let search = gtk::SearchEntry::new();
         gtk_widgets::controls::configure_search_entry(&search);
         bind_search_placeholder(&search, "Search");
-        let query = Rc::new(RefCell::new(String::new()));
         let mut page = self.library_page_shell(LibraryPageShellOptions {
             key,
             empty: sparse.len() == 0,
@@ -781,7 +765,7 @@ impl CatalogUi {
             Rc::new(
                 move |request: CollectionReadRequest,
                       result: Result<
-                    (usize, usize, Vec<library::ArtistRow>),
+                    (usize, usize, Vec<library::ArtistView>),
                     String,
                 >| {
                     let Some(shell) = shell.upgrade() else {
@@ -812,77 +796,22 @@ impl CatalogUi {
                 },
             )
         };
-        let order_database = Arc::clone(&database);
-        let load = Arc::new(
-            move |request: CollectionReadRequest, cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&order_database);
-                Box::pin(async move {
-                    BrowseRequest {
-                        filter: &request.query,
-                        favorites_only: favorites_only,
-                        ..BrowseRequest::new(
-                            &if album_artist {
-                                Route::AlbumArtists
-                            } else {
-                                Route::Artists
-                            },
-                            CollectionCategory::Artists,
-                            Some(source),
-                            folder,
-                            &request.settings,
-                            8,
-                        )
-                    }
-                    .collection()
-                    .expect("collection route")
-                    .page(&database, library::RouteSeedWindow::top(), &cancellation)
-                    .await
-                    .map(|(count, start, rows)| (count, start, rows.artists()))
-                    .map_err(|error| error.to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            },
-        );
+        let load = collection_read.page_load(project);
         let read = LatestMountedRouteRead::new_with_request(
             self.runtime.clone(),
             apply,
             load,
             "mounted Artist route",
         );
-        {
-            let read = Rc::downgrade(&read);
-            let shell = Rc::downgrade(self);
-            let query_state = Rc::clone(&query);
-            search.connect_search_changed(move |search| {
-                let (Some(read), Some(shell)) = (read.upgrade(), shell.upgrade()) else {
-                    return;
-                };
-                let text = search.text().trim().to_string();
-                query_state.replace(text.clone());
-                read.request_with(CollectionReadRequest {
-                    query: text,
-                    settings: shell.settings.current.borrow().library_list(key),
-                });
-            });
-        }
-        let resume = {
-            let shell = Rc::downgrade(self);
-            let read = Rc::clone(&read);
-            let query = Rc::clone(&query);
+        let resume = self.collection_reload(key, &search, &read, {
             let content = content.clone();
             let page = page.clone();
-            Rc::new(move || {
-                let Some(shell) = shell.upgrade() else {
-                    return;
-                };
-                let settings = shell.settings.current.borrow().library_list(key);
-                content.apply_settings(&settings);
-                page.apply_library_list_settings(key, &settings);
-                read.request_with(CollectionReadRequest {
-                    query: query.borrow().clone(),
-                    settings,
-                });
-            })
-        };
+            move |settings| {
+                content.apply_settings(settings);
+                page.apply_library_list_settings(key, settings);
+                true
+            }
+        });
         let favorite_sparse = Rc::clone(&sparse);
 
         let download_rows = Rc::clone(&sparse);
@@ -897,13 +826,20 @@ impl CatalogUi {
             };
             download_rows.update_matching(
                 |row| {
-                    row.media_uri == uri && (row.downloaded_count == row.track_count) != downloaded
+                    row.media_uri == uri
+                        && (row.summary.downloaded_count == row.summary.track_count) != downloaded
                 },
-                |row| row.downloaded_count = if downloaded { row.track_count } else { 0 },
+                |row| {
+                    row.summary.downloaded_count = if downloaded {
+                        row.summary.track_count
+                    } else {
+                        0
+                    }
+                },
             );
         });
         let favorite_read = Rc::clone(&read);
-        let favorite_query = Rc::clone(&query);
+        let favorite_search = search.clone();
         let favorite_shell = Rc::downgrade(self);
         if favorites_only {
             self.install_favorite_category_tabs(CollectionCategory::Artists, &mut page);
@@ -927,15 +863,15 @@ impl CatalogUi {
                 {
                     favorite_sparse.update_ready(
                         position as usize,
-                        |row: &mut library::ArtistRow| {
-                            row.favorite = settlement.effective;
+                        |row: &mut library::ArtistView| {
+                            row.state.favorite = settlement.effective;
                         },
                     );
                 }
                 let settings = favorite_shell.settings.current.borrow().library_list(key);
                 if favorites_only || settings.sort_key == crate::LibraryField::Favorite {
                     favorite_read.request_with(CollectionReadRequest {
-                        query: favorite_query.borrow().clone(),
+                        query: favorite_search.text().trim().to_string(),
                         settings,
                     });
                 }
@@ -950,68 +886,14 @@ impl CatalogUi {
         source: Option<library::SourceKey>,
         folder: Option<library::FolderKey>,
     ) -> MountedRoute {
-        let key = LibraryListKey::Playlists;
-        let database = Arc::clone(&self.library);
-        let row_database = Arc::clone(&database);
-        let row_load = Arc::new(
-            move |request: NamedReadRequest,
-                  range: std::ops::Range<usize>,
-                  cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&row_database);
-                Box::pin(async move {
-                    BrowseRequest {
-                        filter: &request.query,
-                        ..BrowseRequest::new(
-                            &Route::Playlists,
-                            CollectionCategory::Tracks,
-                            source,
-                            folder,
-                            &request.settings,
-                            8,
-                        )
-                    }
-                    .collection()
-                    .expect("collection route")
-                    .rows(&database, range.start, range.len(), &cancellation)
-                    .await
-                    .map(|rows| rows.playlists())
-                    .map_err(|error| error.to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            },
-        );
-        let order_database = Arc::clone(&database);
-        let order_load: NamedPageLoad<library::PlaylistRow> =
-            Arc::new(move |request: NamedReadRequest, cancellation| {
-                let database = Arc::clone(&order_database);
-                Box::pin(async move {
-                    BrowseRequest {
-                        filter: &request.query,
-                        ..BrowseRequest::new(
-                            &Route::Playlists,
-                            CollectionCategory::Tracks,
-                            source,
-                            folder,
-                            &request.settings,
-                            8,
-                        )
-                    }
-                    .collection()
-                    .expect("collection route")
-                    .page(&database, library::RouteSeedWindow::top(), &cancellation)
-                    .await
-                    .map(|(count, start, rows)| (count, start, rows.playlists()))
-                    .map_err(|error| error.to_string())
-                })
-            });
         self.named_collection_route(
-            key,
+            LibraryListKey::Playlists,
             msgid("Nothing here yet"),
             count,
             first_row_position,
             first_rows,
             |row: &library::PlaylistRow| row.playlist_key,
-            row_load,
-            order_load,
+            CollectionRead::new(&self.library, Route::Playlists, source, folder, false),
         )
     }
 
@@ -1023,80 +905,20 @@ impl CatalogUi {
         source: Option<library::SourceKey>,
         folder: Option<library::FolderKey>,
     ) -> MountedRoute {
-        let key = LibraryListKey::SmartPlaylists;
-        let database = Arc::clone(&self.library);
-        let row_database = Arc::clone(&database);
-        let row_load = Arc::new(
-            move |request: NamedReadRequest,
-                  range: std::ops::Range<usize>,
-                  cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&row_database);
-                Box::pin(async move {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
-                    BrowseRequest {
-                        now: now,
-                        ..BrowseRequest::new(
-                            &Route::SmartPlaylists,
-                            CollectionCategory::Tracks,
-                            source,
-                            folder,
-                            &request.settings,
-                            8,
-                        )
-                    }
-                    .collection()
-                    .expect("collection route")
-                    .rows(&database, range.start, range.len(), &cancellation)
-                    .await
-                    .map(|rows| rows.smart_playlists())
-                    .map_err(|error| error.to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            },
-        );
-        let order_database = Arc::clone(&database);
-        let order_load: NamedPageLoad<library::SmartPlaylistRow> =
-            Arc::new(move |request: NamedReadRequest, cancellation| {
-                let database = Arc::clone(&order_database);
-                Box::pin(async move {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
-                    BrowseRequest {
-                        now: now,
-                        ..BrowseRequest::new(
-                            &Route::SmartPlaylists,
-                            CollectionCategory::Tracks,
-                            source,
-                            folder,
-                            &request.settings,
-                            8,
-                        )
-                    }
-                    .collection()
-                    .expect("collection route")
-                    .page(&database, library::RouteSeedWindow::top(), &cancellation)
-                    .await
-                    .map(|(count, start, rows)| (count, start, rows.smart_playlists()))
-                    .map_err(|error| error.to_string())
-                })
-            });
         self.named_collection_route(
-            key,
+            LibraryListKey::SmartPlaylists,
             msgid("No smart playlists yet"),
             count,
             first_row_position,
             first_rows,
             |row: &library::SmartPlaylistRow| row.smart_playlist_key,
-            row_load,
-            order_load,
+            CollectionRead::new(&self.library, Route::SmartPlaylists, source, folder, false),
         )
     }
 
     pub fn searchable_track_collection(
         self: &Rc<Self>,
-        page: library::TrackRoutePage,
+        page: library::CatalogPage,
         key: LibraryListKey,
         options: SearchableTrackOptions,
     ) -> TrackListProjection {
@@ -1106,16 +928,16 @@ impl CatalogUi {
         }
         let model =
             TrackCollectionModel::new(Arc::clone(&self.library), self.runtime.clone(), page);
-        self.searchable_song_collection(model, key, settings, options)
+        self.build_track_collection(model, key, settings, options)
     }
 
-    fn searchable_song_collection<T: CollectionTrack>(
+    fn build_track_collection(
         self: &Rc<Self>,
-        model: TrackCollectionModel<T>,
+        model: TrackCollectionModel,
         key: LibraryListKey,
         settings: LibraryListSettings,
         options: SearchableTrackOptions,
-    ) -> TrackListProjection<T> {
+    ) -> TrackListProjection {
         let persistent_search = options.search.is_some();
         let search = options.search.unwrap_or_else(|| {
             let search = gtk::SearchEntry::new();
@@ -1166,11 +988,11 @@ impl CatalogUi {
         self.mount_track_page(key, projection, page, read, Some(favorites_only))
     }
 
-    fn track_page_shell<T: CollectionTrack>(
+    fn track_page_shell(
         self: &Rc<Self>,
         key: LibraryListKey,
         empty_body: &'static str,
-        projection: &TrackListProjection<T>,
+        projection: &TrackListProjection,
     ) -> super::route_shell::LibraryPageShell {
         self.library_page_shell(LibraryPageShellOptions {
             key,
@@ -1185,13 +1007,13 @@ impl CatalogUi {
         })
     }
 
-    fn mount_track_page<T: CollectionTrack>(
+    fn mount_track_page(
         self: &Rc<Self>,
         key: LibraryListKey,
-        projection: TrackListProjection<T>,
+        projection: TrackListProjection,
         page: super::route_shell::LibraryPageShell,
         read: Rc<
-            LatestMountedRouteRead<Result<library::TrackRoutePage<T>, String>, library::SongQuery>,
+            LatestMountedRouteRead<Result<library::CatalogPage, String>, library::CatalogQuery>,
         >,
         favorite_requery: Option<bool>,
     ) -> MountedRoute {
@@ -1242,7 +1064,9 @@ impl CatalogUi {
                     .update_favorite(&track, settlement.effective);
                 let projection_request = favorite_projection.query();
                 if favorite_requery.is_some_and(|favorites_only| {
-                    favorites_only || projection_request.sort == Some(library::TrackSort::Favorite)
+                    favorites_only
+                        || projection_request.track_sort_option()
+                            == Some(library::CatalogSort::Favorite)
                 }) {
                     favorite_read.request_with(projection_request);
                 }

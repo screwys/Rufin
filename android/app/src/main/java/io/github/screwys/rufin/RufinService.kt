@@ -170,19 +170,19 @@ class RufinService : MediaSessionService() {
             launch {
                 val source = started.source()
                 val sources = source.subscribe()
-                var selectedSource: String? = null
+                var documentSource: String? = null
                 try {
                     launch {
                         for (change in libraryChanges) {
-                            val selected = selectedSource ?: continue
-                            try { source.refreshSource(selected) }
+                            val local = documentSource ?: continue
+                            try { source.refreshSource(local, true) }
                             catch (cancelled: CancellationException) { throw cancelled }
                             catch (error: Exception) { Log.w("Rufin", "Could not refresh changed documents", error) }
                         }
                     }
                     while (isActive) {
                         val state = withContext(Dispatchers.Default) { sources.next() }
-                        selectedSource = state.selectedSourceId
+                        documentSource = state.sources.firstOrNull { it.kind == "local" }?.id
                         libraryObserver.update(state.documentRoots.map { it.uri })
                     }
                 } finally { sources.destroy(); source.destroy() }
@@ -275,8 +275,8 @@ class RufinService : MediaSessionService() {
             if (!alreadyOngoing) {
                 val notification = NotificationCompat.Builder(this, CHANNEL_PLAYBACK)
                     .setSmallIcon(androidx.media3.session.R.drawable.media3_notification_small_icon)
-                    .setContentTitle(current?.transport?.current?.row?.item()?.title?.takeIf { it.isNotEmpty() } ?: getString(R.string.app_name))
-                    .setContentText(current?.transport?.current?.row?.item()?.artist)
+                    .setContentTitle(nativePlayer.mediaMetadata.title?.takeIf { it.isNotEmpty() } ?: getString(R.string.app_name))
+                    .setContentText(nativePlayer.mediaMetadata.artist)
                     .setContentIntent(activityIntent)
                     .setOngoing(true)
                     .setStyle(MediaStyleNotificationHelper.MediaStyle(session))
@@ -354,7 +354,7 @@ class RufinService : MediaSessionService() {
         if (requestLocalNetworkAccess()) {
             val source = core().source()
             val sources = source.subscribe()
-            try { withContext(Dispatchers.Default) { sources.next() }.selectedSourceId?.let { source.refreshSource(it) } }
+            try { withContext(Dispatchers.Default) { sources.next() }.selectedSourceId?.let { source.refreshSource(it, false) } }
             finally { sources.destroy(); source.destroy() }
         }
     }.await()

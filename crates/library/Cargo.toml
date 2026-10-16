@@ -20,11 +20,12 @@ chrono.workspace = true
 tempfile.workspace = true
 futures-util.workspace = true
 blake3.workspace = true
+md5_digest.workspace = true
+libsqlite3-sys.workspace = true
 percent-encoding.workspace = true
 process-memory.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-libsqlite3-sys.workspace = true
 sqlx = { workspace = true, features = ["json"] }
 sqlx-core.workspace = true
 regex.workspace = true

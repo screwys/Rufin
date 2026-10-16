@@ -18,8 +18,6 @@ pub struct AndroidPlaybackUpdate {
 pub struct AndroidPlaybackSubscription {
     subscription: tokio::sync::Mutex<PlaybackChanges>,
     settings: SettingsHandle,
-    database: std::sync::Arc<library::Database>,
-    runtime: tokio::runtime::Handle,
     updates: playback::PlaybackUpdates,
     intents: std::sync::Arc<rufin_core::favorites::FavoriteIntents>,
     artwork: artwork::Artwork,
@@ -27,9 +25,7 @@ pub struct AndroidPlaybackSubscription {
 
 struct PlaybackChanges {
     playback: playback::PlaybackSubscription,
-    catalog: tokio::sync::watch::Receiver<Option<rufin_core::runtime::CatalogChange>>,
     intents: tokio::sync::watch::Receiver<u64>,
-    current_facts: Option<(String, bool)>,
 }
 
 impl AndroidPlaybackSubscription {
@@ -40,13 +36,9 @@ impl AndroidPlaybackSubscription {
         Self {
             subscription: tokio::sync::Mutex::new(PlaybackChanges {
                 playback: products.playback.updates.subscribe(),
-                catalog: products.source.catalog_changes(),
                 intents: intents.subscribe(),
-                current_facts: None,
             }),
             settings: products.settings.clone(),
-            database: products.library.clone(),
-            runtime: products.runtime.clone(),
             updates: products.playback.updates.clone(),
             artwork: products.artwork.clone(),
             intents,
@@ -58,55 +50,25 @@ impl AndroidPlaybackSubscription {
 impl AndroidPlaybackSubscription {
     pub async fn next(&self) -> Result<AndroidPlaybackUpdate, AndroidError> {
         let mut changes = self.subscription.lock().await;
-        let PlaybackChanges {
-            playback,
-            catalog,
-            intents,
-            ..
-        } = &mut *changes;
-        let (view, catalog_received, notices) = tokio::select! {
+        let PlaybackChanges { playback, intents } = &mut *changes;
+        let (view, notices) = tokio::select! {
             projection = playback.recv() => {
                 let projection = projection.map_err(error)?;
                 let (view, notices) = projection.map_or((None, Vec::new()), |p| (Some(std::sync::Arc::new(p.view)), p.notices));
-                (view, false, notices)
+                (view, notices)
             },
-            changed = catalog.changed() => { changed.map_err(error)?; (self.updates.current(), true, Vec::new()) },
-            changed = intents.changed() => { changed.map_err(error)?; (self.updates.current(), false, Vec::new()) },
+            changed = intents.changed() => { changed.map_err(error)?; (self.updates.current(), Vec::new()) },
         };
-        let catalog_changed = catalog_received || changes.catalog.has_changed().map_err(error)?;
-        let cached_uri = changes.current_facts.as_ref().map(|(uri, ..)| uri.as_str());
-        let current_uri = view
-            .as_ref()
-            .and_then(|v| v.transport.current.as_ref())
-            .map(|m| m.media_uri.as_str());
-        if catalog_changed || cached_uri != current_uri {
-            changes.current_facts = None;
-        }
-        changes.catalog.borrow_and_update();
         let mut favorite = false;
         if let Some(current) = view
             .as_ref()
             .and_then(|view| view.transport.current.as_ref())
         {
-            let uri = &current.media_uri;
-            if changes.current_facts.is_none() {
-                let database = self.database.clone();
-                let target = library::FavoriteTarget::Track(uri.clone());
-                let favorite = self
-                    .runtime
-                    .spawn(async move { database.favorite(&target).await })
-                    .await
-                    .map_err(error)?
-                    .map_err(error)?;
-                changes.current_facts = Some((uri.clone(), favorite));
-            }
-            favorite = changes
-                .current_facts
-                .as_ref()
-                .is_some_and(|(_, value)| *value);
-            favorite = self
-                .intents
-                .projected_item_favorite(&library::FavoriteTarget::Track(uri.clone()), favorite);
+            let track = &current.row.track;
+            favorite = self.intents.projected_item_favorite(
+                &library::FavoriteTarget::Track(track.media_uri.clone()),
+                track.state.favorite,
+            );
         }
         let (transport, controls, queue, queue_loading) = view.as_ref().map_or_else(
             || {

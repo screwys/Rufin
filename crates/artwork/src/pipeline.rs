@@ -3,12 +3,9 @@ use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::thread;
 
-use futures_util::{StreamExt, stream::FuturesUnordered};
 use sources::{ImageSize, SourceId};
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
-use tokio_util::sync::CancellationToken;
-use tracing::warn;
 
 use crate::cache::FilesystemCache;
 use crate::decode::{
@@ -17,22 +14,12 @@ use crate::decode::{
 use crate::fetch::{FetchContext, FetchOutcome};
 use crate::selection::Candidate;
 use crate::{
-    ArtworkBinding, ArtworkError, ArtworkKey, ArtworkLoad, ArtworkPreparation, ArtworkRequest,
-    DecodedImage, PendingArtwork, RequestId, SourceResolver,
+    ArtworkBinding, ArtworkError, ArtworkKey, ArtworkLoad, ArtworkRequest, CacheResolver,
+    DecodedImage, PendingArtwork, RequestId, RgbaImage, SourceResolver,
 };
 
 pub(crate) const WORKERS: usize = 4;
-pub(crate) const PREPARATION_WORKERS: usize = WORKERS - 1;
-// Keep every worker fed without mirroring the selected source in the job table.
-pub(crate) const PREPARATION_WINDOW: usize = PREPARATION_WORKERS * 4;
 const SOURCE_ARTWORK_SIZE: u32 = 256;
-pub(crate) const CACHED_IMAGE_SIZES: &[ImageSize] = &[
-    ImageSize::Original,
-    ImageSize::Thumbnail(512),
-    ImageSize::Thumbnail(256),
-    ImageSize::Thumbnail(96),
-];
-
 pub(crate) struct Pipeline {
     shared: Arc<Shared>,
 }
@@ -42,6 +29,8 @@ struct Shared {
     cache: FilesystemCache,
     fetch: FetchContext,
     cache_commit: Mutex<()>,
+    cache_resolver: Mutex<Option<Arc<CacheResolver>>>,
+    previews: Mutex<VecDeque<(String, String, Arc<crate::ArtworkPreview>)>>,
     state: Mutex<State>,
     wake: Condvar,
 }
@@ -53,7 +42,7 @@ struct State {
     external_epoch: u64,
     source_epochs: HashMap<SourceId, u64>,
     foreground: VecDeque<ArtworkKey>,
-    preparations: VecDeque<ArtworkKey>,
+    background: VecDeque<ArtworkKey>,
     jobs: HashMap<ArtworkKey, JobRecord>,
     decoded_index: DecodedIndex,
 }
@@ -79,7 +68,7 @@ struct Work {
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum JobPriority {
-    Preparation,
+    Background,
     Foreground,
 }
 
@@ -95,30 +84,41 @@ struct DecodedEntry {
 
 #[derive(Clone)]
 pub(crate) enum Resolution {
-    Ready {
-        image: Arc<DecodedImage>,
-        cached: bool,
-    },
+    Ready { image: Arc<DecodedImage> },
     Cached,
-    Fetched,
     Missing,
     Failed(Arc<str>),
     Invalidated,
 }
 
 impl Pipeline {
+    pub(crate) fn preview(
+        &self,
+        binding: &ArtworkBinding,
+        allow_external: bool,
+    ) -> Option<Arc<crate::ArtworkPreview>> {
+        prepared_preview(&self.shared, binding, allow_external)
+    }
+
     pub(crate) fn cache(&self) -> &FilesystemCache {
         &self.shared.cache
     }
 
-    pub(crate) fn import_cache_file(&self, key: &str, bytes: &[u8]) -> Result<bool, ArtworkError> {
+    pub(crate) fn import_missing_cache_file(
+        &self,
+        key: &str,
+        path: &Path,
+    ) -> Result<bool, ArtworkError> {
         let _commit = lock_cache_commit(&self.shared);
-        Ok(self.shared.cache.import(key, bytes)?)
+        Ok(self.shared.cache.import_missing(key, path)?)
     }
 
-    pub(crate) fn remove_cache_file(&self, key: &str) -> Result<bool, ArtworkError> {
-        let _commit = lock_cache_commit(&self.shared);
-        Ok(self.shared.cache.remove(key)?)
+    pub(crate) fn install_cache_resolver(&self, resolver: Arc<CacheResolver>) {
+        *self
+            .shared
+            .cache_resolver
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(resolver);
     }
 
     pub(crate) fn invalidate_decoded_cache(&self) {
@@ -127,7 +127,7 @@ impl Pipeline {
         state.cache_epoch = state.cache_epoch.wrapping_add(1);
         state.decoded_index.entries.clear();
         state.foreground.clear();
-        state.preparations.clear();
+        state.background.clear();
         let jobs = std::mem::take(&mut state.jobs);
         drop(state);
         drop(commit);
@@ -140,47 +140,28 @@ impl Pipeline {
         self.shared.wake.notify_all();
     }
 
+    pub(crate) fn remove_cache_entries(
+        &self,
+        entries: &[crate::ArtworkCacheEntry],
+    ) -> Result<(), ArtworkError> {
+        let _commit = lock_cache_commit(&self.shared);
+        self.shared.cache.remove_entries(entries)?;
+        Ok(())
+    }
+
+    pub(crate) fn finish_cache_clear(&self) -> Result<(), ArtworkError> {
+        let _commit = lock_cache_commit(&self.shared);
+        self.shared.cache.clear_missing()?;
+        lock_state(&self.shared).decoded_index.entries.clear();
+        Ok(())
+    }
+
     pub(crate) fn cache_revision(&self) -> u64 {
         lock_state(&self.shared).cache_epoch
     }
 
     pub(crate) fn install_database(&self, database: Arc<library::Database>) {
         self.shared.fetch.install_database(database);
-    }
-    pub(crate) fn begin_source_manifest(
-        &self,
-        source_id: &SourceId,
-        revision: u64,
-    ) -> std::io::Result<std::path::PathBuf> {
-        self.shared.cache.begin_source_manifest(source_id, revision)
-    }
-
-    pub(crate) fn mark_source_manifest(
-        &self,
-        staging: &std::path::Path,
-        bindings: &[Vec<u8>],
-    ) -> std::io::Result<()> {
-        for binding in bindings {
-            let binding = ArtworkBinding::opaque(binding);
-            for candidate in &binding.candidates {
-                self.shared
-                    .cache
-                    .mark_source_manifest_identity(staging, &candidate.stable_identity())?;
-            }
-        }
-        Ok(())
-    }
-
-    pub(crate) fn complete_source_manifest(
-        &self,
-        source_id: &SourceId,
-        revision: u64,
-        staging: &std::path::Path,
-    ) -> std::io::Result<()> {
-        let _commit = lock_cache_commit(&self.shared);
-        self.shared
-            .cache
-            .complete_source_manifest_staging(source_id, revision, staging)
     }
     pub(crate) fn new(
         cache_root: &Path,
@@ -194,6 +175,8 @@ impl Pipeline {
             cache,
             fetch,
             cache_commit: Mutex::new(()),
+            cache_resolver: Mutex::new(None),
+            previews: Mutex::new(VecDeque::new()),
             state: Mutex::new(State {
                 next_request: 1,
                 ..State::default()
@@ -245,76 +228,22 @@ impl Pipeline {
         })
     }
 
-    pub(crate) fn source_preparation_complete(
-        &self,
-        source_id: &SourceId,
-        revision: u64,
-    ) -> Result<bool, ArtworkError> {
-        self.shared
-            .cache
-            .source_manifest_complete(source_id, revision)
-            .map_err(ArtworkError::Cache)
-    }
-
-    pub(crate) async fn prefetch_source_artwork(
+    pub(crate) async fn cache_source(
         self: &Arc<Self>,
-        artwork: &[Vec<u8>],
-        cancelled: &CancellationToken,
-    ) -> Result<ArtworkPreparation, ArtworkError> {
-        let prepare = async {
-            let mut bindings = artwork.iter();
-            let mut pending = FuturesUnordered::new();
-            let mut summary = ArtworkPreparation {
-                total: artwork.len(),
-                ..ArtworkPreparation::default()
-            };
-            loop {
-                while pending.len() < PREPARATION_WINDOW {
-                    let Some(binding) = bindings.next() else {
-                        break;
-                    };
-                    let request = ArtworkRequest::new(
-                        ArtworkBinding::opaque(binding),
-                        SOURCE_ARTWORK_SIZE,
-                        SOURCE_ARTWORK_SIZE,
-                    );
-                    let load = self.submit(request, JobPriority::Preparation);
-                    pending.push(async move {
-                        match load {
-                            ArtworkLoad::Ready(image) => Resolution::Ready {
-                                image,
-                                cached: true,
-                            },
-                            ArtworkLoad::Missing => Resolution::Missing,
-                            ArtworkLoad::Pending(pending) => pending.finish_resolution().await,
-                        }
-                    });
-                }
-                let Some(result) = pending.next().await else {
-                    break;
-                };
-                match result {
-                    Resolution::Ready { cached: true, .. } | Resolution::Cached => {
-                        summary.ready += 1;
-                        summary.cached += 1;
-                    }
-                    Resolution::Ready { cached: false, .. } | Resolution::Fetched => {
-                        summary.ready += 1
-                    }
-                    Resolution::Missing => summary.missing += 1,
-                    Resolution::Failed(error) => {
-                        warn!(%error, "could not prepare one source artwork image");
-                        summary.failed += 1;
-                    }
-                    Resolution::Invalidated => return Err(ArtworkError::Cancelled),
-                }
-            }
-            Ok(summary)
+        binding: ArtworkBinding,
+    ) -> Result<bool, ArtworkError> {
+        let request = ArtworkRequest::new(binding, 512, 512);
+        let resolution = match self.submit(request, JobPriority::Background) {
+            ArtworkLoad::Ready(_) => return Ok(true),
+            ArtworkLoad::Missing => return Ok(false),
+            ArtworkLoad::Pending(pending) => pending.finish_resolution().await,
         };
-        cancelled
-            .run_until_cancelled(prepare)
-            .await
-            .ok_or(ArtworkError::Cancelled)?
+        match resolution {
+            Resolution::Ready { .. } | Resolution::Cached => Ok(true),
+            Resolution::Missing => Ok(false),
+            Resolution::Failed(error) => Err(ArtworkError::FetchSetup(error.to_string())),
+            Resolution::Invalidated => Err(ArtworkError::Cancelled),
+        }
     }
 
     pub(crate) fn cancel(&self, key: &ArtworkKey, request_id: RequestId) {
@@ -348,11 +277,22 @@ impl Pipeline {
     pub(crate) fn cached_binding_file(
         &self,
         binding: &ArtworkBinding,
+        render_size: u32,
     ) -> Option<std::path::PathBuf> {
-        binding
-            .candidates
-            .iter()
-            .find_map(|candidate| cached_leaf_file(&self.shared, candidate, CACHED_IMAGE_SIZES))
+        binding.candidates.iter().find_map(|candidate| {
+            cached_leaf_file(
+                &self.shared,
+                candidate,
+                &[ImageSize::Thumbnail(render_size), ImageSize::Original],
+            )
+            .or_else(|| {
+                self.shared
+                    .cache
+                    .ready_entries(candidate, ImageSize::Thumbnail(1))
+                    .last()
+                    .map(|entry| entry.path)
+            })
+        })
     }
 
     pub(crate) fn key(&self, request: &ArtworkRequest) -> ArtworkKey {
@@ -496,7 +436,7 @@ impl JobRecord {
             .values()
             .map(|subscriber| subscriber.priority)
             .max()
-            .unwrap_or(JobPriority::Preparation)
+            .unwrap_or(JobPriority::Background)
     }
 }
 
@@ -552,7 +492,7 @@ fn queue(state: &mut State, key: ArtworkKey, front: bool) {
     };
     let queue = match priority {
         JobPriority::Foreground => &mut state.foreground,
-        JobPriority::Preparation => &mut state.preparations,
+        JobPriority::Background => &mut state.background,
     };
     if front {
         queue.push_front(key);
@@ -563,7 +503,7 @@ fn queue(state: &mut State, key: ArtworkKey, front: bool) {
 
 fn remove_queued(state: &mut State, key: &ArtworkKey) {
     state.foreground.retain(|queued| queued != key);
-    state.preparations.retain(|queued| queued != key);
+    state.background.retain(|queued| queued != key);
 }
 
 fn job_key(request: &ArtworkRequest, source_epoch: u64, external_epoch: u64) -> ArtworkKey {
@@ -600,7 +540,7 @@ fn next_work(shared: &Shared, foreground_reserved: bool, completed_work: &mut bo
     loop {
         let key = state.foreground.pop_front().or_else(|| {
             (!foreground_reserved)
-                .then(|| state.preparations.pop_front())
+                .then(|| state.background.pop_front())
                 .flatten()
         });
         if let Some(key) = key {
@@ -671,20 +611,56 @@ fn resolve_candidate(shared: &Shared, work: &Work, candidate: &Candidate) -> Res
     let request = &work.request;
     if matches!(result, Resolution::Missing | Resolution::Failed(_))
         && (!candidate.is_external() || request.external.allow_cached)
-        && let Some(path) = cached_leaf_file(shared, candidate, &[ImageSize::Thumbnail(1)])
-        && let Ok(bytes) = std::fs::read(path)
+        && let Some(entry) = shared
+            .cache
+            .ready_entries(candidate, ImageSize::Thumbnail(1))
+            .last()
+            .or_else(|| resolve_peer_cache(shared, work, candidate, true).map(|(entry, _)| entry))
+        && let Ok(bytes) = std::fs::read(entry.path)
         && let Ok(image) = decode_original(
             Arc::from(bytes),
             job_key(request, work.source_epoch, work.external_epoch),
             request.render_size,
         )
     {
+        cache_preview(shared, candidate, false, || image.blur_hash());
         return Resolution::Ready {
             image: Arc::new(image),
-            cached: true,
         };
     }
     result
+}
+
+fn resolve_peer_cache(
+    shared: &Shared,
+    work: &Work,
+    candidate: &Candidate,
+    fallback: bool,
+) -> Option<(crate::cache::CacheEntry, bool)> {
+    if work.request.cache_only {
+        return None;
+    }
+    let resolver = shared
+        .cache_resolver
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()?;
+    let request = crate::CacheImageRequest {
+        family: candidate.key.clone(),
+        size: work.request.fetch_size,
+        fallback,
+    };
+    let (key, file) = shared.runtime.block_on(resolver(request))?;
+    let _commit = lock_cache_commit(shared);
+    if !work_is_current(&lock_state(shared), work) {
+        return None;
+    }
+    shared.cache.import_missing(&key, &file).ok()?;
+    let path = shared.cache.file(&key).ok()??;
+    Some((
+        crate::cache::CacheEntry { path },
+        key.starts_with("originals/"),
+    ))
 }
 
 fn resolve_request(
@@ -696,6 +672,7 @@ fn resolve_request(
     let artwork_key = job_key(request, work.source_epoch, work.external_epoch);
     let may_read_cache = !candidate.is_external() || request.external.allow_cached;
     if may_read_cache {
+        let missing = shared.cache.is_missing(candidate, request.fetch_size);
         let entry = shared
             .cache
             .ready_entry(candidate, request.fetch_size)
@@ -705,9 +682,19 @@ fn resolve_request(
                     .cache
                     .ready_entry(candidate, ImageSize::Original)
                     .map(|entry| (entry, true))
+            })
+            .or_else(|| {
+                if missing
+                    || matches!(&candidate.image, library::ArtworkImage::Local { path, .. }
+                        if Path::new(path).is_absolute() || path.starts_with("content:") || path.starts_with("rufin-document:"))
+                {
+                    None
+                } else {
+                    resolve_peer_cache(shared, work, candidate, false)
+                }
             });
         if let Some((entry, original)) = entry {
-            if !work.decode {
+            if !work.decode && !original {
                 return Ok(Resolution::Cached);
             }
             if original {
@@ -721,21 +708,43 @@ fn resolve_request(
             } else {
                 match decode_cached(&entry.path, artwork_key.clone(), request.render_size) {
                     Ok(image) => {
+                        cache_preview(shared, candidate, false, || image.blur_hash());
                         return Ok(Resolution::Ready {
                             image: Arc::new(image),
-                            cached: true,
                         });
                     }
                     Err(_) => shared.cache.remove_ready(&entry.path),
                 }
             }
         }
-        if shared.cache.is_missing(candidate, request.fetch_size) {
+        if missing {
             return Ok(Resolution::Missing);
         }
     }
     if request.cache_only || (candidate.is_external() && !request.external.allow_network) {
         return Ok(Resolution::Missing);
+    }
+    if let library::ArtworkImage::Playlist {
+        automatic: Some(_),
+        resolved,
+        ..
+    } = &candidate.image
+    {
+        let Some(recipes) = resolved else {
+            let database = shared
+                .fetch
+                .database()
+                .ok_or("Playlist artwork storage is unavailable")?;
+            return match shared
+                .runtime
+                .block_on(database.resolve_playlist_artwork(candidate.clone()))
+                .map_err(|error| error.to_string())?
+            {
+                Some(resolved) => resolve_request(shared, work, &resolved),
+                None => Ok(Resolution::Invalidated),
+            };
+        };
+        return compose_playlist(shared, work, candidate, recipes);
     }
     match shared.fetch.fetch(
         &shared.runtime,
@@ -751,6 +760,62 @@ fn resolve_request(
             Ok(Resolution::Missing)
         }
     }
+}
+
+fn compose_playlist(
+    shared: &Shared,
+    work: &Work,
+    candidate: &Candidate,
+    recipes: &[Vec<Candidate>],
+) -> Result<Resolution, String> {
+    let mut images = Vec::with_capacity(recipes.len());
+    let mut failure = None;
+    for recipe in recipes {
+        for leaf in recipe {
+            let binding = ArtworkBinding::opaque(
+                &serde_json::to_vec(&[leaf]).map_err(|error| error.to_string())?,
+            );
+            let request =
+                ArtworkRequest::new(binding, 512, 512).with_external(work.request.external.clone());
+            let child = Work {
+                key: job_key(&request, 0, 0),
+                source_epoch: source_epoch(&lock_state(shared), &request.binding),
+                external_epoch: work.external_epoch,
+                request: Arc::new(request),
+                decode: false,
+            };
+            match resolve_candidate(shared, &child, leaf) {
+                Resolution::Ready { image } => {
+                    if let Some(bytes) = image.original() {
+                        images.push(bytes.to_vec());
+                        break;
+                    }
+                }
+                Resolution::Cached => {
+                    if let Some(entry) = cached_leaf_file(
+                        shared,
+                        leaf,
+                        &[ImageSize::Thumbnail(512), ImageSize::Original],
+                    ) {
+                        images.push(std::fs::read(entry).map_err(|error| error.to_string())?);
+                        break;
+                    }
+                }
+                Resolution::Missing => {}
+                Resolution::Failed(error) => failure = Some(error),
+                Resolution::Invalidated => return Ok(Resolution::Invalidated),
+            }
+        }
+    }
+    if images.is_empty() {
+        if let Some(error) = failure {
+            return Ok(Resolution::Failed(error));
+        }
+        mark_missing(shared, work, candidate).map_err(|error| error.to_string())?;
+        return Ok(Resolution::Missing);
+    }
+    let bytes = crate::collage_png(&images, 1024).map_err(|error| error.to_string())?;
+    store_image(shared, work, candidate, bytes, false).map_err(|error| error.to_string())
 }
 
 fn store_image(
@@ -776,13 +841,14 @@ fn store_image(
                 .find_map(|entry| cached_poster(&entry.path, size).ok().flatten())
         });
     if cached && request.fetch_size == ImageSize::Original && poster.is_none() {
+        let image = decode_original(
+            Arc::from(bytes),
+            job_key(request, work.source_epoch, work.external_epoch),
+            request.render_size,
+        )?;
+        cache_preview(shared, candidate, false, || image.blur_hash());
         return Ok(Resolution::Ready {
-            image: Arc::new(decode_original(
-                Arc::from(bytes),
-                job_key(request, work.source_epoch, work.external_epoch),
-                request.render_size,
-            )?),
-            cached,
+            image: Arc::new(image),
         });
     }
     let thumbnail = match poster {
@@ -799,18 +865,18 @@ fn store_image(
                 .cache
                 .write_ready(candidate, ImageSize::Thumbnail(thumbnail_size), bytes)?;
         }
-        if request.fetch_size == ImageSize::Original && !cached {
+        if !cached
+            && (request.fetch_size == ImageSize::Original
+                || matches!(candidate.image, library::ArtworkImage::Playlist { .. }))
+        {
             shared
                 .cache
                 .write_ready(candidate, ImageSize::Original, &bytes)?;
         }
     }
+    cache_preview(shared, candidate, !cached, || thumbnail.blur_hash());
     if !work.decode {
-        return Ok(if cached {
-            Resolution::Cached
-        } else {
-            Resolution::Fetched
-        });
+        return Ok(Resolution::Cached);
     }
     let image = decode_normalized(
         thumbnail,
@@ -824,8 +890,105 @@ fn store_image(
     };
     Ok(Resolution::Ready {
         image: Arc::new(image),
-        cached,
     })
+}
+
+fn prepared_preview(
+    shared: &Shared,
+    binding: &ArtworkBinding,
+    allow_external: bool,
+) -> Option<Arc<crate::ArtworkPreview>> {
+    binding
+        .candidates
+        .iter()
+        .filter(|candidate| !candidate.is_external() || allow_external)
+        .find_map(|candidate| cached_preview(shared, candidate, candidate.blur_hash()))
+}
+
+fn cached_preview(
+    shared: &Shared,
+    candidate: &Candidate,
+    supplied: Option<&str>,
+) -> Option<Arc<crate::ArtworkPreview>> {
+    let family = FilesystemCache::candidate_family(candidate);
+    let cached = {
+        let mut previews = shared.previews.lock().unwrap_or_else(|p| p.into_inner());
+        previews
+            .iter()
+            .position(|(key, hash, _)| supplied.map_or(key == &family, |supplied| hash == supplied))
+            .map(|index| {
+                let entry = previews.remove(index).unwrap();
+                let cached = (entry.1.clone(), Arc::clone(&entry.2));
+                previews.push_back(entry);
+                cached
+            })
+    };
+    let (hash, preview) = match cached {
+        Some(cached) => cached,
+        None => {
+            let hash = supplied?;
+            let image = RgbaImage::from_blur_hash(hash).ok()?;
+            let png = image.encode_png().ok()?;
+            (
+                hash.to_owned(),
+                Arc::new(crate::ArtworkPreview {
+                    image,
+                    png: Arc::new(png),
+                }),
+            )
+        }
+    };
+    let mut previews = shared.previews.lock().unwrap_or_else(|p| p.into_inner());
+    previews.retain(|(key, _, _)| key != &family);
+    previews.push_back((family, hash, Arc::clone(&preview)));
+    if previews.len() > 256 {
+        previews.pop_front();
+    }
+    Some(preview)
+}
+
+fn cache_preview(
+    shared: &Shared,
+    candidate: &Candidate,
+    refresh: bool,
+    encode: impl FnOnce() -> Result<String, ArtworkError>,
+) {
+    let versioned = match &candidate.image {
+        library::ArtworkImage::Native { tag, .. } => {
+            tag.as_ref().is_some_and(|tag| !tag.is_empty())
+        }
+        library::ArtworkImage::Local { revision, .. }
+        | library::ArtworkImage::Playlist { revision, .. } => {
+            !revision.is_empty() && revision != "auto"
+        }
+        _ => false,
+    };
+    let refresh = refresh && !versioned;
+    if !refresh && let Some(hash) = candidate.blur_hash() {
+        cached_preview(shared, candidate, Some(hash));
+        return;
+    }
+    let database = shared.fetch.database();
+    let result: Result<String, ArtworkError> = shared.runtime.block_on(async {
+        if let Some(database) = &database {
+            if !refresh && let Some(hash) = database.artwork_preview(&candidate.key).await? {
+                return Ok(hash);
+            }
+        }
+        let hash = encode()?;
+        if let Some(database) = database {
+            database
+                .write_artwork_preview(&candidate.key, &hash, refresh)
+                .await?;
+        }
+        Ok(hash)
+    });
+    match result {
+        Ok(hash) => {
+            cached_preview(shared, candidate, Some(&hash));
+        }
+        Err(error) => tracing::warn!(%error, "Could not cache artwork preview"),
+    }
 }
 
 fn mark_missing(shared: &Shared, work: &Work, candidate: &Candidate) -> std::io::Result<bool> {
@@ -873,12 +1036,12 @@ fn finish(shared: &Shared, work: Work, resolution: Resolution) {
         .extract_if(|_, subscriber| {
             !retry
                 && !(subscriber.priority == JobPriority::Foreground
-                    && matches!(resolution, Resolution::Cached | Resolution::Fetched))
+                    && matches!(resolution, Resolution::Cached))
         })
         .map(|(_, subscriber)| subscriber.completion)
         .collect::<Vec<_>>();
     if record.has_interest() {
-        // Foreground callers joining a preparation may still need a disk decode.
+        // Foreground callers joining a background job may still need a disk decode.
         record.active = false;
         state.jobs.insert(work.key.clone(), record);
         queue(&mut state, work.key, true);
@@ -910,7 +1073,7 @@ mod tests {
     use sources::NativeImageRef;
 
     #[tokio::test]
-    async fn shared_foreground_and_preparation_disk_hit_counts_as_cached() {
+    async fn foreground_and_background_share_a_disk_hit() {
         let directory = tempfile::tempdir().unwrap();
         let cache = FilesystemCache::new(directory.path().to_path_buf()).unwrap();
         let request = ArtworkRequest {
@@ -957,7 +1120,7 @@ mod tests {
             request,
             RequestId(2),
             Subscriber {
-                priority: JobPriority::Preparation,
+                priority: JobPriority::Background,
                 completion,
             },
         );
@@ -967,19 +1130,33 @@ mod tests {
             cache,
             fetch: FetchContext::new(Arc::new(Mutex::new(None))),
             cache_commit: Mutex::new(()),
+            cache_resolver: Mutex::new(None),
+            previews: Mutex::new(VecDeque::new()),
             state: Mutex::new(state),
             wake: Condvar::new(),
         };
-        let work = next_work(&shared, false, &mut false);
-        let resolution = resolve(&shared, &work);
-        finish(&shared, work, resolution);
+        tokio::task::spawn_blocking(move || {
+            let work = next_work(&shared, false, &mut false);
+            let resolution = resolve(&shared, &work);
+            assert!(
+                work.request
+                    .binding
+                    .candidates
+                    .iter()
+                    .all(|candidate| candidate.blur_hash().is_none())
+            );
+            assert!(prepared_preview(&shared, &work.request.binding, false).is_some());
+            finish(&shared, work, resolution);
+        })
+        .await
+        .unwrap();
         assert!(matches!(
             foreground.await.unwrap(),
             Resolution::Ready { .. }
         ));
         assert!(matches!(
             background.await.unwrap(),
-            Resolution::Ready { cached: true, .. }
+            Resolution::Ready { .. }
         ));
     }
 
@@ -994,12 +1171,11 @@ mod tests {
             )
             .expect("pipeline"),
         );
-        let summary = pipeline
-            .prefetch_source_artwork(&[br#"{"no_art":true}"#.to_vec()], &CancellationToken::new())
+        let available = pipeline
+            .cache_source(ArtworkBinding::opaque(br#"{"no_art":true}"#))
             .await
             .expect("prepare no-art");
-        assert_eq!(summary.missing, 1);
-        assert_eq!(summary.failed, 0);
+        assert!(!available);
     }
 
     #[test]

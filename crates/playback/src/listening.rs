@@ -1,4 +1,4 @@
-use crate::{QueueItem, RepeatMode, RunId};
+use crate::{RepeatMode, RunId, TrackReference};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceReportPhase {
@@ -68,7 +68,7 @@ pub struct Continuation {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActivityListen {
     pub play_id: String,
-    pub item: QueueItem,
+    pub item: TrackReference,
     pub started_at_unix_seconds: i64,
     pub local_period: String,
     pub listened_millis: u64,

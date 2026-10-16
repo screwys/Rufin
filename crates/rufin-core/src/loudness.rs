@@ -230,10 +230,17 @@ async fn analyze_selected(
         let owner = Arc::clone(&source_owner);
         let source_id = configuration.source_id.clone();
         let source = tokio::task::spawn_blocking(move || owner.client(&source_id)).await;
-        if let Ok(Ok(source)) = source
-            && let Err(error) = source.backfill_file_r128_tags(&database, source_key).await
-        {
-            warn!(%error, "could not write stored EBU R128 tags");
+        if let Ok(Ok(source)) = source {
+            let result = async {
+                source
+                    .backfill_file_r128_tags(&database, source_key)
+                    .await
+                    .map_err(|error| error.to_string())
+            }
+            .await;
+            if let Err(error) = result {
+                warn!(%error, "could not write stored EBU R128 tags");
+            }
         }
     }
     let mut album_after = None;

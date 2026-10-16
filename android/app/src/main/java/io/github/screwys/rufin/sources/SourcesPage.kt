@@ -38,6 +38,7 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
     var remove by remember { mutableStateOf<Pair<String, String>?>(null) }
     var editingConnection by remember { mutableStateOf<String?>(null) }
     var addingConnection by remember { mutableStateOf(false) }
+    var clearingCache by remember { mutableStateOf(false) }
     LaunchedEffect(model.service, model.ready) {
         val runtime = model.service?.runtime?.value?.getOrNull() ?: return@LaunchedEffect
         val setup = runtime.source()
@@ -58,7 +59,7 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
                 shape = settingsRowShape(index, sources.size + 1), selected = selected,
                 leading = { SourceIcon(source.kind, Modifier.size(24.dp)) }, trailing = {
                     Row {
-                        IconButton({ model.runAction { model.connectedService().runtime.value!!.getOrThrow().source().use { it.refreshSource(source.id) } } }) {
+                        IconButton({ model.runAction { model.connectedService().runtime.value!!.getOrThrow().source().use { it.refreshSource(source.id, false) } } }) {
                             RufinIcon("rufin-view-refresh-symbolic", translate("Refresh"), Modifier.size(20.dp))
                         }
                         IconButton({ remove = source.id to source.name }) {
@@ -71,6 +72,42 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
             SettingsRow(translate("Add Source"), shape = settingsRowShape(sources.size, sources.size + 1),
                 leading = { RufinIcon("rufin-list-add-symbolic", null, Modifier.size(24.dp)) },
                 trailing = { RufinIcon("rufin-go-next-symbolic", null, Modifier.size(20.dp)) }, modifier = Modifier.clickable(onClick = onAdd))
+        }
+        state?.selectedSourceId?.let { sourceId ->
+            SettingsGroup {
+                SettingsRow(translate("Download artwork"), shape = settingsRowShape(0, 2),
+                    leading = { RufinIcon("rufin-download-symbolic", null, Modifier.size(24.dp)) },
+                    modifier = Modifier.clickable(enabled = bridge != null) {
+                        model.runAction { bridge?.downloadArtwork(sourceId) }
+                    })
+                SettingsRow(translate("Download lyrics"), shape = settingsRowShape(1, 2),
+                    leading = { RufinIcon("rufin-download-symbolic", null, Modifier.size(24.dp)) },
+                    modifier = Modifier.clickable(enabled = bridge != null) {
+                        model.runAction { bridge?.downloadLyrics(sourceId) }
+                    })
+            }
+        }
+        SettingsGroup {
+            listOf(
+                Triple(true, translate("Clear artwork cache"), translate("Artwork cache cleared")),
+                Triple(false, translate("Clear lyrics cache"), translate("Lyrics cache cleared")),
+            ).forEachIndexed { index, (artwork, title, success) ->
+                SettingsRow(title, shape = settingsRowShape(index, 2),
+                    leading = { RufinIcon("rufin-user-trash-symbolic", null, Modifier.size(24.dp)) },
+                    modifier = Modifier.clickable(enabled = model.ready && !clearingCache) {
+                        clearingCache = true
+                        model.runAction {
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    model.connectedService().runtime.value!!.getOrThrow().downloads().use {
+                                        if (artwork) it.clearArtworkCache() else it.clearLyricsCache()
+                                    }
+                                }
+                                model.showFeedback(success)
+                            } finally { clearingCache = false }
+                        }
+                    })
+            }
         }
         }
         if (connectionsOnly) SettingsGroup {

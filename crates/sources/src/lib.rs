@@ -48,8 +48,10 @@ pub use file::documents::{
     list_documents, open_document_input, rename_document, resolve_document_relative,
     resolve_document_stream, save_document, stat_document,
 };
-pub use file::documents::{read_document_prefix, read_document_queue_item};
-pub use file::local::media::{local_media_identity_path, read_local_queue_item};
+pub use file::documents::{
+    read_document_image, read_document_prefix, read_document_track_reference,
+};
+pub use file::local::media::{local_media_identity_path, read_local_track_reference};
 pub use file::metadata::read_embedded_lyrics;
 pub use file::playlist::{
     import_local_playlist_file, playlist_file_is_non_audio, playlist_file_revision,
@@ -57,7 +59,8 @@ pub use file::playlist::{
 pub use file::remote::smb::list_smb_shares;
 pub use file::remote::webdav::nextcloud::authorize_nextcloud;
 pub use file::remote::{
-    FileAuthentication, FileCredentials, FileCredentialsEdit, FileHeader, FileSourceSettings,
+    FileAuthentication, FileCredentials, FileCredentialsEdit, FileHeader, FileSource,
+    FileSourceSettings,
 };
 pub use jellyfin_emby::{
     EmbyConnectLogin, EmbyConnectPin, EmbyConnectServer, JellyfinQuickConnect,
@@ -111,14 +114,3 @@ pub enum SourceError {
 }
 
 pub type SourceResult<T> = Result<T, SourceError>;
-
-pub(crate) async fn finish_scan<T>(
-    mut scan: library::Scan,
-    result: SourceResult<T>,
-) -> SourceResult<T> {
-    if result.is_err() {
-        scan.interrupted();
-    }
-    scan.finish().await?;
-    result
-}

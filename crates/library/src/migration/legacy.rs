@@ -1,6 +1,6 @@
 //! Reads released source-scoped user facts; catalog rows are consulted only for referenced locators.
 use super::{has_table, imported, integer, string};
-use crate::{Database, LibraryError, LibraryResult, QueueItem, QueueProvenance, SourceId};
+use crate::{Database, LibraryError, LibraryResult, QueueProvenance, SourceId, TrackReference};
 use futures_util::TryStreamExt;
 use sqlx::{Connection, SqliteConnection, sqlite::SqliteRow};
 use std::io::{Seek, Write};
@@ -53,25 +53,25 @@ fn uri(source: &str, kind: &str, id: &str, track: Option<&SqliteRow>) -> Library
     Ok(crate::normalize_direct_media_uri(id)
         .unwrap_or_else(|| crate::source_entity_uri(&SourceId::new(source), kind, id)))
 }
-fn item(media_uri: String, track: Option<&SqliteRow>) -> QueueItem {
-    let mut item = QueueItem::direct(media_uri, "", "", "", 0);
+fn item(media_uri: String, track: Option<&SqliteRow>) -> TrackReference {
+    let mut item = TrackReference::direct(media_uri, "", "", "", 0);
     if let Some(track) = track {
-        item.title = string(track, "title").unwrap_or_else(|| item.media_uri.clone());
-        item.artist = string(track, "display_artist").unwrap_or_default();
-        item.album = string(track, "display_album").unwrap_or_default();
-        item.duration_millis = integer(track, "duration_seconds")
+        item.metadata.title = string(track, "title").unwrap_or_else(|| item.media_uri.clone());
+        item.metadata.artist = string(track, "display_artist").unwrap_or_default();
+        item.metadata.album = string(track, "display_album").unwrap_or_default();
+        item.metadata.duration_millis = integer(track, "duration_seconds")
             .unwrap_or(0)
             .saturating_mul(1000)
             .max(0);
-        item.disc_number = integer(track, "disc_number");
-        item.track_number = integer(track, "track_number");
-        item.year = integer(track, "year");
-        item.release_date = string(track, "release_date");
-        item.source_format = string(track, "source_format");
-        item.musicbrainz_recording_id = string(track, "musicbrainz_recording_id");
-        item.musicbrainz_release_track_id = string(track, "musicbrainz_release_track_id");
+        item.metadata.disc_number = integer(track, "disc_number").unwrap_or_default();
+        item.metadata.track_number = integer(track, "track_number").unwrap_or_default();
+        item.metadata.year = integer(track, "year");
+        item.metadata.release_date = string(track, "release_date");
+        item.metadata.source_format = string(track, "source_format");
+        item.metadata.musicbrainz_recording_id = string(track, "musicbrainz_recording_id");
+        item.metadata.musicbrainz_release_track_id = string(track, "musicbrainz_release_track_id");
     } else {
-        item.title = item.media_uri.clone();
+        item.metadata.title = item.media_uri.clone();
     }
     item
 }
@@ -237,11 +237,12 @@ async fn playlists(
             let text=|name|track.as_ref().and_then(|track|string(track,name));
             let number=|name|track.as_ref().and_then(|track|integer(track,name));
             crate::playlists::write_playlist_entry(target,key,&crate::playlists::PlaylistEntryWrite{
-                object_id:required(&row,"occurrence_id")?,media_uri:uri(&source_id,"track",&track_id,track.as_ref())?,
-                title:text("title"),artist:text("display_artist"),album:text("display_album"),album_display_artist:text("album_display_artist"),
-                duration_millis:number("duration_seconds").map(|duration|duration.saturating_mul(1000)).filter(|duration|*duration>=0),
-                disc_number:number("disc_number"),track_number:number("track_number"),year:number("year"),release_date:text("release_date"),
-                source_format:text("source_format"),musicbrainz_recording_id:text("musicbrainz_recording_id"),musicbrainz_release_track_id:text("musicbrainz_release_track_id"),
+                object_id:required(&row,"occurrence_id")?,
+                track:crate::TrackReference{media_uri:uri(&source_id,"track",&track_id,track.as_ref())?,metadata:crate::TrackMetadata{
+                    title:text("title").unwrap_or_default(),artist:text("display_artist").unwrap_or_default(),album:text("display_album").unwrap_or_default(),album_display_artist:text("album_display_artist"),
+                    duration_millis:number("duration_seconds").unwrap_or_default().saturating_mul(1000).max(0),
+                    disc_number:number("disc_number").unwrap_or_default(),track_number:number("track_number").unwrap_or_default(),year:number("year"),release_date:text("release_date"),
+                    source_format:text("source_format"),musicbrainz_recording_id:text("musicbrainz_recording_id"),musicbrainz_release_track_id:text("musicbrainz_release_track_id"),..Default::default()},artwork_binding:None},
                 position:integer(&row,"position").ok_or_else(||LibraryError::InvalidStore("missing playlist order".into()))?}).await
         }.await;
         imported(result, "legacy playlist occurrence")?;
@@ -323,6 +324,7 @@ async fn smart(source: &mut SqliteConnection, target: &mut SqliteConnection) -> 
             crate::smart_playlists::write_smart_playlist(
                 target,
                 &crate::smart_playlists::SmartPlaylistWrite {
+                    artwork_binding: None,
                     artwork_bytes: None,
                     object_id: required(&row, "smart_playlist_id")?,
                     name: required(&row, "name")?,
@@ -368,9 +370,9 @@ async fn listens(
                 let track_id=string(&row,"track_id").or_else(||recent.as_ref().and_then(|row|string(row,"track_id"))).unwrap_or_else(||play.clone());
                 let track=if let Some(source_id)=&source_id {track(lookup,source_id,&track_id).await?} else {None};
                 let item=item(uri(source_id.as_deref().unwrap_or("rufin:recovered"),"track",&track_id,track.as_ref())?,track.as_ref());
-                let duration=integer(&row,"duration_millis").unwrap_or(item.duration_millis).max(0);
-                let listen=crate::ListenWrite{external_id:Some(play),media_uri:item.media_uri,title:required(&row,"track_title")?,artist:string(&row,"artist_name").unwrap_or_default(),album:string(&row,"album_title").unwrap_or_default(),duration_millis:duration,disc_number:item.disc_number,track_number:item.track_number,year:item.year,release_date:item.release_date,source_format:item.source_format,musicbrainz_recording_id:item.musicbrainz_recording_id,musicbrainz_release_track_id:item.musicbrainz_release_track_id,started_at:integer(&row,"played_at").or_else(||integer(&row,"started_at")).ok_or_else(||LibraryError::InvalidStore("missing legacy listen time".into()))?,local_period:required(&row,"period")?,listened_millis:if table=="pending_scrobbles" {duration} else {0},skipped:false};
-                let key=crate::activity::write_listen(target,&listen,source_id.as_deref(),None,None).await?;
+                let duration=integer(&row,"duration_millis").unwrap_or(item.metadata.duration_millis).max(0);
+                let listen=crate::ListenWrite{external_id:Some(play),media_uri:item.media_uri,title:required(&row,"track_title")?,artist:string(&row,"artist_name").unwrap_or_default(),album:string(&row,"album_title").unwrap_or_default(),duration_millis:duration,disc_number:Some(item.metadata.disc_number),track_number:Some(item.metadata.track_number),year:item.metadata.year,release_date:item.metadata.release_date,source_format:item.metadata.source_format,musicbrainz_recording_id:item.metadata.musicbrainz_recording_id,musicbrainz_release_track_id:item.metadata.musicbrainz_release_track_id,started_at:integer(&row,"played_at").or_else(||integer(&row,"started_at")).ok_or_else(||LibraryError::InvalidStore("missing legacy listen time".into()))?,local_period:required(&row,"period")?,listened_millis:if table=="pending_scrobbles" {duration} else {0},skipped:false};
+                let (key,_)=crate::activity::write_listen(target,&listen,source_id.as_deref(),None,None).await?;
                 if table=="pending_scrobbles" {
                     sqlx::query("INSERT INTO listen_outbox(listen_key,service,account_id,attempts,next_attempt_at,last_error) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(listen_key,service,account_id) DO UPDATE SET attempts=excluded.attempts,next_attempt_at=excluded.next_attempt_at,last_error=excluded.last_error").bind(key).bind(required(&row,"service")?).bind(required(&row,"account_id")?).bind(integer(&row,"attempts").unwrap_or(0)).bind(integer(&row,"next_attempt_at")).bind(string(&row,"last_error")).execute(&mut *target).await?;
                 }
@@ -625,18 +627,21 @@ async fn queue(
             if let Some(fallback) = string(&row, "payload") {
                 let fallback: serde_json::Value = serde_json::from_str(&fallback)?;
                 if track.is_none() {
-                    item.title = fallback["title"].as_str().unwrap_or(&track_id).into();
-                    item.artist = fallback["artist"].as_str().unwrap_or_default().into();
-                    item.album = fallback["album"].as_str().unwrap_or_default().into();
-                    item.duration_millis = fallback["duration_seconds"]
+                    item.metadata.title = fallback["title"].as_str().unwrap_or(&track_id).into();
+                    item.metadata.artist = fallback["artist"].as_str().unwrap_or_default().into();
+                    item.metadata.album = fallback["album"].as_str().unwrap_or_default().into();
+                    item.metadata.duration_millis = fallback["duration_seconds"]
                         .as_i64()
                         .unwrap_or(0)
                         .saturating_mul(1000);
-                    item.disc_number = fallback["disc_number"].as_i64();
-                    item.track_number = fallback["track_number"].as_i64();
-                    item.year = fallback["year"].as_i64();
-                    item.source_format = fallback["source_format"].as_str().map(str::to_owned);
-                    item.musicbrainz_recording_id = fallback["musicbrainz_recording_id"]
+                    item.metadata.disc_number =
+                        fallback["disc_number"].as_i64().unwrap_or_default();
+                    item.metadata.track_number =
+                        fallback["track_number"].as_i64().unwrap_or_default();
+                    item.metadata.year = fallback["year"].as_i64();
+                    item.metadata.source_format =
+                        fallback["source_format"].as_str().map(str::to_owned);
+                    item.metadata.musicbrainz_recording_id = fallback["musicbrainz_recording_id"]
                         .as_str()
                         .map(str::to_owned);
                 }
