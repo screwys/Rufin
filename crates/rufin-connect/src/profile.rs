@@ -120,15 +120,23 @@ impl ProfileStore {
             CREATE TABLE IF NOT EXISTS local_values(kind TEXT NOT NULL,object_key TEXT NOT NULL,payload TEXT,PRIMARY KEY(kind,object_key)) STRICT;")
             .execute(&mut connection).await?;
         let mut transaction = connection.begin().await?;
-        sqlx::raw_sql(
-            "DELETE FROM documents WHERE (name GLOB 'cache_artwork:*' OR name GLOB 'cache_lyrics:*');
-            DELETE FROM projection WHERE kind IN ('cache_artwork','cache_lyrics');
-            DELETE FROM local_values WHERE kind IN ('cache_artwork','cache_lyrics');
-            DELETE FROM history_pending WHERE (name GLOB 'cache_artwork:*' OR name GLOB 'cache_lyrics:*');
-            DELETE FROM history_acknowledgements WHERE (name GLOB 'cache_artwork:*' OR name GLOB 'cache_lyrics:*');",
-        )
-        .execute(&mut *transaction)
-        .await?;
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(&mut *transaction)
+            .await?;
+        if version < 1 {
+            sqlx::raw_sql(
+                "DELETE FROM documents WHERE (name GLOB 'cache_artwork:*' OR name GLOB 'cache_lyrics:*');
+                DELETE FROM projection WHERE kind IN ('cache_artwork','cache_lyrics');
+                DELETE FROM local_values WHERE kind IN ('cache_artwork','cache_lyrics');
+                DELETE FROM history_pending WHERE (name GLOB 'cache_artwork:*' OR name GLOB 'cache_lyrics:*');
+                DELETE FROM history_acknowledgements WHERE (peer,name) IN (
+                    SELECT peer,name FROM history_acknowledgements WHERE (name GLOB 'cache_artwork:*' OR name GLOB 'cache_lyrics:*')
+                );
+                PRAGMA user_version=1;",
+            )
+            .execute(&mut *transaction)
+            .await?;
+        }
         transaction.commit().await?;
         index_documents(&mut connection, &identity).await?;
         sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
@@ -2845,7 +2853,8 @@ mod tests {
                 INSERT INTO projection VALUES('cache_lyrics','old','null');
                 INSERT INTO local_values VALUES('cache_lyrics','old','null');
                 INSERT INTO history_pending VALUES('cache_lyrics:old');
-                INSERT INTO history_acknowledgements VALUES('peer','cache_lyrics:old',X'');",
+                INSERT INTO history_acknowledgements VALUES('peer','cache_lyrics:old',X'');
+                PRAGMA user_version=0;",
             )
             .execute(&mut *connection)
             .await
