@@ -161,6 +161,29 @@ pub(crate) fn read_media_input(
     uri: &str,
     sidecar: Option<LocalImageRef>,
 ) -> MediaRead {
+    // Mach-O programs can contain audio bytes that decoder typefinding mistakes for a track.
+    let mut signature = [0; 4];
+    if file
+        .rewind()
+        .and_then(|()| file.read_exact(&mut signature))
+        .is_ok()
+        && matches!(
+            u32::from_be_bytes(signature),
+            0xfeed_face
+                | 0xcefa_edfe
+                | 0xfeed_facf
+                | 0xcffa_edfe
+                | 0xcafe_babe
+                | 0xbeba_feca
+                | 0xcafe_babf
+                | 0xbfba_feca
+        )
+    {
+        return MediaRead::Rejected;
+    }
+    if file.rewind().is_err() {
+        return MediaRead::Unreadable;
+    }
     // Recognize a frame sync at the start or immediately after ID3 metadata;
     // searching binary interiors can mistake executable bytes for MPEG audio.
     let mut tagged_file = read_lofty_file(

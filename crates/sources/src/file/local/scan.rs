@@ -220,7 +220,6 @@ pub(crate) async fn acquire_paths(
 ) -> SourceResult<()> {
     let database = catalog.database;
     let source_id = catalog.source_id;
-    require_roots(database, source_id, local, paths).await?;
     let roots = local
         .roots()
         .iter()
@@ -231,6 +230,7 @@ pub(crate) async fn acquire_paths(
         .map(|path| normalize_observed_path(path))
         .filter(|path| !local.excludes(path))
         .collect::<Vec<_>>();
+    require_roots(database, source_id, local, &paths).await?;
     let seeds = paths
         .iter()
         .filter(|path| roots.iter().any(|root| path.starts_with(root)))

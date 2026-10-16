@@ -937,6 +937,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let music = directory.path().join("music");
         fs::create_dir(&music).unwrap();
+        let music = music.canonicalize().unwrap();
         let paths = (0..130)
             .map(|index| music.join(format!("track-{index:03}.wav")))
             .collect::<Vec<_>>();
