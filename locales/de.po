@@ -234,12 +234,6 @@ msgstr ""
 "Quellen enthalten, wird aber nicht mit Remotes synchronisiert."
 
 msgid ""
-"This only takes affect for new local files that are added by another device"
-msgstr ""
-"Dies gilt nur für neue lokale Dateien, die von einem anderen Gerät "
-"hinzugefügt werden"
-
-msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -1969,9 +1963,6 @@ msgstr "Liedtext wird hier angezeigt."
 msgid "Lyrics"
 msgstr "Liedtexte"
 
-msgid "MP3"
-msgstr "MP3"
-
 msgid "Manage"
 msgstr "Verwalten"
 
@@ -2692,6 +2683,11 @@ msgstr "Bibliothek wird vorbereitet …"
 
 msgid "Preparing smaller media"
 msgstr "Kleinere Medien werden vorbereitet …"
+
+#, fuzzy
+#| msgid "Preserve pitch"
+msgid "Preserve channels"
+msgstr "Tonhöhe beibehalten"
 
 msgid "Preserve pitch"
 msgstr "Tonhöhe beibehalten"
@@ -3529,6 +3525,12 @@ msgstr "Wird gestartet …"
 msgid "Status display"
 msgstr "Statusanzeige"
 
+msgid "Stereo for lossy formats"
+msgstr ""
+
+msgid "Stereo"
+msgstr ""
+
 msgid "Stop"
 msgstr "Stopp"
 
@@ -4161,6 +4163,16 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid ""
+#~ "This only takes affect for new local files that are added by another "
+#~ "device"
+#~ msgstr ""
+#~ "Dies gilt nur für neue lokale Dateien, die von einem anderen Gerät "
+#~ "hinzugefügt werden"
+
+#~ msgid "MP3"
+#~ msgstr "MP3"
 
 #~ msgid ""
 #~ "Rufin started with fresh user state because the saved database could not "
