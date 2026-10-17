@@ -204,8 +204,15 @@ jobs:
           fi
 
           if [[ -n "${selected_jobs[container]+selected}" ]]; then
-            unset 'selected_jobs[cargo-deny]' 'selected_jobs[workspace]' 'selected_jobs[source_checks]'
+            unset 'selected_jobs[workspace]' 'selected_jobs[source_checks]'
           fi
+
+          for job in "${package_jobs[@]}" aur_git android container "${workspace_jobs[@]}"; do
+            if [[ -n "${selected_jobs[$job]+selected}" ]]; then
+              add_jobs cargo-deny
+              break
+            fi
+          done
 
           if ((${#selected_jobs[@]})); then
             jobs="$(
@@ -241,7 +248,7 @@ jobs:
 
   aur_bin:
     name: AUR rufin-bin
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'aur_bin')
     uses: ./.github/workflows/aur-build.yml
     with:
@@ -251,7 +258,7 @@ jobs:
 
   android:
     name: Android
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'android')
     uses: ./.github/workflows/android.yml
     with:
@@ -259,7 +266,7 @@ jobs:
 
   aur_git:
     name: AUR rufin-git
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'aur_git')
     uses: ./.github/workflows/aur-build.yml
     with:
@@ -269,7 +276,7 @@ jobs:
 
   rpm:
     name: RPM
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'rpm')
     uses: ./.github/workflows/rpm-source.yml
     with:
@@ -278,7 +285,7 @@ jobs:
 
   nix:
     name: Nix
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'nix')
     uses: ./.github/workflows/nix.yml
     with:
@@ -289,7 +296,7 @@ jobs:
 
   flatpak:
     name: Flatpak
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'flatpak')
     uses: ./.github/workflows/flatpak-build.yml
     with:
@@ -297,7 +304,7 @@ jobs:
 
   macos:
     name: Build macOS
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'macos')
     uses: ./.github/workflows/macos-build.yml
     with:
@@ -305,7 +312,7 @@ jobs:
 
   windows:
     name: Build Windows
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'windows')
     uses: ./.github/workflows/windows-build.yml
     with:
@@ -313,7 +320,7 @@ jobs:
 
   container:
     name: Container
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'container')
     runs-on: ubuntu-latest
 
@@ -375,7 +382,7 @@ jobs:
 
   workspace:
     name: Workspace
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'workspace')
     runs-on: ubuntu-latest
     env:
@@ -453,7 +460,7 @@ jobs:
 
   workspace_macos:
     name: Workspace (macOS)
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'workspace_macos')
     runs-on: macos-15
     env:
@@ -520,7 +527,7 @@ jobs:
 
   workspace_windows:
     name: Workspace (Windows)
-    needs: changes
+    needs: [changes, cargo-deny]
     if: contains(fromJSON(needs.changes.outputs.jobs), 'workspace_windows')
     runs-on: windows-latest
     env:

@@ -263,6 +263,7 @@ check:
     @scripts/container run default none just _check-all
 
 _check-all:
+    @cargo deny --locked check -D unmatched-skip
     @just _check-cmake
     @cargo run --locked -p xtask -- generate flatpak-sources --check
     @cargo run --locked -p xtask -- generate i18n-template --check
@@ -274,7 +275,6 @@ _check-all:
     fi
     @just _lint
     @just _test --locked
-    @cargo deny --locked check -D unmatched-skip
 
 _check-cmake:
     @preset=development; \
