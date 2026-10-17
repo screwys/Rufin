@@ -205,10 +205,6 @@ msgstr ""
 "fonti configurate, ma non viene sincronizzato con i server remoti."
 
 msgid ""
-"This only takes affect for new local files that are added by another device"
-msgstr ""
-
-msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -2018,9 +2014,6 @@ msgstr ""
 msgid "Lyrics"
 msgstr ""
 
-msgid "MP3"
-msgstr ""
-
 msgid "Manage"
 msgstr ""
 
@@ -2745,6 +2738,9 @@ msgid "Preparing library..."
 msgstr ""
 
 msgid "Preparing smaller media"
+msgstr ""
+
+msgid "Preserve channels"
 msgstr ""
 
 msgid "Preserve pitch"
@@ -3598,6 +3594,12 @@ msgid "Starting..."
 msgstr ""
 
 msgid "Status display"
+msgstr ""
+
+msgid "Stereo for lossy formats"
+msgstr ""
+
+msgid "Stereo"
 msgstr ""
 
 msgid "Stop"
