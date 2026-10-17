@@ -112,10 +112,17 @@ fn check(executable: &Path) -> Result<()> {
             Some(json!({"paths": [music]})),
         )?;
         let id = source["id"].as_str().ok_or("Source response has no ID")?;
-        let response = api(&address, &token, &format!("/api/tracks?source={id}"), None)?;
-        let tracks = response["tracks"]
-            .as_array()
-            .ok_or("Missing scanned tracks")?;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let tracks = loop {
+            let response = api(&address, &token, &format!("/api/tracks?source={id}"), None)?;
+            let tracks = response["tracks"]
+                .as_array()
+                .ok_or("Missing scanned tracks")?;
+            if !tracks.is_empty() || Instant::now() >= deadline {
+                break tracks.clone();
+            }
+            thread::sleep(Duration::from_millis(100));
+        };
         if tracks.len() != 1 {
             return Err(format!("Expected one scanned track, got {}", tracks.len()).into());
         }
