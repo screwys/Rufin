@@ -174,10 +174,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"This only takes affect for new local files that are added by another device"
-msgstr ""
-
-msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -2068,9 +2064,6 @@ msgstr "Sanoitukset ilmestyvät tähän."
 msgid "Lyrics"
 msgstr "Sanoitukset"
 
-msgid "MP3"
-msgstr "MP3"
-
 msgid "Manage"
 msgstr "Hallitse"
 
@@ -2857,6 +2850,11 @@ msgstr "Valmistellaan kirjastoa..."
 #| msgid "Preparing library..."
 msgid "Preparing smaller media"
 msgstr "Valmistellaan kirjastoa..."
+
+#, fuzzy
+#| msgid "Preserve pitch"
+msgid "Preserve channels"
+msgstr "Säilytä sävelkorkeus"
 
 msgid "Preserve pitch"
 msgstr "Säilytä sävelkorkeus"
@@ -3793,6 +3791,12 @@ msgstr "Tallennetaan..."
 msgid "Status display"
 msgstr ""
 
+msgid "Stereo for lossy formats"
+msgstr ""
+
+msgid "Stereo"
+msgstr ""
+
 msgid "Stop"
 msgstr "Pysäytä"
 
@@ -4479,6 +4483,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "MP3"
+#~ msgstr "MP3"
 
 #~ msgid "Added to favorites"
 #~ msgstr "Lisätty suosikkeihin"
