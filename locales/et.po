@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-10-17 10:18+0000\n"
+"PO-Revision-Date: 2026-10-18 01:01+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Estonian <https://hosted.weblate.org/projects/rufin/app/et/>\n"
 "Language: et\n"
@@ -2644,10 +2644,8 @@ msgstr "Valmistan muusikakogu ette…"
 msgid "Preparing smaller media"
 msgstr "Valmistan väiksemat meediumi ette"
 
-#, fuzzy
-#| msgid "Preserve pitch"
 msgid "Preserve channels"
-msgstr "Säilita helikõrgus"
+msgstr "Säilita kanalid"
 
 msgid "Preserve pitch"
 msgstr "Säilita helikõrgus"
@@ -3477,10 +3475,10 @@ msgid "Status display"
 msgstr "Oleku kuvamine"
 
 msgid "Stereo for lossy formats"
-msgstr ""
+msgstr "Stereo kadudega vormingute jaoks"
 
 msgid "Stereo"
-msgstr ""
+msgstr "Stereo"
 
 msgid "Stop"
 msgstr "Lõpeta"
