@@ -230,12 +230,6 @@ msgstr ""
 "allikatest, kuid seda ei sünkroonita kaugseadmetesse."
 
 msgid ""
-"This only takes affect for new local files that are added by another device"
-msgstr ""
-"See kehtib ainult uute kohalike failide puhul, mis on lisatud mõne teise "
-"seadme poolt"
-
-msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -1935,9 +1929,6 @@ msgstr "Laulusõnad saavad olema nähtavad siin."
 msgid "Lyrics"
 msgstr "Laulusõnad"
 
-msgid "MP3"
-msgstr "MP3"
-
 msgid "Manage"
 msgstr "Halda"
 
@@ -2652,6 +2643,11 @@ msgstr "Valmistan muusikakogu ette…"
 
 msgid "Preparing smaller media"
 msgstr "Valmistan väiksemat meediumi ette"
+
+#, fuzzy
+#| msgid "Preserve pitch"
+msgid "Preserve channels"
+msgstr "Säilita helikõrgus"
 
 msgid "Preserve pitch"
 msgstr "Säilita helikõrgus"
@@ -3480,6 +3476,12 @@ msgstr "Käivitan…"
 msgid "Status display"
 msgstr "Oleku kuvamine"
 
+msgid "Stereo for lossy formats"
+msgstr ""
+
+msgid "Stereo"
+msgstr ""
+
 msgid "Stop"
 msgstr "Lõpeta"
 
@@ -4109,6 +4111,16 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid ""
+#~ "This only takes affect for new local files that are added by another "
+#~ "device"
+#~ msgstr ""
+#~ "See kehtib ainult uute kohalike failide puhul, mis on lisatud mõne teise "
+#~ "seadme poolt"
+
+#~ msgid "MP3"
+#~ msgstr "MP3"
 
 #~ msgid ""
 #~ "Rufin started with fresh user state because the saved database could not "

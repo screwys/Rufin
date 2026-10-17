@@ -168,10 +168,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"This only takes affect for new local files that are added by another device"
-msgstr ""
-
-msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr "這會移除伺服器，以及其音樂庫元資料快取、播放佇列快照、已儲存的登入憑證"
@@ -2136,9 +2132,6 @@ msgstr ""
 msgid "Lyrics"
 msgstr "歌詞"
 
-msgid "MP3"
-msgstr ""
-
 msgid "Manage"
 msgstr "管理"
 
@@ -2967,6 +2960,11 @@ msgstr "媒體庫準備中..."
 #| msgid "Preparing library..."
 msgid "Preparing smaller media"
 msgstr "媒體庫準備中..."
+
+#, fuzzy
+#| msgid "Preserve pitch"
+msgid "Preserve channels"
+msgstr "維持音調"
 
 msgid "Preserve pitch"
 msgstr "維持音調"
@@ -3928,6 +3926,12 @@ msgid "Starting..."
 msgstr "正在儲存..."
 
 msgid "Status display"
+msgstr ""
+
+msgid "Stereo for lossy formats"
+msgstr ""
+
+msgid "Stereo"
 msgstr ""
 
 msgid "Stop"
