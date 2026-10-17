@@ -207,10 +207,6 @@ msgstr ""
 "avotiem, taču tā netiek sinhronizēta ar attālajām ierīcēm."
 
 msgid ""
-"This only takes affect for new local files that are added by another device"
-msgstr ""
-
-msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -2089,9 +2085,6 @@ msgstr "Teksti tiks parādīti šeit."
 msgid "Lyrics"
 msgstr "Teksti"
 
-msgid "MP3"
-msgstr ""
-
 msgid "Manage"
 msgstr "Pārvaldīt"
 
@@ -2855,6 +2848,11 @@ msgstr "Sagatavo bibliotēku…"
 #| msgid "Preparing library..."
 msgid "Preparing smaller media"
 msgstr "Sagatavo bibliotēku…"
+
+#, fuzzy
+#| msgid "Preserve pitch"
+msgid "Preserve channels"
+msgstr "Saglabāt toni"
 
 msgid "Preserve pitch"
 msgstr "Saglabāt toni"
@@ -3747,6 +3745,12 @@ msgstr "Sākas..."
 
 msgid "Status display"
 msgstr "Statuss"
+
+msgid "Stereo for lossy formats"
+msgstr ""
+
+msgid "Stereo"
+msgstr ""
 
 msgid "Stop"
 msgstr "Apturēt"

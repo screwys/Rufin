@@ -177,10 +177,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"This only takes affect for new local files that are added by another device"
-msgstr ""
-
-msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -2191,9 +2187,6 @@ msgstr ""
 msgid "Lyrics"
 msgstr "Text skladby"
 
-msgid "MP3"
-msgstr ""
-
 msgid "Manage"
 msgstr "Spravovat"
 
@@ -3031,6 +3024,11 @@ msgstr "Příprava knihovny..."
 #| msgid "Preparing library..."
 msgid "Preparing smaller media"
 msgstr "Příprava knihovny..."
+
+#, fuzzy
+#| msgid "Preserve pitch"
+msgid "Preserve channels"
+msgstr "Zachovat výšku tónu"
 
 msgid "Preserve pitch"
 msgstr "Zachovat výšku tónu"
@@ -4019,6 +4017,12 @@ msgstr "Ukládání..."
 
 msgid "Status display"
 msgstr "Zobrazení stavu"
+
+msgid "Stereo for lossy formats"
+msgstr ""
+
+msgid "Stereo"
+msgstr ""
 
 msgid "Stop"
 msgstr ""

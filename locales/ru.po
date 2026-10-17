@@ -232,12 +232,6 @@ msgstr ""
 "источников, но не синхронизируется с удалёнными устройствами."
 
 msgid ""
-"This only takes affect for new local files that are added by another device"
-msgstr ""
-"Это применяется только к новым локальным файлам, добавленным с другого "
-"устройства"
-
-msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -1967,9 +1961,6 @@ msgstr "Текст песни появится здесь."
 msgid "Lyrics"
 msgstr "Текст песни"
 
-msgid "MP3"
-msgstr "MP3"
-
 msgid "Manage"
 msgstr "Управление"
 
@@ -2687,6 +2678,11 @@ msgstr "Подготовка библиотеки…"
 
 msgid "Preparing smaller media"
 msgstr "Подготовка небольших медиафайлов"
+
+#, fuzzy
+#| msgid "Preserve pitch"
+msgid "Preserve channels"
+msgstr "Сохранить высоту звука"
 
 msgid "Preserve pitch"
 msgstr "Сохранить высоту звука"
@@ -3530,6 +3526,12 @@ msgstr "Запуск..."
 msgid "Status display"
 msgstr "Отображение статуса"
 
+msgid "Stereo for lossy formats"
+msgstr ""
+
+msgid "Stereo"
+msgstr ""
+
 msgid "Stop"
 msgstr "Остановить"
 
@@ -4171,6 +4173,16 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid ""
+#~ "This only takes affect for new local files that are added by another "
+#~ "device"
+#~ msgstr ""
+#~ "Это применяется только к новым локальным файлам, добавленным с другого "
+#~ "устройства"
+
+#~ msgid "MP3"
+#~ msgstr "MP3"
 
 #~ msgid ""
 #~ "Rufin started with fresh user state because the saved database could not "
