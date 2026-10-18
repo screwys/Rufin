@@ -196,16 +196,16 @@ impl FileSource {
         }
         self.acquire_media_files(catalog, &workers, progress, cancelled, None, completed)
             .await?;
+        if self.document_access().is_none() {
+            crate::file::artwork::ArtworkFiles::Remote(self)
+                .acquire(catalog, progress, cancelled)
+                .await?;
+        }
         progress(SourceReadProgress {
             stage: SourceReadStage::Finalizing,
             completed: 0,
             total: None,
         });
-        if self.document_access().is_none() {
-            crate::file::artwork::ArtworkFiles::Remote(self)
-                .acquire(catalog, cancelled)
-                .await?;
-        }
         Ok(())
     }
 

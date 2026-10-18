@@ -15,6 +15,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 mod audio;
 mod engine;
+mod file_audio;
 mod pipeline;
 #[cfg(unix)]
 mod process;

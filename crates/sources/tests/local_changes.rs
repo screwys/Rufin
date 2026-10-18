@@ -2038,6 +2038,15 @@ async fn initial_local_walk_reports_real_total_free_file_progress() {
     assert!(first_files < first_tracks);
     assert_eq!(progress[first_files].completed, 2);
     assert_eq!(progress[first_files].total, None);
+    let artwork = progress
+        .iter()
+        .filter(|update| update.stage == sources::SourceReadStage::Artwork)
+        .collect::<Vec<_>>();
+    assert_eq!(artwork.first().expect("artwork started").completed, 0);
+    let finished = artwork.last().expect("artwork finished");
+    assert!(finished.completed > 0);
+    assert_eq!(finished.total, Some(finished.completed));
+    assert!(artwork.iter().all(|update| update.total == finished.total));
     assert_eq!(
         progress
             .iter()

@@ -143,6 +143,17 @@ impl Database {
             .bind(source_id).bind(stamp).bind(serde_json::to_string(uris)?).fetch_all(&mut *connection).await?)
     }
 
+    pub async fn source_artwork_count(
+        &self,
+        source_id: &str,
+        stamp: Option<i64>,
+    ) -> LibraryResult<usize> {
+        let mut connection = self.acquire_reader().await?;
+        let count: i64 = sqlx::query_scalar("WITH eligible AS(SELECT track.track_key,track.album_key FROM tracks track JOIN sources source USING(source_key) WHERE source.object_id=?1 AND track.indexed AND(?2 IS NULL OR track.observed_stamp=?2 OR EXISTS(SELECT 1 FROM local_files file WHERE file.source_key=track.source_key AND file.path=coalesce(track.cue_path,track.source_path) AND file.observed_stamp=?2))) SELECT(SELECT count(DISTINCT album_key) FROM eligible)+(SELECT count(*) FROM(SELECT credit.artist_key FROM track_artists credit JOIN eligible USING(track_key) UNION SELECT credit.artist_key FROM track_album_artists credit JOIN eligible USING(track_key)))")
+            .bind(source_id).bind(stamp).fetch_one(&mut *connection).await?;
+        Ok(count as usize)
+    }
+
     pub async fn source_artwork_album_page(
         &self,
         source_id: &str,

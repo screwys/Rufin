@@ -263,11 +263,22 @@ impl<'a> ArtworkFiles<'a> {
     pub(crate) async fn acquire(
         &self,
         catalog: &mut library::Catalog<'_>,
+        progress: &(dyn Fn(crate::SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let database = catalog.database;
         let source_id = catalog.source_id;
         let stamp = catalog.observed;
+        let mut completed = 0;
+        let total = database.source_artwork_count(source_id, stamp).await?;
+        let report = |completed| {
+            progress(crate::SourceReadProgress {
+                stage: crate::SourceReadStage::Artwork,
+                completed,
+                total: Some(total),
+            })
+        };
+        report(completed);
         let mut after_album = String::new();
         loop {
             let albums = database
@@ -377,9 +388,12 @@ impl<'a> ArtworkFiles<'a> {
                         &[(album, folder_cover.map(|image| image.artwork_binding()))],
                     )
                     .await?;
+                completed += 1;
+                report(completed);
             }
         }
-        self.acquire_artist_artwork(catalog, cancelled).await?;
+        self.acquire_artist_artwork(catalog, &mut completed, &report, cancelled)
+            .await?;
         if matches!(self, Self::Local) {
             catalog.clear_partial_file_image_observations().await?;
         }
@@ -389,6 +403,8 @@ impl<'a> ArtworkFiles<'a> {
     async fn acquire_artist_artwork(
         &self,
         catalog: &mut library::Catalog<'_>,
+        completed: &mut usize,
+        report: &(dyn Fn(usize) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let database = catalog.database;
@@ -476,6 +492,8 @@ impl<'a> ArtworkFiles<'a> {
                         }
                     }
                     bindings.push((artist, image.map(|image| image.artwork_binding())));
+                    *completed += 1;
+                    report(*completed);
                 }
                 Ok(())
             }

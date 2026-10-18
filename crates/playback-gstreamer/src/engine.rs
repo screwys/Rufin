@@ -531,7 +531,7 @@ impl GstEngine {
     }
 
     fn prepare_incoming(&mut self, next: &PreparedNext) {
-        if !next.stream.allows_preloading || !self.active_pipeline().allows_preloading() {
+        if !next.stream.allows_preloading {
             self.clear_incoming();
             return;
         }
@@ -622,13 +622,6 @@ impl GstEngine {
 
     fn handle_incoming_async_done(&mut self, slot: Slot, id: PipelineId) {
         if self.pipeline_for_slot(slot).seek_in_progress() {
-            return;
-        }
-        if self.incoming_matches(slot, id) && !self.pipeline_for_slot(slot).allows_preloading() {
-            if let Some(next) = lock_recover(&self.shared).next.as_mut() {
-                next.stream.allows_preloading = false;
-            }
-            self.clear_incoming();
             return;
         }
         let needs_initial_rate_seek = self.pipeline_for_slot(slot).needs_initial_rate_seek();
@@ -5023,7 +5016,7 @@ mod tests {
     }
 
     #[test]
-    fn module_music_never_preloads_the_next_stream() {
+    fn streams_without_preloading_keep_the_next_reserved() {
         let mut gapless = GaplessPlayback::default();
         let pipeline = PipelineId(5);
         let current_run = RunId::new(10);

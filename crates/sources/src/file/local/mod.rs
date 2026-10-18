@@ -214,13 +214,8 @@ impl LocalSource {
         catalog
             .update_source_file_membership(&self.configured_file_roots()?, &self.excluded_folders)
             .await?;
-        progress(SourceReadProgress {
-            stage: crate::SourceReadStage::Artwork,
-            completed: 0,
-            total: None,
-        });
         crate::file::artwork::ArtworkFiles::Local
-            .acquire(catalog, cancelled)
+            .acquire(catalog, progress, cancelled)
             .await?;
         progress(SourceReadProgress {
             stage: crate::SourceReadStage::Finalizing,
@@ -240,7 +235,7 @@ impl LocalSource {
         scan::acquire_imported_paths(catalog, self, Some(playlist), cancelled).await?;
         catalog.record_imported_files(Some(playlist)).await?;
         crate::file::artwork::ArtworkFiles::Local
-            .acquire(catalog, cancelled)
+            .acquire(catalog, &|_| {}, cancelled)
             .await
     }
 

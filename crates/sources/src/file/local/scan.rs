@@ -288,13 +288,8 @@ pub(crate) async fn acquire_paths(
         &parsers,
     )
     .await?;
-    progress(SourceReadProgress {
-        stage: SourceReadStage::Artwork,
-        completed: 0,
-        total: None,
-    });
     crate::file::artwork::ArtworkFiles::Local
-        .acquire(catalog, cancelled)
+        .acquire(catalog, progress, cancelled)
         .await?;
     progress(SourceReadProgress {
         stage: SourceReadStage::Finalizing,
@@ -628,7 +623,7 @@ pub(crate) async fn import_paths(
         .purge_source_file_absences(stamp.expect("file observation"))
         .await?;
     crate::file::artwork::ArtworkFiles::Local
-        .acquire(catalog, cancelled)
+        .acquire(catalog, progress, cancelled)
         .await?;
     let playlist = catalog
         .create_observed_playlist(stamp.unwrap(), name)

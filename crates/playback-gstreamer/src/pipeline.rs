@@ -4,6 +4,7 @@ use super::engine::{
 };
 use super::visualizer::VisualizerTap;
 use super::*;
+use glib::translate::IntoGlib;
 use std::cell::Cell;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -61,7 +62,6 @@ pub(super) struct PlayerPipeline {
     id: Option<PipelineId>,
     pub(super) initial_stream_started: bool,
     trust_invalid_certificate: Arc<AtomicBool>,
-    module_decoder: Arc<AtomicBool>,
     about_to_finish_id: Option<glib::SignalHandlerId>,
     audio_graph: Option<AudioGraph>,
     visualizer_probe: Option<gst::PadProbeId>,
@@ -106,7 +106,6 @@ impl PlayerPipeline {
             id: None,
             initial_stream_started: false,
             trust_invalid_certificate: Arc::new(AtomicBool::new(false)),
-            module_decoder: Arc::new(AtomicBool::new(false)),
             about_to_finish_id: None,
             audio_graph: None,
             visualizer_probe: None,
@@ -352,10 +351,6 @@ impl PlayerPipeline {
         self.id.is_some()
     }
 
-    pub(super) fn allows_preloading(&self) -> bool {
-        !self.module_decoder.load(Ordering::Relaxed)
-    }
-
     pub(super) fn pop_bus_message(&self) -> Option<(PipelineId, gst::Message)> {
         let id = self.id?;
         let (_, bus) = self.native.as_ref()?;
@@ -418,30 +413,50 @@ impl PlayerPipeline {
             None
         });
 
-        let module_for_setup = Arc::clone(&self.module_decoder);
         pipeline.connect("element-setup", false, move |values| {
-            let element = values[1].get::<gst::Element>().expect("playbin element-setup element");
-            if element.factory().is_some_and(|factory| factory.name() == "qtdemux") {
+            let element = values[1]
+                .get::<gst::Element>()
+                .expect("playbin element-setup element");
+            if element
+                .factory()
+                .is_some_and(|factory| factory.name() == "qtdemux")
+            {
                 element.connect_pad_added(|_, pad| {
                     pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, |pad, info| {
                         if !pad.current_caps().is_some_and(|caps| {
-                            caps.structure(0).is_some_and(|caps| caps.name().starts_with("audio/"))
+                            caps.structure(0)
+                                .is_some_and(|caps| caps.name().starts_with("audio/"))
                         }) {
                             return gst::PadProbeReturn::Ok;
                         }
-                        let Some(event) = info.event_mut() else { return gst::PadProbeReturn::Ok; };
-                        let gst::EventView::Segment(value) = event.view() else { return gst::PadProbeReturn::Ok; };
-                        let Some(segment) = value.segment().downcast_ref::<gst::ClockTime>() else { return gst::PadProbeReturn::Ok; };
+                        let Some(event) = info.event_mut() else {
+                            return gst::PadProbeReturn::Ok;
+                        };
+                        let gst::EventView::Segment(value) = event.view() else {
+                            return gst::PadProbeReturn::Ok;
+                        };
+                        let Some(segment) = value.segment().downcast_ref::<gst::ClockTime>() else {
+                            return gst::PadProbeReturn::Ok;
+                        };
                         let mut query = gst::query::Segment::new(gst::Format::Time);
                         let seek_stop = if pad.query(&mut query) {
                             match query.result().2 {
                                 gst::GenericFormattedValue::Time(stop) => stop,
                                 _ => None,
                             }
-                        } else { None };
-                        let end = pad.query_duration::<gst::ClockTime>().into_iter().chain(seek_stop).min();
+                        } else {
+                            None
+                        };
+                        let end = pad
+                            .query_duration::<gst::ClockTime>()
+                            .into_iter()
+                            .chain(seek_stop)
+                            .min();
                         if let Some(end) = end
-                            && segment.stop().and_then(|stop| segment.to_stream_time(stop)).is_some_and(|stop| stop > end)
+                            && segment
+                                .stop()
+                                .and_then(|stop| segment.to_stream_time(stop))
+                                .is_some_and(|stop| stop > end)
                             && let Some(stop) = segment.position_from_stream_time(end)
                         {
                             // qtdemux can add the full AAC duration to a seek position.
@@ -458,37 +473,81 @@ impl PlayerPipeline {
                 && factory.klass().split('/').any(|class| class == "Decoder")
             {
                 debug!(decoder = %factory.name(), "GStreamer decoder selected");
+                if matches!(factory.name().as_str(), "avdec_wmav1" | "avdec_wmav2") {
+                    element
+                        .static_pad("sink")
+                        .expect("WMA decoder input")
+                        .add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, |pad, info| {
+                            let Some(event) = info.event() else {
+                                return gst::PadProbeReturn::Ok;
+                            };
+                            let gst::EventView::StreamStart(start) = event.view() else {
+                                return gst::PadProbeReturn::Ok;
+                            };
+                            let Some(mut caps) = pad.current_caps() else {
+                                return gst::PadProbeReturn::Ok;
+                            };
+                            if !start
+                                .stream()
+                                .and_then(|stream| stream.caps())
+                                .is_some_and(|next| caps.can_intersect(&next))
+                            {
+                                return gst::PadProbeReturn::Ok;
+                            }
+                            // FFmpeg's WMA flush keeps overlap samples from the old file.
+                            // Changed caps make its normal set_format reopen the codec.
+                            caps.make_mut()
+                                .set("rufin-stream-start", event.seqnum().into_glib());
+                            if !pad.send_event(gst::event::Caps::new(&caps)) {
+                                gst::element_error!(
+                                    pad.parent_element().expect("WMA decoder owner"),
+                                    gst::CoreError::Negotiation,
+                                    ("Could not reset the WMA decoder")
+                                );
+                            }
+                            gst::PadProbeReturn::Ok
+                        });
+                }
                 if factory.name() == "flacdec" {
                     // Headers are already read from caps. Their duplicate buffers
                     // shift the reused decoder's queued frame timestamps.
-                    element.static_pad("sink").expect("FLAC decoder input").add_probe(
-                        gst::PadProbeType::BUFFER | gst::PadProbeType::BUFFER_LIST,
-                        |pad, info| {
-                            if !pad.current_caps().is_some_and(|caps| {
-                                caps.structure(0).is_some_and(|caps| caps.has_field("streamheader"))
-                            }) {
-                                return gst::PadProbeReturn::Ok;
-                            }
-                            match info.data.as_mut() {
-                                Some(gst::PadProbeData::Buffer(buffer)) if buffer.flags().contains(gst::BufferFlags::HEADER) => gst::PadProbeReturn::Drop,
-                                Some(gst::PadProbeData::BufferList(list)) => {
-                                    list.make_mut().foreach_mut(|buffer, _| {
-                                        std::ops::ControlFlow::Continue((!buffer.flags().contains(gst::BufferFlags::HEADER)).then_some(buffer))
-                                    });
-                                    if list.is_empty() { gst::PadProbeReturn::Drop } else { gst::PadProbeReturn::Ok }
+                    element
+                        .static_pad("sink")
+                        .expect("FLAC decoder input")
+                        .add_probe(
+                            gst::PadProbeType::BUFFER | gst::PadProbeType::BUFFER_LIST,
+                            |pad, info| {
+                                if !pad.current_caps().is_some_and(|caps| {
+                                    caps.structure(0)
+                                        .is_some_and(|caps| caps.has_field("streamheader"))
+                                }) {
+                                    return gst::PadProbeReturn::Ok;
                                 }
-                                _ => gst::PadProbeReturn::Ok,
-                            }
-                        },
-                    );
-                }
-                if factory.static_pad_templates().iter().any(|pad| {
-                    pad.direction() == gst::PadDirection::Sink
-                        && pad.caps().iter().any(|caps| caps.name() == "audio/x-mod")
-                })
-                {
-                    info!(decoder = %factory.name(), "isolating tracker decoder from seeks and preloading");
-                    module_for_setup.store(true, Ordering::Relaxed);
+                                match info.data.as_mut() {
+                                    Some(gst::PadProbeData::Buffer(buffer))
+                                        if buffer.flags().contains(gst::BufferFlags::HEADER) =>
+                                    {
+                                        gst::PadProbeReturn::Drop
+                                    }
+                                    Some(gst::PadProbeData::BufferList(list)) => {
+                                        list.make_mut().foreach_mut(|buffer, _| {
+                                            std::ops::ControlFlow::Continue(
+                                                (!buffer
+                                                    .flags()
+                                                    .contains(gst::BufferFlags::HEADER))
+                                                .then_some(buffer),
+                                            )
+                                        });
+                                        if list.is_empty() {
+                                            gst::PadProbeReturn::Drop
+                                        } else {
+                                            gst::PadProbeReturn::Ok
+                                        }
+                                    }
+                                    _ => gst::PadProbeReturn::Ok,
+                                }
+                            },
+                        );
                 }
             }
             None
@@ -509,11 +568,7 @@ impl PlayerPipeline {
         let queued_loudness = Arc::clone(&self.queued_loudness);
         let gapless = Arc::clone(&self.gapless);
         let certificate_policy = Arc::clone(&self.trust_invalid_certificate);
-        let module_for_signal = Arc::clone(&self.module_decoder);
         self.about_to_finish_id = Some(element.connect("about-to-finish", false, move |_| {
-            if module_for_signal.load(Ordering::Relaxed) {
-                return None;
-            }
             let pipeline = pipeline.upgrade()?;
             handle_about_to_finish(
                 &pipeline,
@@ -773,7 +828,6 @@ impl PlayerPipeline {
         *lock_recover(&self.queued_loudness) = None;
         *lock_recover(&self.gapless) = GaplessPlayback::default();
         *lock_recover(&self.segment) = SegmentPlayback::default();
-        self.module_decoder.store(false, Ordering::Relaxed);
         self.buffering_percent.set(None);
         self.requested_state.set(gst::State::Null);
         self.live.set(false);
@@ -790,9 +844,6 @@ impl PlayerPipeline {
     }
 
     pub(super) fn seek_physical_millis(&self, millis: u64) -> Result<(), String> {
-        if self.module_decoder.load(Ordering::Relaxed) {
-            return Err("Tracker decoder does not support safe seeking".to_string());
-        }
         let mut flags = gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE;
         if self.clock().end_millis().is_some() {
             flags |= gst::SeekFlags::SEGMENT;
@@ -965,28 +1016,17 @@ impl PlayerPipeline {
     pub(super) fn position(&self) -> Option<gst::ClockTime> {
         self.id?;
         let (pipeline, _) = self.native.as_ref()?;
-        if self.module_decoder.load(Ordering::Relaxed) {
-            return (pipeline.current_state() == gst::State::Playing)
-                .then(|| pipeline.current_running_time())
-                .flatten();
-        }
         pipeline.query_position::<gst::ClockTime>()
     }
 
     pub(super) fn duration(&self) -> Option<gst::ClockTime> {
         self.id?;
         let (pipeline, _) = self.native.as_ref()?;
-        if self.module_decoder.load(Ordering::Relaxed) {
-            return None;
-        }
         pipeline.query_duration::<gst::ClockTime>()
     }
 
     pub(super) fn seekable(&self) -> Option<bool> {
         let (pipeline, _) = self.native.as_ref()?;
-        if self.module_decoder.load(Ordering::Relaxed) {
-            return Some(false);
-        }
         let mut query = gst::query::Seeking::new(gst::Format::Time);
         Some(pipeline.query(&mut query) && query.result().0)
     }
@@ -1003,6 +1043,7 @@ impl Drop for PlayerPipeline {
     }
 }
 pub(super) fn make_playbin(name: &str) -> Result<gst::Element, String> {
+    super::file_audio::register()?;
     gst::ElementFactory::make("playbin3")
         .name(name)
         .build()
@@ -1030,7 +1071,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tracker_decoder_rejects_seeking_without_format_metadata_or_extension() {
+    fn tracker_decoder_preserves_transport_without_format_metadata_or_extension() {
         ensure_gstreamer_initialized().unwrap();
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("stream");
@@ -1052,7 +1093,7 @@ mod tests {
             stream: ResolvedStream::new(uri.as_str()).into(),
         };
         let settings = BackendAudioSettings {
-            audio_output: Some("fakesink".to_string()),
+            audio_output: Some("appsink".to_string()),
             ..BackendAudioSettings::default()
         };
         player
@@ -1082,10 +1123,39 @@ mod tests {
             ),
             "tracker pipeline did not finish starting"
         );
-        assert!(!player.allows_preloading());
-        assert_eq!(player.seekable(), Some(false));
-        assert_eq!(player.duration(), None);
-        assert!(player.seek_millis(1_000).is_err());
+        assert_eq!(player.seekable(), Some(true));
+        assert!(player.duration().is_some());
+        player.seek_millis(1_000).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while player.seek_in_progress() && Instant::now() < deadline {
+            player.complete_seek().unwrap();
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!player.seek_in_progress(), "tracker seek did not finish");
+        let sink = player
+            .audio_output()
+            .unwrap()
+            .downcast::<gstreamer_app::AppSink>()
+            .unwrap();
+        let sample = sink
+            .try_pull_preroll(gst::ClockTime::SECOND)
+            .expect("seek preroll");
+        let position = sample
+            .segment()
+            .unwrap()
+            .downcast_ref::<gst::ClockTime>()
+            .unwrap()
+            .to_stream_time(sample.buffer().unwrap().pts().unwrap())
+            .unwrap();
+        // This module uses 120 ms rows; native seeking lands on a row boundary.
+        assert!((1_000..1_120).contains(&position.mseconds()));
+        assert!(sample.buffer().unwrap().size() > 0);
+        player.set_state(gst::State::Playing).unwrap();
+        sink.try_pull_sample(gst::ClockTime::SECOND)
+            .expect("resumed audio");
+        sink.try_pull_sample(gst::ClockTime::SECOND)
+            .expect("continued audio");
+        assert!(player.position().unwrap() > position);
         player.stop();
     }
 
