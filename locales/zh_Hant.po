@@ -51,8 +51,12 @@ msgid ""
 "Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
 
+#, fuzzy
+#| msgid ""
+#| "Downloads from this server will be removed, and automatic rules will be "
+#| "turned off"
 msgid ""
-"Downloads from this server will be removed, and automatic rules will be "
+"Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr "從這個伺服器所下載的內容將被移除，且自動化規則會被關閉"
 
@@ -146,11 +150,6 @@ msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
 msgstr "感謝您使用 Rufin！如果遇到問題或有任何建議，請在 GitHub 上建立 issue。"
-
-msgid ""
-"The folder is relative to the selected account. Applying it changes storage "
-"on all devices."
-msgstr ""
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
@@ -258,9 +257,6 @@ msgstr "取得登入授權"
 msgid "Accessibility"
 msgstr ""
 
-msgid "Action required"
-msgstr ""
-
 #, fuzzy
 #| msgid "Collections"
 msgid "Actions"
@@ -291,8 +287,10 @@ msgstr ""
 msgid "Add a new source"
 msgstr "新增來源"
 
-msgid "Add a server to configure downloads."
-msgstr ""
+#, fuzzy
+#| msgid "No sources configured"
+msgid "Add a source to configure downloads."
+msgstr "未設置來源"
 
 msgid "Add a title"
 msgstr "新增標題"
@@ -335,11 +333,6 @@ msgstr "新增"
 
 msgid "Added to"
 msgstr "已加入"
-
-#, fuzzy
-#| msgid "Add a new source"
-msgid "Adding source"
-msgstr "新增來源"
 
 msgid "Album Artists"
 msgstr "專輯藝人"
@@ -448,9 +441,9 @@ msgid "Apply"
 msgstr ""
 
 #, fuzzy
-#| msgid "Saving..."
-msgid "Applying..."
-msgstr "正在儲存..."
+#| msgid "Change Secret Storage"
+msgid "Applying profile"
+msgstr "變更敏感存儲空間"
 
 msgid "Approve sign-in in your browser"
 msgstr ""
@@ -671,20 +664,17 @@ msgid "Changes take effect after restarting Rufin"
 msgstr ""
 
 #, fuzzy
-#| msgid "Change Secret Storage"
-msgid "Changing source"
-msgstr "變更敏感存儲空間"
-
-msgid "Changing this will redownload all local files."
-msgstr ""
-
-#, fuzzy
 #| msgid "Change"
 msgid "Channels"
 msgstr "變更"
 
 msgid "Check for updates"
 msgstr ""
+
+#, fuzzy
+#| msgid "Change Secret Storage"
+msgid "Checking profile"
+msgstr "變更敏感存儲空間"
 
 #, fuzzy
 #| msgid "Locate Folder"
@@ -695,9 +685,6 @@ msgstr "定位資料夾"
 #| msgid "Locate Folder"
 msgid "Choose Server"
 msgstr "定位資料夾"
-
-msgid "Choose a connection for profile storage."
-msgstr ""
 
 msgid "Choose a local music folder"
 msgstr "選擇本地音樂資料夾"
@@ -873,11 +860,6 @@ msgstr "連接失敗"
 
 #, fuzzy
 #| msgid "Connection failed"
-msgid "Connect folder"
-msgstr "連接失敗"
-
-#, fuzzy
-#| msgid "Connection failed"
 msgid "Connect is not enabled"
 msgstr "連接失敗"
 
@@ -923,11 +905,6 @@ msgstr "正在連接到 {device}..."
 
 #, fuzzy
 #| msgid "Connection"
-msgid "Connecting"
-msgstr "連接"
-
-#, fuzzy
-#| msgid "Connection"
 msgid "Connecting..."
 msgstr "連接"
 
@@ -970,11 +947,10 @@ msgstr "繼續"
 msgid "Context Menus"
 msgstr ""
 
-msgid "Continue from where {device} left off"
-msgstr ""
-
-msgid "Continue from where {device} left off?"
-msgstr ""
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Continue from {device}"
+msgstr "正在連接到 {device}..."
 
 msgid "Continue"
 msgstr "繼續"
@@ -1330,8 +1306,18 @@ msgstr "已下載"
 msgid "Downloading Japanese dictionary..."
 msgstr ""
 
+#, fuzzy
+#| msgid "Download started"
+msgid "Downloading artwork"
+msgstr "已開始下載"
+
 msgid "Downloading artwork... {count} checked"
 msgstr ""
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Downloading lyrics"
+msgstr "下載"
 
 msgid "Downloading lyrics... {count} checked"
 msgstr ""
@@ -1569,6 +1555,37 @@ msgstr ""
 msgid "February {year}"
 msgstr ""
 
+msgid "Fetching Home"
+msgstr ""
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Fetching albums"
+msgstr "藝人專輯"
+
+msgid "Fetching artists"
+msgstr ""
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Fetching artwork"
+msgstr "搜尋歌詞"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Fetching genres"
+msgstr "重新搜尋"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Fetching lyrics"
+msgstr "搜尋歌詞"
+
+#, fuzzy
+#| msgid "Smart playlists"
+msgid "Fetching playlists"
+msgstr "智慧播放清單"
+
 #, fuzzy
 #| msgid "Connection"
 msgid "File connection"
@@ -1592,12 +1609,6 @@ msgstr "重新命名"
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr "檔案需要有 Mood/BPM 的標籤。不支援 Jellyfin"
 
-msgid "Files received: {count}"
-msgstr ""
-
-msgid "Files"
-msgstr ""
-
 msgid "Filled spectrum"
 msgstr ""
 
@@ -1611,6 +1622,9 @@ msgstr "尋找您的 ListenBrainz 使用者憑證"
 #| msgid "No lyrics"
 msgid "Finding lyrics..."
 msgstr "無歌詞"
+
+msgid "Finishing setup"
+msgstr ""
 
 msgid "Fixed position"
 msgstr "固定位置"
@@ -1837,6 +1851,11 @@ msgstr "編輯元資料"
 
 msgid "Import"
 msgstr ""
+
+#, fuzzy
+#| msgid "Change Secret Storage"
+msgid "Importing profile"
+msgstr "變更敏感存儲空間"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2149,11 +2168,6 @@ msgstr "最大年份"
 msgid "May {year}"
 msgstr "最大年份"
 
-#, fuzzy
-#| msgid "Artist name"
-msgid "Media available"
-msgstr "藝人名稱"
-
 msgid "Menu"
 msgstr "選單"
 
@@ -2267,11 +2281,6 @@ msgstr ""
 
 msgid "Music folders on the Rufin machine"
 msgstr ""
-
-#, fuzzy
-#| msgid "This device"
-msgid "Music on this device"
-msgstr "此裝置"
 
 #, fuzzy
 #| msgid "All Music"
@@ -2953,12 +2962,12 @@ msgstr "偏好翻譯"
 msgid "Preferences"
 msgstr "偏好設定"
 
-msgid "Preparing library..."
-msgstr "媒體庫準備中..."
-
 #, fuzzy
-#| msgid "Preparing library..."
-msgid "Preparing smaller media"
+#| msgid "Selection"
+msgid "Preparing collection"
+msgstr "選擇"
+
+msgid "Preparing library..."
 msgstr "媒體庫準備中..."
 
 #, fuzzy
@@ -3042,10 +3051,8 @@ msgstr "無痕模式"
 msgid "Profile PIN"
 msgstr ""
 
-#, fuzzy
-#| msgid "Secure storage"
-msgid "Profile storage"
-msgstr "安全儲存空間"
+msgid "Profile download is incomplete. Retry to continue."
+msgstr ""
 
 msgid "Profile up to date"
 msgstr ""
@@ -3155,11 +3162,6 @@ msgid "Refresh source"
 msgstr "重新整理區塊"
 
 msgid "Refresh"
-msgstr "重新整理"
-
-#, fuzzy
-#| msgid "Refresh"
-msgid "Refreshing"
 msgstr "重新整理"
 
 msgid "Regenerate access token"
@@ -3469,8 +3471,18 @@ msgstr "已儲存"
 msgid "Saves lyrics to your source"
 msgstr ""
 
+#, fuzzy
+#| msgid "Search Again"
+msgid "Saving changes"
+msgstr "重新搜尋"
+
 msgid "Saving..."
 msgstr "正在儲存..."
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "Scanning tracks"
+msgstr "無匹配的曲目"
 
 msgid "Schedule"
 msgstr ""
@@ -3668,11 +3680,6 @@ msgstr ""
 
 msgid "Set the Discord activity type to Listening"
 msgstr ""
-
-#, fuzzy
-#| msgid "This device"
-msgid "Set up this device"
-msgstr "此裝置"
 
 #, fuzzy
 #| msgid "Metadata source"
@@ -4081,9 +4088,6 @@ msgstr "標題（已合併）"
 msgid "Title"
 msgstr "標題"
 
-msgid "To use a file-sync app, choose a folder it synchronizes."
-msgstr ""
-
 msgid "Toggle Fullscreen"
 msgstr "切換全螢幕"
 
@@ -4252,6 +4256,11 @@ msgstr "正在等候連線"
 #| msgid "Favorite tracks"
 msgid "Use current artwork"
 msgstr "最愛的曲目"
+
+#, fuzzy
+#| msgid "Use Rufin data folder"
+msgid "Use default folder"
+msgstr "使用 Rufin 資料資料夾"
 
 msgid "Use different layout below a threshold width"
 msgstr ""
@@ -4522,7 +4531,16 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} 年之前"
 
-msgid "{status} · {stage} {completed}{total}"
+msgid "{current} / {total} MiB ({percent}%)"
+msgstr ""
+
+msgid "{current} MiB"
+msgstr ""
+
+msgid "{stage}: {completed} / {total}"
+msgstr ""
+
+msgid "{stage}: {completed}"
 msgstr ""
 
 #. Windows installer: FinishText.
@@ -4597,6 +4615,61 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Add a new source"
+#~ msgid "Adding source"
+#~ msgstr "新增來源"
+
+#, fuzzy
+#~| msgid "Saving..."
+#~ msgid "Applying..."
+#~ msgstr "正在儲存..."
+
+#, fuzzy
+#~| msgid "Change Secret Storage"
+#~ msgid "Changing source"
+#~ msgstr "變更敏感存儲空間"
+
+#, fuzzy
+#~| msgid "Connection failed"
+#~ msgid "Connect folder"
+#~ msgstr "連接失敗"
+
+#, fuzzy
+#~| msgid "Connection"
+#~ msgid "Connecting"
+#~ msgstr "連接"
+
+#, fuzzy
+#~| msgid "Artist name"
+#~ msgid "Media available"
+#~ msgstr "藝人名稱"
+
+#, fuzzy
+#~| msgid "This device"
+#~ msgid "Music on this device"
+#~ msgstr "此裝置"
+
+#, fuzzy
+#~| msgid "Preparing library..."
+#~ msgid "Preparing smaller media"
+#~ msgstr "媒體庫準備中..."
+
+#, fuzzy
+#~| msgid "Secure storage"
+#~ msgid "Profile storage"
+#~ msgstr "安全儲存空間"
+
+#, fuzzy
+#~| msgid "Refresh"
+#~ msgid "Refreshing"
+#~ msgstr "重新整理"
+
+#, fuzzy
+#~| msgid "This device"
+#~ msgid "Set up this device"
+#~ msgstr "此裝置"
 
 #~ msgid "Added to favorites"
 #~ msgstr "已加入最愛"

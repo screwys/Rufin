@@ -66,8 +66,12 @@ msgstr ""
 "Устройства, использующие Rufin Connect, больше не поддерживаются. "
 "Пожалуйста, обновите Rufin."
 
+#, fuzzy
+#| msgid ""
+#| "Downloads from this server will be removed, and automatic rules will be "
+#| "turned off"
 msgid ""
-"Downloads from this server will be removed, and automatic rules will be "
+"Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
 "Загрузки с этого сервера будут удалены, и автоматические правила будут "
@@ -203,13 +207,6 @@ msgstr ""
 "предложения, пожалуйста, создайте запрос в Github."
 
 msgid ""
-"The folder is relative to the selected account. Applying it changes storage "
-"on all devices."
-msgstr ""
-"Папка привязана к выбранной учётной записи. Применение этих настроек изменит "
-"хранилище на всех устройствах."
-
-msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
 "artwork?"
 msgstr ""
@@ -329,9 +326,6 @@ msgstr "Токен доступа"
 msgid "Accessibility"
 msgstr "Специальные возможности"
 
-msgid "Action required"
-msgstr "Требуется действие"
-
 msgid "Actions"
 msgstr "Действия"
 
@@ -356,7 +350,9 @@ msgstr "Добавьте источник музыки, чтобы начать 
 msgid "Add a new source"
 msgstr "Новый источник"
 
-msgid "Add a server to configure downloads."
+#, fuzzy
+#| msgid "Add a server to configure downloads."
+msgid "Add a source to configure downloads."
 msgstr "Добавьте сервер для настройки загрузок."
 
 msgid "Add a title"
@@ -395,9 +391,6 @@ msgstr "Добавить"
 
 msgid "Added to"
 msgstr "Добавлено в"
-
-msgid "Adding source"
-msgstr "Добавление источника"
 
 msgid "Album Artists"
 msgstr "Авторы альбома"
@@ -495,8 +488,10 @@ msgstr "Применить шаблон"
 msgid "Apply"
 msgstr "Применить"
 
-msgid "Applying..."
-msgstr "Применяется..."
+#, fuzzy
+#| msgid "Join profile"
+msgid "Applying profile"
+msgstr "Присоединиться к профилю"
 
 msgid "Approve sign-in in your browser"
 msgstr "Подтвердить вход в системе в вашем браузере"
@@ -686,28 +681,22 @@ msgstr[2] "Изменения применяются к {count} трекам"
 msgid "Changes take effect after restarting Rufin"
 msgstr "Изменения применяются после перезагрузки Rufin"
 
-msgid "Changing source"
-msgstr "Изменение источника"
-
-msgid "Changing this will redownload all local files."
-msgstr ""
-"Изменение этого параметра приведет к повторной загрузке всех локальных "
-"файлов."
-
 msgid "Channels"
 msgstr "Каналы"
 
 msgid "Check for updates"
 msgstr "Проверить обновления"
 
+#, fuzzy
+#| msgid "Receiving profile"
+msgid "Checking profile"
+msgstr "Получение профиля"
+
 msgid "Choose Folder"
 msgstr "Выбрать Папку"
 
 msgid "Choose Server"
 msgstr "Выбрать сервер"
-
-msgid "Choose a connection for profile storage."
-msgstr "Выбрать подключение для хранения профиля."
 
 msgid "Choose a local music folder"
 msgstr "Выбрать локальную папку с музыкой"
@@ -859,9 +848,6 @@ msgstr "Подключить устройство"
 msgid "Connect file"
 msgstr "Подключить файл"
 
-msgid "Connect folder"
-msgstr "Подключить папку"
-
 msgid "Connect is not enabled"
 msgstr "Подключение не включено"
 
@@ -895,9 +881,6 @@ msgstr "Подключение к музыкальному серверу…"
 msgid "Connecting to {device}..."
 msgstr "Подключение к {device}..."
 
-msgid "Connecting"
-msgstr "Подключение"
-
 msgid "Connecting..."
 msgstr "Подключение..."
 
@@ -928,11 +911,10 @@ msgstr "Содержание"
 msgid "Context Menus"
 msgstr "Контекстные меню"
 
-msgid "Continue from where {device} left off"
+#, fuzzy
+#| msgid "Continue from where {device} left off"
+msgid "Continue from {device}"
 msgstr "Продолжить с того места, где {device} остановился"
-
-msgid "Continue from where {device} left off?"
-msgstr "Продолжить воспроизведение с того места, где {device} остановился?"
 
 msgid "Continue"
 msgstr "Продолжить"
@@ -1240,8 +1222,18 @@ msgstr "Загружено"
 msgid "Downloading Japanese dictionary..."
 msgstr "Загрузка японского словаря..."
 
+#, fuzzy
+#| msgid "Upload artwork"
+msgid "Downloading artwork"
+msgstr "Загрузить обложку"
+
 msgid "Downloading artwork... {count} checked"
 msgstr ""
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Downloading lyrics"
+msgstr "Загрузки"
 
 msgid "Downloading lyrics... {count} checked"
 msgstr ""
@@ -1443,6 +1435,37 @@ msgstr "Рекомендованные жанры"
 msgid "February {year}"
 msgstr "Февраль {year}"
 
+msgid "Fetching Home"
+msgstr ""
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Fetching albums"
+msgstr "Альбомы исполнителя"
+
+msgid "Fetching artists"
+msgstr ""
+
+#, fuzzy
+#| msgid "Search artwork"
+msgid "Fetching artwork"
+msgstr "Поиск обложки"
+
+#, fuzzy
+#| msgid "Search genres"
+msgid "Fetching genres"
+msgstr "Поиск по жанрам"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Fetching lyrics"
+msgstr "Поиск текста песни"
+
+#, fuzzy
+#| msgid "Search playlists"
+msgid "Fetching playlists"
+msgstr "Поиск по плейлистам"
+
 msgid "File connection"
 msgstr "Подключение к файлу"
 
@@ -1460,12 +1483,6 @@ msgstr ""
 "Для файлов необходимо указать теги «Настроение» и «BPM». Не поддерживается "
 "для Jellyfin"
 
-msgid "Files received: {count}"
-msgstr "Получено файлов: {count}"
-
-msgid "Files"
-msgstr "Файлы"
-
 msgid "Filled spectrum"
 msgstr "Заполненный спектр"
 
@@ -1477,6 +1494,9 @@ msgstr "Найдите свой токен пользователя ListenBrainz
 
 msgid "Finding lyrics..."
 msgstr "Поиск текста песни..."
+
+msgid "Finishing setup"
+msgstr ""
 
 msgid "Fixed position"
 msgstr "Фиксированное расположение"
@@ -1685,6 +1705,11 @@ msgstr "Импортировать тему"
 
 msgid "Import"
 msgstr "Импорт"
+
+#, fuzzy
+#| msgid "Join profile"
+msgid "Importing profile"
+msgstr "Присоединиться к профилю"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -1976,9 +2001,6 @@ msgstr "Максимальный год"
 msgid "May {year}"
 msgstr "Май {year}"
 
-msgid "Media available"
-msgstr "Доступные медиафайлы"
-
 msgid "Menu"
 msgstr "Меню"
 
@@ -2082,9 +2104,6 @@ msgstr "Разрешение на доступ к музыке было откл
 
 msgid "Music folders on the Rufin machine"
 msgstr "Папки с музыкой на устройстве с Rufin"
-
-msgid "Music on this device"
-msgstr "Музыка на этом устройстве"
 
 msgid "Music"
 msgstr "Музыка"
@@ -2673,11 +2692,13 @@ msgstr "Предпочитать переводы"
 msgid "Preferences"
 msgstr "Настройки"
 
+#, fuzzy
+#| msgid "Receiving collection"
+msgid "Preparing collection"
+msgstr "Получение коллекции"
+
 msgid "Preparing library..."
 msgstr "Подготовка библиотеки…"
-
-msgid "Preparing smaller media"
-msgstr "Подготовка небольших медиафайлов"
 
 #, fuzzy
 #| msgid "Preserve pitch"
@@ -2746,8 +2767,8 @@ msgstr "Приватный режим"
 msgid "Profile PIN"
 msgstr "PIN-код профиля"
 
-msgid "Profile storage"
-msgstr "Хранилище профилей"
+msgid "Profile download is incomplete. Retry to continue."
+msgstr ""
 
 msgid "Profile up to date"
 msgstr "Профиль обновлен"
@@ -2844,9 +2865,6 @@ msgstr "Обновить источник"
 
 msgid "Refresh"
 msgstr "Обновить"
-
-msgid "Refreshing"
-msgstr "Обновление"
 
 msgid "Regenerate access token"
 msgstr "Сгенерировать новый токен доступа"
@@ -3126,8 +3144,18 @@ msgstr "Сохранено..."
 msgid "Saves lyrics to your source"
 msgstr "Сохраняет текст песни в источнике"
 
+#, fuzzy
+#| msgid "Search in page"
+msgid "Saving changes"
+msgstr "Поиск по странице"
+
 msgid "Saving..."
 msgstr "Сохранение..."
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "Scanning tracks"
+msgstr "Нет соответствующих треков"
 
 msgid "Schedule"
 msgstr "Расписание"
@@ -3299,9 +3327,6 @@ msgstr "Серверы"
 
 msgid "Set the Discord activity type to Listening"
 msgstr "Установите тип активности в Discord на \"Прослушивание\""
-
-msgid "Set up this device"
-msgstr "Настроить это устройство"
 
 msgid "Settings and sources"
 msgstr "Настройки и источники"
@@ -3667,11 +3692,6 @@ msgstr "Название (объединено)"
 msgid "Title"
 msgstr "Название"
 
-msgid "To use a file-sync app, choose a folder it synchronizes."
-msgstr ""
-"Чтобы использовать приложение для синхронизации файлов, выберите папку, "
-"которую оно синхронизирует."
-
 msgid "Toggle Fullscreen"
 msgstr "Полноэкранный режим"
 
@@ -3818,6 +3838,11 @@ msgstr "Использовать существующее подключение
 
 msgid "Use current artwork"
 msgstr "Использовать текущее художественное оформление"
+
+#, fuzzy
+#| msgid "Use Rufin data folder"
+msgid "Use default folder"
+msgstr "Использовать папку данных Rufin"
 
 msgid "Use different layout below a threshold width"
 msgstr ""
@@ -4087,7 +4112,20 @@ msgstr[0] "{count} год назад"
 msgstr[1] "{count} года назад"
 msgstr[2] "{count} лет назад"
 
-msgid "{status} · {stage} {completed}{total}"
+msgid "{current} / {total} MiB ({percent}%)"
+msgstr ""
+
+msgid "{current} MiB"
+msgstr ""
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage}: {completed} / {total}"
+msgstr "{статус} · {этап} {выполнено}{всего}"
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage}: {completed}"
 msgstr "{статус} · {этап} {выполнено}{всего}"
 
 #. Windows installer: FinishText.
@@ -4173,6 +4211,71 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid ""
+#~ "The folder is relative to the selected account. Applying it changes "
+#~ "storage on all devices."
+#~ msgstr ""
+#~ "Папка привязана к выбранной учётной записи. Применение этих настроек "
+#~ "изменит хранилище на всех устройствах."
+
+#~ msgid "Action required"
+#~ msgstr "Требуется действие"
+
+#~ msgid "Adding source"
+#~ msgstr "Добавление источника"
+
+#~ msgid "Applying..."
+#~ msgstr "Применяется..."
+
+#~ msgid "Changing source"
+#~ msgstr "Изменение источника"
+
+#~ msgid "Changing this will redownload all local files."
+#~ msgstr ""
+#~ "Изменение этого параметра приведет к повторной загрузке всех локальных "
+#~ "файлов."
+
+#~ msgid "Choose a connection for profile storage."
+#~ msgstr "Выбрать подключение для хранения профиля."
+
+#~ msgid "Connect folder"
+#~ msgstr "Подключить папку"
+
+#~ msgid "Connecting"
+#~ msgstr "Подключение"
+
+#~ msgid "Continue from where {device} left off?"
+#~ msgstr "Продолжить воспроизведение с того места, где {device} остановился?"
+
+#~ msgid "Files received: {count}"
+#~ msgstr "Получено файлов: {count}"
+
+#~ msgid "Files"
+#~ msgstr "Файлы"
+
+#~ msgid "Media available"
+#~ msgstr "Доступные медиафайлы"
+
+#~ msgid "Music on this device"
+#~ msgstr "Музыка на этом устройстве"
+
+#~ msgid "Preparing smaller media"
+#~ msgstr "Подготовка небольших медиафайлов"
+
+#~ msgid "Profile storage"
+#~ msgstr "Хранилище профилей"
+
+#~ msgid "Refreshing"
+#~ msgstr "Обновление"
+
+#~ msgid "Set up this device"
+#~ msgstr "Настроить это устройство"
+
+#~ msgid "To use a file-sync app, choose a folder it synchronizes."
+#~ msgstr ""
+#~ "Чтобы использовать приложение для синхронизации файлов, выберите папку, "
+#~ "которую оно синхронизирует."
 
 #~ msgid ""
 #~ "This only takes affect for new local files that are added by another "
