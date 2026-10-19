@@ -936,7 +936,7 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
     );
     let retired: i64 = sqlx::query_scalar("INSERT INTO tracks(source_key,media_uri,source_path,cue_path,cue_start_millis,cue_end_millis) SELECT source_key,?1,source_path,cue_path,cue_start_millis,cue_end_millis FROM tracks WHERE cue_path=?2 LIMIT 1 RETURNING track_key")
         .bind(&retired_uri)
-        .bind(first_cue.to_string_lossy().as_ref())
+        .bind(first_cue.canonicalize().unwrap().to_string_lossy().as_ref())
         .fetch_one(&mut stored)
         .await
         .unwrap();

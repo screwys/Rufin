@@ -79,7 +79,7 @@ mod imp {
             decoder
                 .downcast_ref::<gst::Bin>()
                 .unwrap()
-                .connect_element_added(|_, element| {
+                .connect_element_added(|decoder, element| {
                     if let Some(factory) = element.factory() {
                         match factory.name().as_str() {
                             "gmedec" | "midiparse" => report_time_seeking(element),
@@ -90,6 +90,31 @@ mod imp {
                             _ => {}
                         }
                     }
+                    let Some(pad) = element.static_pad("src") else {
+                        return;
+                    };
+                    if !pad
+                        .pad_template_caps()
+                        .is_subset(&gst::Caps::builder("audio/x-raw").build())
+                    {
+                        return;
+                    }
+                    // File decoders can start a task before decodebin exposes
+                    // its output. Keep their first buffer until it is linked.
+                    let blocked = Mutex::new(
+                        pad.add_probe(
+                            gst::PadProbeType::BLOCK
+                                | gst::PadProbeType::BUFFER
+                                | gst::PadProbeType::BUFFER_LIST,
+                            |_, _| gst::PadProbeReturn::Ok,
+                        )
+                        .map(|blocked| (pad, blocked)),
+                    );
+                    decoder.connect_no_more_pads(move |_| {
+                        if let Some((pad, blocked)) = lock_recover(&blocked).take() {
+                            pad.remove_probe(blocked);
+                        }
+                    });
                 });
             bin.add(&decoder).expect("file audio decoder child");
             let input = gst::GhostPad::with_target(&decoder.static_pad("sink").unwrap()).unwrap();
