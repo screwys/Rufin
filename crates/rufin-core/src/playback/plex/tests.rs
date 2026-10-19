@@ -120,12 +120,12 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     let root = tempfile::tempdir().unwrap();
     let runtime = tokio::runtime::Handle::current();
     let settings = SettingsFile::open(root.path().join("settings.json")).unwrap();
-    let credential_ref = crate::settings::CredentialRef::new("plex-fixture");
+    let credential = crate::settings::Credential::new("plex-fixture");
     settings
         .update(|stored| {
             stored.sources.configured = vec![crate::settings::ConfiguredSource {
                 configuration: first.clone(),
-                credential_ref: Some(credential_ref.clone()),
+                credential: Some(credential.clone()),
                 music_folder_id: None,
                 local_access: None,
                 enable_half_stars: true,
@@ -140,10 +140,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     );
     let memory = Arc::new(secrets::MemorySecretStore::new());
     memory
-        .save_secret(
-            &crate::settings::provider_secret_key(&credential_ref),
-            &login,
-        )
+        .save_secret(&crate::settings::provider_secret_key(&credential), &login)
         .unwrap();
     let secrets = Arc::new(secrets::SwitchableSecretStore::new(memory));
     let artwork = artwork::Artwork::new(root.path().join("artwork"), runtime.clone()).unwrap();

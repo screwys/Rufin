@@ -12,6 +12,8 @@ extern crate self as sources;
 
 mod download;
 pub use download::{DownloadQuality, ResolvedDownload, downloaded_codec};
+mod peer;
+pub use peer::{PEER_REVISION_HEADER, PeerAccess, PeerAudio, PeerMedia, peer_revision};
 mod config;
 mod detail_links;
 pub mod discovery;

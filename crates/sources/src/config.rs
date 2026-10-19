@@ -200,6 +200,63 @@ impl SourceConfiguration {
         crate::file::local::local_file_location(&roots, path)
     }
 
+    /// Resolve an observed playlist file to this device's source access path.
+    pub fn playlist_file_path(&self, location: &str) -> Option<String> {
+        if self.is_local() {
+            let config = crate::file::local::LocalSourceConfig::from_configuration(self).ok()?;
+            for (index, root) in config.document_roots.into_iter().enumerate() {
+                if let Ok(path) =
+                    crate::file::remote::FileSource::documents(self, root).relative(location)
+                {
+                    return Some(format!("@document:{index}/{path}"));
+                }
+            }
+            return crate::file::local::local_file_location(
+                &config.roots,
+                std::path::Path::new(location),
+            )
+            .map(|(path, _)| path);
+        }
+        crate::file::remote::FileSource::open(self, None)
+            .ok()?
+            .relative(location)
+            .ok()
+    }
+
+    /// Resolve a source playlist access path without opening its files.
+    pub fn playlist_file_location(&self, path: &str) -> Option<String> {
+        if self.is_local() {
+            let config = crate::file::local::LocalSourceConfig::from_configuration(self).ok()?;
+            if let Some((index, relative)) = path
+                .strip_prefix("@document:")
+                .and_then(|path| path.split_once('/'))
+            {
+                let root = config
+                    .document_roots
+                    .get(index.parse::<usize>().ok()?)?
+                    .clone();
+                return crate::file::remote::FileSource::documents(self, root)
+                    .location(relative)
+                    .ok();
+            }
+            let (index, relative) = path
+                .strip_prefix('@')
+                .and_then(|path| path.split_once('/'))
+                .and_then(|(index, relative)| {
+                    index.parse::<usize>().ok().map(|index| (index, relative))
+                })
+                .unwrap_or((0, path));
+            return config
+                .roots
+                .get(index)
+                .map(|root| root.join(relative).to_string_lossy().into_owned());
+        }
+        crate::file::remote::FileSource::open(self, None)
+            .ok()?
+            .location(path)
+            .ok()
+    }
+
     pub fn is_local(&self) -> bool {
         self.kind == crate::file::local::LOCAL_SOURCE_ID
     }

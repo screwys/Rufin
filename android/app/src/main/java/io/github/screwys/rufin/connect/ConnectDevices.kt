@@ -20,14 +20,17 @@ import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.settings.SettingsRow
 
 @Composable
-internal fun ConnectDeviceRow(device: Device, connect: ConnectConnection, controls: () -> Unit, remove: () -> Unit,
-    joining: Boolean = connect.state?.settings?.profile == null) {
+internal fun ConnectDeviceRow(device: Device, connect: ConnectConnection, controls: () -> Unit, remove: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
+    val joining = connect.state?.settings?.profile == null
     val pair = { if (joining) connect.join(device.id) else connect.action(ConnectAction.Invite(device.id)) }
     SettingsRow(device.name, summary = if (device.reachable) device.connection else translate("Offline"),
         leading = { RufinIcon("rufin-phonelink-symbolic", null) }, trailing = {
         Row(verticalAlignment = Alignment.CenterVertically) {
-        if (!device.enrolled) TextButton(pair, enabled = !connect.pending) { Text(translate(if (joining) "Join profile" else "Invite")) }
+        if (!device.enrolled) {
+            TextButton({ connect.join(device.id) }, enabled = !connect.pending) { Text(translate("Join")) }
+            TextButton({ connect.action(ConnectAction.Invite(device.id)) }, enabled = !connect.pending) { Text(translate("Invite")) }
+        }
         else {
             if (device.hasPlayback) TextButton({ connect.action(ConnectAction.Continue(device.id)) },
                 enabled = device.reachable && !connect.pending) { Text(translate("Continue")) }

@@ -27,6 +27,11 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Set up just
+        uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+        with:
+          just-version: '1.57.0'
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
 
@@ -35,6 +40,13 @@ jobs:
         with:
           cache-read-only: ${{ github.event_name != 'push' }}
 
+      - name: Restore Robolectric runtime cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: ${{ runner.os }}-robolectric-${{ hashFiles('android/app/build.gradle.kts', 'android/app/src/test/**') }}
+          restore-keys: ${{ runner.os }}-robolectric-
+
       - name: Install Android toolchains
         run: |
           set -euo pipefail
@@ -42,23 +54,10 @@ jobs:
           rustup target add aarch64-linux-android
 
       - name: Restore GStreamer SDK
-        id: gstreamer
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: android/.toolchains/gstreamer-1.28.7
           key: gstreamer-android-arm64-1.28.7-fa914bcf8695af1c6fa1f81db2e8da019a0306a89c2c3e48659438e1654023da
-
-      - name: Download GStreamer SDK
-        if: steps.gstreamer.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          archive="$RUNNER_TEMP/gstreamer-android.tar.xz"
-          curl --fail --location --silent --show-error \
-            https://gstreamer.freedesktop.org/data/pkg/android/1.28.7/gstreamer-1.0-android-universal-1.28.7.tar.xz \
-            --output "$archive"
-          printf '%s  %s\n' fa914bcf8695af1c6fa1f81db2e8da019a0306a89c2c3e48659438e1654023da "$archive" | sha256sum --check
-          mkdir -p android/.toolchains/gstreamer-1.28.7
-          tar -xf "$archive" -C android/.toolchains/gstreamer-1.28.7 --wildcards 'arm64/*'
 
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -69,7 +68,7 @@ jobs:
             . -> target
 
       - name: Check Android development build
-        run: android/gradlew -p android -PandroidAbis=arm64-v8a lintDevelopmentDebug testDevelopmentDebugUnitTest
+        run: just test android
 
       - name: Check optimized Android release
         if: github.event_name == 'workflow_dispatch'

@@ -108,7 +108,6 @@ pub enum SourceProgressStage {
     Home,
     Artwork,
     Lyrics,
-    Files,
     Finalizing,
 }
 
@@ -154,30 +153,34 @@ impl SourceOperation {
 }
 
 pub fn source_progress_text(progress: &SourceProgress) -> String {
-    let subject = match progress.stage {
+    let stage = match progress.stage {
         SourceProgressStage::Connecting => {
             return localization::tr("Connecting to music server...");
         }
-        SourceProgressStage::Albums => "albums",
-        SourceProgressStage::Tracks => "tracks",
-        SourceProgressStage::Artists => "artists",
-        SourceProgressStage::Genres => "genres",
-        SourceProgressStage::Playlists => "playlists",
-        SourceProgressStage::Home => "Home",
-        SourceProgressStage::Artwork => "artwork",
-        SourceProgressStage::Lyrics => "lyrics",
-        SourceProgressStage::Files => "files",
         SourceProgressStage::Finalizing => return localization::tr("Preparing library..."),
+        SourceProgressStage::Albums => localization::tr("Fetching albums"),
+        SourceProgressStage::Tracks => localization::tr("Scanning tracks"),
+        SourceProgressStage::Artists => localization::tr("Fetching artists"),
+        SourceProgressStage::Genres => localization::tr("Fetching genres"),
+        SourceProgressStage::Playlists => localization::tr("Fetching playlists"),
+        SourceProgressStage::Home => localization::tr("Fetching Home"),
+        SourceProgressStage::Artwork => localization::tr("Fetching artwork"),
+        SourceProgressStage::Lyrics => localization::tr("Fetching lyrics"),
     };
+    let completed = progress.completed.to_string();
     match progress.total {
-        Some(total) => format!(
-            "Fetching {subject}, {}/{total} fetched...",
-            progress.completed
+        Some(total) if total > 0 => localization::tr_with(
+            "{stage}: {completed} / {total}",
+            &[
+                ("stage", &stage),
+                ("completed", &completed),
+                ("total", &total.to_string()),
+            ],
         ),
-        None if progress.completed > 0 => {
-            format!("Fetching {subject}, {} fetched...", progress.completed)
-        }
-        None => format!("Fetching {subject}..."),
+        _ => localization::tr_with(
+            "{stage}: {completed}",
+            &[("stage", &stage), ("completed", &completed)],
+        ),
     }
 }
 

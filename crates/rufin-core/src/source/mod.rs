@@ -8,7 +8,7 @@ mod pins;
 pub mod search;
 pub use integrations::FileIntegration;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,9 +39,8 @@ use tracing::{info, warn};
 
 use crate::playback::PlaybackOwner;
 use crate::settings::{
-    ConfiguredSource, SavedLocalAccess, SettingsFile, StoredSettings, delete_provider_secret,
-    fresh_credential_ref, fresh_source_id, load_provider_secret, platform_secret_store,
-    save_provider_secret,
+    ConfiguredSource, SavedLocalAccess, SettingsFile, StoredSettings, fresh_source_id,
+    load_provider_secret, platform_secret_store, seal_credential,
 };
 
 const SOURCE_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
@@ -60,7 +59,7 @@ pub struct SourceOwner {
 
 struct CachedSource {
     configuration: SourceConfiguration,
-    credential_ref: Option<crate::settings::CredentialRef>,
+    credential: Option<crate::settings::Credential>,
     jellyfin_device_id: String,
     source: Arc<Source>,
     refresh: Option<Refresh>,
@@ -93,7 +92,7 @@ impl Drop for CachedSource {
 impl CachedSource {
     fn matches(&self, configured: &ConfiguredSource, device: &str) -> bool {
         same_native_input(&self.configuration, &configured.configuration)
-            && self.credential_ref == configured.credential_ref
+            && self.credential == configured.credential
             && self.jellyfin_device_id == device
     }
 }
@@ -129,6 +128,7 @@ pub(crate) struct Shared {
     pub(crate) lane: tokio::sync::Mutex<()>,
     playback: Mutex<Weak<PlaybackOwner>>,
     connect: Mutex<Weak<crate::connect::ConnectOwner>>,
+    maintenance: Arc<tokio::sync::Notify>,
     started: AtomicBool,
 }
 
@@ -268,7 +268,7 @@ impl Shared {
             let ids = clients
                 .iter()
                 .filter(|(id, cached)| {
-                    (credentials_replaced && cached.credential_ref.is_some())
+                    (credentials_replaced && cached.credential.is_some())
                         || !current
                             .sources
                             .configured
@@ -406,6 +406,9 @@ impl Shared {
             if !Arc::ptr_eq(&refresh.cancelled, token) || token.load(Ordering::Acquire) {
                 return;
             }
+            if refresh.progress == progress {
+                return;
+            }
             refresh.progress = progress.clone();
             if !refresh.visible {
                 return;
@@ -469,6 +472,7 @@ impl SourceOwner {
             lane: tokio::sync::Mutex::new(()),
             playback: Mutex::new(Weak::new()),
             connect: Mutex::new(Weak::new()),
+            maintenance: Arc::new(tokio::sync::Notify::new()),
             started: AtomicBool::new(false),
         });
         let weak = Arc::downgrade(&shared);
@@ -524,17 +528,24 @@ impl SourceOwner {
                 .await;
         });
         let weak = Arc::downgrade(&self.shared);
+        let maintenance = Arc::clone(&self.shared.maintenance);
         self.shared.runtime.spawn(async move {
             let mut interval = tokio::time::interval(SOURCE_CHECK_INTERVAL);
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
-                interval.tick().await;
+                let check_links = tokio::select! {
+                    _ = interval.tick() => true,
+                    _ = maintenance.notified() => false,
+                };
                 let Some(shared) = weak.upgrade() else {
                     break;
                 };
                 let owner = SourceOwner { shared };
-                let _lane = owner.shared.lane.lock().await;
-                crate::playlist_files::refresh_links(&owner, None).await;
+                if check_links {
+                    let _lane = owner.shared.lane.lock().await;
+                    crate::playlist_files::refresh_links(&owner, None).await;
+                }
+                owner.deliver_pending_favorites().await;
             }
         });
         Ok(())
@@ -568,14 +579,7 @@ impl SourceOwner {
         {
             self.shared.warn_nonfatal(&error);
         }
-        let connect_setup = self
-            .shared
-            .connect
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .upgrade()
-            .is_some_and(|connect| connect.status().settings.setup_pending);
-        if setup && !connect_setup && self.shared.started.load(Ordering::Acquire) {
+        if setup && self.shared.started.load(Ordering::Acquire) {
             let current = self.shared.settings.load();
             if let Some(source) = current.sources.selected_source_id.filter(|id| {
                 current
@@ -668,7 +672,7 @@ impl SourceOwner {
     async fn remove_source_resources(
         &self,
         source_id: &SourceId,
-        credential_ref: Option<crate::settings::CredentialRef>,
+        credential: Option<crate::settings::Credential>,
     ) {
         self.shared
             .clients
@@ -681,6 +685,14 @@ impl SourceOwner {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(source_id);
         self.shared.downloads.clear(source_id.clone(), false);
+        if let Err(error) = self
+            .shared
+            .database
+            .clear_source_waveform_cache(source_id)
+            .await
+        {
+            self.shared.warn_nonfatal(&error.to_string());
+        }
         if let Ok(playback) = self.shared.playback() {
             if let Err(error) = playback.remove_waveform_cache(source_id) {
                 self.shared.warn_nonfatal(&error);
@@ -689,7 +701,7 @@ impl SourceOwner {
         if let Err(error) = self.shared.artwork.invalidate_source(source_id) {
             self.shared.warn_nonfatal(&error.to_string());
         }
-        if let Some(reference) = credential_ref
+        if let Some(reference) = credential
             && !self
                 .shared
                 .settings
@@ -699,7 +711,7 @@ impl SourceOwner {
                 .iter()
                 .any(|source| {
                     &source.configuration.source_id != source_id
-                        && source.credential_ref.as_ref() == Some(&reference)
+                        && source.credential.as_ref() == Some(&reference)
                 })
         {
             let mut logins = self
@@ -709,10 +721,15 @@ impl SourceOwner {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             logins.remove(reference.as_str());
             drop(logins);
-            let secrets = Arc::clone(&self.shared.secrets);
-            self.shared.runtime.spawn_blocking(move || {
-                let _ = delete_provider_secret(&secrets, &reference);
-            });
+            if let crate::settings::Credential::Legacy(reference) = reference {
+                let secrets = Arc::clone(&self.shared.secrets);
+                self.shared.runtime.spawn_blocking(move || {
+                    let _ = secrets::SecretStore::delete_secret(
+                        secrets.as_ref(),
+                        &secrets::SecretKey::provider_token(&reference),
+                    );
+                });
+            }
         }
     }
 
@@ -831,7 +848,7 @@ impl SourceOwner {
                 owner.shared.runtime.spawn(async move {
                     if !cached_start {
                         let _ = refresh_owner
-                            .refresh_now(&source_id, &refresh_source, true, true)
+                            .refresh_now(&source_id, &refresh_source, false, true)
                             .await;
                     } else if let Some(token) =
                         refresh_owner.shared.begin_refresh(&source_id, false, false)
@@ -1092,6 +1109,9 @@ impl SourceOwner {
         if !self.shared.refresh_is_current(source_id, token) {
             return;
         }
+        if result.is_ok() {
+            self.shared.maintenance.notify_one();
+        }
         {
             let mut clients = self
                 .shared
@@ -1165,7 +1185,7 @@ impl SourceOwner {
                 &configured.configuration.source_id,
             )?;
             if current.configuration != configured.configuration
-                || current.credential_ref != configured.credential_ref
+                || current.credential != configured.credential
             {
                 return Err(SourceError::Cancelled.to_string());
             }
@@ -1173,7 +1193,7 @@ impl SourceOwner {
             let mut replacement = configured;
             replacement.configuration = configuration;
             if let Some(fresh) = source.plex_login() {
-                let existing = replacement.credential_ref.as_ref().and_then(|reference| {
+                let existing = replacement.credential.as_ref().and_then(|reference| {
                     self.shared
                         .plex_logins
                         .lock()
@@ -1217,7 +1237,7 @@ impl SourceOwner {
                     .await
                     .map_err(string_error)?;
             }
-            self.persist_connected_source(&replacement, credential)?;
+            replacement = self.persist_connected_source(&replacement, credential)?;
             if let (Ok(old), Ok(new)) = (
                 local_roots(&previous.configuration),
                 local_roots(&replacement.configuration),
@@ -1297,7 +1317,7 @@ impl SourceOwner {
             configured.configuration.source_id.clone(),
             CachedSource {
                 configuration: configured.configuration.clone(),
-                credential_ref: configured.credential_ref.clone(),
+                credential: configured.credential.clone(),
                 jellyfin_device_id: device,
                 source: source.clone(),
                 refresh: None,
@@ -1312,10 +1332,21 @@ impl SourceOwner {
         &self,
         configured: &ConfiguredSource,
         credential: Option<String>,
-    ) -> Result<(), String> {
-        let changed_credential = credential.is_some();
-        if let (Some(reference), Some(secret)) = (&configured.credential_ref, credential) {
-            save_provider_secret(&self.shared.secrets, reference, secret)?;
+    ) -> Result<ConfiguredSource, String> {
+        let mut configured = configured.clone();
+        if let Some(secret) = credential {
+            if configured
+                .credential
+                .as_ref()
+                .map(|credential| load_provider_secret(self.shared.secrets.as_ref(), credential))
+                .transpose()?
+                .flatten()
+                .as_deref()
+                != Some(secret.as_str())
+            {
+                configured.credential =
+                    Some(seal_credential(self.shared.secrets.as_ref(), &secret)?);
+            }
         }
         self.shared.settings.update(|stored| {
             stored
@@ -1331,19 +1362,18 @@ impl SourceOwner {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .retain(|id, cached| {
-                id != &configured.configuration.source_id
-                    || (!changed_credential && cached.matches(configured, &device))
+                id != &configured.configuration.source_id || cached.matches(&configured, &device)
             });
-        Ok(())
+        Ok(configured)
     }
 
     async fn edit_configured_source(&self, input: SourceSettingsChange) -> Result<(), String> {
         let source_id = input.source_id().clone();
         let configured = configured_source(&self.shared.settings.load().sources, &source_id)?;
         let credential = configured
-            .credential_ref
+            .credential
             .as_ref()
-            .map(|reference| load_provider_secret(&self.shared.secrets, reference))
+            .map(|reference| load_provider_secret(self.shared.secrets.as_ref(), reference))
             .transpose()?
             .flatten();
         let edit = Source::edit(
@@ -1359,7 +1389,7 @@ impl SourceOwner {
             sources::SourceEditResult::ConfigurationOnly(configuration) => {
                 let current = configured_source(&self.shared.settings.load().sources, &source_id)?;
                 if current.configuration != configured.configuration
-                    || current.credential_ref != configured.credential_ref
+                    || current.credential != configured.credential
                 {
                     return Err(SourceError::Cancelled.to_string());
                 }
@@ -1723,7 +1753,7 @@ impl SourceOwner {
                 if configured.configuration.kind != "plex" {
                     continue;
                 }
-                let Some(reference) = configured.credential_ref.as_ref() else {
+                let Some(reference) = configured.credential.as_ref() else {
                     continue;
                 };
                 if !seen.insert(reference.as_str().to_owned()) {
@@ -1744,7 +1774,7 @@ impl SourceOwner {
     async fn reuse_plex_login(
         &self,
         input: &mut SourceSetup,
-    ) -> Result<Option<crate::settings::CredentialRef>, String> {
+    ) -> Result<Option<crate::settings::Credential>, String> {
         let SourceSetup::Plex(input) = input else {
             return Ok(None);
         };
@@ -1762,7 +1792,7 @@ impl SourceOwner {
                     .merge_authorization(&input.login)
                     .map_err(string_error)?;
                 input.login = login.for_setup();
-                return Ok(configured.credential_ref);
+                return Ok(configured.credential);
             }
         }
         Ok(None)
@@ -1930,21 +1960,14 @@ impl SourceOwner {
                 if !owner.shared.selection_is_current(&cancelled) {
                     return Err(SourceError::Cancelled.to_string());
                 }
-                let credential_ref = match reused_credential {
-                    Some(reference) => Some(reference),
-                    None => credential
-                        .as_ref()
-                        .map(|_| fresh_credential_ref())
-                        .transpose()?,
-                };
                 let configured = ConfiguredSource {
                     configuration: configuration.clone(),
-                    credential_ref,
+                    credential: reused_credential,
                     music_folder_id: None,
                     local_access: None,
                     enable_half_stars: false,
                 };
-                owner.persist_connected_source(&configured, credential)?;
+                let configured = owner.persist_connected_source(&configured, credential)?;
                 persisted_source_id = Some(configuration.source_id.clone());
                 let source_state = owner
                     .shared
@@ -2129,7 +2152,7 @@ impl SourceOwner {
                             warn!(%error, "could not remove old credential file");
                         }
                     }
-                    let scope = fresh_credential_ref()?.as_str().to_string();
+                    let scope = fresh_source_id()?.to_string();
                     settings.update(|stored| {
                         stored.ui.application.secret_storage_mode = mode;
                         // Reset as confirmed in Preferences; never unlock the old keyring.
@@ -2141,13 +2164,14 @@ impl SourceOwner {
                             descriptor.value_mut(&mut stored.scrobbling).clear();
                         }
                         stored.scrobbling_secrets_present = false;
+                        stored.scrobbling_credentials.clear();
                         for source in stored
                             .sources
                             .configured
                             .iter_mut()
                             .chain(&mut stored.sources.integrations)
                         {
-                            source.credential_ref = None;
+                            source.credential = None;
                         }
                         Ok(())
                     })?;
@@ -2215,11 +2239,19 @@ impl SourceOwner {
                 }
                 stored.sources.configured.push(ConfiguredSource {
                     configuration: configuration.clone(),
-                    credential_ref: None,
+                    credential: None,
                     music_folder_id: None,
                     local_access: None,
                     enable_half_stars: false,
                 });
+                stored.ui.set_download_quality(
+                    configuration.source_id.clone(),
+                    sources::DownloadQuality::Transcoded(library::AudioEncoding {
+                        codec: library::AudioCodec::Opus,
+                        bitrate_kbps: Some(128),
+                        channels: library::AudioChannels::Preserve,
+                    }),
+                );
                 Ok((configuration.clone(), true))
             })?
         };
@@ -2233,6 +2265,9 @@ impl SourceOwner {
             .await
             .map_err(string_error)?;
         if created {
+            self.shared
+                .downloads
+                .settings_changed(self.shared.settings.load().ui.downloads);
             self.shared
                 .send(SourceEvent::Configured(
                     self.shared
@@ -2660,10 +2695,7 @@ impl SourceOwner {
                 return;
             }
             owner
-                .remove_source_resources(
-                    &source_id,
-                    configured.and_then(|item| item.credential_ref),
-                )
+                .remove_source_resources(&source_id, configured.and_then(|item| item.credential))
                 .await;
             owner
                 .shared
@@ -2688,9 +2720,10 @@ impl SourceOwner {
             .connect
             .lock()
             .unwrap_or_else(|p| p.into_inner()) = Arc::downgrade(connect);
-        self.shared.downloads.install_connect(Arc::downgrade(
-            &(Arc::clone(connect) as Arc<dyn downloads::ConnectDownload>),
-        ));
+    }
+
+    pub(crate) fn peer_access(&self) -> sources::PeerAccess {
+        self.shared.downloads.peer_access()
     }
 
     pub(crate) fn connect_media_changed(&self) {
@@ -2700,13 +2733,22 @@ impl SourceOwner {
     pub fn download_media(&self, subject: downloads::DownloadSubject, media_uris: Vec<String>) {
         let owner = self.clone();
         self.shared.runtime.spawn(async move {
-            let mut source_ids = media_uris
-                .iter()
-                .filter_map(|media_uri| {
-                    library::source_entity_parts(media_uri)
-                        .and_then(|(source_id, kind, _)| (kind == "track").then_some(source_id))
-                })
-                .collect::<Vec<_>>();
+            let mut source_ids = Vec::new();
+            for media_uri in &media_uris {
+                let source = match library::source_entity_parts(media_uri) {
+                    Some((source, kind, _)) if kind == "track" => Some(source),
+                    _ => owner
+                        .shared
+                        .database
+                        .track_source_by_uri(media_uri, &ReadCancellation::new())
+                        .await
+                        .ok()
+                        .flatten(),
+                };
+                if let Some(source) = source {
+                    source_ids.push(source);
+                }
+            }
             source_ids.sort();
             source_ids.dedup();
             for source_id in source_ids {
@@ -2754,13 +2796,8 @@ impl SourceOwner {
         info!(kind = target.kind(), favorite, "Favorite requested");
         let (sender, receiver) = async_channel::bounded(1);
         self.spawn_serialized(move |owner| async move {
-            let result = match owner.apply_favorite(target.clone(), favorite).await {
-                Ok(()) => owner
-                    .shared
-                    .database
-                    .favorite(&target)
-                    .await
-                    .map_err(string_error),
+            let result = match owner.apply_favorite(target, favorite).await {
+                Ok(()) => Ok(favorite),
                 Err(error) => Err(error),
             };
             let _ = sender.try_send(result);
@@ -3013,9 +3050,8 @@ impl SourceOwner {
             CatalogChange::Broad,
         )
         .await;
-        if let Some((source_id, source_key, false)) = source {
-            self.deliver_favorite(source_id, source_key, target, favorite)
-                .await;
+        if source.is_some_and(|(_, _, local)| !local) {
+            self.shared.maintenance.notify_one();
         }
         Ok(())
     }
@@ -3112,9 +3148,9 @@ impl SourceOwner {
             return Ok(cached.source.clone());
         }
         let credential = configured
-            .credential_ref
+            .credential
             .as_ref()
-            .map(|reference| load_provider_secret(&self.shared.secrets, reference))
+            .map(|reference| load_provider_secret(self.shared.secrets.as_ref(), reference))
             .transpose()?
             .flatten();
 
@@ -3140,7 +3176,7 @@ impl SourceOwner {
                 .chain(&current.sources.integrations)
                 .any(|item| {
                     same_native_input(&item.configuration, &configured.configuration)
-                        && item.credential_ref == configured.credential_ref
+                        && item.credential == configured.credential
                 })
         {
             if let Some(cached) = clients.get(source_id)
@@ -3152,7 +3188,7 @@ impl SourceOwner {
                 source_id.clone(),
                 CachedSource {
                     configuration: configured.configuration,
-                    credential_ref: configured.credential_ref,
+                    credential: configured.credential,
                     jellyfin_device_id: stored.jellyfin_device_id,
                     source: Arc::clone(&source),
                     refresh: None,
@@ -3190,9 +3226,9 @@ impl SourceOwner {
             return Ok(());
         };
         let reference = configured
-            .credential_ref
+            .credential
             .as_ref()
-            .ok_or("Plex credential reference is missing")?;
+            .ok_or("Plex credentials are missing")?;
         let mut logins = self
             .shared
             .plex_logins
@@ -3204,28 +3240,45 @@ impl SourceOwner {
         }
         let shared = Arc::downgrade(&self.shared);
         let reference = reference.clone();
-        let saved_reference = reference.clone();
+        let saved_reference = Arc::new(Mutex::new(reference.clone()));
         login
             .try_lock()
             .map_err(string_error)?
             .bind_save(Arc::new(move |secret| {
                 let shared = shared.upgrade().ok_or(SourceError::Cancelled)?;
-                let _logins = shared
+                let mut logins = shared
                     .plex_logins
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if !shared
+                let mut previous = saved_reference
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let next = seal_credential(shared.secrets.as_ref(), &secret)
+                    .map_err(SourceError::Other)?;
+                let changed = shared
                     .settings
-                    .load()
-                    .sources
-                    .configured
-                    .iter()
-                    .any(|source| source.credential_ref.as_ref() == Some(&saved_reference))
-                {
+                    .update(|stored| {
+                        let mut changed = false;
+                        for source in stored
+                            .sources
+                            .configured
+                            .iter_mut()
+                            .filter(|source| source.credential.as_ref() == Some(&previous))
+                        {
+                            source.credential = Some(next.clone());
+                            changed = true;
+                        }
+                        Ok(changed)
+                    })
+                    .map_err(SourceError::Other)?;
+                if !changed {
                     return Err(SourceError::Cancelled);
                 }
-                save_provider_secret(&shared.secrets, &saved_reference, secret)
-                    .map_err(SourceError::Other)
+                if let Some(login) = logins.remove(previous.as_str()) {
+                    logins.insert(next.as_str().to_owned(), login);
+                }
+                *previous = next;
+                Ok(())
             }));
         logins.insert(reference.as_str().to_owned(), login);
         Ok(())
@@ -3243,12 +3296,12 @@ impl SourceOwner {
         source_key: SourceKey,
         target: FavoriteTarget,
         favorite: bool,
-    ) {
-        let Ok(source) = self.client(&source_id) else {
-            return;
+    ) -> bool {
+        let Ok(source) = self.open_client(source_id.clone()).await else {
+            return true;
         };
         let Some((kind, object_id)) = favorite_object(&source_id, &target) else {
-            return;
+            return false;
         };
         match source.set_favorite(kind, &object_id, favorite).await {
             Ok(()) => {
@@ -3262,6 +3315,9 @@ impl SourceOwner {
                     acknowledged = matches!(acknowledgement, Ok(true)),
                     "Favorite delivered"
                 );
+                if acknowledgement.is_err() {
+                    return true;
+                }
             }
             Err(error) if source_error_is_temporary(&error) => {
                 info!(favorite, "Favorite delivery deferred");
@@ -3270,15 +3326,20 @@ impl SourceOwner {
                     .database
                     .defer_remote_favorite(&target, favorite, unix_seconds().saturating_add(30))
                     .await;
+                return true;
             }
             Err(_) => {
                 info!(favorite, "Favorite delivery rejected");
-                if let Ok(Some(previous)) = self
+                let previous = match self
                     .shared
                     .database
                     .reject_remote_favorite(&target, favorite)
                     .await
                 {
+                    Ok(previous) => previous,
+                    Err(_) => return true,
+                };
+                if let Some(previous) = previous {
                     self.publish_current_catalog(
                         Some(FavoriteSettlement {
                             target,
@@ -3299,6 +3360,64 @@ impl SourceOwner {
                         .await;
                 }
             }
+        }
+        false
+    }
+
+    async fn deliver_pending_favorites(&self) {
+        let now = unix_seconds();
+        let pending = match self
+            .shared
+            .database
+            .due_remote_favorites(now, 64, &ReadCancellation::new())
+            .await
+        {
+            Ok(pending) => pending,
+            Err(error) => {
+                self.shared.warn_nonfatal(&error.to_string());
+                return;
+            }
+        };
+        let full = pending.len() == 64;
+        let mut completed = true;
+        let mut unavailable = HashSet::new();
+        for (media_uri, favorite) in pending {
+            let Some((source_id, kind, _)) = library::source_entity_parts(&media_uri) else {
+                completed = false;
+                continue;
+            };
+            let target = match kind.as_str() {
+                "track" => FavoriteTarget::Track(media_uri),
+                "album" => FavoriteTarget::Album(media_uri),
+                "artist" => FavoriteTarget::Artist(media_uri),
+                _ => {
+                    completed = false;
+                    continue;
+                }
+            };
+            if unavailable.contains(&source_id) {
+                let _ = self
+                    .shared
+                    .database
+                    .defer_remote_favorite(&target, favorite, unix_seconds().saturating_add(30))
+                    .await;
+                completed = false;
+                continue;
+            }
+            let Some((_, source_key, false)) = self.favorite_source(&target).await else {
+                completed = false;
+                continue;
+            };
+            if self
+                .deliver_favorite(source_id.clone(), source_key, target, favorite)
+                .await
+            {
+                unavailable.insert(source_id);
+                completed = false;
+            }
+        }
+        if full && completed {
+            self.shared.maintenance.notify_one();
         }
     }
 }
@@ -3562,8 +3681,6 @@ fn source_progress(progress: SourceReadProgress) -> SourceProgress {
             SourceReadStage::Genres => SourceProgressStage::Genres,
             SourceReadStage::Playlists => SourceProgressStage::Playlists,
             SourceReadStage::Home => SourceProgressStage::Home,
-            SourceReadStage::Artwork => SourceProgressStage::Artwork,
-            SourceReadStage::Files => SourceProgressStage::Files,
             SourceReadStage::Finalizing => SourceProgressStage::Finalizing,
         },
         completed: progress.completed,
@@ -3612,11 +3729,11 @@ mod source_tests {
         let secrets = Arc::new(SwitchableSecretStore::new(Arc::new(
             secrets::MemorySecretStore::new(),
         )));
-        let reference = crate::settings::CredentialRef::new("shared-plex");
         let secret = serde_json::json!({"client_id":"test-device","token":"test-token","account_id":"profile","profiles":{},"resources":{"profile":{"one":"one-token","two":"two-token"}},"home_admin_subscription":false,"download_subscriptions":{}}).to_string();
+        let reference = seal_credential(secrets.as_ref(), &secret).unwrap();
         let configured:Vec<_> = ["one","two"].into_iter().map(|server|ConfiguredSource {
             configuration: SourceConfiguration {source_id:SourceId::new(server),kind:"plex".into(),name:server.into(),provider_payload:serde_json::json!({"version":1,"server_id":server,"profile_id":"profile","base_url":"http://127.0.0.1:9","address_override":null,"local":true,"relay":false,"owned":true,"trust_invalid_cert":false}).to_string()},
-            credential_ref:Some(reference.clone()),music_folder_id:None,local_access:None,enable_half_stars:false,
+            credential:Some(reference.clone()),music_folder_id:None,local_access:None,enable_half_stars:false,
         }).collect();
         settings
             .update(|stored| {
@@ -3624,7 +3741,6 @@ mod source_tests {
                 Ok(())
             })
             .unwrap();
-        save_provider_secret(&secrets, &reference, secret.clone()).unwrap();
         let owner = SourceOwner::open_dormant(
             Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
             Arc::clone(&database),
@@ -3672,7 +3788,7 @@ mod source_tests {
             )
             .await;
         assert!(
-            load_provider_secret(&secrets, &reference)
+            load_provider_secret(secrets.as_ref(), &reference)
                 .unwrap()
                 .is_some()
         );
@@ -3682,6 +3798,15 @@ mod source_tests {
             .await
             .merge_authorization(&snapshot)
             .unwrap();
+        let current = owner.shared.settings.load().sources.configured[0]
+            .credential
+            .clone()
+            .unwrap();
+        assert!(
+            load_provider_secret(secrets.as_ref(), &current)
+                .unwrap()
+                .is_some()
+        );
         owner
             .shared
             .settings
@@ -3691,30 +3816,13 @@ mod source_tests {
             })
             .unwrap();
         owner
-            .remove_source_resources(
-                &configured[1].configuration.source_id,
-                Some(reference.clone()),
-            )
+            .remove_source_resources(&configured[1].configuration.source_id, Some(current))
             .await;
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while load_provider_secret(&secrets, &reference)
-                .unwrap()
-                .is_some()
-            {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("removed credentials are cleaned up in the background");
         assert!(matches!(
             detached.lock().await.merge_authorization(&snapshot),
             Err(SourceError::Cancelled)
         ));
-        assert!(
-            load_provider_secret(&secrets, &reference)
-                .unwrap()
-                .is_none()
-        );
+        assert!(owner.shared.settings.load().sources.configured.is_empty());
         assert!(owner.shared.plex_logins.lock().unwrap().is_empty());
     }
 
@@ -3767,7 +3875,7 @@ mod source_tests {
             SourceConfiguration::local(source_id.clone(), "Test", vec![music]).unwrap();
         let configured = ConfiguredSource {
             configuration: configuration.clone(),
-            credential_ref: None,
+            credential: None,
             music_folder_id: None,
             local_access: None,
             enable_half_stars: false,
@@ -4046,89 +4154,145 @@ mod source_tests {
 
     #[tokio::test]
     async fn adding_a_source_connects_before_its_background_scan() {
-        let directory = tempfile::tempdir().unwrap();
-        let music = directory.path().join("music");
-        std::fs::create_dir(&music).unwrap();
-        let database = Arc::new(
-            Database::open(directory.path().join("library.sqlite"))
-                .await
-                .unwrap(),
-        );
-        let runtime = tokio::runtime::Handle::current();
-        let (events, receiver) = async_channel::unbounded();
-        let owner = SourceOwner::open_dormant(
-            Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
-            Arc::clone(&database),
-            Downloads::new(
-                artwork::Artwork::new(directory.path().join("downloads/artwork"), runtime.clone())
+        for already_configured in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let music = directory.path().join("music");
+            std::fs::create_dir(&music).unwrap();
+            let database = Arc::new(
+                Database::open(directory.path().join("library.sqlite"))
+                    .await
                     .unwrap(),
-                directory.path().join("downloads"),
-                database.as_ref().clone(),
-                runtime.clone(),
-                async_channel::unbounded().0,
-                Vec::new(),
-            ),
-            SettingsFile::memory(),
-            Arc::new(SwitchableSecretStore::new(Arc::new(
-                secrets::MemorySecretStore::new(),
-            ))),
-            runtime,
-            SourceOutputs {
-                events,
-                discovery: async_channel::unbounded().0,
-            },
-        );
-        let mut connected = Some(owner.configure_source(SourceSetup::Local { roots: vec![music] }));
-        tokio::time::timeout(Duration::from_secs(10), async {
-            let mut scanned = false;
-            let mut selected = None;
-            let mut refreshing = false;
-            loop {
-                match receiver.recv().await.unwrap() {
-                    SourceEvent::Operation(SourceOperation::Adding { progress }) => {
-                        assert_eq!(progress.stage, SourceProgressStage::Connecting);
-                        assert!(selected.is_none());
-                    }
-                    SourceEvent::Selected {
-                        selected: library, ..
-                    } => {
-                        assert!(!refreshing, "selection must precede the initial scan");
-                        selected = Some(library.source_id);
-                    }
-                    SourceEvent::Operation(SourceOperation::Idle) => {
-                        assert!(selected.is_some());
-                        if refreshing {
-                            assert!(
-                                scanned,
-                                "the scan continues after its setup receiver closes"
-                            );
-                            break;
+            );
+            let runtime = tokio::runtime::Handle::current();
+            let (events, receiver) = async_channel::unbounded();
+            let owner = SourceOwner::open_dormant(
+                Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
+                Arc::clone(&database),
+                Downloads::new(
+                    artwork::Artwork::new(
+                        directory.path().join("downloads/artwork"),
+                        runtime.clone(),
+                    )
+                    .unwrap(),
+                    directory.path().join("downloads"),
+                    database.as_ref().clone(),
+                    runtime.clone(),
+                    async_channel::unbounded().0,
+                    Vec::new(),
+                ),
+                SettingsFile::memory(),
+                Arc::new(SwitchableSecretStore::new(Arc::new(
+                    secrets::MemorySecretStore::new(),
+                ))),
+                runtime,
+                SourceOutputs {
+                    events,
+                    discovery: async_channel::unbounded().0,
+                },
+            );
+            let mut connected = if already_configured {
+                let source_id = SourceId::new("restored-source");
+                owner
+                    .shared
+                    .settings
+                    .update(|stored| {
+                        stored.sources.configured.push(ConfiguredSource {
+                            configuration: SourceConfiguration::local(
+                                source_id.clone(),
+                                "Restored",
+                                vec![music],
+                            )
+                            .unwrap(),
+                            credential: None,
+                            music_folder_id: None,
+                            local_access: None,
+                            enable_half_stars: false,
+                        });
+                        Ok(())
+                    })
+                    .unwrap();
+                assert!(
+                    database
+                        .cached_source(source_id.as_str(), &ReadCancellation::new())
+                        .await
+                        .unwrap()
+                        .is_none()
+                );
+                assert_eq!(
+                    owner.select_source(source_id.clone()).await.unwrap(),
+                    source_id
+                );
+                None
+            } else {
+                Some(owner.configure_source(SourceSetup::Local { roots: vec![music] }))
+            };
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let mut scanned = false;
+                let mut selected = None;
+                let mut refreshing = false;
+                loop {
+                    match receiver.recv().await.unwrap() {
+                        SourceEvent::Operation(SourceOperation::Adding { progress }) => {
+                            assert_eq!(progress.stage, SourceProgressStage::Connecting);
+                            assert!(selected.is_none());
                         }
-                    }
-                    SourceEvent::Operation(SourceOperation::Refreshing {
-                        source_id,
-                        progress,
-                    }) => {
-                        assert_eq!(selected.as_ref(), Some(&source_id));
-                        if let Some(connected) = connected.take() {
-                            let library = connected.try_recv().unwrap().unwrap();
-                            assert_eq!(library.source_id, source_id);
-                            assert_eq!(owner.list_sources().selected_source_id, Some(source_id));
+                        SourceEvent::Selected {
+                            selected: library, ..
+                        } => {
+                            assert!(!refreshing, "selection must precede the initial scan");
+                            selected = Some(library.source_id);
                         }
-                        refreshing = true;
-                        scanned |= progress.stage == SourceProgressStage::Finalizing;
+                        SourceEvent::Operation(SourceOperation::Idle) => {
+                            assert!(selected.is_some());
+                            if refreshing {
+                                assert!(scanned, "the empty scan reports its track count");
+                                break;
+                            }
+                        }
+                        SourceEvent::Operation(SourceOperation::Refreshing {
+                            source_id,
+                            progress,
+                        }) => {
+                            assert_eq!(selected.as_ref(), Some(&source_id));
+                            if let Some(connected) = connected.take() {
+                                let library = connected.try_recv().unwrap().unwrap();
+                                assert_eq!(library.source_id, source_id);
+                                assert_eq!(
+                                    owner.list_sources().selected_source_id,
+                                    Some(source_id)
+                                );
+                            }
+                            refreshing = true;
+                            scanned |= progress.stage == SourceProgressStage::Tracks
+                                && progress.completed == 0;
+                        }
+                        SourceEvent::Operation(SourceOperation::Failed { message, .. }) => {
+                            panic!("{message}")
+                        }
+                        _ => {}
                     }
-                    SourceEvent::Operation(SourceOperation::Failed { message, .. }) => {
-                        panic!("{message}")
-                    }
-                    _ => {}
                 }
-            }
-        })
-        .await
-        .unwrap();
-        owner.shared.clients.lock().unwrap().clear();
-        owner.shared.cancel_selection();
+            })
+            .await
+            .unwrap_or_else(|_| {
+                panic!("initial scan did not finish, already_configured={already_configured}")
+            });
+            assert!(matches!(
+                *owner.shared.operation.borrow(),
+                SourceOperation::Idle
+            ));
+            let source_id = owner.selected_library().unwrap().source_id;
+            assert!(
+                database
+                    .cached_source(source_id.as_str(), &ReadCancellation::new())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .catalog_complete
+            );
+            owner.shared.clients.lock().unwrap().clear();
+            owner.shared.cancel_selection();
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -4214,7 +4378,7 @@ mod source_tests {
                     name: "Music".into(),
                     provider_payload: serde_json::json!({ "version": 1, "base_url": "http://127.0.0.1:9", "username": "listener", "trust_invalid_cert": false }).to_string(),
                 },
-                credential_ref: Some(crate::settings::CredentialRef::new("held")),
+                credential: Some(crate::settings::Credential::new("held")),
                 music_folder_id: None,
                 local_access: None,
                 enable_half_stars: false,
@@ -4308,6 +4472,22 @@ mod source_tests {
                 .as_ref()
                 .unwrap()
                 .clone();
+            let favorite =
+                FavoriteTarget::Album(library::source_entity_uri(&source_id, "album", "album"));
+            for value in [true, false] {
+                assert_eq!(
+                    tokio::time::timeout(
+                        Duration::from_secs(2),
+                        owner.set_favorite_with_result(favorite.clone(), value),
+                    )
+                    .await
+                    .expect("favorite completion must not wait for live access")
+                    .unwrap(),
+                    value
+                );
+                assert_eq!(database.favorite(&favorite).await.unwrap(), value);
+            }
+            while receiver.try_recv().is_ok() {}
             let local_uri = url::Url::from_file_path(directory.path().join("local.flac"))
                 .unwrap()
                 .to_string();
@@ -4462,7 +4642,7 @@ mod source_tests {
                                 Vec::new(),
                             )
                             .unwrap(),
-                            credential_ref: None,
+                            credential: None,
                             music_folder_id: None,
                             local_access: None,
                             enable_half_stars: false,
@@ -4567,6 +4747,23 @@ mod source_tests {
                 ),
                 (1, 1)
             );
+            owner.deliver_pending_favorites().await;
+            assert!(!database.favorite(&favorite).await.unwrap());
+            assert!(
+                database
+                    .due_remote_favorites(unix_seconds(), 64, &ReadCancellation::new())
+                    .await
+                    .unwrap()
+                    .is_empty(),
+                "offline delivery is deferred without losing the local edit"
+            );
+            assert_eq!(
+                database
+                    .due_remote_favorites(unix_seconds() + 60, 64, &ReadCancellation::new())
+                    .await
+                    .unwrap(),
+                vec![(favorite.media_uri().to_owned(), false)]
+            );
         }
     }
 
@@ -4593,7 +4790,7 @@ mod source_tests {
                                 Vec::new(),
                             )
                             .unwrap(),
-                            credential_ref: None,
+                            credential: None,
                             music_folder_id: None,
                             local_access: None,
                             enable_half_stars: false,

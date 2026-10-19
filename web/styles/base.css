@@ -257,6 +257,13 @@ dialog::backdrop {
 .connect-header form { margin: 0; }
 .connect-header .icon-button { width: 36px; height: 36px; font-size: 22px; }
 .connect-body { min-height: 0; overflow: auto; padding: 24px; }
+#connect-dialog.connect-working { height: min(520px, 90dvh); }
+#connect-dialog.connect-working .connect-body { display: flex; flex: 1; flex-direction: column; }
+.connect-operation { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px 12px; text-align: center; }
+#connect-connecting-status { margin: 0; font-size: 22px; font-weight: 600; }
+#connect-collection-progress { width: 100%; height: 8px; accent-color: var(--accent); }
+#connect-collection-counter { margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+.connect-operation > button { margin-top: 6px; }
 #connect-dialog h3 { margin: 0; font-size: 16px; }
 #connect-dialog h4 { margin: 0; font-size: 15px; }
 #connect-dialog p { line-height: 1.55; }
@@ -460,8 +467,7 @@ dialog.playlist-edit {
 }
 
 #toast,
-#connect-progress,
-#connect-offer {
+#connect-progress {
   position: absolute;
   bottom: 14px;
   left: 50%;
@@ -478,9 +484,9 @@ dialog.playlist-edit {
   grid-area: 1 / 1 / 2 / -1;
 }
 
-#connect-offer, #connect-progress { display: flex; align-items: center; gap: 12px; }
-#connect-offer > span, #connect-progress > span { min-width: 0; }
-#connect-offer button, #connect-progress button { flex-shrink: 0; }
+#connect-progress { display: flex; align-items: center; gap: 12px; }
+#connect-progress > span { min-width: 0; }
+#connect-progress button { flex-shrink: 0; }
 
 @media (max-width: 580px) {
   .mobile {
@@ -524,8 +530,7 @@ dialog.playlist-edit {
 }
 
 :root[data-theme="light"] #toast,
-:root[data-theme="light"] #connect-progress,
-:root[data-theme="light"] #connect-offer {
+:root[data-theme="light"] #connect-progress {
   background: #45454c;
 }
 
@@ -600,3 +605,5 @@ a { color: inherit; text-decoration: none; }
 .connect-relay-heading > input { margin-left: auto; }
 .connect-relay-heading a { color: inherit; }
 #connect-dialog [data-connect-section="start"] > [data-connect-section="invite"] { margin-top: 0; padding-top: 0; }
+
+#connect-continue { max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

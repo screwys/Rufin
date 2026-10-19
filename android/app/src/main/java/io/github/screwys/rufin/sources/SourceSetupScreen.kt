@@ -78,7 +78,13 @@ internal fun SourceSetupScreen(model: RufinConnection, onClose: () -> Unit, sour
     }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             if (setup.working) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
+                val progress = model.sourceProgress
+                val total = progress?.total
+                if (progress != null && total != null && total > 0UL) {
+                    LinearProgressIndicator(progress = {
+                        (progress.completed.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                    }, modifier = Modifier.fillMaxWidth())
+                } else LinearProgressIndicator(Modifier.fillMaxWidth())
                 model.sourceStatus?.let {
                     Text(it, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
                 }

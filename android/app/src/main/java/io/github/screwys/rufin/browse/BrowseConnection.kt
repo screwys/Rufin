@@ -4,6 +4,7 @@ import io.github.screwys.rufin.shared.rufin_core.ConfiguredSources
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
 import io.github.screwys.rufin.app.RufinConnection
+import io.github.screwys.rufin.ui.userMessage
 
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.Snapshot
@@ -15,6 +16,7 @@ internal enum class AppSection { Browse, Search, Pins, More }
 
 internal class BrowseOptions {
     var preparing by mutableStateOf(false)
+    var preparationError by mutableStateOf<String?>(null)
     var category by mutableStateOf("tracks")
     var filter by mutableStateOf("")
     var favoritesOnly by mutableStateOf(false)
@@ -35,7 +37,7 @@ internal data class BrowseItem(val row: AndroidBrowseRow, val index: ULong, val 
 
 @OptIn(FlowPreview::class)
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-internal class BrowseConnection(private val connection: RufinConnection, scope: CoroutineScope) {
+internal class BrowseConnection(private val connection: RufinConnection, private val scope: CoroutineScope) {
     var section by mutableStateOf(AppSection.Browse)
     var routes by mutableStateOf<List<AndroidRouteDescriptor>>(emptyList())
         private set
@@ -211,10 +213,10 @@ internal class BrowseConnection(private val connection: RufinConnection, scope: 
             }
             details = details + BrowseLocation(route, item.row.title, item.row.kind, options)
             rememberSearchResult(item)
-            if (options.preparing) {
+            if (options.preparing) scope.launch {
                 try { library?.prepareCollection(item.row.mediaUri) }
                 catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { connection.runAction { throw error } }
+                catch (error: Exception) { options.preparationError = error.userMessage() }
                 finally { options.preparing = false }
             }
         }

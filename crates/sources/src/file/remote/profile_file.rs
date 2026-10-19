@@ -8,69 +8,6 @@ use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
 impl FileSource {
-    pub fn file_name(path: &str) -> &str {
-        crate::file::documents::relative_parts(path)
-            .0
-            .rsplit('/')
-            .next()
-            .unwrap_or_default()
-    }
-
-    pub async fn ensure_profile_folder(&self, relative: &str) -> SourceResult<()> {
-        self.location(relative)?;
-        let input = self.input().await?;
-        // Create each missing parent, using the existing account's root.
-        let mut folder = String::new();
-        for component in relative
-            .trim_matches('/')
-            .split('/')
-            .filter(|s| !s.is_empty())
-        {
-            if !folder.is_empty() {
-                folder.push('/');
-            }
-            folder.push_str(component);
-            match self.stat(&input, &folder).await {
-                Ok(entry) if entry.kind == library::LocalFileKind::Directory => continue,
-                Ok(_) => {
-                    return Err(SourceError::InvalidRequest(
-                        "Choose a folder for Connect storage",
-                    ));
-                }
-                Err(SourceError::NotFound) => {}
-                Err(error) => return Err(error),
-            }
-            match input.input() {
-                FileInput::Documents(access) => access.create_directory(&folder)?,
-                FileInput::Smb(client) => client.create_directory(&folder).await?,
-                FileInput::WebDav(client) => {
-                    let url = url::Url::parse(&self.input_path(input.input(), &folder)?)
-                        .map_err(error)?;
-                    let response = client
-                        .request(
-                            Method::from_bytes(b"MKCOL").unwrap(),
-                            &url,
-                            HeaderMap::new(),
-                            Body::Empty,
-                        )
-                        .await?;
-                    if response.status() != StatusCode::CREATED {
-                        // Another device may have created the same folder.
-                        if response.status() != StatusCode::METHOD_NOT_ALLOWED
-                            || !client.stat(&url).await?.directory
-                        {
-                            return Err(SourceError::Server {
-                                status: response.status().as_u16(),
-                                message: "Could not create the Connect folder".into(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub async fn list_profile_files(
         &self,
         relative: &str,
@@ -97,6 +34,11 @@ impl FileSource {
         self.location(relative)?;
         let input = self.input().await?;
         match input.input() {
+            FileInput::Peer { .. } => {
+                return Err(SourceError::InvalidRequest(
+                    "Peer access provides audio bytes",
+                ));
+            }
             FileInput::Documents(access) => {
                 let access = std::sync::Arc::clone(access);
                 let relative_path = relative.to_owned();
@@ -182,12 +124,6 @@ impl FileSource {
             }
         }
         Ok(())
-    }
-
-    pub async fn profile_file_version(&self, relative: &str) -> SourceResult<Option<String>> {
-        self.location(relative)?;
-        let input = self.input().await?;
-        Ok(self.stat(&input, relative).await?.revision)
     }
 
     pub async fn copy_file(

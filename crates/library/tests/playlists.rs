@@ -1117,7 +1117,8 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
 
 #[tokio::test]
 async fn rating_favorite_and_delivery_are_uri_owned() {
-    let fixture = fixture().await;
+    let mut fixture = fixture().await;
+    let cancellation = ReadCancellation::new();
     let target = FavoriteTarget::Track(fixture.track_uris[0].clone());
     assert_eq!(
         fixture
@@ -1180,10 +1181,111 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
     assert!(
         fixture
             .database
+            .due_remote_favorites(99, 64, &cancellation)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let album = FavoriteTarget::Album(fixture.album_uris[0].clone());
+    fixture
+        .database
+        .queue_remote_favorite(&album, true, 100)
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture
+            .database
+            .due_remote_favorites(100, 1, &cancellation)
+            .await
+            .unwrap(),
+        [(target.media_uri().to_string(), false)]
+    );
+    assert_eq!(
+        fixture
+            .database
+            .due_remote_favorites(100, 64, &cancellation)
+            .await
+            .unwrap(),
+        [
+            (target.media_uri().to_string(), false),
+            (album.media_uri().to_string(), true)
+        ]
+    );
+    assert!(
+        fixture
+            .database
+            .acknowledge_remote_favorite(&album, true)
+            .await
+            .unwrap()
+    );
+    assert!(fixture.database.favorite(&album).await.unwrap());
+    assert!(
+        fixture
+            .database
             .defer_remote_favorite(&target, false, 200)
             .await
             .expect("defer delivery")
     );
+    fixture.database.clone().close().await.unwrap();
+    fixture.database = library::Database::open(&fixture.path).await.unwrap();
+    assert!(!fixture.database.favorite(&target).await.unwrap());
+    assert!(
+        fixture
+            .database
+            .due_remote_favorites(199, 64, &cancellation)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        fixture
+            .database
+            .due_remote_favorites(200, 64, &cancellation)
+            .await
+            .unwrap(),
+        [(target.media_uri().to_string(), false)]
+    );
+    fixture
+        .database
+        .queue_remote_favorite(&target, true, 201)
+        .await
+        .unwrap();
+    assert!(
+        !fixture
+            .database
+            .acknowledge_remote_favorite(&target, false)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !fixture
+            .database
+            .defer_remote_favorite(&target, false, 300)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        fixture
+            .database
+            .reject_remote_favorite(&target, false)
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(fixture.database.favorite(&target).await.unwrap());
+    assert_eq!(
+        fixture
+            .database
+            .due_remote_favorites(201, 64, &cancellation)
+            .await
+            .unwrap(),
+        [(target.media_uri().to_string(), true)]
+    );
+    fixture
+        .database
+        .queue_remote_favorite(&target, false, 202)
+        .await
+        .unwrap();
     assert_eq!(
         fixture
             .database
@@ -1191,6 +1293,14 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
             .await
             .expect("reject delivery"),
         Some(true)
+    );
+    assert!(
+        fixture
+            .database
+            .due_remote_favorites(300, 64, &cancellation)
+            .await
+            .unwrap()
+            .is_empty()
     );
     assert!(
         library::CatalogQuery::keys(

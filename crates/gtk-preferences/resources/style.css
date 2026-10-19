@@ -862,8 +862,8 @@ row.artist-search-result button.search-preview-play {
   background-color: color-mix(in srgb, currentColor 13%, transparent);
 }
 
-.album-grid > child:has(.collection-grid-empty),
-.album-grid > flowboxchild:has(.collection-grid-empty) {
+.album-grid > child.collection-grid-empty,
+.album-grid > flowboxchild.collection-grid-empty {
   background-color: transparent;
 }
 
@@ -2776,6 +2776,12 @@ button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
 
 .connect-device-online .subtitle { color: var(--success-color); }
 .connect-device-offline .subtitle { color: var(--error-color); }
+
+.connect-progress trough,
+.connect-progress progress {
+  min-height: 8px;
+  border-radius: 999px;
+}
 /* The report shares the fullscreen player's artwork background and library cells. */
 .activity-overview, .activity-report { background-color: var(--window-bg-color); }
 .activity-export-background { color: var(--window-bg-color); }

@@ -478,6 +478,28 @@ pub(crate) async fn create_default_smart_playlists(
     Ok(())
 }
 
+pub(crate) async fn sync_smart_on(
+    connection: &mut SqliteConnection,
+    key: SmartPlaylistKey,
+) -> LibraryResult<()> {
+    let (identity, position): (String, i64) = sqlx::query_as(
+        "SELECT object_id,position FROM smart_playlists WHERE smart_playlist_key=?1",
+    )
+    .bind(key)
+    .fetch_one(&mut *connection)
+    .await?;
+    crate::connect::mark_current_on(connection, "smart", &identity, false).await?;
+    crate::profile::write_local_on(
+        connection,
+        &[crate::ConnectRecord {
+            kind: "smart_order".into(),
+            key: identity,
+            value: Some(serde_json::json!({"position":position})),
+        }],
+    )
+    .await
+}
+
 impl Database {
     pub async fn smart_playlist_value_suggestions(
         &self,
@@ -571,6 +593,7 @@ impl Database {
         let definition = encode_definition(definition)?;
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
         let result = sqlx::query(
             "INSERT INTO smart_playlists(
                  object_id, name, normalized_name,definition_json, position
@@ -582,9 +605,12 @@ impl Database {
         )
         .bind(name)
         .bind(definition)
-        .execute(connection)
+        .execute(&mut *transaction)
         .await?;
-        Ok(SmartPlaylistKey::from_raw(result.last_insert_rowid()))
+        let key = SmartPlaylistKey::from_raw(result.last_insert_rowid());
+        sync_smart_on(&mut transaction, key).await?;
+        transaction.commit().await?;
+        Ok(key)
     }
 
     pub async fn update_smart_playlist(
@@ -598,6 +624,7 @@ impl Database {
         let definition = encode_definition(definition)?;
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
         let revision = artwork
             .flatten()
             .map(|bytes| blake3::hash(bytes).to_hex().to_string());
@@ -605,7 +632,7 @@ impl Database {
             if artwork.is_some() {
                 let (object, previous): (String, Option<Vec<u8>>) = sqlx::query_as(
                 "SELECT object_id,artwork_binding FROM smart_playlists WHERE smart_playlist_key=?1",
-            ).bind(key).fetch_one(&mut *connection).await?;
+            ).bind(key).fetch_one(&mut *transaction).await?;
                 let incoming = revision.as_ref().map(|revision| {
                     crate::artwork::playlist_binding(true, None, object, revision.clone())
                 });
@@ -613,7 +640,7 @@ impl Database {
             } else {
                 None
             };
-        Ok(sqlx::query(
+        let changed = sqlx::query(
             "UPDATE smart_playlists
              SET name=?2, normalized_name=lower(?2), definition_json=?3,
                  artwork_bytes=CASE WHEN ?4 THEN ?5 ELSE artwork_bytes END,
@@ -626,23 +653,40 @@ impl Database {
         .bind(artwork.is_some())
         .bind(artwork.flatten())
         .bind(revision).bind(binding)
-        .execute(connection)
+        .execute(&mut *transaction)
         .await?
         .rows_affected()
-            == 1)
+            == 1;
+        if changed {
+            sync_smart_on(&mut transaction, key).await?;
+        }
+        transaction.commit().await?;
+        Ok(changed)
     }
 
     pub async fn delete_smart_playlist(&self, key: SmartPlaylistKey) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(
-            sqlx::query("DELETE FROM smart_playlists WHERE smart_playlist_key=?1")
-                .bind(key)
-                .execute(connection)
-                .await?
-                .rows_affected()
-                == 1,
+        let mut transaction = connection.begin().await?;
+        let identity: Option<String> = sqlx::query_scalar(
+            "DELETE FROM smart_playlists WHERE smart_playlist_key=?1 RETURNING object_id",
         )
+        .bind(key)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if let Some(identity) = &identity {
+            crate::profile::write_local_on(
+                &mut transaction,
+                &[crate::ConnectRecord {
+                    kind: "smart".into(),
+                    key: identity.clone(),
+                    value: None,
+                }],
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(identity.is_some())
     }
 
     pub async fn move_smart_playlist(
@@ -656,86 +700,65 @@ impl Database {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
-        let positions = sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(
-            "SELECT
-               (SELECT position FROM smart_playlists WHERE smart_playlist_key=?1),
-               (SELECT position FROM smart_playlists WHERE smart_playlist_key=?2),
-               (SELECT max(position) FROM smart_playlists)",
-        )
-        .bind(dragged)
-        .bind(target)
-        .fetch_one(&mut *transaction)
-        .await?;
-        let (Some(dragged_position), Some(target_position), Some(max_position)) = positions else {
+        let (dragged_position,target_position): (Option<i64>,Option<i64>)=sqlx::query_as(
+            "SELECT(SELECT position FROM smart_playlists WHERE smart_playlist_key=?1),(SELECT position FROM smart_playlists WHERE smart_playlist_key=?2)"
+        ).bind(dragged).bind(target).fetch_one(&mut *transaction).await?;
+        let (Some(dragged_position), Some(target_position)) = (dragged_position, target_position)
+        else {
             transaction.rollback().await?;
             return Ok(false);
         };
-        let insertion = target_position;
-        if insertion == dragged_position {
-            transaction.rollback().await?;
-            return Ok(false);
-        }
-
-        let temporary = max_position + 1;
-        let offset = max_position + 2;
-        sqlx::query(
-            "UPDATE smart_playlists SET position=?2
-             WHERE smart_playlist_key=?1",
-        )
-        .bind(dragged)
-        .bind(temporary)
-        .execute(&mut *transaction)
-        .await?;
-        if insertion < dragged_position {
-            sqlx::query(
-                "UPDATE smart_playlists SET position=position+?3
-                 WHERE position>=?1 AND position<?2",
-            )
-            .bind(insertion)
-            .bind(dragged_position)
-            .bind(offset)
-            .execute(&mut *transaction)
-            .await?;
-            sqlx::query(
-                "UPDATE smart_playlists SET position=position-?3+1
-                 WHERE position>=?1+?3 AND position<?2+?3",
-            )
-            .bind(insertion)
-            .bind(dragged_position)
-            .bind(offset)
-            .execute(&mut *transaction)
-            .await?;
+        let mut order:Vec<(SmartPlaylistKey,String,i64)>=sqlx::query_as(
+            "SELECT smart_playlist_key,object_id,position FROM smart_playlists WHERE position BETWEEN ?1 AND ?2 ORDER BY position"
+        ).bind(dragged_position.min(target_position)).bind(dragged_position.max(target_position)).fetch_all(&mut *transaction).await?;
+        let positions = order.iter().map(|row| row.2).collect::<Vec<_>>();
+        if dragged_position < target_position {
+            order.rotate_left(1);
         } else {
-            sqlx::query(
-                "UPDATE smart_playlists SET position=position+?3
-                 WHERE position>?1 AND position<=?2",
-            )
-            .bind(dragged_position)
-            .bind(insertion)
-            .bind(offset)
-            .execute(&mut *transaction)
-            .await?;
-            sqlx::query(
-                "UPDATE smart_playlists SET position=position-?3-1
-                 WHERE position>?1+?3 AND position<=?2+?3",
-            )
-            .bind(dragged_position)
-            .bind(insertion)
-            .bind(offset)
-            .execute(&mut *transaction)
-            .await?;
+            order.rotate_right(1);
         }
-        sqlx::query(
-            "UPDATE smart_playlists SET position=?2
-             WHERE smart_playlist_key=?1",
-        )
-        .bind(dragged)
-        .bind(insertion)
-        .execute(&mut *transaction)
-        .await?;
+        let final_positions = order
+            .iter()
+            .zip(&positions)
+            .map(|(row, position)| (row.0, *position))
+            .collect::<Vec<_>>();
+        write_positions_on(&mut transaction, &final_positions).await?;
+        let records = order
+            .into_iter()
+            .zip(positions)
+            .map(|((_, key, _), position)| crate::ConnectRecord {
+                kind: "smart_order".into(),
+                key,
+                value: Some(serde_json::json!({"position":position})),
+            })
+            .collect::<Vec<_>>();
+        crate::profile::write_local_on(&mut transaction, &records).await?;
         transaction.commit().await?;
         Ok(true)
     }
+}
+
+/// Store accepted playlist positions.
+pub(crate) async fn write_positions_on(
+    connection: &mut SqliteConnection,
+    positions: &[(SmartPlaylistKey, i64)],
+) -> LibraryResult<bool> {
+    let mut changed = false;
+    for page in positions.chunks(SMART_PLAYLIST_ROW_LIMIT) {
+        let rows = serde_json::to_string(page)?;
+        changed |= sqlx::query(
+            "WITH input AS MATERIALIZED(SELECT json_extract(value,'$[0]') id,json_extract(value,'$[1]') position FROM json_each(?1)),
+             changed AS MATERIALIZED(SELECT input.* FROM input JOIN smart_playlists old ON old.smart_playlist_key=input.id WHERE old.position<>input.position),
+             affected AS MATERIALIZED(SELECT old.smart_playlist_key id,old.position FROM changed input JOIN smart_playlists old ON old.smart_playlist_key=input.id OR old.position=input.position),
+             moved AS MATERIALIZED(SELECT id,(SELECT coalesce(max(position),-1)+1 FROM smart_playlists)+row_number() OVER(ORDER BY position) position FROM (SELECT DISTINCT id,position FROM affected))
+             UPDATE smart_playlists SET position=moved.position FROM moved WHERE smart_playlists.smart_playlist_key=moved.id"
+        ).bind(&rows).execute(&mut *connection).await?.rows_affected()>0;
+        changed |= sqlx::query(
+            "WITH input AS(SELECT json_extract(value,'$[0]') id,json_extract(value,'$[1]') position FROM json_each(?1))
+             UPDATE smart_playlists SET position=input.position FROM input WHERE smart_playlists.smart_playlist_key=input.id AND smart_playlists.position<>input.position"
+        ).bind(rows).execute(&mut *connection).await?.rows_affected()>0;
+    }
+    Ok(changed)
 }
 
 fn require_name(name: &str) -> LibraryResult<&str> {
@@ -1411,15 +1434,15 @@ pub(crate) async fn write_smart_playlist(
             })
         });
     let binding = crate::artwork::merge_playlist_artwork(previous.as_deref(), incoming.as_deref())?;
-    sqlx::query("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,artwork_bytes,artwork_revision,artwork_binding)
+    let key = sqlx::query_scalar("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position,artwork_bytes,artwork_revision,artwork_binding)
        VALUES(?1,?2,lower(?2),?3,CASE WHEN EXISTS(SELECT 1 FROM smart_playlists WHERE position=?4)
        THEN (SELECT COALESCE(max(position)+1,0) FROM smart_playlists) ELSE ?4 END,?5,?6,?7)
        ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,
-       definition_json=excluded.definition_json,artwork_bytes=excluded.artwork_bytes,artwork_revision=excluded.artwork_revision,artwork_binding=excluded.artwork_binding")
+       definition_json=excluded.definition_json,artwork_bytes=excluded.artwork_bytes,artwork_revision=excluded.artwork_revision,artwork_binding=excluded.artwork_binding RETURNING smart_playlist_key")
        .bind(&record.object_id).bind(&record.name).bind(&record.definition_json).bind(record.position)
        .bind(&record.artwork_bytes).bind(revision).bind(binding)
-       .execute(connection).await?;
-    Ok(())
+       .fetch_one(&mut *connection).await?;
+    sync_smart_on(connection, key).await
 }
 
 impl Database {

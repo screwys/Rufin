@@ -22,7 +22,7 @@ import io.github.screwys.rufin.browse.PlaylistPickerSheet
 import io.github.screwys.rufin.browse.PlaylistCreateSheet
 import io.github.screwys.rufin.metadata.MetadataEditorScreen
 import io.github.screwys.rufin.connect.ConnectPairingPrompt
-import io.github.screwys.rufin.connect.ConnectSetupScreen
+import io.github.screwys.rufin.connect.ConnectProgressScreen
 import io.github.screwys.rufin.browse.BrowsePage
 import io.github.screwys.rufin.browse.DetailContent
 import io.github.screwys.rufin.browse.DetailTrackRow
@@ -86,6 +86,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -158,9 +161,9 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val player = rememberPlayerConnection(model)
     FeedbackToast(model, player)
     val connectState = model.connect.state
-    if (model.connect.setupActive && connectState != null && connectState.pairing == null && (connectState.connecting || (connectState.settings.enabled && connectState.settings.profile != null && (connectState.settings.setupPending || connectState.settings.adopting)))) {
-        BackHandler { model.connect.action(io.github.screwys.rufin.shared.rufin_core.Action.CancelPairing) }
-        ConnectSetupScreen(model)
+    if (model.connect.operationActive && connectState != null && connectState.pairing == null && (connectState.connecting || model.connect.visibleError != null)) {
+        BackHandler { model.connect.dismissOperation() }
+        ConnectProgressScreen(model)
         return
     }
     SideEffect { model.controlNotifications = preferences.applicationSettings?.controlNotificationsEnabled != false }
@@ -386,13 +389,20 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
             Box(Modifier.fillMaxSize().padding(padding)) {
             CompositionLocalProvider(LocalPlayerBottomPadding provides playerPadding) {
             Column(Modifier.fillMaxSize()) {
+                if (!model.connect.operationActive && connectState?.let { it.connecting } == true) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(label("Rufin Connect"), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        TextButton(model.connect::showOperation) { Text(label("Open Rufin Connect")) }
+                    }
+                }
                 model.startupError?.let { ErrorRow(it, label("Retry"), model::retryStartup) }
                 model.sourceStatus?.let {
                     val download = model.sourceOperation as? SourceOperation.Downloading
-                    val total = download?.progress?.total
-                    if (download != null && total != null) {
+                    val progress = model.sourceProgress
+                    val total = progress?.total
+                    if (progress != null && total != null && total > 0UL) {
                         LinearProgressIndicator(progress = {
-                            if (total == 0UL) 1f else (download.progress.completed.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                            (progress.completed.toFloat() / total.toFloat()).coerceIn(0f, 1f)
                         }, modifier = Modifier.fillMaxWidth())
                     } else LinearProgressIndicator(Modifier.fillMaxWidth())
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -402,7 +412,14 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                         }
                     }
                 }
-                Box(Modifier.weight(1f)) {
+                val refreshState = rememberPullToRefreshState()
+                val refreshing = (model.sourceOperation as? SourceOperation.Refreshing)?.let {
+                    it.sourceId == model.sources?.selectedSourceId
+                } == true
+                val canRefresh = model.ready && model.sources?.selectedSourceId != null &&
+                    browse.section != AppSection.More && !fullPlayer
+                Box(Modifier.weight(1f).pullToRefresh(isRefreshing = refreshing, state = refreshState,
+                    enabled = canRefresh && !model.sourceBusy, onRefresh = model::refresh)) {
                     if (browse.section == AppSection.Browse) navigationTransition.AnimatedContent(
                         Modifier.fillMaxSize(), transitionSpec = {
                             if (initialState.depth == 0 && targetState.depth == 0)
@@ -464,6 +481,8 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                         routeState.SaveableStateProvider("section:Pins") { PinsContent(model, browse, player, pinsPage) }
                     }
                 }
+                    if (canRefresh) PullToRefreshDefaults.Indicator(state = refreshState, isRefreshing = refreshing,
+                        modifier = Modifier.align(Alignment.TopCenter))
                 }
             }
             }

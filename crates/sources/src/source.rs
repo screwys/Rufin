@@ -305,8 +305,6 @@ pub enum SourceReadStage {
     Genres,
     Playlists,
     Home,
-    Artwork,
-    Files,
     Finalizing,
 }
 
@@ -2537,12 +2535,6 @@ fn mapped_document_access(
         device_id: None,
         inode: None,
         parser_version: 1,
-        title: track.title,
-        album: track.album,
-        artist: track.artist,
-        disc_number: track.disc_number,
-        track_number: track.track_number,
-        duration_millis: track.duration_millis,
         access_uri: entry.uri,
         loudness_analysis_key: Some(*hash.finalize().as_bytes()),
     }
@@ -2610,12 +2602,6 @@ fn mapped_track_access(
         device_id,
         inode,
         parser_version: 1,
-        title: track.title,
-        album: track.album,
-        artist: track.artist,
-        disc_number: track.disc_number,
-        track_number: track.track_number,
-        duration_millis: track.duration_millis,
         access_uri,
         loudness_analysis_key: Some(*hash.finalize().as_bytes()),
     }))
@@ -2912,7 +2898,8 @@ mod refresh_laws {
                     .await
                     .unwrap()
                     .is_some(),
-                track.object_id != "other"
+                track.media_uri
+                    != library::source_entity_uri(&SourceId::new("mapping-test"), "track", "other")
             );
         }
         assert!(
@@ -2950,7 +2937,8 @@ mod refresh_laws {
                     .await
                     .unwrap()
                     .is_some(),
-                track.object_id != "other"
+                track.media_uri
+                    != library::source_entity_uri(&SourceId::new("mapping-test"), "track", "other")
             );
         }
     }

@@ -340,12 +340,17 @@ where
             }
             FixedPageSlot::Empty => {
                 let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-                spacer.add_css_class("collection-grid-empty");
-                spacer.set_can_target(false);
-                spacer.set_focusable(false);
-                spacer.set_sensitive(false);
-                spacer.set_accessible_role(gtk::AccessibleRole::Presentation);
-                cards::collection_grid_card_inset(&spacer, COLLECTION_GRID_MIN_CARD_WIDTH).upcast()
+                let child = gtk::FlowBoxChild::new();
+                child.add_css_class("collection-grid-empty");
+                child.set_can_target(false);
+                child.set_focusable(false);
+                child.set_sensitive(false);
+                child.set_accessible_role(gtk::AccessibleRole::Presentation);
+                child.set_child(Some(&cards::collection_grid_card_inset(
+                    &spacer,
+                    COLLECTION_GRID_MIN_CARD_WIDTH,
+                )));
+                child.upcast()
             }
         }
     });

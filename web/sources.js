@@ -101,16 +101,14 @@ function renderSources(configured) {
       action.append(el("span", "", action.getAttribute("aria-label")));
     actions.lastElementChild.classList.add("destructive");
     card.append(sourceIcon(item.kind), label, edit, actions);
-    if (item.kind !== "local") {
-      const quality = el("fieldset", "source-actions");
-      quality.append(el("legend", "", tr("Download quality")), document.getElementById("download-quality-template").content.cloneNode(true));
-      qualityControls(quality, item.quality, async (value) => {
-        await api("/downloads/quality", "POST", { source: item.id, quality: value });
-        item.quality = value;
-        return value;
-      });
-      card.append(quality);
-    }
+    const quality = el("fieldset", "source-actions");
+    quality.append(el("legend", "", tr("Download quality")), document.getElementById("download-quality-template").content.cloneNode(true));
+    qualityControls(quality, item.quality, async (value) => {
+      await api("/downloads/quality", "POST", { source: item.id, quality: value });
+      item.quality = value;
+      return value;
+    });
+    card.append(quality);
     if (item.id === state.source) {
       const downloads = el("div", "source-actions");
       downloads.append(
@@ -154,32 +152,23 @@ function showSourceProgress(value) {
     : null;
   if (active) {
     const progress = value.progress;
-    $("source-progress-label").textContent = tr(
-      "{status} · {stage} {completed}{total}",
-      {
-        status: {
-          adding: tr("Adding source"),
-          switching: tr("Changing source"),
-          refreshing: tr("Refreshing"),
-          downloading: tr("Downloading"),
-        }[value.state],
-        stage: {
-          connecting: tr("Connecting"),
-          albums: tr("Albums"),
-          tracks: tr("Tracks"),
-          artists: tr("Artists"),
-          genres: tr("Genres"),
-          playlists: tr("Playlists"),
-          home: tr("Home"),
-          artwork: tr("Artwork"),
-          lyrics: tr("Lyrics"),
-          files: tr("Files"),
-          finalizing: tr("Preparing library..."),
-        }[progress.stage],
-        completed: progress.completed,
-        total: progress.total == null ? "" : ` / ${progress.total}`,
-      },
-    );
+    const stage = {
+      connecting: tr("Connecting to music server..."),
+      albums: tr("Fetching albums"),
+      tracks: tr("Scanning tracks"),
+      artists: tr("Fetching artists"),
+      genres: tr("Fetching genres"),
+      playlists: tr("Fetching playlists"),
+      home: tr("Fetching Home"),
+      artwork: value.state === "downloading" ? tr("Downloading artwork") : tr("Fetching artwork"),
+      lyrics: value.state === "downloading" ? tr("Downloading lyrics") : tr("Fetching lyrics"),
+      finalizing: tr("Preparing library..."),
+    }[progress.stage];
+    $("source-progress-label").textContent = ["connecting", "finalizing"].includes(progress.stage)
+      ? stage
+      : progress.total > 0
+        ? tr("{stage}: {completed} / {total}", { stage, completed: progress.completed, total: progress.total })
+        : tr("{stage}: {completed}", { stage, completed: progress.completed });
   }
   if (value.state === "failed") notice(value.message);
   if (

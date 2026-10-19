@@ -322,7 +322,9 @@ impl ScrobblingOwner {
             })
             .map_err(crate::settings::SettingsError::from)?;
         let loaded = self.scrobbler.settings();
-        let needs_credentials = self.settings.load().scrobbling_secrets_present
+        let stored = self.settings.load();
+        let needs_credentials = (stored.scrobbling_secrets_present
+            || !stored.scrobbling_credentials.is_empty())
             && ((preferences.lastfm.enabled && loaded.lastfm.session_key.is_empty())
                 || (preferences.librefm.enabled && loaded.librefm.session_key.is_empty())
                 || (preferences.listenbrainz.enabled && loaded.listenbrainz.user_token.is_empty()));

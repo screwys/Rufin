@@ -4,6 +4,7 @@ import io.github.screwys.rufin.player.PlayerConnection
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Log
 import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.animation.core.animateFloatAsState
@@ -46,7 +47,7 @@ internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection
             if (bridge != null && pixels > 0) {
                 try { value = player.artworkCache.load(bridge, identity, binding.toByteArray(), pixels) ?: value }
                 catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { player.reportError(error) }
+                catch (_: Exception) { Log.d("Rufin", "Could not load artwork") }
             }
         }
         loaded
@@ -148,8 +149,8 @@ private fun decodeArtwork(bytes: ByteArray, maxDimension: Int): PlayerArtwork? {
 internal fun Artwork(artwork: PlayerArtwork?, modifier: Modifier = Modifier, description: String? = null) {
     val opacity = animateFloatAsState(if (artwork == null) 0f else 1f,
         tween(if (LocalReduceMotion.current) 0 else 160), label = "artworkOpacity").value
-    Box(modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-        if (artwork == null || opacity < 1f) FallbackCover(Modifier.fillMaxSize())
+    Box(modifier.background(artwork?.color ?: MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
+        if (artwork == null) FallbackCover(Modifier.fillMaxSize())
         if (artwork != null) {
             Image(artwork.bitmap.asImageBitmap(), description, Modifier.fillMaxSize().graphicsLayer { alpha = opacity }, contentScale = ContentScale.Crop)
         }

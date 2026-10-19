@@ -71,6 +71,126 @@ async fn reopening_without_statistics_preserves_library_order() {
     );
     raw.close().await.unwrap();
     reopened.close().await.unwrap();
+
+    let mut raw = super::support::connection(&fixture.path).await;
+    sqlx::query("INSERT INTO albums(source_key,object_id,media_uri,indexed) VALUES(?1,'retired-header','https://example.org/retired-header',1)")
+        .bind(fixture.source).execute(&mut raw).await.unwrap();
+    sqlx::query("INSERT INTO tracks(source_key,media_uri,metadata,indexed) VALUES(?1,'https://example.org/retired-alias',jsonb('{\"title\":\"Retired alias\"}'),1)")
+        .bind(fixture.source).execute(&mut raw).await.unwrap();
+    sqlx::query("PRAGMA user_version=48")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+    let migrated = Database::open(&fixture.path).await.unwrap();
+    assert_eq!(
+        migrated
+            .selected_track_uris(
+                &library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
+                    .selection(),
+                None,
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap()
+            .len(),
+        fixture.tracks.len()
+    );
+    let home = migrated
+        .home_page(
+            fixture.source,
+            None,
+            0,
+            0,
+            &library::HomeBlockKind::all(),
+            &ReadCancellation::new(),
+        )
+        .await
+        .unwrap();
+    assert!(home.showcase.is_some());
+    for row in home.showcase.iter().chain(&home.explore) {
+        assert!(!row.title.is_empty());
+        assert!(row.album.summary.track_count > 0);
+        assert_ne!(row.album.object_id, "retired-header");
+    }
+    migrated.close().await.unwrap();
+
+    let mut raw = super::support::connection(&fixture.path).await;
+    sqlx::raw_sql("DROP VIEW local_access_files;
+        ALTER TABLE local_access_metadata ADD COLUMN title TEXT NOT NULL DEFAULT '';
+        ALTER TABLE local_access_metadata ADD COLUMN normalized_title TEXT NOT NULL DEFAULT '';
+        ALTER TABLE local_access_metadata ADD COLUMN album TEXT NOT NULL DEFAULT '';
+        ALTER TABLE local_access_metadata ADD COLUMN normalized_album TEXT NOT NULL DEFAULT '';
+        ALTER TABLE local_access_metadata ADD COLUMN artist TEXT NOT NULL DEFAULT '';
+        ALTER TABLE local_access_metadata ADD COLUMN normalized_artist TEXT NOT NULL DEFAULT '';
+        ALTER TABLE local_access_metadata ADD COLUMN disc_number INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE local_access_metadata ADD COLUMN track_number INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE local_access_metadata ADD COLUMN duration_millis INTEGER NOT NULL DEFAULT 0;
+        CREATE INDEX local_access_match_uri_idx ON local_access_metadata(normalized_title,normalized_album,normalized_artist,disc_number,track_number,duration_millis,access_uri);
+        INSERT INTO tracks(media_uri,metadata,native_metadata) VALUES('https://media.example/legacy-access.flac',jsonb('{\"title\":\"Canonical title\",\"source_format\":\"flac\",\"future\":{\"field\":true}}'),1);
+        INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES('https://media.example/legacy-access.flac','download','/downloads/legacy.flac','/downloads','legacy.flac','file:///downloads/legacy.flac');
+        INSERT INTO local_access_metadata(access_uri,size_bytes,mtime_ns,device_id,inode,parser_version,loudness_analysis_key,title,album,artist,disc_number,track_number,duration_millis)
+        VALUES('file:///downloads/legacy.flac',111,222,3,4,17,zeroblob(32),'Legacy title','Legacy album','Legacy artist',1,4,1234);
+        UPDATE connect_profile SET profile='shared-profile',publisher='saved-publisher',schema_version=1;
+        ALTER TABLE connect_profile DROP COLUMN actor;
+        ALTER TABLE connect_profile DROP COLUMN clock;
+        ALTER TABLE connect_profile DROP COLUMN receiving;
+        ALTER TABLE connect_profile DROP COLUMN enabled;
+        PRAGMA user_version=49;")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+    let migrated = Database::open(&fixture.path).await.unwrap();
+    let mut raw = super::support::connection(&fixture.path).await;
+    let legacy = migrated
+        .download_metadata("https://media.example/legacy-access.flac")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(legacy.title, "Canonical title");
+    assert_eq!(legacy.album, "Legacy album");
+    assert_eq!(legacy.artist, "Legacy artist");
+    assert_eq!(legacy.duration_millis, 1234);
+    assert_eq!(legacy.source_format.as_deref(), Some("flac"));
+    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT json_extract(metadata,'$.future.field') FROM tracks WHERE media_uri='https://media.example/legacy-access.flac'").fetch_one(&mut raw).await.unwrap(), 1);
+    assert_eq!(sqlx::query_as::<_,(i64,i64,i64,i64,i64,Vec<u8>)>("SELECT size_bytes,mtime_ns,device_id,inode,parser_version,loudness_analysis_key FROM local_access_metadata WHERE access_uri='file:///downloads/legacy.flac'").fetch_one(&mut raw).await.unwrap(), (111,222,3,4,17,vec![0;32]));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM pragma_table_info('local_access_metadata')"
+        )
+        .fetch_one(&mut raw)
+        .await
+        .unwrap(),
+        7
+    );
+    let profile: (String, String, i64, String, i64, bool, bool) = sqlx::query_as(
+        "SELECT profile,publisher,schema_version,actor,clock,receiving,enabled FROM connect_profile WHERE singleton=1",
+    )
+    .fetch_one(&mut raw)
+    .await
+    .unwrap();
+    assert_eq!(
+        profile,
+        (
+            "shared-profile".into(),
+            "saved-publisher".into(),
+            1,
+            "0".into(),
+            0,
+            false,
+            false,
+        )
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        50
+    );
+    raw.close().await.unwrap();
+    migrated.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -809,7 +929,7 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
             .fetch_one(&mut reader)
             .await
             .expect("read migrated version"),
-        47
+        50
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
@@ -1068,7 +1188,7 @@ async fn schema_43_malformed_listen_keeps_valid_siblings_and_preserves_input() {
             .fetch_one(&mut reader)
             .await
             .expect("read rebuilt schema version"),
-        47
+        50
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT external_id FROM listens ORDER BY listen_key")
@@ -1295,7 +1415,7 @@ async fn schema_39_store_converts_directly_into_current_schema() {
             .fetch_one(&mut reader)
             .await
             .expect("read current schema version"),
-        47
+        50
     );
     let definition = sqlx::query_scalar::<_, String>(
         "SELECT definition_json FROM smart_playlists WHERE object_id='smart-list'",
@@ -1336,7 +1456,7 @@ async fn released_migration_ignores_unused_catalog_damage() {
             .fetch_one(&mut restored)
             .await
             .expect("read repaired schema version"),
-        47
+        50
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources WHERE catalog_complete=1")
@@ -1946,7 +2066,7 @@ async fn missing_listen_identity_returns_error_without_replacing_user_data() {
         .unwrap();
     fixture.database.close().await.unwrap();
     let mut raw = connection(&fixture.path, false).await;
-    sqlx::raw_sql("DROP TRIGGER local_play_count_listen_insert; DROP TRIGGER local_play_count_listen_delete; DROP TRIGGER local_play_count_track_insert; DROP TRIGGER local_play_count_track_uri; DROP TRIGGER IF EXISTS facts_listen_albums_; DROP TRIGGER IF EXISTS facts_listen_artists_; DROP TRIGGER IF EXISTS facts_listen_artists_album_artist_; DROP TRIGGER IF EXISTS facts_listen_delete; DROP TRIGGER IF EXISTS facts_listen_update; DROP INDEX listens_media_activity_idx; ALTER TABLE listens DROP COLUMN media_uri;").execute(&mut raw).await.unwrap();
+    sqlx::raw_sql("DROP TRIGGER local_play_count_listen_insert; DROP TRIGGER local_play_count_listen_delete; DROP TRIGGER local_play_count_track_insert; DROP TRIGGER local_play_count_track_uri; DROP TRIGGER IF EXISTS facts_listen_albums_; DROP TRIGGER IF EXISTS facts_listen_artists_; DROP TRIGGER IF EXISTS facts_listen_artists_album_artist_; DROP TRIGGER IF EXISTS facts_listen_delete; DROP TRIGGER IF EXISTS facts_listen_update; DROP INDEX listens_media_activity_idx; DROP INDEX listens_connect_key_idx; ALTER TABLE listens DROP COLUMN media_uri;").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
     let before = durable_rows(&fixture.path).await;
     assert!(Database::open(&fixture.path).await.is_err());

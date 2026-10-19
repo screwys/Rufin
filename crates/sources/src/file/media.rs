@@ -19,11 +19,25 @@ use super::lofty::{read_lofty_file, source_format};
 pub(crate) struct ScannedTrack {
     pub(crate) track: library::TrackObservation,
     pub(crate) local_artwork: Option<LocalImageRef>,
+    // None is uninspected; -1 records an inspected file without a cover.
+    pub(crate) picture_index: Option<i64>,
     pub(crate) artist_pictures: Vec<super::artwork::ArtistPicture>,
     pub(crate) audio_revision: blake3::Hasher,
 }
 
 impl ScannedTrack {
+    pub(crate) fn observe_images(
+        &self,
+        file: &mut library::LocalFileWrite,
+    ) -> crate::SourceResult<()> {
+        file.picture_index = self.picture_index;
+        file.artist_pictures = self
+            .picture_index
+            .map(|_| serde_json::to_string(&self.artist_pictures))
+            .transpose()?;
+        Ok(())
+    }
+
     pub(crate) fn into_observation(mut self, accepted_at: i64) -> library::TrackObservation {
         let track = &mut self.track;
         track.artwork_binding = self
@@ -115,7 +129,7 @@ pub(crate) fn track_reference(scanned: ScannedTrack, media_uri: String) -> libra
 pub(crate) async fn read_saved_media(
     path: &Path,
     display_path: PathBuf,
-) -> crate::SourceResult<(ScannedTrack, Option<u32>, String)> {
+) -> crate::SourceResult<ScannedTrack> {
     let path = path.to_owned();
     tokio::task::spawn_blocking(move || {
         let mut file = std::fs::File::open(&path)
@@ -129,9 +143,7 @@ pub(crate) async fn read_saved_media(
                 "Saved media could not be read".into(),
             ));
         };
-        let (cover, portraits) =
-            super::artwork::inspect_embedded_input(&mut worker.discovery, &mut file, uri.as_str());
-        Ok((*track, cover, serde_json::to_string(&portraits)?))
+        Ok(*track)
     })
     .await
     .map_err(|error| crate::SourceError::Other(error.to_string()))?
@@ -186,10 +198,20 @@ pub(crate) fn read_media_input(
     }
     // Recognize a frame sync at the start or immediately after ID3 metadata;
     // searching binary interiors can mistake executable bytes for MPEG audio.
+    // Optional picture data must not discard usable audio and tags.
+    let mut pictures_read = true;
     let mut tagged_file = read_lofty_file(
         &mut *file,
-        ParseOptions::new().read_cover_art(false).max_junk_bytes(2),
+        ParseOptions::new().read_cover_art(true).max_junk_bytes(2),
     )
+    .or_else(|_| {
+        pictures_read = false;
+        file.rewind()?;
+        read_lofty_file(
+            &mut *file,
+            ParseOptions::new().read_cover_art(false).max_junk_bytes(2),
+        )
+    })
     .ok()
     .flatten()
     .filter(|file| file.file_type() == FileType::Mp4 || lofty_supplies_required_audio(file));
@@ -221,7 +243,13 @@ pub(crate) fn read_media_input(
         if file.rewind().is_err() {
             return MediaRead::Unreadable;
         }
-        tagged_file = read_lofty_file(file, ParseOptions::new().read_cover_art(false))
+        pictures_read = true;
+        tagged_file = read_lofty_file(&mut *file, ParseOptions::new().read_cover_art(true))
+            .or_else(|_| {
+                pictures_read = false;
+                file.rewind()?;
+                read_lofty_file(&mut *file, ParseOptions::new().read_cover_art(false))
+            })
             .ok()
             .flatten()
             .filter(lofty_supplies_required_audio);
@@ -231,7 +259,23 @@ pub(crate) fn read_media_input(
     } else {
         audio_metadata_from_discoverer(&path, discovered.as_ref(), sidecar)
     };
-    MediaRead::Accepted(Box::new(scanned_track(&path, metadata)))
+    let mut track = scanned_track(&path, metadata);
+    if let Some(tagged) = tagged_file.as_ref().filter(|_| pictures_read) {
+        track.picture_index = Some(
+            super::artwork::best_picture_index(
+                tagged,
+                tagged.primary_tag().or_else(|| tagged.first_tag()),
+            )
+            .map_or(-1, i64::from),
+        );
+        track.artist_pictures = super::artwork::artist_pictures(tagged);
+    } else if let Some(discovered) = discovered {
+        track.picture_index = discovered
+            .artwork_index
+            .map(i64::from)
+            .or_else(|| tagged_file.is_none().then_some(-1));
+    }
+    MediaRead::Accepted(Box::new(track))
 }
 
 fn audio_metadata_from_lofty(
@@ -675,6 +719,7 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
             ..Default::default()
         },
         local_artwork,
+        picture_index: None,
         artist_pictures: Vec::new(),
         audio_revision: blake3::Hasher::new(),
     }
@@ -985,6 +1030,8 @@ mod tests {
             ("track", false),
             ("track.bin", false),
             ("prefixed.bin", true),
+            ("large-art.mp3", false),
+            ("bad-art.mp3", false),
         ] {
             let path = directory.path().join(name);
             let mut frame = vec![0; 417];
@@ -1001,8 +1048,36 @@ mod tests {
             tag.insert_text(ItemKey::ReleaseDate, "2004-05".into());
             tag.insert_text(ItemKey::OriginalReleaseDate, "1995".into());
             tag.set_comment("Retained comment".into());
+            if name != "track.txt" {
+                let bytes = if name == "large-art.mp3" {
+                    33 * 1024 * 1024
+                } else {
+                    32
+                };
+                tag.push_picture(
+                    lofty::picture::Picture::unchecked(vec![7; bytes])
+                        .mime_type(lofty::picture::MimeType::Png)
+                        .pic_type(lofty::picture::PictureType::CoverFront)
+                        .build(),
+                );
+                tag.push_picture(
+                    lofty::picture::Picture::unchecked(vec![8; 32])
+                        .mime_type(lofty::picture::MimeType::Png)
+                        .pic_type(lofty::picture::PictureType::Artist)
+                        .description("Artist: The Cure")
+                        .build(),
+                );
+            }
             tag.save_to_path(&path, WriteOptions::new().preferred_padding(0))
                 .expect("audio tags");
+            if name == "bad-art.mp3" {
+                let mut bytes = fs::read(&path).unwrap();
+                let picture = bytes.windows(4).position(|part| part == b"APIC").unwrap();
+                bytes[picture + 10] = 0xff;
+                fs::write(&path, bytes).unwrap();
+                assert!(super::super::lofty::read_lofty(&path, true).is_err());
+                assert!(super::super::lofty::read_lofty(&path, false).is_ok());
+            }
             if prefixed {
                 let mut bytes = vec![0; 32];
                 bytes.extend(fs::read(&path).expect("tagged audio"));
@@ -1051,6 +1126,29 @@ mod tests {
                 Some("2004-05"),
                 "{name}"
             );
+            if name == "bad-art.mp3" {
+                assert!(
+                    track.picture_index.is_none(),
+                    "failed picture parsing stays unknown"
+                );
+                assert!(track.artist_pictures.is_empty());
+                continue;
+            }
+            if name == "track.txt" {
+                assert_eq!(track.picture_index, Some(-1));
+                assert!(track.artist_pictures.is_empty());
+            } else {
+                assert!(track.picture_index.is_some_and(|index| index >= 0));
+                assert_eq!(track.artist_pictures.len(), 1);
+                assert_eq!(track.artist_pictures[0].artist.as_deref(), Some("The Cure"));
+                assert_ne!(
+                    track.picture_index,
+                    Some(i64::from(track.artist_pictures[0].index))
+                );
+            }
+            if name == "large-art.mp3" {
+                continue;
+            }
             let metadata = crate::file::metadata::read_track_metadata(&path, Some("mp3"))
                 .expect("read audio metadata");
             assert!(

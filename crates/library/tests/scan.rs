@@ -413,7 +413,22 @@ async fn local_component_paths_page_beyond_one_batch() {
             .catalog("source-one", None)
             .await
             .unwrap()
-            .write_file_observations(page, Vec::new(), true)
+            .write_file_observations(
+                page,
+                page.iter()
+                    .filter(|(file, _)| file.kind == LocalFileKind::Media)
+                    .map(|(file, _)| library::TrackObservation {
+                        object_id: file.relative_path.clone(),
+                        source_path: Some(file.path.clone()),
+                        metadata: library::TrackMetadata {
+                            title: file.relative_path.clone(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
+                    .collect(),
+                true,
+            )
             .await
             .expect("write Local observations");
     }
@@ -431,6 +446,30 @@ async fn local_component_paths_page_beyond_one_batch() {
         .await
         .unwrap();
     assert_eq!((first.len(), second.len()), (128, 3));
+    let mut rejected = observations[1].clone();
+    rejected.0.state = LocalFileState::Rejected;
+    rejected.0.mtime_ns += 1;
+    database
+        .catalog("source-one", None)
+        .await
+        .unwrap()
+        .write_file_observations(&[rejected], Vec::new(), true)
+        .await
+        .unwrap();
+    let mut raw = connection(&path).await;
+    let members: (i64, i64) = sqlx::query_as(
+        "SELECT count(*),sum(indexed) FROM tracks WHERE source_path LIKE '/music/track-%'",
+    )
+    .fetch_one(&mut raw)
+    .await
+    .unwrap();
+    assert_eq!(members, (130, 129));
+    let rejected: bool =
+        sqlx::query_scalar("SELECT indexed FROM tracks WHERE object_id='track-000.flac'")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap();
+    assert!(!rejected);
 }
 
 async fn connection(path: &Path) -> SqliteConnection {
@@ -760,6 +799,7 @@ async fn write_small_catalog(
                     ..Default::default()
                 },
                 object_id: "mood-one".into(),
+                ..Default::default()
             }],
             ..Default::default()
         };
@@ -2002,6 +2042,11 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         "Saved edit"
     );
     assert!(database.favorite(&favorite).await.unwrap());
+    let retained_key: i64 =
+        sqlx::query_scalar("SELECT track_key FROM tracks WHERE object_id='known'")
+            .fetch_one(&mut outside)
+            .await
+            .unwrap();
     database
         .remove_source(&library::SourceId::new("source-two"))
         .await
@@ -2016,12 +2061,35 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
     );
 
     database
+        .reconcile_source(&library::SourceId::new("source-two"), "subsonic", "Two")
+        .await
+        .unwrap();
+    for (title, stamp) in [("Reacquired", 1_i64), ("Refreshed", 2)] {
+        let mut catalog = database.catalog("source-two", None).await.unwrap();
+        assert_eq!(catalog.start_observation().await.unwrap(), stamp);
+        point.tracks[0].metadata.title = title.into();
+        catalog.apply_catalog(&point, true).await.unwrap();
+        assert_eq!(
+            sqlx::query_as::<_, (i64, String, bool, i64)>(
+                "SELECT track_key,title,indexed,observed_stamp FROM tracks WHERE object_id='known'",
+            )
+            .fetch_one(&mut outside)
+            .await
+            .unwrap(),
+            (retained_key, title.into(), true, stamp)
+        );
+    }
+
+    database
         .reconcile_source(&library::SourceId::new("file-restart"), "local", "Files")
         .await
         .unwrap();
 
     let mut interrupted_catalog = database.catalog("file-restart", None).await.unwrap();
     interrupted_catalog.start_observation().await.unwrap();
+    sqlx::query("INSERT INTO albums(source_key,object_id,media_uri,metadata,indexed,cached_local) SELECT source_key,'file-album',?1,jsonb('{\"title\":\"Old header\"}'),1,1 FROM sources WHERE object_id='file-restart'")
+        .bind(library::source_entity_uri(&library::SourceId::new("file-restart"), "album", "file-album"))
+        .execute(&mut outside).await.unwrap();
     let write = library::CatalogBatch {
         tracks: vec![library::TrackObservation {
             metadata: library::TrackMetadata {
@@ -2061,6 +2129,15 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .apply_catalog(&write, true)
         .await
         .unwrap();
+    assert_eq!(
+        sqlx::query_as::<_, (bool, bool)>(
+            "SELECT indexed,metadata IS NULL FROM albums WHERE object_id='file-album'"
+        )
+        .fetch_one(&mut outside)
+        .await
+        .unwrap(),
+        (false, true)
+    );
     drop(outside);
     database.close().await.unwrap();
     let reopened = Database::open(&path).await.unwrap();

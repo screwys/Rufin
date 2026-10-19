@@ -167,7 +167,9 @@ async fn exchange(
     let enrollment = async {
         network
             .events
-            .send(NetworkEvent::PairingVerified { session })
+            .send(NetworkEvent::PairingVerified {
+                session: session.clone(),
+            })
             .await
             .map_err(|_| anyhow::anyhow!("Connect stopped"))?;
         if joining {
@@ -180,6 +182,7 @@ async fn exchange(
             network
                 .events
                 .send(NetworkEvent::Paired {
+                    session,
                     profile_id: enrollment.profile_id,
                     peer: peer.to_string(),
                     name: remote.name,

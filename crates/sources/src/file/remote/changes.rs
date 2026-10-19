@@ -244,7 +244,7 @@ impl FileSource {
         self.acquire_media_files(catalog, &workers, &|_| {}, cancelled, rename.as_ref(), 0)
             .await?;
         crate::file::artwork::ArtworkFiles::Remote(self)
-            .acquire(catalog, &|_| {}, cancelled)
+            .acquire(catalog, cancelled)
             .await?;
         Ok(())
     }

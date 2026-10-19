@@ -126,7 +126,7 @@ impl Database {
             .as_ref()
             .and_then(|(_, key, id)| id.as_ref().zip(*key))
             .map(|(id, key)| (SourceId::new(id), key));
-        let (key, inserted) = write_listen(
+        let (key, changed) = write_listen(
             &mut transaction,
             listen,
             source_id.as_deref(),
@@ -141,7 +141,7 @@ impl Database {
         }
         transaction.commit().await?;
         drop(writer);
-        if inserted {
+        if changed {
             self.catalog_updated(
                 origin,
                 crate::CatalogUpdate {
@@ -443,6 +443,9 @@ pub(crate) async fn write_listen(
     )
     .fetch_optional(&mut *connection)
     .await?;
+    let changed = inserted.is_some() || sqlx::query("UPDATE listens SET listened_millis=max(listened_millis,?2),skipped=min(skipped,?3) WHERE external_id=?1 AND(?2>listened_millis OR ?3<skipped)")
+        .bind(&listen.external_id).bind(listen.listened_millis).bind(listen.skipped)
+        .execute(&mut *connection).await?.rows_affected()>0;
     let key = if let Some(key) = inserted {
         key
     } else {
@@ -457,7 +460,12 @@ pub(crate) async fn write_listen(
                 )
             })?
     };
-    Ok((key, inserted.is_some()))
+    if changed {
+        let identity: String = sqlx::query_scalar("SELECT coalesce(external_id,'legacy-'||media_uri||'-'||started_at||'-'||listen_key) FROM listens WHERE listen_key=?1")
+            .bind(key).fetch_one(&mut *connection).await?;
+        crate::connect::mark_current_on(connection, "listen", &identity, false).await?;
+    }
+    Ok((key, changed))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -644,9 +652,19 @@ pub(crate) async fn write_legacy_activity(
             .await?;
         }
     }
-    sqlx::query("INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(source_id,period,item_kind,track_object_id) DO UPDATE SET play_count=excluded.play_count,skip_count=excluded.skip_count,last_played_at=excluded.last_played_at")
-            .bind(&record.source_id).bind(&record.period).bind(&record.item_kind).bind(&record.track_object_id).bind(record.play_count).bind(record.skip_count).bind(record.last_played_at).execute(&mut *connection).await?;
-    Ok(())
+    let changed = sqlx::query("INSERT INTO legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(source_id,period,item_kind,track_object_id) DO UPDATE SET play_count=excluded.play_count,skip_count=excluded.skip_count,last_played_at=excluded.last_played_at WHERE legacy_activity.play_count IS NOT excluded.play_count OR legacy_activity.skip_count IS NOT excluded.skip_count OR legacy_activity.last_played_at IS NOT excluded.last_played_at")
+            .bind(&record.source_id).bind(&record.period).bind(&record.item_kind).bind(&record.track_object_id).bind(record.play_count).bind(record.skip_count).bind(record.last_played_at).execute(&mut *connection).await?.rows_affected();
+    if changed == 0 {
+        return Ok(());
+    }
+    let identity = serde_json::json!([
+        record.source_id,
+        record.period,
+        record.item_kind,
+        record.track_object_id
+    ])
+    .to_string();
+    crate::connect::mark_current_on(connection, "legacy_activity", &identity, false).await
 }
 
 pub(crate) fn history_query(

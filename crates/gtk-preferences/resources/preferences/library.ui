@@ -67,7 +67,7 @@
     <child type="suffix">
       <object class="GtkButton" id="reset_folder">
         <property name="icon-name">rufin-view-refresh-symbolic</property>
-        <property name="tooltip-text" translatable="yes">Use Rufin data folder</property>
+        <property name="tooltip-text" translatable="yes">Use default folder</property>
         <property name="valign">center</property>
         <style><class name="flat"/></style>
       </object>

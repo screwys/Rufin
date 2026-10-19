@@ -1,6 +1,7 @@
 //! Owns persisted source gain and EBU R128 facts and selects one missing analysis unit at a time.
 //! Current source measurements take precedence over Rufin analysis; parsing, scheduling, and tag writing stay outside Library.
 
+use serde::{Deserialize, Serialize};
 use sqlx::{Connection, FromRow, SqliteConnection};
 
 use crate::{
@@ -8,7 +9,7 @@ use crate::{
     TrackKey,
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LoudnessMeasurement {
     pub analysis_key: [u8; 32],
     pub integrated_lufs: Option<f64>,
@@ -34,7 +35,7 @@ pub struct AlbumLoudnessWork {
 #[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct R128TagWrite {
     pub track_key: TrackKey,
-    pub track_lufs: f64,
+    pub track_lufs: Option<f64>,
     pub album_lufs: Option<f64>,
 }
 
@@ -144,6 +145,7 @@ impl Database {
                ON track_loudness.source_key=track.source_key AND track_loudness.entity_kind='track'
               AND track_loudness.entity_key=track.track_key AND track_loudness.analysis_key=track.loudness_analysis_key
              WHERE track.source_key=?1 AND track.indexed=1 AND track.track_key>?2
+               AND (track_loudness.integrated_lufs IS NOT NULL OR album_lufs IS NOT NULL)
                AND NOT(track.source_loudness_analysis_key=track.loudness_analysis_key AND json_extract(track.metadata,'$.source_loudness.integrated_lufs') IS NOT NULL)
              ORDER BY track.track_key LIMIT ?3")))
             .bind(source)
@@ -224,19 +226,36 @@ async fn write_analyzed_loudness(
     key: i64,
     measurement: &LoudnessMeasurement,
 ) -> LibraryResult<bool> {
+    let mut writer = database.writer().await?;
+    let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+    let mut transaction = connection.begin().await?;
+    let accepted = write_measurement_on(&mut transaction, source, kind, key, measurement).await?;
+    transaction.commit().await?;
+    drop(writer);
+    if accepted {
+        database.cache_written();
+    }
+    Ok(accepted)
+}
+
+async fn write_measurement_on(
+    connection: &mut SqliteConnection,
+    source: SourceKey,
+    kind: &str,
+    key: i64,
+    measurement: &LoudnessMeasurement,
+) -> LibraryResult<bool> {
     let input = NativeGain {
         integrated_lufs: measurement.integrated_lufs,
         true_peak: measurement.true_peak,
         replay_gain_db: measurement.replay_gain_db,
         replay_gain_peak: measurement.replay_gain_peak,
     };
-    if measurement.integrated_lufs.is_none() || !valid_measurement(input) {
+    if !valid_measurement(input) {
         return Err(LibraryError::InvalidRequest(
             "invalid loudness measurement".into(),
         ));
     }
-    let mut writer = database.writer().await?;
-    let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
     let native = if kind == "track" {
         "CASE WHEN item.source_loudness_analysis_key=item.loudness_analysis_key THEN json_extract(item.metadata,'$.source_loudness') END".to_owned()
     } else {
@@ -254,19 +273,33 @@ async fn write_analyzed_loudness(
         LibraryError::InvalidRequest("loudness entity does not belong to the source".into())
     })?;
     if accepted {
-        sqlx::query(
+        let changed = sqlx::query(
             "INSERT INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak)
              VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET
                 analysis_key=excluded.analysis_key,integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak
              WHERE (analysis_key,integrated_lufs,true_peak) IS NOT (excluded.analysis_key,excluded.integrated_lufs,excluded.true_peak)")
             .bind(source).bind(kind).bind(key).bind(measurement.analysis_key.as_slice())
-            .bind(measurement.integrated_lufs).bind(measurement.true_peak).execute(connection).await?;
+            .bind(measurement.integrated_lufs).bind(measurement.true_peak).execute(&mut *connection).await?.rows_affected() > 0;
+        if changed {
+            let identity: Option<(String,String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT source.object_id,item.object_id FROM {kind}s item JOIN sources source USING(source_key) WHERE item.source_key=?1 AND item.{kind}_key=?2")))
+                .bind(source).bind(key).fetch_optional(&mut *connection).await?;
+            if let Some((source, object)) = identity {
+                crate::connect::mark_current_on(
+                    connection,
+                    "analysis:loudness",
+                    &serde_json::to_string(&(source, kind, object))?,
+                    false,
+                )
+                .await?;
+            }
+        }
+        return Ok(changed);
     }
-    Ok(accepted)
+    Ok(false)
 }
 
 pub(crate) fn valid_measurement(input: NativeGain) -> bool {
-    (input.integrated_lufs.is_some() || input.replay_gain_db.is_some())
+    (input.integrated_lufs.is_some() || input.true_peak.is_some())
         && input.integrated_lufs.is_none_or(f64::is_finite)
         && input
             .true_peak
@@ -296,4 +329,49 @@ fn native_album_sql(owner: &str) -> String {
     format!(
         "CASE WHEN {owner}.album_source_token={owner}.album_token THEN coalesce((SELECT json_extract(member.metadata,'$.album_loudness') FROM tracks member WHERE member.album_key={owner}.album_key AND member.indexed=1 AND json_type(member.metadata,'$.album_loudness')='object' AND(json_extract(member.metadata,'$.album_loudness.integrated_lufs') IS NOT NULL OR json_extract(member.metadata,'$.album_loudness.replay_gain_db') IS NOT NULL) ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1),CASE WHEN json_extract({owner}.accepted_audio,'$.token')=hex({owner}.album_source_token) THEN json_extract({owner}.accepted_audio,'$.gain') END) END"
     )
+}
+
+pub(crate) async fn current_record_on(
+    connection: &mut SqliteConnection,
+    key: &str,
+) -> LibraryResult<Option<serde_json::Value>> {
+    let (source, kind, object): (String, String, String) = serde_json::from_str(key)?;
+    if !matches!(kind.as_str(), "track" | "album") {
+        return Ok(None);
+    }
+    let measurement = sqlx::query_as::<_,MeasurementScalar>(sqlx::AssertSqlSafe(format!("SELECT measurement.entity_kind,measurement.analysis_key,measurement.integrated_lufs,measurement.true_peak,NULL replay_gain_db,NULL replay_gain_peak FROM loudness_measurements measurement JOIN {kind}s item ON item.source_key=measurement.source_key AND item.{kind}_key=measurement.entity_key JOIN sources source ON source.source_key=item.source_key WHERE source.object_id=?1 AND item.object_id=?2 AND measurement.entity_kind=?3 AND measurement.analysis_key=item.loudness_analysis_key")))
+        .bind(source).bind(object).bind(kind).fetch_optional(&mut *connection).await?;
+    measurement
+        .map(LoudnessMeasurement::try_from)
+        .transpose()?
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(Into::into)
+}
+
+pub(crate) async fn apply_record_on(
+    connection: &mut SqliteConnection,
+    key: &str,
+    value: Option<&serde_json::Value>,
+) -> LibraryResult<bool> {
+    let Some(value) = value else {
+        return Ok(false);
+    };
+    let (source, kind, object): (String, String, String) = serde_json::from_str(key)?;
+    if !matches!(kind.as_str(), "track" | "album") {
+        return Ok(false);
+    }
+    let target: Option<(SourceKey,i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT item.source_key,item.{kind}_key FROM {kind}s item JOIN sources source USING(source_key) WHERE source.object_id=?1 AND item.object_id=?2")))
+        .bind(source).bind(object).fetch_optional(&mut *connection).await?;
+    let Some((source, entity)) = target else {
+        return Ok(false);
+    };
+    write_measurement_on(
+        connection,
+        source,
+        &kind,
+        entity,
+        &serde_json::from_value(value.clone())?,
+    )
+    .await
 }

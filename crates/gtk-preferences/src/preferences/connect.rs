@@ -2,7 +2,7 @@ use crate::Preferences;
 use adw::prelude::*;
 use gtk_widgets::popup::present_light_dismiss_dialog;
 use rufin_core::connect::{
-    Action, ActionError, Confirmation, Control, Status, portable::Destination,
+    Action, ActionError, CollectionProgress, CollectionStage, Confirmation, Control, Status,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -14,96 +14,26 @@ pub fn install(shell: &Rc<Preferences>) {
     let weak = Rc::downgrade(shell);
     let pairing = gtk::glib::spawn_future_local(async move {
         let mut previous = None;
-        let mut setting_up =
-            updates.borrow().settings.setup_pending || updates.borrow().settings.adopting;
+        let mut working = updates.borrow().connecting;
         loop {
             let state = updates.borrow_and_update().clone();
             let session = state
                 .pairing
                 .as_ref()
                 .map(|pairing| pairing.session.clone());
-            let setup = state.connecting || state.settings.setup_pending || state.settings.adopting;
-            if (session.is_some() && session != previous) || (setup && !setting_up) {
+            let active = state.connecting;
+            if (session.is_some() && session != previous) || (active && !working) {
                 let Some(shell) = weak.upgrade() else { return };
                 present(&shell);
             }
             previous = session;
-            setting_up = setup;
+            working = active;
             if updates.changed().await.is_err() {
                 return;
             }
         }
     });
     shell.window.connect_destroy(move |_| pairing.abort());
-
-    let offered = Rc::new(std::cell::Cell::new(false));
-    let offer_task = Rc::new(RefCell::new(None::<gtk::glib::JoinHandle<()>>));
-    let running = offer_task.clone();
-    let weak = Rc::downgrade(shell);
-    shell.window.connect_is_active_notify(move |window| {
-        if !window.is_active() {
-            if let Some(task) = running.borrow_mut().take() {
-                task.abort();
-            }
-            return;
-        }
-        if offered.get() {
-            return;
-        }
-        let Some(shell) = weak.upgrade() else { return };
-        let owner = shell.products.connect.clone();
-        let settings = owner.status().settings;
-        if !settings.enabled || settings.profile.is_none() {
-            return;
-        }
-        let mut updates = owner.subscribe();
-        let weak = Rc::downgrade(&shell);
-        let offered = offered.clone();
-        *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
-            let device = loop {
-                let status = updates.borrow_and_update().clone();
-                if !status.settings.enabled || status.settings.profile.is_none() {
-                    return;
-                }
-                let device = status.continuation_device().cloned();
-                if let Some(device) = device {
-                    break device;
-                }
-                if updates.changed().await.is_err() {
-                    return;
-                }
-            };
-            let Some(shell) = weak.upgrade() else { return };
-            if offered.replace(true) {
-                return;
-            }
-            let toast = adw::Toast::builder()
-                .title(localization::tr_with(
-                    "Continue from where {device} left off?",
-                    &[("device", &device.name)],
-                ))
-                .button_label(localization::tr("Continue"))
-                .timeout(0)
-                .build();
-            let weak = Rc::downgrade(&shell);
-            toast.connect_button_clicked(move |_| {
-                if let Some(shell) = weak.upgrade() {
-                    run(
-                        &shell,
-                        Action::Continue {
-                            peer: device.id.clone(),
-                        },
-                    );
-                }
-            });
-            shell.toast_overlay.add_toast(toast);
-        }));
-    });
-    shell.window.connect_destroy(move |_| {
-        if let Some(task) = offer_task.borrow_mut().take() {
-            task.abort();
-        }
-    });
 }
 
 fn show_feedback(shell: &Preferences, message: String) {
@@ -139,7 +69,7 @@ fn show_connected(shell: &Rc<Preferences>, connected: &str) {
     gtk::glib::spawn_future_local(async move {
         loop {
             let state = updates.borrow_and_update().clone();
-            toast.set_title(&state.profile_status);
+            toast.set_title(state.error.as_deref().unwrap_or(&state.profile_status));
             if !state.receiving_collection {
                 toast.set_timeout(5);
                 return;
@@ -267,7 +197,7 @@ pub fn bind_controller(
 ) {
     gtk_widgets::objects!(builder, resource, {
         connect_enabled: adw::SwitchRow, open_connect: gtk::Button,
-        continue_connect: gtk::Button,
+        continue_connect: gtk::Button, continue_connect_label: gtk::Label,
     });
     connect_enabled.set_active(shell.products.connect.status().settings.enabled);
     let weak = Rc::downgrade(&shell);
@@ -323,6 +253,7 @@ pub fn bind_controller(
     let task = Rc::new(RefCell::new(None::<gtk::glib::JoinHandle<()>>));
     let running = task.clone();
     let continue_button = continue_connect.downgrade();
+    let continue_label = continue_connect_label.downgrade();
     popover.connect_map(move |_| {
         let mut updates = updates.clone();
         let row = row.clone();
@@ -331,6 +262,7 @@ pub fn bind_controller(
         }
         let button = continue_button.clone();
         let offered = offered_device.clone();
+        let label = continue_label.clone();
         if let Some(button) = button.upgrade() {
             button.set_visible(false);
         }
@@ -343,12 +275,14 @@ pub fn bind_controller(
                 if let Some(button) = button.upgrade() {
                     button.set_visible(device.is_some());
                     if let Some(device) = &device {
-                        let label = localization::tr_with(
-                            "Continue from where {device} left off",
+                        let title = localization::tr_with(
+                            "Continue from {device}",
                             &[("device", &device.name)],
                         );
-                        button.set_tooltip_text(Some(&label));
-                        button.update_property(&[gtk::accessible::Property::Label(&label)]);
+                        if let Some(label) = label.upgrade() {
+                            label.set_label(&title);
+                        }
+                        button.update_property(&[gtk::accessible::Property::Label(&title)]);
                     }
                 }
                 *offered.borrow_mut() = device;
@@ -376,35 +310,33 @@ fn present(shell: &Rc<Preferences>) {
     gtk_widgets::objects!(builder, resource, {
         connect_dialog: adw::Dialog, page_title: adw::WindowTitle,
         choose_join: gtk::ToggleButton, choose_invite: gtk::ToggleButton,
-        connection_choices: gtk::Box, finish_setup: gtk::Button,
+        connection_choices: gtk::Box,
         join_method: adw::ComboRow, pairing: adw::PreferencesGroup,
-        join_section: gtk::Box, invite_section: adw::ActionRow, file_section: gtk::Box,
+        start_section: gtk::Box, join_section: gtk::Box, invite_section: adw::ActionRow, file_section: gtk::Box,
         verify_section: gtk::Box, connecting_section: gtk::Box, devices_section: gtk::Box,
         media_section: gtk::Box, network_section: gtk::Box, approval_status: gtk::Label,
         membership_status_text: gtk::Label, connecting_status: gtk::Label,
+        collection_progress: gtk::ProgressBar, collection_spinner: gtk::Spinner,
+        collection_counter: gtk::Label,
         feedback_label: gtk::Label, connection_error: adw::Banner,
-        device_name: adw::EntryRow, media_status: gtk::Label,
+        device_name: adw::EntryRow,
         devices: adw::PreferencesGroup, nearby_devices: adw::PreferencesGroup,
         no_nearby_devices: adw::ActionRow, verification: adw::PreferencesGroup,
         pair_name: gtk::Label, emoji: gtk::Label,
         peer: adw::EntryRow, nearby: adw::SwitchRow, relay: adw::EntryRow,
         relay_enabled: gtk::Switch,
-        folder_title: gtk::Label, file_title: gtk::Label, storage_chooser: gtk::FileDialog,
-        local_storage_help: gtk::Label, storage_help: gtk::Image, folders_section: gtk::Box,
-        encoding: gtk::Box, storage: adw::ComboRow,
+        folders_section: gtk::Box,
+        storage: adw::ComboRow,
         choose_connection: gtk::Button,
         file: adw::EntryRow,
         folders: adw::PreferencesGroup,
         create: gtk::Button, copy_invitation: gtk::Button, join: gtk::Button,
         approve: gtk::Button, reject: gtk::Button, refresh: gtk::Button, discover: gtk::Button,
         cancel_pairing: gtk::Button,
-        import: gtk::Button, save_storage: gtk::Button, browse_file: gtk::Button,
-
-        storage_applying_text: gtk::Label, storage_applied_text: gtk::Label,
+        import: gtk::Button, browse_file: gtk::Button,
         leave: gtk::Button, file_chooser: gtk::FileDialog,
         folder_chooser: gtk::FileDialog,
     });
-    let nearby_actions = Rc::new(RefCell::new(Vec::<(gtk::Button, gtk::Button)>::new()));
     *shell.state.connect_feedback.borrow_mut() = Some(
         gtk_widgets::feedback::ControlFeedbackState::new(&feedback_label, shell.settings.clone()),
     );
@@ -435,97 +367,12 @@ fn present(shell: &Rc<Preferences>) {
     let updating_network = Rc::new(Cell::new(false));
     let accounts = Rc::new(RefCell::new(shell.products.source.file_integrations()));
     let storage_draft = Rc::new(RefCell::new(StorageDraft::default()));
-    let reload_accounts: Rc<dyn Fn() -> bool> = {
-        let weak = Rc::downgrade(shell);
-        let accounts = accounts.clone();
-        Rc::new(move || {
-            let Some(shell) = weak.upgrade() else {
-                return false;
-            };
-            let available = shell.products.source.file_integrations();
-            if *accounts.borrow() == available {
-                return false;
-            }
-            *accounts.borrow_mut() = available;
-            true
-        })
-    };
-    show_destination(
-        &storage,
-        &file,
-        &storage_draft,
-        &accounts.borrow(),
-        &initial,
-    );
-    let applying_storage = Rc::new(Cell::new(false));
-    let apply_label = save_storage.label().unwrap_or_default();
-    let update_storage: Rc<dyn Fn()> = {
-        let applying = applying_storage.clone();
-        let label = apply_label.clone();
-        let weak = Rc::downgrade(shell);
-        let storage = storage.downgrade();
-        let file = file.downgrade();
-        let apply = save_storage.downgrade();
-        let group = storage_help.downgrade();
-        let description = storage_help.tooltip_text();
-        let local_description = local_storage_help.text();
-        let importing = import.downgrade();
-        let storage_draft = storage_draft.clone();
-        Rc::new(move || {
-            let (Some(shell), Some(storage), Some(file), Some(apply), Some(group)) = (
-                weak.upgrade(),
-                storage.upgrade(),
-                file.upgrade(),
-                apply.upgrade(),
-                group.upgrade(),
-            ) else {
-                return;
-            };
-            let remote = storage.selected() > 0;
-            group.set_tooltip_text(
-                if importing
-                    .upgrade()
-                    .is_some_and(|button| button.is_visible())
-                {
-                    None
-                } else if remote {
-                    description.as_deref()
-                } else {
-                    Some(&local_description)
-                },
-            );
-            let source = storage_draft.borrow().source.clone();
-            let path = file.text().to_string();
-            let draft = match source {
-                Some(source_id) => Destination::Remote {
-                    source_id,
-                    path: path.clone(),
-                },
-                None => Destination::Local {
-                    path: path.clone().into(),
-                },
-            };
-            let changed = Some(draft) != shell.products.connect.status().settings.destination;
-            if changed && !applying.get() {
-                apply.set_label(&label);
-            }
-            apply.set_sensitive(
-                !applying.get()
-                    && storage.selected() != gtk::INVALID_LIST_POSITION
-                    && (!remote || storage_draft.borrow().source.is_some())
-                    && !path.is_empty()
-                    && changed,
-            );
-        })
-    };
-    let changed = update_storage.clone();
-    file.connect_changed(move |_| changed());
-    update_storage();
     let update_view: Rc<dyn Fn()> = {
         let weak = Rc::downgrade(shell);
         let choose_join = choose_join.downgrade();
         let connection_choices = connection_choices.downgrade();
-        let finish_setup = finish_setup.downgrade();
+        let cancel_pairing = cancel_pairing.downgrade();
+        let start_section = start_section.downgrade();
         let join_method = join_method.downgrade();
         let join_section = join_section.downgrade();
         let invite_section = invite_section.downgrade();
@@ -539,17 +386,9 @@ fn present(shell: &Rc<Preferences>) {
         let pairing = pairing.downgrade();
         let nearby_devices = nearby_devices.downgrade();
         let no_nearby_devices = no_nearby_devices.downgrade();
-        let nearby_actions = nearby_actions.clone();
         let access_description = verification.description();
         let verification = verification.downgrade();
-        let import = import.downgrade();
-        let save_storage = save_storage.downgrade();
         let approve = approve.downgrade();
-        let storage_changed = update_storage.clone();
-        let file = file.downgrade();
-        let browse_file = browse_file.downgrade();
-        let folder_title = folder_title.text();
-        let file_title = file_title.text();
         let waiting_for_approval = approval_status.text();
         let connecting_devices = membership_status_text.text();
         let approval_status = approval_status.downgrade();
@@ -562,41 +401,43 @@ fn present(shell: &Rc<Preferences>) {
                 return;
             };
             let state = shell.products.connect.status();
-            let busy = state.pairing.is_some() || state.connecting;
-            let established = state.settings.established;
-            let setup = state.settings.setup_pending;
-            let joining = choice.is_active() && !established;
+            let working = state.connecting || state.collection_progress.is_some();
+            let busy = state.pairing.is_some() || working;
+            let progress_visible = working && state.pairing.is_none() && state.error.is_none();
+            let has_profile = state.settings.profile.is_some();
+            let joining = choice.is_active() && !has_profile;
             let importing = joining && method.selected() == 1;
             if let Some(dialog) = dialog.upgrade() {
-                dialog.set_can_close(!state.connecting && !setup && !state.settings.adopting);
+                dialog.set_can_close(!state.connecting);
             }
             if let Some(title) = title.upgrade() {
-                title.set_subtitle(if (joining || setup) && !busy {
+                title.set_subtitle(if joining && !busy && state.error.is_none() {
                     &state.profile_status
                 } else {
                     ""
                 });
             }
             if let Some(choices) = connection_choices.upgrade() {
-                choices.set_visible(!established && !busy);
+                choices.set_visible(!has_profile && !busy);
             }
-            if let Some(button) = finish_setup.upgrade() {
-                button.set_visible(setup && !busy);
+            if let Some(button) = cancel_pairing.upgrade() {
+                button.set_visible(state.connecting);
             }
             if let Some(invite) = invite_section.upgrade() {
-                invite.set_visible(!joining && !busy && !setup);
+                invite.set_visible(!joining && !busy);
             }
-            let profile_controls = established && !busy;
+            let profile_controls = has_profile && !busy;
             for (section, visible) in [
+                (&start_section, !busy),
                 (&join_section, joining && !busy),
-                (&file_section, (profile_controls || importing) && !busy),
+                (&file_section, importing && !busy),
                 (&verify_section, state.pairing.is_some()),
-                (&connecting_section, state.connecting),
+                (&connecting_section, progress_visible),
                 (&network_section, !busy && !importing),
                 (&media_section, profile_controls),
                 (
                     &devices_section,
-                    !busy && !setup && state.devices.iter().any(|device| device.enrolled),
+                    !busy && state.devices.iter().any(|device| device.enrolled),
                 ),
             ] {
                 if let Some(section) = section.upgrade() {
@@ -607,14 +448,10 @@ fn present(shell: &Rc<Preferences>) {
                 group.set_visible(!importing);
             }
             if let Some(group) = nearby_devices.upgrade() {
-                group.set_visible(!busy && !setup && !importing && state.settings.nearby);
+                group.set_visible(!busy && !importing && state.settings.nearby);
             }
             if let Some(row) = no_nearby_devices.upgrade() {
                 row.set_visible(!state.devices.iter().any(|device| !device.enrolled));
-            }
-            for (join, invite) in nearby_actions.borrow().iter() {
-                join.set_visible(joining);
-                invite.set_visible(!joining);
             }
             if let Some(group) = verification.upgrade() {
                 group.set_description(
@@ -634,27 +471,6 @@ fn present(shell: &Rc<Preferences>) {
                     profile_controls && state.devices.iter().any(|device| device.enrolled),
                 );
             }
-            if let Some(file) = file.upgrade() {
-                file.set_title(if importing {
-                    &file_title
-                } else {
-                    &folder_title
-                });
-            }
-            if let Some(browse) = browse_file.upgrade() {
-                browse.set_tooltip_text(Some(if importing {
-                    &file_title
-                } else {
-                    &folder_title
-                }));
-            }
-            if let Some(button) = import.upgrade() {
-                button.set_visible(importing);
-            }
-            if let Some(button) = save_storage.upgrade() {
-                button.set_visible(!importing);
-            }
-            storage_changed();
             let approved = state
                 .pairing
                 .as_ref()
@@ -679,34 +495,11 @@ fn present(shell: &Rc<Preferences>) {
         })
     };
     let select_method: Rc<dyn Fn()> = {
-        let weak = Rc::downgrade(shell);
-        let choice = choose_join.downgrade();
-        let method = join_method.downgrade();
         let file = file.downgrade();
-        let storage = storage.downgrade();
-        let storage_draft = storage_draft.clone();
-        let accounts = accounts.clone();
         let update_view = update_view.clone();
         Rc::new(move || {
-            let (Some(shell), Some(choice), Some(method), Some(file), Some(storage)) = (
-                weak.upgrade(),
-                choice.upgrade(),
-                method.upgrade(),
-                file.upgrade(),
-                storage.upgrade(),
-            ) else {
-                return;
-            };
-            if choice.is_active() && method.selected() == 1 {
+            if let Some(file) = file.upgrade() {
                 file.set_text("");
-            } else {
-                show_destination(
-                    &storage,
-                    &file,
-                    &storage_draft,
-                    &accounts.borrow(),
-                    &shell.products.connect.status(),
-                );
             }
             update_view();
         })
@@ -743,10 +536,8 @@ fn present(shell: &Rc<Preferences>) {
     let storage_accounts = accounts.clone();
     let draft = storage_draft.clone();
     let parent = connect_dialog.downgrade();
-    let storage_changed = update_storage.clone();
     let choose = choose_connection.downgrade();
     choose_connection.set_visible(storage.selected() > 0);
-    let importing = import.downgrade();
     let select_connection: Rc<dyn Fn(&adw::ComboRow, bool)> = Rc::new(move |row, choose_again| {
         if let Some(browse) = browse.upgrade() {
             browse.set_visible(row.selected() == 0);
@@ -758,9 +549,6 @@ fn present(shell: &Rc<Preferences>) {
             return;
         }
         let selected = row.selected();
-        let importing = importing
-            .upgrade()
-            .is_some_and(|button| button.is_visible());
         let (Some(file), Some(shell), Some(parent)) =
             (file_weak.upgrade(), weak.upgrade(), parent.upgrade())
         else {
@@ -770,12 +558,7 @@ fn present(shell: &Rc<Preferences>) {
             draft.borrow_mut().source = None;
             draft.borrow_mut().selected = 0;
             row.set_subtitle("");
-            file.set_text(&if importing {
-                String::new()
-            } else {
-                rufin_core::connect::connect_storage_path(&shell.products.connect.status(), None)
-            });
-            storage_changed();
+            file.set_text("");
             return;
         }
         let previous = draft.borrow().selected;
@@ -788,8 +571,6 @@ fn present(shell: &Rc<Preferences>) {
         let file = file.downgrade();
         let weak = Rc::downgrade(&shell);
         let row = row.downgrade();
-        let changed = storage_changed.clone();
-        storage_changed();
         super::source::login::choose_integration(
             &shell,
             &parent,
@@ -817,15 +598,7 @@ fn present(shell: &Rc<Preferences>) {
                         .map(|a| a.name.as_str())
                         .unwrap_or(""),
                 );
-                file.set_text(&if importing {
-                    String::new()
-                } else {
-                    rufin_core::connect::connect_storage_path(
-                        &shell.products.connect.status(),
-                        Some(id),
-                    )
-                });
-                changed();
+                file.set_text("");
             }),
         );
     });
@@ -966,6 +739,13 @@ fn present(shell: &Rc<Preferences>) {
     });
     let reload_folders = load_folders.clone();
     refresh.connect_clicked(move |_| reload_folders());
+    let retry_label = connection_error.button_label();
+    let weak = Rc::downgrade(shell);
+    connection_error.connect_button_clicked(move |_| {
+        if let Some(shell) = weak.upgrade() {
+            run(&shell, Action::Retry);
+        }
+    });
     let weak = Rc::downgrade(shell);
     let parent = connect_dialog.downgrade();
     leave.connect_clicked(move |_| {
@@ -987,7 +767,6 @@ fn present(shell: &Rc<Preferences>) {
         (refresh, Action::Refresh),
         (discover, Action::Discover),
         (cancel_pairing, Action::CancelPairing),
-        (finish_setup, Action::FinishSetup),
     ] {
         let weak = Rc::downgrade(shell);
         button.connect_clicked(move |_| {
@@ -1076,186 +855,65 @@ fn present(shell: &Rc<Preferences>) {
             );
         }
     });
-    let weak = Rc::downgrade(shell);
-    let parent = connect_dialog.downgrade();
-    for row in crate::download_quality::rows(initial.settings.encoding, move |encoding, reset| {
-        let (Some(shell), Some(parent)) = (weak.upgrade(), parent.upgrade()) else {
-            return;
-        };
-        let previous = shell.products.connect.status().settings.encoding;
-        if previous == encoding {
-            return;
-        }
-        let established = shell.products.connect.status().settings.established
-            && !shell.products.connect.status().settings.setup_pending;
-        if !established {
-            run(
-                &shell,
-                Action::Encoding {
-                    encoding,
-                    confirm: false,
-                },
-            );
-            return;
-        }
-        gtk::glib::spawn_future_local(async move {
-            let resource = crate::ui_resource::CONNECT_COMPONENTS_RESOURCE;
-            let builder = gtk_widgets::ui_resource::builder(resource);
-            let dialog: adw::AlertDialog =
-                gtk_widgets::ui_resource::object(&builder, resource, "encoding_confirmation");
-            if dialog.choose_future(Some(&parent)).await == "continue" {
-                run(
-                    &shell,
-                    Action::Encoding {
-                        encoding,
-                        confirm: true,
-                    },
-                );
-            } else {
-                reset(previous);
-            }
-        });
-    }) {
-        encoding.append(&row);
-    }
     let parent = shell.window.downgrade();
     let entry = file.downgrade();
     let chooser = file_chooser.clone();
-    let folders = storage_chooser.clone();
-    let importing = import.downgrade();
     browse_file.connect_clicked(move |_| {
         let (Some(parent), Some(entry)) = (parent.upgrade(), entry.upgrade()) else {
             return;
         };
         let chooser = chooser.clone();
-        let folders = folders.clone();
-        let importing = importing
-            .upgrade()
-            .is_some_and(|button| button.is_visible());
         gtk::glib::spawn_future_local(async move {
-            let selected = if importing {
-                chooser.open_future(Some(&parent)).await
-            } else {
-                folders.select_folder_future(Some(&parent)).await
-            };
-            if let Ok(file) = selected
+            if let Ok(file) = chooser.open_future(Some(&parent)).await
                 && let Some(path) = file.path()
             {
                 entry.set_text(&path.to_string_lossy());
             }
         });
     });
-    for (button, importing) in [(import.clone(), true), (save_storage, false)] {
-        let applying = applying_storage.clone();
-        let applying_label = storage_applying_text.label();
-        let applied_label = storage_applied_text.label();
-        let apply_label = apply_label.clone();
-        let update_storage = update_storage.clone();
-        let weak = Rc::downgrade(shell);
-        let parent = shell.window.downgrade();
-        let entry = file.downgrade();
-        let storage = storage.downgrade();
-        let storage_draft = storage_draft.clone();
-        let chooser = file_chooser.clone();
-        let folders = storage_chooser.clone();
-        button.connect_clicked(move |button| {
-            let (Some(shell), Some(parent), Some(entry), Some(storage)) = (
-                weak.upgrade(),
-                parent.upgrade(),
-                entry.upgrade(),
-                storage.upgrade(),
-            ) else {
-                return;
-            };
-            let remote = storage.selected() > 0;
-            let source_id = storage_draft.borrow().source.clone();
-            if remote && source_id.is_none() {
-                show_feedback(
-                    &shell,
-                    localization::tr("Choose a connection for profile storage."),
-                );
-                return;
-            }
-            if !importing {
-                applying.set(true);
-                button.set_label(&applying_label);
-                button.set_sensitive(false);
-            }
-            let chooser = chooser.clone();
-            let folders = folders.clone();
-            let button = button.downgrade();
-            let applying = applying.clone();
-            let applied_label = applied_label.clone();
-            let apply_label = apply_label.clone();
-            let update_storage = update_storage.clone();
-            gtk::glib::spawn_future_local(async move {
-                let path = if remote || !entry.text().is_empty() {
-                    entry.text().as_str().into()
-                } else {
-                    let result = if importing {
-                        chooser.open_future(Some(&parent)).await
-                    } else {
-                        folders.select_folder_future(Some(&parent)).await
-                    };
-                    let Ok(file) = result else { return };
-                    let Some(path) = file.path() else { return };
-                    entry.set_text(&path.to_string_lossy());
-                    path
+    let weak = Rc::downgrade(shell);
+    let parent = shell.window.downgrade();
+    let entry = file.downgrade();
+    let storage = storage.downgrade();
+    let chooser = file_chooser.clone();
+    import.connect_clicked(move |_| {
+        let (Some(shell), Some(parent), Some(entry), Some(storage)) = (
+            weak.upgrade(),
+            parent.upgrade(),
+            entry.upgrade(),
+            storage.upgrade(),
+        ) else {
+            return;
+        };
+        let remote = storage.selected() > 0;
+        let source_id = storage_draft.borrow().source.clone();
+        if remote && source_id.is_none() {
+            show_feedback(&shell, localization::tr("Choose connection"));
+            return;
+        }
+        let chooser = chooser.clone();
+        gtk::glib::spawn_future_local(async move {
+            let path = if remote || !entry.text().is_empty() {
+                entry.text().as_str().into()
+            } else {
+                let Ok(file) = chooser.open_future(Some(&parent)).await else {
+                    return;
                 };
-                if importing {
-                    run(
-                        &shell,
-                        Action::Import {
-                            path,
-                            source_id,
-                            replace: false,
-                            key: None,
-                        },
-                    );
-                } else {
-                    let action = Action::Destination {
-                        destination: Some(match source_id {
-                            Some(source_id) => Destination::Remote {
-                                source_id,
-                                path: path.to_string_lossy().into_owned(),
-                            },
-                            None => Destination::Local { path },
-                        }),
-                    };
-                    let owner = shell.products.connect.clone();
-                    let result = shell
-                        .products
-                        .runtime
-                        .spawn(async move { owner.execute(action).await })
-                        .await
-                        .map_err(|error| error.to_string())
-                        .and_then(|result| result.map_err(|error| error.to_string()));
-                    applying.set(false);
-                    update_storage();
-                    match result {
-                        Ok(_) => {
-                            if let Some(button) = button.upgrade() {
-                                button.set_label(&applied_label);
-                            }
-                            gtk::glib::timeout_future(std::time::Duration::from_secs(2)).await;
-                            if let Some(button) = button.upgrade()
-                                && button.label().as_deref() == Some(applied_label.as_str())
-                            {
-                                button.set_label(&apply_label);
-                            }
-                        }
-                        Err(error) => {
-                            if let Some(button) = button.upgrade() {
-                                button.set_label(&apply_label);
-                                button.set_sensitive(true);
-                            }
-                            show_feedback(&shell, error);
-                        }
-                    }
-                }
-            });
+                let Some(path) = file.path() else { return };
+                entry.set_text(&path.to_string_lossy());
+                path
+            };
+            run(
+                &shell,
+                Action::Import {
+                    path,
+                    source_id,
+                    replace: false,
+                    key: None,
+                },
+            );
         });
-    }
+    });
 
     let mut updates = shell.products.connect.subscribe();
     let weak = Rc::downgrade(shell);
@@ -1266,14 +924,13 @@ fn present(shell: &Rc<Preferences>) {
     let task = gtk::glib::spawn_future_local(async move {
         let mut previous_devices = None;
         let mut previous_profile = initial.settings.profile;
-        let mut previous_setup = initial.settings.setup_pending && !initial.connecting;
+        let mut previous_working = initial.connecting;
         let mut completed_pairings = initial.completed_pairings;
         let mut previous_network = (
             initial.settings.nearby,
             initial.settings.relay,
             initial.settings.public_relay,
         );
-        let mut previous_destination = initial.settings.destination;
         loop {
             let state = updates.borrow_and_update().clone();
             let (Some(shell), Some(parent)) = (weak.upgrade(), parent.upgrade()) else {
@@ -1286,13 +943,6 @@ fn present(shell: &Rc<Preferences>) {
                 return;
             }
             completed_pairings = state.completed_pairings;
-            let accounts_changed = reload_accounts();
-            if (accounts_changed || previous_destination != state.settings.destination)
-                && !import.is_visible()
-            {
-                show_destination(&storage, &file, &storage_draft, &accounts.borrow(), &state);
-                previous_destination = state.settings.destination.clone();
-            }
             let network = (
                 state.settings.nearby,
                 state.settings.relay.clone(),
@@ -1310,13 +960,31 @@ fn present(shell: &Rc<Preferences>) {
                 updating_network.set(false);
                 previous_network = network;
             }
-            update_storage();
-            connecting_status.set_text(&localization::tr(&state.profile_status));
+            connecting_status.set_text(&state.profile_status);
+            let progress = state.collection_progress.as_ref();
+            let fraction = progress.and_then(|progress| {
+                progress
+                    .total
+                    .filter(|total| *total > 0)
+                    .map(|total| (progress.completed as f64 / total as f64).clamp(0.0, 1.0))
+            });
+            collection_progress.set_visible(fraction.is_some());
+            collection_progress.set_fraction(fraction.unwrap_or_default());
+            collection_spinner.set_visible(fraction.is_none());
+            let counter = progress.map(collection_progress_text).unwrap_or_default();
+            collection_counter.set_visible(!counter.is_empty());
+            collection_counter.set_text(&counter);
             connection_error.set_title(state.error.as_deref().unwrap_or_default());
             connection_error.set_revealed(state.error.is_some());
-            let message = state.media_status.as_deref();
-            media_status.set_visible(message.is_some());
-            media_status.set_text(&localization::tr(message.unwrap_or_default()));
+            connection_error.set_button_label(
+                if (state.settings.profile.is_some() || state.settings.pending_import.is_some())
+                    && !state.connecting
+                {
+                    retry_label.as_deref()
+                } else {
+                    None
+                },
+            );
             create.set_visible(
                 (!state.settings.enabled || state.settings.profile.is_none())
                     && !state.connecting
@@ -1328,12 +996,12 @@ fn present(shell: &Rc<Preferences>) {
                 pair_name.set_text(&pairing.name);
                 emoji.set_text(&pairing.emoji.join(" "));
             }
-            let setup_ready = state.settings.setup_pending && !state.connecting;
-            if previous_profile != state.settings.profile || previous_setup != setup_ready {
+            let working = state.connecting;
+            if previous_profile != state.settings.profile || (previous_working && !working) {
                 previous_profile = state.settings.profile.clone();
-                previous_setup = setup_ready;
                 load_folders();
             }
+            previous_working = working;
             let membership: Vec<_> = state
                 .devices
                 .iter()
@@ -1346,7 +1014,6 @@ fn present(shell: &Rc<Preferences>) {
                 for row in nearby_rows.borrow_mut().drain(..) {
                     nearby_devices.remove(&row);
                 }
-                nearby_actions.borrow_mut().clear();
                 render_devices(
                     &shell,
                     &parent,
@@ -1355,7 +1022,6 @@ fn present(shell: &Rc<Preferences>) {
                     &state,
                     &device_rows,
                     &nearby_rows,
-                    &nearby_actions,
                 );
                 previous_devices = Some(membership);
             }
@@ -1402,54 +1068,49 @@ fn present(shell: &Rc<Preferences>) {
     present_light_dismiss_dialog(&connect_dialog, &shell.window);
 }
 
+fn collection_progress_text(progress: &CollectionProgress) -> String {
+    let bytes = matches!(
+        progress.stage,
+        CollectionStage::Receiving | CollectionStage::Validating
+    );
+    let count = |count: u64| {
+        if bytes {
+            format!("{:.1}", count as f64 / 1_048_576.0)
+        } else {
+            count.to_string()
+        }
+    };
+    let current = count(progress.completed);
+    if let Some(total) = progress.total.filter(|total| *total > 0) {
+        let percent =
+            (u128::from(progress.completed.min(total)) * 100 / u128::from(total)).to_string();
+        let total = count(total);
+        if bytes {
+            localization::tr_with(
+                "{current} / {total} MiB ({percent}%)",
+                &[
+                    ("current", &current),
+                    ("total", &total),
+                    ("percent", &percent),
+                ],
+            )
+        } else {
+            format!("{current} / {total} ({percent}%)")
+        }
+    } else if progress.completed == 0 {
+        String::new()
+    } else if bytes {
+        localization::tr_with("{current} MiB", &[("current", &current)])
+    } else {
+        current
+    }
+}
+
 #[derive(Default)]
 struct StorageDraft {
     source: Option<sources::SourceId>,
     selected: u32,
     updating: bool,
-}
-
-fn show_destination(
-    storage: &adw::ComboRow,
-    file: &adw::EntryRow,
-    draft: &RefCell<StorageDraft>,
-    accounts: &[rufin_core::source::FileIntegration],
-    state: &Status,
-) {
-    let source = state
-        .settings
-        .destination
-        .as_ref()
-        .and_then(Destination::source_id)
-        .cloned();
-    {
-        let mut draft = draft.borrow_mut();
-        draft.updating = true;
-        draft.source = source.clone();
-    }
-    let connection = source
-        .as_ref()
-        .and_then(|id| accounts.iter().find(|a| &a.id == id));
-    storage.set_selected(if source.is_none() {
-        0
-    } else if connection.is_some_and(|a| a.kind == "smb") {
-        2
-    } else {
-        1
-    });
-    draft.borrow_mut().selected = storage.selected();
-    file.set_text(&rufin_core::connect::connect_storage_path(
-        &state,
-        source.clone(),
-    ));
-    storage.set_subtitle(
-        source
-            .as_ref()
-            .and_then(|id| accounts.iter().find(|a| &a.id == id))
-            .map(|a| a.name.as_str())
-            .unwrap_or(""),
-    );
-    draft.borrow_mut().updating = false;
 }
 
 fn join_profile(shell: &Rc<Preferences>, parent: &adw::Dialog, invitation: String) {
@@ -1480,7 +1141,6 @@ fn render_devices(
     state: &Status,
     rows: &RefCell<Vec<adw::ActionRow>>,
     nearby_rows: &RefCell<Vec<adw::ActionRow>>,
-    nearby_actions: &RefCell<Vec<(gtk::Button, gtk::Button)>>,
 ) {
     for device in &state.devices {
         let resource = crate::ui_resource::CONNECT_COMPONENTS_RESOURCE;
@@ -1511,7 +1171,7 @@ fn render_devices(
         });
         for (button, action) in [
             (
-                invite_device.clone(),
+                invite_device,
                 Action::Invite {
                     peer: device.id.clone(),
                 },
@@ -1560,9 +1220,6 @@ fn render_devices(
         } else {
             nearby.add(&device_row);
             nearby_rows.borrow_mut().push(device_row);
-            nearby_actions
-                .borrow_mut()
-                .push((join_device, invite_device));
         }
     }
 }

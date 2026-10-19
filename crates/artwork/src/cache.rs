@@ -8,7 +8,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use md5_digest::{Digest, Md5};
 use sources::{ImageSize, SourceId};
-use tokio::sync::broadcast;
 
 use crate::selection::Candidate;
 
@@ -169,21 +168,13 @@ struct CacheMaintenance {
 pub(crate) struct FilesystemCache {
     root: PathBuf,
     maintenance: Arc<CacheMaintenance>,
-    changes: broadcast::Sender<(String, u64)>,
-    revision: Arc<Mutex<u64>>,
 }
 
 impl FilesystemCache {
     pub(crate) fn new(root: PathBuf) -> io::Result<Self> {
         fs::create_dir_all(&root)?;
-        let revision = fs::read_to_string(root.join(".revision"))
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or_default();
         let cache = Self {
             root,
-            changes: broadcast::channel(256).0,
-            revision: Arc::new(Mutex::new(revision)),
             maintenance: Arc::new(CacheMaintenance {
                 state: Mutex::new(None),
                 limits: CacheLimits {
@@ -214,19 +205,8 @@ impl FilesystemCache {
         })
     }
 
-    pub(crate) fn revision(&self) -> u64 {
-        *self
-            .revision
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
     pub(crate) fn preview_index_path(&self) -> PathBuf {
         self.root.join("previews.sqlite3")
-    }
-
-    pub(crate) fn subscribe(&self) -> broadcast::Receiver<(String, u64)> {
-        self.changes.subscribe()
     }
 
     pub(crate) fn file(&self, key: &str) -> io::Result<Option<PathBuf>> {
@@ -303,27 +283,6 @@ impl FilesystemCache {
         }
     }
 
-    fn notify_written(&self, path: &Path) {
-        if let Some(key) = cache_key(&self.root, path) {
-            if let Err(error) = self.record_change(Some(key)) {
-                tracing::warn!(%error, "Could not record artwork cache changes");
-            }
-        }
-    }
-
-    fn record_change(&self, key: Option<String>) -> io::Result<()> {
-        let mut revision = lock(&self.revision)?;
-        *revision = revision.wrapping_add(1);
-        atomic_write(
-            &self.root.join(".revision"),
-            revision.to_string().as_bytes(),
-        )?;
-        if let Some(key) = key {
-            let _ = self.changes.send((key, *revision));
-        }
-        Ok(())
-    }
-
     pub(crate) fn remove_entries(&self, entries: &[ArtworkCacheEntry]) -> io::Result<()> {
         let mut usage = lock(&self.maintenance.state)?;
         for entry in entries {
@@ -337,9 +296,6 @@ impl FilesystemCache {
                 usage.bytes = usage.bytes.saturating_sub(previous.bytes);
                 usage.files = usage.files.saturating_sub(previous.files);
             }
-        }
-        if !entries.is_empty() {
-            self.record_change(None)?;
         }
         Ok(())
     }
@@ -435,7 +391,6 @@ impl FilesystemCache {
             atomic_write(&path, bytes)?;
             remove_file_if_present(&self.missing_path(candidate, size))?;
         }
-        self.notify_written(&path);
         Ok(path)
     }
 

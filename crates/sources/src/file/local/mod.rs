@@ -203,25 +203,46 @@ impl LocalSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
         reuse_unchanged: bool,
     ) -> SourceResult<()> {
-        scan::acquire_catalog(catalog, self, progress, cancelled, reuse_unchanged).await?;
+        catalog
+            .update_source_file_membership(&self.configured_file_roots()?, &self.excluded_folders)
+            .await?;
+        let mut completed =
+            scan::acquire_catalog(catalog, self, progress, cancelled, reuse_unchanged).await?;
         for source in &self.documents {
-            source.acquire_catalog(catalog, progress, cancelled).await?;
+            completed += source
+                .acquire_catalog(
+                    catalog,
+                    &|mut update| {
+                        if update.stage == crate::SourceReadStage::Tracks {
+                            update.completed += completed;
+                        }
+                        progress(update);
+                    },
+                    cancelled,
+                )
+                .await?;
         }
+        scan::acquire_imported_paths(
+            catalog,
+            self,
+            None,
+            &|count| {
+                progress(SourceReadProgress {
+                    stage: crate::SourceReadStage::Tracks,
+                    completed: completed + count,
+                    total: None,
+                })
+            },
+            cancelled,
+        )
+        .await?;
         if catalog.changes().metadata {
             catalog.record_imported_files(None).await?;
         }
         check_cancelled(cancelled)?;
-        catalog
-            .update_source_file_membership(&self.configured_file_roots()?, &self.excluded_folders)
-            .await?;
         crate::file::artwork::ArtworkFiles::Local
-            .acquire(catalog, progress, cancelled)
+            .acquire(catalog, cancelled)
             .await?;
-        progress(SourceReadProgress {
-            stage: crate::SourceReadStage::Finalizing,
-            completed: 0,
-            total: None,
-        });
         Ok(())
     }
 
@@ -232,10 +253,10 @@ impl LocalSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         catalog.start_observation().await?;
-        scan::acquire_imported_paths(catalog, self, Some(playlist), cancelled).await?;
+        scan::acquire_imported_paths(catalog, self, Some(playlist), &|_| {}, cancelled).await?;
         catalog.record_imported_files(Some(playlist)).await?;
         crate::file::artwork::ArtworkFiles::Local
-            .acquire(catalog, &|_| {}, cancelled)
+            .acquire(catalog, cancelled)
             .await
     }
 
@@ -295,11 +316,11 @@ impl LocalSource {
                 .await;
             return result;
         }
-        scan::catch_up(catalog, self, progress, cancelled).await?;
-        check_cancelled(cancelled)?;
         catalog
             .update_source_file_membership(&self.configured_file_roots()?, &self.excluded_folders)
             .await?;
+        scan::catch_up(catalog, self, progress, cancelled).await?;
+        check_cancelled(cancelled)?;
         Ok(())
     }
 

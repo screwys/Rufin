@@ -1,9 +1,10 @@
-import { qualityControls } from "./download-quality.js";
 import { chooseFileIntegration } from "./sources.js";
 import { api } from "./connection.js";
 import { tr, notice } from "./ui.js";
 
 const element = (id) => document.getElementById(`connect-${id}`);
+const progressInteger = new Intl.NumberFormat();
+const progressDecimal = new Intl.NumberFormat(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const confirmation = () =>
   window.confirm(
     tr(
@@ -11,32 +12,30 @@ const confirmation = () =>
     ),
   );
 let state;
-let quality;
 let offeredDevice;
-let toastDevice;
 let previousDevices;
 let mode = "invite";
-let applyingStorage = false;
 let storageConnection = null;
 let storageKind = "";
 
 function updateView() {
   if (!state) return;
-  const busy = !!state.pairing || state.connecting;
-  const established = !!state.settings.established;
-  const setup = !!state.settings.setup_pending;
-  const joining = mode === "join" && !established;
+  const working = state.connecting || !!state.collection_progress;
+  const busy = !!state.pairing || working;
+  const progressVisible = working && !state.pairing && !state.error;
+  const hasProfile = !!state.settings.profile;
+  const joining = mode === "join" && !hasProfile;
   const importing = joining && element("join-method").value === "file";
-  const profileControls = established && !busy;
+  const profileControls = hasProfile && !busy;
   const visible = {
-    start: true,
+    start: !progressVisible,
     join: joining && !busy,
-    invite: !joining && !busy && !setup,
-    file: (profileControls || importing) && !busy,
+    invite: !joining && !busy,
+    file: importing && !busy,
     verify: !!state.pairing,
-    connecting: state.connecting,
-    devices: !busy && !setup && state.devices.some(device => device.enrolled),
-    nearby: joining && !busy && !importing && state.devices.some(device => !device.enrolled),
+    connecting: progressVisible,
+    devices: !busy && state.devices.some(device => device.enrolled),
+    nearby: !busy && !importing && state.devices.some(device => !device.enrolled),
     network: !busy && (profileControls || (joining && !importing)),
     media: profileControls,
   };
@@ -46,14 +45,11 @@ function updateView() {
   }
   for (const button of document.querySelectorAll("[data-connect-mode]"))
     button.setAttribute("aria-pressed", String(button.dataset.connectMode === mode));
+  element("dialog").classList.toggle("connect-working", progressVisible);
+  element("cancel-pairing").hidden = !state.connecting;
   element("peer-controls").hidden = importing;
-  element("choices").hidden = established || busy;
-  element("finish-setup").hidden = !setup || busy;
-  element("setup-title").hidden = !setup || busy;
-  element("import").hidden = !importing;
-  element("save-storage").hidden = importing;
-  element("file").placeholder = importing ? tr("Connect file") : tr("Connect folder");
-  element("file").setAttribute("aria-label", element("file").placeholder);
+  element("choices").hidden = hasProfile || busy;
+  element("retry").hidden = !state.error || (!state.settings.profile && !state.settings.pending_import) || state.connecting || !!state.pairing;
   element("leave").hidden = !profileControls || !state.devices.some((device) => device.enrolled);
   element("approve").hidden = !!state.pairing?.approved;
   element("approval-status").hidden = !state.pairing?.approved;
@@ -61,39 +57,45 @@ function updateView() {
     ? tr("Connecting devices") : tr("Waiting for the other device to approve");
 }
 
+function showCollectionProgress(value) {
+  element("connecting-status").textContent = value.profile_status;
+  const progress = value.collection_progress;
+  const bar = element("collection-progress");
+  const total = progress?.total > 0 ? progress.total : null;
+  const fraction = total === null ? null : Math.min(1, Math.max(0, progress.completed / total));
+  if (fraction === null) bar.removeAttribute("value");
+  else bar.value = fraction;
+  const bytes = progress?.stage === "receiving" || progress?.stage === "validating";
+  const count = value => bytes ? progressDecimal.format(value / 1_048_576) : progressInteger.format(value);
+  let counter = "";
+  if (progress && total !== null) {
+    const current = count(progress.completed);
+    const maximum = count(total);
+    const percent = progressInteger.format(Math.floor(Math.min(progress.completed, total) * 100 / total));
+    counter = bytes
+      ? tr("{current} / {total} MiB ({percent}%)", { current, total: maximum, percent })
+      : `${current} / ${maximum} (${percent}%)`;
+  } else if (progress?.completed > 0) {
+    const current = count(progress.completed);
+    counter = bytes ? tr("{current} MiB", { current }) : current;
+  }
+  element("collection-counter").textContent = counter;
+  element("collection-counter").hidden = !counter;
+  return counter;
+}
+
 function selectMethod() {
   if (mode === "join" && element("join-method").value === "file") element("file").value = "";
-  else run(showDestination);
   updateView();
 }
 
-export async function offerContinuation() {
-  if (document.hidden || sessionStorage.getItem("rufin-connect-offered")) return;
-  try {
-    const device = await refreshContinuation();
-    const offer = element("offer");
-    if (device && !sessionStorage.getItem("rufin-connect-offered")) {
-      sessionStorage.setItem("rufin-connect-offered", "true");
-      offer.hidden = false;
-      toastDevice = device;
-      element("offer-text").textContent = tr("Continue from where {device} left off?", {
-        device: device.name,
-      });
-    }
-  } catch {
-    element("offer").hidden = true;
-  }
-}
-
-async function refreshContinuation() {
-  const device = await api("/connect/continuation");
+export async function refreshContinuation() {
+  const device = state?.settings.enabled ? state.devices.find(device => device.enrolled && device.reachable && device.has_playback) : null;
   offeredDevice = device;
   const control = element("continue");
   control.hidden = !device;
   if (device) {
-    const title = tr("Continue from where {device} left off", { device: device.name });
-    control.title = title;
-    control.setAttribute("aria-label", title);
+    control.textContent = tr("Continue from {device}", { device: device.name });
   }
   return device;
 }
@@ -142,12 +144,11 @@ function textNode(tag, text, className = "") {
 function show(value) {
   const pairingChanged = value.pairing?.session !== state?.pairing?.session;
   const profileChanged = state && state.settings.profile !== value.settings.profile;
-  const destinationChanged = state && JSON.stringify(state.settings.destination) !== JSON.stringify(value.settings.destination);
   const networkChanged = state && (state.settings.nearby !== value.settings.nearby || state.settings.relay !== value.settings.relay || state.settings.public_relay !== value.settings.public_relay);
   const completed = state && state.completed_pairings !== value.completed_pairings;
-  const setupReady = value.settings.setup_pending && !value.connecting &&
-    (!state?.settings.setup_pending || state.connecting);
+  const ready = state?.connecting && !value.connecting;
   state = value;
+  const counter = showCollectionProgress(value);
   if (networkChanged) {
     element("nearby").checked = value.settings.nearby;
     element("relay").value = value.settings.relay || (value.settings.public_relay ? "https://euc1-1.relay.n0.iroh.link/" : "");
@@ -161,18 +162,13 @@ function show(value) {
     if (!value.receiving_collection) notice(tr("Connected"));
   }
   if (!element("progress").hidden) {
-    element("progress-text").textContent = tr(value.profile_status);
+    element("progress-text").textContent = value.error || [value.profile_status, counter].filter(Boolean).join(" · ");
     if (!value.receiving_collection) {
       element("progress").hidden = true;
-      notice(tr(value.profile_status));
+      notice(value.error || tr(value.profile_status));
     }
   }
-  if (element("dialog").open && element("import").hidden &&
-      (destinationChanged || (value.settings.destination?.source_id && element("storage").selectedIndex < 0))) run(showDestination);
-  element("connecting-status").textContent = tr(value.profile_status);
   element("enabled").checked = value.settings.enabled;
-  element("media-status").textContent = value.media_status ? tr(value.media_status) : "";
-  element("media-status").hidden = !value.media_status;
   element("error").textContent = value.error || "";
   element("error").hidden = !value.error;
   element("invitation").value = value.invitation || "";
@@ -186,9 +182,8 @@ function show(value) {
     );
   }
   updateView();
-  updateStorage();
   if (value.pairing && pairingChanged && !element("dialog").open) present(value);
-  if ((profileChanged || setupReady) && element("dialog").open) run(loadFolders);
+  if ((profileChanged || ready) && element("dialog").open) run(loadFolders);
   const signature = JSON.stringify(value.devices.map(device => [device.id, device.enrolled]));
   for (const card of element("dialog").querySelectorAll("[data-device-id]")) {
     const device = value.devices.find(device => device.id === card.dataset.deviceId);
@@ -215,9 +210,13 @@ function show(value) {
     heading.append(textNode("h4", device.name));
     card.append(heading);
     if (!device.enrolled) {
-      heading.append(
-        button(tr("Join profile"), () => join(device.id), "primary"),
+      const actions = document.createElement("div");
+      actions.className = "connect-device-controls";
+      actions.append(
+        button(tr("Join"), () => join(device.id)),
+        button(tr("Invite"), () => action({ action: "invite", peer: device.id })),
       );
+      heading.append(actions);
       nearby.append(card);
       continue;
     }
@@ -268,17 +267,6 @@ async function join(invitation) {
   await action({ action: "join", invitation, replace: true });
 }
 
-async function showDestination() {
-  const destination = state.settings.destination;
-  storageConnection = destination?.source_id || null;
-  const connections = await api("/integrations/files");
-  storageKind = connections.find((item) => item.id === storageConnection)?.kind || (storageConnection ? "webdav" : "");
-  element("storage").value = storageKind;
-  element("file").value = storagePath(storageConnection);
-  await showStorageConnection(connections);
-  updateStorage();
-}
-
 async function showStorageConnection(connections = null) {
   connections ||= await api("/integrations/files");
   const selected = connections.find((item) => item.id === storageConnection);
@@ -291,32 +279,14 @@ function chooseStorageConnection(kind = storageKind) {
     storageKind = kind;
     element("storage").value = kind;
     storageConnection = id;
-    element("file").value = storagePath(id);
+    element("file").value = "";
     await showStorageConnection();
-    updateStorage();
   });
 }
 
 function showRelay() {
   const enabled = element("relay-enabled").checked;
   element("relay").hidden = !enabled;
-}
-
-function storagePath(source) {
-  if (!element("import").hidden) return "";
-  const saved = state.settings.destination;
-  if ((saved?.source_id || null) === source && saved?.path) return saved.path;
-  return source ? "Rufin Connect" : state.local_folder || "";
-}
-
-function updateStorage() {
-  const source = fileSource();
-  const path = element("file").value;
-  const saved = state?.settings.destination;
-  element("storage-help").hidden = !source || !element("import").hidden;
-  element("local-storage-help").hidden = !!source || !element("import").hidden;
-  element("save-storage").disabled = applyingStorage || element("storage").selectedIndex < 0 || (element("storage").value && !source) || !path ||
-    ((saved?.source_id || null) === source && saved?.path === path);
 }
 
 async function loadFolders() {
@@ -365,11 +335,10 @@ function present(value) {
   element("relay").value = value.settings.relay || (value.settings.public_relay ? "https://euc1-1.relay.n0.iroh.link/" : "");
   element("relay-enabled").checked = Boolean(value.settings.relay || value.settings.public_relay);
   showRelay();
-  quality?.set(value.settings.encoding);
   updateView();
   element("dialog").showModal();
   if (!value.pairing && !value.connecting) {
-    run(showDestination);
+    run(showStorageConnection);
     run(loadFolders);
     run(refreshContinuation);
   }
@@ -379,7 +348,7 @@ export function watch(signal) {
   const events = new EventSource("/api/connect/events");
   events.addEventListener("connect", (event) => {
     show(JSON.parse(event.data));
-    void offerContinuation();
+    void refreshContinuation();
   });
   signal.addEventListener("abort", () => events.close(), { once: true });
 }
@@ -402,27 +371,22 @@ export function init() {
     } else {
       storageKind = "";
       storageConnection = null;
-      element("file").value = storagePath(null);
+      element("file").value = "";
       element("storage-connection").hidden = true;
-      updateStorage();
     }
   });
   click("storage-connection", () => chooseStorageConnection());
-  element("file").addEventListener("input", updateStorage);
   const continuePlayback = async (device) => {
-    element("offer").hidden = true;
     if (device) await action({ action: "continue", peer: device.id });
     await refreshContinuation();
   };
-  click("offer-accept", () => continuePlayback(toastDevice));
   click("continue", () => continuePlayback(offeredDevice));
-  click("offer-dismiss", () => { element("offer").hidden = true; });
   click("progress-open", () => document.getElementById("open-connect").click());
   click("progress-dismiss", () => {
     element("progress").hidden = true;
   });
   document.addEventListener("visibilitychange", () => {
-    void offerContinuation();
+    void refreshContinuation();
   });
   document.getElementById("open-connect").addEventListener("click", () => run(async () => {
     const value = await api("/connect");
@@ -466,7 +430,11 @@ export function init() {
   click("rename", () => action({ action: "rename", name: element("name").value }));
   click("join", () => join(element("peer").value));
   click("cancel-pairing", () => action({ action: "cancel_pairing" }));
-  click("finish-setup", () => action({ action: "finish_setup" }));
+  click("retry", async () => {
+    element("retry").disabled = true;
+    try { await action({ action: "retry" }); }
+    finally { element("retry").disabled = false; }
+  });
   click("approve", async () => {
     await action({ action: "pair", session: state.pairing.session, approve: true });
   });
@@ -477,37 +445,9 @@ export function init() {
     relay: element("relay-enabled").checked ? element("relay").value.trim() : null,
     public_relay: false,
   }));
-  quality = qualityControls(element("quality"), "original", async (encoding) => {
-    const previous = state.settings.encoding;
-    if (JSON.stringify(encoding) === JSON.stringify(previous)) return previous;
-    const confirm = state.settings.established && !state.settings.setup_pending;
-    if (confirm && !window.confirm(tr("Changing this will redownload all local files."))) return previous;
-    await action({ action: "encoding", encoding, confirm });
-    return state.settings.encoding;
-  });
   click("import", () => action({
     action: "import", path: element("file").value, source_id: fileSource(), replace: false, key: null,
   }));
-  click("save-storage", async () => {
-    const button = element("save-storage");
-    applyingStorage = true;
-    button.textContent = tr("Applying...");
-    updateStorage();
-    try {
-      await action({
-        action: "destination",
-        destination: fileSource()
-            ? { kind: "web_dav", source_id: fileSource(), path: element("file").value }
-            : { kind: "local", path: element("file").value },
-      });
-      button.textContent = tr("Applied");
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    } finally {
-      applyingStorage = false;
-      button.textContent = tr("Apply");
-      updateStorage();
-    }
-  });
   click("leave", async () => {
     if (!window.confirm(tr("Disconnect this device?"))) return;
     await action({ action: "leave" });

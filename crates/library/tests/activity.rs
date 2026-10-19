@@ -483,6 +483,57 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
             .len(),
         10
     );
+    while observed.try_recv().is_ok() {}
+    let completed = ListenWrite {
+        listened_millis: 120_000,
+        skipped: false,
+        ..listen.clone()
+    };
+    assert_eq!(
+        fixture
+            .database
+            .record_listen(&completed, None, &[])
+            .await
+            .unwrap(),
+        key
+    );
+    assert!(observed.try_recv().unwrap().activity);
+    for repeated in [&listen, &completed] {
+        assert_eq!(
+            fixture
+                .database
+                .record_listen(repeated, None, &[])
+                .await
+                .unwrap(),
+            key
+        );
+        assert!(observed.try_recv().is_err());
+    }
+    let mut raw = connection(&fixture.path).await;
+    assert_eq!(
+        sqlx::query_as::<_, (i64, bool)>(
+            "SELECT listened_millis,skipped FROM listens WHERE listen_key=?1"
+        )
+        .bind(key)
+        .fetch_one(&mut raw)
+        .await
+        .unwrap(),
+        (120_000, false)
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM listens")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM listen_outbox")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        11
+    );
 }
 
 #[tokio::test]

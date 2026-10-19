@@ -1,11 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface domain="rufin">
-  <object class="GtkLabel" id="storage_applying_text">
-    <property name="label" translatable="yes">Applying...</property>
-  </object>
-  <object class="GtkLabel" id="storage_applied_text">
-    <property name="label" translatable="yes">Applied</property>
-  </object>
   <object class="AdwDialog" id="connect_dialog">
     <property name="title" translatable="yes">Rufin Connect</property>
     <property name="follows-content-size">true</property>
@@ -34,15 +28,19 @@
                   <object class="AdwBanner" id="connection_error">
                     <property name="revealed">false</property>
                     <property name="use-markup">false</property>
+                    <property name="button-label" translatable="yes">Retry</property>
                   </object>
                 </child>
                 <child>
                   <object class="GtkScrolledWindow">
+                    <property name="vexpand">true</property>
                     <property name="hscrollbar-policy">never</property>
                     <property name="propagate-natural-height">true</property>
+                    <property name="max-content-height">520</property>
                     <property name="child">
                       <object class="GtkBox">
                         <property name="orientation">vertical</property>
+                        <property name="vexpand">true</property>
                         <property name="spacing">18</property>
                         <property name="margin-start">18</property>
                         <property name="margin-end">18</property>
@@ -94,14 +92,6 @@
                                         <property name="icon-name">rufin-application-exit-symbolic</property>
                                         <property name="tooltip-text" translatable="yes">Disconnect this device</property>
                                         <property name="valign">center</property>
-                                      </object>
-                                    </child>
-                                    <child type="suffix">
-                                      <object class="GtkButton" id="finish_setup">
-                                        <property name="label" translatable="yes">Continue</property>
-                                        <property name="valign">center</property>
-                                        <property name="visible">false</property>
-                                        <style><class name="suggested-action" /></style>
                                       </object>
                                     </child>
                                   </object>
@@ -222,7 +212,6 @@
                                 <child>
                                   <object class="GtkLabel" id="emoji">
                                     <property name="wrap">true</property>
-                                    <property name="selectable">true</property>
                                     <property name="margin-top">24</property>
                                     <property name="margin-bottom">24</property>
                                     <style>
@@ -262,23 +251,50 @@
                         </child>
                         <child>
                           <object class="GtkBox" id="connecting_section">
-                            <property name="spacing">8</property>
-                            <property name="halign">center</property>
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">18</property>
+                            <property name="vexpand">true</property>
+                            <property name="valign">center</property>
+                            <property name="margin-start">18</property>
+                            <property name="margin-end">18</property>
+                            <property name="margin-top">24</property>
+                            <property name="margin-bottom">24</property>
                             <property name="visible">false</property>
-                            <child>
-                              <object class="GtkSpinner">
-                                <property name="spinning">true</property>
-                                <property name="valign">center</property>
-                              </object>
-                            </child>
                             <child>
                               <object class="GtkLabel" id="connecting_status">
                                 <property name="wrap">true</property>
+                                <property name="justify">center</property>
+                                <style><class name="title-2" /></style>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkSpinner" id="collection_spinner">
+                                <property name="spinning">true</property>
+                                <property name="halign">center</property>
+                                <property name="width-request">32</property>
+                                <property name="height-request">32</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkProgressBar" id="collection_progress">
+                                <property name="visible">false</property>
+                                <accessibility><relation name="labelled-by">connecting_status</relation><relation name="described-by">collection_counter</relation></accessibility>
+                                <style><class name="connect-progress" /></style>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="collection_counter">
+                                <property name="wrap">true</property>
+                                <property name="justify">center</property>
+                                <property name="visible">false</property>
+                                <style><class name="dim-label" /><class name="numeric" /></style>
                               </object>
                             </child>
                             <child>
                               <object class="GtkButton" id="cancel_pairing">
                                 <property name="label" translatable="yes">Cancel</property>
+                                <property name="halign">center</property>
+                                <property name="margin-top">6</property>
                               </object>
                             </child>
                           </object>
@@ -291,13 +307,9 @@
                             <child><object class="GtkBox">
                                   <property name="spacing">6</property>
                                   <child><object class="GtkLabel">
-                                    <property name="label" translatable="yes">Profile storage</property>
+                                    <property name="label" translatable="yes">Import</property>
                                     <style><class name="heading" /></style>
                                   </object></child>
-                                  <child><object class="GtkImage" id="storage_help">
-                                  <property name="icon-name">rufin-help-about-symbolic</property>
-                                  <property name="tooltip-text" translatable="yes">The folder is relative to the selected account. Applying it changes storage on all devices.</property>
-                                </object></child>
                                 </object></child>
                             <child>
                               <object class="AdwPreferencesGroup" id="storage_group">
@@ -323,10 +335,10 @@
                                 </child>
                                 <child>
                                   <object class="AdwEntryRow" id="file">
-                                    <property name="title" translatable="yes">Connect folder</property>
+                                    <property name="title" translatable="yes">Connect file</property>
                                     <child type="suffix">
                                       <object class="GtkButton" id="browse_file">
-                                        <property name="tooltip-text" translatable="yes">Choose folder</property>
+                                        <property name="tooltip-text" translatable="yes">Connect file</property>
                                         <property name="icon-name">rufin-document-open-symbolic</property>
                                         <property name="valign">center</property>
                                       </object>
@@ -335,14 +347,6 @@
                                       <object class="GtkButton" id="import">
                                         <property name="label" translatable="yes">Import</property>
                                         <property name="valign">center</property>
-                                      </object>
-                                    </child>
-                                    <child type="suffix">
-                                      <object class="GtkButton" id="save_storage">
-                                        <property name="label" translatable="yes">Apply</property>
-                                        <property name="sensitive">false</property>
-                                        <property name="valign">center</property>
-                                        <style><class name="suggested-action" /></style>
                                       </object>
                                     </child>
                                   </object>
@@ -358,20 +362,6 @@
                             <property name="orientation">vertical</property>
                             <property name="spacing">12</property>
                             <property name="visible">false</property>
-                            <child>
-                              <object class="AdwPreferencesGroup">
-                                <child>
-                                  <object class="GtkBox" id="encoding"><property name="orientation">vertical</property></object>
-                                </child>
-                                <child>
-                                  <object class="GtkLabel" id="media_status">
-                                    <property name="visible">false</property>
-                                    <property name="wrap">true</property>
-                                  </object>
-                                </child>
-                                <property name="title" translatable="yes">Music on this device</property>
-                              </object>
-                            </child>
                             <child><object class="GtkBox" id="folders_section">
                               <property name="orientation">vertical</property>
                               <property name="spacing">12</property>
@@ -471,10 +461,6 @@
       </object>
     </property>
   </object>
-  <object class="GtkLabel" id="local_storage_help"><property name="label" translatable="yes">To use a file-sync app, choose a folder it synchronizes.</property></object>
-  <object class="GtkLabel" id="folder_title"><property name="label" translatable="yes">Connect folder</property></object>
-  <object class="GtkLabel" id="file_title"><property name="label" translatable="yes">Connect file</property></object>
-  <object class="GtkFileDialog" id="storage_chooser"><property name="title" translatable="yes">Connect folder</property></object>
   <object class="GtkFileDialog" id="file_chooser">
     <property name="title" translatable="yes">Connect file</property>
     <property name="initial-name">profile.rufin-connect</property>

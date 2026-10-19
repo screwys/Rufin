@@ -6,14 +6,25 @@ use sqlx::{Connection, Sqlite, Transaction, sqlite::SqliteConnection};
 use crate::{Database, LibraryError, LibraryResult, ReadCancellation};
 
 /// Sparse source facts. An absent field leaves the stored value alone.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct NativeUserState {
     pub favorite: Option<bool>,
     /// Outer None means absent; Some(None) clears the source rating (0..100).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "native_rating"
+    )]
     pub rating: Option<Option<i64>>,
     pub play_count: Option<i64>,
     pub skip_count: Option<i64>,
     pub last_played: Option<i64>,
+}
+
+fn native_rating<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<i64>>, D::Error> {
+    <Option<i64> as serde::Deserialize>::deserialize(deserializer).map(Some)
 }
 
 impl NativeUserState {
@@ -93,15 +104,17 @@ impl Database {
         }
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
         sqlx::query(
             "INSERT INTO user_media_state(media_uri,rating) VALUES (?1,?2)
              ON CONFLICT(media_uri) DO UPDATE SET rating=excluded.rating",
         )
         .bind(target.media_uri())
         .bind(rating.map(|rating| i64::from(rating) * 10))
-        .execute(&mut *connection)
+        .execute(&mut *transaction)
         .await?;
-        cleanup_empty_state(connection, target.media_uri()).await?;
+        cleanup_empty_state(&mut transaction, target.media_uri()).await?;
+        transaction.commit().await?;
         Ok(true)
     }
 
@@ -112,7 +125,10 @@ impl Database {
     ) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        update_favorite(connection, target, Some(favorite)).await
+        let mut transaction = connection.begin().await?;
+        let changed = update_favorite(&mut transaction, target, Some(favorite)).await?;
+        transaction.commit().await?;
+        Ok(changed)
     }
 
     pub async fn queue_remote_favorite(
@@ -194,6 +210,23 @@ impl Database {
         Ok(known)
     }
 
+    pub async fn due_remote_favorites(
+        &self,
+        now: i64,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<(String, bool)>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        Ok(sqlx::query_as(
+            "SELECT media_uri,favorite FROM favorite_outbox WHERE next_attempt_at<=?1
+             ORDER BY next_attempt_at,outbox_key LIMIT ?2",
+        )
+        .bind(now)
+        .bind(limit.clamp(1, 64) as i64)
+        .fetch_all(&mut *connection)
+        .await?)
+    }
+
     pub async fn defer_remote_favorite(
         &self,
         target: &FavoriteTarget,
@@ -271,13 +304,13 @@ async fn cleanup_empty_state(
     connection: &mut SqliteConnection,
     media_uri: &str,
 ) -> LibraryResult<()> {
-    sqlx::query(
-        "DELETE FROM user_media_state WHERE media_uri=?1 AND favorite IS NULL AND rating IS NULL",
+    let deleted = sqlx::query(
+        "DELETE FROM user_media_state WHERE media_uri=?1 AND favorite IS NULL AND rating IS NULL AND extra IS NULL",
     )
     .bind(media_uri)
-    .execute(connection)
-    .await?;
-    Ok(())
+    .execute(&mut *connection)
+    .await?.rows_affected() > 0;
+    crate::connect::mark_current_on(connection, "state", media_uri, deleted).await
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, sqlx::FromRow)]

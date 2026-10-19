@@ -3,7 +3,7 @@ use crate::{
     playback::PlaybackOwner,
     settings::{
         SettingsFile, SettingsOwner, StoredSettings, backup_password_key, backup_password_store,
-        fresh_credential_ref, provider_secret_key, scrobbling_secret_key,
+        load_provider_secret, read_scrobbling, seal_credential, store_scrobbling,
     },
     source::SourceOwner,
 };
@@ -630,16 +630,14 @@ fn restore_preferences_and_logins(
                     if let Some(restored) = restored.sources.connections().find(|restored| {
                         restored.configuration.source_id == source.configuration.source_id
                     }) {
-                        source.credential_ref = restored.credential_ref.clone();
+                        source.credential = restored.credential.clone();
                     }
                 }
                 Ok(())
             },
             true,
         ) {
-            warnings.push(format!(
-                "Saved logins were written; settings could not be applied: {error}"
-            ));
+            warnings.push(format!("Saved logins could not be applied: {error}"));
         }
     }
     warnings
@@ -647,6 +645,7 @@ fn restore_preferences_and_logins(
 
 fn copy_scrobbling_logins(previous: &StoredSettings, incoming: &mut StoredSettings) {
     incoming.scrobbling_secrets_present = previous.scrobbling_secrets_present;
+    incoming.scrobbling_credentials = previous.scrobbling_credentials.clone();
     incoming.ui.lastfm_api_key = previous.ui.lastfm_api_key.clone();
     incoming.scrobbling.lastfm.username = previous.scrobbling.lastfm.username.clone();
     incoming.scrobbling.librefm.username = previous.scrobbling.librefm.username.clone();
@@ -662,6 +661,7 @@ fn preserve_destination_settings(
     incoming: &mut StoredSettings,
 ) -> Result<(), String> {
     incoming.secret_scope_id = previous.secret_scope_id.clone();
+    incoming.shared_settings = previous.shared_settings.clone();
     incoming.ui.application.secret_storage_mode = previous.ui.application.secret_storage_mode;
     incoming.jellyfin_device_id = previous.jellyfin_device_id.clone();
     incoming.ui.downloads = previous.ui.downloads.clone();
@@ -675,13 +675,12 @@ fn preserve_destination_settings(
     incoming.ui.application.backup.schedule.last_successful_at =
         previous.ui.application.backup.schedule.last_successful_at;
     for source in incoming.sources.connections_mut() {
-        source.credential_ref = match previous
+        source.credential = match previous
             .sources
             .connections()
             .find(|old| old.configuration.source_id == source.configuration.source_id)
         {
-            Some(old) => old.credential_ref.clone(),
-            None if source.credential_ref.is_some() => Some(fresh_credential_ref()?),
+            Some(old) => old.credential.clone(),
             None => None,
         };
     }
@@ -861,30 +860,21 @@ fn saved_logins(stored: &StoredSettings, secrets: &dyn SecretStore) -> Result<Sa
     };
     for source in stored.sources.connections() {
         let value = source
-            .credential_ref
+            .credential
             .as_ref()
-            .map(|reference| secrets.load_secret(&provider_secret_key(reference)))
-            .transpose()
-            .map_err(|e| e.to_string())?
+            .map(|credential| load_provider_secret(secrets, credential))
+            .transpose()?
             .flatten();
         logins
             .sources
             .insert(source.configuration.source_id.clone(), value);
     }
+    let scrobbling = read_scrobbling(stored, secrets)?;
     for descriptor in scrobbling::secret_descriptors() {
-        let inline = descriptor.value(&stored.scrobbling);
-        let value = if !inline.is_empty() {
-            Some(inline.to_owned())
-        } else if stored.scrobbling_secrets_present {
-            secrets
-                .load_secret(&scrobbling_secret_key(*descriptor))
-                .map_err(|e| e.to_string())?
-        } else {
-            None
-        };
+        let value = descriptor.value(&scrobbling);
         logins.scrobbling.insert(
             format!("{}:{}", descriptor.namespace(), descriptor.kind()),
-            value,
+            (!value.is_empty()).then(|| value.to_owned()),
         );
     }
     Ok(logins)
@@ -909,53 +899,34 @@ fn restore_logins(
             warnings.push(format!("Saved login has no configured source: {source_id}"));
             continue;
         };
-        if source.credential_ref.is_none() && value.is_some() {
-            match fresh_credential_ref() {
-                Ok(reference) => source.credential_ref = Some(reference),
-                Err(error) => {
-                    warnings.push(error);
-                    continue;
-                }
-            }
-        }
-        if let Some(reference) = &source.credential_ref {
-            let key = provider_secret_key(reference);
-            let result = match value {
-                Some(value) => secrets.save_secret(&key, &value),
-                None => secrets.delete_secret(&key),
-            };
-            if let Err(error) = result {
-                warnings.push(format!(
-                    "Could not restore login for {}: {error}",
-                    source.configuration.name
-                ));
-            }
+        match value
+            .as_deref()
+            .map(|value| seal_credential(secrets, value))
+            .transpose()
+        {
+            Ok(credential) => source.credential = credential,
+            Err(error) => warnings.push(format!(
+                "Could not restore login for {}: {error}",
+                source.configuration.name
+            )),
         }
     }
+    let mut scrobbling = incoming.scrobbling_runtime_settings();
     for descriptor in scrobbling::secret_descriptors() {
         let name = format!("{}:{}", descriptor.namespace(), descriptor.kind());
-        let Some(value) = logins.scrobbling.get(&name) else {
-            continue;
-        };
-        let key = scrobbling_secret_key(*descriptor);
-        let result = match value {
-            Some(value) => secrets.save_secret(&key, value),
-            None => secrets.delete_secret(&key),
-        };
-        match result {
-            Ok(()) => {
-                descriptor.value_mut(&mut incoming.scrobbling).clear();
-            }
-            Err(error) => warnings.push(format!("Could not restore {name}: {error}")),
+        if let Some(value) = logins.scrobbling.get(&name) {
+            *descriptor.value_mut(&mut scrobbling) = value.clone().unwrap_or_default();
         }
     }
-    incoming.scrobbling_secrets_present = true;
+    if let Err(error) = store_scrobbling(incoming, secrets, &scrobbling) {
+        warnings.push(format!("Could not restore scrobbling logins: {error}"));
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{ConfiguredSource, CredentialRef};
+    use crate::settings::{ConfiguredSource, Credential, provider_secret_key};
     use secrets::{ConfigSecretStore, MemorySecretStore, SecretStorageMode};
 
     fn source(id: &str, reference: &str) -> ConfiguredSource {
@@ -966,7 +937,7 @@ mod tests {
                 name: "Same server".into(),
                 provider_payload: "{}".into(),
             },
-            credential_ref: Some(CredentialRef::new(reference)),
+            credential: Some(Credential::new(reference)),
             music_folder_id: None,
             local_access: None,
             enable_half_stars: false,
@@ -1150,17 +1121,10 @@ mod tests {
             SecretStorageMode::ConfigFile
         );
         assert_eq!(
-            incoming.sources.configured[0].credential_ref,
-            previous.sources.configured[0].credential_ref
+            incoming.sources.configured[0].credential,
+            previous.sources.configured[0].credential
         );
-        assert_ne!(
-            incoming.sources.configured[1]
-                .credential_ref
-                .as_ref()
-                .unwrap()
-                .as_str(),
-            "archive-other"
-        );
+        assert!(incoming.sources.configured[1].credential.is_none());
         assert_eq!(
             incoming.scrobbling.lastfm.session_key,
             "destination-session"
@@ -1188,7 +1152,7 @@ mod tests {
         settings.scrobbling_secrets_present = true;
         credentials
             .save_secret(
-                &provider_secret_key(&CredentialRef::new("reference")),
+                &provider_secret_key(&Credential::new("reference")),
                 "provider-login",
             )
             .unwrap();
@@ -1238,15 +1202,25 @@ mod tests {
         let mut warnings = Vec::new();
         restore_logins(&credentials, &mut incoming, logins, &mut warnings);
         assert_eq!(
-            credentials
-                .load_token("destination-reference")
-                .unwrap()
-                .as_deref(),
+            load_provider_secret(
+                &credentials,
+                incoming.sources.configured[0].credential.as_ref().unwrap(),
+            )
+            .unwrap()
+            .as_deref(),
             Some("correct-login")
         );
         assert!(credentials.load_token("absent-account").unwrap().is_none());
         assert_eq!(
-            credentials.load_token("file-reference").unwrap().as_deref(),
+            load_provider_secret(
+                &credentials,
+                incoming.sources.integrations[0]
+                    .credential
+                    .as_ref()
+                    .unwrap(),
+            )
+            .unwrap()
+            .as_deref(),
             Some("file-login")
         );
         assert_eq!(warnings.len(), 1);

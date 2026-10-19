@@ -16,7 +16,10 @@ async fn unavailable_local_root_preserves_catalog_and_can_retry() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("music");
     let offline = directory.path().join("offline");
+    let removed = directory.path().join("removed");
     fs::create_dir(&root).unwrap();
+    fs::create_dir(&removed).unwrap();
+    write_silent_wav(&removed.join("removed.wav"), 1).unwrap();
     let track = root.join("track.wav");
     write_silent_wav(&track, 1).unwrap();
     let database = Database::open(directory.path().join("library.sqlite"))
@@ -31,7 +34,7 @@ async fn unavailable_local_root_preserves_catalog_and_can_retry() {
     let (configuration, source, _) = Source::connect(
         SourceId::new("test-source"),
         SourceSetup::Local {
-            roots: vec![root.clone()],
+            roots: vec![root.clone(), removed.clone()],
         },
         "",
     )
@@ -61,12 +64,58 @@ async fn unavailable_local_root_preserves_catalog_and_can_retry() {
         .unwrap();
     let initial = updates.try_recv().expect("catalog update");
     assert!(initial.1.metadata);
+    assert_eq!(track_count(&database, &initial).await, 2);
+    let (_, source, _) = Source::connect(
+        configuration.source_id.clone(),
+        SourceSetup::Local {
+            roots: vec![root.clone()],
+        },
+        "",
+    )
+    .await
+    .unwrap()
+    .into_parts();
+    let profile = library::profile::ProfileStore::open(
+        database.clone(),
+        1,
+        "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33"
+            .parse()
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    profile.bind_profile("shared", "source").await.unwrap();
+    database.connect_set_active(true).await.unwrap();
     fs::rename(&root, &offline).unwrap();
     assert!(
         source
             .acquire_catalog(&database, &|_| {}, cancelled.clone(), true)
             .await
             .is_err()
+    );
+    assert_eq!(track_count(&database, &initial).await, 1);
+    let mut connection = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new().filename(database.path()),
+    )
+    .await
+    .unwrap();
+    let keys: Vec<(String, String)> =
+        sqlx::query_as("SELECT kind,object_key FROM connect_versions WHERE kind='catalog:file'")
+            .fetch_all(&mut connection)
+            .await
+            .unwrap();
+    assert!(
+        profile
+            .current_records(&keys)
+            .await
+            .unwrap()
+            .iter()
+            .any(|record| {
+                record.value.as_ref().is_some_and(|value| {
+                    value["file"]["relative_path"] == "removed.wav"
+                        && value["tracks"].as_array().is_some_and(Vec::is_empty)
+                })
+            })
     );
     assert!(
         source
@@ -406,6 +455,8 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
         .execute(&mut stored)
         .await
         .unwrap();
+    sqlx::query("UPDATE local_file_observations SET parsed_stamp=json_set(parsed_stamp,'$[3]',16),accepted_facts=(SELECT parsed_stamp FROM local_files file WHERE file.local_file_key=local_file_observations.local_file_key) WHERE local_file_key IN(SELECT local_file_key FROM local_files WHERE kind IN('media','cue'))")
+        .execute(&mut stored).await.unwrap();
     sqlx::query("UPDATE tracks SET metadata=jsonb_remove(metadata,'$.album_tags')")
         .execute(&mut stored)
         .await
@@ -436,6 +487,63 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
         assert_eq!(observation.state, library::LocalFileState::Accepted);
         database.close().await.unwrap();
     }
+    let database = Database::open(&database_path).await.unwrap();
+    let received_path = track.canonicalize().unwrap();
+    let previous = database
+        .source_files(
+            configuration.source_id.as_str(),
+            &[received_path.to_string_lossy().into_owned()],
+        )
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    let snapshot = store.path().join("profile.sqlite");
+    let profile = library::profile::ProfileStore::open(
+        database.clone(),
+        1,
+        "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33"
+            .parse()
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    profile.bind_profile("shared", "source").await.unwrap();
+    let key = "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33"
+        .parse()
+        .unwrap();
+    profile
+        .export_database(&snapshot, &key, &[], &[])
+        .await
+        .unwrap();
+    profile.close().await.unwrap();
+    library::profile::ProfileStore::prepare_database(&snapshot, &key, &key)
+        .await
+        .unwrap();
+    library::profile::ProfileStore::install_prepared_database(database.clone(), &snapshot)
+        .await
+        .unwrap();
+    let received = database
+        .source_files(
+            configuration.source_id.as_str(),
+            &[received_path.to_string_lossy().into_owned()],
+        )
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(received, previous);
+    database.close().await.unwrap();
+    let database = Database::open(&database_path).await.unwrap();
+    source
+        .catch_up_local(
+            &database,
+            &|progress| panic!("received index started parsing: {progress:?}"),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .await
+        .unwrap();
+    database.close().await.unwrap();
     write_silent_wav(&track, 2).expect("edit WAV in place");
     let database = Database::open(&database_path)
         .await
@@ -459,15 +567,10 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     assert!(progress.iter().any(|update| {
         update.stage == sources::SourceReadStage::Tracks && update.completed > 0
     }));
-    assert!(
-        progress
-            .iter()
-            .any(|update| update.stage == sources::SourceReadStage::Artwork)
-    );
-    assert_eq!(
-        progress.last().unwrap().stage,
-        sources::SourceReadStage::Finalizing
-    );
+    assert!(progress.iter().all(|update| {
+        update.stage == sources::SourceReadStage::Tracks && update.total.is_none()
+    }));
+    assert_eq!(progress.last().unwrap().completed, 1);
     let changed = updates.try_recv().expect("catalog update");
     assert!(changed.1.metadata);
     assert_eq!(
@@ -510,6 +613,75 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
             .unwrap()
             .1,
         0
+    );
+    let malformed = root.path().join("truncated.wma");
+    let mut bytes = vec![
+        0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11, 0xa6, 0xd9, 0x00, 0xaa, 0x00, 0x62, 0xce,
+        0x6c,
+    ];
+    bytes.extend_from_slice(&1_000_u64.to_le_bytes());
+    bytes.extend_from_slice(&0_u32.to_le_bytes());
+    bytes.extend_from_slice(&[1, 2]);
+    fs::write(&malformed, bytes).unwrap();
+    source
+        .catch_up_local(
+            &database,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .await
+        .unwrap();
+    let paths = [malformed
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()];
+    assert_eq!(
+        database
+            .source_files(configuration.source_id.as_str(), &paths)
+            .await
+            .unwrap()[0]
+            .state,
+        library::LocalFileState::Rejected
+    );
+    database.close().await.unwrap();
+    for _ in 0..2 {
+        let database = Database::open(&database_path).await.unwrap();
+        source
+            .catch_up_local(
+                &database,
+                &|progress| panic!("cached rejection started parsing: {progress:?}"),
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            database
+                .source_files(configuration.source_id.as_str(), &paths)
+                .await
+                .unwrap()[0]
+                .state,
+            library::LocalFileState::Rejected
+        );
+        database.close().await.unwrap();
+    }
+    write_silent_wav(&malformed, 1).expect("replace malformed input with audio");
+    let database = Database::open(&database_path).await.unwrap();
+    source
+        .catch_up_local(
+            &database,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        database
+            .source_files(configuration.source_id.as_str(), &paths)
+            .await
+            .unwrap()[0]
+            .state,
+        library::LocalFileState::Accepted
     );
 }
 
@@ -593,7 +765,7 @@ async fn restart_catch_up_publishes_folder_changes_without_reparsing_tracks() {
             .acquire_catalog(
                 &database,
                 &move |progress| {
-                    if progress.stage == sources::SourceReadStage::Files {
+                    if progress.stage == sources::SourceReadStage::Tracks {
                         stop.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
                 },
@@ -689,9 +861,8 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
     )
     .expect("second CUE");
     let store = tempfile::tempdir().expect("Store");
-    let database = Database::open(store.path().join("library.sqlite"))
-        .await
-        .expect("Database");
+    let database_path = store.path().join("library.sqlite");
+    let database = Database::open(&database_path).await.expect("Database");
     let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
     database.observe_catalog(move |identity, update| {
         let source_key = identity.unwrap().1;
@@ -752,6 +923,23 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
     .expect("Album order")
     .2;
     assert_eq!(albums.len(), 2);
+    let mut stored = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new().filename(&database_path),
+    )
+    .await
+    .unwrap();
+    let retired_uri = library::cue_media_uri(
+        "retired-cue",
+        url::Url::from_file_path(&media).unwrap().as_str(),
+        0,
+        2_000,
+    );
+    let retired: i64 = sqlx::query_scalar("INSERT INTO tracks(source_key,media_uri,source_path,cue_path,cue_start_millis,cue_end_millis) SELECT source_key,?1,source_path,cue_path,cue_start_millis,cue_end_millis FROM tracks WHERE cue_path=?2 LIMIT 1 RETURNING track_key")
+        .bind(&retired_uri)
+        .bind(first_cue.to_string_lossy().as_ref())
+        .fetch_one(&mut stored)
+        .await
+        .unwrap();
     write_silent_wav(&media, 3).expect("edit CUE backing media");
     source
         .catch_up_local(
@@ -774,6 +962,15 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
     assert!(
         updates.try_recv().is_err(),
         "unchanged observations stay quiet"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT indexed FROM tracks WHERE track_key=?1")
+            .bind(retired)
+            .fetch_one(&mut stored)
+            .await
+            .unwrap(),
+        0,
+        "retired CUE aliases stay outside the source catalog"
     );
 }
 
@@ -1992,70 +2189,125 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
 #[tokio::test]
 async fn initial_local_walk_reports_real_total_free_file_progress() {
     let root = tempfile::tempdir().expect("music root");
+    let other = tempfile::tempdir().expect("second music root");
+    fs::create_dir(root.path().join("nested")).unwrap();
     write_silent_wav(&root.path().join("first.wav"), 1).expect("first WAV");
     write_silent_wav(&root.path().join("second.wav"), 1).expect("second WAV");
+    write_silent_wav(&root.path().join("nested/third.wav"), 1).unwrap();
+    write_silent_wav(&other.path().join("backing.wav"), 1).unwrap();
+    fs::write(root.path().join("notes.txt"), "Not audio").unwrap();
+    fs::write(root.path().join("cover.jpg"), "Not audio").unwrap();
+    fs::write(
+        other.path().join("album.cue"),
+        "FILE \"backing.wav\" WAVE\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nINDEX 01 00:00:37\n",
+    )
+    .unwrap();
     let store = tempfile::tempdir().expect("Store");
     let database = Database::open(store.path().join("library.sqlite"))
         .await
         .expect("Database");
-    let connected = Source::connect(
-        SourceId::new("test-source"),
-        SourceSetup::Local {
-            roots: vec![root.path().to_path_buf()],
-        },
-        "",
-    )
-    .await
-    .expect("Local");
-    let (configuration, source, _) = connected.into_parts();
-    database
-        .reconcile_source(
-            &configuration.source_id,
-            &configuration.kind,
-            &configuration.name,
+    let mut identities = None;
+    for source_id in ["test-source", "readded-source"] {
+        let (configuration, source, _) = Source::connect(
+            SourceId::new(source_id),
+            SourceSetup::Local {
+                roots: vec![root.path().to_path_buf(), other.path().to_path_buf()],
+            },
+            "",
         )
         .await
-        .unwrap();
-    let progress = Mutex::new(Vec::new());
-    source
-        .acquire_catalog(
-            &database,
-            &|update| progress.lock().expect("progress lock").push(update),
-            Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            true,
-        )
-        .await
-        .expect("scan");
-    let progress = progress.into_inner().expect("progress");
-    let first_files = progress
-        .iter()
-        .position(|update| update.stage == sources::SourceReadStage::Files)
-        .expect("Files progress");
-    let first_tracks = progress
-        .iter()
-        .position(|update| update.stage == sources::SourceReadStage::Tracks)
-        .expect("Tracks progress");
-    assert!(first_files < first_tracks);
-    assert_eq!(progress[first_files].completed, 2);
-    assert_eq!(progress[first_files].total, None);
-    let artwork = progress
-        .iter()
-        .filter(|update| update.stage == sources::SourceReadStage::Artwork)
-        .collect::<Vec<_>>();
-    assert_eq!(artwork.first().expect("artwork started").completed, 0);
-    let finished = artwork.last().expect("artwork finished");
-    assert!(finished.completed > 0);
-    assert_eq!(finished.total, Some(finished.completed));
-    assert!(artwork.iter().all(|update| update.total == finished.total));
-    assert_eq!(
-        progress
-            .iter()
-            .filter(|update| update.stage == sources::SourceReadStage::Tracks)
-            .next_back()
-            .expect("final Tracks progress")
-            .completed,
-        2
-    );
+        .unwrap()
+        .into_parts();
+        database
+            .reconcile_source(
+                &configuration.source_id,
+                &configuration.kind,
+                &configuration.name,
+            )
+            .await
+            .unwrap();
+        if source_id == "test-source" {
+            database
+                .set_favorite(
+                    &library::FavoriteTarget::Track(
+                        url::Url::from_file_path(
+                            root.path().join("first.wav").canonicalize().unwrap(),
+                        )
+                        .unwrap()
+                        .into(),
+                    ),
+                    true,
+                )
+                .await
+                .unwrap();
+        }
+        let source_key = database
+            .source_identity_key(source.source_id())
+            .await
+            .unwrap()
+            .unwrap();
+        for _ in 0..2 {
+            let progress = Mutex::new(Vec::new());
+            source
+                .acquire_catalog(
+                    &database,
+                    &|update| progress.lock().unwrap().push(update),
+                    Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    true,
+                )
+                .await
+                .unwrap();
+            let progress = progress.into_inner().unwrap();
+            assert!(progress.iter().all(|update| {
+                update.stage == sources::SourceReadStage::Tracks && update.total.is_none()
+            }));
+            assert!(
+                progress
+                    .windows(2)
+                    .all(|pair| pair[0].completed <= pair[1].completed)
+            );
+            assert_eq!(progress.last().unwrap().completed, 5);
+            assert_eq!(
+                CatalogQuery::tracks(TrackScope::Tracks(source_key))
+                    .count(&database, &ReadCancellation::new())
+                    .await
+                    .unwrap(),
+                5,
+                "accepted tracks must also be indexed, including retained tracks from the old source"
+            );
+            let current = database
+                .mapping_track_page(source_key, None, None, 10, &ReadCancellation::new())
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|track| (track.track_key, track.media_uri))
+                .collect::<Vec<_>>();
+            if let Some(expected) = &identities {
+                assert_eq!(
+                    &current, expected,
+                    "source reassignment keeps track identities"
+                );
+            } else {
+                assert_eq!(current.len(), 5);
+                identities = Some(current);
+            }
+        }
+        if source_id == "test-source" {
+            write_silent_wav(&root.path().join("first.wav"), 2).unwrap();
+            source
+                .apply_local_change(
+                    &database,
+                    source_key,
+                    LocalLiveChange::Paths {
+                        paths: vec![root.path().join("first.wav")],
+                        rename: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(database.remove_source(source.source_id()).await.unwrap());
+        }
+    }
 }
 
 async fn track_count(

@@ -625,6 +625,39 @@ impl GstEngine {
             return;
         }
         let needs_initial_rate_seek = self.pipeline_for_slot(slot).needs_initial_rate_seek();
+        let time_reopened = self
+            .pipeline_for_slot(slot)
+            .stream()
+            .is_some_and(|stream| stream.time_offset_millis().is_some());
+        let restart = self
+            .incoming
+            .as_ref()
+            .filter(|incoming| {
+                incoming.slot == slot
+                    && incoming.id == id
+                    && incoming.phase == IncomingPhase::Prerolling
+                    && (incoming.item.stream.end_millis().is_some() || needs_initial_rate_seek)
+                    && incoming.item.stream.time_seekable()
+                    && !time_reopened
+                    && self.pipeline_for_slot(slot).native_seekable() == Some(false)
+            })
+            .map(|incoming| incoming.item.clone());
+        if let Some(mut next) = restart {
+            let planned = next.clone();
+            match next.stream.reopened_at(0) {
+                Ok(stream) => *next.stream.stream = stream,
+                Err(error) => {
+                    self.fail_incoming(slot, id, error.to_string());
+                    return;
+                }
+            }
+            self.clear_incoming();
+            self.prepare_incoming(&next);
+            if let Some(incoming) = self.incoming.as_mut() {
+                incoming.item = planned;
+            }
+            return;
+        }
         let Some(incoming) = self
             .incoming
             .as_mut()
@@ -634,7 +667,8 @@ impl GstEngine {
         };
         match incoming.phase {
             IncomingPhase::Prerolling
-                if incoming.item.stream.end_millis().is_some() || needs_initial_rate_seek =>
+                if (incoming.item.stream.end_millis().is_some() && !time_reopened)
+                    || needs_initial_rate_seek =>
             {
                 incoming.phase = IncomingPhase::Seeking;
                 if let Err(error) = self.pipeline_for_slot(slot).seek_millis(0) {
@@ -1028,7 +1062,6 @@ impl GstEngine {
                             .start_item_session_at_millis(current, position_millis, target_state)?;
                         self.pending_seek = pending_seek_for_session_restart(
                             start_millis,
-                            position_millis,
                             target_state,
                             needs_preroll_seek,
                             PendingSeekKind::Startup,
@@ -1321,12 +1354,17 @@ impl GstEngine {
         } else {
             gst::State::Paused
         };
+        let current_after_gapless_cancel = current_after_gapless_cancel.or_else(|| {
+            (self.active_pipeline().native_seekable() == Some(false))
+                .then(|| self.current_item().ok())
+                .flatten()
+                .filter(|item| item.stream.time_seekable())
+        });
         if let Some(current) = current_after_gapless_cancel {
             let (start_millis, needs_preroll_seek) =
                 self.start_item_session_at_millis(current, millis, target_state)?;
             self.pending_seek = pending_seek_for_session_restart(
                 start_millis,
-                millis,
                 target_state,
                 needs_preroll_seek,
                 PendingSeekKind::Interactive,
@@ -1341,7 +1379,6 @@ impl GstEngine {
                 self.start_item_session_at_millis(current, 0, target_state)?;
             self.pending_seek = pending_seek_for_session_restart(
                 start_millis,
-                0,
                 target_state,
                 needs_preroll_seek,
                 PendingSeekKind::Interactive,
@@ -1441,17 +1478,27 @@ impl GstEngine {
 
     fn start_item_session_at_millis(
         &mut self,
-        item: PreparedRun,
+        mut item: PreparedRun,
         position_millis: u64,
         target_state: gst::State,
     ) -> Result<(u64, bool), String> {
         self.repeated_seek_guard = None;
         let (settings, volume, muted, playback_rate, visualizer_enabled, slot) =
             self.session_context();
+        if item.stream.time_seekable()
+            && (item.stream.time_offset_millis().is_some()
+                || self.active_pipeline().native_seekable() == Some(false))
+        {
+            *item.stream.stream = item
+                .stream
+                .reopened_at(position_millis)
+                .map_err(|error| error.to_string())?;
+        }
         let start_millis = SourceClock::from_stream(&item.stream).physical_seek(position_millis);
         let needs_preroll_seek = start_millis > 0
-            || item.stream.end_millis().is_some()
-            || playback_rate != DEFAULT_PLAYBACK_RATE;
+            || (item.stream.end_millis().is_some() && item.stream.time_offset_millis().is_none())
+            || (playback_rate != DEFAULT_PLAYBACK_RATE
+                && item.stream.time_offset_millis().is_none());
         let startup_state = if needs_preroll_seek {
             gst::State::Paused
         } else {
@@ -2046,6 +2093,35 @@ impl GstEngine {
             } else {
                 SEEK_SETTLE_WINDOW
             };
+        if self.active_pipeline().native_seekable() == Some(false)
+            && self
+                .current_item()
+                .is_ok_and(|item| item.stream.time_seekable())
+        {
+            let logical = self.active_pipeline().logical_position(target_millis);
+            let state = if self.desired_playing {
+                gst::State::Playing
+            } else {
+                gst::State::Paused
+            };
+            let result = self
+                .current_item()
+                .and_then(|item| self.start_item_session_at_millis(item, logical, state));
+            match result {
+                Ok((start, needs_seek)) => {
+                    self.pending_seek = pending_seek_for_session_restart(
+                        start,
+                        state,
+                        needs_seek,
+                        PendingSeekKind::Startup,
+                        now,
+                    );
+                    self.push_logical_position(logical);
+                }
+                Err(error) => self.fail_playback(self.timing_run_id(), BackendFailure::new(error)),
+            }
+            return true;
+        }
         let seek_result = self.active_pipeline().seek_physical_millis(target_millis);
         if let Err(error) = seek_result {
             self.pending_seek = None;
@@ -2724,6 +2800,100 @@ impl GstEngine {
                     .then(|| self.pipeline_for_slot(slot).position().map(clock_millis))
                     .flatten(),
             };
+            let time_stream = self
+                .pipeline_for_slot(slot)
+                .stream()
+                .filter(|stream| {
+                    stream.time_seekable()
+                        && self.pipeline_for_slot(slot).native_seekable() != Some(true)
+                })
+                .cloned();
+            if let Some(mut stream) = time_stream {
+                if let Some(position) = seek_position {
+                    let logical = self.pipeline_for_slot(slot).logical_position(position);
+                    stream.stream = Box::new(
+                        stream
+                            .reopened_at(logical)
+                            .map_err(|error| error.to_string())?,
+                    );
+                    let run = self
+                        .run_for_slot(slot)
+                        .or_else(|| {
+                            self.incoming
+                                .as_ref()
+                                .filter(|incoming| incoming.slot == slot)
+                                .map(|incoming| incoming.item.run)
+                        })
+                        .or_else(|| {
+                            self.pending_handoff
+                                .as_ref()
+                                .filter(|handoff| handoff.incoming.slot == slot)
+                                .map(|handoff| handoff.incoming.item.run)
+                        })
+                        .ok_or("No playback item is active")?;
+                    let previous_rate = self.playback_rate();
+                    lock_recover(&self.shared).playback_rate = rate;
+                    let state = if self.desired_playing
+                        && (slot == active || crossfading || handoff_in_progress)
+                    {
+                        gst::State::Playing
+                    } else {
+                        gst::State::Paused
+                    };
+                    let volume =
+                        self.output_levels_at(settings.output_gain(), Instant::now())[slot.index()];
+                    let id = match self.start_pipeline(
+                        slot,
+                        &PreparedRun { run, stream },
+                        &settings,
+                        volume,
+                        settings.muted,
+                        rate,
+                        state,
+                    ) {
+                        Ok(id) => id,
+                        Err(error) => {
+                            lock_recover(&self.shared).playback_rate = previous_rate;
+                            return Err(error);
+                        }
+                    };
+                    let tap = self.visualizer_tap(slot, self.visualizer_enabled());
+                    self.pipeline_for_slot_mut(slot).set_visualizer_tap(tap);
+                    if let Some(incoming) = self
+                        .incoming
+                        .as_mut()
+                        .filter(|incoming| incoming.slot == slot)
+                    {
+                        incoming.id = id;
+                        incoming.phase = IncomingPhase::Prerolling;
+                    }
+                    if let Some(handoff) = self
+                        .pending_handoff
+                        .as_mut()
+                        .filter(|handoff| handoff.incoming.slot == slot)
+                    {
+                        handoff.incoming.id = id;
+                    }
+                    if slot == active {
+                        self.pending_seek = pending_seek_for_session_restart(
+                            0,
+                            state,
+                            false,
+                            PendingSeekKind::Interactive,
+                            Instant::now(),
+                        );
+                        self.push_logical_position(logical);
+                    }
+                    continue;
+                } else if slot == active {
+                    let target = self
+                        .pending_seek
+                        .as_ref()
+                        .map(|pending| pending.target_millis)
+                        .unwrap_or_else(|| self.active_pipeline().physical_seek_target(0));
+                    self.start_playback_seek(target);
+                }
+            }
             let seek_started = self.pipeline_for_slot_mut(slot).set_playback_rate(
                 rate,
                 seek_position,
@@ -3177,7 +3347,6 @@ fn seek_position_matches_target(target_millis: u64, millis: u64) -> bool {
 }
 fn pending_seek_for_session_restart(
     absolute_start_millis: u64,
-    logical_position_millis: u64,
     target_state: gst::State,
     needs_preroll_seek: bool,
     kind: PendingSeekKind,
@@ -3191,7 +3360,7 @@ fn pending_seek_for_session_restart(
     if target_state == gst::State::Playing {
         return Some(PendingSeek::track_start(now));
     }
-    Some(PendingSeek::interactive(logical_position_millis, now))
+    Some(PendingSeek::interactive(absolute_start_millis, now))
 }
 fn stream_uri_scheme(uri: &str) -> &str {
     uri.split_once(':')

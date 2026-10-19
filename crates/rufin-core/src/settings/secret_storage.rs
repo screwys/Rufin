@@ -90,6 +90,18 @@ impl KeyringSecretStore {
                     return Err("credential storage was reset".into());
                 }
                 stored.ui.application.secret_storage_mode = SecretStorageMode::ConfigFile;
+                for source in stored.sources.connections_mut() {
+                    if let Some(super::Credential::Sealed { session, .. }) = &mut source.credential
+                    {
+                        *session = false;
+                    }
+                }
+                for credential in stored.scrobbling_credentials.values_mut() {
+                    if let super::Credential::Sealed { session, .. } = credential {
+                        *session = false;
+                    }
+                }
+                stored.shared_settings.persist_credentials();
                 Ok(())
             })
             .map_err(SecretError::Config)

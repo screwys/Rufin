@@ -822,6 +822,8 @@ impl Database {
             return Ok(None);
         };
         let smart = *smart;
+        let source_id = source_id.clone();
+        let object_id = object_id.clone();
         let (table, from, scope) = if smart {
             ("smart_playlists", "smart_playlists owner", "?2 IS NULL")
         } else {
@@ -838,8 +840,8 @@ impl Database {
         let mut connection = self.acquire_reader().await?;
         let Some((key, previous)) =
             sqlx::query_as::<_, (i64, Option<String>)>(sqlx::AssertSqlSafe(select))
-                .bind(object_id)
-                .bind(source_id)
+                .bind(&object_id)
+                .bind(&source_id)
                 .fetch_optional(&mut *connection)
                 .await?
         else {
@@ -898,11 +900,31 @@ impl Database {
             {
                 let mut writer = self.writer().await?;
                 let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+                let mut transaction = connection.begin().await?;
                 let path = format!(
                     "(SELECT '$['||key||']' FROM json_each(artwork_binding) WHERE {automatic} LIMIT 1)"
                 );
-                sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET artwork_binding=CAST(CASE WHEN {path} IS NULL THEN json_insert(coalesce(artwork_binding,'[]'),'$[#]',json(?1)) ELSE json_set(artwork_binding,{path},json(?1)) END AS BLOB) WHERE rowid=?2 AND (SELECT json(value) FROM json_each(artwork_binding) WHERE {automatic} LIMIT 1) IS json(?3)")))
-                    .bind(serde_json::to_string(&selected)?).bind(key).bind(previous).execute(connection).await?;
+                let changed = sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET artwork_binding=CAST(CASE WHEN {path} IS NULL THEN json_insert(coalesce(artwork_binding,'[]'),'$[#]',json(?1)) ELSE json_set(artwork_binding,{path},json(?1)) END AS BLOB) WHERE rowid=?2 AND (SELECT json(value) FROM json_each(artwork_binding) WHERE {automatic} LIMIT 1) IS json(?3)")))
+                    .bind(serde_json::to_string(&selected)?).bind(key).bind(previous).execute(&mut *transaction).await?.rows_affected()>0;
+                if changed {
+                    if smart {
+                        crate::smart_playlists::sync_smart_on(
+                            &mut transaction,
+                            crate::SmartPlaylistKey::from_raw(key),
+                        )
+                        .await?;
+                    } else {
+                        crate::playlists::sync_playlist_header_on(
+                            &mut transaction,
+                            crate::PlaylistKey::from_raw(key),
+                        )
+                        .await?;
+                    }
+                }
+                transaction.commit().await?;
+                if changed {
+                    self.cache_written();
+                }
             }
             connection = self.acquire_reader().await?;
             let winner: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT (SELECT value FROM json_each(artwork_binding) WHERE {automatic} LIMIT 1) FROM {table} WHERE rowid=?1"))).bind(key).fetch_optional(&mut *connection).await?.flatten();

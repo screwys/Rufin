@@ -1,6 +1,7 @@
 use super::*;
 use crate::{app, diagnostics::Diagnostics, paths::Paths, runtime::RuntimeInputs};
 use playback::{BackendCommand, BackendError, BackendEvent, PlaybackBackend};
+use sources::DownloadQuality;
 
 fn diagnostics() -> Arc<Diagnostics> {
     static DIAGNOSTICS: std::sync::OnceLock<(
@@ -21,6 +22,12 @@ fn diagnostics() -> Arc<Diagnostics> {
 #[test]
 fn saved_settings_enable_only_remembered_legacy_profiles() {
     assert!(!ConnectSettings::default().enabled);
+    let default_name = if cfg!(target_os = "android") {
+        "Rufin Android"
+    } else {
+        "Rufin Desktop"
+    };
+    assert_eq!(ConnectSettings::default().name, default_name);
     for (saved, expected) in [
         (r#"{}"#, false),
         (r#"{"name":"Work Laptop"}"#, false),
@@ -29,154 +36,47 @@ fn saved_settings_enable_only_remembered_legacy_profiles() {
         (r#"{"profile":"shared-profile","enabled":false}"#, false),
         (r#"{"enabled":true}"#, true),
     ] {
-        let config = ConnectSettings::from_device_file(saved.as_bytes()).unwrap();
+        let (config, encoding) = ConnectSettings::from_device_file(saved.as_bytes()).unwrap();
         assert_eq!(config.enabled, expected, "{saved}");
+        assert_eq!(encoding, None, "{saved}");
+        assert_eq!(
+            config.name,
+            if saved.contains("Work Laptop") {
+                "Work Laptop"
+            } else {
+                default_name
+            }
+        );
     }
+    for saved in [
+        DownloadQuality::Original,
+        DownloadQuality::Transcoded(library::AudioEncoding::mp3()),
+    ] {
+        let bytes = serde_json::to_vec(&serde_json::json!({"encoding": saved})).unwrap();
+        assert_eq!(
+            ConnectSettings::from_device_file(&bytes).unwrap().1,
+            Some(saved)
+        );
+    }
+    assert_eq!(
+        ConnectSettings::from_device_file(br#"{"encoding":"mp3"}"#)
+            .unwrap()
+            .1,
+        Some(DownloadQuality::Transcoded(library::AudioEncoding::mp3()))
+    );
+    assert_eq!(
+        ConnectSettings::from_device_file(br#"{"name":"Rufin"}"#)
+            .unwrap()
+            .0
+            .name,
+        "Rufin"
+    );
 }
 
 struct IdleBackend;
 
 #[test]
-fn cue_backing_file_reuse_and_removal() {
-    let root = tempfile::tempdir().unwrap();
-    app::with_runtime(|runtime| {
-        runtime.block_on(Box::pin(async {
-            let inputs = device(root.path(), "cue-files", diagnostics(), Arc::new(secrets::MemorySecretStore::new())).await;
-            let owner = &inputs.products.connect;
-            for (case, mapped, original_exists, encoding) in [
-                ("existing", true, true, DownloadQuality::Original),
-                ("empty", true, false, DownloadQuality::Original),
-                ("private", false, false, DownloadQuality::Original),
-                ("smaller", true, false, DownloadQuality::Transcoded(library::AudioEncoding::mp3())),
-            ] {
-                let folder = root.path().join(case);
-                std::fs::create_dir_all(&folder).unwrap();
-                let original = folder.join("album.flac");
-                if original_exists { std::fs::write(&original, b"whole audio").unwrap(); }
-                owner.status.send_modify(|status| {
-                    status.settings.encoding = encoding;
-                    status.settings.folders.clear();
-                    if mapped { status.settings.folders.insert(case.into(), downloads::DownloadDirectory::Native(folder.clone())); }
-                });
-                let remote = url::Url::from_file_path(root.path().join(format!("remote-{case}.flac"))).unwrap().to_string();
-                let mut uris = Vec::new();
-                for index in 0..3 {
-                    let uri = library::cue_media_uri(&format!("{case}:{index}"), &remote, index * 1000, (index + 1) * 1000);
-                    owner.database.connect_apply(&[ConnectRecord {
-                        kind: "track".into(), key: uri.clone(), value: Some(serde_json::json!({
-                            "object_id":format!("{case}:{index}"), "media_uri":uri, "source_id":case,
-                            "title":format!("Track {index}"), "normalized_search":"track", "display_album":"Album", "display_artist":"Artist", "sort_text":"track", "duration_millis":1000,
-                            "source_favorite":false, "disc_number":1, "track_number":index+1, "relative_path":"album.flac", "source_format":"flac", "revision":"v1"
-                        }))
-                    }]).await.unwrap();
-                    uris.push(uri);
-                }
-                let mut stored = Vec::new();
-                for (index, uri) in uris.iter().enumerate() {
-                    if index == 1 {
-                        assert!(downloads::ConnectDownload::reuse(owner.as_ref(), uri).await.unwrap(), "reuse {case}");
-                    } else {
-                        let part = folder.join(format!("input-{index}.part"));
-                        std::fs::write(&part, b"whole audio").unwrap();
-                        let destination = downloads::ConnectDownload::destination(owner.as_ref(), uri).await.unwrap()
-                            .unwrap_or_else(|| folder.join("private.audio"));
-                        downloads::ConnectDownload::finish(owner.as_ref(), library::ConnectMediaFile {
-                            media_uri: uri.clone(), encoding:library::media_encoding_key(encoding.encoding()), revision:"\"v1\"".into(),
-                            path:url::Url::from_file_path(&part).unwrap().into(), managed:true, hash:None,
-                        }, &destination).await.unwrap();
-                    }
-                    let file = owner.database.connect_media_file(uri, &library::media_encoding_key(encoding.encoding())).await.unwrap().unwrap();
-                    assert_eq!(file.managed, !original_exists);
-                    stored.push(file.path);
-                    let stream = crate::playback::prepare_stream(&owner.database, playback::StreamRequest::original(uri), None, None, |_| async { panic!("CUE uses its backing file") }).await.unwrap();
-                    assert_eq!(stream.window().unwrap().start_millis, index as u64 * 1000);
-                    assert_eq!(stream.window().unwrap().end_millis, (index as u64 + 1) * 1000);
-                }
-                assert!(stored.iter().all(|path| path == &stored[0]), "shared backing for {case}: {stored:?}");
-                let file = library::file_media_path(&stored[0]).unwrap();
-                assert_eq!(downloads::ConnectDownload::remove(owner.as_ref(), &uris[0]).await.unwrap(), 0);
-                assert!(file.is_file());
-                assert_eq!(downloads::ConnectDownload::remove(owner.as_ref(), &uris[1]).await.unwrap(), 0);
-                assert!(file.is_file());
-                assert_eq!(downloads::ConnectDownload::remove(owner.as_ref(), &uris[2]).await.unwrap(), usize::from(!original_exists));
-                assert_eq!(file.is_file(), original_exists);
-            }
-            inputs.receivers.visualizer.close();
-            let playback = inputs.products.playback.clone();
-            tokio::task::spawn_blocking(move || playback.shutdown()).await.unwrap();
-        }))
-    }).unwrap();
-}
-
-#[test]
-fn cue_concurrent_completion_and_revision_changes() {
-    let root = tempfile::tempdir().unwrap();
-    app::with_runtime(|runtime| {
-        runtime.block_on(Box::pin(async {
-            let inputs = device(root.path(), "cue-revisions", diagnostics(), Arc::new(secrets::MemorySecretStore::new())).await;
-            let owner = &inputs.products.connect;
-            for original_exists in [false, true] {
-                let folder = root.path().join(format!("mapped-{original_exists}"));
-                std::fs::create_dir_all(&folder).unwrap();
-                let original = folder.join("album.flac");
-                if original_exists { std::fs::write(&original, b"old audio").unwrap(); }
-                owner.status.send_modify(|status| { status.settings.folders.insert("cue".into(), downloads::DownloadDirectory::Native(folder.clone())); });
-                let remote = url::Url::from_file_path(folder.join("remote.flac")).unwrap().to_string();
-                let mut uris = Vec::new();
-                for index in 0..3 {
-                    let uri = library::cue_media_uri(&format!("{original_exists}:{index}"), &remote, index*1000, (index+1)*1000);
-                    owner.database.connect_apply(&[ConnectRecord {
-                        kind:"track".into(), key:uri.clone(), value:Some(serde_json::json!({
-                            "object_id":format!("{original_exists}:{index}"), "media_uri":uri, "source_id":"cue",
-                            "title":"Track", "normalized_search":"track", "display_album":"Album", "display_artist":"Artist", "sort_text":"track", "duration_millis":1000,
-                            "source_favorite":false, "disc_number":1, "track_number":index+1, "relative_path":"album.flac", "source_format":"flac", "revision":"v1"
-                        }))
-                    }]).await.unwrap();
-                    uris.push(uri);
-                }
-                let mut completions = Vec::new();
-                for (index, uri) in uris[..2].iter().enumerate() {
-                    let part = folder.join(format!("old-{index}.part"));
-                    std::fs::write(&part, b"old audio").unwrap();
-                    completions.push(library::ConnectMediaFile { media_uri:uri.clone(), encoding:"original".into(), revision:"\"v1\"".into(), path:url::Url::from_file_path(part).unwrap().into(), managed:true, hash:None });
-                }
-                let second = completions.pop().unwrap();
-                let first = completions.pop().unwrap();
-                let (first, second) = tokio::join!(
-                    downloads::ConnectDownload::finish(owner.as_ref(), first, &original),
-                    downloads::ConnectDownload::finish(owner.as_ref(), second, &original)
-                );
-                first.unwrap(); second.unwrap();
-                let a = owner.database.connect_media_file(&uris[0], "original").await.unwrap().unwrap();
-                let b = owner.database.connect_media_file(&uris[1], "original").await.unwrap().unwrap();
-                assert_eq!(a.path, b.path);
-                let mut new_paths = Vec::new();
-                for uri in &uris {
-                    let mut reference = owner.database.connect_track_reference(uri).await.unwrap().unwrap();
-                    reference["revision"] = "v2".into();
-                    owner.database.connect_apply(&[ConnectRecord {kind:"track".into(),key:uri.clone(),value:Some(reference)}]).await.unwrap();
-                    let part = folder.join("new.part");
-                    std::fs::write(&part, b"new audio").unwrap();
-                    downloads::ConnectDownload::finish(owner.as_ref(), library::ConnectMediaFile {
-                        media_uri:uri.clone(),encoding:"original".into(),revision:"\"v2\"".into(),path:url::Url::from_file_path(part).unwrap().into(),managed:true,hash:None,
-                    }, &original).await.unwrap();
-                    let file = owner.database.connect_media_file(uri,"original").await.unwrap().unwrap();
-                    assert_eq!(std::fs::read(library::file_media_path(&file.path).unwrap()).unwrap(),b"new audio");
-                    new_paths.push(file.path);
-                    if new_paths.len() == 1 || original_exists { assert_eq!(std::fs::read(&original).unwrap(), b"old audio"); }
-                }
-                assert!(new_paths.iter().all(|path| path==&new_paths[0]));
-                assert_eq!(original.is_file(), original_exists);
-            }
-            inputs.receivers.visualizer.close();
-            let playback = inputs.products.playback.clone();
-            tokio::task::spawn_blocking(move || playback.shutdown()).await.unwrap();
-        }))
-    }).unwrap();
-}
-
-#[test]
-fn cue_direct_continuation_transfers_one_file_without_enrollment() {
+fn cue_direct_continuation_streams_without_enrollment() {
     let root = tempfile::tempdir().unwrap();
     app::with_runtime(|runtime| {
         runtime.block_on(Box::pin(async {
@@ -247,14 +147,48 @@ fn cue_direct_continuation_transfers_one_file_without_enrollment() {
                 })
                 .await
                 .unwrap();
-                b.fetch_direct_continuation(
-                    &a.status().identity.unwrap(),
-                    &item.media_uri,
-                    &item.metadata,
-                    0,
+                b.database
+                    .remember_media_uris(std::slice::from_ref(&uri))
+                    .await
+                    .unwrap();
+                let mut entries = b
+                    .database
+                    .queue_entries(
+                        library::QueueLoad::media_uris(
+                            vec![uri.clone()],
+                            library::QueueProvenance::Manual,
+                        ),
+                        None,
+                    )
+                    .await
+                    .unwrap()
+                    .entries;
+                for entry in &mut entries {
+                    entry.received_from_connect = true;
+                }
+                let rows = b
+                    .database
+                    .queue_rows_for_entries(
+                        &entries.into_iter().enumerate().collect::<Vec<_>>(),
+                        &library::ReadCancellation::new(),
+                    )
+                    .await
+                    .unwrap();
+                let stream = crate::playback::prepare_stream(
+                    &b.database,
+                    playback::StreamRequest::original(&uri),
+                    None,
+                    Some((b.as_ref(), rows[0].as_ref())),
+                    |_| async { panic!("peer file") },
                 )
                 .await
                 .unwrap();
+                let response = reqwest::get(stream.uri()).await.unwrap();
+                assert!(response.status().is_success());
+                assert_eq!(
+                    response.bytes().await.unwrap().as_ref(),
+                    b"complete backing audio"
+                );
                 assert!(
                     b.database
                         .connect_track_reference(&uri)
@@ -262,45 +196,216 @@ fn cue_direct_continuation_transfers_one_file_without_enrollment() {
                         .unwrap()
                         .is_none()
                 );
-                let file = b
-                    .database
-                    .connect_media_file(&uri, "original")
-                    .await
-                    .unwrap()
-                    .unwrap();
-                let path = library::file_media_path(&file.path).unwrap();
-                assert_eq!(std::fs::read(&path).unwrap(), b"complete backing audio");
-                let stream = crate::playback::prepare_stream(
-                    &b.database,
-                    playback::StreamRequest::original(&uri),
-                    None,
-                    None,
-                    |_| async { panic!("downloaded file") },
-                )
-                .await
-                .unwrap();
+                assert!(
+                    b.database
+                        .connect_media_file(&uri, "original")
+                        .await
+                        .unwrap()
+                        .is_none()
+                );
                 assert_eq!(stream.window().unwrap().start_millis, index as u64 * 1000);
                 assert_eq!(
                     stream.window().unwrap().end_millis,
                     (index as u64 + 1) * 1000
                 );
-                files.push((uri, file.path));
+                files.push(uri);
             }
-            assert_eq!(files[0].1, files[1].1);
-            assert_eq!(
-                downloads::ConnectDownload::remove(b.as_ref(), &files[0].0)
-                    .await
-                    .unwrap(),
-                0
-            );
-            assert!(library::file_media_path(&files[1].1).unwrap().is_file());
-            assert_eq!(
-                downloads::ConnectDownload::remove(b.as_ref(), &files[1].0)
-                    .await
-                    .unwrap(),
-                1
-            );
+            guest.products.downloads.remove(files, false);
+            guest.products.downloads.queue_page(0, 1).await.unwrap();
             assert!(source.is_file());
+            assert!(host.products.source.list_sources().sources.is_empty());
+            guest.products.downloads.set_paused(true);
+            guest.products.downloads.queue_page(0, 1).await.unwrap();
+            let mut shared = Vec::new();
+            for index in 0..2 {
+                let path = root.path().join(format!("outside-{index}.flac"));
+                let bytes = format!("shared playlist audio {index}").into_bytes();
+                std::fs::write(&path, &bytes).unwrap();
+                let uri = url::Url::from_file_path(&path).unwrap().to_string();
+                a.database
+                    .write_direct_track_metadata(
+                        &uri,
+                        &library::TrackMetadata {
+                            title: format!("Outside {index}"),
+                            album: "Shared playlist".into(),
+                            artist: "Artist".into(),
+                            disc_number: 1,
+                            track_number: index + 1,
+                            duration_millis: 1000,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap();
+                a.database
+                    .write_local_access(
+                        None,
+                        &[&library::LocalAccessWrite {
+                            media_uri: uri.clone(),
+                            origin: library::LocalAccessOrigin::Import,
+                            path: path.to_string_lossy().into_owned(),
+                            root: root.path().to_string_lossy().into_owned(),
+                            relative_path: format!("outside-{index}.flac"),
+                            access_uri: uri.clone(),
+                            size_bytes: bytes.len() as i64,
+                            mtime_ns: 1,
+                            device_id: None,
+                            inode: None,
+                            parser_version: 18,
+                            loudness_analysis_key: None,
+                        }],
+                    )
+                    .await
+                    .unwrap();
+                shared.push((uri, bytes));
+            }
+            let (host_playlist, playlist) = a
+                .database
+                .create_playlist(
+                    None,
+                    "Outside sources",
+                    &library::CatalogQuery::uris(
+                        library::CatalogKind::Track,
+                        shared.iter().map(|(uri, _)| uri.clone()).collect(),
+                    )
+                    .selection(),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            let host_queue = host.products.playback.clone();
+            let host_queue = tokio::task::spawn_blocking(move || host_queue.snapshot())
+                .await
+                .unwrap()
+                .unwrap();
+            let shared_keys = a
+                .database
+                .selected_track_keys(
+                    &library::CatalogQuery::uris(
+                        library::CatalogKind::Track,
+                        shared.iter().map(|(uri, _)| uri.clone()).collect(),
+                    )
+                    .selection(),
+                    &library::ReadCancellation::new(),
+                )
+                .await
+                .unwrap();
+            assert!(
+                host_queue
+                    .entries
+                    .iter()
+                    .all(|entry| !shared_keys.contains(&entry.track_key))
+            );
+            let snapshot = a.export().await.unwrap();
+            let session = a.active().await.unwrap();
+            let key = a
+                .secret(file_key(&a.identity_reference().unwrap(), &session.profile))
+                .await
+                .unwrap()
+                .unwrap();
+            b.import_file(snapshot.path().to_owned(), true, Some(key))
+                .await
+                .unwrap();
+            let cancellation = library::ReadCancellation::new();
+            let playlist = b
+                .database
+                .playlist_key_by_identity(None, &playlist, &cancellation)
+                .await
+                .unwrap()
+                .unwrap();
+            let entries = b
+                .database
+                .queue_entries(
+                    library::QueueLoad::tracks(
+                        library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist))
+                            .selection(),
+                    ),
+                    None,
+                )
+                .await
+                .unwrap()
+                .entries;
+            let rows = b
+                .database
+                .queue_rows_for_entries(
+                    &entries.into_iter().enumerate().collect::<Vec<_>>(),
+                    &cancellation,
+                )
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 2);
+            for (row, (uri, bytes)) in rows.iter().zip(&shared) {
+                assert!(!row.received_from_connect);
+                assert_eq!(&row.track.media_uri, uri);
+                assert!(
+                    b.database
+                        .connect_track_reference(uri)
+                        .await
+                        .unwrap()
+                        .is_some()
+                );
+                let stream = crate::playback::prepare_stream(
+                    &b.database,
+                    playback::StreamRequest::original(uri),
+                    None,
+                    Some((b.as_ref(), row.as_ref())),
+                    |_| async { panic!("shared file uses peer access") },
+                )
+                .await
+                .unwrap();
+                let response = reqwest::get(stream.uri()).await.unwrap();
+                assert!(response.status().is_success());
+                assert_eq!(response.bytes().await.unwrap().as_ref(), bytes);
+                assert!(
+                    b.database
+                        .connect_media_files(uri)
+                        .await
+                        .unwrap()
+                        .is_empty(),
+                    "playing does not retain audio"
+                );
+            }
+            let unadmitted = root.path().join("unadmitted.flac");
+            std::fs::write(&unadmitted, b"not shared").unwrap();
+            let uri = url::Url::from_file_path(unadmitted).unwrap().to_string();
+            a.database
+                .remember_media_uris(std::slice::from_ref(&uri))
+                .await
+                .unwrap();
+            a.database
+                .add_playlist_tracks(
+                    None,
+                    host_playlist,
+                    &library::CatalogQuery::uris(library::CatalogKind::Track, vec![uri.clone()])
+                        .selection(),
+                    false,
+                )
+                .await
+                .unwrap();
+            let peer = a.status().identity.unwrap();
+            assert!(
+                b.request(&peer, Request::TrackReference { uri: uri.clone() })
+                    .await
+                    .unwrap()
+                    .is_null()
+            );
+            assert!(
+                b.connected_network()
+                    .await
+                    .unwrap()
+                    .stream_request(
+                        &peer,
+                        serde_json::to_vec(&rufin_connect::media::PeerMediaRequest {
+                            uri,
+                            encoding: None,
+                            range: None,
+                            window: None
+                        })
+                        .unwrap()
+                    )
+                    .await
+                    .is_err()
+            );
             for inputs in [guest, host] {
                 inputs.products.connect.leave_profile().await.unwrap();
                 inputs.receivers.visualizer.close();
@@ -336,9 +441,70 @@ fn relay_changes_preserve_the_open_profile_and_device_identity() {
             )
             .await;
             let owner = &inputs.products.connect;
+            {
+                let _action = owner.actions.lock().await;
+                let result = tokio::time::timeout(
+                    Duration::from_secs(1),
+                    execute(
+                        owner,
+                        Action::Join {
+                            invitation: "unused".into(),
+                            replace: false,
+                        },
+                    ),
+                )
+                .await
+                .expect("the local confirmation must not wait for network work");
+                assert!(result.unwrap_err().contains("remove all data"));
+            }
             execute(owner, Action::Create).await.unwrap();
             let session = owner.active().await.unwrap();
             let identity = owner.status().identity;
+            let nearby_peer = "nearby-device".to_owned();
+            owner
+                .event(NetworkEvent::Discovered {
+                    peer: nearby_peer.clone(),
+                    name: "Rufin Android".into(),
+                })
+                .await
+                .unwrap();
+            execute(owner, Action::Refresh).await.unwrap();
+            let nearby = owner
+                .status()
+                .devices
+                .into_iter()
+                .find(|device| device.id == nearby_peer)
+                .unwrap();
+            assert_eq!(nearby.name, "Rufin Android");
+            assert!(!nearby.enrolled);
+            owner
+                .event(NetworkEvent::Discovered {
+                    peer: nearby_peer.clone(),
+                    name: "Phone".into(),
+                })
+                .await
+                .unwrap();
+            let nearby = owner
+                .status()
+                .devices
+                .into_iter()
+                .find(|device| device.id == nearby_peer)
+                .unwrap();
+            assert_eq!(nearby.name, "Phone");
+            assert!(!nearby.enrolled);
+            owner
+                .event(NetworkEvent::DiscoveryExpired {
+                    peer: nearby_peer.clone(),
+                })
+                .await
+                .unwrap();
+            assert!(
+                owner
+                    .status()
+                    .devices
+                    .iter()
+                    .all(|device| device.id != nearby_peer)
+            );
             for relay in [Some("http://127.0.0.1:9/".to_owned()), None] {
                 let previous = owner.connected_network().await.unwrap();
                 execute(
@@ -361,6 +527,27 @@ fn relay_changes_preserve_the_open_profile_and_device_identity() {
                 assert!(Arc::ptr_eq(&session, &owner.active().await.unwrap()));
                 assert_eq!(owner.status().identity, identity);
             }
+            execute(
+                owner,
+                Action::Rename {
+                    name: "Living room".into(),
+                },
+            )
+            .await
+            .unwrap();
+            owner.leave_profile().await.unwrap();
+            execute(owner, Action::Discover).await.unwrap();
+            assert_eq!(owner.status().identity, identity);
+            assert_eq!(owner.status().settings.name, "Living room");
+            assert!(owner.status().settings.profile.is_none());
+            execute(owner, Action::Enable { enabled: true })
+                .await
+                .unwrap();
+            assert_eq!(owner.status().identity, identity);
+            assert_ne!(
+                owner.status().settings.profile,
+                Some(session.profile.clone())
+            );
             owner.leave_profile().await.unwrap();
             inputs.receivers.visualizer.close();
             let playback = inputs.products.playback.clone();
@@ -393,9 +580,250 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
             .await;
             let a = &host.products.connect;
             let b = &guest.products.connect;
+            let former = device(
+                root.path(),
+                "former-profile",
+                diagnostics(),
+                Arc::new(secrets::MemorySecretStore::new()),
+            )
+            .await;
+            execute(b, Action::Create).await.unwrap();
+            pair(b, &former.products.connect).await;
+            let former_id = former.products.connect.status().identity.unwrap();
+            let music = root.path().join("music");
+            std::fs::create_dir(&music).unwrap();
+            let source_id = library::SourceId::new("cached-local");
+            a.source
+                .shared
+                .settings
+                .update(|stored| {
+                    stored
+                        .sources
+                        .configured
+                        .push(crate::settings::ConfiguredSource {
+                            configuration: sources::SourceConfiguration::local(
+                                source_id.clone(),
+                                "Cached",
+                                vec![music],
+                            )
+                            .unwrap(),
+                            credential: None,
+                            music_folder_id: None,
+                            local_access: None,
+                            enable_half_stars: false,
+                        });
+                    stored.sources.selected_source_id = Some(source_id.clone());
+                    Ok(())
+                })
+                .unwrap();
+            a.database
+                .reconcile_source(&source_id, "local", "Cached")
+                .await
+                .unwrap();
             execute(a, Action::Create).await.unwrap();
-            pair(a, b).await;
+            prepare_profile_snapshot(a).await;
+            let retrying = device(
+                root.path(),
+                "retrying-profile",
+                diagnostics(),
+                Arc::new(secrets::MemorySecretStore::new()),
+            )
+            .await;
+            let retry_owner = &retrying.products.connect;
+            pair(b, retry_owner).await;
+            let saved_keys = a
+                .secrets
+                .replace(Arc::new(secrets::UnavailableSecretStore::new(
+                    "keyring unavailable",
+                )));
+            approve_pair(a, retry_owner).await;
+            let failed = wait(retry_owner, |status| {
+                status.error.is_some() && !status.connecting
+            })
+            .await;
+            assert!(
+                failed
+                    .error
+                    .as_deref()
+                    .unwrap()
+                    .contains("keyring unavailable")
+            );
+            assert_eq!(failed.settings.profile, b.status().settings.profile);
+            assert!(matches!(&failed.settings.pending_import, Some(PendingImport::Peer { profile, .. }) if Some(profile) == a.status().settings.profile.as_ref()));
+            assert_eq!(ProfileStore::database_profile(retry_owner.database.path()).await.unwrap(), failed.settings.profile);
+            assert!(!retry_owner.active().await.unwrap().stop.is_cancelled());
+            assert!(execute(retry_owner, Action::Retry).await.is_err());
+            assert!(
+                retry_owner
+                    .status()
+                    .error
+                    .as_deref()
+                    .unwrap()
+                    .contains("keyring unavailable")
+            );
+            execute(retry_owner, Action::CancelPairing).await.unwrap();
+            assert_eq!(retry_owner.status().error, failed.error);
+            a.secrets.replace(saved_keys);
+            execute(retry_owner, Action::Retry).await.unwrap();
+            assert!(retry_owner.status().error.is_none());
+            assert!(retry_owner.status().settings.pending_import.is_none());
+            assert!(!retry_owner.directory.join(format!(
+                "{}.pending.sqlite",
+                blake3::hash(a.status().settings.profile.as_ref().unwrap().as_bytes()).to_hex()
+            )).exists());
+            assert_eq!(
+                ProfileStore::database_profile(retry_owner.database.path())
+                    .await
+                    .unwrap(),
+                a.status().settings.profile
+            );
+            let working = retry_owner.active().await.unwrap();
+            let retained_keys = a.secrets.replace(Arc::new(secrets::UnavailableSecretStore::new("snapshot export must not run")));
+            prepare_pair(a, retry_owner).await;
+            assert!(Arc::ptr_eq(&working, &retry_owner.active().await.unwrap()));
+            assert!(!working.stop.is_cancelled());
+            a.secrets.replace(retained_keys);
+            retry_owner.leave_profile().await.unwrap();
+            retrying.receivers.visualizer.close();
+            let retry_playback = retrying.products.playback.clone();
+            tokio::task::spawn_blocking(move || retry_playback.shutdown())
+                .await
+                .unwrap();
+            prepare_pair(a, b).await;
+            assert!(
+                !b.status()
+                    .devices
+                    .iter()
+                    .any(|device| device.id == former_id && device.enrolled)
+            );
+            wait(&former.products.connect, |status| {
+                !status.devices.iter().any(|device| {
+                    Some(&device.id) == b.status().identity.as_ref() && device.enrolled
+                })
+            })
+            .await;
+            b.database
+                .reconcile_source(&source_id, "local", "Cached")
+                .await
+                .unwrap();
+            let mut catalog = b.database.catalog(source_id.as_str(), None).await.unwrap();
+            let observed = catalog.start_observation().await.unwrap();
+            catalog
+                .apply_catalog(
+                    &library::CatalogBatch {
+                        tracks: vec![library::TrackObservation {
+                            object_id: "cached-track".into(),
+                            metadata: library::TrackMetadata {
+                                title: "Cached track".into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    },
+                    true,
+                )
+                .await
+                .unwrap();
+            catalog
+                .complete_source_observation(observed, &[], None)
+                .await
+                .unwrap();
+            drop(catalog);
+            let paired = b.status().settings;
+            let download_settings = b.source.shared.settings.load().ui.download_settings(&source_id);
+            b.source
+                .shared
+                .settings
+                .update(|stored| {
+                    stored.sources.selected_source_id = Some(source_id.clone());
+                    Ok(())
+                })
+                .unwrap();
+            let resumed = crate::source::SourceOwner::open_dormant(
+                guest.products.artwork.clone(),
+                guest.products.library.clone(),
+                guest.products.downloads.clone(),
+                b.source.shared.settings.clone(),
+                b.secrets.clone(),
+                guest.products.runtime.clone(),
+                crate::source::SourceOutputs {
+                    events: async_channel::unbounded().0,
+                    discovery: async_channel::unbounded().0,
+                },
+            );
+            resumed.install_connect(b);
+            let mut operations = resumed.operation();
+            resumed.start().unwrap();
+            tokio::time::timeout(
+                Duration::from_secs(2),
+                operations.wait_for(|operation| {
+                    matches!(operation, crate::runtime::source::SourceOperation::Idle)
+                }),
+            )
+            .await
+            .expect("Connect must not hide the cached library")
+            .unwrap();
+            assert_eq!(resumed.selected_library().unwrap().source_id, source_id);
+            let selected = resumed.selected_library().unwrap();
+            assert_eq!(
+                resumed
+                    .shared
+                    .database
+                    .source_counts(selected.source_key, &library::ReadCancellation::new())
+                    .await
+                    .unwrap()
+                    .1,
+                1
+            );
+            execute(b, Action::CancelPairing).await.unwrap();
+            let retained = b.status().settings;
+            assert_eq!(retained.profile, paired.profile);
+            assert_eq!(b.source.shared.settings.load().ui.download_settings(&source_id), download_settings);
+            assert!(retained.profile.is_some() && retained.pending_import.is_none());
+            assert!(!b.active().await.unwrap().stop.is_cancelled());
+            let favorite = library::FavoriteTarget::Track(library::source_entity_uri(
+                &source_id,
+                "track",
+                "cached-track",
+            ));
+            b.database.set_favorite(&favorite, true).await.unwrap();
+            a.connected_network()
+                .await
+                .unwrap()
+                .close_profile()
+                .await
+                .unwrap();
+            execute(b, Action::Retry).await.unwrap();
+            a.connected_network().await.unwrap().open_profile(&a.active().await.unwrap().profile, false, serde_json::to_vec(&Enrollment { file_key: a.secret(file_key(&a.identity_reference().unwrap(), &a.active().await.unwrap().profile)).await.unwrap().unwrap() }).unwrap()).await.unwrap();
+            a.connected_network().await.unwrap().attach_documents(a.active().await.unwrap().documents.clone()).await.unwrap();
+            assert!(b.status().error.is_none());
+            assert_eq!(b.status().settings.profile, paired.profile);
+            assert!(b.status().settings.pending_import.is_none());
+            assert!(b.database.favorite(&favorite).await.unwrap());
+            let library::CatalogRows::Tracks(rows) = library::CatalogQuery::uris(
+                library::CatalogKind::Track,
+                vec![favorite.media_uri().to_owned()],
+            )
+            .rows(&b.database, 0, 1, &library::ReadCancellation::new())
+            .await
+            .unwrap() else {
+                panic!("track query");
+            };
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].metadata.title, "Cached track");
+            execute(b, Action::Retry).await.unwrap();
+            assert_eq!(b.status().settings.profile, paired.profile);
             let peer = b.status().identity.unwrap();
+            a.event(NetworkEvent::DiscoveryExpired { peer: peer.clone() })
+                .await
+                .unwrap();
+            assert!(
+                a.status()
+                    .devices
+                    .iter()
+                    .any(|device| device.id == peer && device.enrolled)
+            );
             execute(a, Action::TestConnection { peer: peer.clone() })
                 .await
                 .unwrap();
@@ -504,7 +932,10 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                 .is_none(),
                 "cache reads do not acquire the available sidecar"
             );
-            b.cache_transfer_assets(Some(&host_id), &uri).await;
+            b.peer_access()
+                .cache_assets(&b.database, &uri, [0; 32])
+                .await
+                .unwrap();
             let cached = b
                 .database
                 .lyrics_cache_for_role(
@@ -568,14 +999,51 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                     );
                 }
             }
-            assert!(
-                a.database
-                    .connect_changes()
+            let documents = a.active().await.unwrap().documents.clone();
+            let mut after = 0;
+            loop {
+                let changes = documents
+                    .changes_in_stream(after, library::CONNECT_PAGE_SIZE, library::profile::SyncStream::Authored)
                     .await
-                    .unwrap()
-                    .iter()
-                    .all(|change| change.record.kind != "cache_lyrics")
+                    .unwrap();
+                assert!(
+                    changes
+                        .iter()
+                        .all(|change| !change.name.starts_with("cache_lyrics:"))
+                );
+                let Some(last) = changes.last() else { break };
+                after = last.revision;
+            }
+            let saved_keys = a
+                .secrets
+                .replace(Arc::new(secrets::UnavailableSecretStore::new(
+                    "keyring unavailable",
+                )));
+            pair(a, b).await;
+            a.secrets.replace(saved_keys);
+            assert_eq!(
+                ProfileStore::database_profile(b.database.path())
+                    .await
+                    .unwrap(),
+                a.status().settings.profile
             );
+            assert!(b.database.favorite(&favorite).await.unwrap());
+            let previous_identity = b.status().identity;
+            b.status.send_modify(|status| {
+                for device in &mut status.devices {
+                    device.reachable = false;
+                }
+            });
+            execute(b, Action::Leave).await.unwrap();
+            wait(a, |status| {
+                !status
+                    .devices
+                    .iter()
+                    .any(|device| device.id == peer && device.enrolled)
+            })
+            .await;
+            pair(a, b).await;
+            assert_eq!(b.status().identity, previous_identity);
             // Keep the same transport reachable after closing its profile.
             b.connected_network()
                 .await
@@ -601,7 +1069,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                     .iter()
                     .any(|device| device.id == peer && !device.reachable)
             );
-            for inputs in [guest, host] {
+            for inputs in [guest, host, former] {
                 inputs.products.connect.leave_profile().await.unwrap();
                 inputs.receivers.visualizer.close();
                 let playback = inputs.products.playback.clone();
@@ -615,671 +1083,14 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
 }
 
 #[test]
-fn folder_exchange_preserves_disconnected_edits_without_rewriting_peer_files() {
-    let root = tempfile::tempdir().unwrap();
-    let diagnostics = diagnostics();
-    app::with_runtime(|runtime| {
-        runtime.block_on(Box::pin(async {
-            let host = device(
-                root.path(),
-                "folder-host",
-                diagnostics.clone(),
-                Arc::new(secrets::MemorySecretStore::new()),
-            )
-            .await;
-            let guest = device(
-                root.path(),
-                "folder-guest",
-                diagnostics,
-                Arc::new(secrets::MemorySecretStore::new()),
-            )
-            .await;
-            let a = &host.products.connect;
-            let b = &guest.products.connect;
-            execute(a, Action::Create).await.unwrap();
-            pair(a, b).await;
-            a.network
-                .lock()
-                .await
-                .take()
-                .unwrap()
-                .shutdown()
-                .await
-                .unwrap();
-            b.network
-                .lock()
-                .await
-                .take()
-                .unwrap()
-                .shutdown()
-                .await
-                .unwrap();
-            let folders = [root.path().join("sync-a"), root.path().join("sync-b")];
-            for (owner, folder) in [(a, &folders[0]), (b, &folders[1])] {
-                execute(
-                    owner,
-                    Action::Destination {
-                        destination: Some(portable::Destination::Local {
-                            path: folder.clone(),
-                        }),
-                    },
-                )
-                .await
-                .unwrap();
-            }
-            let first = library::FavoriteTarget::Track("https://example.invalid/first.flac".into());
-            let second =
-                library::FavoriteTarget::Track("https://example.invalid/second.flac".into());
-            a.database.set_favorite(&first, true).await.unwrap();
-            b.database.set_favorite(&second, true).await.unwrap();
-            for owner in [a, b] {
-                owner.synchronize().await.unwrap();
-                owner.exchange().await.unwrap();
-            }
-            assert!(!a.database.favorite(&second).await.unwrap());
-            assert!(!b.database.favorite(&first).await.unwrap());
-            let names = [
-                format!("{}.rufin-connect", a.status().identity.unwrap()),
-                format!("{}.rufin-connect", b.status().identity.unwrap()),
-            ];
-            // Deliver the two independent writes as a file-sync tool would.
-            std::fs::copy(folders[0].join(&names[0]), folders[1].join(&names[0])).unwrap();
-            std::fs::copy(folders[1].join(&names[1]), folders[0].join(&names[1])).unwrap();
-            let peer_files = [
-                std::fs::read(folders[0].join(&names[1])).unwrap(),
-                std::fs::read(folders[1].join(&names[0])).unwrap(),
-            ];
-            for (index, owner) in [a, b].into_iter().enumerate() {
-                owner.exchange().await.unwrap();
-                assert!(owner.database.favorite(&first).await.unwrap());
-                assert!(owner.database.favorite(&second).await.unwrap());
-                prepare_profile_snapshot(owner).await;
-                owner.exchange().await.unwrap();
-                let own = folders[index].join(&names[index]);
-                let bytes = std::fs::read(&own).unwrap();
-                owner.exchange().await.unwrap();
-                owner.exchange().await.unwrap();
-                assert!(
-                    std::fs::read(&own).unwrap() == bytes,
-                    "unchanged exchange leaves the file intact"
-                );
-                assert_eq!(
-                    std::fs::read(folders[index].join(&names[1 - index])).unwrap(),
-                    peer_files[index]
-                );
-            }
-            for owner in [a, b] {
-                owner
-                    .status
-                    .send_modify(|status| status.settings.enabled = false);
-            }
-            let mut encoded = std::io::Cursor::new(Vec::new());
-            image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
-                8,
-                8,
-                image::Rgba([30, 60, 90, 255]),
-            ))
-            .write_to(&mut encoded, image::ImageFormat::Png)
-            .unwrap();
-            let encoded = encoded.into_inner();
-            let cover = root.path().join("shared-cover.png");
-            std::fs::write(&cover, encoded).unwrap();
-            let binding = sources::LocalImageRef::File {
-                source_id: sources::SourceId::new("shared-images"),
-                path: cover.to_string_lossy().into_owned(),
-                revision: "one".into(),
-            }
-            .artwork_binding();
-            assert!(
-                a.source
-                    .shared
-                    .artwork
-                    .cache_source(&binding)
-                    .await
-                    .unwrap()
-            );
-            let image = a
-                .source
-                .shared
-                .artwork
-                .cache_entries()
-                .unwrap()
-                .map(Result::unwrap)
-                .find(|image| image.key.ends_with("/512.png"))
-                .unwrap();
-            let image_key = image.key;
-            let image_family = image_key
-                .strip_prefix("ready/")
-                .unwrap()
-                .rsplit_once('/')
-                .unwrap()
-                .0
-                .to_owned();
-            let image_query = artwork::CacheImageRequest {
-                family: image_family.clone(),
-                size: artwork::ImageSize::Thumbnail(512),
-                fallback: false,
-            };
-            let encoded = std::fs::read(&image.path).unwrap();
-            let arbitrary_key = format!("ready/{image_family}/800.png");
-            a.source
-                .shared
-                .artwork
-                .import_missing_cache_file(&arbitrary_key, &image.path)
-                .unwrap();
-            let a_session = a.active().await.unwrap();
-            let b_session = b.active().await.unwrap();
-            let cached_uri = "https://example.invalid/archive-lyrics.flac";
-            for authority in ["source", "external"] {
-                a.database
-                    .write_lyrics_cache(
-                        cached_uri,
-                        authority,
-                        "original",
-                        "",
-                        "",
-                        [4; 32],
-                        "Archive lyrics",
-                        9,
-                    )
-                    .await
-                    .unwrap();
-            }
-            a.publish_cache(&a_session, None).await.unwrap();
-            b.publish_cache(&b_session, None).await.unwrap();
-            let own_assets = folders[0].join("cache");
-            let received_assets = folders[1].join("cache");
-            let own_image_parent = own_assets
-                .join(blake3::hash(a_session.profile.as_bytes()).to_hex().as_str())
-                .join("images")
-                .join(image_family.rsplit_once('/').unwrap().0);
-            std::fs::create_dir_all(&received_assets).unwrap();
-            for entry in std::fs::read_dir(&own_assets)
-                .unwrap()
-                .filter(|entry| entry.as_ref().unwrap().path().is_file())
-                .chain(
-                    std::fs::read_dir(&own_image_parent)
-                        .unwrap()
-                        .flat_map(|family| std::fs::read_dir(family.unwrap().path()).unwrap()),
-                )
-            {
-                let entry = entry.unwrap();
-                let target = received_assets.join(entry.path().strip_prefix(&own_assets).unwrap());
-                std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-                std::fs::copy(entry.path(), target).unwrap();
-            }
-            assert!(
-                b.source
-                    .shared
-                    .artwork
-                    .cache_file(&image_key)
-                    .unwrap()
-                    .is_none(),
-                "publication does not fill another device's cache"
-            );
-            b.status.send_modify(|status| {
-                status.settings.enabled = true;
-                for peer in &mut status.devices {
-                    peer.reachable = false;
-                }
-            });
-            for (size, fallback) in [
-                (artwork::ImageSize::Thumbnail(700), false),
-                (artwork::ImageSize::Original, true),
-            ] {
-                let (selected, _) = b
-                    .fetch_cached_artwork(artwork::CacheImageRequest {
-                        family: image_family.clone(),
-                        size,
-                        fallback,
-                    })
-                    .await
-                    .unwrap();
-                assert_eq!(
-                    selected, arbitrary_key,
-                    "shared-folder lookup selects the cached rendition by actual size"
-                );
-            }
-            let (key, received) = b.fetch_cached_artwork(image_query.clone()).await.unwrap();
-            assert_eq!(std::fs::read(&received).unwrap(), encoded);
-            assert!(
-                b.source
-                    .shared
-                    .artwork
-                    .import_missing_cache_file(&key, &received)
-                    .unwrap()
-            );
-            for authority in ["source", "external"] {
-                let row = b
-                    .fetch_cached_lyrics(LyricsCacheQuery {
-                        media_uri: cached_uri.into(),
-                        authority: authority.into(),
-                        role: "original".into(),
-                        language: String::new(),
-                        script: String::new(),
-                        input: [4; 32],
-                    })
-                    .await
-                    .unwrap();
-                assert_eq!(row.lyrics, "Archive lyrics");
-                assert_eq!(row.cache_input_digest, [4; 32]);
-                assert_eq!(row.updated_at, 9);
-                assert!(
-                    b.database
-                        .import_lyrics_cache(
-                            vec![library::LyricsCacheRow {
-                                lyrics: "Replacement".into(),
-                                ..row
-                            }],
-                            false
-                        )
-                        .await
-                        .unwrap()
-                        .is_empty()
-                );
-            }
-            b.status
-                .send_modify(|status| status.settings.enabled = false);
-            let before: BTreeMap<_, _> = std::fs::read_dir(&own_assets)
-                .unwrap()
-                .filter(|entry| entry.as_ref().unwrap().path().is_file())
-                .chain(
-                    std::fs::read_dir(&own_image_parent)
-                        .unwrap()
-                        .flat_map(|family| std::fs::read_dir(family.unwrap().path()).unwrap()),
-                )
-                .map(|entry| {
-                    let entry = entry.unwrap();
-                    (
-                        entry
-                            .path()
-                            .strip_prefix(&own_assets)
-                            .unwrap()
-                            .to_path_buf(),
-                        std::fs::read(entry.path()).unwrap(),
-                    )
-                })
-                .collect();
-            assert_eq!(
-                before.len(),
-                4,
-                "two renditions and two lyrics rows, without a marker"
-            );
-            b.publish_cache(&b_session, None).await.unwrap();
-            let peer_files: BTreeMap<_, _> = std::fs::read_dir(&received_assets)
-                .unwrap()
-                .filter(|entry| entry.as_ref().unwrap().path().is_file())
-                .chain(
-                    std::fs::read_dir(
-                        received_assets.join(own_image_parent.strip_prefix(&own_assets).unwrap()),
-                    )
-                    .unwrap()
-                    .flat_map(|family| std::fs::read_dir(family.unwrap().path()).unwrap()),
-                )
-                .map(|entry| {
-                    let entry = entry.unwrap();
-                    (
-                        entry
-                            .path()
-                            .strip_prefix(&received_assets)
-                            .unwrap()
-                            .to_path_buf(),
-                        std::fs::read(entry.path()).unwrap(),
-                    )
-                })
-                .collect();
-            assert_eq!(peer_files, before, "incoming cache data is not republished");
-            a.publish_cache(&a_session, None).await.unwrap();
-            a.open(a_session.profile.clone(), false).await.unwrap();
-            a.status
-                .send_modify(|status| status.settings.enabled = false);
-            let a_session = a.active().await.unwrap();
-            a.publish_cache(&a_session, None).await.unwrap();
-            let restarted: BTreeMap<_, _> = std::fs::read_dir(&own_assets)
-                .unwrap()
-                .filter(|entry| entry.as_ref().unwrap().path().is_file())
-                .chain(
-                    std::fs::read_dir(&own_image_parent)
-                        .unwrap()
-                        .flat_map(|family| std::fs::read_dir(family.unwrap().path()).unwrap()),
-                )
-                .map(|entry| {
-                    let entry = entry.unwrap();
-                    (
-                        entry
-                            .path()
-                            .strip_prefix(&own_assets)
-                            .unwrap()
-                            .to_path_buf(),
-                        std::fs::read(entry.path()).unwrap(),
-                    )
-                })
-                .collect();
-            assert_eq!(
-                before, restarted,
-                "unchanged restart does not encrypt assets again"
-            );
-            b.database.clear_lyrics_cache(&[]).await.unwrap();
-            std::fs::remove_file(
-                b.source
-                    .shared
-                    .artwork
-                    .cache_file(&image_key)
-                    .unwrap()
-                    .unwrap(),
-            )
-            .unwrap();
-            b.publish_cache(&b_session, None).await.unwrap();
-            assert!(
-                b.source
-                    .shared
-                    .artwork
-                    .cache_file(&image_key)
-                    .unwrap()
-                    .is_none()
-            );
-            for authority in ["source", "external"] {
-                assert!(
-                    b.database
-                        .lyrics_cache_for_role(
-                            cached_uri,
-                            "original",
-                            "",
-                            "",
-                            [4; 32],
-                            authority,
-                            &library::ReadCancellation::new()
-                        )
-                        .await
-                        .unwrap()
-                        .is_none()
-                );
-                assert!(
-                    a.database
-                        .lyrics_cache_for_role(
-                            cached_uri,
-                            "original",
-                            "",
-                            "",
-                            [4; 32],
-                            authority,
-                            &library::ReadCancellation::new()
-                        )
-                        .await
-                        .unwrap()
-                        .is_some()
-                );
-            }
-            let mut notices = a.source.shared.artwork.subscribe_cache_writes();
-            let mut replacement = std::io::Cursor::new(Vec::new());
-            image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
-                8,
-                8,
-                image::Rgba([90, 60, 30, 255]),
-            ))
-            .write_to(&mut replacement, image::ImageFormat::Png)
-            .unwrap();
-            std::fs::write(&cover, replacement.into_inner()).unwrap();
-            a.source
-                .shared
-                .artwork
-                .invalidate_image(&artwork::ArtworkBinding::opaque(&binding))
-                .unwrap();
-            a.source
-                .shared
-                .artwork
-                .cache_source(&binding)
-                .await
-                .unwrap();
-            let (first_key, first_revision) = notices.recv().await.unwrap();
-            let later = sources::LocalImageRef::File {
-                source_id: sources::SourceId::new("shared-images"),
-                path: cover.to_string_lossy().into_owned(),
-                revision: "later".into(),
-            }
-            .artwork_binding();
-            a.source.shared.artwork.cache_source(&later).await.unwrap();
-            let (later_key, later_revision) = notices.recv().await.unwrap();
-            assert!(later_revision > first_revision);
-            a.publish_cache(&a_session, Some((&[first_key], first_revision)))
-                .await
-                .unwrap();
-            let state: serde_json::Value = serde_json::from_str(
-                &a_session
-                    .documents
-                    .cache_file_exchange()
-                    .await
-                    .unwrap()
-                    .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(
-                state["artwork"], first_revision,
-                "a later notice is not acknowledged before its asset"
-            );
-            let changed: BTreeMap<_, _> = std::fs::read_dir(&own_assets)
-                .unwrap()
-                .filter(|entry| entry.as_ref().unwrap().path().is_file())
-                .chain(
-                    std::fs::read_dir(&own_image_parent)
-                        .unwrap()
-                        .flat_map(|family| std::fs::read_dir(family.unwrap().path()).unwrap()),
-                )
-                .map(|entry| {
-                    let entry = entry.unwrap();
-                    (
-                        entry
-                            .path()
-                            .strip_prefix(&own_assets)
-                            .unwrap()
-                            .to_path_buf(),
-                        std::fs::read(entry.path()).unwrap(),
-                    )
-                })
-                .collect();
-            assert_eq!(changed.len(), before.len());
-            assert_eq!(
-                before
-                    .iter()
-                    .filter(|(name, bytes)| changed.get(*name) == Some(*bytes))
-                    .count(),
-                3,
-                "changing one artwork preserves the other rendition and both lyrics files"
-            );
-            a.publish_cache(&a_session, Some((&[later_key], later_revision)))
-                .await
-                .unwrap();
-            assert_eq!(
-                std::fs::read_dir(&own_assets)
-                    .unwrap()
-                    .filter(|entry| entry.as_ref().unwrap().path().is_file())
-                    .chain(
-                        std::fs::read_dir(&own_image_parent)
-                            .unwrap()
-                            .flat_map(|family| std::fs::read_dir(family.unwrap().path()).unwrap())
-                    )
-                    .count(),
-                before.len() + 1
-            );
-            a.source
-                .shared
-                .artwork
-                .invalidate_image(&artwork::ArtworkBinding::opaque(&binding))
-                .unwrap();
-            a.source
-                .shared
-                .artwork
-                .cache_source(&binding)
-                .await
-                .unwrap();
-            let (failed_key, failed_revision) = notices.recv().await.unwrap();
-            let unavailable = own_assets.with_extension("unavailable");
-            std::fs::rename(&own_assets, &unavailable).unwrap();
-            std::fs::write(&own_assets, b"not a directory").unwrap();
-            assert!(
-                a.publish_cache(&a_session, Some((&[failed_key], failed_revision)))
-                    .await
-                    .is_err()
-            );
-            std::fs::remove_file(&own_assets).unwrap();
-            std::fs::rename(&unavailable, &own_assets).unwrap();
-            let retry = sources::LocalImageRef::File {
-                source_id: sources::SourceId::new("shared-images"),
-                path: cover.to_string_lossy().into_owned(),
-                revision: "after-failure".into(),
-            }
-            .artwork_binding();
-            a.source.shared.artwork.cache_source(&retry).await.unwrap();
-            let (_, retry_revision) = notices.recv().await.unwrap();
-            a.publish_cache(&a_session, None).await.unwrap();
-            let state: serde_json::Value = serde_json::from_str(
-                &a_session
-                    .documents
-                    .cache_file_exchange()
-                    .await
-                    .unwrap()
-                    .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(state["artwork"], retry_revision);
-            assert_eq!(
-                std::fs::read_dir(&own_assets)
-                    .unwrap()
-                    .filter(|entry| entry.as_ref().unwrap().path().is_file())
-                    .chain(
-                        std::fs::read_dir(&own_image_parent)
-                            .unwrap()
-                            .flat_map(|family| std::fs::read_dir(family.unwrap().path()).unwrap())
-                    )
-                    .count(),
-                before.len() + 2
-            );
-            for entry in std::fs::read_dir(&own_assets)
-                .unwrap()
-                .filter(|entry| entry.as_ref().unwrap().path().is_file())
-                .chain(
-                    std::fs::read_dir(&own_image_parent)
-                        .unwrap()
-                        .flat_map(|family| std::fs::read_dir(family.unwrap().path()).unwrap()),
-                )
-            {
-                let entry = entry.unwrap();
-                let target = received_assets.join(entry.path().strip_prefix(&own_assets).unwrap());
-                std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-                std::fs::copy(entry.path(), target).unwrap();
-            }
-            b.publish_cache(&b_session, None).await.unwrap();
-            assert!(
-                b.source
-                    .shared
-                    .artwork
-                    .cache_file(&image_key)
-                    .unwrap()
-                    .is_none(),
-                "changed shared files wait for local demand"
-            );
-            b.status
-                .send_modify(|status| status.settings.enabled = true);
-            let (key, image) = b.fetch_cached_artwork(image_query.clone()).await.unwrap();
-            assert_eq!(
-                std::fs::read(&image).unwrap(),
-                std::fs::read(
-                    a.source
-                        .shared
-                        .artwork
-                        .cache_file(&image_key)
-                        .unwrap()
-                        .unwrap()
-                )
-                .unwrap()
-            );
-            assert!(
-                b.source
-                    .shared
-                    .artwork
-                    .import_missing_cache_file(&key, &image)
-                    .unwrap()
-            );
-            for authority in ["source", "external"] {
-                assert!(
-                    b.fetch_cached_lyrics(LyricsCacheQuery {
-                        media_uri: cached_uri.into(),
-                        authority: authority.into(),
-                        role: "original".into(),
-                        language: String::new(),
-                        script: String::new(),
-                        input: [4; 32]
-                    })
-                    .await
-                    .is_some(),
-                    "cleared lyrics return on demand from shared files"
-                );
-            }
-            b.status
-                .send_modify(|status| status.settings.enabled = false);
-            // Pruning changes representation, not document versions. The next
-            // exchange must still replace this device's old, larger file.
-            let session = a.active().await.unwrap();
-            for index in 0..80 {
-                session
-                    .documents
-                    .write_records(&[ConnectRecord {
-                        kind: "device".into(),
-                        key: session.identity.clone(),
-                        value: Some(serde_json::json!(format!("Laptop {index}"))),
-                    }])
-                    .await
-                    .unwrap();
-            }
-            a.exchange().await.unwrap();
-            let before = a
-                .exchange_import(&session, folders[0].join(&names[0]))
-                .await
-                .unwrap();
-            std::fs::copy(folders[0].join(&names[0]), folders[1].join(&names[0])).unwrap();
-            b.exchange().await.unwrap();
-            std::fs::copy(folders[1].join(&names[1]), folders[0].join(&names[1])).unwrap();
-            a.exchange().await.unwrap();
-            while session
-                .documents
-                .prune_history(&session.identity, &[], library::CONNECT_PAGE_SIZE)
-                .await
-                .unwrap()
-                > 0
-            {}
-            a.exchange().await.unwrap();
-            let after = a
-                .exchange_import(&session, folders[0].join(&names[0]))
-                .await
-                .unwrap();
-            let before =
-                std::io::copy(&mut before.reader().unwrap(), &mut std::io::sink()).unwrap();
-            let after = std::io::copy(&mut after.reader().unwrap(), &mut std::io::sink()).unwrap();
-            assert!(after < before);
-            let compact = std::fs::read(folders[0].join(&names[0])).unwrap();
-            a.exchange().await.unwrap();
-            assert!(std::fs::read(folders[0].join(&names[0])).unwrap() == compact);
-            for inputs in [host, guest] {
-                inputs.receivers.visualizer.close();
-                let playback = inputs.products.playback.clone();
-                tokio::task::spawn_blocking(move || playback.shutdown())
-                    .await
-                    .unwrap();
-            }
-        }))
-    })
-    .unwrap();
-}
-
-#[test]
-fn webdav_exchange_leaves_an_unchanged_profile_file_untouched() {
+fn profile_files_and_pairing_preserve_the_ready_catalog() {
     use axum::{body::Bytes, extract::State, http::StatusCode, response::IntoResponse};
     let root = tempfile::tempdir().unwrap();
     let diagnostics = diagnostics();
     app::with_runtime(|runtime| {
         runtime.block_on(Box::pin(async {
-            type Files = Arc<Mutex<(BTreeMap<String, Vec<u8>>, usize, BTreeSet<String>, usize)>>;
-            let file: Files = Arc::new(Mutex::new((BTreeMap::new(), 0, BTreeSet::from(["/".into()]), 0)));
+            type Files = Arc<Mutex<(BTreeMap<String, Vec<u8>>, usize, BTreeSet<String>, usize, usize, usize)>>;
+            let file: Files = Arc::new(Mutex::new((BTreeMap::new(), 0, BTreeSet::from(["/".into(), "/profiles".into()]), 0, 0, 0)));
             let router = axum::Router::new().fallback(axum::routing::any(
                 |State(files): State<Files>, method: axum::http::Method, uri: axum::http::Uri, body: Bytes| async move {
                     let path = uri.path().to_owned();
@@ -1307,6 +1118,8 @@ fn webdav_exchange_leaves_an_unchanged_profile_file_untouched() {
                         }
                         "GET" => {
                             if path.contains("/cache/") { files.3 += 1; }
+                            if path.contains(".delta-") { files.4 += 1; }
+                            if path.contains(".base-") { files.5 += 1; }
                             match files.0.get(&path) {
                                 Some(bytes) => bytes.clone().into_response(),
                                 None => StatusCode::NOT_FOUND.into_response(),
@@ -1377,63 +1190,161 @@ fn webdav_exchange_leaves_an_unchanged_profile_file_untouched() {
             assert_eq!(inputs.products.source.list_sources().sources[0].id, connections[0].id);
             assert_eq!(inputs.products.source.shared.settings.load().sources.integrations.len(), 1);
             let owner = &inputs.products.connect;
+            let music = library::SourceId::new("music-server");
+            owner.database.reconcile_source(&music, "webdav", "Music server").await.unwrap();
+            let music_root = format!("http://{address}/music/");
+            file.lock().unwrap().0.insert("/music/copied.m3u".into(), b"#EXTM3U\n#PLAYLIST:Disk version\ntrack-0.flac\n".to_vec());
+            let playlist_file = library::LocalFileWrite {
+                path: format!("{music_root}copied.m3u"), root: music_root.clone(), relative_path: "copied.m3u".into(),
+                kind: library::LocalFileKind::Media, size_bytes: Some(64), mtime_ns: 1,
+                device_id: None, inode: None, native_id: None, picture_index: None, artist_pictures: None,
+                revision: Some("playlist-v1".into()), parse_version: Some(1), state: library::LocalFileState::Rejected,
+            };
+            let track_file = library::LocalFileWrite {
+                path: format!("{music_root}track-0.flac"),
+                root: music_root,
+                relative_path: "track-0.flac".into(),
+                kind: library::LocalFileKind::Media,
+                size_bytes: Some(16),
+                mtime_ns: 1,
+                device_id: None,
+                inode: None,
+                native_id: None,
+                picture_index: None,
+                artist_pictures: None,
+                revision: Some("track-v1".into()),
+                parse_version: Some(1),
+                state: library::LocalFileState::Accepted,
+            };
+            let mut tracks = (0..130).map(|index| library::TrackObservation {
+                object_id: format!("track-{index}"),
+                album_object_id: Some("album".into()),
+                metadata: library::TrackMetadata {
+                    title: format!("Track {index}"),
+                    sort_text: format!("track {index:03}"),
+                    album: "Shared album".into(),
+                    artist: "Shared artist".into(),
+                    duration_millis: 120_000 + index,
+                    disc_number: 1,
+                    track_number: index + 1,
+                    source_format: Some("flac".into()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }).collect::<Vec<_>>();
+            tracks[0].user_data = library::NativeUserState { favorite: Some(true), rating: Some(None), play_count: Some(7), ..Default::default() };
+            tracks[0].source_path = Some(track_file.path.clone());
+            let freshness = library::Freshness::new(b"received-native-catalog".to_vec()).unwrap();
+            let mut catalog = owner.database.catalog(music.as_str(), None).await.unwrap();
+            let observed = catalog.start_observation().await.unwrap();
+            catalog.apply_catalog(&library::CatalogBatch {
+                tracks: tracks.clone(),
+                albums: vec![library::AlbumObservation {
+                    object_id: "album".into(),
+                    metadata: library::AlbumMetadata {
+                        title: "Shared album".into(),
+                        artist: "Shared artist".into(),
+                        sort_text: "shared album".into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }],
+                playlists: vec![library::PlaylistObservation { object_id: "server-mix".into(), name: "Server mix".into(), sort_text: "server mix".into(), writable: Some(false), metadata_writable: Some(true), ..Default::default() }],
+                ..Default::default()
+            }, true).await.unwrap();
+            catalog.write_file_observations(&[(track_file.clone(), Vec::new()), (playlist_file, Vec::new())], vec![tracks[0].clone()], true).await.unwrap();
+            catalog.write_source_playlist_page("server-mix", 0, &(0..130).map(|index| library::PlaylistEntryObservation { object_id: format!("entry-{index}"), track_id: format!("track-{index}") }).collect::<Vec<_>>(), true).await.unwrap();
+            catalog.write_source_playlist_freshness("server-mix", Some("revision-one"), Some(7_000_000_000)).await.unwrap();
+            catalog.replace_source_home_section("featured", Some("Featured"), &[library::HomeEntryInput { position: 0, kind: library::HomeEntryKind::Track, entity_object_id: "track-0".into(), title: "Featured track".into(), subtitle: String::new() }]).await.unwrap();
+            catalog.complete_source_observation(observed, &[], Some(&freshness)).await.unwrap();
+            drop(catalog);
+            let shared_uris = vec![library::source_entity_uri(&music, "track", "track-0"), library::source_entity_uri(&music, "track", "track-1")];
+            let (shared_playlist, shared_id) = owner.database.create_playlist(None, "Shared edit", &library::CatalogQuery::uris(library::CatalogKind::Track, shared_uris.clone()).selection()).await.unwrap().unwrap();
             execute(owner, Action::Create).await.unwrap();
-            execute(
-                owner,
-                Action::Destination {
-                    destination: Some(portable::Destination::Remote {
-                        source_id,
-                        path: "profiles".into(),
-                    }),
-                },
-            )
-            .await
-            .unwrap();
-            prepare_profile_snapshot(owner).await;
-            owner.exchange().await.unwrap();
-            let uploads = file.lock().unwrap().1;
-            assert!(uploads > 0);
-            for _ in 0..3 {
-                owner.exchange().await.unwrap();
-            }
-            assert_eq!(
-                file.lock().unwrap().1,
-                uploads,
-                "reading the same profile must not PUT it again, even without an ETag"
-            );
-            execute(
-                owner,
-                Action::Rename {
-                    name: "Renamed".into(),
-                },
-            )
-            .await
-            .unwrap();
-            owner.exchange().await.unwrap();
-            assert_eq!(file.lock().unwrap().1, uploads + 1, "local edits must reach the file");
-            owner.exchange().await.unwrap();
-            assert_eq!(file.lock().unwrap().1, uploads + 1);
-            owner.status.send_modify(|status| status.settings.enabled = false);
+            // A released device link has no canonical file association yet.
+            owner.database.save_playlist_file_link(&library::PlaylistFileLink {
+                playlist: shared_playlist, source_id: Some(music.clone()), path: "music/copied.m3u".into(),
+                auto_refresh: true, auto_save: None, path_mode: library::PlaylistPathMode::Automatic,
+                revision: Some("older disk revision".into()), dirty: true, error: None,
+            }).await.unwrap();
+            let music_key = owner.database.cached_source(music.as_str(), &library::ReadCancellation::new()).await.unwrap().unwrap().source;
+            assert!(owner.database.observed_playlist_file_page(music_key, None).await.unwrap()[0].playlist_identity.is_none());
+            let previous = owner.session.write().await.take().unwrap();
+            let profile = previous.profile.clone();
+            previous.stop.cancel();
+            previous.documents.close().await.unwrap();
+            owner.connected_network().await.unwrap().close_profile().await.unwrap();
+            owner.open(profile, false).await.unwrap();
+            let reopened = owner.database.observed_playlist_file_page(music_key, None).await.unwrap();
+            assert!(reopened[0].playlist_identity.is_some(), "opening an existing profile publishes released file associations without another scan or export");
+            assert_eq!(reopened[0].playlist, Some(shared_playlist));
+            tracks[0].metadata.title = "Edited track".into();
+            owner.database.catalog(music.as_str(), None).await.unwrap()
+                .write_file_observations(&[(track_file, Vec::new())], vec![tracks[0].clone()], true).await.unwrap();
+            let uri = library::source_entity_uri(&music, "track", "track-0");
+            let cancellation = library::ReadCancellation::new();
+            let library::CatalogRows::Tracks(rows) = library::CatalogQuery::uris(library::CatalogKind::Track, vec![uri.clone()])
+                .rows(&owner.database, 0, 1, &cancellation).await.unwrap() else { panic!("track query"); };
+            let expected_metadata = rows[0].metadata.clone();
+            assert_eq!(expected_metadata.title, "Edited track");
+            let exported = owner.export().await.unwrap();
             let session = owner.active().await.unwrap();
-            owner.publish_cache(&session, None).await.unwrap();
-            let cache_uploads = file.lock().unwrap().1;
-            owner.status.send_modify(|status| status.settings.enabled = true);
-            for (index, text) in [(1, "First cached lyrics"), (2, "Updated cached lyrics")] {
-                owner.database.write_lyrics_cache("https://example.invalid/remote-cache.flac", "external", "original", "", "", [0; 32], text, index).await.unwrap();
-                tokio::time::timeout(Duration::from_secs(5), async {
-                    while file.lock().unwrap().1 < cache_uploads + index as usize {
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-                    }
-                }).await.expect("idle lyrics write wakes publication");
-                assert_eq!(file.lock().unwrap().1, cache_uploads + index as usize,
-                    "only the changed asset is uploaded");
-                let saved = file.lock().unwrap().0.clone();
-                owner.publish_cache(&session, None).await.unwrap();
-                assert_eq!(file.lock().unwrap().0, saved, "unchanged no-ETag exchange preserves ciphertext");
-                assert_eq!(file.lock().unwrap().3, 0, "unchanged publication does not read shared payloads");
-                assert_eq!(saved.keys().filter(|path| path.contains("/cache/")).count(), 1,
-                    "asset replacement leaves no older payload file");
+            let key = owner.secret(file_key(&owner.identity_reference().unwrap(), &session.profile)).await.unwrap().unwrap();
+            execute(owner, Action::Export { path: "profiles/manual.rufin-connect".into(), source_id: Some(source_id.clone()) }).await.unwrap();
+            assert_eq!(owner.list_profile_files(source_id.clone(), "profiles".into()).await.unwrap(), vec!["profiles/manual.rufin-connect"]);
+            execute(owner, Action::Import { path: "profiles/manual.rufin-connect".into(), source_id: Some(source_id), replace: false, key: None }).await.unwrap();
+            for (name, paired) in [
+                ("native-file-receiver", false),
+                ("native-network-receiver", true),
+            ] {
+                let receiving = device(root.path(), name, self::diagnostics(), Arc::new(secrets::MemorySecretStore::new())).await;
+                let receiving_owner = &receiving.products.connect;
+                receiving_owner.database.reconcile_source(&music, "webdav", "Music server").await.unwrap();
+                let mut previous = tracks[0].clone();
+                previous.user_data = library::NativeUserState { favorite: Some(false), rating: Some(Some(70)), ..Default::default() };
+                receiving_owner.database.catalog(music.as_str(), Some(0)).await.unwrap().apply_catalog(&library::CatalogBatch { tracks: vec![previous], ..Default::default() }, true).await.unwrap();
+                if paired {
+                    pair(owner, receiving_owner).await;
+                } else {
+                    receiving_owner.import_file(exported.path().to_owned(), true, Some(key.clone())).await.unwrap();
+                }
+                let received = &receiving_owner.database;
+                let source = received.cached_source(music.as_str(), &cancellation).await.unwrap().unwrap();
+                assert!(source.catalog_complete, "the native catalog is ready before provider refresh");
+                assert!(received.accept_freshness(music.as_str(), &freshness, &cancellation).await.unwrap());
+                assert_eq!(received.source_counts(source.source, &cancellation).await.unwrap(), (1, 130));
+                let library::CatalogRows::Tracks(rows) = library::CatalogQuery::uris(library::CatalogKind::Track, vec![uri.clone()])
+                    .rows(received, 0, 1, &cancellation).await.unwrap() else { panic!("track query"); };
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].media_uri, uri);
+                assert_eq!(rows[0].metadata, expected_metadata);
+                assert!(rows[0].state.favorite);
+                assert_eq!(rows[0].state.rating, None, "native rating null clears the previous server rating");
+                let playlist = received.playlist_key_by_object(source.source, "server-mix", &cancellation).await.unwrap().unwrap();
+                let access = received.playlist_access(playlist, &cancellation).await.unwrap().unwrap();
+                assert!(!access.writable);
+                assert!(access.metadata_writable);
+                let entries = received.playlist_entry_uri_page(playlist, -1).await.unwrap();
+                assert_eq!(entries.len(), 130);
+                assert_eq!(entries[0].2, uri);
+                assert!(received.source_playlist_is_fresh(music.as_str(), "server-mix", Some("revision-one"), 0).await.unwrap());
+                let home = received.home_page(source.source, None, 0, 0, &[], &cancellation).await.unwrap();
+                assert_eq!(home.provider_sections[0].section_id, "featured");
+                assert_eq!(home.provider_sections[0].rows.tracks[0].track.media_uri, uri);
+                let shared = received.playlist_key_by_identity(None, &shared_id, &cancellation).await.unwrap().unwrap();
+                assert!(received.get_playlist_file_link(shared).await.unwrap().is_none(), "device file permissions are not imported");
+                crate::playlist_files::discover(&receiving.products.source, &music, source.source).await;
+                let associated = received.find_playlist_file_link(Some(&music), "music/copied.m3u").await.unwrap().unwrap();
+                assert_eq!(associated.playlist, shared, "automatic discovery reuses the existing random playlist identity");
+                assert_eq!(received.playlist_entry_uri_page(shared, -1).await.unwrap().into_iter().map(|entry| entry.2).collect::<Vec<_>>(), shared_uris, "the stale physical playlist does not overwrite shared edits");
+                let copy = receiving.products.source.client(&music).unwrap().import_playlist_file(received, "music/copied.m3u", None).await.unwrap();
+                assert_ne!(copy.playlist, shared, "explicit import as a copy remains independent");
+                receiving_owner.leave_profile().await.unwrap();
+                receiving.receivers.visualizer.close();
+                let playback = receiving.products.playback.clone();
+                tokio::task::spawn_blocking(move || playback.shutdown()).await.unwrap();
             }
+
             owner.leave_profile().await.unwrap();
             inputs.receivers.visualizer.close();
             let playback = inputs.products.playback.clone();
@@ -1454,16 +1365,10 @@ async fn execute(owner: &Arc<ConnectOwner>, action: Action) -> Result<Status, St
         .map_err(|error| error.to_string())
 }
 
-// Finish the writes that background startup and pruning would otherwise race
-// against assertions about an unchanged profile file.
+// Finish background startup and history pruning before capturing the profile.
 async fn prepare_profile_snapshot(owner: &Arc<ConnectOwner>) {
-    loop {
-        let seeded = owner.database.connect_seed_page().await.unwrap();
-        let captured = owner.synchronize().await.unwrap();
-        if !seeded && !captured {
-            break;
-        }
-    }
+    while owner.database.connect_seed_page().await.unwrap() {}
+    owner.synchronize().await.unwrap();
     let session = owner.active().await.unwrap();
     while session
         .documents
@@ -1507,6 +1412,13 @@ async fn device(
         .await
         .unwrap();
     inputs.products.connect.secrets.replace(secret_store);
+    inputs
+        .products
+        .connect
+        .save(|config| {
+            config.nearby = false;
+        })
+        .unwrap();
     inputs
 }
 
@@ -1581,19 +1493,18 @@ async fn prepare_pair(host: &Arc<ConnectOwner>, guest: &Arc<ConnectOwner>) {
     wait(guest, |status| {
         !status.connecting
             && status.pairing.is_none()
+            && status.settings.pending_import.is_none()
+            && !status.receiving_collection
             && status.devices.iter().any(|device| {
                 Some(&device.id) == host.status().identity.as_ref() && device.enrolled
             })
     })
     .await;
-    assert!(guest.status().settings.setup_pending);
+    assert!(guest.status().settings.pending_import.is_none());
     assert!(!guest.status().receiving_collection);
-    assert!(!guest.synchronize().await.unwrap());
-    guest.exchange().await.unwrap();
+    guest.synchronize().await.unwrap();
 }
 
 async fn pair(host: &Arc<ConnectOwner>, guest: &Arc<ConnectOwner>) {
     prepare_pair(host, guest).await;
-    execute(guest, Action::FinishSetup).await.unwrap();
-    assert!(!guest.status().settings.setup_pending);
 }

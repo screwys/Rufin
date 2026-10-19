@@ -2,7 +2,7 @@ use super::*;
 use crate::{ArtistMetadata, NativeUserState, TagMetadata, TrackObservation};
 use sqlx::{QueryBuilder, Sqlite};
 
-pub(super) fn table(kind: &str) -> (&'static str, &'static str) {
+pub(crate) fn table(kind: &str) -> (&'static str, &'static str) {
     match kind {
         "track" => ("tracks", "track_key"),
         "album" => ("albums", "album_key"),
@@ -193,7 +193,7 @@ pub(super) async fn users(
     Ok(changed)
 }
 
-pub(super) async fn stamp(
+pub(crate) async fn stamp(
     connection: &mut SqliteConnection,
     source: i64,
     kind: &str,
@@ -452,6 +452,21 @@ pub(super) async fn tracks(
 ) -> LibraryResult<(CatalogUpdate, Vec<i64>)> {
     let mut changed = CatalogUpdate::default();
     let mut previous_albums = Vec::new();
+    let metadata = if authoritative {
+        let fields = serde_json::to_value(crate::TrackMetadata::default())?;
+        let fields = fields
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|field| format!(",'$.{field}',jsonb_extract(excluded.metadata,'$.{field}')"))
+            .collect::<String>();
+        format!(
+            "CASE WHEN tracks.metadata IS excluded.metadata THEN excluded.metadata ELSE jsonb_set(tracks.metadata{fields}) END"
+        )
+    } else {
+        "jsonb_patch(tracks.metadata,(SELECT jsonb(metadata) FROM input WHERE object_id=excluded.object_id LIMIT 1))".into()
+    };
+
     for page in rows.chunks(128) {
         if page.is_empty() {
             continue;
@@ -523,7 +538,7 @@ pub(super) async fn tracks(
                 })
                 .collect::<Vec<_>>(),
         )?;
-        let audio_changed = "WITH input AS(SELECT json_extract(value,'$[0]') id,json_extract(value,'$[1]') uri,json_extract(value,'$[2]') album_id,unhex(json_extract(value,'$[3]')) audio FROM json_each(?2)),changed AS(SELECT old.album_key old_album,album.album_key new_album FROM input LEFT JOIN tracks old ON old.media_uri=input.uri LEFT JOIN albums album ON album.source_key=?1 AND album.object_id=input.album_id WHERE NOT EXISTS(SELECT 1 FROM tracks known WHERE known.source_key=?1 AND known.object_id=input.id AND(known.observed_stamp>?4 OR(NOT ?5 AND known.native_metadata=1))) AND(old.track_key IS NULL OR(old.observed_stamp<=?4 AND(?5 OR old.native_metadata=0) AND(old.album_key IS NOT album.album_key OR old.source_loudness_analysis_key IS NOT input.audio OR(?3 AND old.indexed=0))))) SELECT old_album FROM changed WHERE old_album IS NOT NULL UNION SELECT new_album FROM changed WHERE new_album IS NOT NULL";
+        let audio_changed = "WITH input AS(SELECT json_extract(value,'$[0]') id,json_extract(value,'$[1]') uri,json_extract(value,'$[2]') album_id,unhex(json_extract(value,'$[3]')) audio FROM json_each(?2)),changed AS(SELECT old.album_key old_album,album.album_key new_album FROM input LEFT JOIN tracks old ON old.media_uri=input.uri LEFT JOIN albums album ON album.source_key=?1 AND album.object_id=input.album_id WHERE NOT EXISTS(SELECT 1 FROM tracks known WHERE known.source_key=?1 AND known.object_id=input.id AND(known.observed_stamp>?4 OR(NOT ?5 AND known.native_metadata=1))) AND(old.track_key IS NULL OR((old.source_key IS NOT ?1 OR old.observed_stamp<=?4) AND(?5 OR old.native_metadata=0) AND(old.album_key IS NOT album.album_key OR old.source_loudness_analysis_key IS NOT input.audio OR(?3 AND old.indexed=0))))) SELECT old_album FROM changed WHERE old_album IS NOT NULL UNION SELECT new_album FROM changed WHERE new_album IS NOT NULL";
         let audio_albums: Vec<i64> = sqlx::query_scalar(audio_changed)
             .bind(source)
             .bind(&identities)
@@ -579,8 +594,8 @@ pub(super) async fn tracks(
         query.push(",input.source_path,input.cue_path,input.cue_start,input.cue_end,input.first_seen,input.audio_key,coalesce((SELECT loudness_analysis_key FROM local_access_files WHERE media_uri=input.media_uri ORDER BY CASE origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,local_access_file_key LIMIT 1),input.audio_key),input.normalized_search,")
             .push_bind(admit).push(",").push_bind(authoritative).push(" FROM input LEFT JOIN albums album ON album.source_key=").push_bind(source)
             .push(" AND album.object_id=input.album_id WHERE NOT EXISTS(SELECT 1 FROM tracks known WHERE known.source_key=").push_bind(source).push(" AND known.object_id=input.object_id AND(known.observed_stamp>").push_bind(observed.unwrap_or(i64::MAX)).push(if authoritative{")"}else{" OR known.native_metadata=1)"}).push(") ON CONFLICT(media_uri) DO UPDATE SET source_key=excluded.source_key,object_id=excluded.object_id,album_key=excluded.album_key,metadata=")
-            .push(if authoritative {"excluded.metadata"} else {"jsonb_patch(tracks.metadata,(SELECT jsonb(metadata) FROM input WHERE object_id=excluded.object_id LIMIT 1))"}).push(",normalized_search=excluded.normalized_search,native_metadata=max(tracks.native_metadata,excluded.native_metadata),source_path=excluded.source_path,cue_path=excluded.cue_path,cue_start_millis=excluded.cue_start_millis,cue_end_millis=excluded.cue_end_millis,first_seen_at=coalesce(tracks.first_seen_at,excluded.first_seen_at),source_loudness_analysis_key=excluded.source_loudness_analysis_key,loudness_analysis_key=excluded.loudness_analysis_key,indexed=max(tracks.indexed,excluded.indexed) WHERE ")
-            .push(if authoritative{"1"}else{"tracks.native_metadata=0"}).push(" AND tracks.observed_stamp<=").push_bind(observed.unwrap_or(i64::MAX)).push(" AND (tracks.source_key,tracks.object_id,tracks.album_key,tracks.metadata,tracks.source_path,tracks.cue_path,tracks.cue_start_millis,tracks.cue_end_millis,tracks.source_loudness_analysis_key,tracks.loudness_analysis_key,tracks.indexed,tracks.native_metadata) IS NOT(excluded.source_key,excluded.object_id,excluded.album_key,").push(if authoritative {"excluded.metadata"} else {"jsonb_patch(tracks.metadata,(SELECT jsonb(metadata) FROM input WHERE object_id=excluded.object_id LIMIT 1))"}).push(",excluded.source_path,excluded.cue_path,excluded.cue_start_millis,excluded.cue_end_millis,excluded.source_loudness_analysis_key,excluded.loudness_analysis_key,max(tracks.indexed,excluded.indexed),max(tracks.native_metadata,excluded.native_metadata)) RETURNING object_id");
+            .push(&metadata).push(",normalized_search=excluded.normalized_search,native_metadata=max(tracks.native_metadata,excluded.native_metadata),observed_stamp=CASE WHEN tracks.source_key IS excluded.source_key THEN tracks.observed_stamp ELSE 0 END,source_path=excluded.source_path,cue_path=excluded.cue_path,cue_start_millis=excluded.cue_start_millis,cue_end_millis=excluded.cue_end_millis,first_seen_at=coalesce(tracks.first_seen_at,excluded.first_seen_at),source_loudness_analysis_key=excluded.source_loudness_analysis_key,loudness_analysis_key=excluded.loudness_analysis_key,indexed=max(tracks.indexed,excluded.indexed) WHERE ")
+            .push(if authoritative{"1"}else{"tracks.native_metadata=0"}).push(" AND (tracks.source_key IS NOT excluded.source_key OR tracks.observed_stamp<=").push_bind(observed.unwrap_or(i64::MAX)).push(") AND (tracks.source_key,tracks.object_id,tracks.album_key,tracks.metadata,tracks.source_path,tracks.cue_path,tracks.cue_start_millis,tracks.cue_end_millis,tracks.source_loudness_analysis_key,tracks.loudness_analysis_key,tracks.indexed,tracks.native_metadata) IS NOT(excluded.source_key,excluded.object_id,excluded.album_key,").push(&metadata).push(",excluded.source_path,excluded.cue_path,excluded.cue_start_millis,excluded.cue_end_millis,excluded.source_loudness_analysis_key,excluded.loudness_analysis_key,max(tracks.indexed,excluded.indexed),max(tracks.native_metadata,excluded.native_metadata)) RETURNING object_id");
         let accepted = query
             .build_query_scalar::<String>()
             .fetch_all(&mut *connection)
@@ -588,6 +603,13 @@ pub(super) async fn tracks(
             .into_iter()
             .collect::<std::collections::HashSet<_>>();
         changed.metadata |= !accepted.is_empty();
+        crate::connect::mark_saved_references_on(
+            connection,
+            source,
+            &accepted.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+        .await?;
+
         if !authoritative && !accepted.is_empty() {
             let rows: Vec<(i64,sqlx::types::Json<crate::TrackMetadata>)> = sqlx::query_as("SELECT track_key,json(metadata) FROM tracks WHERE source_key=?1 AND object_id IN(SELECT value FROM json_each(?2))").bind(source).bind(serde_json::to_string(&accepted)?).fetch_all(&mut *connection).await?;
             let mut normalized =
@@ -632,6 +654,8 @@ pub(super) async fn tracks(
             observed,
         )
         .await?;
+        sqlx::query("UPDATE tracks SET local_file_key=(SELECT local_file_key FROM local_files WHERE source_key=tracks.source_key AND path=coalesce(tracks.cue_path,tracks.source_path)) WHERE source_key=?1 AND observed_stamp<=?2 AND object_id IN(SELECT value FROM json_each(?3)) AND local_file_key IS NOT(SELECT local_file_key FROM local_files WHERE source_key=tracks.source_key AND path=coalesce(tracks.cue_path,tracks.source_path))")
+            .bind(source).bind(observed.unwrap_or(i64::MAX)).bind(serde_json::to_string(&page.iter().map(|track|&track.object_id).collect::<Vec<_>>())?).execute(&mut *connection).await?;
         track_indexes(
             connection,
             source,
@@ -780,6 +804,26 @@ pub(crate) async fn remember_collection(
     metadata: &serde_json::Value,
     artwork: Option<Vec<u8>>,
 ) -> LibraryResult<i64> {
+    if kind == "playlist" {
+        let key: Option<i64> = sqlx::query_scalar("INSERT INTO playlists(source_key,owner,object_id,name,normalized_name,sort_text,artwork_binding,writable,metadata_writable,provider_revision,valid_until,indexed,position)
+            VALUES(?1,'source',?2,json_extract(?3,'$.name'),json_extract(?3,'$.normalized_name'),json_extract(?3,'$.sort_text'),?4,coalesce(json_extract(?3,'$.writable'),1),coalesce(json_extract(?3,'$.metadata_writable'),json_extract(?3,'$.writable'),1),json_extract(?3,'$.provider_revision'),json_extract(?3,'$.valid_until'),0,
+                CASE WHEN json_extract(?3,'$.position') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM playlists WHERE position=json_extract(?3,'$.position')) THEN json_extract(?3,'$.position') ELSE(SELECT coalesce(max(position),-1)+1 FROM playlists) END)
+            ON CONFLICT(source_key,object_id) DO UPDATE SET
+                name=coalesce(playlists.name,excluded.name),normalized_name=coalesce(playlists.normalized_name,excluded.normalized_name),sort_text=coalesce(playlists.sort_text,excluded.sort_text),artwork_binding=coalesce(playlists.artwork_binding,excluded.artwork_binding),writable=coalesce(playlists.writable,excluded.writable),metadata_writable=coalesce(playlists.metadata_writable,excluded.metadata_writable),provider_revision=coalesce(playlists.provider_revision,excluded.provider_revision),valid_until=coalesce(playlists.valid_until,excluded.valid_until)
+            WHERE(name,normalized_name,sort_text,artwork_binding,writable,metadata_writable,provider_revision,valid_until) IS NOT(coalesce(playlists.name,excluded.name),coalesce(playlists.normalized_name,excluded.normalized_name),coalesce(playlists.sort_text,excluded.sort_text),coalesce(playlists.artwork_binding,excluded.artwork_binding),coalesce(playlists.writable,excluded.writable),coalesce(playlists.metadata_writable,excluded.metadata_writable),coalesce(playlists.provider_revision,excluded.provider_revision),coalesce(playlists.valid_until,excluded.valid_until))
+            RETURNING playlist_key")
+            .bind(source).bind(object_id).bind(serde_json::to_string(metadata)?).bind(artwork).fetch_optional(&mut *connection).await?;
+        return match key {
+            Some(key) => Ok(key),
+            None => Ok(sqlx::query_scalar(
+                "SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=?2",
+            )
+            .bind(source)
+            .bind(object_id)
+            .fetch_one(connection)
+            .await?),
+        };
+    }
     let source_id: String = sqlx::query_scalar("SELECT object_id FROM sources WHERE source_key=?1")
         .bind(source)
         .fetch_one(&mut *connection)
@@ -865,172 +909,177 @@ pub(crate) async fn remember_collection(
     Ok(key)
 }
 
-impl super::Catalog<'_> {
-    pub async fn apply_catalog(&mut self, batch: &CatalogBatch, admit: bool) -> LibraryResult<()> {
-        let source_id = self.source_id;
-        let observed = self.observed;
-        let mut writer = self.database.writer().await?;
-        let mut tx = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
+pub(crate) async fn apply_on(
+    connection: &mut SqliteConnection,
+    source: i64,
+    source_id: &str,
+    batch: &CatalogBatch,
+    observed: Option<i64>,
+    admit: bool,
+) -> LibraryResult<CatalogUpdate> {
+    let observed = Some(observation_stamp(connection, source, observed).await?);
+    let mut update = CatalogUpdate::default();
+    macro_rules! write {
+        ($kind:literal,$rows:expr,$caption:expr,$art:expr) => {{
+            let rows = &$rows;
+            let inputs = rows
+                .iter()
+                .map(|row| {
+                    Ok((
+                        row.object_id.as_str(),
+                        &row.metadata,
+                        ($caption)(row),
+                        ($art)(row)?,
+                    ))
+                })
+                .collect::<LibraryResult<Vec<_>>>()?;
+            let change = write_headers(
+                connection,
+                source,
+                source_id,
+                $kind,
+                &inputs,
+                admit,
+                !batch.reference,
+                observed,
+            )
             .await?;
-        let source = self.source.raw();
-        let observed = Some(observation_stamp(&mut tx, source, observed).await?);
-        let mut update = CatalogUpdate::default();
-        let mut changed_albums = Vec::new();
-        macro_rules! write {
-            ($kind:literal,$rows:expr,$caption:expr,$art:expr) => {{
-                let rows = &$rows;
-                let inputs = rows
+            update.metadata |= !change.0.is_empty();
+            update.artwork |= change.1;
+            stamp(
+                connection,
+                source,
+                $kind,
+                &rows
                     .iter()
-                    .map(|row| {
-                        Ok((
-                            row.object_id.as_str(),
-                            &row.metadata,
-                            ($caption)(row),
-                            ($art)(row)?,
-                        ))
-                    })
-                    .collect::<LibraryResult<Vec<_>>>()?;
-                let change = write_headers(
-                    &mut tx,
-                    source,
-                    source_id,
-                    $kind,
-                    &inputs,
-                    admit,
-                    !batch.reference,
-                    observed,
-                )
-                .await?;
-                update.metadata |= !change.0.is_empty();
-                if $kind == "album" {
-                    changed_albums = change.0;
-                }
-                update.artwork |= change.1;
-                stamp(
-                    &mut tx,
-                    source,
-                    $kind,
-                    &rows
-                        .iter()
-                        .map(|row| row.object_id.as_str())
-                        .collect::<Vec<_>>(),
-                    observed,
-                )
-                .await?;
-            }};
-        }
-        write!(
+                    .map(|row| row.object_id.as_str())
+                    .collect::<Vec<_>>(),
+                observed,
+            )
+            .await?;
+        }};
+    }
+    write!(
+        "album",
+        batch.albums,
+        |row: &AlbumObservation| row.metadata.title.to_lowercase(),
+        |row: &AlbumObservation| Ok::<_, LibraryError>(row.artwork_binding.clone())
+    );
+    write!(
+        "artist",
+        batch.artists,
+        |row: &ArtistObservation| row.metadata.name.to_lowercase(),
+        |row: &ArtistObservation| Ok::<_, LibraryError>(row.artwork_binding.clone())
+    );
+    write!(
+        "genre",
+        batch.genres,
+        |row: &GenreObservation| row.metadata.name.to_lowercase(),
+        |row: &GenreObservation| Ok::<_, LibraryError>(row.artwork_binding.clone())
+    );
+    write!(
+        "mood",
+        batch.moods,
+        |row: &MoodObservation| row.metadata.name.to_lowercase(),
+        |row: &MoodObservation| Ok::<_, LibraryError>(row.artwork_binding.clone())
+    );
+    write!(
+        "folder",
+        batch.folders,
+        |row: &FolderObservation| row
+            .metadata
+            .name
+            .as_deref()
+            .unwrap_or(&row.object_id)
+            .to_lowercase(),
+        |row: &FolderObservation| Ok::<_, LibraryError>(row.artwork_binding.clone())
+    );
+    let (track_update, previous_albums) = tracks(
+        connection,
+        source,
+        source_id,
+        &batch.tracks,
+        observed,
+        admit,
+        !batch.reference,
+    )
+    .await?;
+    update.merge(track_update);
+    for (kind, states) in [
+        (
             "album",
-            batch.albums,
-            |row: &AlbumObservation| row.metadata.title.to_lowercase(),
-            |row: &AlbumObservation| Ok::<_, LibraryError>(row.artwork_binding.clone())
-        );
-        write!(
-            "artist",
-            batch.artists,
-            |row: &ArtistObservation| row.metadata.name.to_lowercase(),
-            |row: &ArtistObservation| Ok::<_, LibraryError>(row.artwork_binding.clone())
-        );
-        write!(
-            "genre",
-            batch.genres,
-            |row: &GenreObservation| row.metadata.name.to_lowercase(),
-            |row: &GenreObservation| Ok::<_, LibraryError>(row.artwork_binding.clone())
-        );
-        write!(
-            "mood",
-            batch.moods,
-            |row: &MoodObservation| row.metadata.name.to_lowercase(),
-            |_: &MoodObservation| Ok::<_, LibraryError>(None)
-        );
-        write!(
-            "folder",
-            batch.folders,
-            |row: &FolderObservation| row
-                .metadata
-                .name
-                .as_deref()
-                .unwrap_or(&row.object_id)
-                .to_lowercase(),
-            |row: &FolderObservation| Ok::<_, LibraryError>(row.artwork_binding.clone())
-        );
-        let (track_update, previous_albums) = tracks(
-            &mut tx,
-            source,
-            source_id,
-            &batch.tracks,
-            observed,
-            admit,
-            !batch.reference,
-        )
-        .await?;
-        update.merge(track_update);
-        for (kind, states) in [
-            (
-                "album",
-                batch
-                    .albums
-                    .iter()
-                    .map(|row| (row.object_id.as_str(), &row.user_data))
-                    .collect::<Vec<_>>(),
-            ),
-            (
-                "artist",
-                batch
-                    .artists
-                    .iter()
-                    .map(|row| (row.object_id.as_str(), &row.user_data))
-                    .collect::<Vec<_>>(),
-            ),
-        ] {
-            update.merge(users(&mut tx, source, kind, &states, observed).await?);
-        }
-        update.metadata |= super::collections::headers(
-            &mut tx,
-            source,
-            source_id,
-            &batch
+            batch
                 .albums
                 .iter()
-                .filter(|row| changed_albums.contains(&row.object_id))
+                .map(|row| (row.object_id.as_str(), &row.user_data))
                 .collect::<Vec<_>>(),
-            &batch.folders,
-            observed,
-        )
-        .await?;
-        update.playlists |= super::collections::playlists(
-            &mut tx,
+        ),
+        (
+            "artist",
+            batch
+                .artists
+                .iter()
+                .map(|row| (row.object_id.as_str(), &row.user_data))
+                .collect::<Vec<_>>(),
+        ),
+    ] {
+        update.merge(users(connection, source, kind, &states, observed).await?);
+    }
+    update.metadata |= super::collections::headers(
+        connection,
+        source,
+        source_id,
+        &batch.albums.iter().collect::<Vec<_>>(),
+        &batch.folders,
+        observed,
+    )
+    .await?;
+    update.playlists |= super::collections::playlists(
+        connection,
+        source,
+        &batch.playlists,
+        observed,
+        admit,
+        batch.reference,
+    )
+    .await?;
+    if update.metadata || update.artwork {
+        update.artwork |= super::artwork::refresh_batch(
+            connection,
             source,
-            &batch.playlists,
-            observed,
-            admit,
-            batch.reference,
+            &batch.tracks,
+            &batch.albums,
+            &batch.artists,
+            &previous_albums,
+            &update,
         )
         .await?;
-        if update.metadata || update.artwork {
-            update.artwork |= super::artwork::refresh_batch(
-                &mut tx,
-                source,
-                &batch.tracks,
-                &batch.albums,
-                &batch.artists,
-                &previous_albums,
-                &update,
-            )
-            .await?;
-        }
-        if update.changed() {
-            sqlx::query(
-                "UPDATE sources SET catalog_revision=catalog_revision+1 WHERE source_key=?1",
-            )
+    }
+    if update.changed() {
+        sqlx::query("UPDATE sources SET catalog_revision=catalog_revision+1 WHERE source_key=?1")
             .bind(source)
-            .execute(&mut *tx)
+            .execute(&mut *connection)
             .await?;
-        }
-        tx.commit().await?;
+    }
+    Ok(update)
+}
+
+impl super::Catalog<'_> {
+    pub async fn apply_catalog(&mut self, batch: &CatalogBatch, admit: bool) -> LibraryResult<()> {
+        let mut writer = self.database.writer().await?;
+        let mut tx = self
+            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+            .await?;
+        let update = apply_on(
+            &mut tx,
+            self.source.raw(),
+            self.source_id,
+            batch,
+            self.observed,
+            admit,
+        )
+        .await?;
+        self.commit_write(tx).await?;
         self.changes.merge(update);
         Ok(())
     }
@@ -1045,10 +1094,8 @@ impl super::Catalog<'_> {
             let mut after = 0_i64;
             loop {
                 let mut writer = self.database.writer().await?;
-                let mut tx = writer
-                    .as_mut()
-                    .ok_or(LibraryError::WriterUnavailable)?
-                    .begin()
+                let mut tx = self
+                    .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
                     .await?;
                 let source = self.source.raw();
                 let (table, key) = if *kind == "playlist" {
@@ -1061,9 +1108,10 @@ impl super::Catalog<'_> {
                 } else {
                     ""
                 };
-                let keys:Vec<i64>=sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT {key} FROM {table} WHERE source_key=?1 AND indexed=1 AND observed_stamp<?2 AND {key}>?3 {absent} ORDER BY {key} LIMIT 128"))).bind(source).bind(observed).bind(after).fetch_all(&mut *tx).await?;
+                let keep_local = super::keep_local_membership(kind, self.incoming);
+                let keys:Vec<i64>=sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT {key} FROM {table} WHERE source_key=?1 AND indexed=1 AND observed_stamp<?2 AND {key}>?3 {absent}{keep_local} ORDER BY {key} LIMIT 128"))).bind(source).bind(observed).bind(after).fetch_all(&mut *tx).await?;
                 let Some(last) = keys.last() else {
-                    tx.commit().await?;
+                    self.commit_write(tx).await?;
                     self.changes.merge(update.clone());
                     break;
                 };
@@ -1093,7 +1141,7 @@ impl super::Catalog<'_> {
                             .iter()
                             .map(|key| crate::AlbumKey::from_raw(*key))
                             .collect::<Vec<_>>(),
-                        true,
+                        !self.incoming,
                     )
                     .await?;
                 }
@@ -1106,19 +1154,27 @@ impl super::Catalog<'_> {
                     false,
                 )
                 .await?;
-                tx.commit().await?;
+                self.commit_write(tx).await?;
                 self.changes.merge(update.clone());
             }
         }
         let mut writer = self.database.writer().await?;
-        let mut tx = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
+        let mut tx = self
+            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
             .await?;
         let source = self.source.raw();
         if kinds.is_empty() {
-            sqlx::query("UPDATE sources SET catalog_complete=1,freshness=?2,catalog_revision=catalog_revision+?3 WHERE source_key=?1").bind(source).bind(freshness.map(Freshness::as_bytes)).bind(update.changed()).execute(&mut *tx).await?;
+            let share: Option<bool> = sqlx::query_scalar("UPDATE sources SET catalog_complete=1,freshness=?2,catalog_revision=catalog_revision+?3 WHERE source_key=?1 AND(catalog_complete,freshness) IS NOT(1,?2) RETURNING coalesce(kind IN('local','webdav','smb'),0)")
+                .bind(source).bind(freshness.map(Freshness::as_bytes)).bind(update.changed()).fetch_optional(&mut *tx).await?;
+            if share == Some(true) {
+                crate::connect::mark_current_on(
+                    &mut tx,
+                    "catalog:source",
+                    &serde_json::json!([self.source_id, self.source_id]).to_string(),
+                    false,
+                )
+                .await?;
+            }
         } else if update.changed() {
             sqlx::query(
                 "UPDATE sources SET catalog_revision=catalog_revision+1 WHERE source_key=?1",
@@ -1127,7 +1183,7 @@ impl super::Catalog<'_> {
             .execute(&mut *tx)
             .await?;
         }
-        tx.commit().await?;
+        self.commit_write(tx).await?;
         self.changes.merge(update.clone());
         self.changes.merge(update);
         Ok(())
@@ -1137,8 +1193,12 @@ impl super::Catalog<'_> {
 impl super::Catalog<'_> {
     pub async fn start_observation(&mut self) -> LibraryResult<i64> {
         let mut writer = self.database.writer().await?;
+        let mut tx = self
+            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+            .await?;
         let stamp = sqlx::query_scalar("UPDATE sources SET observation_stamp=observation_stamp+1 WHERE source_key=?1 RETURNING observation_stamp")
-            .bind(self.source).fetch_one(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
+            .bind(self.source).fetch_one(&mut *tx).await?;
+        self.commit_write(tx).await?;
         self.observed = Some(stamp);
         Ok(stamp)
     }

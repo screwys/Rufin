@@ -12,17 +12,14 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 internal fun ErrorRow(message: String, actionText: String, action: () -> Unit) {
-    ErrorNotice(message)
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Spacer(Modifier.weight(1f))
+        ErrorNotice(message, Modifier.weight(1f))
         TextButton(onClick = action) { Text(actionText) }
     }
 }
 
 @Composable
 internal fun ErrorRow(failure: Throwable, actionText: String, action: () -> Unit) = ErrorRow(failure.userMessage(), actionText, action)
-
-internal val LocalFeedback = staticCompositionLocalOf<(String) -> Unit> { error("Feedback presenter is unavailable") }
 
 internal fun Throwable.userMessage(): String = when (this) {
     is AndroidException.Failure -> reason
@@ -32,9 +29,8 @@ internal fun Throwable.userMessage(): String = when (this) {
 }
 
 @Composable
-internal fun ErrorNotice(message: String) {
-    val feedback = LocalFeedback.current
-    LaunchedEffect(message) { feedback(message) }
+internal fun ErrorNotice(message: String, modifier: Modifier = Modifier) {
+    Text(message, modifier, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
 }
 
 @Composable

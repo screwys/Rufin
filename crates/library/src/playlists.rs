@@ -423,6 +423,9 @@ impl Database {
         if changed && name.is_some() {
             crate::playlist_links::mark_dirty_on(&mut transaction, playlist).await?;
         }
+        if changed {
+            sync_playlist_header_on(&mut transaction, playlist).await?;
+        }
         transaction.commit().await?;
         Ok(changed)
     }
@@ -464,25 +467,14 @@ impl Database {
             target_index
         };
         order.insert(insertion, dragged);
-        let max_position =
-            sqlx::query_scalar::<_, Option<i64>>("SELECT max(position) FROM playlists")
-                .fetch_one(&mut *transaction)
-                .await?
-                .unwrap_or_default();
-        let offset = max_position + 1;
-        sqlx::query(
-            "UPDATE main.playlists SET position=position+?2 WHERE name IS NOT NULL AND (owner='rufin' OR indexed) AND (?1 IS NULL OR source_key=?1 OR source_key IS NULL)",
-        )
-        .bind(source)
-        .bind(offset)
-        .execute(&mut *transaction)
-        .await?;
-        for (key, (_, position)) in order.into_iter().zip(visible) {
-            sqlx::query("UPDATE main.playlists SET position=?2 WHERE playlist_key=?1")
-                .bind(key)
-                .bind(position)
-                .execute(&mut *transaction)
-                .await?;
+        let positions = order
+            .into_iter()
+            .zip(visible)
+            .map(|(key, (_, position))| (key, position))
+            .collect::<Vec<_>>();
+        write_positions_on(&mut transaction, &positions).await?;
+        for (key, _) in positions {
+            sync_playlist_header_on(&mut transaction, key).await?;
         }
         transaction.commit().await?;
         Ok(true)
@@ -495,17 +487,29 @@ impl Database {
     ) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(sqlx::query(
-            "DELETE FROM main.playlists
-             WHERE source_key IS ?1 AND owner='rufin'
-               AND playlist_key=?2",
-        )
-        .bind(source)
-        .bind(playlist)
-        .execute(connection)
-        .await?
-        .rows_affected()
-            == 1)
+        let mut transaction = connection.begin().await?;
+        let identity:Option<String> = sqlx::query_scalar("DELETE FROM playlists WHERE source_key IS ?1 AND owner='rufin' AND playlist_key=?2 RETURNING json_array((SELECT object_id FROM sources WHERE source_key=playlists.source_key),object_id)")
+            .bind(source).bind(playlist).fetch_optional(&mut *transaction).await?;
+        if let Some(key) = &identity {
+            crate::profile::write_local_on(
+                &mut transaction,
+                &[
+                    crate::ConnectRecord {
+                        kind: "playlist".into(),
+                        key: key.clone(),
+                        value: None,
+                    },
+                    crate::ConnectRecord {
+                        kind: "playlist_artwork".into(),
+                        key: key.clone(),
+                        value: None,
+                    },
+                ],
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(identity.is_some())
     }
 
     pub async fn add_playlist_tracks(
@@ -581,6 +585,17 @@ impl Database {
             if batch.is_empty() {
                 break;
             }
+            let deleted:Vec<(String,i64)> = sqlx::query_as("SELECT json_array((SELECT object_id FROM sources WHERE source_key=playlist.source_key),playlist.object_id,entry.object_id),entry.position FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) JOIN json_each(?2) requested ON entry.playlist_entry_key=requested.value WHERE playlist.playlist_key=?1")
+                .bind(playlist).bind(serde_json::to_string(&batch)?).fetch_all(&mut *transaction).await?;
+            let tombstones = deleted
+                .into_iter()
+                .map(|(key, _position)| crate::ConnectRecord {
+                    kind: "entry".into(),
+                    key,
+                    value: None,
+                })
+                .collect::<Vec<_>>();
+            crate::profile::write_local_on(&mut transaction, &tombstones).await?;
             let mut query = QueryBuilder::<Sqlite>::new(
                 "DELETE FROM main.playlist_entries WHERE playlist_key=",
             );
@@ -685,9 +700,62 @@ impl Database {
         .execute(&mut *transaction)
         .await?;
         crate::playlist_links::mark_dirty_on(&mut transaction, playlist).await?;
+        let records =
+            playlist_entry_records_on(&mut transaction, playlist, new_position, new_position)
+                .await?;
+        crate::profile::write_local_on(&mut transaction, &records).await?;
         transaction.commit().await?;
         Ok(true)
     }
+}
+
+pub(crate) async fn sync_playlist_header_on(
+    connection: &mut SqliteConnection,
+    playlist: PlaylistKey,
+) -> LibraryResult<()> {
+    let active:bool = sqlx::query_scalar("SELECT profile IS NOT NULL AND enabled AND NOT receiving FROM connect_profile WHERE singleton=1").fetch_one(&mut *connection).await?;
+    if !active {
+        return Ok(());
+    }
+
+    let identity: Option<(String, bool)> = sqlx::query_as("SELECT json_array((SELECT object_id FROM sources WHERE source_key=playlist.source_key),playlist.object_id),owner='rufin' FROM playlists playlist WHERE playlist_key=?1")
+        .bind(playlist).fetch_optional(&mut *connection).await?;
+    let Some((key, authored)) = identity else {
+        return Ok(());
+    };
+    let mut records = Vec::new();
+    for kind in if authored {
+        &["playlist", "playlist_artwork"][..]
+    } else {
+        &["playlist_order"][..]
+    } {
+        records.push(Database::connect_record_on(connection, kind, &key).await?);
+    }
+    crate::profile::write_local_on(connection, &records).await
+}
+
+pub(crate) async fn playlist_entry_records_on(
+    connection: &mut SqliteConnection,
+    playlist: PlaylistKey,
+    start: i64,
+    end: i64,
+) -> LibraryResult<Vec<crate::ConnectRecord>> {
+    let active:bool = sqlx::query_scalar("SELECT profile IS NOT NULL AND enabled AND NOT receiving FROM connect_profile WHERE singleton=1").fetch_one(&mut *connection).await?;
+    if !active {
+        return Ok(Vec::new());
+    }
+
+    let keys: Vec<(String, String, bool)> = sqlx::query_as("SELECT json_array((SELECT object_id FROM sources WHERE source_key=playlist.source_key),playlist.object_id,entry.object_id),track.media_uri,NOT EXISTS(SELECT 1 FROM connect_versions WHERE name='reference:'||track.media_uri AND deleted=0) FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) JOIN tracks track USING(track_key) WHERE playlist.playlist_key=?1 AND playlist.owner='rufin' AND entry.position BETWEEN ?2 AND ?3 ORDER BY entry.position")
+        .bind(playlist).bind(start).bind(end).fetch_all(&mut *connection).await?;
+    let mut records = Vec::with_capacity(keys.len());
+    let mut references = std::collections::HashSet::new();
+    for (key, uri, missing) in keys {
+        if missing && references.insert(uri.clone()) {
+            records.push(Database::connect_record_on(connection, "reference", &uri).await?);
+        }
+        records.push(Database::connect_record_on(connection, "entry", &key).await?);
+    }
+    Ok(records)
 }
 
 async fn editable_playlist_exists(
@@ -874,7 +942,7 @@ pub(crate) async fn create_playlist_identity(
             "Playlist name cannot be empty".into(),
         ));
     }
-    Ok(sqlx::query_as(
+    let created: (PlaylistKey, String) = sqlx::query_as(
         "INSERT INTO main.playlists(source_key,object_id,name,normalized_name,sort_text,position)
          SELECT ?1,id,?2,lower(?2),lower(?2),
                 (SELECT coalesce(max(position)+1,0) FROM playlists)
@@ -884,7 +952,9 @@ pub(crate) async fn create_playlist_identity(
     .bind(source)
     .bind(name)
     .fetch_one(&mut **transaction)
-    .await?)
+    .await?;
+    sync_playlist_header_on(transaction, created.0).await?;
+    Ok(created)
 }
 
 async fn insert_playlist_tracks(
@@ -894,7 +964,7 @@ async fn insert_playlist_tracks(
     tracks: &[TrackKey],
     skip_existing: bool,
 ) -> LibraryResult<usize> {
-    Ok(sqlx::query(
+    let accepted = sqlx::query(
         "INSERT INTO playlist_entries(playlist_key,object_id,track_key,position)
         SELECT ?1,'rufin:entry:'||lower(hex(randomblob(16))),requested.value,
                ?2+row_number() OVER (ORDER BY CAST(requested.key AS INTEGER))-1
@@ -909,7 +979,12 @@ async fn insert_playlist_tracks(
     .bind(skip_existing)
     .execute(&mut **transaction)
     .await?
-    .rows_affected() as usize)
+    .rows_affected() as usize;
+    if accepted > 0 {
+        let records = playlist_entry_records_on(transaction, playlist, start, i64::MAX).await?;
+        crate::profile::write_local_on(transaction, &records).await?;
+    }
+    Ok(accepted)
 }
 
 /// Playlist identity and rank in backups and exported files.
@@ -966,6 +1041,19 @@ pub(crate) async fn write_playlist_identity(
         None
     };
     let source_owned = identity.source_owned || identity.name.is_none();
+    if source_owned && let Some(source) = source {
+        return crate::catalog::remember_collection(
+            connection,
+            "playlist",
+            SourceKey::from_raw(source),
+            &identity.object_id,
+            None,
+            &serde_json::json!({"position":identity.position}),
+            None,
+        )
+        .await
+        .map(PlaylistKey::from_raw);
+    }
     let owner = if source_owned { "source" } else { "rufin" };
     let existing = sqlx::query_scalar::<_, PlaylistKey>(
         "SELECT playlist_key FROM playlists WHERE object_id=?1 AND source_key IS ?2",
@@ -1000,18 +1088,59 @@ pub(crate) async fn write_playlist_entry(
         ));
     }
     let track = remember_playlist_track(connection, entry).await?;
-    sqlx::query(
-        "INSERT INTO playlist_entries(playlist_key,object_id,track_key,position)
-        VALUES(?1,?2,?3,?4) ON CONFLICT(playlist_key,object_id)
-        DO UPDATE SET track_key=excluded.track_key,position=excluded.position",
+    write_entry_positions_on(
+        connection,
+        &[(
+            playlist,
+            entry.object_id.clone(),
+            Some(track),
+            entry.position,
+        )],
     )
-    .bind(playlist)
-    .bind(&entry.object_id)
-    .bind(track)
-    .bind(entry.position)
-    .execute(connection)
     .await?;
     Ok(())
+}
+
+/// Store accepted playlist positions.
+pub(crate) async fn write_positions_on(
+    connection: &mut SqliteConnection,
+    positions: &[(PlaylistKey, i64)],
+) -> LibraryResult<bool> {
+    let mut changed = false;
+    for page in positions.chunks(PLAYLIST_ROW_LIMIT) {
+        let rows = serde_json::to_string(page)?;
+        changed |= sqlx::query(
+            "WITH input AS MATERIALIZED(SELECT json_extract(value,'$[0]') id,json_extract(value,'$[1]') position FROM json_each(?1)),
+             changed AS MATERIALIZED(SELECT input.* FROM input JOIN playlists old ON old.playlist_key=input.id WHERE old.position<>input.position),
+             affected AS MATERIALIZED(SELECT old.playlist_key id,old.position FROM changed input JOIN playlists old ON old.playlist_key=input.id OR old.position=input.position),
+             moved AS MATERIALIZED(SELECT id,(SELECT coalesce(max(position),-1)+1 FROM playlists)+row_number() OVER(ORDER BY position) position FROM (SELECT DISTINCT id,position FROM affected))
+             UPDATE playlists SET position=moved.position FROM moved WHERE playlists.playlist_key=moved.id"
+        ).bind(&rows).execute(&mut *connection).await?.rows_affected()>0;
+        changed |= sqlx::query(
+            "WITH input AS(SELECT json_extract(value,'$[0]') id,json_extract(value,'$[1]') position FROM json_each(?1))
+             UPDATE playlists SET position=input.position FROM input WHERE playlists.playlist_key=input.id AND playlists.position<>input.position"
+        ).bind(rows).execute(&mut *connection).await?.rows_affected()>0;
+    }
+    Ok(changed)
+}
+
+/// Store accepted occurrence identities and their final positions.
+pub(crate) async fn write_entry_positions_on(
+    connection: &mut SqliteConnection,
+    entries: &[(PlaylistKey, String, Option<TrackKey>, i64)],
+) -> LibraryResult<bool> {
+    let mut changed = false;
+    let input = "WITH input AS MATERIALIZED(SELECT json_extract(value,'$[0]') playlist_key,json_extract(value,'$[1]') object_id,json_extract(value,'$[2]') track_key,json_extract(value,'$[3]') position,json_extract(value,'$[2]') IS NOT NULL present FROM json_each(?1)) ";
+    for page in entries.chunks(PLAYLIST_ROW_LIMIT) {
+        let rows = serde_json::to_string(page)?;
+        changed |= sqlx::query(sqlx::AssertSqlSafe(format!("{input} DELETE FROM playlist_entries WHERE playlist_entry_key IN(SELECT old.playlist_entry_key FROM input CROSS JOIN playlist_entries old ON old.playlist_key=input.playlist_key AND old.object_id=input.object_id WHERE NOT input.present)")))
+            .bind(&rows).execute(&mut *connection).await?.rows_affected()>0;
+        sqlx::query(sqlx::AssertSqlSafe(format!("{input},changed AS MATERIALIZED(SELECT input.* FROM input LEFT JOIN playlist_entries old ON old.playlist_key=input.playlist_key AND old.object_id=input.object_id WHERE input.present AND(old.track_key,old.position) IS NOT(input.track_key,input.position)),affected AS MATERIALIZED(SELECT old.playlist_entry_key,old.playlist_key FROM changed input CROSS JOIN playlist_entries old ON old.playlist_key=input.playlist_key AND old.object_id=input.object_id UNION SELECT old.playlist_entry_key,old.playlist_key FROM changed input CROSS JOIN playlist_entries old ON old.playlist_key=input.playlist_key AND old.position=input.position),moved AS MATERIALIZED(SELECT playlist_entry_key,(SELECT coalesce(max(position),-1)+1 FROM playlist_entries WHERE playlist_key=affected.playlist_key)+playlist_entry_key position FROM affected) UPDATE playlist_entries SET position=moved.position FROM moved WHERE playlist_entries.playlist_entry_key=moved.playlist_entry_key")))
+            .bind(&rows).execute(&mut *connection).await?;
+        changed |= sqlx::query(sqlx::AssertSqlSafe(format!("{input} INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) SELECT playlist_key,object_id,track_key,position FROM input WHERE present ON CONFLICT(playlist_key,object_id) DO UPDATE SET track_key=excluded.track_key,position=excluded.position WHERE(track_key,position) IS NOT(excluded.track_key,excluded.position)")))
+            .bind(rows).execute(&mut *connection).await?.rows_affected()>0;
+    }
+    Ok(changed)
 }
 
 pub(crate) async fn remember_playlist_track(

@@ -116,13 +116,29 @@ androidComponents.onVariants { variant ->
             if (variant.productFlavors.any { it.second == "development" }) "development" else "stable", abis)
     }
     nativeBuildTasks += native
+    val bindings = tasks.register<Exec>("generate${variant.name.replaceFirstChar(Char::uppercaseChar)}Bindings") {
+        dependsOn(native)
+        val generator = file(metadata["cargoTarget"]!!).resolve("debug/rufin-bindgen")
+        val library = generated.get().dir("jniLibs/${abis.split(',').last()}").file("librufin_android.so")
+        inputs.files(generator, library)
+        inputs.files(repository.resolve("Cargo.toml"), repository.resolve("Cargo.lock"))
+        inputs.files(fileTree(repository.resolve("crates")) {
+            include("*/Cargo.toml", "*/uniffi.toml")
+        })
+        outputs.dir(generated.map { it.dir("kotlin") })
+        workingDir(repository)
+        commandLine(generator, "generate", "--library", library.asFile,
+            "--language", "kotlin", "--out-dir", generated.get().dir("kotlin").asFile, "--no-format")
+        inputs.property("commandLine", commandLine)
+    }
     variant.sources.java?.addStaticSourceDirectory(generated.get().dir("java").asFile.path)
     variant.sources.kotlin?.addStaticSourceDirectory(generated.get().dir("kotlin").asFile.path)
+    variant.sources.kotlin?.addStaticSourceDirectory(generated.get().dir("icons").asFile.path)
     variant.sources.jniLibs?.addStaticSourceDirectory(generated.get().dir("jniLibs").asFile.path)
     variant.sources.assets?.addStaticSourceDirectory(generated.get().dir("assets").asFile.path)
     variant.sources.res?.addStaticSourceDirectory(generated.get().dir("res").asFile.path)
     tasks.matching { it.name == "pre${variant.name.replaceFirstChar(Char::uppercaseChar)}Build" }.configureEach {
-        dependsOn(native)
+        dependsOn(bindings)
     }
 }
 

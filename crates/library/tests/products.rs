@@ -2260,12 +2260,6 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
                     device_id: Some(1),
                     inode: Some(index as i64 + 1),
                     parser_version: 1,
-                    title: track.metadata.title.clone(),
-                    album: track.metadata.album.clone(),
-                    artist: track.metadata.artist.clone(),
-                    disc_number: track.metadata.disc_number,
-                    track_number: track.metadata.track_number,
-                    duration_millis: track.metadata.duration_millis,
                     access_uri: format!(
                         "file:///validated/{}.flac",
                         track.object_id.as_deref().expect("indexed track object")
@@ -3685,6 +3679,18 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
     let direct = "https://media.example/download.flac".to_string();
     fixture
         .database
+        .write_direct_track_metadata(
+            &direct,
+            &library::TrackMetadata {
+                title: "Direct artifact".into(),
+                duration_millis: 42_000,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    fixture
+        .database
         .write_local_access(
             None,
             &[&LocalAccessWrite {
@@ -3698,12 +3704,6 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
                 device_id: None,
                 inode: None,
                 parser_version: 5,
-                title: "Direct artifact".to_string(),
-                album: String::new(),
-                artist: String::new(),
-                disc_number: 0,
-                track_number: 0,
-                duration_millis: 42_000,
                 access_uri: "file:///downloads/direct.flac".to_string(),
                 loudness_analysis_key: None,
             }],

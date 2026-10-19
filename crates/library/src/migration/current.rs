@@ -4,6 +4,173 @@ use crate::{LibraryError, LibraryResult, SourceId, source_entity_uri};
 use sqlx::{Connection, Row, SqliteConnection};
 use std::path::Path;
 
+pub(crate) async fn narrow_access_metadata(connection: &mut SqliteConnection) -> LibraryResult<()> {
+    if !columns(connection, "main", "local_access_metadata")
+        .await?
+        .iter()
+        .any(|column| column == "title")
+    {
+        return Ok(());
+    }
+    // Released access rows also carried a second copy of the track's display values.
+    for field in [
+        "title",
+        "album",
+        "artist",
+        "disc_number",
+        "track_number",
+        "duration_millis",
+    ] {
+        sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE tracks SET metadata=jsonb_set(metadata,'$.{field}',access.{field})
+            FROM local_locators locator JOIN local_access_metadata access USING(access_uri)
+            WHERE tracks.media_uri=locator.media_uri AND(json_extract(tracks.metadata,'$.{field}') IS NULL OR json_extract(tracks.metadata,'$.{field}')='' OR json_extract(tracks.metadata,'$.{field}')=0)
+              AND access.{field} IS NOT NULL AND access.{field}<>'' AND access.{field}<>0")))
+            .execute(&mut *connection).await?;
+    }
+    let mut after = 0_i64;
+    loop {
+        let rows: Vec<(i64,i64,String)> = sqlx::query_as("SELECT locator.local_access_file_key,track.track_key,json(track.metadata) FROM local_locators locator JOIN tracks track USING(media_uri) JOIN local_access_metadata access USING(access_uri) WHERE locator.local_access_file_key>?1 ORDER BY locator.local_access_file_key LIMIT 128")
+            .bind(after).fetch_all(&mut *connection).await?;
+        let Some(last) = rows.last() else {
+            break;
+        };
+        after = last.0;
+        for (_, key, payload) in rows {
+            let metadata: crate::TrackMetadata = serde_json::from_str(&payload)?;
+            sqlx::query("UPDATE tracks SET normalized_search=?2 WHERE track_key=?1 AND normalized_search IS NOT ?2")
+                .bind(key).bind(crate::catalog::cache::track_search(&metadata)).execute(&mut *connection).await?;
+        }
+    }
+    sqlx::raw_sql(
+        "DROP VIEW IF EXISTS local_access_files; DROP INDEX IF EXISTS local_access_match_uri_idx;
+        ALTER TABLE local_access_metadata RENAME TO old_access_metadata;",
+    )
+    .execute(&mut *connection)
+    .await?;
+    sqlx::raw_sql(crate::schema::STORE_SCHEMA)
+        .execute(&mut *connection)
+        .await?;
+    sqlx::raw_sql("INSERT INTO local_access_metadata(access_uri,size_bytes,mtime_ns,device_id,inode,parser_version,loudness_analysis_key)
+        SELECT access_uri,size_bytes,mtime_ns,device_id,inode,parser_version,loudness_analysis_key FROM old_access_metadata;
+        DROP TABLE old_access_metadata;").execute(&mut *connection).await?;
+    Ok(())
+}
+
+pub(crate) async fn separate_file_access(connection: &mut SqliteConnection) -> LibraryResult<()> {
+    if has_table(connection, "main", "connect_profile").await? {
+        let profile = columns(connection, "main", "connect_profile").await?;
+        for (column, declaration) in [
+            ("actor", "TEXT NOT NULL DEFAULT '0'"),
+            ("clock", "INTEGER NOT NULL DEFAULT 0"),
+            ("receiving", "INTEGER NOT NULL DEFAULT 0"),
+            ("enabled", "INTEGER NOT NULL DEFAULT 0"),
+        ] {
+            if !profile.iter().any(|name| name == column) {
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "ALTER TABLE connect_profile ADD COLUMN {column} {declaration}"
+                )))
+                .execute(&mut *connection)
+                .await?;
+            }
+        }
+    }
+    sqlx::query("CREATE TABLE IF NOT EXISTS connect_roots(source_id TEXT NOT NULL,id TEXT NOT NULL,label TEXT NOT NULL,root TEXT,PRIMARY KEY(source_id,id)) STRICT")
+        .execute(&mut *connection).await?;
+    if !columns(connection, "main", "connect_roots")
+        .await?
+        .iter()
+        .any(|column| column == "root")
+    {
+        sqlx::query("ALTER TABLE connect_roots ADD COLUMN root TEXT")
+            .execute(&mut *connection)
+            .await?;
+    }
+    sqlx::query("CREATE TEMP TABLE file_identity(physical INTEGER NOT NULL,canonical INTEGER NOT NULL,PRIMARY KEY(physical,canonical))")
+        .execute(&mut *connection).await?;
+    if has_table(connection, "main", "local_track_files").await? {
+        sqlx::raw_sql("INSERT OR IGNORE INTO file_identity
+            SELECT physical.local_file_key,canonical.local_file_key FROM local_track_files binding JOIN tracks track USING(track_key)
+            JOIN local_files canonical ON canonical.source_key=track.source_key AND canonical.path=track.source_path
+            JOIN local_files physical ON physical.source_key=track.source_key AND physical.path=binding.source_path;
+            INSERT OR IGNORE INTO file_identity
+            SELECT physical.local_file_key,canonical.local_file_key FROM local_track_files binding JOIN tracks track USING(track_key)
+            JOIN local_files canonical ON canonical.source_key=track.source_key AND canonical.path=track.cue_path
+            JOIN local_files physical ON physical.source_key=track.source_key AND physical.path=binding.cue_path;")
+            .execute(&mut *connection).await?;
+    }
+    sqlx::raw_sql("INSERT OR IGNORE INTO file_identity SELECT local_file_key,local_file_key FROM local_files file WHERE local_file_key NOT IN(SELECT physical FROM file_identity) OR EXISTS(SELECT 1 FROM tracks track WHERE track.source_key=file.source_key AND file.path IN(track.source_path,track.cue_path));
+        INSERT OR REPLACE INTO local_file_observations(local_file_key,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,native_id,revision,observed_stamp,parent_path,parsed_stamp,accepted_facts,state)
+        SELECT identity.canonical,file.path,file.root,file.relative_path,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.native_id,file.revision,file.observed_stamp,file.parent_path,file.parsed_stamp,file.parsed_stamp,file.state
+        FROM file_identity identity JOIN local_files file ON file.local_file_key=identity.physical JOIN local_file_access_roots access USING(source_key,root)
+        WHERE NOT EXISTS(SELECT 1 FROM connect_media_files receipt JOIN local_locators locator ON locator.media_uri=receipt.media_uri AND locator.origin='download' WHERE receipt.managed AND locator.path=file.path)
+            OR EXISTS(SELECT 1 FROM local_files directory WHERE directory.source_key=file.source_key AND directory.root=file.root AND directory.kind='directory');
+        UPDATE local_files AS canonical SET size_bytes=physical.size_bytes,mtime_ns=physical.mtime_ns,revision=physical.revision,picture_index=physical.picture_index,artist_pictures=physical.artist_pictures,parse_version=physical.parse_version,parsed_stamp=physical.parsed_stamp,state=physical.state
+        FROM file_identity identity JOIN local_files physical ON physical.local_file_key=identity.physical
+        WHERE canonical.local_file_key=identity.canonical AND identity.canonical<>identity.physical AND physical.parsed_stamp IS NOT NULL
+            AND NOT(canonical.root LIKE 'http://%' OR canonical.root LIKE 'https://%' OR canonical.root LIKE 'smb://%');
+        UPDATE tracks SET local_file_key=(SELECT file.local_file_key FROM local_files file WHERE file.source_key=tracks.source_key AND file.path=coalesce(tracks.cue_path,tracks.source_path))
+            WHERE local_file_key IN(SELECT physical FROM file_identity WHERE physical<>canonical);
+        UPDATE local_file_dependencies AS edge SET dependency_path=(SELECT canonical.path FROM file_identity identity JOIN local_files physical ON physical.local_file_key=identity.physical JOIN local_files canonical ON canonical.local_file_key=identity.canonical WHERE physical.source_key=owner.source_key AND physical.path=edge.dependency_path LIMIT 1)
+            FROM local_files owner WHERE owner.local_file_key=edge.local_file_key AND EXISTS(SELECT 1 FROM file_identity identity JOIN local_files physical ON physical.local_file_key=identity.physical WHERE physical.source_key=owner.source_key AND physical.path=edge.dependency_path AND identity.physical<>identity.canonical);
+        INSERT OR REPLACE INTO local_file_dependencies(local_file_key,dependency_path,position,accepted_inputs)
+            SELECT identity.canonical,edge.dependency_path,edge.position,edge.accepted_inputs FROM file_identity identity JOIN local_file_dependencies edge ON edge.local_file_key=identity.physical WHERE identity.physical<>identity.canonical;
+        DELETE FROM local_file_dependencies WHERE local_file_key IN(SELECT physical FROM file_identity WHERE physical<>canonical AND physical NOT IN(SELECT canonical FROM file_identity));
+        DELETE FROM local_files WHERE local_file_key IN(SELECT physical FROM file_identity WHERE physical<>canonical AND physical NOT IN(SELECT canonical FROM file_identity));
+        DROP TABLE file_identity; DROP TABLE IF EXISTS local_track_files;")
+        .execute(&mut *connection).await?;
+    let roots: Vec<(i64,String,String,Option<String>)> = sqlx::query_as("SELECT DISTINCT file.source_key,source.object_id,file.root,(SELECT id FROM connect_roots shared WHERE shared.source_id=source.object_id AND shared.root=file.root LIMIT 1) FROM local_files file JOIN sources source USING(source_key)")
+        .fetch_all(&mut *connection).await?;
+    for (source, source_id, root, shared) in roots {
+        let id = shared.unwrap_or_else(|| blake3::hash(root.as_bytes()).to_hex().to_string());
+        sqlx::query("UPDATE local_files SET root_id=?3 WHERE source_key=?1 AND root=?2")
+            .bind(source)
+            .bind(&root)
+            .bind(&id)
+            .execute(&mut *connection)
+            .await?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO connect_roots(source_id,id,label,root) VALUES(?1,?2,'',?3)",
+        )
+        .bind(source_id)
+        .bind(&id)
+        .bind(root)
+        .execute(&mut *connection)
+        .await?;
+    }
+    sqlx::raw_sql("ALTER TABLE local_file_access_roots RENAME TO old_file_roots;
+        CREATE TABLE local_file_access_roots(source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,root TEXT NOT NULL,root_id TEXT NOT NULL,PRIMARY KEY(source_key,root_id,root)) STRICT,WITHOUT ROWID;
+        INSERT OR IGNORE INTO local_file_access_roots SELECT file.source_key,observation.root,file.root_id FROM local_files file JOIN local_file_observations observation USING(local_file_key) JOIN old_file_roots access ON access.source_key=file.source_key AND access.root=observation.root;
+        DROP TABLE old_file_roots;
+        UPDATE local_files SET device_id=NULL,inode=NULL,native_id=NULL,observed_stamp=0;")
+        .execute(&mut *connection).await?;
+    if has_table(connection, "main", "connect_versions").await? {
+        sqlx::query("DELETE FROM connect_versions WHERE kind GLOB 'catalog:*' AND kind NOT IN ('catalog:source','catalog:file','catalog:artwork')")
+            .execute(&mut *connection).await?;
+        let mut after = String::new();
+        loop {
+            let rows:Vec<(String,String)>=sqlx::query_as("SELECT name,version FROM connect_versions WHERE name>?1 AND json_type(version,'$.lamport') IS NULL ORDER BY name LIMIT 128")
+                .bind(&after).fetch_all(&mut *connection).await?;
+            let Some(last) = rows.last() else {
+                break;
+            };
+            after = last.0.clone();
+            for (name, version) in rows {
+                let values: std::collections::BTreeMap<u64, u64> = serde_json::from_str(&version)?;
+                let stamp = crate::RecordStamp {
+                    lamport: values.values().copied().sum(),
+                    actor: values.keys().copied().max().unwrap_or_default(),
+                };
+                sqlx::query("UPDATE connect_versions SET version=?2 WHERE name=?1")
+                    .bind(name)
+                    .bind(serde_json::to_string(&stamp)?)
+                    .execute(&mut *connection)
+                    .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) async fn attach(
     connection: &mut SqliteConnection,
     path: &Path,
@@ -205,6 +372,9 @@ pub(super) async fn copy_catalog(
         )
         .await?;
     }
+    sqlx::query("INSERT OR IGNORE INTO local_file_access_roots(source_key,root) SELECT DISTINCT source_key,root FROM local_files")
+        .execute(&mut *connection)
+        .await?;
     let mut after = 0_i64;
     loop {
         let files: Vec<(i64, String)> = sqlx::query_as("SELECT local_file_key,path FROM local_files WHERE local_file_key>?1 ORDER BY local_file_key LIMIT 128")
@@ -250,6 +420,7 @@ pub(super) async fn copy_catalog(
             }
         }
     }
+    copy_table(connection, schema, "waveform_cache", "waveform_cache", &[]).await?;
     crate::migration::snapshots::populate(connection, &format!("{schema}.")).await?;
     if has_table(connection, schema, "loudness_measurements").await? {
         let cols = columns(connection, schema, "loudness_measurements").await?;
@@ -257,6 +428,7 @@ pub(super) async fn copy_catalog(
             sqlx::query(sqlx::AssertSqlSafe(format!("INSERT OR REPLACE INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak) SELECT mapping.source_key,old.entity_kind,old.entity_key,old.analysis_key,old.integrated_lufs,old.true_peak FROM {schema}.loudness_measurements old JOIN migration_source_keys mapping ON mapping.old_key=old.source_key WHERE old.origin='analysis'"))).execute(&mut *connection).await?;
         }
     }
+    separate_file_access(connection).await?;
     Ok(())
 }
 
@@ -448,12 +620,7 @@ pub(super) async fn reduce_metadata(connection: &mut SqliteConnection) -> Librar
     sqlx::query("INSERT INTO tracks(media_uri,indexed) SELECT DISTINCT media_uri,0 FROM migration_metadata WHERE true ON CONFLICT(media_uri) DO NOTHING")
         .execute(&mut *connection).await?;
     for (field, _) in FIELDS {
-        let canonical = match *field {
-            "display_artist" => "artist",
-            "display_album" => "album",
-            field => field,
-        };
-        sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE tracks SET metadata=jsonb_set(metadata,'$.{canonical}',(SELECT value.{field} FROM migration_metadata value WHERE value.media_uri=tracks.media_uri AND value.{field} IS NOT NULL ORDER BY value.priority,value.present,value.stamp DESC,value.tie DESC LIMIT 1)) WHERE(json_extract(metadata,'$.{canonical}') IS NULL OR json_extract(metadata,'$.{canonical}')='' OR json_extract(metadata,'$.{canonical}')=0) AND EXISTS(SELECT 1 FROM migration_metadata value WHERE value.media_uri=tracks.media_uri AND value.{field} IS NOT NULL)"))).execute(&mut *connection).await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE tracks SET metadata=jsonb_set(metadata,'$.{field}',(SELECT value.{field} FROM migration_metadata value WHERE value.media_uri=tracks.media_uri AND value.{field} IS NOT NULL ORDER BY value.priority,value.present,value.stamp DESC,value.tie DESC LIMIT 1)) WHERE(json_extract(metadata,'$.{field}') IS NULL OR json_extract(metadata,'$.{field}')='' OR json_extract(metadata,'$.{field}')=0) AND EXISTS(SELECT 1 FROM migration_metadata value WHERE value.media_uri=tracks.media_uri AND value.{field} IS NOT NULL)"))).execute(&mut *connection).await?;
     }
     sqlx::query("UPDATE tracks SET metadata=jsonb_set(metadata,'$.sort_text',lower(coalesce(title,media_uri))) WHERE json_extract(metadata,'$.sort_text') IS NULL").execute(&mut *connection).await?;
     let mut after = 0_i64;
@@ -807,31 +974,13 @@ pub(crate) async fn import(input: &Path, destination: &Path, catalog: &Path) -> 
         &[],
     )
     .await?;
-    if has_table(&mut transaction, "old_store", "connect_collection").await? {
-        let fields = [
-            "source_id",
-            "album_id",
-            "root_id",
-            "root_label",
-            "relative_path",
-            "revision",
-            "local_media",
-            "cue_start_millis",
-            "cue_end_millis",
-            "backing_id",
-        ];
-        let values = fields
-            .iter()
-            .map(|field| format!("'{field}',json_extract(payload,'$.{field}')"))
-            .collect::<Vec<_>>()
-            .join(",");
-        sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO connect_collection(media_uri,payload) SELECT media_uri,json_object({values}) FROM old_store.connect_collection"))).execute(&mut *transaction).await?;
-    }
+    crate::connect::migrate_collection_on(&mut transaction, "old_store").await?;
     if has_table(&mut transaction, "old_store", "connect_changes").await? {
-        sqlx::query("INSERT INTO connect_changes(sequence,kind,object_key,payload) SELECT sequence,kind,object_key,payload FROM old_store.connect_changes WHERE payload IS NULL AND kind<>'cache_lyrics'").execute(&mut *transaction).await?;
+        sqlx::raw_sql("CREATE TABLE legacy_connect_changes(kind TEXT NOT NULL,object_key TEXT NOT NULL,payload TEXT,PRIMARY KEY(kind,object_key)) STRICT;
+            INSERT INTO legacy_connect_changes SELECT kind,object_key,payload FROM old_store.connect_changes WHERE payload IS NULL AND kind<>'cache_lyrics';").execute(&mut *transaction).await?;
     }
     if has_table(&mut transaction, "old_store", "connect_capture").await? {
-        sqlx::query("UPDATE connect_capture SET enabled=COALESCE((SELECT enabled FROM old_store.connect_capture WHERE singleton=1),0),applying=0 WHERE singleton=1").execute(&mut *transaction).await?;
+        sqlx::query("UPDATE connect_profile SET enabled=COALESCE((SELECT enabled FROM old_store.connect_capture WHERE singleton=1),0),receiving=0 WHERE singleton=1").execute(&mut *transaction).await?;
     }
     super::normalize_stored_artwork(&mut transaction).await?;
     transaction.commit().await?;

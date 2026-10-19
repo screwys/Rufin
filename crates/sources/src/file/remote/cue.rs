@@ -141,7 +141,11 @@ impl FileSource {
                 catalog
                     .write_file_observations(&[(file, old.dependencies.clone())], Vec::new(), true)
                     .await?;
-                return Ok(0);
+                let completed = database
+                    .source_file_track_count(source_id, &old.path)
+                    .await?;
+                progress(completed);
+                return Ok(completed);
             }
         }
         file.parse_version = Some(PARSER_VERSION);
@@ -210,14 +214,7 @@ impl FileSource {
                         continue;
                     }
                 };
-                backing_file.artist_pictures =
-                    Some(serde_json::to_string(&backing.artist_pictures)?);
-                backing_file.picture_index = match &backing.local_artwork {
-                    Some(crate::LocalImageRef::Embedded { picture_index, .. }) => {
-                        Some(i64::from(*picture_index))
-                    }
-                    _ => None,
-                };
+                backing.observe_images(&mut backing_file)?;
                 self.locate_track(&mut backing, &backing_file);
                 let duration = backing.track.metadata.duration_millis as u64;
                 for (chunk, cues) in entry.tracks.chunks(128).enumerate() {
@@ -250,10 +247,8 @@ impl FileSource {
                     let count = tracks.len();
                     catalog.write_file_observations(&[], tracks, true).await?;
 
-                    for _ in 0..count {
-                        completed += 1;
-                        progress(completed);
-                    }
+                    completed += count;
+                    progress(completed);
                     if !parsed? {
                         return Ok(false);
                     }

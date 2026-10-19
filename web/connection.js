@@ -18,7 +18,7 @@ import { coverRequest, showLyrics, showPlayback } from "./player.js";
 
 import { showSourceProgress, updateSources } from "./sources.js";
 import { refreshPins, resetPins } from "./pins.js";
-import { offerContinuation, watch as watchConnect } from "./connect.js";
+import { refreshContinuation, watch as watchConnect } from "./connect.js";
 
 let session = null;
 let initialPage = true;
@@ -152,7 +152,7 @@ async function connect() {
     initialPage = false;
   }
   await loadView(rendered);
-  void offerContinuation();
+  void refreshContinuation();
   stream(
     "/events",
     (value) => {

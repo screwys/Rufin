@@ -163,26 +163,26 @@
             packages =
               with pkgs;
               [
+                android-tools
                 ast-grep
-                cargo
                 cargo-deny
                 cargo-nextest
-                clippy
                 cmake
+                curl
                 debugedit
                 desktop-file-utils
                 fakeroot
                 file
                 gettext
                 git
+                jdk21
                 just
                 jq
                 libarchive
                 ninja
                 pacman
                 pkg-config
-                rustc
-                rustfmt
+                rustup
                 wavpack
                 zstd
               ]
@@ -202,6 +202,8 @@
               ]);
 
             GIO_EXTRA_MODULES = "${pkgs.glib-networking}/lib/gio/modules";
+            JAVA_HOME = "${pkgs.jdk21}";
+            RUSTUP_TOOLCHAIN = "stable";
           };
         in
         {
@@ -217,6 +219,7 @@
           };
           packaging = pkgs.mkShell {
             inputsFrom = [ defaultShell ];
+            inherit (defaultShell) JAVA_HOME RUSTUP_TOOLCHAIN;
             packages = with pkgs; [
               bubblewrap
               dbus

@@ -4,8 +4,8 @@ use sqlx::{Connection, FromRow, SqliteConnection};
 use std::sync::Arc;
 pub(crate) mod artwork;
 pub(crate) mod cache;
-mod collections;
-mod file_reads;
+pub(crate) mod collections;
+pub(crate) mod file_reads;
 pub(crate) mod files;
 mod observations;
 pub(crate) use cache::{remember_collection, remember_track};
@@ -64,10 +64,47 @@ pub struct Catalog<'a> {
     pub source_id: &'a str,
     pub observed: Option<i64>,
     pub source: SourceKey,
-    changes: CatalogUpdate,
+    pub(crate) changes: CatalogUpdate,
+    pub(crate) incoming: bool,
+}
+
+pub(crate) fn keep_local_membership(kind: &str, incoming: bool) -> String {
+    if !incoming {
+        return String::new();
+    }
+    let member = match kind {
+            "track" => "EXISTS(SELECT 1 FROM local_track_access access WHERE access.track_key=tracks.track_key AND access.local_file_key IS NOT NULL)".to_owned(),
+            "album" => "EXISTS(SELECT 1 FROM tracks member WHERE member.album_key=albums.album_key AND member.indexed=1 AND EXISTS(SELECT 1 FROM local_track_access access WHERE access.track_key=member.track_key AND access.local_file_key IS NOT NULL))".to_owned(),
+            "artist" => "EXISTS(SELECT 1 FROM tracks member JOIN track_artists edge USING(track_key) WHERE edge.artist_key=artists.artist_key AND member.indexed=1 AND EXISTS(SELECT 1 FROM local_track_access access WHERE access.track_key=member.track_key AND access.local_file_key IS NOT NULL)) OR EXISTS(SELECT 1 FROM tracks member JOIN track_album_artists edge USING(track_key) WHERE edge.artist_key=artists.artist_key AND member.indexed=1 AND EXISTS(SELECT 1 FROM local_track_access access WHERE access.track_key=member.track_key AND access.local_file_key IS NOT NULL))".to_owned(),
+            "genre" | "mood" | "folder" => format!("EXISTS(SELECT 1 FROM tracks member JOIN track_{kind}s edge USING(track_key) WHERE edge.{kind}_key={kind}s.{kind}_key AND member.indexed=1 AND EXISTS(SELECT 1 FROM local_track_access access WHERE access.track_key=member.track_key AND access.local_file_key IS NOT NULL))"),
+            _ => return String::new(),
+        };
+    format!(" AND NOT((SELECT kind FROM sources WHERE source_key=?1)='local' AND({member}))")
 }
 
 impl Catalog<'_> {
+    pub(crate) async fn begin_write<'c>(
+        &self,
+        connection: &'c mut SqliteConnection,
+    ) -> LibraryResult<sqlx::Transaction<'c, sqlx::Sqlite>> {
+        let mut transaction = connection.begin().await?;
+        if self.incoming {
+            crate::connect::set_receiving_on(&mut transaction, true).await?;
+        }
+        Ok(transaction)
+    }
+
+    pub(crate) async fn commit_write(
+        &self,
+        mut transaction: sqlx::Transaction<'_, sqlx::Sqlite>,
+    ) -> LibraryResult<()> {
+        if self.incoming {
+            crate::connect::set_receiving_on(&mut transaction, false).await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub fn changes(&self) -> &CatalogUpdate {
         &self.changes
     }
@@ -115,6 +152,7 @@ impl Database {
             source,
             observed,
             changes: CatalogUpdate::default(),
+            incoming: false,
         })
     }
 
@@ -141,14 +179,40 @@ impl Database {
         kind: &str,
         name: &str,
     ) -> LibraryResult<CachedSource> {
+        self.reconcile_source_cache(source_id, kind, name, false)
+            .await
+    }
+
+    pub(crate) async fn reconcile_source_cache(
+        &self,
+        source_id: &SourceId,
+        kind: &str,
+        name: &str,
+        incoming: bool,
+    ) -> LibraryResult<CachedSource> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
+        if incoming {
+            crate::connect::set_receiving_on(&mut transaction, true).await?;
+        }
         let source = crate::db::write_source_identity(&mut transaction, source_id.as_str()).await?;
-        sqlx::query("UPDATE sources SET kind=?2,display_name=?3,normalized_name=?4,distinct_track_covers=?5 WHERE source_key=?1 AND (kind,display_name,normalized_name,distinct_track_covers) IS NOT (?2,?3,?4,?5)")
-            .bind(source).bind(kind).bind(name).bind(name.to_lowercase()).bind(self.distinct_track_covers()).execute(&mut *transaction).await?;
+        let changed = sqlx::query("UPDATE sources SET kind=?2,display_name=?3,normalized_name=?4,distinct_track_covers=?5 WHERE source_key=?1 AND (kind,display_name,normalized_name,distinct_track_covers) IS NOT (?2,?3,?4,?5)")
+            .bind(source).bind(kind).bind(name).bind(name.to_lowercase()).bind(self.distinct_track_covers()).execute(&mut *transaction).await?.rows_affected()>0;
+        if changed {
+            crate::connect::mark_current_on(
+                &mut transaction,
+                "catalog:source",
+                &serde_json::json!([source_id.as_str(), source_id.as_str()]).to_string(),
+                false,
+            )
+            .await?;
+        }
         let row = sqlx::query_as("SELECT source_key source,object_id,display_name,catalog_complete FROM sources WHERE source_key=?1")
             .bind(source).fetch_one(&mut *transaction).await?;
+        if incoming {
+            crate::connect::set_receiving_on(&mut transaction, false).await?;
+        }
         transaction.commit().await?;
         Ok(row)
     }

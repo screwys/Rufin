@@ -54,7 +54,7 @@
             <span class="icon" data-icon="server"></span>
           </button>
           <button id="open-connect" class="icon-button" aria-label="{{ localization::tr("Rufin Connect") }}">⇄</button>
-          <button id="connect-continue" class="icon-button" aria-label="{{ localization::tr("Continue") }}" hidden><span class="icon" data-icon="play"></span></button>
+          <button id="connect-continue" class="text-button" hidden></button>
           <a
             class="icon-button mobile"
             id="close-navigation"
@@ -374,7 +374,6 @@
       </footer>
       <div id="toast" role="status" hidden></div>
       <div id="connect-progress" role="status" hidden><span id="connect-progress-text"></span><button id="connect-progress-open">{{ localization::tr("Open Rufin Connect") }}</button><button id="connect-progress-dismiss" class="icon-button" aria-label="{{ localization::tr("Close") }}">×</button></div>
-      <div id="connect-offer" role="status" hidden><span id="connect-offer-text"></span><button id="connect-offer-accept">{{ localization::tr("Continue") }}</button><button id="connect-offer-dismiss" class="icon-button" aria-label="{{ localization::tr("Close") }}">×</button></div>
     </div>
 
     <div

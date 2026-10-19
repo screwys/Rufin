@@ -150,9 +150,9 @@ impl SourceOwner {
                     .find(|s| s.configuration.source_id == id)
                     .ok_or("The connection no longer exists")?;
                 let credential = saved
-                    .credential_ref
+                    .credential
                     .as_ref()
-                    .map(|r| load_provider_secret(&owner.shared.secrets, r))
+                    .map(|r| load_provider_secret(owner.shared.secrets.as_ref(), r))
                     .transpose()?
                     .flatten();
                 match Source::edit(saved.configuration.clone(), credential, input, None)
@@ -195,28 +195,14 @@ impl SourceOwner {
         let settings = self.shared.settings.clone();
         let secrets = self.shared.secrets.clone();
         tokio::task::spawn_blocking(move || {
-            let reference = if credential.is_some() {
-                Some(
-                    settings
-                        .load()
-                        .sources
-                        .integrations
-                        .iter()
-                        .find(|saved| saved.configuration.source_id == configuration.source_id)
-                        .and_then(|saved| saved.credential_ref.clone())
-                        .map(Ok)
-                        .unwrap_or_else(fresh_credential_ref)?,
-                )
-            } else {
-                None
-            };
-            if let (Some(reference), Some(credential)) = (&reference, credential) {
-                save_provider_secret(&secrets, reference, credential)?;
-            }
+            let credential = credential
+                .as_deref()
+                .map(|value| seal_credential(secrets.as_ref(), value))
+                .transpose()?;
             settings.update(|stored| {
                 let next = ConfiguredSource {
                     configuration,
-                    credential_ref: reference,
+                    credential,
                     music_folder_id: None,
                     local_access: None,
                     enable_half_stars: false,

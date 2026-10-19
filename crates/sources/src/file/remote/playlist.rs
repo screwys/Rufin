@@ -234,6 +234,11 @@ impl FileSource {
         self.location(to)?;
         let input = self.input().await?;
         match input.input() {
+            FileInput::Peer { .. } => {
+                return Err(SourceError::InvalidRequest(
+                    "Peer access provides audio bytes",
+                ));
+            }
             FileInput::Documents(access) => {
                 let access = std::sync::Arc::clone(access);
                 let (from, to) = (from.to_owned(), to.to_owned());
@@ -261,10 +266,15 @@ impl FileSource {
         ))
     }
 
-    pub(crate) async fn remove_file(&self, path: &str) -> SourceResult<()> {
+    pub async fn remove_file(&self, path: &str) -> SourceResult<()> {
         self.location(path)?;
         let input = self.input().await?;
         match input.input() {
+            FileInput::Peer { .. } => {
+                return Err(SourceError::InvalidRequest(
+                    "Peer access provides audio bytes",
+                ));
+            }
             FileInput::Documents(access) => {
                 let access = std::sync::Arc::clone(access);
                 let path = path.to_owned();

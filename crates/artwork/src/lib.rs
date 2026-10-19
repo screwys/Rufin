@@ -349,19 +349,6 @@ impl Artwork {
             .map_err(|error| std::io::Error::other(error.to_string()))?
     }
 
-    /// Enumerate ready images and originals, one filesystem entry at a time.
-    pub fn cache_entries(&self) -> Result<ArtworkCacheEntries, ArtworkError> {
-        Ok(self.pipeline.cache().entries()?)
-    }
-
-    pub fn subscribe_cache_writes(&self) -> tokio::sync::broadcast::Receiver<(String, u64)> {
-        self.pipeline.cache().subscribe()
-    }
-
-    pub fn cache_write_revision(&self) -> u64 {
-        self.pipeline.cache().revision()
-    }
-
     /// Keys are relative to the existing v1 cache layout, never filesystem paths.
     pub fn cache_file(&self, key: &str) -> Result<Option<PathBuf>, ArtworkError> {
         Ok(self.pipeline.cache().file(key)?)
@@ -860,7 +847,6 @@ mod tests {
         cache
             .mark_missing(candidate, ImageSize::Thumbnail(1024))
             .unwrap();
-        let revision = artwork.cache_write_revision();
         artwork
             .clear_cache(
                 &database,
@@ -877,7 +863,6 @@ mod tests {
         assert!(!discarded.exists());
         assert!(!cache.is_missing(candidate, ImageSize::Thumbnail(1024)));
         assert_eq!(artwork.key(&request), key);
-        assert!(artwork.cache_write_revision() > revision);
         artwork.clear_cache(&database, &[]).await.unwrap();
         assert!(!large.exists());
         assert!(!original.exists());

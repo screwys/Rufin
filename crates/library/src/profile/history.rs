@@ -1,8 +1,66 @@
 use super::*;
 
+pub(super) const OBSERVATION_KINDS: &[&str] = &[
+    "listen",
+    "legacy_activity",
+    "catalog",
+    "analysis",
+    "state",
+    "smart",
+    "reference",
+    "track",
+    "album",
+    "artist",
+    "genre",
+    "mood",
+    "folder",
+    "native_playlist",
+    "native_entry",
+    "album_artists",
+    "album_genres",
+    "track_artists",
+    "track_genres",
+    "track_moods",
+    "track_folders",
+];
+
+pub(super) fn retains_history(name: &str) -> bool {
+    !OBSERVATION_KINDS.contains(&name.split(':').next().unwrap_or(name))
+}
+
+pub(super) fn predicate() -> String {
+    format!(
+        "substr(name,1,instr(name||':',':')-1) NOT IN ('{}')",
+        OBSERVATION_KINDS.join("','")
+    )
+}
+
+pub(super) async fn remove_peers_on(
+    connection: &mut SqliteConnection,
+    removed: &[&str],
+) -> Result<()> {
+    if removed.is_empty() {
+        return Ok(());
+    }
+    let mut delete = QueryBuilder::new("DELETE FROM history_acknowledgements WHERE peer IN (");
+    let mut peers = delete.separated(",");
+    for peer in removed {
+        peers.push_bind(peer);
+    }
+    peers.push_unseparated(")");
+    delete.build().execute(&mut *connection).await?;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "INSERT OR IGNORE INTO history_pending SELECT name FROM documents WHERE {}",
+        predicate()
+    )))
+    .execute(connection)
+    .await?;
+    Ok(())
+}
+
 impl ProfileStore {
     pub async fn register_members(&self, members: &[String]) -> Result<()> {
-        let mut connection = database_connection(&self.connection).await?;
+        let mut connection = self.writer().await?;
         let mut transaction = connection.begin().await?;
         register_on(&mut transaction, members).await?;
         transaction.commit().await?;
@@ -16,13 +74,14 @@ impl ProfileStore {
         versions: &[DocumentVersion],
         members: &[String],
     ) -> Result<()> {
-        let mut connection = database_connection(&self.connection).await?;
+        let mut connection = self.writer().await?;
         let mut transaction = connection.begin().await?;
         register_on(&mut transaction, members).await?;
         register_on(&mut transaction, &[peer.to_owned()]).await?;
         for page in versions.chunks(CONNECT_PAGE_SIZE) {
             let page = page
                 .iter()
+                .filter(|version| retains_history(&version.name))
                 .map(|version| {
                     Ok((
                         peer.to_owned(),
@@ -31,32 +90,12 @@ impl ProfileStore {
                     ))
                 })
                 .collect::<Result<Vec<_>>>()?;
-            acknowledge_page_on(&mut transaction, &page).await?;
+            if !page.is_empty() {
+                acknowledge_page_on(&mut transaction, &page).await?;
+            }
         }
         transaction.commit().await?;
         Ok(())
-    }
-
-    /// Include membership observed after the snapshot, so a newly enrolled device
-    /// cannot disappear from the acknowledgement used by another device to prune.
-    pub async fn finish_device_snapshot<W: Write + Send + 'static>(
-        &self,
-        mut output: W,
-        members: &[String],
-    ) -> Result<W> {
-        let mut connection = database_connection(&self.connection).await?;
-        register_on(&mut connection, members).await?;
-        let members = participants(&mut connection).await?;
-        drop(connection);
-        tokio::task::spawn_blocking(move || -> Result<W> {
-            let mut membership = GzEncoder::new(&mut output, Compression::default());
-            serde_json::to_writer(&mut membership, &members)?;
-            membership.write_all(b"\n")?;
-            membership.finish()?;
-            output.flush()?;
-            Ok(output)
-        })
-        .await?
     }
 
     /// Process a bounded page without projecting values or invalidating the UI.
@@ -68,17 +107,18 @@ impl ProfileStore {
         members: &[String],
         limit: usize,
     ) -> Result<usize> {
-        let mut connection = database_connection(&self.connection).await?;
+        let mut connection = self.writer().await?;
         let mut transaction = connection.begin().await?;
         register_on(&mut transaction, members).await?;
         register_on(&mut transaction, &[identity.to_owned()]).await?;
         let peers = participants(&mut transaction).await?;
-        let names: Vec<String> =
-            sqlx::query_scalar("SELECT name FROM history_pending ORDER BY name LIMIT ?1")
-                .bind(i64::try_from(limit)?)
-                .fetch_all(&mut *transaction)
-                .await?;
-        let mut changed = false;
+        let names: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT name FROM history_pending WHERE {} ORDER BY name LIMIT ?1",
+            predicate()
+        )))
+        .bind(i64::try_from(limit)?)
+        .fetch_all(&mut *transaction)
+        .await?;
         for name in &names {
             sqlx::query("DELETE FROM history_pending WHERE name=?1")
                 .bind(name)
@@ -141,12 +181,6 @@ impl ProfileStore {
                 .bind(pruned)
                 .execute(&mut *transaction)
                 .await?;
-            changed = true;
-        }
-        if changed {
-            // Replication versions and projected values stay unchanged. Only the
-            // file needs republishing with its smaller representation.
-            next_revision(&mut transaction).await?;
         }
         transaction.commit().await?;
         Ok(names.len())
@@ -175,9 +209,12 @@ pub(super) async fn register_on(
         sqlx::query("DELETE FROM sync_cursors")
             .execute(&mut *connection)
             .await?;
-        sqlx::query("INSERT OR IGNORE INTO history_pending SELECT name FROM documents")
-            .execute(&mut *connection)
-            .await?;
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "INSERT OR IGNORE INTO history_pending SELECT name FROM documents WHERE {}",
+            predicate()
+        )))
+        .execute(&mut *connection)
+        .await?;
     }
     Ok(())
 }
@@ -187,8 +224,16 @@ pub(super) async fn acknowledge_page_on(
     versions: &[(String, String, VersionVector)],
 ) -> Result<()> {
     for page in versions.chunks(CONNECT_PAGE_SIZE) {
+        let page = page
+            .iter()
+            .filter(|(_, name, _)| retains_history(name))
+            .cloned()
+            .collect::<Vec<_>>();
+        if page.is_empty() {
+            continue;
+        }
         let mut query = QueryBuilder::<sqlx::Sqlite>::new("WITH requested(peer,name) AS (");
-        query.push_values(page, |mut values, (peer, name, _)| {
+        query.push_values(&page, |mut values, (peer, name, _)| {
             values.push_bind(peer).push_bind(name);
         });
         query.push(") SELECT DISTINCT h.peer,h.name,h.version FROM requested r JOIN history_acknowledgements h ON h.peer=r.peer AND h.name=r.name");
@@ -200,7 +245,7 @@ pub(super) async fn acknowledge_page_on(
             );
         }
         let mut changed = BTreeSet::new();
-        for (peer, name, version) in page {
+        for (peer, name, version) in &page {
             let key = (peer.clone(), name.clone());
             let previous = acknowledged.entry(key.clone()).or_default();
             if !previous.includes_vv(version) {

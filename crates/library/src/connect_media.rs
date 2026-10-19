@@ -1,14 +1,47 @@
 //! Device-local representations of shared collection entries.
-use crate::{Database, LibraryError, LibraryResult, LocalMediaLocation};
+use crate::{Database, LibraryError, LibraryResult, LocalFileWrite, LocalMediaLocation};
+use serde::{Deserialize, Serialize};
+use sqlx::Connection;
 
-#[derive(Clone, Debug, sqlx::FromRow)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CatalogFileStamp {
+    pub size_bytes: Option<i64>,
+    pub mtime_ns: i64,
+    pub revision: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CatalogFileDependency {
+    pub path: String,
+    pub accepted: Option<CatalogFileStamp>,
+    pub file: Option<LocalFileWrite>,
+    #[serde(default)]
+    pub root_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CatalogFile {
+    pub file: LocalFileWrite,
+    #[serde(default)]
+    pub root_id: Option<String>,
+    pub parsed: Option<(CatalogFileStamp, Option<i64>)>,
+    pub directory_complete: bool,
+    pub dependencies: Vec<CatalogFileDependency>,
+}
+
+#[derive(Clone, Debug, Default, sqlx::FromRow)]
 pub struct ConnectMediaFile {
     pub media_uri: String,
     pub encoding: String,
     pub revision: String,
     pub path: String,
     pub managed: bool,
-    pub hash: Option<String>,
+    pub source_id: Option<String>,
+    pub owners: String,
+    pub storage_root: String,
+    pub relative_path: String,
+    pub completed_size: Option<i64>,
+    pub retired_documents: String,
 }
 
 pub fn media_encoding_key(encoding: Option<crate::AudioEncoding>) -> String {
@@ -18,16 +51,6 @@ pub fn media_encoding_key(encoding: Option<crate::AudioEncoding>) -> String {
         Some(encoding) => {
             serde_json::to_string(&encoding).expect("an audio encoding can be stored")
         }
-    }
-}
-
-pub fn media_encoding_from_key(
-    key: &str,
-) -> Result<Option<crate::AudioEncoding>, serde_json::Error> {
-    match key {
-        "original" => Ok(None),
-        "mp3" => Ok(Some(crate::AudioEncoding::mp3())),
-        _ => serde_json::from_str(key).map(Some),
     }
 }
 
@@ -43,6 +66,12 @@ mod tests {
         let backing = url::Url::from_file_path(root.path().join("album.flac"))
             .unwrap()
             .to_string();
+        std::fs::write(root.path().join("album.flac"), b"original").unwrap();
+        let source_id = crate::SourceId::new("local");
+        database
+            .reconcile_source(&source_id, "local", "Local")
+            .await
+            .unwrap();
         for index in 0..130 {
             let uri = crate::cue_media_uri(
                 &index.to_string(),
@@ -50,6 +79,49 @@ mod tests {
                 index * 1000,
                 (index + 1) * 1000,
             );
+            if index == 0 {
+                database
+                    .catalog(source_id.as_str(), None)
+                    .await
+                    .unwrap()
+                    .apply_catalog(
+                        &crate::CatalogBatch {
+                            tracks: vec![crate::TrackObservation {
+                                object_id: "track".into(),
+                                media_uri: Some(uri.clone()),
+                                ..Default::default()
+                            }],
+                            ..Default::default()
+                        },
+                        true,
+                    )
+                    .await
+                    .unwrap();
+                database
+                    .write_local_access(
+                        None,
+                        &[&crate::LocalAccessWrite {
+                            media_uri: uri.clone(),
+                            origin: crate::LocalAccessOrigin::Download,
+                            path: root
+                                .path()
+                                .join("album.flac")
+                                .to_string_lossy()
+                                .into_owned(),
+                            root: root.path().to_string_lossy().into_owned(),
+                            relative_path: "album.flac".into(),
+                            access_uri: backing.clone(),
+                            size_bytes: 8,
+                            mtime_ns: 0,
+                            device_id: None,
+                            inode: None,
+                            parser_version: 1,
+                            loudness_analysis_key: None,
+                        }],
+                    )
+                    .await
+                    .unwrap();
+            }
             database
                 .connect_save_media_file(&ConnectMediaFile {
                     media_uri: uri,
@@ -57,13 +129,36 @@ mod tests {
                     revision: "v1".into(),
                     path: backing.clone(),
                     managed: true,
-                    hash: Some("blob".into()),
+                    ..Default::default()
                 })
                 .await
                 .unwrap();
         }
+        assert_eq!(database.downloaded_count(None).await.unwrap(), 1);
         database.close().await.unwrap();
         let database = Database::open(&path).await.unwrap();
+        assert_eq!(
+            database
+                .downloaded_count(Some(source_id.as_str()))
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(database.downloaded_count(None).await.unwrap(), 0);
+        let records = database
+            .download_files_page(
+                Some(source_id.as_str()),
+                &(String::new(), String::new()),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].path, backing);
+        assert_eq!(
+            std::fs::read(root.path().join("album.flac")).unwrap(),
+            b"original"
+        );
         let mut reader = database.acquire_reader().await.unwrap();
         let count: i64 =
             sqlx::query_scalar("SELECT count(*) FROM connect_media_files WHERE backing_uri=?1")
@@ -80,36 +175,54 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(shared.path, backing);
-        assert_eq!(
-            database.connect_media_file_users(&shared).await.unwrap(),
-            (true, true)
-        );
+        assert!(database.connect_media_file_users(&shared).await.unwrap());
     }
 
     #[tokio::test]
-    async fn direct_continuation_access_stays_local_and_removal_preserves_original() {
+    async fn download_receipt_removal_preserves_original_and_borrowed_access() {
         let root = tempfile::tempdir().unwrap();
         let database = Database::open(root.path().join("library.sqlite"))
             .await
             .unwrap();
-        database.connect_capture_enabled(true).await.unwrap();
         let original = root.path().join("original.flac");
         std::fs::write(&original, b"original").unwrap();
         let uri = url::Url::from_file_path(&original).unwrap().to_string();
         let item = crate::TrackReference::direct(&uri, "Track", "Artist", "Album", 180_000);
-        let copy = root.path().join("download.mp3");
-        std::fs::write(&copy, b"download").unwrap();
         database
-            .connect_set_queue_file(&item.media_uri, &item.metadata, &copy)
+            .write_direct_track_metadata(&uri, &item.metadata)
             .await
             .unwrap();
+        let copy = root.path().join("download.mp3");
+        std::fs::write(&copy, b"download").unwrap();
+        let mut access = crate::LocalAccessWrite {
+            media_uri: item.media_uri.clone(),
+            origin: crate::LocalAccessOrigin::Download,
+            path: copy.to_string_lossy().into_owned(),
+            root: root.path().to_string_lossy().into_owned(),
+            relative_path: "download.mp3".into(),
+            size_bytes: 8,
+            mtime_ns: 0,
+            device_id: None,
+            inode: None,
+            parser_version: 1,
+            access_uri: url::Url::from_file_path(&copy).unwrap().to_string(),
+            loudness_analysis_key: None,
+        };
+        database.write_local_access(None, &[&access]).await.unwrap();
+        assert!(
+            database
+                .connect_original_file(&uri, |path| path)
+                .await
+                .unwrap()
+                .is_none()
+        );
         let receipt = ConnectMediaFile {
             media_uri: uri.clone(),
             encoding: "mp3".into(),
             revision: "1".into(),
             path: url::Url::from_file_path(&copy).unwrap().to_string(),
             managed: true,
-            hash: None,
+            ..Default::default()
         };
         database.connect_save_media_file(&receipt).await.unwrap();
         assert_eq!(
@@ -134,6 +247,36 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        let alternative = root.path().join("download.opus");
+        std::fs::write(&alternative, b"alternative").unwrap();
+        let alternate = ConnectMediaFile {
+            encoding: media_encoding_key(Some(crate::AudioEncoding {
+                codec: crate::AudioCodec::Opus,
+                ..crate::AudioEncoding::mp3()
+            })),
+            path: url::Url::from_file_path(&alternative).unwrap().to_string(),
+            completed_size: Some(11),
+            storage_root: root.path().to_string_lossy().into_owned(),
+            relative_path: "download.opus".into(),
+            ..receipt.clone()
+        };
+        let mut alternate_access = access.clone();
+        alternate_access.path = alternative.to_string_lossy().into_owned();
+        alternate_access.access_uri = alternate.path.clone();
+        alternate_access.relative_path = "download.opus".into();
+        alternate_access.size_bytes = 11;
+        database
+            .commit_download(&alternate, None, &alternate_access)
+            .await
+            .unwrap();
+        database
+            .connect_forget_media_file(&alternate)
+            .await
+            .unwrap();
+        assert_eq!(
+            database.playback_access(&uri).await.unwrap().unwrap().0,
+            receipt.path
+        );
         database.connect_forget_media_file(&receipt).await.unwrap();
         assert!(database.playback_access(&uri).await.unwrap().is_none());
         assert_eq!(
@@ -147,94 +290,42 @@ mod tests {
             },
             "Track"
         );
+        let mut borrowed = receipt.clone();
+        borrowed.path = uri.clone();
+        borrowed.managed = false;
+        access.origin = crate::LocalAccessOrigin::Mapping;
+        access.path = original.to_string_lossy().into_owned();
+        access.relative_path = "original.flac".into();
+        access.access_uri = uri.clone();
+        database.write_local_access(None, &[&access]).await.unwrap();
+        assert!(matches!(
+            database.connect_original_file(&uri, |path| path).await.unwrap(),
+            Some(LocalMediaLocation::File(path)) if path == original
+        ));
+        let cue = crate::cue_media_uri("mapped", &uri, 0, 1_000);
+        assert!(matches!(
+            database.connect_original_file(&cue, |path| path).await.unwrap(),
+            Some(LocalMediaLocation::File(path)) if path == original
+        ));
+        database.connect_save_media_file(&borrowed).await.unwrap();
+        database.connect_forget_media_file(&borrowed).await.unwrap();
+        assert_eq!(
+            database.playback_access(&uri).await.unwrap().unwrap().0,
+            uri
+        );
         assert_eq!(std::fs::read(original).unwrap(), b"original");
+        access.path = "content://provider/document/original.flac".into();
+        access.access_uri = access.path.clone();
+        access.root = "content://provider/tree/music".into();
+        database.write_local_access(None, &[&access]).await.unwrap();
+        assert!(matches!(
+            database.connect_original_file(&uri, |path| path).await.unwrap(),
+            Some(LocalMediaLocation::Document(document)) if document == access.access_uri
+        ));
     }
 }
 
 impl Database {
-    pub async fn connect_local_media_page(&self, after: &str) -> LibraryResult<Vec<String>> {
-        let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT media_uri FROM ({}) needed JOIN tracks t USING(track_key) WHERE media_uri>?1 AND ((media_uri>='file:' AND media_uri<'file;') OR (media_uri>='rufin:cue/' AND media_uri<'rufin:cue0') OR (media_uri>='rufin:document/' AND media_uri<'rufin:document0') OR EXISTS(SELECT 1 FROM local_files f WHERE f.source_key=t.source_key AND f.path=t.source_path AND f.path LIKE 'rufin-document:%') OR EXISTS(SELECT 1 FROM main.local_locators l WHERE l.media_uri=t.media_uri AND l.origin IN ('local','import') AND l.access_uri LIKE 'content://%') OR EXISTS(SELECT 1 FROM connect_collection c WHERE c.media_uri=t.media_uri AND json_extract(c.payload,'$.local_media')=1)) ORDER BY media_uri LIMIT ?2", crate::connect::NEEDED_TRACK_KEYS)))
-            .bind(after).bind(crate::CONNECT_PAGE_SIZE as i64)
-            .fetch_all(&mut *reader).await?)
-    }
-
-    /// A transferred direct queue file has local access without catalog enrollment.
-    pub async fn connect_set_queue_file(
-        &self,
-        uri: &str,
-        tags: &crate::TrackMetadata,
-        path: &std::path::Path,
-    ) -> LibraryResult<()> {
-        let metadata = std::fs::metadata(path)?;
-        let access_uri = url::Url::from_file_path(path)
-            .map_err(|()| LibraryError::InvalidRequest("Media path must be absolute".into()))?
-            .to_string();
-        self.connect_set_queue_access(
-            uri,
-            tags,
-            path.to_string_lossy().into_owned(),
-            path.parent().unwrap_or(path).to_string_lossy().into_owned(),
-            access_uri,
-            i64::try_from(metadata.len()).unwrap_or(i64::MAX),
-        )
-        .await
-    }
-
-    pub async fn connect_set_queue_document(
-        &self,
-        media_uri: &str,
-        tags: &crate::TrackMetadata,
-        uri: &str,
-        size: Option<u64>,
-    ) -> LibraryResult<()> {
-        self.connect_set_queue_access(
-            media_uri,
-            tags,
-            uri.into(),
-            uri.into(),
-            uri.into(),
-            size.and_then(|size| i64::try_from(size).ok()).unwrap_or(0),
-        )
-        .await
-    }
-
-    async fn connect_set_queue_access(
-        &self,
-        uri: &str,
-        tags: &crate::TrackMetadata,
-        path: String,
-        root: String,
-        access_uri: String,
-        size_bytes: i64,
-    ) -> LibraryResult<()> {
-        self.write_local_access(
-            None,
-            &[&crate::LocalAccessWrite {
-                media_uri: uri.to_string(),
-                origin: crate::LocalAccessOrigin::Download,
-                path,
-                root,
-                relative_path: String::new(),
-                size_bytes,
-                mtime_ns: 0,
-                device_id: None,
-                inode: None,
-                parser_version: 1,
-                title: tags.title.clone(),
-                album: tags.album.clone(),
-                artist: tags.artist.clone(),
-                disc_number: tags.disc_number.max(1),
-                track_number: tags.track_number.max(1),
-                duration_millis: tags.duration_millis,
-                access_uri,
-                loudness_analysis_key: None,
-            }],
-        )
-        .await
-        .map(|_| ())
-    }
-
     pub async fn connect_original_file(
         &self,
         uri: &str,
@@ -242,7 +333,7 @@ impl Database {
     ) -> LibraryResult<Option<LocalMediaLocation>> {
         let mut reader = self.acquire_reader().await?;
         let backing = crate::cue_media_parts(uri).map(|(_, backing, _, _)| backing);
-        let access: Option<String> = sqlx::query_scalar("SELECT access_uri FROM local_locators WHERE media_uri IN (?1,?2) AND origin IN ('local','import') ORDER BY media_uri=?1 DESC LIMIT 1")
+        let access: Option<String> = sqlx::query_scalar("SELECT access_uri FROM local_locators WHERE media_uri IN (?1,?2) AND origin IN ('local','import','mapping') ORDER BY media_uri=?1 DESC LIMIT 1")
             .bind(uri).bind(backing.as_deref()).fetch_optional(&mut *reader).await?;
         if let Some(uri) = access.as_ref().filter(|uri| uri.starts_with("content://")) {
             return Ok(Some(LocalMediaLocation::Document(uri.clone())));
@@ -254,15 +345,10 @@ impl Database {
         {
             return Ok(Some(LocalMediaLocation::File(path)));
         }
-        let native = crate::file_media_path(backing.as_deref().unwrap_or(uri)).is_some();
-        // Native scans set source_path; Connect never copies it from another device.
-        // Playlist imports keep that path without configuring a folder.
         let path: Option<String> = sqlx::query_scalar(
-            "SELECT source_path FROM tracks t WHERE media_uri=?1 AND source_path IS NOT NULL
-             AND (?2 OR EXISTS(SELECT 1 FROM local_files f WHERE f.source_key=t.source_key AND f.path=t.source_path))",
+            "SELECT access.source_path FROM tracks t JOIN sources source USING(source_key) JOIN local_track_access access USING(track_key) WHERE media_uri=?1 AND source.kind='local'",
         )
         .bind(uri)
-        .bind(native)
         .fetch_optional(&mut *reader)
         .await?;
         if let Some(uri) = path.as_deref().and_then(crate::document_access_uri) {
@@ -287,25 +373,29 @@ impl Database {
 
     pub async fn connect_forget_media_file(&self, file: &ConnectMediaFile) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let writer = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        sqlx::query(
-            "DELETE FROM local_locators WHERE media_uri=?1 AND access_uri=?2 AND origin='download' AND NOT EXISTS(SELECT 1 FROM connect_media_files WHERE media_uri=?1 AND path=?2 AND (encoding,revision)<>(?3,?4))",
-        )
-        .bind(&file.media_uri)
-        .bind(&file.path)
-        .bind(&file.encoding)
-        .bind(&file.revision)
-        .execute(&mut *writer)
-        .await?;
-        sqlx::query(
-            "DELETE FROM connect_media_files WHERE media_uri=?1 AND encoding=?2 AND path=?3 AND revision=?4",
-        )
-        .bind(&file.media_uri)
-        .bind(&file.encoding)
-        .bind(&file.path)
-        .bind(&file.revision)
-        .execute(writer)
-        .await?;
+        let mut transaction = writer
+            .as_mut()
+            .ok_or(LibraryError::WriterUnavailable)?
+            .begin()
+            .await?;
+        let removed = sqlx::query("DELETE FROM connect_media_files WHERE media_uri=?1 AND encoding=?2 AND path=?3 AND revision=?4")
+            .bind(&file.media_uri).bind(&file.encoding).bind(&file.path).bind(&file.revision).execute(&mut *transaction).await?.rows_affected()>0;
+        if removed {
+            let access = sqlx::query("DELETE FROM local_locators WHERE media_uri=?1 AND access_uri=?2 AND origin='download' AND NOT EXISTS(SELECT 1 FROM connect_media_files WHERE media_uri=?1 AND path=?2)")
+                .bind(&file.media_uri).bind(&file.path).execute(&mut *transaction).await?.rows_affected()>0;
+            if access && let Some(next) = sqlx::query_as::<_, ConnectMediaFile>("SELECT * FROM connect_media_files WHERE media_uri=?1 ORDER BY rowid DESC LIMIT 1")
+                .bind(&file.media_uri).fetch_optional(&mut *transaction).await? {
+                let path = crate::file_media_path(&next.path);
+                let root = if next.storage_root.is_empty() { path.as_deref().and_then(std::path::Path::parent).map(|path|path.to_string_lossy().into_owned()).unwrap_or_else(|| next.path.clone()) } else { next.storage_root.clone() };
+                crate::local::write_local_locator(&mut transaction, &crate::LocalLocatorWrite {
+                    source_id: next.source_id.clone(), media_uri: next.media_uri.clone(), origin: "download".into(),
+                    path: path.map(|path|path.to_string_lossy().into_owned()).unwrap_or_else(||next.path.clone()), root, relative_path: next.relative_path.clone(), access_uri: next.path.clone(),
+                }).await?;
+                sqlx::query("INSERT INTO local_access_metadata SELECT ?1,coalesce(?2,size_bytes),0,NULL,NULL,parser_version,loudness_analysis_key FROM local_access_metadata WHERE access_uri=?3 ON CONFLICT(access_uri) DO NOTHING")
+                    .bind(&next.path).bind(next.completed_size).bind(&file.path).execute(&mut *transaction).await?;
+            }
+        }
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -324,18 +414,6 @@ impl Database {
         )
     }
 
-    pub async fn connect_media_file_at_path(
-        &self,
-        path: &str,
-        encoding: &str,
-        revision: &str,
-    ) -> LibraryResult<Option<ConnectMediaFile>> {
-        let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_as("SELECT * FROM connect_media_files WHERE path=?1 AND encoding=?2 ORDER BY revision=?3 DESC,managed DESC LIMIT 1")
-            .bind(path).bind(encoding).bind(revision)
-            .fetch_optional(&mut *reader).await?)
-    }
-
     pub async fn connect_backing_media_file(
         &self,
         uri: &str,
@@ -349,25 +427,53 @@ impl Database {
             .fetch_optional(&mut *reader).await?)
     }
 
-    /// Other tracks can use the same backing file or transferred blob.
-    pub async fn connect_media_file_users(
-        &self,
-        file: &ConnectMediaFile,
-    ) -> LibraryResult<(bool, bool)> {
+    /// Other tracks can use the same backing file.
+    pub async fn connect_media_file_users(&self, file: &ConnectMediaFile) -> LibraryResult<bool> {
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_as("SELECT EXISTS(SELECT 1 FROM connect_media_files WHERE path=?1 AND (media_uri,encoding,revision,path)<>(?2,?3,?5,?1)), EXISTS(SELECT 1 FROM connect_media_files WHERE hash=?4 AND (media_uri,encoding,revision,path)<>(?2,?3,?5,?1))")
-            .bind(&file.path).bind(&file.media_uri).bind(&file.encoding).bind(&file.hash).bind(&file.revision)
+        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM connect_media_files WHERE path=?1 AND (media_uri,encoding,revision)<>(?2,?3,?4))")
+            .bind(&file.path).bind(&file.media_uri).bind(&file.encoding).bind(&file.revision)
             .fetch_one(&mut *reader).await?)
     }
 
     pub async fn connect_save_media_file(&self, file: &ConnectMediaFile) -> LibraryResult<()> {
         let backing = self.connect_backing_id(&file.media_uri).await?;
         let mut writer = self.writer().await?;
-        sqlx::query("INSERT INTO connect_media_files(media_uri,encoding,revision,path,managed,hash,backing_uri) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(media_uri,encoding) DO UPDATE SET revision=excluded.revision,path=excluded.path,managed=excluded.managed,hash=excluded.hash,backing_uri=excluded.backing_uri")
-            .bind(&file.media_uri).bind(&file.encoding).bind(&file.revision).bind(&file.path).bind(file.managed).bind(&file.hash)
-            .bind(backing)
-            .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
+        save_download_on(
+            writer.as_mut().ok_or(LibraryError::WriterUnavailable)?,
+            file,
+            &backing,
+        )
+        .await
+    }
+
+    pub async fn commit_download(
+        &self,
+        file: &ConnectMediaFile,
+        source: Option<crate::SourceKey>,
+        access: &crate::LocalAccessWrite,
+    ) -> LibraryResult<()> {
+        let backing = self.connect_backing_id(&file.media_uri).await?;
+        let mut writer = self.writer().await?;
+        let mut transaction = writer
+            .as_mut()
+            .ok_or(LibraryError::WriterUnavailable)?
+            .begin()
+            .await?;
+        crate::local::write_local_access_on(&mut transaction, source, &[access]).await?;
+        save_download_on(&mut transaction, file, &backing).await?;
+        transaction.commit().await?;
         Ok(())
+    }
+
+    pub async fn download_files_page(
+        &self,
+        source: Option<&str>,
+        after: &(String, String),
+        owner: Option<&str>,
+    ) -> LibraryResult<Vec<ConnectMediaFile>> {
+        let mut reader = self.acquire_reader().await?;
+        Ok(sqlx::query_as("SELECT * FROM connect_media_files WHERE source_id IS ?1 AND (media_uri,encoding)>(?2,?3) AND (?4 IS NULL OR EXISTS(SELECT 1 FROM json_each(owners) WHERE value=json_extract(?4,'$'))) ORDER BY media_uri,encoding LIMIT 128")
+            .bind(source).bind(&after.0).bind(&after.1).bind(owner).fetch_all(&mut *reader).await?)
     }
 
     pub async fn connect_backing_id(&self, uri: &str) -> LibraryResult<String> {
@@ -379,16 +485,16 @@ impl Database {
             .or_else(|| crate::cue_media_parts(uri).map(|(_, backing, _, _)| backing))
             .unwrap_or_else(|| uri.to_string()))
     }
+}
 
-    pub async fn connect_document_backing_used(
-        &self,
-        uri: &str,
-        encoding: &str,
-        revision: &str,
-    ) -> LibraryResult<bool> {
-        let backing = self.connect_backing_id(uri).await?;
-        let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM connect_media_files WHERE backing_uri=?1 AND encoding=?2 AND revision=?3 AND path LIKE 'content://%')")
-            .bind(backing).bind(encoding).bind(revision).fetch_one(&mut *reader).await?)
-    }
+async fn save_download_on(
+    connection: &mut sqlx::SqliteConnection,
+    file: &ConnectMediaFile,
+    backing: &str,
+) -> LibraryResult<()> {
+    sqlx::query("INSERT INTO connect_media_files(media_uri,encoding,revision,path,managed,backing_uri,source_id,owners,storage_root,relative_path,completed_size,retired_documents) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) ON CONFLICT(media_uri,encoding) DO UPDATE SET revision=excluded.revision,path=excluded.path,managed=excluded.managed,backing_uri=excluded.backing_uri,source_id=coalesce(excluded.source_id,connect_media_files.source_id),owners=excluded.owners,storage_root=excluded.storage_root,relative_path=excluded.relative_path,completed_size=excluded.completed_size,retired_documents=excluded.retired_documents")
+        .bind(&file.media_uri).bind(&file.encoding).bind(&file.revision).bind(&file.path).bind(file.managed).bind(backing).bind(&file.source_id)
+        .bind(if file.owners.is_empty() { "[]" } else { &file.owners }).bind(&file.storage_root).bind(&file.relative_path).bind(file.completed_size)
+        .bind(if file.retired_documents.is_empty() { "[]" } else { &file.retired_documents }).execute(connection).await?;
+    Ok(())
 }

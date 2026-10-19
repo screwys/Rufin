@@ -51,7 +51,7 @@ msgid ""
 msgstr ""
 
 msgid ""
-"Downloads from this server will be removed, and automatic rules will be "
+"Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
 
@@ -145,11 +145,6 @@ msgstr ""
 msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
-msgstr ""
-
-msgid ""
-"The folder is relative to the selected account. Applying it changes storage "
-"on all devices."
 msgstr ""
 
 msgid ""
@@ -252,9 +247,6 @@ msgstr ""
 msgid "Accessibility"
 msgstr ""
 
-msgid "Action required"
-msgstr ""
-
 msgid "Actions"
 msgstr ""
 
@@ -279,7 +271,7 @@ msgstr ""
 msgid "Add a new source"
 msgstr ""
 
-msgid "Add a server to configure downloads."
+msgid "Add a source to configure downloads."
 msgstr ""
 
 msgid "Add a title"
@@ -316,9 +308,6 @@ msgid "Add"
 msgstr ""
 
 msgid "Added to"
-msgstr ""
-
-msgid "Adding source"
 msgstr ""
 
 msgid "Album Artists"
@@ -417,7 +406,7 @@ msgstr ""
 msgid "Apply"
 msgstr ""
 
-msgid "Applying..."
+msgid "Applying profile"
 msgstr ""
 
 msgid "Approve sign-in in your browser"
@@ -610,25 +599,19 @@ msgstr[1] ""
 msgid "Changes take effect after restarting Rufin"
 msgstr ""
 
-msgid "Changing source"
-msgstr ""
-
-msgid "Changing this will redownload all local files."
-msgstr ""
-
 msgid "Channels"
 msgstr ""
 
 msgid "Check for updates"
 msgstr ""
 
+msgid "Checking profile"
+msgstr ""
+
 msgid "Choose Folder"
 msgstr ""
 
 msgid "Choose Server"
-msgstr ""
-
-msgid "Choose a connection for profile storage."
 msgstr ""
 
 msgid "Choose a local music folder"
@@ -776,9 +759,6 @@ msgstr ""
 msgid "Connect file"
 msgstr ""
 
-msgid "Connect folder"
-msgstr ""
-
 msgid "Connect is not enabled"
 msgstr ""
 
@@ -814,9 +794,6 @@ msgstr ""
 msgid "Connecting to {device}..."
 msgstr ""
 
-msgid "Connecting"
-msgstr ""
-
 msgid "Connecting..."
 msgstr ""
 
@@ -848,11 +825,7 @@ msgid "Context Menus"
 msgstr ""
 
 #, rust-format
-msgid "Continue from where {device} left off"
-msgstr ""
-
-#, rust-format
-msgid "Continue from where {device} left off?"
+msgid "Continue from {device}"
 msgstr ""
 
 msgid "Continue"
@@ -1159,8 +1132,14 @@ msgstr ""
 msgid "Downloading Japanese dictionary..."
 msgstr ""
 
+msgid "Downloading artwork"
+msgstr ""
+
 #, rust-format
 msgid "Downloading artwork... {count} checked"
+msgstr ""
+
+msgid "Downloading lyrics"
 msgstr ""
 
 #, rust-format
@@ -1363,6 +1342,27 @@ msgstr ""
 msgid "February {year}"
 msgstr ""
 
+msgid "Fetching Home"
+msgstr ""
+
+msgid "Fetching albums"
+msgstr ""
+
+msgid "Fetching artists"
+msgstr ""
+
+msgid "Fetching artwork"
+msgstr ""
+
+msgid "Fetching genres"
+msgstr ""
+
+msgid "Fetching lyrics"
+msgstr ""
+
+msgid "Fetching playlists"
+msgstr ""
+
 msgid "File connection"
 msgstr ""
 
@@ -1378,13 +1378,6 @@ msgstr ""
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
-#, rust-format
-msgid "Files received: {count}"
-msgstr ""
-
-msgid "Files"
-msgstr ""
-
 msgid "Filled spectrum"
 msgstr ""
 
@@ -1395,6 +1388,9 @@ msgid "Find your ListenBrainz user token"
 msgstr ""
 
 msgid "Finding lyrics..."
+msgstr ""
+
+msgid "Finishing setup"
 msgstr ""
 
 msgid "Fixed position"
@@ -1601,6 +1597,9 @@ msgid "Import theme"
 msgstr ""
 
 msgid "Import"
+msgstr ""
+
+msgid "Importing profile"
 msgstr ""
 
 msgid "Imports files into the library, and watches added folders for changes."
@@ -1887,9 +1886,6 @@ msgstr ""
 msgid "May {year}"
 msgstr ""
 
-msgid "Media available"
-msgstr ""
-
 msgid "Menu"
 msgstr ""
 
@@ -1990,9 +1986,6 @@ msgid "Music access permission was denied"
 msgstr ""
 
 msgid "Music folders on the Rufin machine"
-msgstr ""
-
-msgid "Music on this device"
 msgstr ""
 
 msgid "Music"
@@ -2579,10 +2572,10 @@ msgstr ""
 msgid "Preferences"
 msgstr ""
 
-msgid "Preparing library..."
+msgid "Preparing collection"
 msgstr ""
 
-msgid "Preparing smaller media"
+msgid "Preparing library..."
 msgstr ""
 
 msgid "Preserve channels"
@@ -2648,7 +2641,7 @@ msgstr ""
 msgid "Profile PIN"
 msgstr ""
 
-msgid "Profile storage"
+msgid "Profile download is incomplete. Retry to continue."
 msgstr ""
 
 msgid "Profile up to date"
@@ -2745,9 +2738,6 @@ msgid "Refresh source"
 msgstr ""
 
 msgid "Refresh"
-msgstr ""
-
-msgid "Refreshing"
 msgstr ""
 
 msgid "Regenerate access token"
@@ -3024,7 +3014,13 @@ msgstr ""
 msgid "Saves lyrics to your source"
 msgstr ""
 
+msgid "Saving changes"
+msgstr ""
+
 msgid "Saving..."
+msgstr ""
+
+msgid "Scanning tracks"
 msgstr ""
 
 msgid "Schedule"
@@ -3202,9 +3198,6 @@ msgid "Servers"
 msgstr ""
 
 msgid "Set the Discord activity type to Listening"
-msgstr ""
-
-msgid "Set up this device"
 msgstr ""
 
 msgid "Settings and sources"
@@ -3561,9 +3554,6 @@ msgstr ""
 msgid "Title"
 msgstr ""
 
-msgid "To use a file-sync app, choose a folder it synchronizes."
-msgstr ""
-
 msgid "Toggle Fullscreen"
 msgstr ""
 
@@ -3711,6 +3701,9 @@ msgid "Use an existing connection?"
 msgstr ""
 
 msgid "Use current artwork"
+msgstr ""
+
+msgid "Use default folder"
 msgstr ""
 
 msgid "Use different layout below a threshold width"
@@ -3981,7 +3974,19 @@ msgstr[0] ""
 msgstr[1] ""
 
 #, rust-format
-msgid "{status} \302\267 {stage} {completed}{total}"
+msgid "{current} / {total} MiB ({percent}%)"
+msgstr ""
+
+#, rust-format
+msgid "{current} MiB"
+msgstr ""
+
+#, rust-format
+msgid "{stage}: {completed} / {total}"
+msgstr ""
+
+#, rust-format
+msgid "{stage}: {completed}"
 msgstr ""
 
 #. Windows installer: FinishText.

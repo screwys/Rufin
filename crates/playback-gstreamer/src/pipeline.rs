@@ -10,6 +10,7 @@ use std::cell::Cell;
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct SourceClock {
     origin_millis: u64,
+    time_offset_millis: u64,
     end_millis: Option<u64>,
 }
 
@@ -17,6 +18,7 @@ impl SourceClock {
     pub(super) fn from_stream(stream: &ResolvedStream) -> Self {
         Self {
             origin_millis: stream.start_millis(),
+            time_offset_millis: stream.time_offset_millis().unwrap_or_default(),
             end_millis: stream.end_millis(),
         }
     }
@@ -25,16 +27,20 @@ impl SourceClock {
         let physical = self.origin_millis.saturating_add(logical_millis);
         self.end_millis
             .map_or(physical, |end_millis| physical.min(end_millis))
+            .saturating_sub(self.time_offset_millis)
     }
 
     pub(super) fn logical_position(self, physical_millis: u64) -> u64 {
-        let logical = physical_millis.saturating_sub(self.origin_millis);
+        let logical = physical_millis
+            .saturating_add(self.time_offset_millis)
+            .saturating_sub(self.origin_millis);
         self.fixed_duration()
             .map_or(logical, |duration| logical.min(duration))
     }
 
     pub(super) fn logical_duration(self, physical_duration_millis: u64) -> u64 {
-        self.fixed_duration().unwrap_or(physical_duration_millis)
+        self.fixed_duration()
+            .unwrap_or_else(|| physical_duration_millis.saturating_add(self.time_offset_millis))
     }
 
     pub(super) fn remaining(
@@ -48,6 +54,7 @@ impl SourceClock {
 
     pub(super) fn end_millis(self) -> Option<u64> {
         self.end_millis
+            .map(|end| end.saturating_sub(self.time_offset_millis))
     }
 
     pub(super) fn fixed_duration(self) -> Option<u64> {
@@ -86,6 +93,7 @@ struct SegmentPlayback {
     seek: Option<gst::Seqnum>,
     done: bool,
     starts_stream: bool,
+    time_reopened: bool,
     progress: SeekProgress,
 }
 
@@ -169,6 +177,7 @@ impl PlayerPipeline {
         self.id = Some(id);
         self.current_stream = Some(item.stream.clone());
         self.playback_rate = sanitize_playback_rate(playback_rate);
+        lock_recover(&self.segment).time_reopened = item.stream.time_offset_millis().is_some();
         self.connect_about_to_finish(id, slot, Arc::clone(&self.shared));
         let result = (|| {
             self.configure_audio(settings)?;
@@ -647,11 +656,24 @@ impl PlayerPipeline {
                     }
                 }
                 if matches!(event.view(), gst::EventView::Segment(_)) {
-                    let starts_stream = {
+                    let (starts_stream, time_reopened) = {
                         let mut segment = segment.lock().unwrap_or_else(|p| p.into_inner());
-                        segment.seek == Some(event.seqnum())
-                            && std::mem::take(&mut segment.starts_stream)
+                        (
+                            segment.seek == Some(event.seqnum())
+                                && std::mem::take(&mut segment.starts_stream),
+                            segment.time_reopened,
+                        )
                     };
+                    if time_reopened
+                        && let gst::EventView::Segment(current) = event.view()
+                        && let Some(current) = current.segment().downcast_ref::<gst::ClockTime>()
+                    {
+                        let mut current = current.clone();
+                        current.set_rate(lock_recover(&shared).playback_rate);
+                        *event = gst::event::Segment::builder(&current)
+                            .seqnum(event.seqnum())
+                            .build();
+                    }
                     if starts_stream {
                         // A non-flushing segment seek keeps the decoder and sink. Mark
                         // the logical track boundary for gain, tags, and playback events.
@@ -845,10 +867,15 @@ impl PlayerPipeline {
 
     pub(super) fn seek_physical_millis(&self, millis: u64) -> Result<(), String> {
         let mut flags = gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE;
-        if self.clock().end_millis().is_some() {
+        let end = self
+            .current_stream
+            .as_ref()
+            .filter(|stream| stream.time_offset_millis().is_none())
+            .and_then(|_| self.clock().end_millis());
+        if end.is_some() {
             flags |= gst::SeekFlags::SEGMENT;
         }
-        self.seek_segment(millis, self.clock().end_millis(), flags, false)
+        self.seek_segment(millis, end, flags, false)
     }
 
     fn seek_segment(
@@ -882,6 +909,10 @@ impl PlayerPipeline {
             seek: Some(event.seqnum()),
             done: false,
             starts_stream,
+            time_reopened: self
+                .current_stream
+                .as_ref()
+                .is_some_and(|stream| stream.time_offset_millis().is_some()),
             progress: if flags.contains(gst::SeekFlags::FLUSH) {
                 SeekProgress::Pausing(event.clone())
             } else {
@@ -1010,7 +1041,14 @@ impl PlayerPipeline {
     }
 
     pub(super) fn needs_initial_rate_seek(&self) -> bool {
-        (self.playback_rate - DEFAULT_PLAYBACK_RATE).abs() > f64::EPSILON
+        self.current_stream
+            .as_ref()
+            .is_none_or(|stream| stream.time_offset_millis().is_none())
+            && (self.playback_rate - DEFAULT_PLAYBACK_RATE).abs() > f64::EPSILON
+    }
+
+    pub(super) fn stream(&self) -> Option<&PreparedStream> {
+        self.current_stream.as_ref()
     }
 
     pub(super) fn position(&self) -> Option<gst::ClockTime> {
@@ -1026,6 +1064,16 @@ impl PlayerPipeline {
     }
 
     pub(super) fn seekable(&self) -> Option<bool> {
+        self.native_seekable().map(|native| {
+            native
+                || self
+                    .current_stream
+                    .as_ref()
+                    .is_some_and(|stream| stream.time_seekable())
+        })
+    }
+
+    pub(super) fn native_seekable(&self) -> Option<bool> {
         let (pipeline, _) = self.native.as_ref()?;
         let mut query = gst::query::Seeking::new(gst::Format::Time);
         Some(pipeline.query(&mut query) && query.result().0)

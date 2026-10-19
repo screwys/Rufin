@@ -291,15 +291,27 @@ mod tests {
     fn analysis_is_bounded_to_the_prepared_stream_window() {
         let directory = tempfile::tempdir().expect("loudness fixture directory");
         let path = directory.path().join("window.wav");
-        write_stereo_wave(&path, &[0.8, 0.03]);
+        for amplitude in [0.03, 0.0, 0.0001] {
+            write_stereo_wave(&path, &[0.8, amplitude]);
+            let uri = gst::glib::filename_to_uri(&path, None).expect("loudness fixture URI");
+            let stream = ResolvedStream::new(uri.as_str()).with_window(1_000, 2_000);
+
+            let result = analyze_loudness_cancellable(&stream, || false)
+                .expect("analyze prepared stream window");
+
+            assert!(result.measurement.true_peak.is_some_and(|peak| peak < 0.05));
+            assert_eq!(
+                result.measurement.integrated_lufs.is_some(),
+                amplitude == 0.03
+            );
+        }
+        write_stereo_wave(&path, &[0.8, 0.8]);
         let uri = gst::glib::filename_to_uri(&path, None).expect("loudness fixture URI");
-        let stream = ResolvedStream::new(uri.as_str()).with_window(1_000, 2_000);
-
+        let stream = ResolvedStream::new(uri.as_str()).with_window(1_000, 1_100);
         let result = analyze_loudness_cancellable(&stream, || false)
-            .expect("analyze prepared stream window");
-
-        assert!(result.measurement.true_peak.is_some_and(|peak| peak < 0.05));
-        assert!(result.measurement.integrated_lufs.is_some());
+            .expect("analyze audio shorter than the loudness gate");
+        assert!(result.measurement.true_peak.is_some_and(|peak| peak > 0.5));
+        assert_eq!(result.measurement.integrated_lufs, None);
     }
 
     #[test]
@@ -307,9 +319,22 @@ mod tests {
         let directory = tempfile::tempdir().expect("loudness fixture directory");
         let quiet_path = directory.path().join("quiet.wav");
         let loud_path = directory.path().join("loud.wav");
+        let silent_path = directory.path().join("silent.wav");
         write_stereo_wave(&quiet_path, &[0.05]);
         write_stereo_wave(&loud_path, &[0.5]);
-        let analyses = [analyze_path(&quiet_path), analyze_path(&loud_path)];
+        write_stereo_wave(&silent_path, &[0.0]);
+        let analyses = [
+            analyze_path(&quiet_path),
+            analyze_path(&loud_path),
+            analyze_path(&silent_path),
+        ];
+        assert_eq!(
+            album_loudness(&analyses[2..]).unwrap(),
+            AnalyzedLoudness {
+                integrated_lufs: None,
+                true_peak: Some(0.0)
+            }
+        );
 
         let album = album_loudness(&analyses).expect("calculate album loudness");
         let quiet_lufs = analyses[0]

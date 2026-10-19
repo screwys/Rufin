@@ -1,3 +1,4 @@
+use library::profile::{DocumentVersion, ProfileStore, SyncStream};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -16,7 +17,6 @@ use iroh::{
     endpoint::{Connection, ConnectionError, presets},
     protocol::{AcceptError, ProtocolHandler, Router},
 };
-use iroh_mdns_address_lookup::{DiscoveryEvent, MdnsAddressLookup};
 use loro::{ExportMode, LoroDoc, ToJson};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::{Connection as _, Row, SqliteConnection};
@@ -25,15 +25,16 @@ use tokio::sync::{Mutex, Notify, RwLock, mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    media::{MediaStore, MemberBlobs},
+    media::PeerByteResponse,
+    nearby::{Discovery, Nearby},
     pairing,
-    profile::{DocumentVersion, ProfileStore, SyncStream},
 };
 
 pub(crate) const RPC_PROTOCOL: &[u8] = b"rufin/connect/rpc/1";
 pub(crate) const PAIR_PROTOCOL: &[u8] = b"rufin/connect/pair/2";
 const INVITE_PROTOCOL: &[u8] = b"rufin/connect/invite/1";
-const SYNC_PROTOCOL: &[u8] = b"rufin/connect/sync/1";
+const MEDIA_PROTOCOL: &[u8] = b"rufin/connect/media/1";
+const SYNC_PROTOCOL: &[u8] = b"rufin/connect/sync/2";
 const MAX_FRAME: usize = 16 * 1024 * 1024;
 const SYNC_PAGE: usize = 64;
 const PROFILE_CLOSED: &[u8] = b"profile closed";
@@ -79,7 +80,7 @@ fn relay_mode(address: Option<&str>, public: bool) -> Result<RelayMode> {
     ))
 }
 
-fn canonical_relay(relay: iroh::RelayUrl) -> iroh::RelayUrl {
+pub(super) fn canonical_relay(relay: iroh::RelayUrl) -> iroh::RelayUrl {
     let mut url = (*relay).clone();
     if let Some(domain) = url.domain().map(str::to_owned) {
         url.set_host(Some(domain.trim_end_matches('.')))
@@ -159,7 +160,6 @@ impl<T: AddressLookup> AddressLookup for CanonicalRelays<T> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NetworkConfig {
     pub database: PathBuf,
-    pub media_directory: PathBuf,
     pub name: String,
     pub nearby: bool,
     pub relay: Option<String>,
@@ -184,6 +184,7 @@ pub enum NetworkEvent {
         error: String,
     },
     Paired {
+        session: String,
         profile_id: String,
         peer: String,
         name: String,
@@ -199,6 +200,16 @@ pub enum NetworkEvent {
         peer: String,
         body: Vec<u8>,
         reply: oneshot::Sender<Result<Vec<u8>, String>>,
+    },
+    Settings {
+        profile: String,
+        peer: String,
+    },
+    StreamRequest {
+        profile: String,
+        peer: String,
+        body: Vec<u8>,
+        reply: oneshot::Sender<Result<PeerByteResponse, String>>,
     },
     Syncing {
         profile: String,
@@ -216,6 +227,9 @@ pub enum NetworkEvent {
     Discovered {
         peer: String,
         name: String,
+    },
+    DiscoveryExpired {
+        peer: String,
     },
     Error(String),
 }
@@ -239,7 +253,7 @@ pub struct ConnectNetwork {
     sync_requested: Arc<Notify>,
     database: Mutex<SqliteConnection>,
     addresses: MemoryLookup,
-    media: MediaStore,
+    transfers: Mutex<HashMap<String, Weak<Mutex<()>>>>,
     stop: CancellationToken,
     relay: RelayMode,
     nearby: bool,
@@ -251,9 +265,7 @@ pub struct ConnectNetwork {
 struct SyncRequest {
     profile: String,
     after: i64,
-    setup: bool,
-    #[serde(default)]
-    cache: bool,
+    stream: SyncStream,
     roster: Vec<u8>,
     addresses: Vec<EndpointAddr>,
 }
@@ -263,18 +275,12 @@ struct SyncPage {
     versions: Vec<DocumentVersion>,
     roster: Vec<u8>,
     addresses: Vec<EndpointAddr>,
-    #[serde(default)]
-    acknowledgements: bool,
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(untagged)]
-enum SyncAcknowledgement {
-    Committed {
-        versions: Vec<DocumentVersion>,
-        roster: Vec<u8>,
-    },
-    Legacy(bool),
+struct SyncAcknowledgement {
+    versions: Vec<DocumentVersion>,
+    roster: Vec<u8>,
 }
 
 impl ConnectNetwork {
@@ -313,15 +319,9 @@ impl ConnectNetwork {
         }
         let mut discovery_error = None;
         let discoveries = if config.nearby {
-            match MdnsAddressLookup::builder()
-                .service_name("rufin-connect")
-                .build(credentials.public())
-            {
-                Ok(mdns) => {
-                    // mDNS does not replay peers found before subscription.
-                    // Subscribe before endpoint and media startup can yield.
-                    let discoveries = mdns.subscribe().await;
-                    builder = builder.address_lookup(CanonicalRelays(mdns));
+            match Nearby::new(credentials.public(), addresses.clone()) {
+                Ok((nearby, discoveries)) => {
+                    builder = builder.address_lookup(nearby);
                     Some(discoveries)
                 }
                 Err(error) => {
@@ -350,8 +350,6 @@ impl ConnectNetwork {
                 .dns_resolver(dns)
                 .build(credentials.clone(), endpoint.tls_config().clone()),
         ));
-        let media =
-            MediaStore::open(&config.media_directory, endpoint.clone(), addresses.clone()).await?;
         let (events, receiver) = mpsc::channel(64);
         let network = Arc::new(Self {
             endpoint,
@@ -364,7 +362,7 @@ impl ConnectNetwork {
             sync_requested: Arc::new(Notify::new()),
             database: Mutex::new(database),
             addresses,
-            media,
+            transfers: Mutex::new(HashMap::new()),
             stop: CancellationToken::new(),
             relay,
             nearby: config.nearby,
@@ -377,13 +375,7 @@ impl ConnectNetwork {
             .accept(PAIR_PROTOCOL, pairing::PairProtocol(weak.clone(), false))
             .accept(INVITE_PROTOCOL, pairing::PairProtocol(weak.clone(), true))
             .accept(SYNC_PROTOCOL, SyncProtocol(weak.clone()))
-            .accept(
-                iroh_blobs::ALPN,
-                MemberBlobs {
-                    network: weak.clone(),
-                    media: network.media.clone(),
-                },
-            )
+            .accept(MEDIA_PROTOCOL, MediaProtocol(weak.clone()))
             .spawn();
         *network.router.lock().await = Some(router);
         if let Some(error) = discovery_error {
@@ -394,18 +386,29 @@ impl ConnectNetwork {
             let stop = network.stop.clone();
             tokio::spawn(async move {
                 loop {
-                    let event = tokio::select! { _ = stop.cancelled() => break, event = discoveries.next() => event };
-                    let Some(event) = event else { break };
-                    let DiscoveryEvent::Discovered { endpoint_info, .. } = event else {
-                        continue;
+                    let event = tokio::select! { _ = stop.cancelled() => break, event = discoveries.recv() => event };
+                    let Some(event) = event else {
+                        break;
                     };
                     let Some(network) = weak.upgrade() else { break };
-                    let name = endpoint_info
+                    if let Discovery::Expired(endpoint_id) = event {
+                        let _ = network
+                            .events
+                            .send(NetworkEvent::DiscoveryExpired {
+                                peer: endpoint_id.to_string(),
+                            })
+                            .await;
+                        continue;
+                    }
+                    let Discovery::Found(info) = event else {
+                        continue;
+                    };
+                    let name = info
                         .data
                         .user_data()
                         .map(ToString::to_string)
-                        .unwrap_or_else(|| endpoint_info.endpoint_id.to_string());
-                    let address: EndpointAddr = endpoint_info.into();
+                        .unwrap_or_else(|| info.endpoint_id.to_string());
+                    let address: EndpointAddr = info.into();
                     if let Err(error) = network.remember_address(&address).await {
                         let _ = network
                             .events
@@ -492,8 +495,18 @@ impl ConnectNetwork {
     pub fn refresh(&self) {
         self.sync_requested.notify_one();
     }
-    pub fn media(&self) -> &MediaStore {
-        &self.media
+    pub async fn file_transfer(&self, key: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = {
+            let mut transfers = self.transfers.lock().await;
+            transfers.retain(|_, lock| lock.strong_count() != 0);
+            let lock = transfers
+                .get(key)
+                .and_then(Weak::upgrade)
+                .unwrap_or_default();
+            transfers.insert(key.into(), Arc::downgrade(&lock));
+            lock
+        };
+        lock.lock_owned().await
     }
     pub async fn rename(&self, name: String) {
         self.endpoint
@@ -591,7 +604,36 @@ impl ConnectNetwork {
             .context("No Connect profile is open")?;
         documents.register_members(&self.members().await?).await?;
         *profile.documents.write().await = Some(documents);
+        let mut db = self.database.lock().await;
+        let roster = self.load_roster(&mut db, &profile.id).await?;
+        drop(db);
+        self.retire_members(&profile.id, &roster).await?;
         self.membership_changed.send_replace(());
+        Ok(())
+    }
+
+    async fn retire_members(&self, profile: &str, roster: &LoroDoc) -> Result<()> {
+        let records = roster
+            .get_map("devices")
+            .get_deep_value()
+            .to_json_value()
+            .as_object()
+            .into_iter()
+            .flat_map(|members| members.iter())
+            .filter(|(_, value)| value.as_bool() == Some(false))
+            .map(|(peer, _)| library::ConnectRecord {
+                kind: "device".into(),
+                key: peer.clone(),
+                value: None,
+            })
+            .collect::<Vec<_>>();
+        if !records.is_empty()
+            && let Some(current) = self.profile.read().await.clone()
+            && current.id == profile
+            && let Some(documents) = current.documents.read().await.clone()
+        {
+            documents.write_records(&records).await?;
+        }
         Ok(())
     }
     async fn load_roster(&self, db: &mut SqliteConnection, profile: &str) -> Result<LoroDoc> {
@@ -611,9 +653,11 @@ impl ConnectNetwork {
         Ok(doc)
     }
     pub async fn members(&self) -> Result<Vec<String>> {
-        let profile = self.current_profile().await?;
+        self.enrolled_members(&self.current_profile().await?).await
+    }
+    pub async fn enrolled_members(&self, profile: &str) -> Result<Vec<String>> {
         let mut db = self.database.lock().await;
-        let doc = self.load_roster(&mut db, &profile).await?;
+        let doc = self.load_roster(&mut db, profile).await?;
         if !trusted(&doc, self.endpoint.id()) {
             return Ok(Vec::new());
         }
@@ -630,8 +674,11 @@ impl ConnectNetwork {
     }
     pub(crate) async fn authorize(&self, peer: EndpointId) -> Result<()> {
         let profile = self.current_profile().await?;
+        self.authorize_profile(&profile, peer).await
+    }
+    async fn authorize_profile(&self, profile: &str, peer: EndpointId) -> Result<()> {
         let mut db = self.database.lock().await;
-        let doc = self.load_roster(&mut db, &profile).await?;
+        let doc = self.load_roster(&mut db, profile).await?;
         ensure!(
             trusted(&doc, self.endpoint.id()),
             "This device was removed from the profile"
@@ -708,7 +755,54 @@ impl ConnectNetwork {
         save_roster(&mut db, &profile, &doc).await?;
         self.membership_changed.send_replace(());
         drop(db);
+        self.retire_members(&profile, &doc).await?;
         let _ = self.events.send(NetworkEvent::MembershipChanged).await;
+        Ok(())
+    }
+    pub async fn leave_profile(&self, profile: &str) -> Result<()> {
+        let mut db = self.database.lock().await;
+        let doc = self.load_roster(&mut db, profile).await?;
+        let peers = doc
+            .get_map("devices")
+            .get_deep_value()
+            .to_json_value()
+            .as_object()
+            .into_iter()
+            .flat_map(|map| map.iter())
+            .filter(|(_, value)| value.as_bool() == Some(true))
+            .filter_map(|(peer, _)| peer.parse::<EndpointId>().ok())
+            .filter(|peer| *peer != self.endpoint.id())
+            .collect::<Vec<_>>();
+        doc.get_map("devices").insert(&self.identity(), false)?;
+        save_roster(&mut db, profile, &doc).await?;
+        let request = SyncRequest {
+            profile: profile.to_owned(),
+            after: 0,
+            stream: SyncStream::Authored,
+            roster: doc.export(ExportMode::Snapshot)?,
+            addresses: Vec::new(),
+        };
+        drop(db);
+        futures_util::stream::iter(peers)
+            .for_each_concurrent(None, |peer| {
+                let request = &request;
+                async move {
+                    let _ = tokio::time::timeout(Duration::from_secs(15), async {
+                        let conn = self
+                            .endpoint
+                            .connect(peer_address(&self.addresses, peer), SYNC_PROTOCOL)
+                            .await?;
+                        let (mut send, mut recv) = conn.open_bi().await?;
+                        write_frame(&mut send, request).await?;
+                        send.finish()?;
+                        let _: Option<SyncPage> = read_frame(&mut recv).await?;
+                        conn.close(0u32.into(), b"profile left");
+                        Ok::<(), anyhow::Error>(())
+                    })
+                    .await;
+                }
+            })
+            .await;
         Ok(())
     }
     async fn roster(&self, profile: &str) -> Result<Vec<u8>> {
@@ -728,6 +822,7 @@ impl ConnectNetwork {
             save_roster(&mut db, profile, &doc).await?;
             self.membership_changed.send_replace(());
             drop(db);
+            self.retire_members(profile, &doc).await?;
             let _ = self.events.send(NetworkEvent::MembershipChanged).await;
         }
         Ok(member)
@@ -768,10 +863,6 @@ impl ConnectNetwork {
         Ok(())
     }
     pub async fn begin_pairing(self: &Arc<Self>, invitation: &str) -> Result<()> {
-        ensure!(
-            self.profile.read().await.is_none(),
-            "Leave the current Connect profile before joining another"
-        );
         self.start_pairing(invitation, true).await
     }
     pub async fn invite(self: &Arc<Self>, peer: &str) -> Result<()> {
@@ -852,6 +943,37 @@ impl ConnectNetwork {
         conn.close(0u32.into(), b"complete");
         response.map_err(anyhow::Error::msg)
     }
+    pub async fn stream_request(&self, peer: &str, body: Vec<u8>) -> Result<PeerByteResponse> {
+        self.stream_request_for_profile(&self.current_profile().await?, peer, body)
+            .await
+    }
+
+    /// Read from a verified enrollment without changing the currently active profile.
+    pub async fn stream_request_for_profile(
+        &self,
+        profile: &str,
+        peer: &str,
+        body: Vec<u8>,
+    ) -> Result<PeerByteResponse> {
+        let peer = peer.parse()?;
+        self.authorize_profile(profile, peer).await?;
+        let connection = self
+            .endpoint
+            .connect(peer_address(&self.addresses, peer), MEDIA_PROTOCOL)
+            .await?;
+        let (mut send, mut recv) = connection.open_bi().await?;
+        write_frame(&mut send, &body).await?;
+        send.finish()?;
+        let metadata: Result<serde_json::Value, String> = read_frame(&mut recv).await?;
+        Ok(PeerByteResponse {
+            metadata: metadata.map_err(anyhow::Error::msg)?,
+            reader: Box::pin(MediaReader {
+                _connection: connection,
+                recv,
+            }),
+        })
+    }
+
     pub async fn test_connection(&self, peer: &str, body: Vec<u8>) -> Result<(String, Vec<u8>)> {
         let peer = peer.parse()?;
         let profile = self.current_profile().await?;
@@ -969,111 +1091,93 @@ impl ConnectNetwork {
         let Some(documents) = profile.documents.read().await.clone() else {
             return Ok(());
         };
+        let _ = self
+            .events
+            .send(NetworkEvent::Settings {
+                profile: profile.id.clone(),
+                peer: peer.to_string(),
+            })
+            .await;
         let mut receiving = false;
         loop {
-            // Check settings before every catalog page, even during initial catch-up.
             let mut more = false;
-            for stream in [SyncStream::Settings, SyncStream::Catalog] {
-                loop {
-                    self.authorize(peer).await?;
-                    let after = documents.sync_cursor_in(&peer.to_string(), stream).await?;
-                    let (mut send, mut recv) = conn.open_bi().await?;
-                    write_frame(
-                        &mut send,
-                        &SyncRequest {
-                            profile: profile.id.clone(),
-                            after,
-                            setup: stream == SyncStream::Settings,
-                            cache: false,
-                            roster: self.roster(&profile.id).await?,
-                            addresses: self.peer_addresses().await?,
-                        },
-                    )
-                    .await?;
-                    let page: Option<SyncPage> = read_frame(&mut recv).await?;
-                    let Some(page) = page else {
-                        return Ok(());
-                    };
-                    if !self.merge_roster(&profile.id, &page.roster).await? {
-                        return Ok(());
-                    }
-                    self.authorize(peer).await?;
-                    self.accept_addresses(page.addresses).await?;
-                    let names = page
-                        .versions
-                        .iter()
-                        .map(|v| v.name.clone())
-                        .collect::<Vec<_>>();
-                    let versions = documents.versions(&names).await?;
-                    write_frame(&mut send, &versions).await?;
-                    // Commit the bounded page together instead of fsyncing once
-                    // for every catalog row in the initial collection.
-                    let mut updates = Vec::with_capacity(names.len());
-                    loop {
-                        let length = recv.read_u64().await?;
-                        if length == 0 {
-                            break;
-                        }
-                        let mut update = Vec::new();
-                        let read = (&mut recv).take(length).read_to_end(&mut update).await?;
-                        ensure!(read as u64 == length, "Incomplete profile update");
-                        updates.push(update);
-                    }
-                    let changed = documents.import_updates(&updates).await?;
-                    if changed && !receiving {
-                        receiving = true;
-                        let _ = self
-                            .events
-                            .send(NetworkEvent::Syncing {
-                                profile: profile.id.clone(),
-                                peer: peer.to_string(),
-                                active: true,
-                            })
-                            .await;
-                    }
-                    documents
-                        .acknowledge_versions(
-                            &peer.to_string(),
-                            &page.versions,
-                            &self.members().await?,
-                        )
-                        .await?;
-                    if page.acknowledgements {
-                        let versions = documents.versions(&names).await?;
-                        // Read the roster after the acknowledged state, including
-                        // any devices enrolled before that state was captured.
-                        let roster = self.roster(&profile.id).await?;
-                        write_frame(
-                            &mut send,
-                            &SyncAcknowledgement::Committed { versions, roster },
-                        )
-                        .await?;
-                    } else {
-                        write_frame(&mut send, &true).await?;
-                    }
-                    send.finish()?;
-                    // The server sends a final acknowledgement only after it has
-                    // consumed ours. Keep the connection alive through that read.
-                    let _: bool = read_frame(&mut recv).await?;
-                    if let Some(last) = page.versions.last() {
-                        documents
-                            .acknowledge_sync_in(&peer.to_string(), stream, last.revision)
-                            .await?;
-                    }
-                    let complete = page.versions.len() < SYNC_PAGE
-                        && !page
-                            .versions
-                            .last()
-                            .is_some_and(|version| version.name.starts_with("playlist_artwork:"));
-                    if complete {
-                        break;
-                    }
-                    if stream != SyncStream::Settings {
-                        more = true;
-                        break;
-                    }
-                    tokio::task::yield_now().await;
+            for stream in [SyncStream::Authored, SyncStream::NativeCache] {
+                self.authorize(peer).await?;
+                let after = documents.sync_cursor_in(&peer.to_string(), stream).await?;
+                let (mut send, mut recv) = conn.open_bi().await?;
+                write_frame(
+                    &mut send,
+                    &SyncRequest {
+                        profile: profile.id.clone(),
+                        after,
+                        stream,
+                        roster: self.roster(&profile.id).await?,
+                        addresses: self.peer_addresses().await?,
+                    },
+                )
+                .await?;
+                let page: Option<SyncPage> = read_frame(&mut recv).await?;
+                let Some(page) = page else {
+                    return Ok(());
+                };
+                if !self.merge_roster(&profile.id, &page.roster).await? {
+                    return Ok(());
                 }
+                self.authorize(peer).await?;
+                self.accept_addresses(page.addresses).await?;
+                let names = page
+                    .versions
+                    .iter()
+                    .map(|v| v.name.clone())
+                    .collect::<Vec<_>>();
+                let versions = documents.versions(&names).await?;
+                write_frame(&mut send, &versions).await?;
+                // Commit the bounded page together instead of fsyncing once
+                // for every catalog row in the initial collection.
+                let mut updates = Vec::with_capacity(names.len());
+                loop {
+                    let length = recv.read_u64().await?;
+                    if length == 0 {
+                        break;
+                    }
+                    let mut update = Vec::new();
+                    let read = (&mut recv).take(length).read_to_end(&mut update).await?;
+                    ensure!(read as u64 == length, "Incomplete profile update");
+                    updates.push(update);
+                }
+                let changed = documents.import_updates(&updates).await?;
+                if changed && !receiving {
+                    receiving = true;
+                    let _ = self
+                        .events
+                        .send(NetworkEvent::Syncing {
+                            profile: profile.id.clone(),
+                            peer: peer.to_string(),
+                            active: true,
+                        })
+                        .await;
+                }
+                documents
+                    .acknowledge_versions(&peer.to_string(), &page.versions, &self.members().await?)
+                    .await?;
+                let versions = documents.versions(&names).await?;
+                let roster = self.roster(&profile.id).await?;
+                write_frame(&mut send, &SyncAcknowledgement { versions, roster }).await?;
+                send.finish()?;
+                // The server sends a final acknowledgement only after it has
+                // consumed ours. Keep the connection alive through that read.
+                let _: bool = read_frame(&mut recv).await?;
+                if let Some(last) = page.versions.last() {
+                    documents
+                        .acknowledge_sync_in(&peer.to_string(), stream, last.revision)
+                        .await?;
+                }
+                let complete = page.versions.len() < SYNC_PAGE
+                    && !page
+                        .versions
+                        .last()
+                        .is_some_and(|version| version.name.starts_with("playlist_artwork:"));
+                more |= !complete;
             }
             if !more {
                 return Ok(());
@@ -1089,7 +1193,6 @@ impl ConnectNetwork {
         if let Some(router) = self.router.lock().await.take() {
             router.shutdown().await?;
         }
-        self.media.shutdown().await?;
         Ok(())
     }
     pub async fn close_profile(&self) -> Result<()> {
@@ -1157,7 +1260,6 @@ impl ProtocolHandler for SyncProtocol {
                             versions: Vec::new(),
                             roster,
                             addresses: Vec::new(),
-                            acknowledgements: true,
                         }),
                     )
                     .await?;
@@ -1169,6 +1271,12 @@ impl ProtocolHandler for SyncProtocol {
                 if !network.merge_roster(&profile.id, &request.roster).await? {
                     return Ok(());
                 }
+                if network.revocation(&profile.id, peer).await?.is_some() {
+                    write_frame(&mut send, &None::<SyncPage>).await?;
+                    send.finish()?;
+                    let _ = send.stopped().await;
+                    return Ok(());
+                }
                 network.authorize(peer).await?;
                 network.accept_addresses(request.addresses).await?;
                 let documents = profile.documents.read().await.clone();
@@ -1178,13 +1286,9 @@ impl ProtocolHandler for SyncProtocol {
                     let _ = send.stopped().await;
                     return Ok(());
                 };
-                let versions = if request.cache {
-                    Vec::new()
-                } else {
-                    documents
-                        .changes_in(request.after, SYNC_PAGE, request.setup)
-                        .await?
-                };
+                let versions = documents
+                    .changes_in_stream(request.after, SYNC_PAGE, request.stream)
+                    .await?;
                 let names = versions.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
                 write_frame(
                     &mut send,
@@ -1192,7 +1296,6 @@ impl ProtocolHandler for SyncProtocol {
                         versions,
                         roster: network.roster(&profile.id).await?,
                         addresses: network.peer_addresses().await?,
-                        acknowledgements: true,
                     }),
                 )
                 .await?;
@@ -1211,7 +1314,8 @@ impl ProtocolHandler for SyncProtocol {
                 }
                 send.write_u64(0).await?;
                 let acknowledged: SyncAcknowledgement = read_frame(&mut recv).await?;
-                if let SyncAcknowledgement::Committed { versions, roster } = acknowledged {
+                {
+                    let SyncAcknowledgement { versions, roster } = acknowledged;
                     ensure!(
                         versions
                             .iter()
@@ -1247,6 +1351,78 @@ impl ProtocolHandler for SyncProtocol {
                 conn.close(1u32.into(), b"sync ended");
                 break;
             }
+        }
+        Ok(())
+    }
+}
+
+struct MediaReader {
+    _connection: Connection,
+    recv: iroh::endpoint::RecvStream,
+}
+
+impl tokio::io::AsyncRead for MediaReader {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buffer: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.recv).poll_read(cx, buffer)
+    }
+}
+
+#[derive(Debug)]
+struct MediaProtocol(Weak<ConnectNetwork>);
+impl ProtocolHandler for MediaProtocol {
+    async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+        let Some(network) = self.0.upgrade() else {
+            return Ok(());
+        };
+        let result: Result<()> = async {
+            let peer = connection.remote_id();
+            network.authorize(peer).await?;
+            let profile = network
+                .profile
+                .read()
+                .await
+                .clone()
+                .context("Connect is disabled")?;
+            let (mut send, mut recv) = connection.accept_bi().await?;
+            let body = read_frame(&mut recv).await?;
+            let (reply, response) = oneshot::channel();
+            network
+                .events
+                .send(NetworkEvent::StreamRequest {
+                    profile: profile.id.clone(),
+                    peer: peer.to_string(),
+                    body,
+                    reply,
+                })
+                .await
+                .map_err(|_| anyhow::anyhow!("Connect stopped"))?;
+            let transfer = async {
+                match response.await? {
+                    Ok(mut audio) => {
+                        write_frame(&mut send, &Ok::<_, String>(audio.metadata)).await?;
+                        tokio::io::copy(&mut audio.reader, &mut send).await?;
+                    }
+                    Err(error) => {
+                        write_frame(&mut send, &Err::<serde_json::Value, _>(error)).await?
+                    }
+                }
+                send.finish()?;
+                let _ = send.stopped().await;
+                Ok::<_, anyhow::Error>(())
+            };
+            tokio::select! {
+                result = transfer => result,
+                _ = profile.stop.cancelled() => Ok(()),
+                _ = connection.closed() => Ok(()),
+            }
+        }
+        .await;
+        if result.is_err() {
+            connection.close(1u32.into(), b"media ended");
         }
         Ok(())
     }
@@ -1338,7 +1514,6 @@ mod tests {
         let (network, _events) = ConnectNetwork::spawn(
             NetworkConfig {
                 database: root.path().join("network.sqlite"),
-                media_directory: root.path().join("media"),
                 name: "Direct device".into(),
                 nearby: false,
                 relay: None,
@@ -1404,7 +1579,6 @@ mod tests {
             let directory = tempfile::tempdir().unwrap();
             let config = |name: &str| NetworkConfig {
                 database: directory.path().join(format!("{name}-network.sqlite")),
-                media_directory: directory.path().join(name),
                 name: name.into(),
                 nearby: false,
                 relay: None,
@@ -1425,15 +1599,19 @@ mod tests {
             peer.open_profile(&profile, false, Vec::new())
                 .await
                 .unwrap();
-            let documents = Arc::new(
-                ProfileStore::open(
-                    &directory.path().join("host.sqlite"),
-                    1,
-                    KEY.parse().unwrap(),
-                )
+            let database = library::Database::open(&directory.path().join("host.sqlite"))
                 .await
-                .unwrap(),
+                .unwrap();
+            let documents = Arc::new(
+                ProfileStore::open(database.clone(), 1, KEY.parse().unwrap())
+                    .await
+                    .unwrap(),
             );
+            documents
+                .bind_profile(&profile, &host.identity())
+                .await
+                .unwrap();
+            database.connect_set_active(true).await.unwrap();
             for value in 0..80 {
                 documents
                     .write_records(&[library::ConnectRecord {
@@ -1447,7 +1625,9 @@ mod tests {
             host.attach_documents(documents.clone()).await.unwrap();
             let receiving_documents = Arc::new(
                 ProfileStore::open(
-                    &directory.path().join("peer.sqlite"),
+                    library::Database::open(&directory.path().join("peer.sqlite"))
+                        .await
+                        .unwrap(),
                     2,
                     KEY.parse().unwrap(),
                 )
@@ -1455,39 +1635,262 @@ mod tests {
                 .unwrap(),
             );
             let file = directory.path().join("snapshot");
-            documents.export_snapshot(&file).await.unwrap();
-            receiving_documents
-                .import_snapshot(std::fs::File::open(&file).unwrap())
+            documents
+                .export_database(&file, &KEY.parse().unwrap(), &[], &[])
                 .await
                 .unwrap();
-            // A profile already caught up before acknowledgement tracking must
-            // exchange versions again, without importing its catalog again.
+            // A cursor established before member tracking must exchange versions
+            // again, without importing the same catalog twice.
             receiving_documents
-                .acknowledge_sync(&host.identity(), true, documents.revision().await.unwrap())
+                .acknowledge_sync_in(
+                    &host.identity(),
+                    SyncStream::Authored,
+                    documents.revision().await.unwrap(),
+                )
                 .await
                 .unwrap();
+            receiving_documents
+                .merge_database(&file, &KEY.parse().unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                receiving_documents
+                    .sync_cursor_in(&host.identity(), SyncStream::Authored)
+                    .await
+                    .unwrap(),
+                0
+            );
+            let uri = library::source_entity_uri(
+                &library::SourceId::new("remote"),
+                "track",
+                "after-snapshot",
+            );
+            database
+                .record_listen(
+                    &library::ListenWrite {
+                        external_id: Some("after-snapshot".into()),
+                        media_uri: uri.clone(),
+                        title: "Saved track".into(),
+                        artist: "Artist".into(),
+                        album: "Album".into(),
+                        duration_millis: 180000,
+                        disc_number: None,
+                        track_number: None,
+                        year: None,
+                        release_date: None,
+                        source_format: None,
+                        musicbrainz_recording_id: None,
+                        musicbrainz_release_track_id: None,
+                        started_at: 1700000000,
+                        local_period: "2023-11".into(),
+                        listened_millis: 120000,
+                        skipped: false,
+                    },
+                    None,
+                    &[],
+                )
+                .await
+                .unwrap();
+            database
+                .create_playlist(
+                    None,
+                    "Saved",
+                    &library::TrackSelection::from_uris(vec![uri.clone()]),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            database
+                .reconcile_source(&library::SourceId::new("remote"), "webdav", "Files")
+                .await
+                .unwrap();
+            let path = "https://files.example.test/music/after-snapshot.flac";
+            database
+                .catalog("remote", None)
+                .await
+                .unwrap()
+                .write_file_observations(
+                    &[(
+                        library::LocalFileWrite {
+                            path: path.into(),
+                            root: "https://files.example.test/music".into(),
+                            relative_path: "after-snapshot.flac".into(),
+                            kind: library::LocalFileKind::Media,
+                            size_bytes: Some(12),
+                            mtime_ns: 0,
+                            device_id: None,
+                            inode: None,
+                            native_id: None,
+                            picture_index: None,
+                            artist_pictures: None,
+                            revision: Some("v1".into()),
+                            parse_version: Some(1),
+                            state: library::LocalFileState::Accepted,
+                        },
+                        Vec::new(),
+                    )],
+                    vec![library::TrackObservation {
+                        object_id: "after-snapshot".into(),
+                        media_uri: Some(uri.clone()),
+                        source_path: Some(path.into()),
+                        metadata: library::TrackMetadata {
+                            title: "Current catalog".into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }],
+                    true,
+                )
+                .await
+                .unwrap();
+            let current = documents
+                .current_records(&[(
+                    "catalog:file".into(),
+                    serde_json::json!(["remote", path]).to_string(),
+                )])
+                .await
+                .unwrap()
+                .remove(0);
             peer.attach_documents(receiving_documents.clone())
                 .await
                 .unwrap();
             peer.remember_peer(&host.invitation().await.unwrap())
                 .await
                 .unwrap();
-            documents.export_snapshot(&file).await.unwrap();
-            let before = std::fs::metadata(&file).unwrap().len();
+            documents
+                .export_database(&file, &KEY.parse().unwrap(), &[], &[])
+                .await
+                .unwrap();
+            let before = {
+                let mut snapshot = sqlx::SqliteConnection::connect_with(
+                    &sqlx::sqlite::SqliteConnectOptions::new()
+                        .filename(&file)
+                        .read_only(true),
+                )
+                .await
+                .unwrap();
+                let bytes: i64 = sqlx::query_scalar(
+                    "SELECT length(snapshot) FROM documents WHERE name='preference:example'",
+                )
+                .fetch_one(&mut snapshot)
+                .await
+                .unwrap();
+                snapshot.close().await.unwrap();
+                bytes
+            };
             documents
                 .prune_history(&host.identity(), &[], 10)
                 .await
                 .unwrap();
-            documents.export_snapshot(&file).await.unwrap();
-            assert_eq!(std::fs::metadata(&file).unwrap().len(), before);
+            documents
+                .export_database(&file, &KEY.parse().unwrap(), &[], &[])
+                .await
+                .unwrap();
             let receiving = peer.profile.read().await.clone().unwrap();
             peer.sync_peer(&receiving, &host.identity()).await.unwrap();
+            let mut received = Vec::new();
+            for stream in [SyncStream::Authored, SyncStream::NativeCache] {
+                let mut cursor = 0;
+                loop {
+                    let page = receiving_documents
+                        .changes_in_stream(cursor, 64, stream)
+                        .await
+                        .unwrap();
+                    let Some(last) = page.last() else { break };
+                    cursor = last.revision;
+                    received.extend(page);
+                }
+            }
+            assert!(
+                received
+                    .iter()
+                    .any(|value| value.name == "listen:after-snapshot")
+            );
+            assert!(
+                !received
+                    .iter()
+                    .any(|value| value.name == "track:after-snapshot")
+            );
+            assert!(
+                received
+                    .iter()
+                    .any(|value| value.name == format!("reference:{uri}"))
+            );
+            assert_eq!(
+                receiving_documents
+                    .current_records(&[(current.kind.clone(), current.key.clone())])
+                    .await
+                    .unwrap(),
+                [current]
+            );
+            let unchanged = receiving_documents.revision().await.unwrap();
+            peer.sync_peer(&receiving, &host.identity()).await.unwrap();
+            assert_eq!(receiving_documents.revision().await.unwrap(), unchanged);
+
+            let authored = peer
+                .endpoint
+                .connect(
+                    peer_address(&peer.addresses, host.endpoint.id()),
+                    SYNC_PROTOCOL,
+                )
+                .await
+                .unwrap();
+            let (mut send, mut recv) = authored.open_bi().await.unwrap();
+            let reference = documents
+                .versions(&[format!("reference:{uri}")])
+                .await
+                .unwrap()
+                .remove(0);
+            assert!(reference.revision > 0);
+            write_frame(
+                &mut send,
+                &serde_json::json!({
+                    "profile": profile,
+                    "after": reference.revision - 1,
+                    "stream": SyncStream::Authored,
+                    "roster": peer.roster(&profile).await.unwrap(),
+                    "addresses": peer.peer_addresses().await.unwrap(),
+                }),
+            )
+            .await
+            .unwrap();
+            let page: Option<SyncPage> = read_frame(&mut recv).await.unwrap();
+            let page = page.unwrap();
+            assert!(
+                page.versions
+                    .iter()
+                    .any(|value| value.name == format!("reference:{uri}"))
+            );
+            assert!(
+                !page
+                    .versions
+                    .iter()
+                    .any(|value| value.name.starts_with("catalog:"))
+            );
+            authored.close(0u32.into(), b"authored request checked");
             documents
                 .prune_history(&host.identity(), &[], 10)
                 .await
                 .unwrap();
-            documents.export_snapshot(&file).await.unwrap();
-            assert!(std::fs::metadata(&file).unwrap().len() < before);
+            documents
+                .export_database(&file, &KEY.parse().unwrap(), &[], &[])
+                .await
+                .unwrap();
+            let mut snapshot = sqlx::SqliteConnection::connect_with(
+                &sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(&file)
+                    .read_only(true),
+            )
+            .await
+            .unwrap();
+            let after: i64 = sqlx::query_scalar(
+                "SELECT length(snapshot) FROM documents WHERE name='preference:example'",
+            )
+            .fetch_one(&mut snapshot)
+            .await
+            .unwrap();
+            snapshot.close().await.unwrap();
+            assert!(after < before);
             host.shutdown().await.unwrap();
             peer.shutdown().await.unwrap();
         })
@@ -1502,7 +1905,6 @@ mod tests {
             let peer_dir = tempfile::tempdir().unwrap();
             let config = |directory: &std::path::Path| NetworkConfig {
                 database: directory.join("network.sqlite"),
-                media_directory: directory.join("media"),
                 name: "Device".into(),
                 nearby: false,
                 relay: None,
@@ -1516,7 +1918,7 @@ mod tests {
             peer.accept_enrollment(&profile_id, &roster, host.endpoint.id()).await.unwrap();
             peer.open_profile(&profile_id, false, Vec::new()).await.unwrap();
             peer.remember_peer(&host.invitation().await.unwrap()).await.unwrap();
-            peer.attach_documents(Arc::new(ProfileStore::open(&peer_dir.path().join("profile.sqlite"), 2, KEY.parse().unwrap()).await.unwrap())).await.unwrap();
+            peer.attach_documents(Arc::new(ProfileStore::open(library::Database::open(&peer_dir.path().join("profile.sqlite")).await.unwrap(), 2, KEY.parse().unwrap()).await.unwrap())).await.unwrap();
 
             // Hold the server's document attachment until the request has
             // arrived. Closing its profile must interrupt this active sync.

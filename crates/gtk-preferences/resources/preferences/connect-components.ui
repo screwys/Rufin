@@ -3,7 +3,7 @@
   <object class="AdwActionRow" id="device_row">
     <child type="suffix">
       <object class="GtkButton" id="join_device">
-        <property name="label" translatable="yes">Join profile</property>
+        <property name="label" translatable="yes">Join</property>
         <property name="valign">center</property>
       </object>
     </child>
@@ -69,16 +69,6 @@
     <responses>
       <response id="cancel" translatable="yes">Cancel</response>
       <response id="join" appearance="destructive" translatable="yes">Join profile</response>
-    </responses>
-  </object>
-  <object class="AdwAlertDialog" id="encoding_confirmation">
-    <property name="heading" translatable="yes">Download quality</property>
-    <property name="body" translatable="yes">Changing this will redownload all local files.</property>
-    <property name="default-response">cancel</property>
-    <property name="close-response">cancel</property>
-    <responses>
-      <response id="cancel" translatable="yes">Cancel</response>
-      <response id="continue" appearance="suggested" translatable="yes">Continue</response>
     </responses>
   </object>
   <object class="AdwEntryRow" id="folder_mapping">

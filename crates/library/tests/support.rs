@@ -158,6 +158,7 @@ pub async fn fixture() -> Fixture {
             name: "Energetic".into(),
             sort_text: Some("energetic".into()),
         },
+        ..Default::default()
     });
     batch.folders.push(library::FolderObservation {
         object_id: "folder".into(),

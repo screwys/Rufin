@@ -140,14 +140,62 @@ mod tests {
         let database = Database::open(directory.path().join("store.sqlite")).await?;
         {
             let mut writer = database.writer().await?;
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES(1,'files','Files','files',zeroblob(32));
-                INSERT INTO local_files(local_file_key,source_key,path,root,relative_path,kind,mtime_ns,state) VALUES
-                (1,1,'album/photo.png','album','photo.png','image',1,'rejected'),
-                (2,1,'album/Music.M3U8','album','Music.M3U8','media',1,'rejected'),
-                (3,1,'album/other.pls','album','other.pls','media',1,'observed'),
-                (4,1,'album/folder.xspf','album','folder.xspf','directory',1,'observed');")
-                .execute(writer.as_mut().unwrap()).await?;
+            sqlx::query("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES(1,'files','Files','files',zeroblob(32))").execute(writer.as_mut().unwrap()).await?;
         }
+        let files = [
+            (
+                "album/photo.png",
+                "photo.png",
+                crate::LocalFileKind::Image,
+                crate::LocalFileState::Rejected,
+            ),
+            (
+                "album/Music.M3U8",
+                "Music.M3U8",
+                crate::LocalFileKind::Media,
+                crate::LocalFileState::Rejected,
+            ),
+            (
+                "album/other.pls",
+                "other.pls",
+                crate::LocalFileKind::Media,
+                crate::LocalFileState::Observed,
+            ),
+            (
+                "album/folder.xspf",
+                "folder.xspf",
+                crate::LocalFileKind::Directory,
+                crate::LocalFileState::Observed,
+            ),
+        ]
+        .into_iter()
+        .map(|(path, relative, kind, state)| {
+            (
+                crate::LocalFileWrite {
+                    path: path.into(),
+                    root: "album".into(),
+                    relative_path: relative.into(),
+                    kind,
+                    size_bytes: None,
+                    mtime_ns: 1,
+                    device_id: None,
+                    inode: None,
+                    native_id: None,
+                    picture_index: None,
+                    artist_pictures: None,
+                    revision: None,
+                    parse_version: Some(1),
+                    state,
+                },
+                Vec::new(),
+            )
+        })
+        .collect::<Vec<_>>();
+        let mut catalog = database.catalog("files", None).await?;
+        catalog
+            .write_file_observations(&files, Vec::new(), true)
+            .await?;
+        drop(catalog);
         let source = SourceId::new("files");
         check!(
             database
@@ -181,6 +229,34 @@ mod tests {
             .await?;
         check_eq!(next.len(), 1);
         check_eq!(next[0].path, "album/other.pls");
+        let playlist = database
+            .create_playlist(
+                None,
+                "Shared",
+                &crate::CatalogQuery::uris(crate::CatalogKind::Track, Vec::new()).selection(),
+            )
+            .await?
+            .unwrap()
+            .0;
+        database
+            .associate_playlist_files(&source, &[(rows[0].path.clone(), playlist)])
+            .await?;
+        database
+            .catalog("files", None)
+            .await?
+            .write_file_observations(&files, Vec::new(), true)
+            .await?;
+        let associated = database
+            .observed_playlist_file_page(crate::SourceKey::from_raw(1), None)
+            .await?;
+        check_eq!(associated[0].playlist, Some(playlist));
+        check!(associated[0].playlist_identity.is_some());
+        database.delete_playlist(None, playlist).await?;
+        let deleted = database
+            .observed_playlist_file_page(crate::SourceKey::from_raw(1), None)
+            .await?;
+        check_eq!(deleted[0].playlist, None);
+        check!(deleted[0].playlist_identity.is_some());
         database.close().await
     }
 
@@ -460,6 +536,8 @@ fn location_source(source: Option<&SourceId>) -> &str {
 #[derive(Clone, Debug, sqlx::FromRow)]
 pub struct ObservedPlaylistFile {
     pub local_file_key: crate::LocalFileKey,
+    pub playlist_identity: Option<String>,
+    pub playlist: Option<PlaylistKey>,
     pub path: String,
     pub root: String,
     pub relative_path: String,
@@ -659,7 +737,7 @@ impl Database {
         path: &str,
     ) -> LibraryResult<bool> {
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM local_files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2 AND file.state='rejected')")
+        Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observed_local_files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2 AND file.state='rejected')")
             .bind(source_id.as_str()).bind(path).fetch_one(&mut *reader).await?)
     }
 
@@ -669,9 +747,41 @@ impl Database {
         after: Option<crate::LocalFileKey>,
     ) -> LibraryResult<Vec<ObservedPlaylistFile>> {
         let mut reader = self.acquire_reader().await?;
-        Ok(sqlx::query_as("SELECT local_file_key,path,root,relative_path,size_bytes,mtime_ns,revision FROM local_files WHERE source_key=?1 AND local_file_key>?2 AND kind<>'directory' AND (lower(path) LIKE '%.m3u' OR lower(path) LIKE '%.m3u8' OR lower(path) LIKE '%.pls' OR lower(path) LIKE '%.xspf') ORDER BY local_file_key LIMIT 256")
+        Ok(sqlx::query_as("SELECT observed.local_file_key,observed.path,observed.root,observed.relative_path,observed.size_bytes,observed.mtime_ns,observed.revision,file.playlist_identity,(SELECT playlist.playlist_key FROM playlists playlist WHERE playlist.source_key IS(SELECT source_key FROM sources WHERE object_id=json_extract(file.playlist_identity,'$[0]')) AND (json_extract(file.playlist_identity,'$[0]') IS NULL OR playlist.source_key IS NOT NULL) AND playlist.object_id=json_extract(file.playlist_identity,'$[1]') AND playlist.owner='rufin' AND playlist.name IS NOT NULL) playlist FROM local_files file JOIN observed_local_files observed USING(local_file_key) WHERE file.source_key=?1 AND file.local_file_key>?2 AND (lower(file.path) LIKE '%.m3u' OR lower(file.path) LIKE '%.m3u8' OR lower(file.path) LIKE '%.pls' OR lower(file.path) LIKE '%.xspf') AND observed.kind<>'directory' AND (lower(observed.path) LIKE '%.m3u' OR lower(observed.path) LIKE '%.m3u8' OR lower(observed.path) LIKE '%.pls' OR lower(observed.path) LIKE '%.xspf') ORDER BY file.local_file_key LIMIT 256")
             .bind(source).bind(after.map_or(0, crate::LocalFileKey::raw)).fetch_all(&mut *reader).await?)
     }
+    pub async fn associate_playlist_files(
+        &self,
+        source: &SourceId,
+        files: &[(String, PlaylistKey)],
+    ) -> LibraryResult<()> {
+        let mut writer = self.writer().await?;
+        let mut transaction = writer
+            .as_mut()
+            .ok_or(LibraryError::WriterUnavailable)?
+            .begin()
+            .await?;
+        let mut changed = std::collections::BTreeMap::<i64, Vec<String>>::new();
+        for (path, playlist) in files {
+            let row: Option<(i64, String)> = sqlx::query_as("WITH target AS(SELECT json_array(source.object_id,playlist.object_id) identity FROM playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist.playlist_key=?3 AND playlist.owner='rufin' AND playlist.name IS NOT NULL) UPDATE local_files SET playlist_identity=(SELECT identity FROM target) WHERE local_file_key=(SELECT file.local_file_key FROM observed_local_files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2) AND EXISTS(SELECT 1 FROM target) AND playlist_identity IS NOT(SELECT identity FROM target) RETURNING source_key,path")
+                .bind(source.as_str()).bind(path).bind(playlist).fetch_optional(&mut *transaction).await?;
+            if let Some((source, path)) = row {
+                changed.entry(source).or_default().push(path);
+            }
+        }
+        for (source, paths) in changed {
+            crate::connect::catalog::mark_files_on(
+                &mut transaction,
+                source,
+                &paths.iter().map(String::as_str).collect::<Vec<_>>(),
+                false,
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
     pub async fn get_playlist_file_link(
         &self,
         playlist: PlaylistKey,

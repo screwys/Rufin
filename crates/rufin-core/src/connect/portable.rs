@@ -1,242 +1,13 @@
 //! The portable file contains shared state only. Device identity and playback stay here.
 use age::secrecy::ExposeSecret;
-use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
-    io::{Read, Seek, Write},
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::Arc,
 };
-
-pub(super) enum ExchangeFolder {
-    Local(PathBuf),
-    Remote {
-        source: Arc<sources::Source>,
-        path: String,
-    },
-    Document(Box<sources::FileSource>),
-}
-
-pub(super) struct ExchangeFile {
-    pub path: String,
-    pub version: Option<String>,
-}
-
-impl ExchangeFile {
-    pub fn name(&self) -> &str {
-        sources::FileSource::file_name(&self.path)
-    }
-}
-
-impl ExchangeFolder {
-    pub fn new(owner: &super::ConnectOwner, destination: Destination) -> Result<Self, String> {
-        Ok(match destination {
-            Destination::Local { path } => Self::Local(path),
-            Destination::Remote { source_id, path } => Self::Remote {
-                source: owner.source.client(&source_id)?,
-                path,
-            },
-            Destination::Document { uri } => {
-                Self::Document(Box::new(sources::FileSource::document_profile(
-                    sources::DocumentRoot::new(uri, "").map_err(error)?,
-                )))
-            }
-        })
-    }
-
-    fn native(&self) -> Result<&sources::FileSource, String> {
-        match self {
-            Self::Remote { source, .. } => source.profile_file_source().map_err(error),
-            Self::Document(source) => Ok(source),
-            Self::Local(_) => unreachable!("Local exchange uses filesystem operations"),
-        }
-    }
-
-    fn remote_path(&self, relative: &str) -> String {
-        let Self::Remote { path, .. } = self else {
-            return relative.into();
-        };
-        [path.trim_matches('/'), relative.trim_matches('/')]
-            .into_iter()
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join("/")
-    }
-
-    pub async fn ensure(&self, relative: &str) -> Result<(), String> {
-        match self {
-            Self::Local(path) => tokio::fs::create_dir_all(path.join(relative))
-                .await
-                .map_err(error),
-            _ => self
-                .native()?
-                .ensure_profile_folder(&self.remote_path(relative))
-                .await
-                .map_err(error),
-        }
-    }
-
-    pub async fn visit<F, Fut>(&self, relative: &str, mut visit: F) -> Result<(), String>
-    where
-        F: FnMut(ExchangeFile) -> Fut + Send,
-        Fut: std::future::Future<Output = Result<(), String>> + Send,
-    {
-        match self {
-            Self::Local(path) => {
-                let mut directory = match tokio::fs::read_dir(path.join(relative)).await {
-                    Ok(directory) => directory,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-                    Err(failure) => return Err(error(failure)),
-                };
-                while let Some(entry) = directory.next_entry().await.map_err(error)? {
-                    let name = entry.file_name();
-                    let Some(name) = name
-                        .to_str()
-                        .filter(|name| name.ends_with(".rufin-connect"))
-                    else {
-                        continue;
-                    };
-                    let metadata = entry.metadata().await.map_err(error)?;
-                    if metadata.is_file() {
-                        visit(ExchangeFile {
-                            path: if relative.is_empty() {
-                                name.into()
-                            } else {
-                                format!("{relative}/{name}")
-                            },
-                            version: Some(format!(
-                                "{:?}:{}",
-                                metadata.modified().map_err(error)?,
-                                metadata.len()
-                            )),
-                        })
-                        .await?;
-                    }
-                }
-                Ok(())
-            }
-            _ => match self
-                .native()?
-                .visit_files(
-                    &self.remote_path(relative),
-                    ".rufin-connect",
-                    |(path, version)| {
-                        let next = visit(ExchangeFile { path, version });
-                        async move { next.await.map_err(sources::SourceError::Other) }
-                    },
-                )
-                .await
-            {
-                Ok(()) | Err(sources::SourceError::NotFound) => Ok(()),
-                Err(failure) => Err(error(failure)),
-            },
-        }
-    }
-
-    pub async fn read(
-        &self,
-        file: &ExchangeFile,
-        target: &Path,
-    ) -> Result<Option<PathBuf>, String> {
-        match self {
-            Self::Local(path) => Ok(Some(path.join(&file.path))),
-            _ => self
-                .native()?
-                .copy_file(&file.path, target)
-                .await
-                .map(|file| file.map(|_| target.into()))
-                .map_err(error),
-        }
-    }
-
-    pub async fn read_named(
-        &self,
-        relative: &str,
-        target: &Path,
-    ) -> Result<Option<PathBuf>, String> {
-        if let Self::Local(path) = self {
-            let path = path.join(relative);
-            return tokio::fs::try_exists(&path)
-                .await
-                .map(|exists| exists.then_some(path))
-                .map_err(error);
-        }
-        self.read(
-            &ExchangeFile {
-                path: self.remote_path(relative),
-                version: None,
-            },
-            target,
-        )
-        .await
-    }
-
-    pub async fn write(
-        &self,
-        relative: &str,
-        output: tempfile::NamedTempFile,
-    ) -> Result<ExchangeFile, String> {
-        let (path, version) = match self {
-            Self::Local(path) => {
-                let path = path.join(relative);
-                install(output, path.clone()).await?;
-                let metadata = tokio::fs::metadata(path).await.map_err(error)?;
-                (
-                    relative.into(),
-                    Some(format!(
-                        "{:?}:{}",
-                        metadata.modified().map_err(error)?,
-                        metadata.len()
-                    )),
-                )
-            }
-            _ => {
-                let path = self.remote_path(relative);
-                let source = self.native()?;
-                source
-                    .write_profile_file(&path, output, Some(None))
-                    .await
-                    .map_err(error)?;
-                let version = source.profile_file_version(&path).await.map_err(error)?;
-                (path, version)
-            }
-        };
-        Ok(ExchangeFile { path, version })
-    }
-}
 
 const MAGIC: &[u8; 8] = b"RUFINCX2";
 const UNCOMPRESSED_MAGIC: &[u8; 8] = b"RUFINCX1";
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-pub enum Destination {
-    Local {
-        path: PathBuf,
-    },
-    Document {
-        uri: String,
-    },
-    // Keep the existing file format; the saved connection owns its protocol.
-    #[serde(rename = "web_dav", alias = "smb")]
-    Remote {
-        source_id: sources::SourceId,
-        path: String,
-    },
-}
-
-impl Destination {
-    pub fn is_remote(&self) -> bool {
-        matches!(self, Self::Remote { .. })
-    }
-    pub fn source_id(&self) -> Option<&sources::SourceId> {
-        match self {
-            Self::Remote { source_id, .. } => Some(source_id),
-            Self::Local { .. } | Self::Document { .. } => None,
-        }
-    }
-}
 
 pub fn new_key() -> String {
     age::x25519::Identity::generate()
@@ -245,11 +16,13 @@ pub fn new_key() -> String {
         .to_owned()
 }
 
-pub fn encrypt(
+#[cfg(test)]
+fn encrypt(
     output: File,
     profile: &str,
     key: &str,
 ) -> Result<age::stream::StreamWriter<File>, String> {
+    use std::io::Write as _;
     let identity: age::x25519::Identity = key.parse().map_err(error)?;
     let recipient = identity.to_public();
     let encryptor =
@@ -283,14 +56,31 @@ impl Snapshot {
 }
 
 /// Authenticate the complete input before returning a snapshot for application.
-pub fn decrypt(input: &Path, keys: &[String]) -> Result<(String, Snapshot), String> {
+pub fn decrypt(
+    input: &Path,
+    keys: &[String],
+    mut progress: impl FnMut(u64, u64),
+) -> Result<(String, Snapshot), String> {
     let identities: Vec<age::x25519::Identity> = keys
         .iter()
         .map(|key| key.parse::<age::x25519::Identity>().map_err(error))
         .collect::<Result<Vec<_>, _>>()?;
     let file = File::open(input).map_err(error)?;
     let (profile, mut stream) = open_snapshot(file.try_clone().map_err(error)?, &identities)?;
-    std::io::copy(&mut stream, &mut std::io::sink()).map_err(error)?;
+    let start = stream.stream_position().map_err(error)?;
+    let total = stream.seek(SeekFrom::End(0)).map_err(error)? - start;
+    stream.seek(SeekFrom::Start(start)).map_err(error)?;
+    progress(0, total);
+    let mut completed = 0;
+    let mut buffer = vec![0; 256 * 1024];
+    loop {
+        let read = stream.read(&mut buffer).map_err(error)?;
+        if read == 0 {
+            break;
+        }
+        completed += read as u64;
+        progress(completed, total);
+    }
     Ok((
         profile.clone(),
         Snapshot {
@@ -316,7 +106,7 @@ fn open_snapshot(
     let mut magic = [0u8; 8];
     stream.read_exact(&mut magic).map_err(error)?;
     if &magic != MAGIC && &magic != UNCOMPRESSED_MAGIC {
-        return Err(super::error(rufin_connect::profile::INCOMPATIBLE_PROFILE));
+        return Err(super::error(library::profile::INCOMPATIBLE_PROFILE));
     }
     let mut length = [0u8; 2];
     stream.read_exact(&mut length).map_err(error)?;
@@ -332,6 +122,12 @@ pub async fn install(input: tempfile::NamedTempFile, destination: PathBuf) -> Re
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
+        input.as_file().sync_all().map_err(error)?;
+        let input = match input.persist(&destination) {
+            Ok(_) => return Ok(()),
+            Err(cause) if cause.error.kind() == std::io::ErrorKind::CrossesDevices => cause.file,
+            Err(cause) => return Err(error(cause)),
+        };
         let mut pending = tempfile::NamedTempFile::new_in(parent).map_err(error)?;
         std::io::copy(&mut File::open(input.path()).map_err(error)?, &mut pending)
             .map_err(error)?;
@@ -350,6 +146,7 @@ fn error(error: impl std::fmt::Display) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write as _;
 
     #[test]
     fn encrypted_file_authenticates_before_exposing_a_snapshot() {
@@ -370,16 +167,16 @@ mod tests {
         let ciphertext = std::fs::read(&encrypted).unwrap();
         assert!(ciphertext.len() < contents.len() / 10);
         assert!(!ciphertext.windows(11).any(|bytes| bytes == b"credentials"));
-        let (profile, staged) = decrypt(&encrypted, std::slice::from_ref(&key)).unwrap();
+        let (profile, staged) = decrypt(&encrypted, std::slice::from_ref(&key), |_, _| {}).unwrap();
         assert_eq!(profile, "profile");
         let mut restored = Vec::new();
         flate2::read::MultiGzDecoder::new(staged.reader().unwrap())
             .read_to_end(&mut restored)
             .unwrap();
         assert_eq!(restored, contents);
-        assert!(decrypt(&encrypted, &[new_key()]).is_err());
+        assert!(decrypt(&encrypted, &[new_key()], |_, _| {}).is_err());
         std::fs::write(&encrypted, &ciphertext[..ciphertext.len() - 1]).unwrap();
-        assert!(decrypt(&encrypted, std::slice::from_ref(&key)).is_err());
+        assert!(decrypt(&encrypted, std::slice::from_ref(&key), |_, _| {}).is_err());
     }
 
     #[test]
@@ -399,7 +196,7 @@ mod tests {
         stream.write_all(&7u16.to_le_bytes()).unwrap();
         stream.write_all(b"profile1\nEND\n").unwrap();
         stream.finish().unwrap();
-        let (profile, staged) = decrypt(&encrypted, &[key]).unwrap();
+        let (profile, staged) = decrypt(&encrypted, &[key], |_, _| {}).unwrap();
         assert_eq!(profile, "profile");
         let mut restored = String::new();
         staged
@@ -427,12 +224,12 @@ mod tests {
         std::io::copy(&mut File::open(&snapshot).unwrap(), &mut output).unwrap();
         output.finish().unwrap();
         let keys = vec![current.clone(), old.clone(), intermediate];
-        let (profile, staged) = decrypt(&destination, &keys).unwrap();
+        let (profile, staged) = decrypt(&destination, &keys, |_, _| {}).unwrap();
         let rewritten = dir.path().join("rewritten");
         let mut output = encrypt(File::create(&rewritten).unwrap(), &profile, &current).unwrap();
         std::io::copy(&mut staged.reader().unwrap(), &mut output).unwrap();
         output.finish().unwrap();
-        assert!(decrypt(&rewritten, &[old]).is_err());
-        assert!(decrypt(&rewritten, &[current]).is_ok());
+        assert!(decrypt(&rewritten, &[old], |_, _| {}).is_err());
+        assert!(decrypt(&rewritten, &[current], |_, _| {}).is_ok());
     }
 }

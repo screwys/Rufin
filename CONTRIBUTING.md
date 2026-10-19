@@ -42,6 +42,26 @@ and Windows packages.
 just container setup
 ```
 
+### Android
+
+Android development runs on Linux or macOS. Install rustup, a Gradle-compatible
+JDK 17 or newer, `just`, CMake 3.25 or newer, Make, `pkg-config`, gettext, curl,
+tar, xz, and the Android SDK command-line tools. On Linux, `nix develop`
+provides the host build tools. Set `ANDROID_HOME` to your SDK directory, then install:
+
+```bash
+sdkmanager "platforms;android-37.2" "build-tools;36.1.0" "ndk;29.0.14206865" "platform-tools"
+rustup toolchain install stable --target aarch64-linux-android
+```
+
+The first build downloads GStreamer 1.28.7 into `android/.toolchains/gstreamer-1.28.7`
+and reuses it afterward. To use an existing SDK, set `GSTREAMER_ROOT_ANDROID` or
+`gstreamer.dir` in `android/local.properties`.
+That file also accepts `sdk.dir` for the Android SDK.
+
+Run `just test android` for JVM unit tests and Android lint, without an emulator.
+Run `just build apk-dev` to build the development APK.
+
 ## Project structure
 
 Rufin's crates try to follow a product ownership model. The goal is to separate parts that can grow vertically (or parts we want to scale) and work on them independently, while only doing minimal or no work for their integration with other parts.
@@ -102,6 +122,7 @@ just debug headless # runs the headless development executable on the host
 just debug headless --listen # also enables browser and HTTP API access; requires RUFIN_API_TOKEN
 just fmt # formats Rust code
 just test # runs the test suite
+just test android # runs Android development unit tests and lint without an emulator
 just i18n # regenerates the shared desktop and web translation template
 just i18n --check # checks the translation template without changing it
 ```

@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use futures_util::{StreamExt, stream};
 use library::{LocalFileKind, LocalFileState, LocalFileWrite};
@@ -36,6 +37,11 @@ impl FileSource {
         relative: &str,
     ) -> SourceResult<LocalFileWrite> {
         match input.input() {
+            FileInput::Peer { .. } => {
+                return Err(SourceError::InvalidRequest(
+                    "Peer access provides audio bytes",
+                ));
+            }
             FileInput::Documents(access) => {
                 let access = Arc::clone(access);
                 let path = relative.to_owned();
@@ -85,17 +91,18 @@ impl FileSource {
         } else {
             relative.to_owned()
         };
-        let (mut track, picture, portraits) =
-            media::read_saved_media(temporary, display_path.into()).await?;
-        observation.picture_index = picture.map(i64::from);
-        observation.artist_pictures = Some(portraits);
+        let mut track = media::read_saved_media(temporary, display_path.into()).await?;
+        track.observe_images(&mut observation)?;
         observation.state = LocalFileState::Accepted;
-        track.local_artwork = picture.map(|picture_index| LocalImageRef::Embedded {
-            source_id: self.source_id.clone(),
-            path: observation.path.clone(),
-            revision: observation.revision.clone().unwrap_or_default(),
-            picture_index,
-        });
+        track.local_artwork = track
+            .picture_index
+            .and_then(|index| u32::try_from(index).ok())
+            .map(|picture_index| LocalImageRef::Embedded {
+                source_id: self.source_id.clone(),
+                path: observation.path.clone(),
+                revision: observation.revision.clone().unwrap_or_default(),
+                picture_index,
+            });
         track.track.object_id = object_id;
         self.locate_track(&mut track, &observation);
         Ok((observation, track.into_observation(media::accepted_at())))
@@ -132,14 +139,14 @@ impl FileSource {
         catalog: &mut library::Catalog<'_>,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<()> {
+    ) -> SourceResult<usize> {
         let database = catalog.database;
         let source_id = catalog.source_id;
         let stamp = catalog.observed;
         let input = self.input().await?;
         let root_scope = self.location("")?;
         progress(SourceReadProgress {
-            stage: SourceReadStage::Files,
+            stage: SourceReadStage::Tracks,
             completed: 0,
             total: None,
         });
@@ -161,11 +168,6 @@ impl FileSource {
         let workers: [_; 4] =
             std::array::from_fn(|_| Arc::new(Mutex::new(media::Worker::default())));
         let mut completed = 0;
-        progress(SourceReadProgress {
-            stage: SourceReadStage::Tracks,
-            completed,
-            total: None,
-        });
         let mut after = None;
         loop {
             check_cancelled(cancelled)?;
@@ -194,19 +196,15 @@ impl FileSource {
                 .await?;
             after = Some(directory);
         }
-        self.acquire_media_files(catalog, &workers, progress, cancelled, None, completed)
+        completed = self
+            .acquire_media_files(catalog, &workers, progress, cancelled, None, completed)
             .await?;
         if self.document_access().is_none() {
             crate::file::artwork::ArtworkFiles::Remote(self)
-                .acquire(catalog, progress, cancelled)
+                .acquire(catalog, cancelled)
                 .await?;
         }
-        progress(SourceReadProgress {
-            stage: SourceReadStage::Finalizing,
-            completed: 0,
-            total: None,
-        });
-        Ok(())
+        Ok(completed)
     }
 
     pub(super) async fn acquire_directory(
@@ -287,6 +285,7 @@ impl FileSource {
                 total: None,
             })
         };
+        report(completed);
         let mut after = None;
         loop {
             check_cancelled(cancelled)?;
@@ -346,6 +345,7 @@ impl FileSource {
             .buffered(workers.len());
             let mut accepted = Vec::new();
             let mut observations = Vec::new();
+            let mut reported = Instant::now();
             let result: SourceResult<()> = async {
                 while let Some((mut file, reusable, parsed)) = files.next().await {
                     check_cancelled(cancelled)?;
@@ -356,6 +356,13 @@ impl FileSource {
                         file.state = state;
                         file.parse_version = version;
                         observations.push((file, vec![]));
+                        if state == LocalFileState::Accepted {
+                            completed += 1;
+                            if reported.elapsed() >= Duration::from_millis(100) {
+                                report(completed);
+                                reported = Instant::now();
+                            }
+                        }
                         continue;
                     }
                     file.parse_version = Some(PARSER_VERSION);
@@ -409,18 +416,16 @@ impl FileSource {
                                     crate::policy::stable_hash(&super::file_identity(&file.path))
                                 );
                             }
-                            file.picture_index = match &track.local_artwork {
-                                Some(LocalImageRef::Embedded { picture_index, .. }) => {
-                                    Some(i64::from(*picture_index))
-                                }
-                                _ => None,
-                            };
-                            file.artist_pictures =
-                                Some(serde_json::to_string(&track.artist_pictures)?);
+                            track.observe_images(&mut file)?;
                             self.locate_track(&mut track, &file);
                             file.state = LocalFileState::Accepted;
                             accepted.push(track.into_observation(media::accepted_at()));
                             observations.push((file, vec![]));
+                            completed += 1;
+                            if reported.elapsed() >= Duration::from_millis(100) {
+                                report(completed);
+                                reported = Instant::now();
+                            }
                         }
                         media::MediaRead::Rejected => {
                             file.state = LocalFileState::Rejected;
@@ -437,12 +442,10 @@ impl FileSource {
             }
             .await;
             if !observations.is_empty() {
-                let accepted_count = accepted.len();
                 check_cancelled(cancelled)?;
                 catalog
                     .write_file_observations(&observations, accepted, true)
                     .await?;
-                completed += accepted_count;
                 report(completed);
             }
             result?;
@@ -550,18 +553,15 @@ impl FileSource {
             let mut parsed =
                 media::read_media_input(&mut worker, display_path.into(), &mut reader, &uri, None);
             if let media::MediaRead::Accepted(track) = &mut parsed {
-                let (cover, portraits) = crate::file::artwork::inspect_embedded_input(
-                    &mut worker.discovery,
-                    &mut reader,
-                    &uri,
-                );
-                track.artist_pictures = portraits;
-                track.local_artwork = cover.map(|picture_index| LocalImageRef::Embedded {
-                    source_id,
-                    path: artwork_path,
-                    picture_index,
-                    revision,
-                });
+                track.local_artwork = track
+                    .picture_index
+                    .and_then(|index| u32::try_from(index).ok())
+                    .map(|picture_index| LocalImageRef::Embedded {
+                        source_id,
+                        path: artwork_path,
+                        picture_index,
+                        revision,
+                    });
             }
             if reader.failed() {
                 media::MediaRead::Unreadable
@@ -588,6 +588,11 @@ impl FileSource {
         let (send, receive) = async_channel::bounded(128);
         let listing = async {
             match input.input() {
+                FileInput::Peer { .. } => {
+                    return Err(SourceError::InvalidRequest(
+                        "Peer access provides audio bytes",
+                    ));
+                }
                 FileInput::Documents(access) => {
                     let access = Arc::clone(access);
                     let path = relative.to_owned();
@@ -737,6 +742,11 @@ impl FileSource {
                         .write_file_observations(&batch, Vec::new(), true)
                         .await?;
                     batch.clear();
+                    progress(SourceReadProgress {
+                        stage: SourceReadStage::Tracks,
+                        completed,
+                        total: None,
+                    });
                 }
             }
             if !batch.is_empty() {
@@ -745,6 +755,11 @@ impl FileSource {
                     .write_file_observations(&batch, Vec::new(), true)
                     .await?;
             }
+            progress(SourceReadProgress {
+                stage: SourceReadStage::Tracks,
+                completed,
+                total: None,
+            });
             Ok::<_, SourceError>(completed)
         };
         let (_, completed) = tokio::try_join!(listing, staging)?;
@@ -763,7 +778,7 @@ impl FileSource {
         Ok(completed)
     }
 
-    fn document_observation(
+    pub(crate) fn document_observation(
         &self,
         relative: &str,
         entry: crate::DocumentEntry,

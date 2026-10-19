@@ -16,46 +16,45 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
 import io.github.screwys.rufin.shared.rufin_core.*
 import io.github.screwys.rufin.shared.rufin_core.Action as ConnectAction
 import io.github.screwys.rufin.shared.rufin_core.Status as ConnectStatus
-import io.github.screwys.rufin.shared.rufin_core.Control as ConnectControl
-import io.github.screwys.rufin.shared.downloads.DownloadDirectory
 
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.settings.SettingsPage
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsRow
 import kotlinx.coroutines.delay
+import java.text.NumberFormat
 
 @Composable
-internal fun ConnectSetupScreen(model: RufinConnection) {
+internal fun ConnectProgressScreen(model: RufinConnection) {
     Surface(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(model.connect::dismissOperation) { RufinIcon("rufin-go-previous-symbolic", translate("Back")) }
                 Text(translate("Rufin Connect"), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                TextButton({ model.connect.action(ConnectAction.CancelPairing) }) { Text(translate("Cancel")) }
             }
-            Box(Modifier.weight(1f)) { ConnectPage(model, setupOnly = true) }
+            Box(Modifier.weight(1f)) { ConnectPage(model, progressOnly = true) }
         }
     }
 }
 
 @Composable
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setupOnly: Boolean = false) {
+internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, progressOnly: Boolean = false) {
     val connect = model.connect
     DisposableEffect(connect) { connect.pageVisible = true; onDispose { connect.pageVisible = false } }
     val state = connect.state
     LaunchedEffect(state?.settings?.profile, state?.settings?.enabled) {
-        if (!setupOnly && state?.settings?.profile != null && state.settings.enabled) {
+        if (!progressOnly && state?.settings?.profile != null && state.settings.enabled) {
             if (!model.connectedService().requestLocalNetworkAccess()) {
                 model.showFeedback(translate("Local network permission was denied"))
             }
-            connect.action(ConnectAction.Refresh)
         }
     }
     val context = LocalContext.current
@@ -63,8 +62,6 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
     var rename by remember { mutableStateOf(false) }
     var leave by remember { mutableStateOf(false) }
     var disable by remember { mutableStateOf(false) }
-    var remoteStorage by remember { mutableStateOf(false) }
-    var storageChoice by remember { mutableStateOf(false) }
     var musicFolderChoice by remember { mutableStateOf<ConnectMusicFolder?>(null) }
     var relayEdit by remember { mutableStateOf(false) }
     var remoteFile by remember { mutableStateOf<Boolean?>(null) }
@@ -75,7 +72,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
     LaunchedEffect(connect, state != null) {
         if (state?.settings?.nearby == true && state.identity == null) connect.action(ConnectAction.Discover)
     }
-    LaunchedEffect(connect, state?.settings?.profile, state?.settings?.setupPending, state?.connecting, model.sources) {
+    LaunchedEffect(connect, state?.settings?.profile, state?.connecting, model.sources) {
         if (state?.settings?.profile != null && !state.connecting) connect.refreshMusicFolders()
     }
     val chooseMusicFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -86,12 +83,6 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
         } catch (failure: Exception) { connect.reportError(failure) }
         musicFolderChoice = null
     }
-    val chooseFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) try {
-            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            connect.action(ConnectAction.Destination(Destination.Document(uri.toString())))
-        } catch (failure: Exception) { connect.reportError(failure) }
-    }
     val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { connect.importDocument(it.toString()) }
     }
@@ -101,15 +92,28 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
     if (state == null) {
         Box(if (embedded) Modifier.fillMaxWidth().padding(24.dp) else Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             val failure = connect.error
-            if (failure != null) io.github.screwys.rufin.ui.ErrorNotice(failure)
+            if (failure != null) Text(failure, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
             else CircularProgressIndicator()
         }
         return
     }
     val enabled = !connect.pending
-    SettingsPage(embedded = embedded) {
+    val failure = connect.visibleError
+    val working = failure == null && state.pairing == null &&
+        (state.connecting || (state.collectionProgress != null && connect.pending))
+    if (working) {
+        Box(if (embedded) Modifier.fillMaxWidth().padding(vertical = 48.dp) else Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                ConnectProgress(state)
+                if (state.connecting) TextButton({ connect.action(ConnectAction.CancelPairing) }) {
+                    Text(translate("Cancel"))
+                }
+            }
+        }
+    } else SettingsPage(embedded = embedded) {
         SettingsGroup {
-            if (!setupOnly) {
+            if (!progressOnly) {
             SettingsRow(translate("Device name"), summary = state.settings.name,
                 trailing = { IconButton({ rename = true }, enabled = enabled) { RufinIcon("rufin-document-edit-symbolic", translate("Edit")) } },
                 modifier = Modifier.clickable(enabled) { rename = true })
@@ -117,24 +121,21 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
                 Button({ connect.action(ConnectAction.Create) }, Modifier.fillMaxWidth(), enabled = enabled) {
                     Text(translate("Enable Rufin Connect"))
                 }
-            } else SettingsRow(translate("Enable Rufin Connect"), summary = state.profileStatus,
+            } else SettingsRow(translate("Enable Rufin Connect"), summary = state.profileStatus.takeIf { failure == null },
                 trailing = { Switch(state.settings.enabled, {
                     if (it) connect.action(ConnectAction.Enable(true)) else disable = true
                 }, enabled = enabled) })
             }
-            if (setupOnly) Text(state.profileStatus, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.titleMedium)
-            Box(Modifier.fillMaxWidth().height(2.dp)) {
-                if (connect.pending || state.connecting || state.settings.adopting || state.receivingCollection) LinearProgressIndicator(Modifier.fillMaxWidth())
-            }
-            if (!setupOnly && state.connecting && state.pairing == null) SettingsRow(state.profileStatus,
-                trailing = { TextButton({ connect.action(ConnectAction.CancelPairing) }, enabled = enabled) {
-                    Text(translate("Cancel"))
-                } })
-            connect.visibleError?.let { message ->
-                io.github.screwys.rufin.ui.ErrorNotice(message)
+            if (progressOnly && failure == null) Text(state.profileStatus, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.titleMedium)
+            if (connect.pending) LinearProgressIndicator(Modifier.fillMaxWidth())
+            failure?.let { message ->
+                Text(message, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.error)
+                if ((state.settings.profile != null || state.settings.pendingImport != null) && !state.connecting) TextButton({ connect.action(ConnectAction.Retry) }, enabled = enabled) {
+                    Text(translate("Retry"))
+                }
             }
         }
-        if (!setupOnly) {
+        if (!progressOnly) {
         SettingsGroup {
             SettingsRow(translate("Join profile"),
                 modifier = Modifier.clickable(enabled) { join = true })
@@ -186,7 +187,7 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
                 trailing = { Switch(state.settings.publicRelay, { connect.action(ConnectAction.Network(state.settings.nearby, state.settings.relay, it)) }, enabled = enabled) })
         }
         }
-        if (!setupOnly || (state.settings.setupPending && !state.connecting)) {
+        if (!progressOnly) {
         if (connect.musicFolders.isNotEmpty()) SettingsGroup(translate("Local music folders")) {
             connect.musicFolders.forEach { folder ->
                 key(folder.sourceId, folder.rootId) {
@@ -199,24 +200,8 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
                 }
             }
         }
-        SettingsGroup(translate("Music on this device")) {
-            Text(translate("Download quality"), Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge)
-            io.github.screwys.rufin.downloads.DownloadQualityControls(state.settings.encoding, enabled) { connect.encoding(it) }
-            state.mediaStatus?.let { Text(it, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall) }
         }
-        SettingsGroup(translate("Profile storage")) {
-            SettingsRow(translate("Storage"), summary = when (val destination = state.settings.destination) {
-                    is Destination.Document -> translate("This device")
-                    is Destination.Local -> destination.path
-                    is Destination.Remote -> listOf(connect.fileSources.firstOrNull { it.id == destination.sourceId }?.name.orEmpty(), destination.path).filter(String::isNotBlank).joinToString(" · ")
-                    else -> translate("Rufin data folder")
-                },
-                modifier = Modifier.clickable(enabled) { storageChoice = true })
-        }
-        }
-        if (state.settings.setupPending && !state.connecting) Button({ connect.action(ConnectAction.FinishSetup) },
-            Modifier.fillMaxWidth(), enabled = enabled) { Text(translate("Continue")) }
-        if (!setupOnly) {
+        if (!progressOnly) {
         SettingsGroup {
             SettingsRow(translate("Import"),
                 modifier = Modifier.clickable(enabled) { importFile.launch(arrayOf("*/*")) })
@@ -242,14 +227,36 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, setu
     removeDevice?.let { device -> AlertDialog(onDismissRequest = { removeDevice = null }, title = { Text(translate("Remove device")) }, text = { Text(device.name) },
         confirmButton = { TextButton({ connect.action(ConnectAction.Remove(device.id)); removeDevice = null }) { Text(translate("Remove")) } },
         dismissButton = { TextButton({ removeDevice = null }) { Text(translate("Cancel")) } }) }
-    if (remoteStorage) ConnectRemoteStorageDialog(connect, state.settings.destination, { remoteStorage = false }) { destination ->
-        connect.action(ConnectAction.Destination(destination)); remoteStorage = false
-    }
-    if (storageChoice) ConnectStorageDialog(state.settings.destination, { storageChoice = false },
-        useDefault = { connect.action(ConnectAction.Destination(null)) },
-        chooseFolder = { chooseFolder.launch((state.settings.destination as? Destination.Document)?.uri?.let(android.net.Uri::parse)) },
-        chooseConnection = { remoteStorage = true })
     remoteFile?.let { importing -> ConnectRemoteFileDialog(connect, importing, { remoteFile = null }) }
     controlDevice?.let { device -> ConnectDeviceControls(device, connect) { controlDevice = null } }
     ConnectConfirmationDialog(connect)
+}
+
+@Composable
+private fun ConnectProgress(state: ConnectStatus) {
+    val progress = state.collectionProgress
+    val total = progress?.total?.takeIf { it > 0uL }
+    val fraction = if (progress != null && total != null) (progress.completed.toDouble() / total.toDouble()).coerceIn(0.0, 1.0) else null
+    val integer = remember { NumberFormat.getIntegerInstance() }
+    val decimal = remember { NumberFormat.getNumberInstance().apply { minimumFractionDigits = 1; maximumFractionDigits = 1 } }
+    val bytes = progress?.stage == CollectionStage.RECEIVING || progress?.stage == CollectionStage.VALIDATING
+    val counter = progress?.let {
+        val current = if (bytes) decimal.format(it.completed.toDouble() / 1_048_576) else integer.format(it.completed.toLong())
+        if (total != null && fraction != null) {
+            val maximum = if (bytes) decimal.format(total.toDouble() / 1_048_576) else integer.format(total.toLong())
+            val percent = integer.format((it.completed.coerceAtMost(total).toDouble() * 100 / total.toDouble()).toInt())
+            if (bytes) translate("{current} / {total} MiB ({percent}%)")
+                .replace("{current}", current).replace("{total}", maximum).replace("{percent}", percent)
+            else "$current / $maximum ($percent%)"
+        } else if (it.completed > 0uL) {
+            if (bytes) translate("{current} MiB").replace("{current}", current) else current
+        } else null
+    }
+    Text(state.profileStatus, Modifier.fillMaxWidth(), textAlign = TextAlign.Center, style = MaterialTheme.typography.titleMedium)
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (fraction == null) LinearProgressIndicator(Modifier.fillMaxWidth().height(8.dp))
+        else LinearProgressIndicator(progress = { fraction.toFloat() }, modifier = Modifier.fillMaxWidth().height(8.dp))
+        counter?.let { Text(it, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
 }

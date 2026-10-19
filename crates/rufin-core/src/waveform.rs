@@ -14,7 +14,7 @@ use async_channel::Sender;
 use audio_processing::generate_waveform_peaks_cancellable;
 use md5_digest::{Digest, Md5};
 use playback::{CurrentMedia, CurrentMediaId, StreamRequest};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tracing::{debug, warn};
 
 use crate::playback::prepare_stream;
@@ -73,7 +73,7 @@ impl Drop for CurrentWaveform {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize)]
 struct CachedWaveform {
     version: u8,
     duration_millis: i64,
@@ -216,15 +216,27 @@ impl WaveformOwner {
         let task_key = key.clone();
         let cache_root = self.cache_root.clone();
         let task = self.runtime.spawn(async move {
-            let cache_key = task_key.clone();
-            let cached = tokio::task::spawn_blocking(move || load_cached(&cache_root, &cache_key))
-                .await.ok().flatten();
-            if let Some(peaks) = cached {
-                if let Some(owner) = owner.upgrade() {
-                    owner.accept_peaks(request, &task_key, Arc::new(peaks));
+            let analysis_key = input.database.waveform_analysis_key(&task_key.media_uri).await.unwrap_or_else(|error| {
+                warn!(%error, media_uri = %task_key.media_uri, "failed to read waveform analysis key");
+                None
+            });
+            let mut cached = input.database.waveform_cache(&task_key.media_uri).await.unwrap_or_else(|error| {
+                warn!(%error, media_uri = %task_key.media_uri, "failed to read waveform cache");
+                None
+            }).map(|row| row.peaks);
+            if cached.is_none() {
+                let cache_key = task_key.clone();
+                cached = tokio::task::spawn_blocking(move || load_cached(&cache_root, &cache_key)).await.ok().flatten();
+                if let (Some(analysis_key), Some(peaks)) = (analysis_key, cached.as_ref()) {
+                    let row = library::WaveformCacheRow { media_uri: task_key.media_uri.clone(), analysis_key, peaks: peaks.clone() };
+                    if let Err(error) = input.database.write_waveform_cache(&row).await { warn!(%error, media_uri = %task_key.media_uri, "failed to cache waveform"); }
                 }
+            }
+            if let Some(peaks) = cached {
+                if let Some(owner) = owner.upgrade() { owner.accept_peaks(request, &task_key, Arc::new(peaks)); }
                 return;
             }
+            let database = Arc::clone(&input.database);
             let local = input.source.upgrade().and_then(|source| source.shared.settings.local_configuration());
             let stream = match prepare_stream(&input.database, input.request, local.as_ref(), None, move |source_id| async move {
                 tokio::task::spawn_blocking(move || {
@@ -283,7 +295,9 @@ impl WaveformOwner {
             if !owner.matches(request, &task_key) {
                 return;
             }
-            if let Err(error) = save_cached(&owner.cache_root, &task_key, &peaks) {
+            if let Some(analysis_key) = analysis_key
+                && let Err(error) = database.write_waveform_cache(&library::WaveformCacheRow { media_uri: task_key.media_uri.clone(), analysis_key, peaks: peaks.clone() }).await
+            {
                 warn!(%error, media_uri = %task_key.media_uri, "failed to cache waveform");
             }
             owner.accept_peaks(request, &task_key, Arc::new(peaks));
@@ -371,20 +385,6 @@ fn load_cached(root: &Path, key: &WaveformKey) -> Option<Vec<(f64, f64)>> {
     sanitize_peaks(cached.peaks)
 }
 
-fn save_cached(root: &Path, key: &WaveformKey, peaks: &[(f64, f64)]) -> Result<(), String> {
-    let path = key.cache_path(root);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let value = serde_json::to_vec(&CachedWaveform {
-        version: CACHE_VERSION,
-        duration_millis: key.duration_millis,
-        peaks: peaks.to_vec(),
-    })
-    .map_err(|error| error.to_string())?;
-    fs::write(path, value).map_err(|error| error.to_string())
-}
-
 fn sanitize_peaks(peaks: Vec<(f64, f64)>) -> Option<Vec<(f64, f64)>> {
     let peaks = peaks
         .into_iter()
@@ -426,44 +426,52 @@ mod tests {
             run: None,
             media_uri: media_uri.clone(),
         };
-        let media = Arc::new(CurrentMedia {
-            stream: None,
-            id: media_id.clone(),
-            row: Arc::new(playback::QueueRow {
-                occurrence_id: None,
-                position: 0,
-                received_from_connect: false,
-                provenance: playback::Provenance::Manual,
-                track: {
-                    let reference = playback::TrackReference::direct(
-                        library::source_entity_uri(
-                            &sources::SourceId::new("remote"),
-                            "track",
-                            "track",
-                        ),
+        let entries = database
+            .queue_entries(
+                library::QueueLoad::items(vec![(
+                    playback::TrackReference::direct(
+                        media_uri.clone(),
                         "Track",
                         "Artist",
                         "Album",
                         0,
-                    );
-                    library::TrackView {
-                        track_key: library::TrackKey::from_raw(1),
-                        source_key: None,
-                        source_id: None,
-                        object_id: None,
-                        media_uri: reference.media_uri,
-                        metadata: reference.metadata,
-                        artwork_binding: reference.artwork_binding,
-                        state: Default::default(),
-                        access: Default::default(),
-                        links: Default::default(),
-                    }
-                },
-            }),
+                    ),
+                    playback::Provenance::Manual,
+                )]),
+                None,
+            )
+            .await
+            .expect("admit track")
+            .entries;
+        let row = database
+            .queue_rows_for_entries(
+                &entries.into_iter().enumerate().collect::<Vec<_>>(),
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .expect("queue rows")
+            .pop()
+            .expect("admitted track row");
+        let media = Arc::new(CurrentMedia {
+            stream: None,
+            id: media_id.clone(),
+            row,
         });
         let peaks = vec![(0.1, 0.2), (0.3, 0.4)];
-        save_cached(directory.path(), &WaveformKey::for_media(&media), &peaks)
-            .expect("cached waveform");
+        let key = WaveformKey::for_media(&media);
+        let path = key.cache_path(directory.path());
+        fs::create_dir_all(path.parent().expect("cache directory"))
+            .expect("create cache directory");
+        fs::write(
+            path,
+            serde_json::to_vec(&serde_json::json!({
+                "version": CACHE_VERSION,
+                "duration_millis": key.duration_millis,
+                "peaks": &peaks,
+            }))
+            .expect("legacy waveform JSON"),
+        )
+        .expect("cached waveform");
         let input = WaveformMedia {
             request: StreamRequest::original(media.row.track.media_uri.clone()),
             media,

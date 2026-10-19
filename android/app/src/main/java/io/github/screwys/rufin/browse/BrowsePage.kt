@@ -172,7 +172,7 @@ internal class BrowsePage(
                 }
         }
         snapshotFlow {
-            if (options.preparing || !(parent?.active ?: active) || (parent != null && parent.preparedContext == null)) null else PageContext(browse.library, connection.sources,
+            if (!(parent?.active ?: active) || (parent != null && parent.preparedContext == null)) null else PageContext(browse.library, connection.sources,
                 if (parent != null) parent.preparedContext?.catalog else connection.catalogRevision,
                 location.route, options.category, options.filter, options.sort, options.descending, options.favoritesOnly, options.downloadedOnly,
                 revision + (parent?.revision ?: 0), if (artistAlbums) browse.artistAlbumsRevision else 0,

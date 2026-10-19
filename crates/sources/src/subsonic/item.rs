@@ -413,6 +413,7 @@ pub(super) fn playlist_from_json(
                 .transpose()?,
             writable: Some(writable),
             metadata_writable: Some(metadata_writable),
+            ..Default::default()
         },
         revision: json::field::<String>(playlist, "changed").filter(|value| !value.is_empty()),
         valid_until: crate::policy::unix_seconds(json::field(playlist, "validUntil")),

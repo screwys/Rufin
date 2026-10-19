@@ -122,6 +122,13 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
         private set
     val sourceBusy get() = sourceOperation !is SourceOperation.Idle && sourceOperation !is SourceOperation.Failed
     val sourceStatus get() = if (sourceBusy) sourceOperationText(sourceOperation) else null
+    val sourceProgress get() = when (val operation = sourceOperation) {
+        is SourceOperation.Adding -> operation.progress
+        is SourceOperation.Switching -> operation.progress
+        is SourceOperation.Refreshing -> operation.progress
+        is SourceOperation.Downloading -> operation.progress
+        else -> null
+    }
     val selectedSourceName get() = sources?.sources?.firstOrNull { it.id == sources?.selectedSourceId }?.name.orEmpty()
     var sources by mutableStateOf<ConfiguredSources?>(null)
         private set

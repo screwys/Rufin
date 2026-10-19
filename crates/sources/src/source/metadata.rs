@@ -79,8 +79,6 @@ impl NativeFile {
             } else {
                 FileLocation::Native(PathBuf::from(original.path))
             }
-        } else if let Some(path) = library::file_media_path(media_uri) {
-            FileLocation::Native(path)
         } else if matches!(source.implementation, Implementation::Local(_)) {
             FileLocation::Native(PathBuf::from(source_path.ok_or(Error::Unavailable)?))
         } else if matches!(source.implementation, Implementation::OpenSubsonic(_)) {
@@ -1336,7 +1334,7 @@ impl Source {
                 after = page.last().map(|row| row.track_key);
                 let values = page
                     .into_iter()
-                    .map(|row| (row.track_key, Some(row.track_lufs), row.album_lufs))
+                    .map(|row| (row.track_key, row.track_lufs, row.album_lufs))
                     .collect::<Vec<_>>();
                 self.write_r128_values(catalog, source, &values).await?;
             }

@@ -263,6 +263,7 @@ async fn link_on(
         }
         return Err(error);
     }
+    associate(owner, &link).await?;
     publish(owner, Some(playlist)).await;
     Ok(())
 }
@@ -631,6 +632,22 @@ pub(crate) async fn remember(
         .save_playlist_file_link(&link)
         .await
         .map_err(string_error)?;
+    associate(owner, &link).await
+}
+
+async fn associate(owner: &SourceOwner, link: &PlaylistFileLink) -> Result<(), String> {
+    if let Some(source) = &link.source_id
+        && let Some(path) = owner
+            .configuration(source)
+            .and_then(|config| config.playlist_file_location(&link.path))
+    {
+        owner
+            .shared
+            .database
+            .associate_playlist_files(source, &[(path, link.playlist)])
+            .await
+            .map_err(string_error)?;
+    }
     Ok(())
 }
 
@@ -884,6 +901,65 @@ pub(crate) async fn refresh_links(owner: &SourceOwner, source: Option<&SourceId>
     }
 }
 
+pub(crate) async fn backfill_file_playlists(owner: &SourceOwner) -> Result<(), String> {
+    let configurations = owner.shared.settings.load().sources.configured.clone();
+    for configured in configurations {
+        let configuration = configured.configuration;
+        if !configuration.is_file_library() {
+            continue;
+        }
+        let source_id = &configuration.source_id;
+        let Some(source) = owner
+            .shared
+            .database
+            .cached_source(source_id.as_str(), &ReadCancellation::new())
+            .await
+            .map_err(string_error)?
+        else {
+            continue;
+        };
+        let mut after = None;
+        loop {
+            let page = owner
+                .shared
+                .database
+                .observed_playlist_file_page(source.source, after)
+                .await
+                .map_err(string_error)?;
+            let Some(last) = page.last() else { break };
+            after = Some(last.local_file_key);
+            let mut associations = Vec::new();
+            for file in page {
+                if file.playlist_identity.is_some() {
+                    continue;
+                }
+                let Some(path) = configuration.playlist_file_path(&file.path) else {
+                    continue;
+                };
+                if let Some(link) = owner
+                    .shared
+                    .database
+                    .find_playlist_file_link(Some(source_id), &path)
+                    .await
+                    .map_err(string_error)?
+                {
+                    associations.push((file.path, link.playlist));
+                }
+            }
+            if !associations.is_empty() {
+                owner
+                    .shared
+                    .database
+                    .associate_playlist_files(source_id, &associations)
+                    .await
+                    .map_err(string_error)?;
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) async fn discover(
     owner: &SourceOwner,
     source_id: &SourceId,
@@ -910,14 +986,8 @@ pub(crate) async fn discover(
         }
         after = page.last().map(|file| file.local_file_key);
         for file in page {
-            let path = if configuration.is_local() {
-                let Some((path, _)) = configuration.local_file_location(Path::new(&file.path))
-                else {
-                    continue;
-                };
-                path
-            } else {
-                file.relative_path
+            let Some(path) = configuration.playlist_file_path(&file.path) else {
+                continue;
             };
             if owner
                 .shared
@@ -928,32 +998,41 @@ pub(crate) async fn discover(
             {
                 continue;
             }
-            if owner
+            if let Ok(Some(link)) = owner
                 .shared
                 .database
                 .find_playlist_file_link(Some(source_id), &path)
                 .await
-                .ok()
-                .flatten()
-                .is_some()
             {
+                if file.playlist_identity.is_none() {
+                    if let Err(error) = owner
+                        .shared
+                        .database
+                        .associate_playlist_files(source_id, &[(file.path, link.playlist)])
+                        .await
+                    {
+                        tracing::warn!(%path, %error, "could not associate playlist file");
+                    }
+                }
+                continue;
+            }
+            if file.playlist_identity.is_some() && file.playlist.is_none() {
                 continue;
             }
             let result = async {
-                let report = owner
-                    .client(source_id)?
-                    .import_playlist_file(&owner.shared.database, &path, None)
-                    .await
-                    .map_err(string_error)?;
-                remember(
-                    owner,
-                    report.playlist,
-                    Some(source_id.clone()),
-                    path.clone(),
-                    None,
-                )
-                .await?;
-                publish(owner, Some(report.playlist)).await;
+                let playlist = match file.playlist {
+                    Some(playlist) => playlist,
+                    None => {
+                        owner
+                            .client(source_id)?
+                            .import_playlist_file(&owner.shared.database, &path, None)
+                            .await
+                            .map_err(string_error)?
+                            .playlist
+                    }
+                };
+                remember(owner, playlist, Some(source_id.clone()), path.clone(), None).await?;
+                publish(owner, Some(playlist)).await;
                 Ok::<_, String>(())
             }
             .await;

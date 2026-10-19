@@ -150,6 +150,47 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         .expect("missing Track loudness")
         .unwrap();
     assert_eq!(work.track_key, fixture.tracks[0]);
+    let below_gate = LoudnessMeasurement {
+        analysis_key: work.expected_analysis_key,
+        integrated_lufs: None,
+        true_peak: Some(1.04),
+        replay_gain_db: None,
+        replay_gain_peak: None,
+    };
+    assert!(
+        fixture
+            .database
+            .write_track_analyzed_loudness(fixture.source, work.track_key, &below_gate)
+            .await
+            .expect("store completed analysis below the loudness gate")
+    );
+    assert_eq!(
+        fixture
+            .database
+            .playback_loudness(&work.media_uri, &cancel)
+            .await
+            .unwrap()
+            .0,
+        Some(below_gate.clone())
+    );
+    assert!(
+        fixture
+            .database
+            .r128_tag_write_page(fixture.source, None, 64, &cancel)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_ne!(
+        fixture
+            .database
+            .next_missing_track_loudness(fixture.source, None, &cancel)
+            .await
+            .unwrap()
+            .unwrap()
+            .track_key,
+        work.track_key
+    );
     let analyzed = LoudnessMeasurement {
         analysis_key: work.expected_analysis_key,
         integrated_lufs: Some(-14.0),
@@ -171,7 +212,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         .expect("read Rufin-owned R128 tag page");
     assert_eq!(tag_page.len(), 1);
     assert_eq!(tag_page[0].track_key, work.track_key);
-    assert_eq!(tag_page[0].track_lufs, -14.0);
+    assert_eq!(tag_page[0].track_lufs, Some(-14.0));
     assert!(
         !fixture
             .database
@@ -389,6 +430,33 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         .expect("missing Album loudness")
         .unwrap();
     assert_eq!(album.tracks.len(), 2);
+    assert!(
+        fixture
+            .database
+            .write_album_analyzed_loudness(
+                fixture.source,
+                album.album_key,
+                &LoudnessMeasurement {
+                    analysis_key: album.expected_analysis_key,
+                    integrated_lufs: None,
+                    true_peak: Some(0.0),
+                    replay_gain_db: None,
+                    replay_gain_peak: None,
+                }
+            )
+            .await
+            .expect("store an album below the loudness gate")
+    );
+    assert_ne!(
+        fixture
+            .database
+            .next_missing_album_loudness(fixture.source, None, &cancel)
+            .await
+            .unwrap()
+            .unwrap()
+            .album_key,
+        album.album_key
+    );
     let album_measurement = LoudnessMeasurement {
         analysis_key: album.expected_analysis_key,
         integrated_lufs: Some(-13.0),
@@ -404,6 +472,36 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             .expect("write Album loudness")
     );
     let old_album_key = album.expected_analysis_key;
+    let quiet_track = album
+        .tracks
+        .iter()
+        .find(|track| track.track_key == fixture.tracks[1])
+        .unwrap();
+    assert!(
+        fixture
+            .database
+            .write_track_analyzed_loudness(
+                fixture.source,
+                quiet_track.track_key,
+                &LoudnessMeasurement {
+                    analysis_key: quiet_track.expected_analysis_key,
+                    ..below_gate
+                }
+            )
+            .await
+            .unwrap()
+    );
+    let tag_page = fixture
+        .database
+        .r128_tag_write_page(fixture.source, None, 64, &cancel)
+        .await
+        .unwrap();
+    let quiet_tags = tag_page
+        .iter()
+        .find(|row| row.track_key == quiet_track.track_key)
+        .unwrap();
+    assert_eq!(quiet_tags.track_lufs, None);
+    assert_eq!(quiet_tags.album_lufs, Some(-13.0));
     fixture
         .database
         .write_local_access(
@@ -419,12 +517,6 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                 device_id: Some(2),
                 inode: Some(3),
                 parser_version: 1,
-                title: "Beta".to_string(),
-                album: "Album A".to_string(),
-                artist: "Artist A".to_string(),
-                disc_number: 1,
-                track_number: 2,
-                duration_millis: 181_000,
                 access_uri: "file:///generic/local-track.flac".to_string(),
                 loudness_analysis_key: Some([77; 32]),
             }],
@@ -918,32 +1010,21 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     let dependencies = (0..300)
         .map(|index| format!("/generic/component-{index:03}.bin"))
         .collect::<Vec<_>>();
+    let mut catalog = fixture.database.catalog("source", None).await.unwrap();
+    catalog
+        .write_file_observations(&[(cue.clone(), dependencies.clone())], Vec::new(), true)
+        .await
+        .unwrap();
+    drop(catalog);
     let mut raw = connection(&fixture.path).await;
     let key = sqlx::query_scalar::<_, library::LocalFileKey>(
-        "INSERT INTO local_files(source_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state)
-         VALUES(?1,?2,?3,?4,'cue',?5,?6,?7,?8,?9,'accepted') RETURNING local_file_key",
+        "SELECT local_file_key FROM local_files WHERE source_key=?1 AND path=?2",
     )
     .bind(fixture.source)
     .bind(&cue.path)
-    .bind(&cue.root)
-    .bind(&cue.relative_path)
-    .bind(cue.size_bytes)
-    .bind(cue.mtime_ns)
-    .bind(cue.device_id)
-    .bind(cue.inode)
-    .bind(cue.parse_version)
     .fetch_one(&mut raw)
     .await
-    .expect("write Local CUE observation");
-    for (position, dependency) in dependencies.iter().enumerate() {
-        sqlx::query("INSERT INTO local_file_dependencies(local_file_key,dependency_path,position) VALUES(?1,?2,?3)")
-            .bind(key)
-            .bind(dependency)
-            .bind(position as i64)
-            .execute(&mut raw)
-            .await
-            .expect("write Local CUE dependency");
-    }
+    .unwrap();
     drop(raw);
     let cancel = ReadCancellation::new();
     let page = fixture
@@ -955,7 +1036,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     assert_eq!(page[0].dependencies, dependencies);
     assert_eq!(page[0].path, "/music/album.cue");
     let metadata = LocalAccessWrite {
-        media_uri: "rufin://source/track/not-catalogued".to_string(),
+        media_uri: "https://media.example/mapped.flac".to_string(),
         origin: library::LocalAccessOrigin::Mapping,
         path: "/downloads/metadata.flac".to_string(),
         root: "/downloads".to_string(),
@@ -965,15 +1046,25 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         device_id: None,
         inode: None,
         parser_version: 1,
-        title: "Alpha".to_string(),
-        album: "Album A".to_string(),
-        artist: "Artist A".to_string(),
-        disc_number: 1,
-        track_number: 1,
-        duration_millis: 180_000,
         access_uri: "file:///downloads/metadata.flac".to_string(),
         loudness_analysis_key: Some([7; 32]),
     };
+    fixture
+        .database
+        .write_direct_track_metadata(
+            &metadata.media_uri,
+            &library::TrackMetadata {
+                title: "Mapped title".into(),
+                album: "Mapped album".into(),
+                artist: "Mapped artist".into(),
+                disc_number: 1,
+                track_number: 1,
+                duration_millis: 180_000,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     fixture
         .database
         .write_local_access(Some(fixture.source), &[&metadata])
@@ -1002,36 +1093,50 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     assert_eq!(local_loudness.expected_analysis_key, [8; 32]);
     let resolved = fixture
         .database
-        .resolve_local_access(
-            fixture.source,
-            &fixture.track_uris[0],
-            "Alpha",
-            "Album A",
-            "Artist A",
-            1,
-            1,
-            180_000,
-        )
+        .playback_access(&fixture.track_uris[0])
         .await
         .expect("resolve exact Local access")
         .unwrap();
-    assert_eq!(resolved.access_uri, "file:///downloads/exact.flac");
-    let matched = fixture
-        .database
-        .resolve_local_access(
-            fixture.source,
-            "rufin://source/track/missing",
-            "Alpha",
-            "Album A",
-            "Artist A",
-            1,
-            1,
-            180_000,
-        )
-        .await
-        .expect("resolve metadata Local access")
-        .unwrap();
-    assert_eq!(matched.access_uri, "file:///downloads/metadata.flac");
+    assert_eq!(resolved.0, "file:///downloads/exact.flac");
+    assert_eq!(resolved.1, library::LocalAccessOrigin::Mapping);
+    assert_eq!(
+        fixture
+            .database
+            .playback_access(&metadata.media_uri)
+            .await
+            .unwrap()
+            .unwrap()
+            .0,
+        "file:///downloads/metadata.flac"
+    );
+    assert_eq!(
+        fixture
+            .database
+            .download_metadata(&metadata.media_uri)
+            .await
+            .unwrap()
+            .unwrap()
+            .title,
+        "Mapped title"
+    );
+    assert_eq!(
+        fixture
+            .database
+            .download_metadata(&fixture.track_uris[0])
+            .await
+            .unwrap()
+            .unwrap()
+            .title,
+        "Alpha"
+    );
+    assert!(
+        fixture
+            .database
+            .playback_access("rufin://source/track/missing")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -1096,7 +1201,6 @@ async fn local_mapping_counts_formula_coverage_without_probing_local_files() {
 #[tokio::test]
 async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     let fixture = fixture().await;
-    let mut writes = fixture.database.subscribe_lyrics_cache_writes();
     let cancel = ReadCancellation::new();
     let capacity_payload = "x".repeat(8 * 1024 * 1024);
     fixture
@@ -1113,8 +1217,6 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         )
         .await
         .expect("write lyrics");
-    assert!(writes.has_changed().unwrap());
-    writes.borrow_and_update();
     fixture
         .database
         .write_lyrics_cache(
@@ -1297,8 +1399,6 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
             );
         }
     }
-    writes.borrow_and_update();
-    let revision = fixture.database.lyrics_cache_revision().await.unwrap();
     let imported = library::LyricsCacheRow {
         media_uri: fixture.track_uris[2].clone(),
         authority: "source".into(),
@@ -1318,23 +1418,6 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
             .len(),
         1
     );
-    assert!(
-        !writes.has_changed().unwrap(),
-        "peer import does not wake local publication"
-    );
-    assert_eq!(
-        fixture.database.lyrics_cache_revision().await.unwrap(),
-        revision,
-        "peer imports are not local export changes"
-    );
-    assert!(
-        fixture
-            .database
-            .lyrics_cache_changes((revision, i64::MAX), revision)
-            .await
-            .unwrap()
-            .is_empty()
-    );
     fixture
         .database
         .write_lyrics_cache(
@@ -1349,19 +1432,24 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         )
         .await
         .unwrap();
-    assert!(
-        writes.has_changed().unwrap(),
-        "local source write wakes publication while idle"
+    assert_eq!(
+        fixture
+            .database
+            .lyrics_cache_for_role(
+                &fixture.track_uris[2],
+                "original",
+                "",
+                "",
+                [9; 32],
+                "source",
+                &cancel
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .lyrics,
+        "Local edit"
     );
-    let edited_revision = fixture.database.lyrics_cache_revision().await.unwrap();
-    assert!(edited_revision > revision);
-    let changes = fixture
-        .database
-        .lyrics_cache_changes((revision, i64::MAX), edited_revision)
-        .await
-        .unwrap();
-    assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].1.lyrics, "Local edit");
 }
 
 #[tokio::test]

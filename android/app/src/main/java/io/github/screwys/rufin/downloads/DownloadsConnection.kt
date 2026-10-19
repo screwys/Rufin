@@ -103,7 +103,7 @@ internal class DownloadsConnection(private val model: RufinConnection, scope: Co
     suspend fun refreshSources() {
         if (bridge == null) return
         sources = withSettings { settings ->
-            model.sources?.sources.orEmpty().filter { it.kind != "local" }
+            model.sources?.sources.orEmpty()
                 .map { DownloadSource(it, settings.downloadSettings(it.id)) }
         }
     }

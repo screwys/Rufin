@@ -80,7 +80,7 @@ jobs:
             case "$1" in
               *.md|*.css|*.ui|locales/*|resources/*|*/resources/*)
                 ;;
-              android/*|*.kt|*.kts|Cargo.toml|Cargo.lock|.cargo/*|crates/xtask/src/android.rs|crates/xtask/src/main.rs|crates/xtask/src/process.rs|crates/xtask/Cargo.toml|.github/workflows/checks.yml|.github/workflows/android.yml)
+              android/*|*.kt|*.kts|Cargo.toml|Cargo.lock|justfile|.cargo/*|crates/xtask/src/android.rs|crates/xtask/src/main.rs|crates/xtask/src/process.rs|crates/xtask/Cargo.toml|.github/workflows/checks.yml|.github/workflows/android.yml)
                 add_jobs android
                 ;;
               crates/gtk-*/*|crates/rufin/*|crates/rufin-controller/*|crates/desktop-integration/*|crates/windows-updater/*|crates/xtask/*)

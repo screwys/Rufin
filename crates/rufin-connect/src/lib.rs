@@ -3,9 +3,9 @@
 uniffi::setup_scaffolding!();
 
 pub mod media;
+mod nearby;
 pub mod network;
 pub mod pairing;
-pub mod profile;
 
 pub use iroh::SecretKey as Credentials;
 pub use iroh::dns;

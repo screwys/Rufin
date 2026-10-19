@@ -559,7 +559,7 @@ fn apply_source_refresh_feedback(
             shell
                 .chrome
                 .source_refresh_feedback_progress
-                .set_visible(progress.total.is_some());
+                .set_visible(progress.total.is_some_and(|total| total > 0));
             shell.chrome.source_refresh_feedback.set_visible(true);
         }
         SourceOperation::Idle
@@ -1051,7 +1051,7 @@ mod tests {
         };
         assert_eq!(fraction(SourceProgressStage::Connecting, 0, None), 0.0);
         assert_eq!(fraction(SourceProgressStage::Tracks, 200, None), 0.0);
-        assert_eq!(fraction(SourceProgressStage::Files, 10, Some(10)), 1.0);
+        assert_eq!(fraction(SourceProgressStage::Tracks, 10, Some(10)), 1.0);
         assert_eq!(fraction(SourceProgressStage::Tracks, 0, Some(10)), 0.0);
         assert_eq!(fraction(SourceProgressStage::Tracks, 5, Some(10)), 0.5);
         assert_eq!(

@@ -1,10 +1,14 @@
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::Result;
 use crate::process::{command_stdout, repo_root};
+
+const GSTREAMER_VERSION: &str = "1.28.7";
+const GSTREAMER_SHA256: &str = "fa914bcf8695af1c6fa1f81db2e8da019a0306a89c2c3e48659438e1654023da";
 
 pub(crate) fn run(args: Vec<String>) -> Result<()> {
     let root = repo_root()?;
@@ -50,6 +54,7 @@ fn metadata() -> Result<()> {
             "developmentName": app_identity::DEVELOPMENT_DISPLAY_NAME,
             "verifierManifest": verifier["manifest_path"],
             "verifierVersion": verifier["version"],
+            "cargoTarget": cargo["target_directory"],
         })
     );
     Ok(())
@@ -107,6 +112,49 @@ fn build(root: &Path, distribution: &str) -> Result<()> {
     Ok(())
 }
 
+fn download_gstreamer(destination: &Path, architectures: &[&str]) -> Result<()> {
+    println!("Downloading GStreamer {GSTREAMER_VERSION} Android SDK…");
+    fs::create_dir_all(destination)?;
+    let temporary = tempfile::tempdir_in(destination)?;
+    let archive = temporary.path().join("gstreamer.tar.xz");
+    execute(
+        Command::new("curl")
+            .args(["--fail", "--location", "--progress-bar"])
+            .arg(format!(
+                "https://gstreamer.freedesktop.org/data/pkg/android/{GSTREAMER_VERSION}/gstreamer-1.0-android-universal-{GSTREAMER_VERSION}.tar.xz"
+            ))
+            .arg("--output")
+            .arg(&archive),
+    )?;
+    let checksum = if env::consts::OS == "macos" {
+        command_stdout(
+            "shasum",
+            [OsStr::new("-a"), OsStr::new("256"), archive.as_os_str()],
+        )?
+    } else {
+        command_stdout("sha256sum", [&archive])?
+    };
+    if checksum.split_whitespace().next() != Some(GSTREAMER_SHA256) {
+        return Err("GStreamer Android SDK checksum does not match the pinned release".into());
+    }
+    execute(
+        Command::new("tar")
+            .arg("-xf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(temporary.path())
+            .args(architectures),
+    )?;
+    for arch in architectures {
+        let target = destination.join(arch);
+        if target.exists() {
+            fs::remove_dir_all(&target)?;
+        }
+        fs::rename(temporary.path().join(arch), target)?;
+    }
+    Ok(())
+}
+
 fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<()> {
     let android = root.join("android");
     let mut sdk = env::var_os("ANDROID_HOME")
@@ -117,9 +165,7 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
                 .home_dir()
                 .join("Android/Sdk")
         });
-    let mut gst = env::var_os("GSTREAMER_ROOT_ANDROID")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| android.join(".toolchains/gstreamer-1.28.7"));
+    let mut custom_gst = env::var_os("GSTREAMER_ROOT_ANDROID").map(PathBuf::from);
     let properties = android.join("local.properties");
     if properties.exists() {
         for line in fs::read_to_string(properties)?.lines() {
@@ -127,7 +173,7 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
                 sdk = path.into();
             }
             if let Some(path) = line.strip_prefix("gstreamer.dir=") {
-                gst = path.into();
+                custom_gst = Some(path.into());
             }
         }
     }
@@ -136,6 +182,48 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
         "macos" => "darwin-x86_64",
         _ => return Err("Android native builds currently require Linux or macOS.".into()),
     };
+    let gst = custom_gst
+        .clone()
+        .unwrap_or_else(|| android.join(format!(".toolchains/gstreamer-{GSTREAMER_VERSION}")));
+    let targets = abis
+        .split(',')
+        .map(|abi| {
+            let (target, sdk_arch, compiler_target) = match abi {
+                "arm64-v8a" => ("aarch64-linux-android", "arm64", "aarch64-linux-android"),
+                "armeabi-v7a" => (
+                    "armv7-linux-androideabi",
+                    "armv7",
+                    "armv7a-linux-androideabi",
+                ),
+                "x86_64" => ("x86_64-linux-android", "x86_64", "x86_64-linux-android"),
+                "x86" => ("i686-linux-android", "x86", "i686-linux-android"),
+                _ => return Err(format!("Unknown Android ABI: {abi}")),
+            };
+            Ok((abi, target, sdk_arch, compiler_target))
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut missing = targets
+        .iter()
+        .map(|(_, _, arch, _)| *arch)
+        .filter(|arch| {
+            !gst.join(arch)
+                .join("lib/pkgconfig/gstreamer-1.0.pc")
+                .is_file()
+        })
+        .collect::<Vec<_>>();
+    missing.sort_unstable();
+    missing.dedup();
+    if !missing.is_empty() {
+        if custom_gst.is_some() {
+            return Err(format!(
+                "GStreamer SDK at {} is missing architectures: {}",
+                gst.display(),
+                missing.join(", ")
+            )
+            .into());
+        }
+        download_gstreamer(&gst, &missing)?;
+    }
     let ndk = sdk.join("ndk/29.0.14206865");
     let compiler_dir = ndk.join("toolchains/llvm/prebuilt").join(host).join("bin");
     let generated = android.join("app/build/generated/rufin").join(variant);
@@ -145,23 +233,8 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
     } else {
         "android"
     };
-    let mut library = PathBuf::new();
-    for abi in abis.split(',') {
-        let (target, sdk_arch, compiler_target) = match abi {
-            "arm64-v8a" => ("aarch64-linux-android", "arm64", "aarch64-linux-android"),
-            "armeabi-v7a" => (
-                "armv7-linux-androideabi",
-                "armv7",
-                "armv7a-linux-androideabi",
-            ),
-            "x86_64" => ("x86_64-linux-android", "x86_64", "x86_64-linux-android"),
-            "x86" => ("i686-linux-android", "x86", "i686-linux-android"),
-            _ => return Err(format!("Unknown Android ABI: {abi}").into()),
-        };
+    for (abi, target, sdk_arch, compiler_target) in targets {
         let gst_arch = gst.join(sdk_arch);
-        if !gst_arch.join("lib/pkgconfig/gstreamer-1.0.pc").is_file() {
-            return Err("Set gstreamer.dir in android/local.properties to the unpacked GStreamer 1.28.7 Android SDK.".into());
-        }
         let native = android.join("build/native").join(abi);
         execute(
             Command::new("cmake")
@@ -233,7 +306,7 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
             cargo.args(["--features", "development"]);
         }
         execute(&mut cargo)?;
-        library = cargo_output
+        let library = cargo_output
             .join(target)
             .join(profile)
             .join("librufin_android.so");
@@ -248,27 +321,16 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
         copy_tree(&native.join("java"), &generated.join("java"))?;
         copy_tree(&native.join("assets"), &generated.join("assets"))?;
     }
-    execute(
-        Command::new("cargo")
-            .args([
-                "run",
-                "--locked",
-                "-p",
-                "rufin-android",
-                "--features",
-                "bindgen",
-                "--bin",
-                "rufin-bindgen",
-                "--",
-                "generate",
-                "--library",
-            ])
-            .arg(library)
-            .args(["--language", "kotlin"])
-            .arg("--out-dir")
-            .arg(generated.join("kotlin"))
-            .arg("--no-format"),
-    )?;
+    execute(Command::new("cargo").args([
+        "build",
+        "--locked",
+        "-p",
+        "rufin-android",
+        "--features",
+        "bindgen",
+        "--bin",
+        "rufin-bindgen",
+    ]))?;
     copy_file(
         &root.join("resources/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png"),
         &generated.join("res/drawable-nodpi/app_icon.png"),
@@ -400,7 +462,7 @@ fn icons(root: &Path, generated: &Path) -> Result<()> {
         ));
     }
     mapping.push_str(")\n");
-    let output = generated.join("kotlin/io/github/screwys/rufin/IconResources.kt");
+    let output = generated.join("icons/io/github/screwys/rufin/IconResources.kt");
     fs::create_dir_all(output.parent().ok_or("Icon mapping directory is missing")?)?;
     if fs::read_to_string(&output).ok().as_deref() != Some(mapping.as_str()) {
         fs::write(output, mapping)?;

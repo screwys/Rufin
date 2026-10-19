@@ -128,6 +128,12 @@ impl Database {
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
         let mut report = BackupRestoreReport::default();
+        sync_restore_on(&mut transaction, contents, true).await?;
+        let receiving: bool =
+            sqlx::query_scalar("SELECT receiving FROM connect_profile WHERE singleton=1")
+                .fetch_one(&mut *transaction)
+                .await?;
+        crate::connect::set_receiving_on(&mut transaction, true).await?;
         if contents.playlists {
             sqlx::raw_sql("DELETE FROM main.playlists WHERE owner='rufin';DELETE FROM smart_playlists;DELETE FROM playlist_file_ignored;DELETE FROM playlist_file_settings;")
                 .execute(&mut *transaction)
@@ -201,9 +207,97 @@ impl Database {
                 )
                 .await?;
         }
+        crate::connect::set_receiving_on(&mut transaction, receiving).await?;
+        sync_restore_on(&mut transaction, contents, false).await?;
         transaction.commit().await?;
         Ok(report)
     }
+}
+
+async fn sync_restore_on(
+    connection: &mut sqlx::SqliteConnection,
+    groups: StateGroups,
+    deleting: bool,
+) -> LibraryResult<()> {
+    let active:bool=sqlx::query_scalar("SELECT profile IS NOT NULL AND enabled AND NOT receiving FROM connect_profile WHERE singleton=1").fetch_one(&mut *connection).await?;
+    if !active {
+        return Ok(());
+    }
+    let mut selected = Vec::new();
+    if groups.playlists {
+        selected.push("SELECT 'playlist' kind,json_array((SELECT object_id FROM sources WHERE source_key=playlist.source_key),playlist.object_id) object_key,playlist_key FROM playlists playlist WHERE owner='rufin'");
+        selected.push(
+            "SELECT 'smart' kind,object_id object_key,NULL playlist_key FROM smart_playlists",
+        );
+    }
+    if groups.favorites {
+        selected.push(
+            "SELECT 'state' kind,media_uri object_key,NULL playlist_key FROM user_media_state",
+        );
+    }
+    if groups.activity {
+        selected.push("SELECT 'listen' kind,coalesce(external_id,'legacy-'||media_uri||'-'||started_at||'-'||listen_key) object_key,NULL playlist_key FROM listens");
+        selected.push("SELECT 'legacy_activity' kind,json_array(source_id,period,item_kind,track_object_id) object_key,NULL playlist_key FROM legacy_activity");
+    }
+    if selected.is_empty() {
+        return Ok(());
+    }
+    let query = format!(
+        "SELECT kind,object_key,playlist_key FROM ({}) WHERE (kind,object_key)>(?1,?2) ORDER BY kind,object_key LIMIT ?3",
+        selected.join(" UNION ALL ")
+    );
+    let mut after = (String::new(), String::new());
+    loop {
+        let page: Vec<(String, String, Option<PlaylistKey>)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(query.clone()))
+                .bind(&after.0)
+                .bind(&after.1)
+                .bind(crate::CONNECT_PAGE_SIZE as i64)
+                .fetch_all(&mut *connection)
+                .await?;
+        let Some(last) = page.last() else { break };
+        after = (last.0.clone(), last.1.clone());
+        let mut records = Vec::new();
+        for (kind, key, playlist) in page {
+            if crate::connect_current_kind(&kind) {
+                crate::connect::mark_current_on(connection, &kind, &key, deleting).await?;
+                continue;
+            }
+            if deleting {
+                records.push(crate::ConnectRecord {
+                    kind: kind.clone(),
+                    key: key.clone(),
+                    value: None,
+                });
+            } else {
+                records.push(Database::connect_record_on(connection, &kind, &key).await?);
+                if let Some(playlist) = playlist {
+                    records.extend(
+                        crate::playlists::playlist_entry_records_on(
+                            connection,
+                            playlist,
+                            0,
+                            i64::MAX,
+                        )
+                        .await?,
+                    );
+                }
+            }
+            if kind == "playlist" {
+                records.push(if deleting {
+                    crate::ConnectRecord {
+                        kind: "playlist_artwork".into(),
+                        key,
+                        value: None,
+                    }
+                } else {
+                    Database::connect_record_on(connection, "playlist_artwork", &key).await?
+                });
+            }
+        }
+        crate::profile::write_local_on(connection, &records).await?;
+    }
+    Ok(())
 }
 #[cfg(test)]
 mod tests {

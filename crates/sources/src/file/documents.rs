@@ -155,16 +155,41 @@ pub(crate) fn find_document_paths(
     paths: &[Option<String>],
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> SourceResult<Vec<Option<DocumentEntry>>> {
+    Ok(find_document_path_entries(root, paths, cancelled, false)?
+        .into_iter()
+        .map(|entry| entry.map(|(_, entry)| entry))
+        .collect())
+}
+
+pub(crate) fn find_document_path_entries(
+    root: &str,
+    paths: &[Option<String>],
+    cancelled: &std::sync::atomic::AtomicBool,
+    include_directories: bool,
+) -> SourceResult<Vec<Option<(String, DocumentEntry)>>> {
     let mut result = vec![None; paths.len()];
+    if include_directories && paths.iter().any(|path| path.as_deref() == Some("")) {
+        let entry = stat_document(root)?;
+        for (path, result) in paths.iter().zip(&mut result) {
+            if path.as_deref() == Some("") {
+                *result = Some((String::new(), entry.clone()));
+            }
+        }
+    }
     let mut pending = vec![(
         root.to_owned(),
+        String::new(),
         paths
             .iter()
             .enumerate()
             .filter_map(|(index, path)| Some((index, path.as_deref()?.to_owned())))
+            .filter(|(_, path)| !path.is_empty())
             .collect::<Vec<_>>(),
     )];
-    while let Some((parent, wanted)) = pending.pop() {
+    while let Some((parent, relative, wanted)) = pending.pop() {
+        if wanted.is_empty() {
+            continue;
+        }
         let mut offset = 0;
         loop {
             if cancelled.load(std::sync::atomic::Ordering::Acquire) {
@@ -172,22 +197,38 @@ pub(crate) fn find_document_paths(
             }
             let page = list_documents(&parent, offset)?;
             for entry in page.entries {
+                let path = if relative.is_empty() {
+                    entry.name.clone()
+                } else {
+                    format!("{relative}/{}", entry.name)
+                };
                 let mut children = Vec::new();
-                for (index, path) in &wanted {
-                    let (name, rest) = path
+                for (index, wanted_path) in &wanted {
+                    let (name, rest) = wanted_path
                         .split_once('/')
-                        .map_or((path.as_str(), None), |(name, rest)| (name, Some(rest)));
+                        .map_or((wanted_path.as_str(), None), |(name, rest)| {
+                            (name, Some(rest))
+                        });
                     if name != entry.name {
                         continue;
                     }
                     match rest {
                         Some(rest) if entry.directory => children.push((*index, rest.to_owned())),
-                        None if !entry.directory => result[*index] = Some(entry.clone()),
+                        None if !entry.directory || include_directories => {
+                            result[*index] = Some((path.clone(), entry.clone()));
+                        }
                         _ => {}
                     }
                 }
                 if !children.is_empty() {
-                    pending.push((entry.uri, children));
+                    let path = format!(
+                        "{path}\u{1f}{}",
+                        percent_encoding::utf8_percent_encode(
+                            &entry.uri,
+                            percent_encoding::NON_ALPHANUMERIC
+                        )
+                    );
+                    pending.push((entry.uri, path, children));
                 }
             }
             let Some(next) = page.next else {
@@ -412,18 +453,15 @@ pub(crate) async fn read_document_media(
             None,
         );
         if let crate::file::media::MediaRead::Accepted(track) = &mut read {
-            let (cover, portraits) = crate::file::artwork::inspect_embedded_input(
-                &mut worker.discovery,
-                &mut input,
-                &playback_uri,
-            );
-            track.artist_pictures = portraits;
-            track.local_artwork = cover.map(|picture_index| crate::LocalImageRef::Embedded {
-                source_id,
-                path: entry.uri.clone(),
-                revision: entry.revision.clone().unwrap_or_default(),
-                picture_index,
-            });
+            track.local_artwork = track
+                .picture_index
+                .and_then(|index| u32::try_from(index).ok())
+                .map(|picture_index| crate::LocalImageRef::Embedded {
+                    source_id,
+                    path: entry.uri.clone(),
+                    revision: entry.revision.clone().unwrap_or_default(),
+                    picture_index,
+                });
         }
         Ok((entry, read))
     })
@@ -654,15 +692,6 @@ impl DocumentAccess {
         let parent = self.resolve(parent)?;
         request::<serde_json::Value>(
             serde_json::json!({"op":"move", "uri":entry.uri, "parent":parent.uri, "name":name}),
-        )?;
-        Ok(())
-    }
-
-    pub fn create_directory(&self, relative: &str) -> SourceResult<()> {
-        let (parent, name) = relative.rsplit_once('/').unwrap_or(("", relative));
-        let parent = self.resolve(parent)?;
-        request::<serde_json::Value>(
-            serde_json::json!({"op":"mkdir", "uri":parent.uri, "name":name}),
         )?;
         Ok(())
     }

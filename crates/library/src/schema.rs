@@ -14,7 +14,7 @@ pub(crate) async fn pragma(
 }
 pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 47;
+PRAGMA user_version = 50;
 
 CREATE TABLE IF NOT EXISTS queue_contexts (
     context_key INTEGER PRIMARY KEY,
@@ -138,7 +138,8 @@ CREATE INDEX IF NOT EXISTS favorite_outbox_due_idx ON favorite_outbox(next_attem
 CREATE TABLE IF NOT EXISTS user_media_state (
     media_uri TEXT PRIMARY KEY CHECK (media_uri <> ''),
     favorite INTEGER CHECK (favorite IS NULL OR favorite IN (0,1)),
-    rating INTEGER CHECK (rating IS NULL OR rating BETWEEN 0 AND 100)
+    rating INTEGER CHECK (rating IS NULL OR rating BETWEEN 0 AND 100),
+    extra BLOB
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS user_media_favorite_idx ON user_media_state(favorite,media_uri) WHERE favorite=1;
@@ -167,6 +168,7 @@ CREATE TABLE IF NOT EXISTS listens (
 
 CREATE INDEX IF NOT EXISTS listens_history_idx ON listens(source_id, started_at DESC, listen_key DESC);
 CREATE INDEX IF NOT EXISTS listens_recent_idx ON listens(started_at DESC, listen_key DESC);
+CREATE INDEX IF NOT EXISTS listens_connect_key_idx ON listens(coalesce(external_id,'legacy-'||media_uri||'-'||started_at||'-'||listen_key));
 
 CREATE INDEX IF NOT EXISTS listens_media_activity_idx ON listens(media_uri, started_at DESC,listen_key DESC,skipped);
 CREATE INDEX IF NOT EXISTS listens_period_idx ON listens(local_period) WHERE skipped=0;
@@ -206,13 +208,17 @@ CREATE TABLE IF NOT EXISTS connect_media_files (
     revision TEXT NOT NULL,
     path TEXT NOT NULL,
     managed INTEGER NOT NULL,
-    hash TEXT,
     backing_uri TEXT,
+    source_id TEXT,
+    owners TEXT NOT NULL DEFAULT '[]',
+    storage_root TEXT NOT NULL DEFAULT '',
+    relative_path TEXT NOT NULL DEFAULT '',
+    completed_size INTEGER,
+    retired_documents TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (media_uri, encoding)
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS connect_media_files_path_idx ON connect_media_files(path,encoding,revision);
-CREATE INDEX IF NOT EXISTS connect_media_files_hash_idx ON connect_media_files(hash) WHERE hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS connect_media_files_backing_idx ON connect_media_files(backing_uri,encoding,revision);
 CREATE INDEX IF NOT EXISTS connect_media_files_missing_backing_idx ON connect_media_files(media_uri) WHERE backing_uri IS NULL;
 
@@ -579,6 +585,12 @@ CREATE TABLE IF NOT EXISTS home_entries (
     PRIMARY KEY (source_key, section_id, position)
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS waveform_cache (
+    media_uri TEXT PRIMARY KEY REFERENCES tracks(media_uri) ON DELETE CASCADE,
+    analysis_key BLOB NOT NULL CHECK(length(analysis_key)=32),
+    peaks TEXT NOT NULL
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS loudness_measurements (
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     entity_kind TEXT NOT NULL, entity_key INTEGER NOT NULL,
@@ -596,16 +608,14 @@ CREATE TABLE IF NOT EXISTS lyrics_cache (
     cache_input_digest BLOB NOT NULL CHECK (length(cache_input_digest) = 32),
     lyrics TEXT NOT NULL,
     updated_at INTEGER NOT NULL CHECK (updated_at >= 0),
-    cache_revision INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (media_uri, authority, role, language, script)
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS lyrics_cache_revision(singleton INTEGER PRIMARY KEY CHECK(singleton=1),revision INTEGER NOT NULL) STRICT;
-INSERT OR IGNORE INTO lyrics_cache_revision VALUES(1,0);
-CREATE INDEX IF NOT EXISTS lyrics_cache_changes ON lyrics_cache(cache_revision);
-CREATE TRIGGER IF NOT EXISTS lyrics_cache_insert AFTER INSERT ON lyrics_cache WHEN NEW.cache_revision>=0 BEGIN UPDATE lyrics_cache_revision SET revision=revision+1; UPDATE lyrics_cache SET cache_revision=(SELECT revision FROM lyrics_cache_revision) WHERE rowid=NEW.rowid; END;
-CREATE TRIGGER IF NOT EXISTS lyrics_cache_update AFTER UPDATE OF lyrics,cache_input_digest ON lyrics_cache WHEN NEW.cache_revision>=0 AND (NEW.lyrics IS NOT OLD.lyrics OR NEW.cache_input_digest IS NOT OLD.cache_input_digest) BEGIN UPDATE lyrics_cache_revision SET revision=revision+1; UPDATE lyrics_cache SET cache_revision=(SELECT revision FROM lyrics_cache_revision) WHERE rowid=NEW.rowid; END;
-CREATE TRIGGER IF NOT EXISTS lyrics_cache_delete AFTER DELETE ON lyrics_cache BEGIN UPDATE lyrics_cache_revision SET revision=revision+1; END;
+DROP TRIGGER IF EXISTS lyrics_cache_insert;
+DROP TRIGGER IF EXISTS lyrics_cache_update;
+DROP TRIGGER IF EXISTS lyrics_cache_delete;
+DROP INDEX IF EXISTS lyrics_cache_changes;
+DROP TABLE IF EXISTS lyrics_cache_revision;
 CREATE TABLE IF NOT EXISTS artwork_previews(family TEXT PRIMARY KEY,hash TEXT NOT NULL) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS local_files (
@@ -613,7 +623,9 @@ CREATE TABLE IF NOT EXISTS local_files (
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     path TEXT NOT NULL CHECK (path <> ''),
     root TEXT NOT NULL CHECK (root <> ''),
+    root_id TEXT NOT NULL DEFAULT '',
     relative_path TEXT NOT NULL,
+    playlist_identity TEXT,
     kind TEXT NOT NULL CHECK (kind IN ('media', 'cue', 'image', 'directory')),
     size_bytes INTEGER,
     mtime_ns INTEGER NOT NULL,
@@ -642,6 +654,41 @@ CREATE INDEX IF NOT EXISTS local_files_root_path_idx ON local_files(source_key,r
 CREATE INDEX IF NOT EXISTS local_files_playlist_idx ON local_files(source_key, local_file_key)
     WHERE lower(path) LIKE '%.m3u' OR lower(path) LIKE '%.m3u8' OR lower(path) LIKE '%.pls' OR lower(path) LIKE '%.xspf';
 
+CREATE TABLE IF NOT EXISTS local_file_access_roots (
+    source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
+    root TEXT NOT NULL,
+    root_id TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(source_key,root_id,root)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS local_file_observations (
+    local_file_key INTEGER PRIMARY KEY REFERENCES local_files ON DELETE CASCADE,
+    path TEXT NOT NULL, root TEXT NOT NULL, relative_path TEXT NOT NULL,
+    size_bytes INTEGER, mtime_ns INTEGER NOT NULL, device_id INTEGER, inode INTEGER, native_id TEXT,
+    revision TEXT, observed_stamp INTEGER NOT NULL DEFAULT 0, parent_path TEXT NOT NULL DEFAULT '',
+    parsed_stamp TEXT, accepted_facts TEXT, state TEXT NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS local_file_observations_path ON local_file_observations(path,local_file_key);
+CREATE INDEX IF NOT EXISTS local_file_observations_identity ON local_file_observations(device_id,inode,local_file_key);
+CREATE INDEX IF NOT EXISTS local_file_observations_native ON local_file_observations(native_id,local_file_key) WHERE native_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS local_file_observations_parent ON local_file_observations(root,parent_path,observed_stamp,path);
+CREATE VIEW IF NOT EXISTS observed_local_files AS
+    SELECT file.local_file_key,file.source_key,access.path,access.root,access.relative_path,file.root_id,
+        file.kind,access.size_bytes,access.mtime_ns,access.device_id,access.inode,access.native_id,
+        file.picture_index,file.artist_pictures,access.revision,file.parse_version,
+        access.observed_stamp,access.parent_path,
+        CASE WHEN access.accepted_facts IS file.parsed_stamp THEN access.parsed_stamp END parsed_stamp,
+        CASE WHEN access.state IN('accepted','rejected') AND access.accepted_facts IS NOT file.parsed_stamp THEN 'observed' ELSE access.state END state
+    FROM local_files file JOIN local_file_observations access USING(local_file_key);
+CREATE VIEW IF NOT EXISTS local_track_access AS
+    SELECT track.track_key,track.source_key,backing.path source_path,owner.path cue_path,
+        CASE WHEN track.cue_path IS NULL THEN backing.local_file_key ELSE owner.local_file_key END local_file_key
+    FROM tracks track
+    JOIN local_files canonical ON canonical.source_key=track.source_key AND canonical.path=track.source_path
+    JOIN observed_local_files backing ON backing.local_file_key=canonical.local_file_key
+    LEFT JOIN local_files cue ON cue.source_key=track.source_key AND cue.path=track.cue_path
+    LEFT JOIN observed_local_files owner ON owner.local_file_key=cue.local_file_key;
+
 CREATE TABLE IF NOT EXISTS local_file_dependencies (
     local_file_key INTEGER NOT NULL REFERENCES local_files ON DELETE CASCADE,
     dependency_path TEXT NOT NULL CHECK (dependency_path <> ''),
@@ -652,17 +699,21 @@ CREATE TABLE IF NOT EXISTS local_file_dependencies (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS local_file_dependencies_path_idx ON local_file_dependencies(dependency_path, local_file_key);
+CREATE VIEW IF NOT EXISTS observed_file_dependencies AS
+    SELECT edge.local_file_key,coalesce(access.path,edge.dependency_path) dependency_path,edge.position,
+        CASE WHEN edge.accepted_inputs=json_array(backing.size_bytes,backing.mtime_ns,backing.revision)
+            AND access.accepted_facts IS backing.parsed_stamp AND access.parsed_stamp IS NOT NULL
+            THEN json_array(json_extract(access.parsed_stamp,'$[0]'),json_extract(access.parsed_stamp,'$[1]'),json_extract(access.parsed_stamp,'$[2]'))
+            ELSE edge.accepted_inputs END accepted_inputs
+    FROM local_file_dependencies edge JOIN local_files owner USING(local_file_key)
+    LEFT JOIN local_files backing ON backing.source_key=owner.source_key AND backing.path=edge.dependency_path
+    LEFT JOIN local_file_observations access ON access.local_file_key=backing.local_file_key;
 
 CREATE TABLE IF NOT EXISTS local_access_metadata (
     access_uri TEXT PRIMARY KEY,
     size_bytes INTEGER NOT NULL, mtime_ns INTEGER NOT NULL, device_id INTEGER, inode INTEGER,
-    parser_version INTEGER NOT NULL, title TEXT NOT NULL, normalized_title TEXT NOT NULL,
-    album TEXT NOT NULL, normalized_album TEXT NOT NULL, artist TEXT NOT NULL,
-    normalized_artist TEXT NOT NULL, disc_number INTEGER NOT NULL, track_number INTEGER NOT NULL,
-    duration_millis INTEGER NOT NULL, loudness_analysis_key BLOB
+    parser_version INTEGER NOT NULL, loudness_analysis_key BLOB
 ) STRICT;
-
-CREATE INDEX IF NOT EXISTS local_access_match_uri_idx ON local_access_metadata(normalized_title,normalized_album,normalized_artist,disc_number,track_number,duration_millis,access_uri);
 
 CREATE TRIGGER IF NOT EXISTS local_play_count_listen_insert AFTER INSERT ON listens BEGIN
              UPDATE tracks SET local_play_count=local_play_count+1 WHERE media_uri=NEW.media_uri;
@@ -685,13 +736,9 @@ CREATE VIEW IF NOT EXISTS local_access_files AS
                  locator.origin,locator.path,locator.root,locator.relative_path,
                  COALESCE(metadata.size_bytes,0) size_bytes,COALESCE(metadata.mtime_ns,0) mtime_ns,
                  metadata.device_id,metadata.inode,COALESCE(metadata.parser_version,1) parser_version,
-                 COALESCE(metadata.title,'') title,COALESCE(metadata.normalized_title,'') normalized_title,
-                 COALESCE(metadata.album,'') album,COALESCE(metadata.normalized_album,'') normalized_album,
-                 COALESCE(metadata.artist,'') artist,COALESCE(metadata.normalized_artist,'') normalized_artist,
-                 COALESCE(metadata.disc_number,0) disc_number,COALESCE(metadata.track_number,0) track_number,
-                 COALESCE(metadata.duration_millis,0) duration_millis,locator.access_uri,
+                 locator.access_uri,
                  metadata.loudness_analysis_key
-          FROM main.local_locators locator
+          FROM local_locators locator
           LEFT JOIN local_access_metadata metadata USING(access_uri);
 
 CREATE TABLE IF NOT EXISTS native_playlist_pending (
@@ -704,18 +751,119 @@ CREATE TABLE IF NOT EXISTS native_playlist_pending (
 
 pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
     let version = pragma(connection, "user_version").await?;
-    if !matches!(version, 0 | 47) {
+    if !matches!(version, 0 | 47 | 48 | 49 | 50) {
         return Err(crate::LibraryError::Migration(format!(
             "unsupported library schema {version}"
         )));
     }
     let mut transaction = connection.begin().await?;
+    if version < 50 {
+        sqlx::query("DROP VIEW IF EXISTS local_access_files")
+            .execute(&mut *transaction)
+            .await?;
+    }
+    if version < 50 {
+        sqlx::query("DROP VIEW IF EXISTS local_track_access")
+            .execute(&mut *transaction)
+            .await?;
+    }
     sqlx::raw_sql(STORE_SCHEMA)
         .execute(&mut *transaction)
         .await?;
+    for table in ["local_files", "local_file_access_roots"] {
+        if !sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name='root_id')",
+        )
+        .bind(table)
+        .fetch_one(&mut *transaction)
+        .await?
+        {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "ALTER TABLE {table} ADD COLUMN root_id TEXT NOT NULL DEFAULT ''"
+            )))
+            .execute(&mut *transaction)
+            .await?;
+        }
+    }
+    if !sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('local_files') WHERE name='playlist_identity')",
+    )
+    .fetch_one(&mut *transaction)
+    .await?
+    {
+        sqlx::query("ALTER TABLE local_files ADD COLUMN playlist_identity TEXT")
+            .execute(&mut *transaction)
+            .await?;
+    }
+    sqlx::query("CREATE INDEX IF NOT EXISTS local_files_root_identity_idx ON local_files(source_key,root_id,relative_path)")
+        .execute(&mut *transaction).await?;
+    if !sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('user_media_state') WHERE name='extra')",
+    )
+    .fetch_one(&mut *transaction)
+    .await?
+    {
+        sqlx::query("ALTER TABLE user_media_state ADD COLUMN extra BLOB")
+            .execute(&mut *transaction)
+            .await?;
+    }
+    let old_blob: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('connect_media_files') WHERE name='hash')",
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+    if old_blob {
+        sqlx::raw_sql("DROP INDEX IF EXISTS connect_media_files_hash_idx; ALTER TABLE connect_media_files DROP COLUMN hash;")
+            .execute(&mut *transaction).await?;
+    }
+    for (column, declaration) in [
+        ("source_id", "TEXT"),
+        ("owners", "TEXT NOT NULL DEFAULT '[]'"),
+        ("storage_root", "TEXT NOT NULL DEFAULT ''"),
+        ("relative_path", "TEXT NOT NULL DEFAULT ''"),
+        ("completed_size", "INTEGER"),
+        ("retired_documents", "TEXT NOT NULL DEFAULT '[]'"),
+    ] {
+        let present: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('connect_media_files') WHERE name=?1)",
+        )
+        .bind(column)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !present {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "ALTER TABLE connect_media_files ADD COLUMN {column} {declaration}"
+            )))
+            .execute(&mut *transaction)
+            .await?;
+        }
+    }
+    sqlx::query("CREATE INDEX IF NOT EXISTS download_source_idx ON connect_media_files(source_id,media_uri,encoding)")
+        .execute(&mut *transaction).await?;
+    if version == 47 {
+        sqlx::query(
+            "INSERT OR IGNORE INTO local_file_access_roots(source_key,root) SELECT DISTINCT source_key,root FROM local_files",
+        )
+        .execute(&mut *transaction)
+        .await?;
+    }
+    if matches!(version, 47 | 48) {
+        // Albums derived from file tags are admitted through their current tracks.
+        sqlx::raw_sql("UPDATE albums SET indexed=0 WHERE indexed=1 AND metadata IS NULL;
+            UPDATE tracks SET indexed=0 WHERE indexed=1 AND source_key IS NOT NULL AND object_id IS NULL;")
+            .execute(&mut *transaction)
+            .await?;
+    }
     if version == 0 {
         crate::smart_playlists::create_default_smart_playlists(&mut transaction).await?;
     }
+    if version < 50 {
+        crate::migration::current::separate_file_access(&mut transaction).await?;
+    }
+    crate::migration::current::narrow_access_metadata(&mut transaction).await?;
+    sqlx::raw_sql("UPDATE connect_media_files AS download SET source_id=source.object_id FROM tracks track JOIN sources source USING(source_key) WHERE download.source_id IS NULL AND download.media_uri=track.media_uri;
+        UPDATE local_locators AS locator SET source_key=track.source_key FROM tracks track WHERE locator.source_key IS NULL AND locator.origin='download' AND locator.media_uri=track.media_uri AND track.source_key IS NOT NULL;")
+        .execute(&mut *transaction).await?;
     transaction.commit().await?;
     Ok(())
 }

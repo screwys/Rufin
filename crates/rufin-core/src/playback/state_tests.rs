@@ -1528,14 +1528,14 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
         })
         .collect();
     let (directory, database, sequence, owner, commands, playback, _inbox) = seeded(items).await;
-    let credential = crate::settings::CredentialRef::new("gapless");
+    let credential = crate::settings::Credential::new("gapless");
     owner.settings.update(|stored| {
         stored.sources.configured = vec![crate::settings::ConfiguredSource {
             configuration: sources::SourceConfiguration {
                 source_id: source_id.clone(), kind: "plex".into(), name: "Gapless".into(),
                 provider_payload: serde_json::json!({"version":1,"server_id":"server","profile_id":"user","base_url":endpoint,"address_override":null,"local":true,"relay":false,"owned":true,"trust_invalid_cert":false}).to_string(),
             },
-            credential_ref: Some(credential.clone()), music_folder_id: None, local_access: None, enable_half_stars: true,
+            credential: Some(credential.clone()), music_folder_id: None, local_access: None, enable_half_stars: true,
         }];
         Ok(())
     }).unwrap();

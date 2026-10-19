@@ -15,6 +15,8 @@ pub struct ResolvedStream {
     redacted_uri: String,
     trust_invalid_certificate: bool,
     window: Option<StreamWindow>,
+    time_seek: bool,
+    time_offset_millis: Option<u64>,
     resource: Option<std::sync::Arc<dyn Send + Sync>>,
 }
 
@@ -26,6 +28,8 @@ impl PartialEq for ResolvedStream {
             && self.redacted_uri == other.redacted_uri
             && self.trust_invalid_certificate == other.trust_invalid_certificate
             && self.window == other.window
+            && self.time_seek == other.time_seek
+            && self.time_offset_millis == other.time_offset_millis
             && self.content_type == other.content_type
     }
 }
@@ -42,6 +46,8 @@ impl ResolvedStream {
             uri,
             trust_invalid_certificate: false,
             window: None,
+            time_seek: false,
+            time_offset_millis: None,
             resource: None,
             content_type: None,
         }
@@ -56,6 +62,8 @@ impl ResolvedStream {
             redacted_uri: redacted_uri.into(),
             trust_invalid_certificate: false,
             window: None,
+            time_seek: false,
+            time_offset_millis: None,
             resource: None,
             content_type: None,
         }
@@ -100,6 +108,46 @@ impl ResolvedStream {
     pub fn without_window(mut self) -> Self {
         self.window = None;
         self
+    }
+
+    /// The HTTP input accepts source-time start_ms and optional end_ms bounds.
+    pub fn with_time_seek(mut self) -> Self {
+        self.time_seek = true;
+        self
+    }
+
+    pub fn time_seekable(&self) -> bool {
+        self.time_seek
+    }
+    pub fn time_offset_millis(&self) -> Option<u64> {
+        self.time_offset_millis
+    }
+
+    pub fn reopened_at(&self, logical_millis: u64) -> Result<Self, url::ParseError> {
+        let mut stream = self.clone();
+        if !self.time_seek {
+            return Ok(stream);
+        }
+        let start = self.start_millis().saturating_add(logical_millis);
+        let start = self.end_millis().map_or(start, |end| start.min(end));
+        let mut uri = url::Url::parse(self.uri())?;
+        let pairs = uri
+            .query_pairs()
+            .filter(|(key, _)| key != "start_ms" && key != "end_ms")
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect::<Vec<_>>();
+        uri.set_query(None);
+        uri.query_pairs_mut()
+            .extend_pairs(pairs)
+            .append_pair("start_ms", &start.to_string());
+        if let Some(end) = self.end_millis() {
+            uri.query_pairs_mut()
+                .append_pair("end_ms", &end.to_string());
+        }
+        stream.uri = uri.into();
+        stream.redacted_uri = redact_sensitive_uri(&stream.uri);
+        stream.time_offset_millis = Some(start);
+        Ok(stream)
     }
 
     pub fn uri(&self) -> &str {

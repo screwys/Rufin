@@ -462,7 +462,7 @@ impl FileSource {
             && !match input.input() {
                 FileInput::Smb(client) => client.is_disconnected(),
                 FileInput::WebDav(client) => client.is_disconnected(),
-                FileInput::Documents(_) => false,
+                FileInput::Documents(_) | FileInput::Peer { .. } => false,
             }
         {
             return Ok(Arc::clone(input));
@@ -635,7 +635,9 @@ impl FileSource {
 
     pub(crate) fn input_path(&self, input: &FileInput, relative: &str) -> SourceResult<String> {
         match input {
-            FileInput::Smb(_) | FileInput::Documents(_) => Ok(relative.into()),
+            FileInput::Smb(_) | FileInput::Documents(_) | FileInput::Peer { .. } => {
+                Ok(relative.into())
+            }
             FileInput::WebDav(client) => {
                 let mut url = client.root().clone();
                 {

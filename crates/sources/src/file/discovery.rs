@@ -104,8 +104,16 @@ impl Reader {
         file: &mut (impl Read + Seek),
         uri: &str,
     ) -> std::io::Result<Option<Metadata>> {
-        if let Some(header) = preflight_known_container(file)
-            .map_err(|error| std::io::Error::other(format!("Media inspection failed: {error:?}")))?
+        let header = match preflight_known_container(file) {
+            Ok(header) => header,
+            Err(PreflightError::InvalidAsf) => return Ok(None),
+            Err(error) => {
+                return Err(std::io::Error::other(format!(
+                    "Media inspection failed: {error:?}"
+                )));
+            }
+        };
+        if let Some(header) = header
             && header.skip_metadata
         {
             if header.moving_video {
@@ -649,6 +657,16 @@ enum PreflightError {
     MissingSegment,
 }
 
+impl PreflightError {
+    fn asf_read(error: std::io::Error) -> Self {
+        if error.kind() == std::io::ErrorKind::UnexpectedEof {
+            Self::InvalidAsf
+        } else {
+            Self::Io
+        }
+    }
+}
+
 fn preflight_known_container(
     file: &mut (impl Read + Seek),
 ) -> Result<Option<PreflightState>, PreflightError> {
@@ -706,7 +724,7 @@ fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<PreflightState, Pr
     file.rewind().map_err(|_| PreflightError::Io)?;
     let mut guid = [0_u8; 16];
     file.read_exact(&mut guid)
-        .map_err(|_| PreflightError::InvalidAsf)?;
+        .map_err(PreflightError::asf_read)?;
     if guid != ASF_HEADER_GUID {
         return Err(PreflightError::InvalidAsf);
     }
@@ -722,7 +740,7 @@ fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<PreflightState, Pr
     state.skip_metadata |= object_count > MAX_ASF_HEADER_OBJECTS;
     let mut reserved = [0_u8; 2];
     file.read_exact(&mut reserved)
-        .map_err(|_| PreflightError::InvalidAsf)?;
+        .map_err(PreflightError::asf_read)?;
     if reserved != [1, 2] {
         return Err(PreflightError::InvalidAsf);
     }
@@ -738,7 +756,7 @@ fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<PreflightState, Pr
         file.seek(SeekFrom::Start(position))
             .map_err(|_| PreflightError::Io)?;
         file.read_exact(&mut guid)
-            .map_err(|_| PreflightError::InvalidAsf)?;
+            .map_err(PreflightError::asf_read)?;
         let object_size = read_u64_le(&mut file)?;
         if object_size < 24 {
             return Err(PreflightError::InvalidAsf);
@@ -769,7 +787,7 @@ fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<PreflightState, Pr
                 .map_err(|_| PreflightError::Io)?;
             let mut stream_type = [0_u8; 16];
             file.read_exact(&mut stream_type)
-                .map_err(|_| PreflightError::InvalidAsf)?;
+                .map_err(PreflightError::asf_read)?;
             if stream_type == ASF_AUDIO_MEDIA_GUID {
                 state.audio = true;
                 file.seek(SeekFrom::Start(object_start + 64))
@@ -812,7 +830,7 @@ fn read_u16_le(reader: &mut impl Read) -> Result<u16, PreflightError> {
     let mut bytes = [0_u8; 2];
     reader
         .read_exact(&mut bytes)
-        .map_err(|_| PreflightError::InvalidAsf)?;
+        .map_err(PreflightError::asf_read)?;
     Ok(u16::from_le_bytes(bytes))
 }
 
@@ -820,7 +838,7 @@ fn read_u32_le(reader: &mut impl Read) -> Result<u32, PreflightError> {
     let mut bytes = [0_u8; 4];
     reader
         .read_exact(&mut bytes)
-        .map_err(|_| PreflightError::InvalidAsf)?;
+        .map_err(PreflightError::asf_read)?;
     Ok(u32::from_le_bytes(bytes))
 }
 
@@ -828,7 +846,7 @@ fn read_u64_le(reader: &mut impl Read) -> Result<u64, PreflightError> {
     let mut bytes = [0_u8; 8];
     reader
         .read_exact(&mut bytes)
-        .map_err(|_| PreflightError::InvalidAsf)?;
+        .map_err(PreflightError::asf_read)?;
     Ok(u64::from_le_bytes(bytes))
 }
 
@@ -1377,6 +1395,30 @@ mod tests {
                 .map(|state| state.skip_metadata),
             Err(PreflightError::InvalidAsf)
         );
+
+        assert!(matches!(
+            crate::file::local::media::read_media(
+                &mut crate::file::media::Worker::default(),
+                truncated_pro.clone(),
+                None,
+            ),
+            crate::file::media::MediaRead::Rejected
+        ));
+        let mut write_only = fs::OpenOptions::new()
+            .write(true)
+            .open(&truncated_pro)
+            .expect("open unreadable handle");
+        assert_eq!(read_u16_le(&mut write_only), Err(PreflightError::Io));
+        assert!(matches!(
+            crate::file::media::read_media_input(
+                &mut crate::file::media::Worker::default(),
+                truncated_pro.clone(),
+                &mut write_only,
+                url::Url::from_file_path(&truncated_pro).unwrap().as_str(),
+                None,
+            ),
+            crate::file::media::MediaRead::Unreadable
+        ));
 
         let partial_wma2 = directory.path().join("partial-wma2.wma");
         fs::write(&partial_wma2, asf_with_declared_file_size(1_000, 0x0161))

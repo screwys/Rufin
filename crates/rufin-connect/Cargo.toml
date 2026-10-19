@@ -12,24 +12,21 @@ bindings = ["dep:uniffi"]
 [dependencies]
 uniffi = { workspace = true, optional = true }
 anyhow = "1"
-age.workspace = true
-base64.workspace = true
-bao-tree = "0.16.1"
 blake3.workspace = true
+data-encoding = "2"
 futures-util.workspace = true
-flate2.workspace = true
 iroh = { version = "1.0.3", default-features = false, features = ["tls-aws-lc-rs"] }
-iroh-blobs = { version = "0.103.0", default-features = false }
-iroh-io = "0.6.2"
-iroh-mdns-address-lookup = "0.5.0"
 library.workspace = true
 loro = "=1.16.2"
+netdev = { version = "0.46.3", default-features = false }
 rustls = { workspace = true, features = ["prefer-post-quantum"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sqlx.workspace = true
+swarm-discovery = "0.6.3"
 tokio = { workspace = true, features = ["fs", "io-util", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }
+tracing.workspace = true
 vodozemac = { version = "=0.10.0", default-features = false }
 tempfile.workspace = true
 url.workspace = true

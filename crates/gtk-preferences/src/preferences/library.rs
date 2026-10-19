@@ -20,7 +20,7 @@ use rufin_core::runtime::source::{LocalAccessStatus, SourceLocalAccessSummary, S
 
 const SERVER_PROVIDER_ICON_SIZE: i32 = 28;
 const DOWNLOAD_JOB_DRAG_PREFIX: &str = "rufin-download-job:";
-const DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE: &str = msgid("Rufin data folder");
+const DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE: &str = msgid("Default");
 
 struct DownloadQueueRow {
     row: adw::ActionRow,
@@ -318,15 +318,16 @@ fn library_sources_page(
     }
     library_page.add(&cache_group);
 
-    if let Some(server) = remote_sources
+    if let Some(source) = configured
+        .sources
         .iter()
-        .find(|server| configured.selected_source_id.as_ref() == Some(&server.id))
+        .find(|source| configured.selected_source_id.as_ref() == Some(&source.id))
     {
         let download_settings = shell
             .settings
             .current
             .borrow()
-            .download_settings(&server.id);
+            .download_settings(&source.id);
         download_folder_row.set_subtitle(
             &download_settings
                 .directory
@@ -341,7 +342,7 @@ fn library_sources_page(
         );
         reset_folder.set_visible(download_settings.directory.is_some());
         let weak = Rc::downgrade(shell);
-        let source_id = server.id.clone();
+        let source_id = source.id.clone();
         open_folder.connect_clicked(move |_| {
             let Some(shell) = weak.upgrade() else { return };
             let directory = shell
@@ -353,7 +354,7 @@ fn library_sources_page(
             super::open_folder(&shell, gio::File::for_path(directory));
         });
         let choose_shell = Rc::clone(shell);
-        let choose_source_id = server.id.clone();
+        let choose_source_id = source.id.clone();
         let choose_row = download_folder_row.downgrade();
         let choose_reset = reset_folder.downgrade();
         choose_folder.connect_clicked(move |_| {
@@ -396,7 +397,7 @@ fn library_sources_page(
             });
         });
         let reset_shell = Rc::clone(shell);
-        let reset_source_id = server.id.clone();
+        let reset_source_id = source.id.clone();
         let reset_row = download_folder_row.downgrade();
         let reset_button = reset_folder.downgrade();
         reset_folder.connect_clicked(move |_| {
@@ -419,7 +420,7 @@ fn library_sources_page(
         downloads_group.add(&download_folder_row);
 
         let quality_shell = Rc::clone(shell);
-        let quality_source_id = server.id.clone();
+        let quality_source_id = source.id.clone();
         for row in crate::download_quality::rows(download_settings.quality, move |quality, _| {
             quality_shell
                 .settings
@@ -448,13 +449,13 @@ fn library_sources_page(
             &downloads_group,
             shell,
             dialog,
-            &server.id,
+            &source.id,
             download_settings.rules,
         );
 
         download_action_buttons.prepend(&add_rule);
         let remove_shell = Rc::clone(shell);
-        let source_id = server.id.clone();
+        let source_id = source.id.clone();
         let preferences_dialog = dialog.downgrade();
         remove_all.connect_clicked(move |_| {
             let Some(preferences_dialog) = preferences_dialog.upgrade() else {
@@ -465,7 +466,7 @@ fn library_sources_page(
         downloads_group.add(&download_actions_row);
 
         downloads_group.add(&download_queue_header);
-        let queue_focus = add_download_queue(&downloads_group, shell, &server.id, &pause_downloads);
+        let queue_focus = add_download_queue(&downloads_group, shell, &source.id, &pause_downloads);
         if focus_download_queue {
             gtk::glib::idle_add_local_once(move || {
                 queue_focus.grab_focus();
@@ -1162,7 +1163,7 @@ fn confirm_remove_all_downloads(
     let dialog = adw::AlertDialog::builder()
         .heading(tr("Remove All Downloads"))
         .body(tr(
-            "Downloads from this server will be removed, and automatic rules will be turned off",
+            "Downloads from this source will be removed, and automatic rules will be turned off",
         ))
         .build();
     dialog.add_response("cancel", &tr("Cancel"));

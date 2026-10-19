@@ -21,6 +21,10 @@ pub(crate) enum FileInput {
     Smb(Arc<SmbClient>),
     WebDav(Arc<WebDavClient>),
     Documents(Arc<crate::file::documents::DocumentAccess>),
+    Peer {
+        peer: Arc<dyn crate::PeerMedia>,
+        encoding: Option<library::AudioEncoding>,
+    },
 }
 
 pub(crate) struct FileInputServer {
@@ -190,6 +194,7 @@ async fn serve(
         FileInput::Smb(client) => smb_response(client, &path, &request).await,
         FileInput::WebDav(client) => dav_response(client, &path, &request).await,
         FileInput::Documents(access) => document_response(access, &path, &request).await,
+        FileInput::Peer { peer, encoding } => peer_response(peer, *encoding, &path, &request).await,
     };
     result.unwrap_or_else(|error| {
         empty(match error {
@@ -204,6 +209,131 @@ async fn serve(
             _ => StatusCode::BAD_GATEWAY,
         })
     })
+}
+
+async fn peer_response(
+    peer: &Arc<dyn crate::PeerMedia>,
+    encoding: Option<library::AudioEncoding>,
+    uri: &str,
+    request: &Request<hyper::body::Incoming>,
+) -> SourceResult<Response<Body>> {
+    if request.method() == Method::HEAD
+        && let Some(encoding) = encoding
+    {
+        let mut response = empty(StatusCode::OK);
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            encoding.codec.content_type().parse().unwrap(),
+        );
+        response.headers_mut().insert(
+            header::ACCEPT_RANGES,
+            header::HeaderValue::from_static("none"),
+        );
+        return Ok(response);
+    }
+    let mut range = request
+        .headers()
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("bytes="))
+        .and_then(|value| value.split_once('-'))
+        .and_then(|(start, end)| {
+            Some((
+                start.parse().ok()?,
+                if end.is_empty() {
+                    None
+                } else {
+                    Some(end.parse::<u64>().ok()?.saturating_add(1))
+                },
+            ))
+        });
+    let time = |name: &str| {
+        request.uri().query().and_then(|query| {
+            url::form_urlencoded::parse(query.as_bytes())
+                .find(|(key, _)| key == name)
+                .and_then(|(_, value)| value.parse::<u64>().ok())
+        })
+    };
+    let window = time("start_ms").map(|start| (start, time("end_ms")));
+    let mut audio = peer.open(uri, encoding, range, window).await?;
+    let etag = |audio: &crate::PeerAudio| {
+        audio
+            .validator
+            .as_ref()
+            .map(|validator| format!("\"{}\"", blake3::hash(validator.as_bytes()).to_hex()))
+    };
+    if range.is_some()
+        && request
+            .headers()
+            .get(header::IF_RANGE)
+            .is_some_and(|value| etag(&audio).is_none_or(|etag| value != etag.as_str()))
+    {
+        range = None;
+        audio = peer.open(uri, encoding, None, window).await?;
+    }
+    let etag = etag(&audio);
+    let revision = crate::peer::encode_peer_revision(&audio.revision);
+    if let Some(length) = audio.length
+        && range.is_some_and(|(start, _)| start >= length)
+    {
+        let mut response = empty(StatusCode::RANGE_NOT_SATISFIABLE);
+        response.headers_mut().insert(
+            header::CONTENT_RANGE,
+            format!("bytes */{length}").parse().unwrap(),
+        );
+        response
+            .headers_mut()
+            .insert(crate::PEER_REVISION_HEADER, revision.parse().unwrap());
+        if let Some(etag) = etag {
+            response
+                .headers_mut()
+                .insert(header::ETAG, etag.parse().unwrap());
+        }
+        return Ok(response);
+    }
+    let partial = audio.length.is_some() && range.is_some();
+    let mut response = empty(if partial {
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        StatusCode::OK
+    });
+    let headers = response.headers_mut();
+    if let Some(length) = audio.length {
+        let end = range.and_then(|(_, end)| end).unwrap_or(length).min(length);
+        headers.insert(
+            header::CONTENT_LENGTH,
+            end.saturating_sub(audio.offset).into(),
+        );
+        headers.insert(
+            header::ACCEPT_RANGES,
+            header::HeaderValue::from_static("bytes"),
+        );
+        if partial {
+            headers.insert(
+                header::CONTENT_RANGE,
+                format!("bytes {}-{}/{length}", audio.offset, end.saturating_sub(1))
+                    .parse()
+                    .unwrap(),
+            );
+        }
+    } else {
+        headers.insert(
+            header::ACCEPT_RANGES,
+            header::HeaderValue::from_static("none"),
+        );
+    }
+    if let Some(content_type) = audio.content_type.and_then(|value| value.parse().ok()) {
+        headers.insert(header::CONTENT_TYPE, content_type);
+    }
+    headers.insert(crate::PEER_REVISION_HEADER, revision.parse().unwrap());
+    if let Some(etag) = etag {
+        headers.insert(header::ETAG, etag.parse().unwrap());
+    }
+    if request.method() != Method::HEAD {
+        let stream = tokio_util::io::ReaderStream::new(audio.reader).map_ok(Frame::data);
+        *response.body_mut() = StreamBody::new(stream).boxed_unsync();
+    }
+    Ok(response)
 }
 
 async fn document_response(

@@ -1101,10 +1101,13 @@ where
     if let Some((connect, occurrence)) = file_transfer
         && connect.is_local_media(&request.media_uri).await?
     {
+        if occurrence.received_from_connect && file_uri.starts_with("content://") {
+            return Err("The source device did not provide a portable document identity".into());
+        }
         let received_document = url::Url::parse(file_uri)
             .is_ok_and(|uri| uri.scheme() == "content")
             && occurrence.received_from_connect;
-        if received_document {
+        if received_document && !matches!(access, Some((_, library::LocalAccessOrigin::Download))) {
             access = None;
         }
         let remote = received_document
@@ -1119,24 +1122,29 @@ where
         // A content URI received from another device is not a grant to this device's provider.
         let available =
             local_access || (!remote && local_access_available(file_uri).await.unwrap_or(false));
-        if remote || !available {
-            let fetched = connect.fetch_playback_file(occurrence).await?;
-            if remote && fetched.is_none() && !local_access {
-                return Err(sources::SourceError::NotFound.to_string());
-            }
-            fetched_uri = fetched
-                .map(|location| match location {
+        if !available {
+            let peer = connect.peer_access();
+            if let Some(location) = peer
+                .mapped_file(database, &request.media_uri)
+                .await
+                .map_err(string_error)?
+            {
+                fetched_uri = Some(match location {
                     library::LocalMediaLocation::File(path) => url::Url::from_file_path(path)
                         .map(String::from)
-                        .map_err(|_| "Media path must be absolute".to_string()),
-                    library::LocalMediaLocation::Document(uri) => Ok(uri),
-                })
-                .transpose()?;
-            if !received_document {
-                access = database
-                    .playback_access(&request.media_uri)
+                        .map_err(|_| "Media path must be absolute".to_owned())?,
+                    library::LocalMediaLocation::Document(uri) => uri,
+                });
+            } else {
+                let mut stream = peer.stream(request.clone()).await.map_err(string_error)?;
+                if let Some((start, end)) = database
+                    .playback_window(&request.media_uri)
                     .await
-                    .map_err(string_error)?;
+                    .map_err(string_error)?
+                {
+                    stream = stream.with_window(start, end);
+                }
+                return Ok(stream);
             }
         }
     }
@@ -1424,6 +1432,16 @@ mod tests {
             .await
             .unwrap();
         let occurrence = test_occurrence("flac");
+        database
+            .queue_entries(
+                library::QueueLoad::items(vec![(
+                    occurrence.track.clone().into(),
+                    library::QueueProvenance::Manual,
+                )]),
+                None,
+            )
+            .await
+            .unwrap();
         let path = folder.path().join("track.opus");
         std::fs::write(&path, b"downloaded audio").unwrap();
         let uri = url::Url::from_file_path(&path).unwrap().to_string();
@@ -1441,12 +1459,6 @@ mod tests {
                     device_id: None,
                     inode: None,
                     parser_version: 1,
-                    title: "Track".into(),
-                    album: "Album".into(),
-                    artist: "Artist".into(),
-                    disc_number: 1,
-                    track_number: 1,
-                    duration_millis: 180_000,
                     access_uri: uri.clone(),
                     loudness_analysis_key: None,
                 }],

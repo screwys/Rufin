@@ -1408,15 +1408,15 @@ mod tests {
             panic!("expected changed Local source")
         };
         let (configuration, source, _) = (*connected).into_parts();
-        let first_files = tokio::sync::Notify::new();
+        let first_tracks = tokio::sync::Notify::new();
         let progress = |progress: crate::SourceReadProgress| {
-            if progress.stage == crate::SourceReadStage::Files {
-                first_files.notify_one();
+            if progress.stage == crate::SourceReadStage::Tracks {
+                first_tracks.notify_one();
             }
         };
         tokio::select! {
             biased;
-            () = first_files.notified() => {}
+            () = first_tracks.notified() => {}
             result = source.acquire_catalog(&database, &progress, Arc::new(AtomicBool::new(false)), true) => panic!("refresh completed before interruption: {result:?}"),
         }
         assert!(

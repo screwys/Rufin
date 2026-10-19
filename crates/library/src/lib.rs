@@ -26,7 +26,9 @@ mod collections;
 pub use query::{
     CatalogIdentity, CatalogKind, CatalogPage, CatalogQuery, CatalogRows, CatalogSubject,
 };
-mod connect;
+pub mod connect;
+pub mod profile;
+pub use connect::connect_current_kind;
 mod connect_media;
 mod db;
 mod favorites;
@@ -40,7 +42,10 @@ mod playlist_format;
 mod playlist_links;
 mod playlists;
 mod queue;
-pub use connect_media::{ConnectMediaFile, media_encoding_from_key, media_encoding_key};
+mod waveform;
+pub use connect_media::{
+    CatalogFile, CatalogFileDependency, CatalogFileStamp, ConnectMediaFile, media_encoding_key,
+};
 mod catalog;
 mod radio;
 mod scroll_sections;
@@ -73,7 +78,7 @@ pub use collections::{
     AlbumReleaseClass, AlbumReleaseResult, AlbumView, ArtistView, CollectionSummary, FolderChoice,
     FolderView, GenreChoice, GenreView, MoodView,
 };
-pub use connect::{CONNECT_PAGE_SIZE, ConnectChange, ConnectRecord, ConnectRoot};
+pub use connect::{CONNECT_PAGE_SIZE, ConnectRecord, ConnectRoot, RecordStamp, StampedRecord};
 pub use db::{Database, ReadCancellation};
 pub use favorites::{FavoriteTarget, NativeUserState, UserMediaStateWrite};
 pub use home::{
@@ -89,9 +94,9 @@ pub use keys::{
     source_id_for_uri,
 };
 pub use local::{
-    DownloadMetadata, FileEditRow, LocalAccessOrigin, LocalAccessRow, LocalAccessWrite,
-    LocalFileKind, LocalFileRow, LocalFileState, LocalFileWrite, LocalLocatorWrite,
-    LocalMediaLocation, MappingTrackRow, ObservedMediaFile,
+    DownloadMetadata, FileEditRow, LocalAccessOrigin, LocalAccessWrite, LocalFileKind,
+    LocalFileRow, LocalFileState, LocalFileWrite, LocalLocatorWrite, LocalMediaLocation,
+    MappingTrackRow, ObservedMediaFile,
 };
 pub use loudness::{AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork};
 pub use lyrics::LyricsCacheRow;
@@ -120,6 +125,7 @@ pub use smart_playlists::{
 pub use tracks::{
     CatalogSort, TrackAccess, TrackArtistLink, TrackGenreLink, TrackLinks, TrackState, TrackView,
 };
+pub use waveform::WaveformCacheRow;
 
 use thiserror::Error;
 

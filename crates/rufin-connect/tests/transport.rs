@@ -1,8 +1,7 @@
 use library::ConnectRecord;
+use library::profile::{ProfileStore, SyncStream};
 use loro::{LoroDoc, ToJson, VersionVector};
-use rufin_connect::{
-    ConnectNetwork, Credentials, NetworkConfig, NetworkEvent, profile::ProfileStore,
-};
+use rufin_connect::{ConnectNetwork, Credentials, NetworkConfig, NetworkEvent};
 use std::{path::Path, sync::Arc, time::Duration};
 
 const KEY: &str = "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33";
@@ -13,7 +12,6 @@ async fn node(root: &Path, name: &str) -> (Arc<ConnectNetwork>, mpsc::Receiver<N
     ConnectNetwork::spawn(
         NetworkConfig {
             database: root.join("network.sqlite"),
-            media_directory: root.join("media"),
             name: name.into(),
             nearby: false,
             relay: None,
@@ -66,9 +64,15 @@ async fn ended(events: &mut mpsc::Receiver<NetworkEvent>, expected_session: &str
 
 async fn documents(root: &Path, peer: u64) -> Arc<ProfileStore> {
     Arc::new(
-        ProfileStore::open(&root.join("profile.sqlite"), peer, KEY.parse().unwrap())
-            .await
-            .unwrap(),
+        ProfileStore::open(
+            library::Database::open(&root.join("profile.sqlite"))
+                .await
+                .unwrap(),
+            peer,
+            KEY.parse().unwrap(),
+        )
+        .await
+        .unwrap(),
     )
 }
 
@@ -123,7 +127,16 @@ async fn pair(
 }
 
 async fn received(source: &ProfileStore, target: &ProfileStore, records: &[ConnectRecord]) {
-    let expected = source.changes(0, 64).await.unwrap();
+    let mut expected = source
+        .changes_in_stream(0, 64, SyncStream::Authored)
+        .await
+        .unwrap();
+    expected.extend(
+        source
+            .changes_in_stream(0, 64, SyncStream::NativeCache)
+            .await
+            .unwrap(),
+    );
     let names: Vec<_> = expected
         .iter()
         .map(|version| version.name.clone())
@@ -149,6 +162,15 @@ async fn received(source: &ProfileStore, target: &ProfileStore, records: &[Conne
     let mut values = serde_json::Map::new();
     for update in target.updates(&missing).await.unwrap() {
         let update: serde_json::Value = serde_json::from_slice(&update).unwrap();
+        if !update["current"].is_null() {
+            let current: ConnectRecord = serde_json::from_value(update["current"].clone()).unwrap();
+            let key = serde_json::to_string(&(&current.kind, &current.key)).unwrap();
+            values.insert(
+                key,
+                serde_json::Value::String(serde_json::to_string(&current.value).unwrap()),
+            );
+            continue;
+        }
         let bytes: Vec<u8> = serde_json::from_value(update["bytes"].clone()).unwrap();
         let document = LoroDoc::new();
         document.import(&bytes).unwrap();
@@ -166,7 +188,11 @@ async fn received(source: &ProfileStore, target: &ProfileStore, records: &[Conne
         let key = serde_json::to_string(&(&record.kind, &record.key)).unwrap();
         let actual: serde_json::Value =
             serde_json::from_str(values[&key].as_str().unwrap()).unwrap();
-        assert_eq!(Some(actual), record.value);
+        assert!(
+            Some(actual) == record.value,
+            "received record {} differs",
+            record.key
+        );
     }
 }
 
@@ -236,20 +262,110 @@ async fn enrollment_after_collection_publication() {
         let (b, mut b_events) = node(b_dir.path(), "Joiner").await;
         let profile = ConnectNetwork::new_profile_id();
         a.open_profile(&profile, true, Vec::new()).await.unwrap();
-        let a_docs = documents(a_dir.path(), 1).await;
-        let b_docs = documents(b_dir.path(), 2).await;
-        let records: Vec<_> = (0..20).map(|index| ConnectRecord {
-            kind: "track".into(), key: format!("track-{index}"),
-            value: Some(serde_json::json!({"title": format!("Track {index}"), "metadata": "x".repeat(512 * 1024)})),
-        }).collect();
-        a_docs.write_records(&records).await.unwrap();
+        let a_database = library::Database::open(a_dir.path().join("profile.sqlite"))
+            .await
+            .unwrap();
+        let b_database = library::Database::open(b_dir.path().join("profile.sqlite"))
+            .await
+            .unwrap();
+        let a_docs = Arc::new(
+            ProfileStore::open(a_database.clone(), 1, KEY.parse().unwrap())
+                .await
+                .unwrap(),
+        );
+        let b_docs = Arc::new(
+            ProfileStore::open(b_database.clone(), 2, KEY.parse().unwrap())
+                .await
+                .unwrap(),
+        );
+        let source = library::SourceId::new("music");
+        for (database, documents, identity) in [
+            (&a_database, &a_docs, a.identity()),
+            (&b_database, &b_docs, b.identity()),
+        ] {
+            database
+                .reconcile_source(&source, "webdav", "Files")
+                .await
+                .unwrap();
+            documents.bind_profile(&profile, &identity).await.unwrap();
+            database.connect_set_active(true).await.unwrap();
+        }
+        let mut records = Vec::new();
+        for index in 0..20 {
+            let object_id = format!("track-{index}");
+            let path = format!("https://files.example.test/music/{object_id}.flac");
+            a_database
+                .catalog("music", None)
+                .await
+                .unwrap()
+                .write_file_observations(
+                    &[(
+                        library::LocalFileWrite {
+                            path: path.clone(),
+                            root: "https://files.example.test/music".into(),
+                            relative_path: format!("{object_id}.flac"),
+                            kind: library::LocalFileKind::Media,
+                            size_bytes: Some(12),
+                            mtime_ns: 0,
+                            device_id: None,
+                            inode: None,
+                            native_id: None,
+                            picture_index: None,
+                            artist_pictures: None,
+                            revision: Some("v1".into()),
+                            parse_version: Some(1),
+                            state: library::LocalFileState::Accepted,
+                        },
+                        Vec::new(),
+                    )],
+                    vec![library::TrackObservation {
+                        object_id: object_id.clone(),
+                        media_uri: Some(library::source_entity_uri(&source, "track", &object_id)),
+                        source_path: Some(path.clone()),
+                        metadata: library::TrackMetadata {
+                            title: format!("Track {index}"),
+                            comment: Some("x".repeat(512 * 1024)),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }],
+                    true,
+                )
+                .await
+                .unwrap();
+            records.push(ConnectRecord {
+                kind: "catalog:file".into(),
+                key: serde_json::to_string(&("music", path)).unwrap(),
+                value: None,
+            });
+        }
+        let keys: Vec<_> = records
+            .iter()
+            .map(|record| (record.kind.clone(), record.key.clone()))
+            .collect();
+        let records = a_docs.current_records(&keys).await.unwrap();
+        assert_eq!(records.len(), 20);
+        for (index, record) in records.iter().enumerate() {
+            let value = record.value.as_ref().unwrap();
+            assert_eq!(
+                value["tracks"][0]["metadata"]["title"],
+                format!("Track {index}")
+            );
+            assert!(
+                value["tracks"][0]["metadata"]["comment"].as_str()
+                    == Some("x".repeat(512 * 1024).as_str()),
+                "track {index} must retain its full 512 KiB comment"
+            );
+        }
         a.attach_documents(a_docs.clone()).await.unwrap();
         pair(&a, &mut a_events, &b, &mut b_events, &profile).await;
         b.attach_documents(b_docs.clone()).await.unwrap();
         received(&a_docs, &b_docs, &records).await;
         a.shutdown().await.unwrap();
         b.shutdown().await.unwrap();
-    }).await.expect("Collection publication starved enrollment");
+    })
+    .await
+    .expect("Collection publication starved enrollment");
 }
 
 #[tokio::test]
@@ -347,16 +463,34 @@ async fn enrollment_delivery_media_and_removal() {
         assert_eq!(answer.await.unwrap().unwrap(), b"queue and position");
         let original = a_dir.path().join("track.flac");
         tokio::fs::write(&original, b"original media bytes").await.unwrap();
-        let hash = a.media().publish(&original).await.unwrap();
         let destination = b_dir.path().join("Music/track.flac");
-        let (progress, _) = watch::channel(0);
-        b.media().fetch(&a.identity(), &hash, &destination, CancellationToken::new(), progress).await.unwrap();
-        assert_eq!(tokio::fs::read(&destination).await.unwrap(), b"original media bytes");
-        assert_eq!(tokio::fs::read(&original).await.unwrap(), b"original media bytes");
-        tokio::fs::write(&destination, b"previous downloaded copy").await.unwrap();
-        let (progress, _) = watch::channel(0);
-        b.media().fetch(&a.identity(), &hash, &destination, CancellationToken::new(), progress).await.unwrap();
-        assert_eq!(tokio::fs::read(&destination).await.unwrap(), b"original media bytes");
+        let mut validator = None;
+        for (previous, offset) in [(None, 0), (Some(b"previous downloaded copy".as_slice()), 0), (Some(b"original ".as_slice()), 9)] {
+            if let Some(previous) = previous { tokio::fs::write(&destination, previous).await.unwrap(); }
+            let requester = b.clone();
+            let host = a.identity();
+            let target = destination.clone();
+            let body = serde_json::to_vec(&serde_json::json!({"offset":offset,"validator":validator})).unwrap();
+            let transfer = tokio::spawn(async move {
+                let response = requester.stream_request(&host, body).await.unwrap();
+                let metadata: rufin_connect::media::FileMetadata = serde_json::from_value(response.metadata).unwrap();
+                assert_eq!(metadata.offset, offset);
+                rufin_connect::media::receive_file(response.reader, &metadata, &target, CancellationToken::new(), watch::channel(0).0).await.unwrap();
+                metadata.validator
+            });
+            loop {
+                if let NetworkEvent::StreamRequest { peer, body, reply, .. } = a_events.recv().await.unwrap() {
+                    assert_eq!(peer, b.identity());
+                    let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                    let (metadata, reader) = rufin_connect::media::open_file(&original, request["offset"].as_u64().unwrap(), request["validator"].as_str()).await.unwrap();
+                    assert!(reply.send(Ok(rufin_connect::media::PeerByteResponse { metadata: serde_json::to_value(metadata).unwrap(), reader: Box::pin(reader) })).is_ok());
+                    break;
+                }
+            }
+            validator = transfer.await.unwrap();
+            assert_eq!(tokio::fs::read(&destination).await.unwrap(), b"original media bytes");
+            assert_eq!(tokio::fs::read(&original).await.unwrap(), b"original media bytes");
+        }
         let c_dir = tempfile::tempdir().unwrap();
         let (c, mut c_events) = node(c_dir.path(), "Third device").await;
         pair(&a, &mut a_events, &c, &mut c_events, &profile).await;
@@ -372,34 +506,47 @@ async fn enrollment_delivery_media_and_removal() {
         assert!(b.members().await.unwrap().contains(&c.identity()));
         let third = c_dir.path().join("third.flac");
         tokio::fs::write(&third, b"third device media").await.unwrap();
-        let third_hash = c.media().publish(&third).await.unwrap();
         let destination = b_dir.path().join("third.flac");
-        let (progress, _) = watch::channel(0);
         // B has never received C's invitation. Its address and trust arrived
         // through A's authenticated sync connection.
-        b.media().fetch(&c.identity(), &third_hash, &destination, CancellationToken::new(), progress).await.unwrap();
+        let requester = b.clone();
+        let host = c.identity();
+        let target = destination.clone();
+        let transfer = tokio::spawn(async move {
+            let response = requester.stream_request(&host, b"third device media".to_vec()).await.unwrap();
+            let metadata = serde_json::from_value(response.metadata).unwrap();
+            rufin_connect::media::receive_file(response.reader, &metadata, &target, CancellationToken::new(), watch::channel(0).0).await.unwrap();
+        });
+        loop {
+            if let NetworkEvent::StreamRequest { peer, body, reply, .. } = c_events.recv().await.unwrap() {
+                assert_eq!(peer, b.identity());
+                assert_eq!(body, b"third device media");
+                let (metadata, reader) = rufin_connect::media::open_file(&third, 0, None).await.unwrap();
+                assert!(reply.send(Ok(rufin_connect::media::PeerByteResponse { metadata: serde_json::to_value(metadata).unwrap(), reader: Box::pin(reader) })).is_ok());
+                break;
+            }
+        }
+        transfer.await.unwrap();
         assert_eq!(tokio::fs::read(destination).await.unwrap(), b"third device media");
         a.remove_member(&b.identity()).await.unwrap();
+        assert!(a_docs.device_name(&b.identity()).await.unwrap().is_none());
         c.refresh();
         b.refresh();
         let second = a_dir.path().join("second.flac");
         tokio::fs::write(&second, b"not authorized after removal").await.unwrap();
-        let hash = a.media().publish(&second).await.unwrap();
-        let (progress, _) = watch::channel(0);
-        assert!(b.media().fetch(&a.identity(), &hash, &b_dir.path().join("denied.flac"), CancellationToken::new(), progress).await.is_err());
-        while c.members().await.unwrap().contains(&b.identity()) {
+        assert!(b.stream_request(&a.identity(), b"denied after removal".to_vec()).await.is_err());
+        while c.members().await.unwrap().contains(&b.identity()) || c_docs.device_name(&b.identity()).await.unwrap().is_some() {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        assert!(c_docs.device_name(&b.identity()).await.unwrap().is_none());
         tokio::fs::write(&third, b"third device private media after removal").await.unwrap();
-        let third_hash = c.media().publish(&third).await.unwrap();
-        let (progress, _) = watch::channel(0);
-        assert!(b.media().fetch(&c.identity(), &third_hash, &b_dir.path().join("denied-third.flac"), CancellationToken::new(), progress).await.is_err());
+        assert!(b.stream_request(&c.identity(), b"denied after removal".to_vec()).await.is_err());
         // The removed device learns that it is no longer enrolled, while its
         // already received library remains available locally.
         while !b.members().await.unwrap().is_empty() {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        assert!(!b_docs.changes(0, 64).await.unwrap().is_empty());
+        assert!(!b_docs.changes_in_stream(0, 64, SyncStream::Authored).await.unwrap().is_empty());
         a.shutdown().await.unwrap();
         b.shutdown().await.unwrap();
         c.shutdown().await.unwrap();
@@ -440,6 +587,14 @@ async fn offline_member_does_not_delay_later_edits_between_online_devices() {
         c.shutdown().await.unwrap();
         assert!(a.members().await.unwrap().contains(&c.identity()));
         assert!(b.members().await.unwrap().contains(&c.identity()));
+        a_docs
+            .write_records(&[ConnectRecord {
+                kind: "device".into(),
+                key: "file-only".into(),
+                value: Some(serde_json::json!("Profile file device")),
+            }])
+            .await
+            .unwrap();
 
         for value in ["first edit", "edit after the first acknowledgement"] {
             while b_events.try_recv().is_ok() {}
@@ -468,6 +623,26 @@ async fn offline_member_does_not_delay_later_edits_between_online_devices() {
             .await
             .expect("An online edit waited for the offline peer's 30-second connection timeout");
         }
+        let retained = b_docs.revision().await.unwrap();
+        b.close_profile().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(20), b.leave_profile(&profile))
+            .await
+            .expect("Departure notification exceeded the network timeout")
+            .unwrap();
+        assert!(a.check_membership(&b.identity()).await.is_err());
+        assert!(a.members().await.unwrap().contains(&c.identity()));
+        assert!(a_docs.device_name(&b.identity()).await.unwrap().is_none());
+        assert_eq!(
+            a_docs.device_name(&c.identity()).await.unwrap().as_deref(),
+            Some("Offline peer")
+        );
+        assert_eq!(
+            a_docs.device_name("file-only").await.unwrap().as_deref(),
+            Some("Profile file device")
+        );
+        b.open_profile(&profile, false, Vec::new()).await.unwrap();
+        assert!(b.members().await.unwrap().is_empty());
+        assert_eq!(b_docs.revision().await.unwrap(), retained);
         a.shutdown().await.unwrap();
         b.shutdown().await.unwrap();
     })
@@ -501,7 +676,6 @@ async fn offline_edits_catch_up_after_restarting_with_saved_trust() {
         let peer_directory = tempfile::tempdir().unwrap();
         let config = NetworkConfig {
             database: directory.path().join("network.sqlite"),
-            media_directory: directory.path().join("media"),
             name: "Work Laptop".into(),
             nearby: false,
             relay: None,

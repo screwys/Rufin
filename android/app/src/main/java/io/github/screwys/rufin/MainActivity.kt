@@ -82,7 +82,6 @@ class MainActivity : ComponentActivity() {
                 catch (error: Exception) { connection.runAction { throw error } }
             }
             AppTheme(preferences) {
-                CompositionLocalProvider(io.github.screwys.rufin.ui.LocalFeedback provides { message -> connection.showFeedback(message) }) {
                 LibraryScreen(connection, preferences,
                     onOpen = {
                         openDocuments.launch(Intent(Intent.ACTION_OPEN_DOCUMENT)
@@ -97,7 +96,6 @@ class MainActivity : ComponentActivity() {
                     },
                     onSaveLog = { saveDiagnosticLog.launch("rufin-debug.log") },
                 )
-                }
             }
         }
     }

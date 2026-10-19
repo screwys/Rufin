@@ -22,7 +22,7 @@ pub(crate) fn artist_binding(
     Ok(serde_json::to_vec(&candidates)?)
 }
 
-pub(super) async fn write_images(
+pub(crate) async fn write_images(
     connection: &mut SqliteConnection,
     source: i64,
     kind: &str,
@@ -58,7 +58,7 @@ pub(super) async fn write_images(
     };
     let (table, _) = super::cache::table(kind);
     let next = if kind == "track" && native {
-        "CASE WHEN EXISTS(SELECT 1 FROM local_files physical WHERE physical.source_key=tracks.source_key AND physical.path=tracks.source_path AND(physical.artist_pictures IS NULL OR physical.picture_index>=0)) THEN coalesce(input.binding,tracks.native_artwork) ELSE input.binding END".to_owned()
+        "CASE WHEN EXISTS(SELECT 1 FROM local_track_access location JOIN observed_local_files physical ON physical.source_key=location.source_key AND physical.path=location.source_path WHERE location.track_key=tracks.track_key AND(physical.artist_pictures IS NULL OR physical.picture_index>=0)) THEN coalesce(input.binding,tracks.native_artwork) ELSE input.binding END".to_owned()
     } else if native || kind == "artist" {
         "input.binding".to_owned()
     } else {
@@ -83,8 +83,29 @@ pub(super) async fn write_images(
         .push_bind(observed.unwrap_or(i64::MAX))
         .push(" AND ")
         .push(if native { "1" } else { "native_metadata=0" })
-        .push(format!(" AND native_artwork IS NOT {next}"));
-    Ok(query.build().execute(connection).await?.rows_affected() > 0)
+        .push(format!(
+            " AND native_artwork IS NOT {next} RETURNING object_id"
+        ));
+    let ids = query
+        .build_query_scalar::<String>()
+        .fetch_all(&mut *connection)
+        .await?;
+    crate::connect::catalog::mark_artwork_on(
+        connection,
+        source,
+        kind,
+        &ids.iter().map(String::as_str).collect::<Vec<_>>(),
+    )
+    .await?;
+    if kind == "track" {
+        crate::connect::mark_saved_references_on(
+            connection,
+            source,
+            &ids.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+        .await?;
+    }
+    Ok(!ids.is_empty())
 }
 
 pub(crate) async fn refresh_choices(
@@ -119,7 +140,7 @@ pub(crate) async fn refresh_choices(
          UNION SELECT artist_key FROM artists WHERE artwork_album_key IN(SELECT value FROM json_each(?2)) OR artwork_track_key IN(SELECT value FROM json_each(?1))
          UNION SELECT artist_key FROM track_artists WHERE track_key IN(SELECT value FROM json_each(?1))
          UNION SELECT artist_key FROM effective_album_artists WHERE album_key IN(SELECT value FROM json_each(?2))
-         UNION SELECT artist_key FROM track_artists JOIN tracks USING(track_key) WHERE album_key IN(SELECT value FROM json_each(?2)) AND indexed=1",
+         UNION SELECT artist_key FROM track_artists JOIN tracks INDEXED BY tracks_album_order_idx USING(track_key) WHERE album_key IN(SELECT value FROM json_each(?2)) AND indexed=1",
     ).bind(&tracks_json).bind(&albums_json).bind(&artists_json).fetch_all(&mut *connection).await?;
     let artists_json = serde_json::to_string(&artists)?;
     let related_albums = "SELECT credit.album_key FROM album_artists credit JOIN albums album USING(album_key) WHERE credit.artist_key=artist.artist_key AND album.metadata IS NOT NULL
@@ -131,7 +152,7 @@ pub(crate) async fn refresh_choices(
             WHERE (album.native_artwork IS NOT NULL AND json_array_length(album.native_artwork)>0 OR album.artwork_track_key IS NOT NULL)
               AND(album.indexed=1 OR EXISTS(SELECT 1 FROM tracks WHERE tracks.album_key=album.album_key AND indexed=1))
             ORDER BY ordering.title_sort,album.album_key LIMIT 1) album_key,
-           (SELECT track.track_key FROM track_artists credit JOIN tracks track USING(track_key)
+           (SELECT track.track_key FROM track_artists credit CROSS JOIN tracks track USING(track_key)
             WHERE credit.artist_key=artist.artist_key AND track.indexed=1 AND track.album_key IS NULL AND track.native_artwork IS NOT NULL AND json_array_length(track.native_artwork)>0
             ORDER BY track.sort_text,track.track_key LIMIT 1) track_key
          FROM artists artist WHERE artist.artist_key IN(SELECT value FROM json_each(?1)))

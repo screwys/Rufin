@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use super::LocalSource;
 use super::media::read_media;
@@ -19,7 +19,7 @@ const LOCAL_BATCH_SIZE: usize = 128;
 const LOCAL_CUE_MAX_BYTES: u64 = 1024 * 1024;
 pub(crate) const LOCAL_PARSER_VERSION: u32 = 18;
 
-fn reusable_parser_version(version: Option<i64>) -> bool {
+pub(crate) fn reusable_parser_version(version: Option<i64>) -> bool {
     // Accepted released metadata remains usable; newer readers retry rejected files.
     matches!(version, Some(14..=18))
 }
@@ -35,7 +35,7 @@ pub(crate) async fn read_saved_file(
         .await?
         .ok_or(SourceError::NotFound)?;
     let path = normalize_observed_path(path);
-    let (mut track, cover, portraits) = media::read_saved_media(&path, path.clone()).await?;
+    let mut track = media::read_saved_media(&path, path.clone()).await?;
     let saved_path = path.clone();
     let (mut observation, revision, audio_revision) = tokio::task::spawn_blocking(move || {
         let observation = previous
@@ -65,15 +65,17 @@ pub(crate) async fn read_saved_file(
     .await
     .map_err(|error| SourceError::Other(error.to_string()))??;
     if let Some(observation) = &mut observation {
-        observation.picture_index = cover.map(i64::from);
-        observation.artist_pictures = Some(portraits);
+        track.observe_images(observation)?;
     }
-    track.local_artwork = cover.map(|picture_index| crate::LocalImageRef::Embedded {
-        source_id: crate::SourceId::new(catalog.source_id),
-        path: path.to_string_lossy().into_owned(),
-        picture_index,
-        revision,
-    });
+    track.local_artwork = track
+        .picture_index
+        .and_then(|index| u32::try_from(index).ok())
+        .map(|picture_index| crate::LocalImageRef::Embedded {
+            source_id: crate::SourceId::new(catalog.source_id),
+            path: path.to_string_lossy().into_owned(),
+            picture_index,
+            revision,
+        });
     track.track.object_id = object_id;
     track.track.media_uri = Some(media_uri.to_owned());
     if source_path.is_some() {
@@ -98,15 +100,13 @@ pub(crate) async fn read_saved_document(
     let entry = tokio::task::spawn_blocking(move || crate::stat_document(&stat_uri))
         .await
         .map_err(|error| SourceError::Other(error.to_string()))??;
-    let (mut track, cover, portraits) =
-        media::read_saved_media(temporary, PathBuf::from(&entry.name)).await?;
+    let mut track = media::read_saved_media(temporary, PathBuf::from(&entry.name)).await?;
     let path = source_path.unwrap_or_else(|| document_uri.to_owned());
     if let Some(observation) = &mut observation {
         observation.size_bytes = entry.size.and_then(|size| i64::try_from(size).ok());
         observation.revision = entry.revision.clone();
         observation.native_id = Some(entry.native_id);
-        observation.picture_index = cover.map(i64::from);
-        observation.artist_pictures = Some(portraits);
+        track.observe_images(observation)?;
         observation.parse_version = Some(super::super::remote::scan::PARSER_VERSION);
         observation.state = library::LocalFileState::Accepted;
     }
@@ -118,12 +118,15 @@ pub(crate) async fn read_saved_document(
         entry.revision.as_deref(),
         entry.size.and_then(|size| i64::try_from(size).ok()),
     );
-    track.local_artwork = cover.map(|picture_index| crate::LocalImageRef::Embedded {
-        source_id: crate::SourceId::new(catalog.source_id),
-        path,
-        revision: entry.revision.unwrap_or_default(),
-        picture_index,
-    });
+    track.local_artwork = track
+        .picture_index
+        .and_then(|index| u32::try_from(index).ok())
+        .map(|picture_index| crate::LocalImageRef::Embedded {
+            source_id: crate::SourceId::new(catalog.source_id),
+            path,
+            revision: entry.revision.unwrap_or_default(),
+            picture_index,
+        });
     Ok((observation, track.into_observation(media::accepted_at())))
 }
 
@@ -138,7 +141,7 @@ pub(crate) async fn catch_up(
     require_roots(database, source_id, local, local.roots()).await?;
     let stamp = Some(catalog.start_observation().await?);
     let mut after = None;
-    let mut completed = 0;
+    let mut tracks = 0;
     loop {
         check_cancelled(cancelled)?;
         let page = database
@@ -153,7 +156,6 @@ pub(crate) async fn catch_up(
             break;
         }
         after = page.last().map(|file| file.local_file_key);
-        completed += page.len();
         let paths = page
             .iter()
             .filter(|file| {
@@ -167,14 +169,27 @@ pub(crate) async fn catch_up(
             .collect::<Vec<_>>();
         if !paths.is_empty() {
             progress(SourceReadProgress {
-                stage: SourceReadStage::Files,
-                completed,
+                stage: SourceReadStage::Tracks,
+                completed: tracks,
                 total: None,
             });
-            acquire_paths(catalog, local, &paths, None, progress, cancelled).await?;
+            tracks += acquire_paths(
+                catalog,
+                local,
+                &paths,
+                None,
+                &|mut update| {
+                    if update.stage == SourceReadStage::Tracks {
+                        update.completed += tracks;
+                    }
+                    progress(update);
+                },
+                cancelled,
+            )
+            .await?;
         }
     }
-    acquire_imported_paths(catalog, local, None, cancelled).await?;
+    acquire_imported_paths(catalog, local, None, &|_| {}, cancelled).await?;
     if catalog.changes().metadata {
         catalog.record_imported_files(None).await?;
     }
@@ -217,7 +232,7 @@ pub(crate) async fn acquire_paths(
     rename: Option<&(PathBuf, PathBuf)>,
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
-) -> SourceResult<()> {
+) -> SourceResult<usize> {
     let database = catalog.database;
     let source_id = catalog.source_id;
     let roots = local
@@ -237,7 +252,7 @@ pub(crate) async fn acquire_paths(
         .map(|path| path.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
     if seeds.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     let rename =
         rename.map(|(old, new)| (normalize_observed_path(old), normalize_observed_path(new)));
@@ -247,7 +262,7 @@ pub(crate) async fn acquire_paths(
         .cloned()
         .collect::<Vec<_>>();
     let parsers = local_workers();
-    acquire_directories(
+    let mut completed = acquire_directories(
         catalog,
         local,
         &directories,
@@ -275,7 +290,7 @@ pub(crate) async fn acquire_paths(
             ))
         })
         .collect::<Vec<_>>();
-    acquire_component(
+    completed += acquire_component(
         catalog,
         &roots,
         local,
@@ -283,20 +298,20 @@ pub(crate) async fn acquire_paths(
         &prefixes,
         &directories,
         rename.as_ref(),
-        progress,
+        &|mut update| {
+            if update.stage == SourceReadStage::Tracks {
+                update.completed += completed;
+            }
+            progress(update);
+        },
         cancelled,
         &parsers,
     )
     .await?;
     crate::file::artwork::ArtworkFiles::Local
-        .acquire(catalog, progress, cancelled)
+        .acquire(catalog, cancelled)
         .await?;
-    progress(SourceReadProgress {
-        stage: SourceReadStage::Finalizing,
-        completed: 0,
-        total: None,
-    });
-    Ok(())
+    Ok(completed)
 }
 
 async fn require_roots(
@@ -333,7 +348,7 @@ async fn require_roots(
     Ok(())
 }
 
-pub(super) fn normalize_observed_path(path: &Path) -> PathBuf {
+pub(crate) fn normalize_observed_path(path: &Path) -> PathBuf {
     if let Ok(path) = fs::canonicalize(path) {
         return path;
     }
@@ -367,7 +382,7 @@ async fn acquire_component(
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
     parsers: &[Arc<Mutex<media::Worker>>],
-) -> SourceResult<()> {
+) -> SourceResult<usize> {
     let database = catalog.database;
     let source_id = catalog.source_id;
     let stamp = catalog.observed;
@@ -379,6 +394,7 @@ async fn acquire_component(
     });
 
     let mut after = None;
+    let mut renamed_missing = None;
     loop {
         let page = database
             .source_component_page(source_id, seeds, prefixes, after.as_deref())
@@ -416,6 +432,15 @@ async fn acquire_component(
                 audio.push(path);
             }
         }
+        // Rename matching still needs the old observation when native file IDs are absent.
+        if let Some((old, new)) = rename
+            && new.is_file()
+            && let Some(position) = missing
+                .iter()
+                .position(|path| path == old.to_string_lossy().as_ref())
+        {
+            renamed_missing = Some(missing.swap_remove(position));
+        }
         if !missing.is_empty() {
             check_cancelled(cancelled)?;
             catalog
@@ -448,7 +473,21 @@ async fn acquire_component(
         });
         if !audio.is_empty() {
             parsed += acquire_audio_batch(
-                catalog, roots, &audio, cancelled, true, rename, parsers, true,
+                catalog,
+                roots,
+                &audio,
+                cancelled,
+                true,
+                rename,
+                parsers,
+                true,
+                &|count| {
+                    progress(SourceReadProgress {
+                        stage: SourceReadStage::Tracks,
+                        completed: parsed + count,
+                        total: None,
+                    })
+                },
             )
             .await?;
             progress(SourceReadProgress {
@@ -465,14 +504,12 @@ async fn acquire_component(
         }
     }
 
-    {
-        progress(SourceReadProgress {
-            stage: SourceReadStage::Finalizing,
-            completed: parsed,
-            total: None,
-        });
+    if let Some(path) = renamed_missing {
+        catalog
+            .remove_source_files(&[path], stamp.expect("file observation"))
+            .await?;
     }
-    Ok(())
+    Ok(parsed)
 }
 
 async fn acquire_exact_cue(
@@ -535,10 +572,6 @@ async fn acquire_exact_cue(
         }
     }
     let accepted = tracks.len();
-    let observed_tracks = tracks
-        .into_iter()
-        .map(|track| track.into_observation(media::accepted_at()))
-        .collect::<Vec<_>>();
     let mut observations = vec![file_observation(
         roots,
         path,
@@ -552,15 +585,25 @@ async fn acquire_exact_cue(
             .map(PathBuf::from)
             .filter(|path| path.is_file() && roots.iter().any(|root| path.starts_with(root)))
         {
-            observations.push(file_observation(
+            let mut observation = file_observation(
                 roots,
                 &path,
                 library::LocalFileKind::Media,
                 library::LocalFileState::Accepted,
                 &[],
-            )?);
+            )?;
+            if let Some(track) = tracks.iter().find(|track| {
+                track.track.source_path.as_deref() == Some(path.to_string_lossy().as_ref())
+            }) {
+                track.observe_images(&mut observation.0)?;
+            }
+            observations.push(observation);
         }
     }
+    let observed_tracks = tracks
+        .into_iter()
+        .map(|track| track.into_observation(media::accepted_at()))
+        .collect::<Vec<_>>();
     check_cancelled(cancelled)?;
     catalog
         .write_file_observations(&observations, observed_tracks, admit)
@@ -574,7 +617,7 @@ pub(crate) async fn acquire_catalog(
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
     reuse_unchanged: bool,
-) -> SourceResult<()> {
+) -> SourceResult<usize> {
     acquire_directories(
         catalog,
         local,
@@ -585,9 +628,7 @@ pub(crate) async fn acquire_catalog(
         true,
         &local_workers(),
     )
-    .await?;
-    acquire_imported_paths(catalog, local, None, cancelled).await?;
-    Ok(())
+    .await
 }
 
 pub(crate) async fn import_paths(
@@ -623,7 +664,7 @@ pub(crate) async fn import_paths(
         .purge_source_file_absences(stamp.expect("file observation"))
         .await?;
     crate::file::artwork::ArtworkFiles::Local
-        .acquire(catalog, progress, cancelled)
+        .acquire(catalog, cancelled)
         .await?;
     let playlist = catalog
         .create_observed_playlist(stamp.unwrap(), name)
@@ -641,12 +682,12 @@ async fn acquire_directories(
     reuse_unchanged: bool,
     admit: bool,
     parsers: &[Arc<Mutex<media::Worker>>],
-) -> SourceResult<()> {
+) -> SourceResult<usize> {
     let database = catalog.database;
     let source_id = catalog.source_id;
     let stamp = catalog.observed;
     if starts.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     let roots = local
         .roots()
@@ -672,14 +713,19 @@ async fn acquire_directories(
                 )
                 .await?;
         } else if is_cue(path) {
-            if !reuse_unchanged
-                || unchanged_cue(catalog, &roots, path, admit, cancelled)
-                    .await?
-                    .is_none()
-            {
-                completed +=
-                    acquire_exact_cue(catalog, &roots, path, true, admit, cancelled).await?;
-            }
+            completed += match if reuse_unchanged {
+                unchanged_cue(catalog, &roots, path, admit, cancelled).await?
+            } else {
+                None
+            } {
+                Some(count) => count,
+                None => acquire_exact_cue(catalog, &roots, path, true, admit, cancelled).await?,
+            };
+            progress(SourceReadProgress {
+                stage: SourceReadStage::Tracks,
+                completed,
+                total: None,
+            });
         } else {
             let kind = if crate::file::artwork::supported_image(path) {
                 library::LocalFileKind::Image
@@ -701,7 +747,6 @@ async fn acquire_directories(
                 .await?;
         }
     }
-    let mut listed = 0;
     for root in local.roots() {
         let mut after = None;
         while let Some(directory) = database
@@ -710,6 +755,9 @@ async fn acquire_directories(
         {
             after = Some(directory.clone());
             let directory = PathBuf::from(directory);
+            if !starts.iter().any(|start| directory.starts_with(start)) {
+                continue;
+            }
             check_cancelled(cancelled)?;
             let mut observations = Vec::with_capacity(LOCAL_BATCH_SIZE);
             for entry in
@@ -724,17 +772,18 @@ async fn acquire_directories(
                 let kind = entry
                     .file_type()
                     .map_err(|error| SourceError::Other(error.to_string()))?;
-                listed += 1;
                 if kind.is_file() && is_cue(&path) {
-                    if !reuse_unchanged
-                        || unchanged_cue(catalog, &roots, &path, admit, cancelled)
-                            .await?
-                            .is_none()
-                    {
-                        completed +=
+                    completed += match if reuse_unchanged {
+                        unchanged_cue(catalog, &roots, &path, admit, cancelled).await?
+                    } else {
+                        None
+                    } {
+                        Some(count) => count,
+                        None => {
                             acquire_exact_cue(catalog, &roots, &path, true, admit, cancelled)
-                                .await?;
-                    }
+                                .await?
+                        }
+                    };
                     progress(SourceReadProgress {
                         stage: SourceReadStage::Tracks,
                         completed,
@@ -765,8 +814,8 @@ async fn acquire_directories(
                         .await?;
                     observations.clear();
                     progress(SourceReadProgress {
-                        stage: SourceReadStage::Files,
-                        completed: listed,
+                        stage: SourceReadStage::Tracks,
+                        completed,
                         total: None,
                     });
                 }
@@ -783,12 +832,17 @@ async fn acquire_directories(
                 .write_file_observations(&observations, Vec::new(), admit)
                 .await?;
             progress(SourceReadProgress {
-                stage: SourceReadStage::Files,
-                completed: listed,
+                stage: SourceReadStage::Tracks,
+                completed,
                 total: None,
             });
         }
     }
+    progress(SourceReadProgress {
+        stage: SourceReadStage::Tracks,
+        completed,
+        total: None,
+    });
     for root in local.roots() {
         let mut after = None;
         loop {
@@ -819,6 +873,11 @@ async fn acquire_directories(
                 .await?;
             let paths = page
                 .into_iter()
+                .filter(|file| {
+                    starts
+                        .iter()
+                        .any(|start| Path::new(&file.path).starts_with(start))
+                })
                 .filter(|file| !dependencies.contains(&file.path))
                 .map(|file| PathBuf::from(file.path))
                 .collect::<Vec<_>>();
@@ -831,6 +890,13 @@ async fn acquire_directories(
                 None,
                 parsers,
                 admit,
+                &|count| {
+                    progress(SourceReadProgress {
+                        stage: SourceReadStage::Tracks,
+                        completed: completed + count,
+                        total: None,
+                    })
+                },
             )
             .await?;
             progress(SourceReadProgress {
@@ -840,7 +906,7 @@ async fn acquire_directories(
             });
         }
     }
-    Ok(())
+    Ok(completed)
 }
 
 async fn unchanged_cue(
@@ -849,7 +915,7 @@ async fn unchanged_cue(
     path: &Path,
     admit: bool,
     cancelled: &(dyn Fn() -> bool + Send + Sync),
-) -> SourceResult<Option<Vec<String>>> {
+) -> SourceResult<Option<usize>> {
     let database = catalog.database;
     let source_id = catalog.source_id;
     let observation = file_observation(
@@ -910,7 +976,11 @@ async fn unchanged_cue(
             admit,
         )
         .await?;
-    Ok(Some(stored.dependencies))
+    Ok(Some(
+        database
+            .source_file_track_count(source_id, &stored.path)
+            .await?,
+    ))
 }
 
 async fn retained_cue_dependencies(
@@ -954,6 +1024,7 @@ async fn acquire_audio_batch(
     explicit_rename: Option<&(PathBuf, PathBuf)>,
     parsers: &[Arc<Mutex<media::Worker>>],
     admit: bool,
+    progress: &(dyn Fn(usize) + Send + Sync),
 ) -> SourceResult<usize> {
     if paths.is_empty() {
         return Ok(0);
@@ -970,15 +1041,22 @@ async fn acquire_audio_batch(
     let mut accepted: Vec<ScannedTrack> = Vec::with_capacity(paths.len());
     let mut aliases = Vec::new();
     let mut observations = Vec::with_capacity(paths.len());
+    let mut worker_index = 0;
     let jobs = paths
         .iter()
-        .filter(|path| !unchanged.contains_key(path.to_string_lossy().as_ref()))
         .cloned()
-        .enumerate()
-        .map(|(index, path)| (path, Arc::clone(&parsers[index % parsers.len()])))
+        .map(|path| {
+            let state = unchanged.get(path.to_string_lossy().as_ref()).copied();
+            let worker = Arc::clone(&parsers[worker_index % parsers.len()]);
+            worker_index += usize::from(state.is_none());
+            (path, state, worker)
+        })
         .collect::<Vec<_>>();
-    let mut reads = stream::iter(jobs.into_iter().map(|(path, worker)| async move {
+    let mut reads = stream::iter(jobs.into_iter().map(|(path, state, worker)| async move {
         check_cancelled(cancelled)?;
+        if let Some(state) = state {
+            return Ok((path, Some(state), None));
+        }
         let read = tokio::task::spawn_blocking(move || {
             let mut worker = worker.lock().unwrap_or_else(|error| error.into_inner());
             let read = read_media(&mut worker, path.clone(), None);
@@ -987,31 +1065,39 @@ async fn acquire_audio_batch(
         .await
         .map_err(|error| SourceError::Other(error.to_string()))?;
         check_cancelled(cancelled)?;
-        Ok::<_, SourceError>(read)
+        Ok::<_, SourceError>((read.0, None, Some(read.1)))
     }))
-    .buffered(parsers.len())
-    .try_collect::<BTreeMap<_, _>>()
-    .await?;
-    for path in paths {
-        if let Some(state) = unchanged.get(path.to_string_lossy().as_ref()) {
+    .buffered(parsers.len());
+    let mut accepted_count = 0;
+    let mut reported = Instant::now();
+    while let Some((path, state, read)) = reads.try_next().await? {
+        if let Some(state) = state {
             observations.push(file_observation(
                 roots,
-                path,
+                &path,
                 library::LocalFileKind::Media,
-                *state,
+                state,
                 &[],
             )?);
+            if state == library::LocalFileState::Accepted {
+                accepted_count += 1;
+                if reported.elapsed() >= Duration::from_millis(100) {
+                    progress(accepted_count);
+                    reported = Instant::now();
+                }
+            }
             continue;
         }
-        match reads.remove(path).unwrap_or(MediaRead::Unreadable) {
+        match read.expect("uncached media is read before staging") {
             MediaRead::Accepted(mut track) => {
-                let observation = file_observation(
+                let mut observation = file_observation(
                     roots,
-                    path,
+                    &path,
                     library::LocalFileKind::Media,
                     library::LocalFileState::Accepted,
                     &[],
                 )?;
+                track.observe_images(&mut observation.0)?;
                 observations.push(observation);
                 if let Some(uri) = track.track.media_uri.as_deref()
                     && let Some((object_id, _)) = database.source_track_file(uri).await?
@@ -1046,12 +1132,17 @@ async fn acquire_audio_batch(
                         track.track.object_id.clone(),
                     ));
                 }
-                accepted.push(*track)
+                accepted.push(*track);
+                accepted_count += 1;
+                if reported.elapsed() >= Duration::from_millis(100) {
+                    progress(accepted_count);
+                    reported = Instant::now();
+                }
             }
             MediaRead::Rejected => {
                 let observation = file_observation(
                     roots,
-                    path,
+                    &path,
                     library::LocalFileKind::Media,
                     library::LocalFileState::Rejected,
                     &[],
@@ -1061,7 +1152,7 @@ async fn acquire_audio_batch(
             MediaRead::Unreadable => {
                 let observation = file_observation(
                     roots,
-                    path,
+                    &path,
                     library::LocalFileKind::Media,
                     library::LocalFileState::Unreadable,
                     &[],
@@ -1070,7 +1161,6 @@ async fn acquire_audio_batch(
             }
         }
     }
-    let accepted_count = accepted.len();
     let facts = accepted
         .into_iter()
         .map(|track| track.into_observation(media::accepted_at()))
@@ -1083,7 +1173,7 @@ async fn acquire_audio_batch(
     catalog
         .write_file_observations(&observations, facts, admit)
         .await?;
-
+    progress(accepted_count);
     Ok(accepted_count)
 }
 
@@ -1348,13 +1438,15 @@ pub(crate) async fn acquire_imported_paths(
     catalog: &mut library::Catalog<'_>,
     local: &LocalSource,
     playlist: Option<library::PlaylistKey>,
+    progress: &(dyn Fn(usize) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
-) -> SourceResult<()> {
+) -> SourceResult<usize> {
     let database = catalog.database;
     let source_id = catalog.source_id;
     let stamp = catalog.observed;
     let mut after = String::new();
     let parsers = local_workers();
+    let mut completed = 0;
     loop {
         let page = database.imported_local_uri_page(playlist, &after).await?;
         if page.is_empty() {
@@ -1394,7 +1486,17 @@ pub(crate) async fn acquire_imported_paths(
             {
                 continue;
             }
-            let access = if let Some(path) = library::file_media_path(&uri) {
+            let observed = database.observed_media_file(&uri).await?;
+            if let Some(document) = observed.as_ref().and_then(|file| {
+                library::document_access_uri(&file.path)
+                    .or_else(|| file.path.starts_with("content:").then(|| file.path.clone()))
+            }) {
+                documents.push((uri, document));
+                continue;
+            }
+            let access = if let Some(file) = observed {
+                Some(PathBuf::from(file.path))
+            } else if let Some(path) = library::file_media_path(&uri) {
                 if path.is_file() {
                     Some(path)
                 } else if let Some((_, access)) = super::local_file_location(local.roots(), &path)
@@ -1442,7 +1544,13 @@ pub(crate) async fn acquire_imported_paths(
             }
             uris.push((uri, cue, access));
         }
-        acquire_imported_documents(catalog, documents, cancelled).await?;
+        completed += acquire_imported_documents(
+            catalog,
+            documents,
+            &|count| progress(completed + count),
+            cancelled,
+        )
+        .await?;
         if !aliases.is_empty() {
             check_cancelled(cancelled)?;
             catalog.merge_local_file_uris(&aliases).await?;
@@ -1481,26 +1589,34 @@ pub(crate) async fn acquire_imported_paths(
             .chain(local.roots().iter().map(PathBuf::as_path))
             .collect::<BTreeSet<_>>();
         for path in &cues {
-            if unchanged_cue(catalog, &roots, path, true, cancelled)
-                .await?
-                .is_none()
-            {
-                acquire_exact_cue(catalog, &roots, path, true, true, cancelled).await?;
-            }
+            completed += match unchanged_cue(catalog, &roots, path, true, cancelled).await? {
+                Some(count) => count,
+                None => acquire_exact_cue(catalog, &roots, path, true, true, cancelled).await?,
+            };
+            progress(completed);
         }
-        acquire_audio_batch(
-            catalog, &roots, &paths, cancelled, true, None, &parsers, true,
+        completed += acquire_audio_batch(
+            catalog,
+            &roots,
+            &paths,
+            cancelled,
+            true,
+            None,
+            &parsers,
+            true,
+            &|count| progress(completed + count),
         )
         .await?;
     }
-    Ok(())
+    Ok(completed)
 }
 
 async fn acquire_imported_documents(
     catalog: &mut library::Catalog<'_>,
     documents: Vec<(String, String)>,
+    progress: &(dyn Fn(usize) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
-) -> SourceResult<()> {
+) -> SourceResult<usize> {
     let mut files = Vec::with_capacity(documents.len());
     for (uri, access) in documents {
         check_cancelled(cancelled)?;
@@ -1545,7 +1661,7 @@ async fn acquire_imported_documents(
         ));
     }
     if files.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     let candidates = catalog
         .database
@@ -1559,6 +1675,7 @@ async fn acquire_imported_documents(
         .await?;
     let mut observations = Vec::with_capacity(files.len());
     let mut tracks = Vec::new();
+    let mut completed = 0;
     for (uri, mut file) in files {
         check_cancelled(cancelled)?;
         let access = file.path.clone();
@@ -1611,13 +1728,7 @@ async fn acquire_imported_documents(
                         file.revision.as_deref(),
                         file.size_bytes,
                     );
-                    file.picture_index = Some(match &track.local_artwork {
-                        Some(crate::LocalImageRef::Embedded { picture_index, .. }) => {
-                            i64::from(*picture_index)
-                        }
-                        _ => -1,
-                    });
-                    file.artist_pictures = Some(serde_json::to_string(&track.artist_pictures)?);
+                    track.observe_images(&mut file)?;
                     file.state = library::LocalFileState::Accepted;
                     tracks.push(track.into_observation(media::accepted_at()));
                 }
@@ -1627,10 +1738,14 @@ async fn acquire_imported_documents(
                 }
             }
         }
+        if file.state == library::LocalFileState::Accepted {
+            completed += 1;
+            progress(completed);
+        }
         observations.push((file, Vec::new()));
     }
     catalog
         .write_file_observations(&observations, tracks, true)
         .await?;
-    Ok(())
+    Ok(completed)
 }

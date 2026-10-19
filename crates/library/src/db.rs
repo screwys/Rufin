@@ -2,7 +2,7 @@
 //! It creates no runtime and contains no product query policy.
 
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -70,6 +70,7 @@ type CatalogObserver = dyn Fn(
     + Sync;
 
 struct DatabaseInner {
+    path: PathBuf,
     writer: Arc<Mutex<Option<SqliteConnection>>>,
     readers: SqlitePool,
     export_readers: SqlitePool,
@@ -77,7 +78,7 @@ struct DatabaseInner {
     general_read: Arc<Semaphore>,
     distinct_track_covers: AtomicBool,
     catalog_observer: std::sync::Mutex<Option<Arc<CatalogObserver>>>,
-    lyrics_writes: tokio::sync::watch::Sender<()>,
+    cache_writes: tokio::sync::watch::Sender<()>,
 }
 
 /// Final ownership of one fixed writer and the bounded read-only pool.
@@ -87,12 +88,16 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn subscribe_lyrics_cache_writes(&self) -> tokio::sync::watch::Receiver<()> {
-        self.inner.lyrics_writes.subscribe()
+    pub fn path(&self) -> &Path {
+        &self.inner.path
     }
 
-    pub(crate) fn lyrics_cache_written(&self) {
-        self.inner.lyrics_writes.send_replace(());
+    pub fn subscribe_cache_writes(&self) -> tokio::sync::watch::Receiver<()> {
+        self.inner.cache_writes.subscribe()
+    }
+
+    pub(crate) fn cache_written(&self) {
+        self.inner.cache_writes.send_replace(());
     }
 
     pub fn observe_catalog<F, Work>(&self, observer: F)
@@ -196,6 +201,10 @@ impl Database {
         Self::open_configured(path, &[], None).await
     }
 
+    pub async fn open_snapshot(path: impl AsRef<Path>) -> LibraryResult<Self> {
+        Self::open_final(path.as_ref()).await
+    }
+
     pub async fn open_configured(
         path: impl AsRef<Path>,
         configured: &[crate::SourceId],
@@ -255,7 +264,7 @@ impl Database {
                     .await?
             }
             44..=46 => crate::migration::import_current(input, destination, catalog).await?,
-            0 | 47 => {
+            0 | 47 | 48 | 49 | 50 => {
                 if input != destination {
                     Self::relocate(input, destination).await?;
                 }
@@ -299,6 +308,7 @@ impl Database {
         let export_readers = open_readers(path, 0, 1, 1).await?;
         Ok(Self {
             inner: Arc::new(DatabaseInner {
+                path: path.to_owned(),
                 writer: Arc::new(Mutex::new(Some(writer))),
                 readers,
                 export_readers,
@@ -306,7 +316,7 @@ impl Database {
                 general_read: Arc::new(Semaphore::new(1)),
                 distinct_track_covers: AtomicBool::new(false),
                 catalog_observer: std::sync::Mutex::new(None),
-                lyrics_writes: tokio::sync::watch::channel(()).0,
+                cache_writes: tokio::sync::watch::channel(()).0,
             }),
         })
     }
@@ -336,9 +346,27 @@ impl Database {
         sqlx::query("UPDATE sources SET observation_stamp=observation_stamp+1,freshness=NULL WHERE object_id=?1").bind(source_id.as_str()).execute(&mut *transaction).await?;
         for kind in ["track", "album", "artist", "genre", "mood", "folder"] {
             let prefix = crate::keys::source_entity_prefix(source_id, kind);
+            loop {
+                let keys:Vec<String>=sqlx::query_scalar("DELETE FROM user_media_state WHERE media_uri IN (SELECT media_uri FROM user_media_state WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN(SELECT media_uri FROM tracks WHERE source_key=?2) LIMIT 128) RETURNING media_uri")
+                    .bind(&prefix).bind(source).fetch_all(&mut *transaction).await?;
+                if keys.is_empty() {
+                    break;
+                }
+                crate::profile::write_local_on(
+                    &mut transaction,
+                    &keys
+                        .into_iter()
+                        .map(|key| crate::ConnectRecord {
+                            kind: "state".into(),
+                            key,
+                            value: None,
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .await?;
+            }
             for query in [
                 "DELETE FROM lyrics_cache WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
-                "DELETE FROM user_media_state WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
                 "DELETE FROM native_media_state WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
                 "DELETE FROM favorite_outbox WHERE substr(media_uri,1,length(?1))=?1 OR media_uri IN (SELECT media_uri FROM tracks WHERE source_key=?2)",
             ] {
@@ -363,6 +391,15 @@ impl Database {
             .bind(source)
             .execute(&mut *transaction)
             .await?;
+        if source.is_some() {
+            crate::connect::mark_current_on(
+                &mut transaction,
+                "catalog:source",
+                &serde_json::json!([source_id.as_str(), source_id.as_str()]).to_string(),
+                true,
+            )
+            .await?;
+        }
         let removed = sqlx::query("DELETE FROM sources WHERE source_key=?1")
             .bind(source)
             .execute(&mut *transaction)
@@ -373,7 +410,7 @@ impl Database {
         Ok(removed)
     }
 
-    pub(crate) async fn writer(
+    pub async fn writer(
         &self,
     ) -> LibraryResult<tokio::sync::MutexGuard<'_, Option<SqliteConnection>>> {
         let writer = self.inner.writer.lock().await;
@@ -460,6 +497,38 @@ pub(crate) async fn open_writer(path: &Path) -> LibraryResult<SqliteConnection> 
         return Err(error.into());
     }
     Ok(connection)
+}
+
+#[allow(unsafe_code)]
+pub(crate) async fn copy_database(
+    source: &mut SqliteConnection,
+    destination: &mut SqliteConnection,
+) -> LibraryResult<()> {
+    destination.clear_cached_statements().await?;
+    let mut source = source.lock_handle().await?;
+    let mut destination = destination.lock_handle().await?;
+    // SAFETY: SQLx keeps both handles alive and excludes its workers for these guards.
+    unsafe {
+        let destination = destination.as_raw_handle().as_ptr();
+        let backup = libsqlite3_sys::sqlite3_backup_init(
+            destination,
+            c"main".as_ptr(),
+            source.as_raw_handle().as_ptr(),
+            c"main".as_ptr(),
+        );
+        if !backup.is_null() {
+            let copied = libsqlite3_sys::sqlite3_backup_step(backup, -1);
+            let finished = libsqlite3_sys::sqlite3_backup_finish(backup);
+            if copied == libsqlite3_sys::SQLITE_DONE && finished == libsqlite3_sys::SQLITE_OK {
+                return Ok(());
+            }
+        }
+        Err(LibraryError::InvalidStore(
+            std::ffi::CStr::from_ptr(libsqlite3_sys::sqlite3_errmsg(destination))
+                .to_string_lossy()
+                .into_owned(),
+        ))
+    }
 }
 
 fn reader_options(path: &Path) -> SqliteConnectOptions {

@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.screwys.rufin.shared.rufin_core.Action as ConnectAction
 import io.github.screwys.rufin.shared.playback.PlaybackOutput
 import io.github.screwys.rufin.shared.playback.RemoteOutput
 import io.github.screwys.rufin.shared.playback.RemoteOutputProtocol
@@ -117,6 +118,14 @@ internal fun PlayerOutputSheet(player: PlayerConnection, onDismiss: () -> Unit) 
                 remotes.filter { it.protocol == RemoteOutputProtocol.RUFIN_CONNECT }).distinctBy { it.id }
             if (connectOutputs.isNotEmpty()) item {
                 Text(translate("Rufin Connect"), Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.titleMedium)
+            }
+            val continuation = devices.firstOrNull { connect?.settings?.enabled == true && it.enrolled && it.reachable && it.hasPlayback }
+            if (continuation != null) item(key = "connect-continue") {
+                TextButton({ player.model.connect.action(ConnectAction.Continue(continuation.id)); onDismiss() }, Modifier.fillMaxWidth()) {
+                    RufinIcon("rufin-media-playback-start-symbolic", null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(translate("Continue from {device}").replace("{device}", continuation.name), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
             items(connectOutputs, key = { "connect:${it.id}" }) { output ->
                 val key = "connect:${output.id}"

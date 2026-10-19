@@ -47,38 +47,8 @@ const MAX_ACTIVE_DOWNLOADS: usize = 3;
 pub struct Downloads {
     root: Arc<PathBuf>,
     commands: Sender<Command>,
-    connect: Arc<Mutex<Option<Weak<dyn ConnectDownload>>>>,
+    peer: sources::PeerAccess,
     status: tokio::sync::watch::Receiver<DownloadStatus>,
-}
-
-/// Connect supplies peer media; this actor retains download scheduling and files.
-pub trait ConnectDownload: Send + Sync {
-    fn enabled(&self) -> bool;
-    fn quality(&self) -> DownloadQuality;
-    fn reuse<'a>(
-        &'a self,
-        uri: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send + 'a>>;
-    fn destination<'a>(
-        &'a self,
-        uri: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<PathBuf>, String>> + Send + 'a>>;
-    fn finish<'a>(
-        &'a self,
-        file: library::ConnectMediaFile,
-        destination: &'a Path,
-    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
-    fn remove<'a>(
-        &'a self,
-        uri: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<usize, String>> + Send + 'a>>;
-    fn transfer<'a>(
-        &'a self,
-        uri: &'a str,
-        partial: &'a Path,
-        quality: DownloadQuality,
-        cancel: tokio_util::sync::CancellationToken,
-    ) -> Pin<Box<dyn Future<Output = sources::SourceResult<library::ConnectMediaFile>> + Send + 'a>>;
 }
 
 /// Holds the existing download actor at a completed command boundary during restore.
@@ -376,11 +346,15 @@ async fn load_queue(
     Ok(jobs)
 }
 
-async fn load_direct_queue(root: &Path) -> Result<Vec<DownloadJob>, String> {
+async fn load_direct_queue(
+    root: &Path,
+    database: &Database,
+    settings: &HashMap<SourceId, SourceDownloadSettings>,
+) -> Result<Vec<DownloadJob>, String> {
     let Some((bytes, recovered, path, part)) = read_queue_file(root, None)? else {
         return Ok(Vec::new());
     };
-    let queue: QueueFile = serde_json::from_slice(&bytes)
+    let mut queue: QueueFile = serde_json::from_slice(&bytes)
         .map_err(|error| format!("could not decode {}: {error}", path.display()))?;
     if queue.version != QUEUE_VERSION {
         return Err("the saved direct download queue has an unsupported version".to_string());
@@ -388,7 +362,73 @@ async fn load_direct_queue(root: &Path) -> Result<Vec<DownloadJob>, String> {
     if recovered && let Err(error) = std::fs::rename(&part, &path) {
         warn!(%error, path=%part.display(), "could not finish recovering the direct download queue");
     }
-    Ok(queue.jobs)
+    queue.jobs.retain(|job| !matches!(&job.subject, DownloadSubject::Prepared { context_id, .. } if context_id=="connect-local"));
+    let mut grouped = HashMap::<Option<SourceId>, Vec<DownloadJob>>::new();
+    for mut job in queue.jobs {
+        let completed = std::mem::take(&mut job.completed);
+        let remaining = std::mem::take(&mut job.remaining);
+        let mut split = HashMap::<Option<SourceId>, DownloadJob>::new();
+        for (completed, uri) in completed
+            .into_iter()
+            .map(|uri| (true, uri))
+            .chain(remaining.into_iter().map(|uri| (false, uri)))
+        {
+            let source = media_source_id(database, &uri).await;
+            let part = split.entry(source).or_insert_with(|| job.clone());
+            if completed {
+                part.completed.push(uri);
+            } else {
+                part.remaining.push(uri);
+            }
+        }
+        for (source, job) in split {
+            if !job.remaining.is_empty() {
+                grouped.entry(source).or_default().push(job);
+            }
+        }
+    }
+    let direct = grouped.remove(&None).unwrap_or_default();
+    for (source, jobs) in grouped {
+        let source = source.unwrap();
+        let key = database
+            .source_identity_key(&source)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or("The download source is unavailable")?;
+        let directory = settings
+            .get(&source)
+            .and_then(|settings| settings.directory.as_ref());
+        let mut saved = load_queue(root, &source, database, key, directory).await?;
+        for job in jobs {
+            if let Some(existing) = saved.iter_mut().find(|existing| existing.id == job.id) {
+                let mut completed = existing.completed.iter().cloned().collect::<HashSet<_>>();
+                let mut remaining = existing.remaining.iter().cloned().collect::<HashSet<_>>();
+                existing.completed.extend(
+                    job.completed
+                        .into_iter()
+                        .filter(|uri| completed.insert(uri.clone())),
+                );
+                existing.remaining.extend(
+                    job.remaining
+                        .into_iter()
+                        .filter(|uri| !completed.contains(uri) && remaining.insert(uri.clone())),
+                );
+                existing.remaining.retain(|uri| !completed.contains(uri));
+            } else {
+                saved.push(job);
+            }
+        }
+        persist_queue(root, Some(&source), &saved).await?;
+    }
+    persist_queue(root, None, &direct).await?;
+    let queued = direct
+        .iter()
+        .flat_map(|job| job.remaining.iter().cloned())
+        .collect();
+    cleanup_staging(root, None, None, &queued)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(direct)
 }
 
 async fn released_queue_media_uri(
@@ -434,8 +474,15 @@ async fn released_queue_media_uri(
         .map(|uri| (uri, staging_identity)))
 }
 
-fn media_source_id(media_uri: &str) -> Option<SourceId> {
-    library::source_entity_parts(media_uri).map(|(source, _, _)| source)
+async fn media_source_id(database: &Database, media_uri: &str) -> Option<SourceId> {
+    if let Some((source, _, _)) = library::source_entity_parts(media_uri) {
+        return Some(source);
+    }
+    database
+        .track_source_by_uri(media_uri, &library::ReadCancellation::new())
+        .await
+        .ok()
+        .flatten()
 }
 
 fn rebind_released_subject(
@@ -515,7 +562,7 @@ struct ActiveDownload {
     quality: DownloadQuality,
     cancellation: Option<tokio::sync::oneshot::Sender<()>>,
     task: tokio::task::JoinHandle<Result<(), DownloadFailure>>,
-    connect_receipt: Arc<Mutex<Option<library::ConnectMediaFile>>>,
+    revision: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -749,7 +796,7 @@ struct Actor {
     database: Database,
     events: DownloadEvents,
     transfers: Arc<TransferClients>,
-    connect: Arc<Mutex<Option<Weak<dyn ConnectDownload>>>>,
+    peer: sources::PeerAccess,
     prepared_rules: Sender<PreparedRules>,
     attached: HashMap<SourceId, AttachedSource>,
     settings: HashMap<SourceId, SourceDownloadSettings>,
@@ -758,13 +805,13 @@ struct Actor {
     jobs: HashMap<Option<SourceId>, Vec<DownloadJob>>,
     paused: bool,
     next_job: u64,
-    connect_after: Option<String>,
 }
 
 impl Downloads {
-    pub fn install_connect(&self, connect: Weak<dyn ConnectDownload>) {
-        *self.connect.lock().unwrap_or_else(|p| p.into_inner()) = Some(connect);
+    pub fn peer_access(&self) -> sources::PeerAccess {
+        self.peer.clone()
     }
+
     pub fn default_directory(&self) -> &Path {
         &self.root
     }
@@ -784,7 +831,7 @@ impl Downloads {
             root: Arc::new(root),
             commands,
             status: changes,
-            connect: Arc::new(Mutex::new(None)),
+            peer: sources::PeerAccess::default(),
         };
         runtime.spawn(run(
             Actor {
@@ -796,7 +843,7 @@ impl Downloads {
                     status,
                 },
                 transfers: Arc::new(TransferClients::default()),
-                connect: Arc::clone(&downloads.connect),
+                peer: downloads.peer.clone(),
                 prepared_rules,
                 attached: HashMap::new(),
                 settings: settings
@@ -808,7 +855,6 @@ impl Downloads {
                 jobs: HashMap::new(),
                 paused: false,
                 next_job: 0,
-                connect_after: None,
             },
             receiver,
             rule_results,
@@ -951,10 +997,10 @@ impl Downloads {
 }
 
 async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiver<PreparedRules>) {
-    if let Err(error) = actor.restore_direct_download_access().await {
+    if let Err(error) = migrate_download_records(&actor.root, &actor.database, None, None).await {
         warn!(%error, "could not restore direct download access");
     }
-    match load_direct_queue(&actor.root).await {
+    match load_direct_queue(&actor.root, &actor.database, &actor.settings).await {
         Ok(jobs) if !jobs.is_empty() => {
             actor.jobs.insert(None, jobs);
             actor.publish(None).await;
@@ -972,10 +1018,6 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
         }
         if let Ok(prepared) = rule_results.try_recv() {
             actor.apply_prepared_rules(prepared, &mut active).await;
-            continue;
-        }
-        if actor.fill_connect_collection().await {
-            tokio::task::yield_now().await;
             continue;
         }
         actor.fill_slots(&mut active).await;
@@ -1034,61 +1076,6 @@ async fn wait_for_finished(
 }
 
 impl Actor {
-    // Feed one bounded page into the existing queue. Finish that page before
-    // reading more, including when its transfers are waiting for a peer.
-    async fn fill_connect_collection(&mut self) -> bool {
-        let subject = DownloadSubject::Prepared {
-            context_id: "connect-local".into(),
-            title: None,
-        };
-        if self.paused
-            || self
-                .jobs
-                .values()
-                .flatten()
-                .any(|job| job.subject == subject)
-        {
-            return false;
-        }
-        let Some(after) = self.connect_after.take() else {
-            return false;
-        };
-        let connect = self
-            .connect
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_ref()
-            .and_then(Weak::upgrade)
-            .filter(|connect| connect.enabled());
-        let Some(connect) = connect else { return false };
-        let page = match self.database.connect_local_media_page(&after).await {
-            Ok(page) => page,
-            Err(error) => {
-                warn!(%error, "could not read local collection downloads");
-                return false;
-            }
-        };
-        self.connect_after = page.last().cloned();
-        let mut missing = Vec::new();
-        for uri in page {
-            match connect.reuse(&uri).await {
-                Ok(true) => {}
-                Ok(false) => missing.push(uri),
-                Err(error) => {
-                    warn!(%error, "could not reuse local collection media");
-                    missing.push(uri);
-                }
-            }
-        }
-        if missing.is_empty() {
-            return self.connect_after.is_some();
-        }
-        let _ = self
-            .enqueue(None, subject, DownloadQuality::Original, missing, false)
-            .await;
-        false
-    }
-
     async fn apply(&mut self, command: Command, active: &mut Vec<ActiveDownload>) {
         match command {
             Command::ClearArtworkCache(response) => {
@@ -1169,7 +1156,7 @@ impl Actor {
                 let mut grouped = HashMap::<Option<SourceId>, Vec<String>>::new();
                 for media_uri in media_uris {
                     grouped
-                        .entry(media_source_id(&media_uri))
+                        .entry(media_source_id(&self.database, &media_uri).await)
                         .or_default()
                         .push(media_uri);
                 }
@@ -1201,14 +1188,13 @@ impl Actor {
                 }
             }
             Command::ConnectChanged => {
-                self.connect_after = Some(String::new());
                 self.retry_waiting();
             }
             Command::Remove { media_uris, notify } => {
                 let mut grouped = HashMap::<Option<SourceId>, Vec<String>>::new();
                 for media_uri in media_uris {
                     grouped
-                        .entry(media_source_id(&media_uri))
+                        .entry(media_source_id(&self.database, &media_uri).await)
                         .or_default()
                         .push(media_uri);
                 }
@@ -1350,31 +1336,45 @@ impl Actor {
                     job.state = DownloadQueueState::Queued;
                 }
             }
-            let directory = self
-                .attached
-                .get(&source_id)
-                .and_then(|source| source.directory.as_ref());
-            match load_download_records(&self.root, Some(&source_id), directory).await {
-                Ok(records) => {
-                    let mut replacements: HashMap<DownloadSubject, Vec<String>> = HashMap::new();
-                    for (uri, record) in records {
-                        for owner in record.owners {
-                            let subject = match owner {
-                                DownloadOwner::Subject(subject) => subject,
-                                DownloadOwner::Retained => DownloadSubject::Prepared {
-                                    context_id: "retained-downloads".into(),
-                                    title: None,
-                                },
-                            };
-                            replacements.entry(subject).or_default().push(uri.clone());
-                        }
+            let mut after = (String::new(), String::new());
+            loop {
+                let records = match self
+                    .database
+                    .download_files_page(Some(source_id.as_str()), &after, None)
+                    .await
+                {
+                    Ok(records) if records.is_empty() => break,
+                    Ok(records) => records,
+                    Err(error) => {
+                        warn!(%error, "could not read downloads for a quality change");
+                        break;
                     }
-                    for (subject, uris) in replacements {
-                        self.enqueue(Some(source_id.clone()), subject, quality, uris, true)
-                            .await;
+                };
+                let last = records.last().unwrap();
+                after = (last.media_uri.clone(), last.encoding.clone());
+                let mut replacements: HashMap<DownloadSubject, Vec<String>> = HashMap::new();
+                for record in records {
+                    let Ok(owners) = download_owners(&record) else {
+                        continue;
+                    };
+                    for owner in owners {
+                        let subject = match owner {
+                            DownloadOwner::Subject(subject) => subject,
+                            DownloadOwner::Retained => DownloadSubject::Prepared {
+                                context_id: "retained-downloads".into(),
+                                title: None,
+                            },
+                        };
+                        replacements
+                            .entry(subject)
+                            .or_default()
+                            .push(record.media_uri.clone());
                     }
                 }
-                Err(error) => warn!(%error, "could not read downloads for a quality change"),
+                for (subject, uris) in replacements {
+                    self.enqueue(Some(source_id.clone()), subject, quality, uris, true)
+                        .await;
+                }
             }
         }
         for source_id in source_ids {
@@ -1501,11 +1501,10 @@ impl Actor {
             return Ok(());
         }
         let mut attachment_error = None;
-        if let Err(error) = attach_downloaded_files(
+        if let Err(error) = migrate_download_records(
             &self.root,
             &self.database,
-            source_key,
-            &source_id,
+            Some((source_key, &source_id)),
             directory.as_ref(),
         )
         .await
@@ -1532,7 +1531,13 @@ impl Actor {
                 }
             }
         };
+        let quality = self.settings_for(&source_id).quality;
         jobs.retain_mut(|job| {
+            if job.quality != quality {
+                job.quality = quality;
+                job.replace_unknown = true;
+                job.remaining.append(&mut job.completed);
+            }
             job.state = if source_available {
                 DownloadQueueState::Queued
             } else {
@@ -1564,32 +1569,152 @@ impl Actor {
         source_id: Option<&SourceId>,
         media_uri: &str,
         owner: &DownloadOwner,
-        custom_directory: Option<&DownloadDirectory>,
         quality: DownloadQuality,
         replace_unknown: bool,
     ) -> Result<bool, String> {
-        let connect = self
-            .connect
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+        let automatic = matches!(owner, DownloadOwner::Subject(DownloadSubject::Rule(_)));
+        let reference = self
+            .database
+            .connect_track_reference(media_uri)
+            .await
+            .map_err(|error| error.to_string())?
+            .filter(|reference| {
+                reference["local_media"].as_bool() == Some(true)
+                    || library::file_media_path(media_uri).is_some()
+                    || library::cue_media_parts(media_uri).is_some()
+                    || library::document_media_id(media_uri).is_some()
+            });
+        let encoding = library::media_encoding_key(quality.encoding());
+        let previous = self
+            .database
+            .connect_media_file(media_uri, &encoding)
+            .await
+            .map_err(|error| error.to_string())?;
+        let revision = reference
             .as_ref()
-            .and_then(Weak::upgrade);
-        if let Some(connect) = connect.filter(|connect| connect.enabled())
-            && (library::file_media_path(media_uri).is_some()
-                || library::cue_media_parts(media_uri).is_some())
+            .map(|reference| reference["revision"].to_string());
+        let mut saved = previous
+            .as_ref()
+            .filter(|file| {
+                revision
+                    .as_ref()
+                    .is_none_or(|revision| *revision == file.revision)
+            })
+            .cloned();
+        if saved.is_none()
+            && let Some(revision) = &revision
         {
-            return connect.reuse(media_uri).await;
+            saved = self
+                .database
+                .connect_backing_media_file(media_uri, &encoding, revision)
+                .await
+                .map_err(|error| error.to_string())?;
         }
-        add_owner_to_existing_download(
-            &self.root,
-            source_id,
-            media_uri,
-            owner,
-            custom_directory,
-            quality,
-            replace_unknown,
-        )
-        .await
+        if saved.is_none() && reference.is_none() && !replace_unknown {
+            saved = self
+                .database
+                .connect_media_file(media_uri, "unknown")
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        if saved.is_none()
+            && previous.is_none()
+            && !automatic
+            && quality == DownloadQuality::Original
+            && let Some(location) = self
+                .peer
+                .original_file(&self.database, media_uri)
+                .await
+                .map_err(|error| error.to_string())?
+        {
+            let (path, root, relative) = match location {
+                library::LocalMediaLocation::File(path) => (
+                    reqwest::Url::from_file_path(&path)
+                        .map(String::from)
+                        .map_err(|_| "Media path must be absolute")?,
+                    path.parent()
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .into_owned(),
+                    path.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                library::LocalMediaLocation::Document(uri) => (uri.clone(), uri, String::new()),
+            };
+            saved = Some(library::ConnectMediaFile {
+                media_uri: media_uri.into(),
+                encoding,
+                revision: revision.unwrap_or_default(),
+                path,
+                storage_root: root,
+                relative_path: relative,
+                managed: false,
+                ..Default::default()
+            });
+        }
+        let saved = match saved {
+            Some(file) => {
+                let paths = completed_download_paths(&self.root, &file)?;
+                paths
+                    .audio
+                    .inspect()
+                    .await?
+                    .filter(|metadata| {
+                        !metadata.size.is_some_and(|size| {
+                            file.completed_size
+                                .is_some_and(|expected| size != expected as u64)
+                        })
+                    })
+                    .map(|_| (file, paths))
+            }
+            None => None,
+        };
+        if automatic
+            && saved.as_ref().is_none_or(|(file, _)| !file.managed)
+            && self
+                .peer
+                .original_file(&self.database, media_uri)
+                .await
+                .map_err(|error| error.to_string())?
+                .is_some()
+        {
+            return Ok(true);
+        }
+        let Some((mut file, paths)) = saved else {
+            return Ok(false);
+        };
+        file.media_uri = media_uri.into();
+        file.source_id = source_id.map(ToString::to_string);
+        let mut owners = download_owners(&file)?;
+        if !owners.insert(owner.clone())
+            && previous.as_ref().is_some_and(|previous| {
+                previous.path == file.path && previous.revision == file.revision
+            })
+        {
+            self.retire_previous_files(&mut file).await?;
+            return Ok(true);
+        }
+        file.owners = serde_json::to_string(&owners).map_err(|error| error.to_string())?;
+        let source = source_id
+            .and_then(|source| self.attached.get(source))
+            .map(|source| source.source_key);
+        let access =
+            download_access(&self.database, media_uri, &paths, file.completed_size).await?;
+        file.storage_root = access.root.clone();
+        file.relative_path = access.relative_path.clone();
+        file.completed_size = Some(access.size_bytes);
+        self.database
+            .commit_download(&file, source, &access)
+            .await
+            .map_err(|error| error.to_string())?;
+        if let Some(previous) =
+            previous.filter(|old| old.path != file.path || old.revision != file.revision)
+        {
+            self.retire_receipt(&previous).await?;
+        }
+        Ok(true)
     }
 
     async fn enqueue(
@@ -1608,7 +1733,6 @@ impl Actor {
                 .and_then(|attached| attached.source.as_ref())
                 .and_then(Weak::upgrade)
                 .is_some();
-        let custom_directory = attached.and_then(|attached| attached.directory.clone());
         let can_start = !self.paused && source_available;
 
         let mut seen = HashSet::new();
@@ -1629,7 +1753,6 @@ impl Actor {
                     source_id.as_ref(),
                     media_uri,
                     &owner,
-                    custom_directory.as_ref(),
                     quality,
                     replace_unknown,
                 )
@@ -1759,40 +1882,39 @@ impl Actor {
             .map(|download| download.job_id.clone());
         let owner = DownloadOwner::Subject(subject.clone());
 
-        let custom_directory = self
-            .attached
-            .get(&source_id)
-            .and_then(|attached| attached.directory.as_ref());
-        let records =
-            match load_download_records(&self.root, Some(&source_id), custom_directory).await {
+        let owner_key = serde_json::to_string(&owner).expect("download ownership can be stored");
+        let mut after = (String::new(), String::new());
+        loop {
+            let records = match self
+                .database
+                .download_files_page(Some(source_id.as_str()), &after, Some(&owner_key))
+                .await
+            {
+                Ok(records) if records.is_empty() => break,
                 Ok(records) => records,
                 Err(error) => {
                     warn!(%error, %source_id, "could not read rule downloads");
                     return;
                 }
             };
-        for (identity, mut record) in records {
-            if desired.contains(&identity) || !record.owners.remove(&owner) {
-                continue;
-            }
-            record.owners.extend(self.queued_owners_for_track(
-                &source_id,
-                &identity,
-                Some(&subject),
-            ));
-            let Ok(paths) =
-                record_download_paths(&self.root, Some(&source_id), &record, custom_directory)
-            else {
-                continue;
-            };
-            if record.owners.is_empty() {
-                if let Err(error) = remove_download_files(&paths).await {
-                    warn!(%error, %source_id, media_uri=%record.media_uri, "could not remove stale rule download");
+            let last = records.last().unwrap();
+            after = (last.media_uri.clone(), last.encoding.clone());
+            for mut record in records {
+                if desired.contains(&record.media_uri) {
                     continue;
                 }
-                self.remove_download_access(&record, &paths).await;
-            } else if let Err(error) = write_record(&paths, &record).await {
-                warn!(%error, %source_id, media_uri=%record.media_uri, "could not update rule ownership");
+                let Ok(mut owners) = download_owners(&record) else {
+                    continue;
+                };
+                owners.remove(&owner);
+                owners.extend(self.queued_owners_for_track(
+                    &source_id,
+                    &record.media_uri,
+                    Some(&subject),
+                ));
+                if let Err(error) = self.store_owners(&mut record, owners).await {
+                    warn!(%error, %source_id, media_uri=%record.media_uri, "could not update rule ownership");
+                }
             }
         }
 
@@ -1808,7 +1930,6 @@ impl Actor {
                     Some(&source_id),
                     media_uri,
                     &owner,
-                    custom_directory,
                     quality,
                     replace_unknown,
                 )
@@ -1924,7 +2045,6 @@ impl Actor {
                     source_id.as_ref(),
                     &media_uri,
                     &owner,
-                    custom_directory,
                     quality,
                     replace_unknown,
                 )
@@ -1945,42 +2065,22 @@ impl Actor {
                     continue;
                 }
             }
-            let connect = if (library::file_media_path(&media_uri).is_some()
-                || library::cue_media_parts(&media_uri).is_some())
-                && self
-                    .database
-                    .connect_track_reference(&media_uri)
+            let peer_reference = self
+                .database
+                .connect_track_reference(&media_uri)
+                .await
+                .ok()
+                .flatten()
+                .filter(|reference| {
+                    reference["local_media"].as_bool() == Some(true)
+                        || library::file_media_path(&media_uri).is_some()
+                        || library::cue_media_parts(&media_uri).is_some()
+                        || library::document_media_id(&media_uri).is_some()
+                });
+            let resolved = if peer_reference.is_some() {
+                self.peer
+                    .download(&self.database, &media_uri, quality)
                     .await
-                    .ok()
-                    .flatten()
-                    .is_some()
-            {
-                self.connect
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .as_ref()
-                    .and_then(Weak::upgrade)
-                    .filter(|connect| connect.enabled())
-            } else {
-                None
-            };
-            if connect.is_none()
-                && matches!(&subject, DownloadSubject::Prepared { context_id, .. } if context_id == "connect-local")
-            {
-                if let Some(job) = self.find_job_mut(&source_id, &job_id) {
-                    job.state = DownloadQueueState::WaitingForConnection;
-                }
-                self.persist_and_publish(source_id.as_ref()).await;
-                continue;
-            }
-            let quality = connect
-                .as_ref()
-                .map_or(quality, |connect| connect.quality());
-            let resolved = if connect.is_some() {
-                Ok(ResolvedDownload::Ready {
-                    stream: ResolvedStream::new(&media_uri),
-                    codec: quality.encoding().map(|encoding| encoding.codec),
-                })
             } else if let Some(source) = source.as_ref() {
                 source
                     .resolve_download(&self.database, &media_uri, quality)
@@ -2015,32 +2115,57 @@ impl Actor {
                 custom_directory,
                 transcoded_extension,
             );
-            if let Some(connect) = &connect {
-                match connect.destination(&media_uri).await {
-                    Ok(Some(destination)) => {
-                        let directory = destination.parent();
-                        let native_directory =
-                            directory.map(|path| DownloadDirectory::Native(path.to_owned()));
-                        paths = staging_paths(
-                            &self.root,
-                            source_id.as_ref(),
+            if let Some(reference) = &peer_reference {
+                let backing = reference["backing_id"].as_str().unwrap_or(&media_uri);
+                let revision = reference["revision"].to_string();
+                let key = blake3::hash(
+                    format!(
+                        "{backing}\0{revision}\0{}",
+                        library::media_encoding_key(quality.encoding())
+                    )
+                    .as_bytes(),
+                )
+                .to_hex()
+                .to_string();
+                if custom_directory.is_none()
+                    && let Ok(Some((root, mut relative))) =
+                        self.peer.destination(&self.database, &media_uri).await
+                {
+                    let previous = self
+                        .database
+                        .connect_media_file(
                             &media_uri,
-                            native_directory.as_ref(),
-                        );
-                        paths.audio = DownloadAudio::Native {
-                            root: directory.map(Path::to_path_buf),
-                            path: destination,
-                        };
+                            &library::media_encoding_key(quality.encoding()),
+                        )
+                        .await
+                        .ok()
+                        .flatten();
+                    if (quality != DownloadQuality::Original
+                        || previous.is_some_and(|file| file.revision != revision))
+                        && let Some(name) = relative.last_mut()
+                    {
+                        let extension = quality
+                            .extension()
+                            .or_else(|| reference["source_format"].as_str())
+                            .unwrap_or("audio");
+                        *name = format!("{key}.{extension}");
                     }
-                    Ok(None) => {}
-                    Err(error) => {
-                        warn!(%error, %media_uri, "could not select Connect media storage");
-                        if let Some(job) = self.find_job_mut(&source_id, &job_id) {
-                            job.state = DownloadQueueState::NeedsAttention;
-                        }
-                        self.persist_and_publish(source_id.as_ref()).await;
-                        continue;
-                    }
+                    paths.audio = match root {
+                        library::LocalMediaLocation::File(root) => DownloadAudio::Native {
+                            path: relative
+                                .iter()
+                                .fold(root.clone(), |path, part| path.join(part)),
+                            root: Some(root),
+                        },
+                        library::LocalMediaLocation::Document(root) => DownloadAudio::Document {
+                            root,
+                            relative,
+                            file: None,
+                        },
+                    };
+                } else if let DownloadAudio::Native { path, .. } = &mut paths.audio {
+                    let extension = path.extension().unwrap_or_default().to_string_lossy();
+                    *path = path.with_file_name(format!("{key}.{extension}"));
                 }
             }
             let entering_download = state != DownloadQueueState::Downloading;
@@ -2055,8 +2180,11 @@ impl Actor {
             let task_paths = paths.clone();
             let transfers = Arc::clone(&self.transfers);
             let (cancellation, cancelled) = tokio::sync::oneshot::channel();
-            let connect_receipt = Arc::new(Mutex::new(None));
-            let receipt = Arc::clone(&connect_receipt);
+            let revision = Arc::new(Mutex::new(
+                peer_reference
+                    .as_ref()
+                    .map(|reference| reference["revision"].to_string()),
+            ));
             let uri = media_uri.clone();
             let database = self.database.clone();
             let artwork = self.artwork.clone();
@@ -2064,98 +2192,85 @@ impl Actor {
                 .as_ref()
                 .map_or([0; 32], |source| source.input_digest);
             let task_source_id = source_id.clone();
+            let peer_assets = peer_reference.is_some().then(|| self.peer.clone());
+            let task_revision = Arc::clone(&revision);
             let task = tokio::spawn(async move {
                 let mut cancelled = cancelled;
-                if let Some(connect) = connect {
-                    prepare_download_directories(&task_paths)
-                        .await
-                        .map_err(download_source_failure)?;
-                    let cancel = tokio_util::sync::CancellationToken::new();
-                    let transfer =
-                        connect.transfer(&uri, &task_paths.audio_part, quality, cancel.clone());
-                    tokio::pin!(transfer);
-                    let result = tokio::select! {
-                        result = &mut transfer => result,
-                        _ = &mut cancelled => { cancel.cancel(); transfer.await },
+                match resolved.map_err(download_source_failure)? {
+                    ResolvedDownload::Encode { stream, encoding } => {
+                        encode_download(stream, encoding, &task_paths, &mut cancelled)
+                            .await
+                            .map_err(download_source_failure)?;
                     }
-                    .map_err(download_source_failure)?;
-                    *receipt.lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
-                } else {
-                    match resolved.map_err(download_source_failure)? {
-                        ResolvedDownload::Encode { stream, encoding } => {
-                            encode_download(stream, encoding, &task_paths, &mut cancelled)
+                    ResolvedDownload::Ready { stream, codec } => {
+                        let needs_encoding = match run_transfer(
+                            task_source_id.as_ref(),
+                            &uri,
+                            quality,
+                            &stream,
+                            &task_paths,
+                            &transfers,
+                            &mut cancelled,
+                        )
+                        .await
+                        {
+                            Ok(revision) => {
+                                if let Some(revision) = revision {
+                                    *task_revision.lock().unwrap_or_else(|p| p.into_inner()) =
+                                        Some(revision);
+                                }
+                                if let Some(codec) = codec {
+                                    let path = task_paths.audio_part.clone();
+                                    tokio::task::spawn_blocking(move || {
+                                        sources::downloaded_codec(&path)
+                                    })
+                                    .await
+                                    .map_err(|error| {
+                                        DownloadFailure::NeedsAttention(error.to_string())
+                                    })? != Some(codec)
+                                } else {
+                                    false
+                                }
+                            }
+                            Err(SourceError::Server {
+                                status: 415 | 500 | 501,
+                                ..
+                            }) if codec.is_some() => true,
+                            Err(error) => return Err(download_source_failure(error)),
+                        };
+                        if needs_encoding {
+                            let source = source.as_ref().ok_or_else(|| {
+                                DownloadFailure::NeedsAttention(
+                                    "The audio format did not match the download profile".into(),
+                                )
+                            })?;
+                            let (ResolvedDownload::Ready {
+                                stream: original, ..
+                            }
+                            | ResolvedDownload::Encode {
+                                stream: original, ..
+                            }) = source
+                                .resolve_download(&database, &uri, DownloadQuality::Original)
                                 .await
                                 .map_err(download_source_failure)?;
-                        }
-                        ResolvedDownload::Ready { stream, codec } => {
-                            let needs_encoding = match run_transfer(
-                                task_source_id.as_ref(),
-                                &uri,
-                                quality,
-                                &stream,
+                            let encoding = quality
+                                .encoding()
+                                .expect("encoded downloads have a profile");
+                            encode_download(
+                                original.without_window(),
+                                encoding,
                                 &task_paths,
-                                &transfers,
                                 &mut cancelled,
                             )
                             .await
-                            {
-                                Ok(()) => {
-                                    if let Some(codec) = codec {
-                                        let path = task_paths.audio_part.clone();
-                                        tokio::task::spawn_blocking(move || {
-                                            sources::downloaded_codec(&path)
-                                        })
-                                        .await
-                                        .map_err(
-                                            |error| {
-                                                DownloadFailure::NeedsAttention(error.to_string())
-                                            },
-                                        )? != Some(codec)
-                                    } else {
-                                        false
-                                    }
-                                }
-                                Err(SourceError::Server {
-                                    status: 415 | 500 | 501,
-                                    ..
-                                }) if codec.is_some() => true,
-                                Err(error) => return Err(download_source_failure(error)),
-                            };
-                            if needs_encoding {
-                                let source = source.as_ref().ok_or_else(|| {
-                                    DownloadFailure::NeedsAttention(
-                                        "The audio format did not match the download profile"
-                                            .into(),
-                                    )
-                                })?;
-                                let (ResolvedDownload::Ready {
-                                    stream: original, ..
-                                }
-                                | ResolvedDownload::Encode {
-                                    stream: original, ..
-                                }) = source
-                                    .resolve_download(&database, &uri, DownloadQuality::Original)
-                                    .await
-                                    .map_err(download_source_failure)?;
-                                let encoding = quality
-                                    .encoding()
-                                    .expect("encoded downloads have a profile");
-                                encode_download(
-                                    original.without_window(),
-                                    encoding,
-                                    &task_paths,
-                                    &mut cancelled,
-                                )
-                                .await
-                                .map_err(download_source_failure)?;
-                            }
+                            .map_err(download_source_failure)?;
                         }
                     }
                 }
                 // Companion failures do not discard successfully downloaded audio.
                 tokio::select! {
                     _ = &mut cancelled => {},
-                    _ = cache_track_assets(&database, &artwork, source.as_deref(), &uri, input) => {},
+                    _ = cache_track_assets(&database, &artwork, source.as_deref(), peer_assets.as_ref(), &uri, input) => {},
                 }
                 Ok(())
             });
@@ -2168,7 +2283,7 @@ impl Actor {
                 quality,
                 cancellation: Some(cancellation),
                 task,
-                connect_receipt,
+                revision,
             });
         }
     }
@@ -2194,7 +2309,12 @@ impl Actor {
                 }
                 let media_uri = job.remaining.iter().find(|media_uri| {
                     !active.iter().any(|download| {
-                        download.source_id == *source_id && download.media_uri == **media_uri
+                        download.source_id == *source_id
+                            && library::cue_media_parts(&download.media_uri).map_or_else(
+                                || download.media_uri.clone(),
+                                |(_, backing, _, _)| backing,
+                            ) == library::cue_media_parts(media_uri)
+                                .map_or_else(|| (*media_uri).clone(), |(_, backing, _, _)| backing)
                     })
                 });
                 if let Some(media_uri) = media_uri {
@@ -2231,56 +2351,15 @@ impl Actor {
             subject,
             paths,
             quality,
-            connect_receipt,
+            revision,
             ..
         } = active;
         let result = match joined {
             Ok(Ok(())) => {
-                async {
-                    let receipt = connect_receipt
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .take();
-                    let connect = self
-                        .connect
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .as_ref()
-                        .and_then(Weak::upgrade);
-                    if let (Some(receipt), Some(connect), Some(native)) =
-                        (receipt.as_ref(), connect.as_ref(), paths.audio.native())
-                    {
-                        connect
-                            .finish(receipt.clone(), native)
-                            .await
-                            .map_err(DownloadFailure::NeedsAttention)?;
-                        let _ = self
-                            .events
-                            .send(DownloadEvent::Changed {
-                                media_uri: media_uri.clone(),
-                                downloaded: true,
-                            })
-                            .await;
-                    } else {
-                        let published = self
-                            .commit_transfer(&source_id, &media_uri, &subject, &paths, quality)
-                            .await?;
-                        if let Some(mut receipt) = receipt {
-                            receipt.path = published
-                                .audio
-                                .access_uri()
-                                .map_err(DownloadFailure::NeedsAttention)?;
-                            self.database
-                                .connect_save_media_file(&receipt)
-                                .await
-                                .map_err(|error| {
-                                    DownloadFailure::NeedsAttention(error.to_string())
-                                })?;
-                        }
-                    }
-                    Ok(())
-                }
-                .await
+                let revision = revision.lock().unwrap_or_else(|p| p.into_inner()).take();
+                self.commit_transfer(&source_id, &media_uri, &subject, &paths, quality, revision)
+                    .await
+                    .map(|_| ())
             }
             Ok(Err(error)) => Err(error),
             Err(error) => Err(DownloadFailure::NeedsAttention(format!(
@@ -2327,122 +2406,118 @@ impl Actor {
         subject: &DownloadSubject,
         paths: &DownloadPaths,
         quality: DownloadQuality,
+        revision: Option<String>,
     ) -> Result<DownloadPaths, DownloadFailure> {
-        let finished = finalize_download(
-            paths,
-            media_uri.to_string(),
-            DownloadOwner::Subject(subject.clone()),
-            quality,
+        let mut file = library::ConnectMediaFile {
+            media_uri: media_uri.into(),
+            encoding: library::media_encoding_key(quality.encoding()),
+            revision: revision.unwrap_or_default(),
+            managed: true,
+            ..Default::default()
+        };
+        let previous = self
+            .database
+            .connect_media_file(media_uri, &file.encoding)
+            .await
+            .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
+        let finished = finalize_download(paths, previous.as_ref())
+            .await
+            .map_err(DownloadFailure::NeedsAttention)?;
+        let mut owners = previous
+            .as_ref()
+            .map(download_owners)
+            .transpose()
+            .map_err(DownloadFailure::NeedsAttention)?
+            .unwrap_or_default();
+        owners.insert(DownloadOwner::Subject(subject.clone()));
+        file.source_id = source_id.as_ref().map(ToString::to_string);
+        file.path = finished
+            .paths
+            .audio
+            .access_uri()
+            .map_err(DownloadFailure::NeedsAttention)?;
+        file.owners = serde_json::to_string(&owners)
+            .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
+        file.completed_size = Some(i64::try_from(finished.completed_size).unwrap_or(i64::MAX));
+        let mut retired: Vec<String> = previous
+            .as_ref()
+            .filter(|file| !file.retired_documents.is_empty())
+            .map(|file| serde_json::from_str(&file.retired_documents))
+            .transpose()
+            .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?
+            .unwrap_or_default();
+        if let Some(previous) = previous
+            .as_ref()
+            .filter(|old| old.managed && old.path != file.path)
+        {
+            let used = self
+                .database
+                .connect_media_file_users(previous)
+                .await
+                .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
+            if !used {
+                retired.push(previous.path.clone());
+            }
+        }
+        file.retired_documents = serde_json::to_string(&retired)
+            .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
+        let source = source_id
+            .as_ref()
+            .and_then(|id| self.attached.get(id))
+            .map(|source| source.source_key);
+        let access = download_access(
+            &self.database,
+            media_uri,
+            &finished.paths,
+            file.completed_size,
         )
         .await
         .map_err(DownloadFailure::NeedsAttention)?;
-        let paths = finished.paths;
-        let source = source_id
-            .as_ref()
-            .and_then(|source_id| self.attached.get(source_id))
-            .map(|attached| attached.source_key);
-        self.store_download_access(source, media_uri, &paths)
+        file.storage_root = access.root.clone();
+        file.relative_path = access.relative_path.clone();
+        self.database
+            .commit_download(&file, source, &access)
             .await
-            .map_err(DownloadFailure::NeedsAttention)?;
+            .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
         let _ = self
             .events
             .send(DownloadEvent::Changed {
-                media_uri: media_uri.to_string(),
+                media_uri: media_uri.into(),
                 downloaded: true,
             })
             .await;
-        if let Some(error) = finished.cleanup_error {
+        if let Err(error) = self.retire_previous_files(&mut file).await {
             let _ = self.events.send(DownloadEvent::Notice(error)).await;
         }
-        Ok(paths)
+        Ok(finished.paths)
     }
 
-    async fn restore_direct_download_access(&self) -> Result<(), String> {
-        for (_, record) in load_download_records(&self.root, None, None).await? {
-            let paths = record_download_paths(&self.root, None, &record, None)?;
-            self.store_download_access(None, &record.media_uri, &paths)
-                .await?;
+    async fn retire_previous_files(
+        &self,
+        file: &mut library::ConnectMediaFile,
+    ) -> Result<(), String> {
+        let mut retired: Vec<String> = serde_json::from_str(if file.retired_documents.is_empty() {
+            "[]"
+        } else {
+            &file.retired_documents
+        })
+        .map_err(|error| error.to_string())?;
+        while let Some(path) = retired.first() {
+            let old = library::ConnectMediaFile {
+                path: path.clone(),
+                managed: true,
+                ..file.clone()
+            };
+            self.remove_representation_bytes(&old).await?;
+            retired.remove(0);
+            file.retired_documents =
+                serde_json::to_string(&retired).map_err(|error| error.to_string())?;
+            self.database
+                .connect_save_media_file(file)
+                .await
+                .map_err(|error| error.to_string())?;
         }
         Ok(())
-    }
-
-    async fn store_download_access(
-        &self,
-        source: Option<SourceKey>,
-        media_uri: &str,
-        paths: &DownloadPaths,
-    ) -> Result<(), String> {
-        let catalog = self
-            .database
-            .download_metadata(media_uri)
-            .await
-            .map_err(|error| error.to_string())?;
-        let (title, album, artist, disc_number, track_number, duration_millis, loudness) =
-            if let Some(track) = catalog {
-                (
-                    track.title,
-                    track.album,
-                    track.artist,
-                    track.disc_number,
-                    track.track_number,
-                    track.duration_millis,
-                    track.loudness_analysis_key.try_into().ok(),
-                )
-            } else {
-                (
-                    "Untitled".to_string(),
-                    String::new(),
-                    String::new(),
-                    0,
-                    0,
-                    0,
-                    None,
-                )
-            };
-        let metadata = paths
-            .audio
-            .inspect()
-            .await?
-            .ok_or("The downloaded file is unavailable")?;
-        let size = match metadata.size {
-            Some(size) => size,
-            None => serde_json::from_slice::<DownloadRecord>(
-                &tokio::fs::read(&paths.record)
-                    .await
-                    .map_err(|error| error.to_string())?,
-            )
-            .map_err(|error| error.to_string())?
-            .completed_size
-            .ok_or("The download record has no completed size")?,
-        };
-        let (storage_root, relative_path) = local_access_projection(paths)?;
-        self.database
-            .write_local_access(
-                source,
-                &[&library::LocalAccessWrite {
-                    media_uri: media_uri.to_string(),
-                    origin: library::LocalAccessOrigin::Download,
-                    path: paths.audio.location()?,
-                    root: storage_root,
-                    relative_path,
-                    size_bytes: i64::try_from(size).unwrap_or(i64::MAX),
-                    mtime_ns: metadata.mtime_ns,
-                    device_id: None,
-                    inode: None,
-                    parser_version: RECORD_VERSION as i64,
-                    title,
-                    album,
-                    artist,
-                    disc_number,
-                    track_number,
-                    duration_millis,
-                    access_uri: paths.audio.access_uri()?,
-                    loudness_analysis_key: loudness,
-                }],
-            )
-            .await
-            .map(|_| ())
-            .map_err(|error| error.to_string())
     }
 
     async fn abort_matching(
@@ -2490,6 +2565,11 @@ impl Actor {
             let joined = download.task.await;
             let completed = matches!(joined, Ok(Ok(())));
             if completed && commit_completed {
+                let receipt = download
+                    .revision
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .take();
                 match self
                     .commit_transfer(
                         &download.source_id,
@@ -2497,6 +2577,7 @@ impl Actor {
                         &download.subject,
                         &download.paths,
                         download.quality,
+                        receipt,
                     )
                     .await
                 {
@@ -2745,102 +2826,79 @@ impl Actor {
 
     async fn delete_downloads(
         &self,
-        source_id: Option<&SourceId>,
+        _source_id: Option<&SourceId>,
         media_uris: impl IntoIterator<Item = String>,
     ) -> (usize, usize) {
-        let mut removed = 0usize;
-        let mut failed = 0usize;
-        let custom_directory = source_id
-            .and_then(|source_id| self.settings.get(source_id))
-            .and_then(|settings| settings.directory.as_ref());
-        let records = load_download_records(&self.root, source_id, custom_directory)
-            .await
-            .unwrap_or_default();
-        for media_uri in media_uris {
-            let connect = self
-                .connect
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .as_ref()
-                .and_then(Weak::upgrade);
-            if let Some(connect) = connect {
-                match connect.remove(&media_uri).await {
-                    Ok(count) => {
-                        removed += count;
-                        if count > 0 {
-                            let _ = self
-                                .events
-                                .send(DownloadEvent::Changed {
-                                    media_uri: media_uri.clone(),
-                                    downloaded: false,
-                                })
-                                .await;
+        let mut removed = 0;
+        let mut failed = 0;
+        for uri in media_uris {
+            match self.database.connect_media_files(&uri).await {
+                Ok(files) => {
+                    for file in files {
+                        match self.retire_receipt(&file).await {
+                            Ok(count) => removed += count,
+                            Err(error) => {
+                                failed += 1;
+                                warn!(%error, %uri, "could not remove downloaded media");
+                            }
                         }
                     }
-                    Err(error) => {
-                        failed += 1;
-                        warn!(%error, %media_uri, "could not remove Connect media");
-                    }
-                }
-            }
-            let Some(record) = records.get(&media_uri) else {
-                continue;
-            };
-            let Ok(paths) = record_download_paths(&self.root, source_id, record, custom_directory)
-            else {
-                failed += 1;
-                continue;
-            };
-            match remove_download_files(&paths).await {
-                Ok(was_present) => {
-                    self.remove_download_access(&record, &paths).await;
-                    removed += usize::from(was_present);
                 }
                 Err(error) => {
                     failed += 1;
-                    warn!(%error, source_id=?source_id, %media_uri, "could not remove downloaded track");
+                    warn!(%error, %uri, "could not read downloaded media");
                 }
             }
         }
         (removed, failed)
     }
 
-    async fn remove_download_access(&self, record: &DownloadRecord, paths: &DownloadPaths) {
-        let media_uri = record.media_uri.as_str();
-        let Ok(access) = self
+    async fn remove_representation_bytes(
+        &self,
+        file: &library::ConnectMediaFile,
+    ) -> Result<usize, String> {
+        let used = self
             .database
-            .retaining_download_rows(&[media_uri.to_string()], &library::ReadCancellation::new())
+            .connect_media_file_users(file)
             .await
-        else {
-            return;
-        };
-        let Some(access) = access.into_iter().next() else {
-            return;
-        };
-        if paths.audio.location().as_deref() == Ok(access.path.as_str())
-            && matches!(
-                self.database
-                    .remove_local_access(access.local_access_file_key)
-                    .await,
-                Ok(true)
-            )
-        {
-            let _ = self
-                .events
-                .send(DownloadEvent::Changed {
-                    media_uri: media_uri.to_string(),
+            .map_err(|error| error.to_string())?;
+        if !file.managed || used {
+            return Ok(0);
+        }
+        let paths = completed_download_paths(&self.root, file)?;
+        remove_download_files(&paths).await.map(usize::from)
+    }
+
+    async fn retire_receipt(&self, file: &library::ConnectMediaFile) -> Result<usize, String> {
+        let mut file = file.clone();
+        self.retire_previous_files(&mut file).await?;
+        let removed = self.remove_representation_bytes(&file).await?;
+        self.database
+            .connect_forget_media_file(&file)
+            .await
+            .map_err(|error| error.to_string())?;
+        let downloaded = !self
+            .database
+            .connect_media_files(&file.media_uri)
+            .await
+            .map_err(|error| error.to_string())?
+            .is_empty();
+        let _ = self
+            .events
+            .send(DownloadEvent::Changed {
+                media_uri: file.media_uri.clone(),
+                downloaded,
+            })
+            .await;
+        for owner in download_owners(&file)? {
+            if let DownloadOwner::Subject(subject) = owner {
+                let _ = self.events.try_send(DownloadEvent::SubjectChanged {
+                    subject,
                     downloaded: false,
-                })
-                .await;
-            for owner in &record.owners {
-                if let DownloadOwner::Subject(subject) = owner {
-                    let _ = self.events.try_send(DownloadEvent::SubjectChanged {
-                        subject: subject.clone(),
-                        downloaded: false,
-                    });
-                }
+                });
             }
         }
+        Ok(removed)
     }
 
     async fn send_removal_notice(&self, removed: usize, failed: usize) {
@@ -2944,46 +3002,56 @@ impl Actor {
         if media_ids.is_some_and(HashSet::is_empty) {
             return;
         }
-        let custom_directory = self
-            .attached
-            .get(source_id)
-            .and_then(|attached| attached.directory.as_ref());
-        let records =
-            match load_download_records(&self.root, Some(source_id), custom_directory).await {
+        let owner = DownloadOwner::Subject(subject.clone());
+        let owner_key = serde_json::to_string(&owner).expect("download ownership can be stored");
+        let mut after = (String::new(), String::new());
+        loop {
+            let records = match self
+                .database
+                .download_files_page(Some(source_id.as_str()), &after, Some(&owner_key))
+                .await
+            {
+                Ok(records) if records.is_empty() => break,
                 Ok(records) => records,
                 Err(error) => {
                     warn!(%error, %source_id, "could not read download ownership");
                     return;
                 }
             };
-        let owner = DownloadOwner::Subject(subject.clone());
-        for (identity, mut record) in records {
-            if media_ids.is_some_and(|media_ids| !media_ids.contains(&identity)) {
-                continue;
-            }
-            if !record.owners.remove(&owner) {
-                continue;
-            }
-            if retain {
-                record.owners.insert(DownloadOwner::Retained);
-            }
-            record
-                .owners
-                .extend(self.queued_owners_for_track(source_id, &identity, None));
-            let Ok(paths) =
-                record_download_paths(&self.root, Some(source_id), &record, custom_directory)
-            else {
-                continue;
-            };
-            if record.owners.is_empty() {
-                if let Err(error) = remove_download_files(&paths).await {
-                    warn!(%error, %source_id, media_uri=%record.media_uri, "could not remove unowned download");
+            let last = records.last().unwrap();
+            after = (last.media_uri.clone(), last.encoding.clone());
+            for mut record in records {
+                if media_ids.is_some_and(|ids| !ids.contains(&record.media_uri)) {
                     continue;
                 }
-                self.remove_download_access(&record, &paths).await;
-            } else if let Err(error) = write_record(&paths, &record).await {
-                warn!(%error, %source_id, media_uri=%record.media_uri, "could not update download ownership");
+                let Ok(mut owners) = download_owners(&record) else {
+                    continue;
+                };
+                owners.remove(&owner);
+                if retain {
+                    owners.insert(DownloadOwner::Retained);
+                }
+                owners.extend(self.queued_owners_for_track(source_id, &record.media_uri, None));
+                if let Err(error) = self.store_owners(&mut record, owners).await {
+                    warn!(%error, %source_id, media_uri=%record.media_uri, "could not update download ownership");
+                }
             }
+        }
+    }
+
+    async fn store_owners(
+        &self,
+        file: &mut library::ConnectMediaFile,
+        owners: HashSet<DownloadOwner>,
+    ) -> Result<(), String> {
+        if owners.is_empty() {
+            self.retire_receipt(file).await.map(|_| ())
+        } else {
+            file.owners = serde_json::to_string(&owners).map_err(|error| error.to_string())?;
+            self.database
+                .connect_save_media_file(file)
+                .await
+                .map_err(|error| error.to_string())
         }
     }
 
@@ -3034,22 +3102,33 @@ impl Actor {
             )
             .await
             .map_err(|error| error.to_string())?;
-            for (_, record) in
-                load_download_records(&self.root, Some(source_id), staging_directory.as_ref())
-                    .await?
-            {
-                let paths = record_download_paths(
-                    &self.root,
-                    Some(source_id),
-                    &record,
-                    staging_directory.as_ref(),
-                )?;
-                self.remove_download_access(&record, &paths).await;
-                remove_download_files(&paths).await?;
+            let mut after = (String::new(), String::new());
+            loop {
+                let records = self
+                    .database
+                    .download_files_page(Some(source_id.as_str()), &after, None)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let Some(last) = records.last() else {
+                    break;
+                };
+                after = (last.media_uri.clone(), last.encoding.clone());
+                for record in records {
+                    self.retire_receipt(&record).await?;
+                }
             }
-            match tokio::fs::remove_dir_all(&directory).await {
+            remove_file_if_present(&directory.join(QUEUE_FILE)).await?;
+            remove_file_if_present(&directory.join(QUEUE_PART_FILE)).await?;
+            match tokio::fs::remove_dir(&directory).await {
                 Ok(()) => Ok(()),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                    ) =>
+                {
+                    Ok(())
+                }
                 Err(error) => Err(format!("could not remove {}: {error}", directory.display())),
             }
         }
@@ -3131,9 +3210,15 @@ async fn cache_track_assets(
     database: &Database,
     artwork: &artwork::Artwork,
     source: Option<&Source>,
+    peer: Option<&sources::PeerAccess>,
     media_uri: &str,
     input_digest: [u8; 32],
 ) {
+    if let Some(peer) = peer
+        && let Err(error) = peer.cache_assets(database, media_uri, input_digest).await
+    {
+        warn!(%error, %media_uri, "could not download accompanying media");
+    }
     let images = async {
         let bindings = database
             .track_artwork_bindings(&[media_uri.to_owned()], &library::ReadCancellation::new())
@@ -3281,10 +3366,35 @@ mod tests {
         (directory, database, source, track)
     }
 
-    #[test]
-    fn queued_media_survives_restart_serialization() {
+    #[tokio::test]
+    async fn queued_media_survives_restart_serialization() {
         let source_id = SourceId::new("source");
-        let media_uri = library::source_entity_uri(&source_id, "track", "track");
+        let (root, database, source, _) = download_fixture("source", "track").await;
+        let media_uri = reqwest::Url::from_file_path(root.path().join("track.flac"))
+            .unwrap()
+            .to_string();
+        database
+            .catalog(source_id.as_str(), None)
+            .await
+            .unwrap()
+            .apply_catalog(
+                &library::CatalogBatch {
+                    tracks: vec![library::TrackObservation {
+                        object_id: "track".into(),
+                        media_uri: Some(media_uri.clone()),
+                        metadata: library::TrackMetadata {
+                            title: "Track".into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                true,
+            )
+            .await
+            .unwrap();
+        let direct = "https://media.example/direct.flac".to_string();
         let queue = QueueFile {
             version: QUEUE_VERSION,
             jobs: vec![DownloadJob {
@@ -3298,14 +3408,106 @@ mod tests {
                 replace_unknown: false,
                 completed: Vec::new(),
                 failed: false,
-                remaining: vec![media_uri.clone()],
+                remaining: vec![media_uri.clone(), direct.clone()],
                 state: DownloadQueueState::Queued,
             }],
         };
         let restored: QueueFile =
             serde_json::from_slice(&serde_json::to_vec(&queue).expect("encode Queue"))
                 .expect("decode Queue");
-        assert_eq!(restored.jobs[0].remaining, [media_uri]);
+        assert_eq!(
+            restored.jobs[0].remaining,
+            [media_uri.clone(), direct.clone()]
+        );
+        persist_queue(root.path(), None, &restored.jobs)
+            .await
+            .unwrap();
+        let mut already_saved = restored.jobs[0].clone();
+        already_saved.remaining = vec![media_uri.clone()];
+        persist_queue(root.path(), Some(&source_id), &[already_saved])
+            .await
+            .unwrap();
+        let old = staging_paths(root.path(), None, &media_uri, None);
+        let http = staging_paths(root.path(), None, &direct, None);
+        std::fs::create_dir_all(old.audio_part.parent().unwrap()).unwrap();
+        std::fs::write(&old.audio_part, b"old partial").unwrap();
+        std::fs::write(&http.audio_part, b"http partial").unwrap();
+        let settings = HashMap::new();
+        for _ in 0..2 {
+            let direct_queue = load_direct_queue(root.path(), &database, &settings)
+                .await
+                .unwrap();
+            assert_eq!(direct_queue[0].remaining, std::slice::from_ref(&direct));
+            let ordinary = load_queue(root.path(), &source_id, &database, source, None)
+                .await
+                .unwrap();
+            assert_eq!(ordinary.len(), 1);
+            assert_eq!(ordinary[0].remaining, std::slice::from_ref(&media_uri));
+        }
+        assert!(!old.audio_part.exists());
+        assert!(http.audio_part.exists());
+        let mut actor = actor_for_test(root.path(), database, &source_id, source);
+        let mut settings = SourceDownloadSettings::for_source(source_id.clone());
+        settings.quality = DownloadQuality::Transcoded(library::AudioEncoding {
+            codec: library::AudioCodec::Opus,
+            bitrate_kbps: Some(64),
+            channels: library::AudioChannels::Preserve,
+        });
+        actor.settings.insert(source_id.clone(), settings.clone());
+        actor
+            .attach(source_id.clone(), source, None, None, None, [0; 32])
+            .await
+            .unwrap();
+        assert_eq!(
+            actor.jobs[&Some(source_id.clone())][0].quality,
+            settings.quality
+        );
+        let paths = download_paths(root.path(), None, &media_uri);
+        let audio = paths.audio.native().unwrap();
+        std::fs::write(audio, b"saved audio").unwrap();
+        let record = ReleasedDownloadRecord {
+            version: RECORD_VERSION,
+            media_uri: media_uri.clone(),
+            quality: Some(DownloadQuality::Original),
+            owners: HashSet::from([DownloadOwner::Retained]),
+            audio: RecordedAudio::Native {
+                storage_root: None,
+                custom_storage: false,
+                relative_audio_path: Some(audio.file_name().unwrap().into()),
+            },
+            retired_documents: Vec::new(),
+            completed_size: Some(11),
+        };
+        std::fs::write(&paths.record, serde_json::to_vec(&record).unwrap()).unwrap();
+        migrate_download_records(root.path(), &actor.database, None, None)
+            .await
+            .unwrap();
+        let receipt = actor
+            .database
+            .connect_media_file(&media_uri, "original")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(receipt.source_id.as_deref(), Some(source_id.as_str()));
+        assert_eq!(std::fs::read(audio).unwrap(), b"saved audio");
+        assert_eq!(
+            actor
+                .database
+                .downloaded_count(Some(source_id.as_str()))
+                .await
+                .unwrap(),
+            1
+        );
+        actor
+            .apply(
+                Command::Remove {
+                    media_uris: vec![media_uri],
+                    notify: false,
+                },
+                &mut Vec::new(),
+            )
+            .await;
+        assert!(actor.jobs[&Some(source_id)].is_empty());
     }
 
     #[tokio::test]
@@ -3371,7 +3573,7 @@ mod tests {
             paths: paths.clone(),
             quality: DownloadQuality::Original,
             cancellation: None,
-            connect_receipt: Arc::new(Mutex::new(None)),
+            revision: Arc::new(Mutex::new(None)),
             task: tokio::spawn(async { Ok(()) }),
         };
         actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
@@ -3468,7 +3670,7 @@ mod tests {
             .enqueue(
                 Some(source.clone()),
                 subject.clone(),
-                DownloadQuality::Original,
+                DownloadQuality::Transcoded(library::AudioEncoding::mp3()),
                 vec![uri.clone()],
                 false,
             )
@@ -3476,16 +3678,6 @@ mod tests {
         let paths = download_paths(root.path(), Some(&source), &uri);
         std::fs::create_dir_all(paths.audio_part.parent().unwrap()).unwrap();
         std::fs::write(&paths.audio_part, b"verified peer bytes").unwrap();
-        let receipt = library::ConnectMediaFile {
-            media_uri: uri.clone(),
-            encoding: "mp3".into(),
-            revision: "original-revision-2".into(),
-            path: reqwest::Url::from_file_path(&paths.audio_part)
-                .unwrap()
-                .to_string(),
-            managed: true,
-            hash: Some("blob-hash".into()),
-        };
         assert!(
             database
                 .connect_media_file(&uri, "mp3")
@@ -3499,10 +3691,10 @@ mod tests {
             media_uri: uri.clone(),
             subject,
             paths: paths.clone(),
-            quality: DownloadQuality::Original,
+            quality: DownloadQuality::Transcoded(library::AudioEncoding::mp3()),
             cancellation: None,
             task: tokio::spawn(async { Ok(()) }),
-            connect_receipt: Arc::new(Mutex::new(Some(receipt))),
+            revision: Arc::new(Mutex::new(Some("original-revision-2".into()))),
         };
         actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
         assert_eq!(
@@ -3578,7 +3770,7 @@ mod tests {
                     paths,
                     quality: DownloadQuality::Original,
                     cancellation: None,
-                    connect_receipt: Arc::new(Mutex::new(None)),
+                    revision: Arc::new(Mutex::new(None)),
                     task: tokio::spawn(async { Ok(()) }),
                 };
                 let result = if index == 0 && fail_first {
@@ -3661,27 +3853,35 @@ mod tests {
         )
         .expect("write released Queue");
 
-        attach_downloaded_files(downloads.path(), &database, source_key, &source_id, None)
-            .await
-            .expect("attach released download");
-        let records = load_download_records(downloads.path(), Some(&source_id), None)
+        migrate_download_records(
+            downloads.path(),
+            &database,
+            Some((source_key, &source_id)),
+            None,
+        )
+        .await
+        .expect("attach released download");
+        let records = database
+            .download_files_page(
+                Some(source_id.as_str()),
+                &(String::new(), String::new()),
+                None,
+            )
             .await
             .expect("load migrated records");
-        let migrated = records.values().next().expect("migrated record");
+        let migrated = records.first().expect("migrated record");
         assert_eq!(
             migrated.media_uri,
             library::source_entity_uri(&source_id, "track", "track-object")
         );
         assert_eq!(migrated.completed_size, Some(14));
         assert_eq!(
-            match &migrated.audio {
-                RecordedAudio::Native {
-                    relative_audio_path,
-                    ..
-                } => relative_audio_path.as_deref(),
-                _ => panic!("expected native record"),
-            },
-            audio.file_name().map(Path::new)
+            Path::new(&migrated.relative_path),
+            audio.file_name().map(Path::new).unwrap()
+        );
+        assert!(
+            !record.exists(),
+            "released record is replaced by the completed registry"
         );
         assert!(audio.is_file());
 
@@ -3736,53 +3936,432 @@ mod tests {
         )
         .expect("write released custom record");
 
-        attach_downloaded_files(
+        migrate_download_records(
             downloads.path(),
             &database,
-            source_key,
-            &source_id,
+            Some((source_key, &source_id)),
             Some(&DownloadDirectory::Native(custom.path().to_owned())),
         )
         .await
         .expect("attach released custom download");
-        let records = load_download_records(
-            downloads.path(),
-            Some(&source_id),
-            Some(&DownloadDirectory::Native(custom.path().to_owned())),
-        )
-        .await
-        .expect("load migrated custom record");
-        let migrated = records.values().next().expect("migrated custom record");
+        let records = database
+            .download_files_page(
+                Some(source_id.as_str()),
+                &(String::new(), String::new()),
+                None,
+            )
+            .await
+            .expect("load migrated custom record");
+        let migrated = records.first().expect("migrated custom record");
         assert_eq!(
             migrated.media_uri,
             library::source_entity_uri(&source_id, "track", "custom-track")
         );
-        assert!(matches!(
-            migrated.audio,
-            RecordedAudio::Native {
-                custom_storage: true,
-                ..
-            }
-        ));
+        assert_eq!(Path::new(&migrated.storage_root), custom.path());
         assert!(
-            migrated
-                .owners
+            download_owners(migrated)
+                .unwrap()
                 .contains(&DownloadOwner::Subject(DownloadSubject::Rule(
                     DownloadRule::Favorites
                 )))
         );
-        assert_eq!(
-            match &migrated.audio {
-                RecordedAudio::Native {
-                    relative_audio_path,
-                    ..
-                } => relative_audio_path.as_deref(),
-                _ => panic!("expected native record"),
-            },
-            Some(relative.as_path())
-        );
+        assert_eq!(Path::new(&migrated.relative_path), relative.as_path());
         assert_eq!(migrated.completed_size, Some(12));
         assert!(custom.path().join(relative).is_file());
+    }
+
+    #[tokio::test]
+    async fn cue_backing_file_reuse_and_removal() {
+        let root = tempfile::tempdir().unwrap();
+        for (case, mapped, original_exists, quality, document) in [
+            ("existing", true, true, DownloadQuality::Original, false),
+            ("own", false, true, DownloadQuality::Original, false),
+            (
+                "source-mapped",
+                false,
+                true,
+                DownloadQuality::Transcoded(library::AudioEncoding::mp3()),
+                false,
+            ),
+            ("empty", true, false, DownloadQuality::Original, false),
+            ("private", false, false, DownloadQuality::Original, false),
+            (
+                "smaller",
+                true,
+                false,
+                DownloadQuality::Transcoded(library::AudioEncoding::mp3()),
+                false,
+            ),
+            ("document", true, false, DownloadQuality::Original, true),
+        ] {
+            let (_db_root, database, source, _) = download_fixture(case, "track").await;
+            let folder = root.path().join(case);
+            std::fs::create_dir_all(&folder).unwrap();
+            let original = folder.join("album.flac");
+            if original_exists {
+                std::fs::write(&original, b"whole audio").unwrap();
+            }
+            let mut actor = actor_for_test(root.path(), database, &SourceId::new(case), source);
+            let source_id = SourceId::new(case);
+            let client = Arc::new(
+                Source::open(
+                    sources::SourceConfiguration::local(
+                        source_id.clone(),
+                        "Local",
+                        vec![folder.clone()],
+                    )
+                    .unwrap(),
+                    None,
+                    None,
+                )
+                .unwrap(),
+            );
+            actor.attached.get_mut(&source_id).unwrap().source = Some(Arc::downgrade(&client));
+            let mut settings = SourceDownloadSettings::for_source(source_id.clone());
+            settings.quality = quality;
+            if case == "smaller" {
+                settings.directory = Some(DownloadDirectory::Native(root.path().join("custom")));
+                actor.attached.get_mut(&source_id).unwrap().directory = settings.directory.clone();
+            }
+            actor.settings.insert(source_id.clone(), settings);
+            if mapped {
+                actor.peer.set_folders(std::collections::BTreeMap::from([(
+                    case.into(),
+                    library::LocalMediaLocation::File(folder.clone()),
+                )]));
+            }
+            let own = original_exists && !mapped;
+            let remote = if own {
+                reqwest::Url::from_file_path(&original).unwrap().to_string()
+            } else if document {
+                "content://other-device/album.flac".to_owned()
+            } else {
+                reqwest::Url::from_file_path(root.path().join(format!("remote-{case}.flac")))
+                    .unwrap()
+                    .to_string()
+            };
+            let mut uris = Vec::new();
+            for index in 0..3 {
+                let uri = library::cue_media_uri(
+                    &format!("{case}:{index}"),
+                    &remote,
+                    index * 1000,
+                    (index + 1) * 1000,
+                );
+                actor.database.connect_apply(&[library::ConnectRecord {
+                    kind: "track".into(), key: uri.clone(), value: Some(serde_json::json!({
+                        "object_id":format!("{case}:{index}"), "media_uri":uri, "source_id":case,
+                        "title":format!("Track {index}"), "display_album":"Album", "display_artist":"Artist", "duration_millis":1000,
+                        "disc_number":1, "track_number":index+1, "relative_path":"album.flac", "source_format":"flac", "revision":"v1", "local_media":true
+                    })),
+                }]).await.unwrap();
+                actor
+                    .database
+                    .create_playlist(
+                        None,
+                        "Saved",
+                        &library::CatalogQuery::uris(
+                            library::CatalogKind::Track,
+                            vec![uri.clone()],
+                        )
+                        .selection(),
+                    )
+                    .await
+                    .unwrap();
+                if index == 0 {
+                    let source_id = SourceId::new(case);
+                    let rule = DownloadRule::EntireLibrary;
+                    let smaller = DownloadQuality::Transcoded(library::AudioEncoding::mp3());
+                    actor
+                        .reconcile_rule(
+                            source_id.clone(),
+                            rule,
+                            smaller,
+                            vec![uri.clone()],
+                            &mut Vec::new(),
+                        )
+                        .await;
+                    assert_eq!(
+                        actor.jobs[&Some(source_id.clone())].is_empty(),
+                        original_exists && mapped
+                    );
+                    if own {
+                        actor
+                            .database
+                            .upsert_local_locator(&library::LocalLocatorWrite {
+                                source_id: Some(case.into()),
+                                media_uri: remote.clone(),
+                                origin: if case == "source-mapped" {
+                                    "mapping"
+                                } else {
+                                    "import"
+                                }
+                                .into(),
+                                path: original.to_string_lossy().into_owned(),
+                                root: folder.to_string_lossy().into_owned(),
+                                relative_path: "album.flac".into(),
+                                access_uri: remote.clone(),
+                            })
+                            .await
+                            .unwrap();
+                        actor
+                            .reconcile_rule(
+                                source_id.clone(),
+                                rule,
+                                smaller,
+                                vec![uri.clone()],
+                                &mut Vec::new(),
+                            )
+                            .await;
+                        assert!(actor.jobs[&Some(source_id.clone())].is_empty());
+                    }
+                    assert!(
+                        actor
+                            .database
+                            .connect_media_files(&uri)
+                            .await
+                            .unwrap()
+                            .is_empty()
+                    );
+                    actor.remove_rule(&source_id, rule, true).await;
+                    assert_eq!(original.is_file(), original_exists);
+                }
+                actor
+                    .apply(
+                        Command::Download {
+                            subject: DownloadSubject::Prepared {
+                                context_id: format!("{case}:{index}"),
+                                title: None,
+                            },
+                            media_uris: vec![uri.clone()],
+                        },
+                        &mut Vec::new(),
+                    )
+                    .await;
+                if let Some(active) = actor.start_next(&[]).await {
+                    assert_eq!(active.source_id.as_ref(), Some(&source_id));
+                    assert_eq!(active.quality, quality);
+                    if case == "smaller" {
+                        assert!(
+                            active
+                                .paths
+                                .audio
+                                .native()
+                                .unwrap()
+                                .starts_with(root.path().join("custom"))
+                        );
+                    }
+                    active.task.abort();
+                    prepare_download_directories(&active.paths).await.unwrap();
+                    std::fs::write(&active.paths.audio_part, b"whole audio").unwrap();
+                    actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
+                }
+                uris.push(uri);
+            }
+            let mut paths = Vec::new();
+            for uri in &uris {
+                let file = actor
+                    .database
+                    .connect_media_file(uri, &library::media_encoding_key(quality.encoding()))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let managed = !original_exists || quality != DownloadQuality::Original;
+                assert_eq!(file.managed, managed);
+                if managed {
+                    let owner =
+                        DownloadOwner::Subject(DownloadSubject::Rule(DownloadRule::Favorites));
+                    assert!(
+                        actor
+                            .add_download_owner(
+                                Some(&SourceId::new(case)),
+                                uri,
+                                &owner,
+                                quality,
+                                false
+                            )
+                            .await
+                            .unwrap()
+                    );
+                    let retained = actor
+                        .database
+                        .connect_media_file(uri, &file.encoding)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    assert!(download_owners(&retained).unwrap().contains(&owner));
+                }
+                paths.push(file.path);
+            }
+            assert!(
+                paths.iter().all(|path| path == &paths[0]),
+                "shared backing for {case}"
+            );
+            let file = library::file_media_path(&paths[0]).unwrap();
+            let managed = !original_exists || quality != DownloadQuality::Original;
+            for (index, uri) in uris.into_iter().enumerate() {
+                let (removed, failed) = actor.delete_downloads(Some(&source_id), [uri]).await;
+                assert_eq!(failed, 0);
+                assert_eq!(removed, usize::from(index == 2 && managed));
+                assert_eq!(file.is_file(), index != 2 || !managed);
+            }
+            assert_eq!(original.is_file(), original_exists);
+        }
+    }
+
+    #[tokio::test]
+    async fn cue_concurrent_completion_and_revision_changes() {
+        let root = tempfile::tempdir().unwrap();
+        for original_exists in [false, true] {
+            let (_db_root, database, source, _) = download_fixture("cue", "track").await;
+            let mut actor = actor_for_test(root.path(), database, &SourceId::new("cue"), source);
+            let folder = root.path().join(format!("mapped-{original_exists}"));
+            std::fs::create_dir_all(&folder).unwrap();
+            let client = Arc::new(
+                Source::open(
+                    sources::SourceConfiguration::local(
+                        SourceId::new("cue"),
+                        "Local",
+                        vec![folder.clone()],
+                    )
+                    .unwrap(),
+                    None,
+                    None,
+                )
+                .unwrap(),
+            );
+            actor
+                .attached
+                .get_mut(&SourceId::new("cue"))
+                .unwrap()
+                .source = Some(Arc::downgrade(&client));
+            let original = folder.join("album.flac");
+            if original_exists {
+                std::fs::write(&original, b"old audio").unwrap();
+            }
+            actor.peer.set_folders(std::collections::BTreeMap::from([(
+                "cue".into(),
+                library::LocalMediaLocation::File(folder.clone()),
+            )]));
+            let remote = reqwest::Url::from_file_path(folder.join("remote.flac"))
+                .unwrap()
+                .to_string();
+            let mut uris = Vec::new();
+            for index in 0..3 {
+                let uri = library::cue_media_uri(
+                    &format!("{original_exists}:{index}"),
+                    &remote,
+                    index * 1000,
+                    (index + 1) * 1000,
+                );
+                actor.database.connect_apply(&[library::ConnectRecord {
+                    kind:"track".into(), key:uri.clone(), value:Some(serde_json::json!({
+                        "object_id":format!("{original_exists}:{index}"), "media_uri":uri, "source_id":"cue", "title":"Track", "display_album":"Album", "display_artist":"Artist", "duration_millis":1000,
+                        "relative_path":"album.flac", "source_format":"flac", "revision":"v1", "local_media":true
+                    })),
+                }]).await.unwrap();
+                uris.push(uri);
+            }
+            actor
+                .database
+                .create_playlist(
+                    None,
+                    "Saved",
+                    &library::CatalogQuery::uris(library::CatalogKind::Track, uris.clone())
+                        .selection(),
+                )
+                .await
+                .unwrap();
+            for (version, bytes) in [("v1", b"old audio"), ("v2", b"new audio")] {
+                for (index, uri) in uris.iter().enumerate() {
+                    let mut reference = actor
+                        .database
+                        .connect_track_reference(uri)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    reference["revision"] = version.into();
+                    actor
+                        .database
+                        .connect_apply(&[library::ConnectRecord {
+                            kind: "track".into(),
+                            key: uri.clone(),
+                            value: Some(reference),
+                        }])
+                        .await
+                        .unwrap();
+                    if version == "v2" && index == 0 {
+                        assert!(
+                            !actor
+                                .add_download_owner(
+                                    Some(&SourceId::new("cue")),
+                                    uri,
+                                    &DownloadOwner::Subject(DownloadSubject::Rule(
+                                        DownloadRule::EntireLibrary
+                                    )),
+                                    DownloadQuality::Original,
+                                    false,
+                                )
+                                .await
+                                .unwrap()
+                        );
+                        assert!(matches!(
+                            actor
+                                .peer
+                                .download(&actor.database, uri, DownloadQuality::Original)
+                                .await,
+                            Err(SourceError::Network(_))
+                        ));
+                    }
+                    actor
+                        .apply(
+                            Command::Download {
+                                subject: DownloadSubject::Prepared {
+                                    context_id: format!("{version}:{index}"),
+                                    title: None,
+                                },
+                                media_uris: vec![uri.clone()],
+                            },
+                            &mut Vec::new(),
+                        )
+                        .await;
+                    if let Some(active) = actor.start_next(&[]).await {
+                        active.task.abort();
+                        prepare_download_directories(&active.paths).await.unwrap();
+                        std::fs::write(&active.paths.audio_part, bytes).unwrap();
+                        actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
+                    }
+                    let file = actor
+                        .database
+                        .connect_media_file(uri, "original")
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        std::fs::read(library::file_media_path(&file.path).unwrap()).unwrap(),
+                        bytes,
+                        "original_exists={original_exists}, revision={version}, track={index}"
+                    );
+                    if version == "v2" && (index == 0 || original_exists) {
+                        assert_eq!(std::fs::read(&original).unwrap(), b"old audio");
+                    }
+                }
+                let mut paths = Vec::new();
+                for uri in &uris {
+                    paths.push(
+                        actor
+                            .database
+                            .connect_media_file(uri, "original")
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .path,
+                    );
+                }
+                assert!(paths.iter().all(|path| path == &paths[0]));
+            }
+            assert_eq!(original.is_file(), original_exists);
+        }
     }
 
     fn actor_for_test(
@@ -3804,7 +4383,7 @@ mod tests {
             },
             transfers: Arc::new(TransferClients::default()),
             prepared_rules,
-            connect: Arc::new(Mutex::new(None)),
+            peer: sources::PeerAccess::default(),
             attached: HashMap::from([(
                 source_id.clone(),
                 AttachedSource {
@@ -3821,7 +4400,6 @@ mod tests {
             jobs: HashMap::new(),
             paused: false,
             next_job: 0,
-            connect_after: None,
         }
     }
 
@@ -3874,7 +4452,7 @@ mod tests {
             paths,
             quality: DownloadQuality::Original,
             cancellation: Some(cancel),
-            connect_receipt: Arc::new(Mutex::new(None)),
+            revision: Arc::new(Mutex::new(None)),
             task,
         }];
 
@@ -3916,7 +4494,7 @@ mod tests {
             paths,
             quality: DownloadQuality::Original,
             cancellation: Some(cancel),
-            connect_receipt: Arc::new(Mutex::new(None)),
+            revision: Arc::new(Mutex::new(None)),
             task,
         }];
 
@@ -3983,7 +4561,7 @@ mod tests {
             paths: paths.clone(),
             quality: DownloadQuality::Original,
             cancellation: Some(cancel),
-            connect_receipt: Arc::new(Mutex::new(None)),
+            revision: Arc::new(Mutex::new(None)),
             task,
         }];
 
@@ -4017,7 +4595,7 @@ mod tests {
             paths: paths.clone(),
             quality: DownloadQuality::Original,
             cancellation: None,
-            connect_receipt: Arc::new(Mutex::new(None)),
+            revision: Arc::new(Mutex::new(None)),
             task: tokio::spawn(async { Ok(()) }),
         };
 

@@ -110,15 +110,27 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
             .await
             .unwrap();
         let progress = std::sync::Mutex::new(Vec::new());
-        source
-            .acquire_catalog(
-                &database,
-                &|value| progress.lock().unwrap().push(value),
-                Arc::new(false.into()),
-                true,
-            )
-            .await
-            .unwrap();
+        for _ in 0..2 {
+            progress.lock().unwrap().clear();
+            source
+                .acquire_catalog(
+                    &database,
+                    &|value| progress.lock().unwrap().push(value),
+                    Arc::new(false.into()),
+                    true,
+                )
+                .await
+                .unwrap();
+            let updates = progress.lock().unwrap();
+            let counts = updates
+                .iter()
+                .filter(|p| p.stage == crate::SourceReadStage::Tracks)
+                .map(|p| p.completed)
+                .collect::<Vec<_>>();
+            assert_eq!(counts.first(), Some(&0));
+            assert_eq!(counts.last(), Some(&2));
+            assert!(counts.windows(2).all(|pair| pair[0] <= pair[1]));
+        }
         let (catalog_source, publication) = emit.try_recv().expect("catalog update");
         assert!(publication.metadata);
         let rows = database
@@ -143,10 +155,9 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
         assert_eq!(counts.first(), Some(&0));
         assert_eq!(counts.last(), Some(&2));
         assert!(counts.windows(2).all(|pair| pair[0] <= pair[1]));
-        assert_eq!(
-            progress.last().unwrap().stage,
-            crate::SourceReadStage::Finalizing
-        );
+        assert!(progress.iter().all(|update| {
+            update.stage == crate::SourceReadStage::Tracks && update.total.is_none()
+        }));
     }
 }
 
@@ -485,6 +496,10 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
             .await
             .unwrap();
             sqlx::query("UPDATE local_files SET parse_version=7,parsed_stamp=json_set(parsed_stamp,'$[3]',7) WHERE kind IN ('media','cue')")
+                .execute(&mut stored)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE local_file_observations SET parsed_stamp=json_set(parsed_stamp,'$[3]',7),accepted_facts=json_set(accepted_facts,'$[3]',7) WHERE local_file_key IN(SELECT local_file_key FROM local_files WHERE kind IN('media','cue'))")
                 .execute(&mut stored)
                 .await
                 .unwrap();

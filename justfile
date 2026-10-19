@@ -403,13 +403,15 @@ fmt:
 i18n *args:
     @scripts/container run default none cargo run -p xtask -- generate i18n-template {{ args }}
 
+[positional-arguments]
 test *args:
-    @if [[ "{{ args }}" == "android" ]]; then \
+    @if [[ "$*" == "android" ]]; then \
         android/gradlew -p android -PandroidAbis=arm64-v8a testDevelopmentDebugUnitTest lintDevelopmentDebug; \
     else \
-        scripts/container run default none just _test {{ args }}; \
+        scripts/container run default none just _test "$@"; \
     fi
 
+[positional-arguments]
 _test *args:
     @if [[ "$(uname -s)" == Darwin ]]; then \
         gettext_prefix="$(brew --prefix gettext)"; \
@@ -422,14 +424,14 @@ _test *args:
             echo "NEXTEST_JOBS must be a positive integer." >&2; \
             exit 1; \
         fi; \
-        cargo nextest run --config-file nextest.toml --features app-identity/development --test-threads "$nextest_jobs" {{ args }}; \
+        cargo nextest run --config-file nextest.toml --features app-identity/development --test-threads "$nextest_jobs" "$@"; \
     else \
         cargo_args=(--features app-identity/development); \
-        if [[ -z "{{ args }}" || "{{ args }}" == "--locked" ]]; then \
+        if [[ -z "$*" || "$*" == "--locked" ]]; then \
             cargo_args+=(--lib --bins --tests --benches --examples); \
         fi; \
         echo "cargo-nextest is unavailable; falling back to cargo test." >&2; \
-        cargo test "${cargo_args[@]}" {{ args }}; \
+        cargo test "${cargo_args[@]}" "$@"; \
     fi
 
 container action="status":

@@ -25,6 +25,11 @@ impl FileSource {
             .unwrap_or_default();
         let temporary = format!("{parent}.rufin-write-{token}.tmp");
         match input.input() {
+            FileInput::Peer { .. } => {
+                return Err(SourceMetadataError::Write(
+                    "Peer access provides audio bytes".into(),
+                ));
+            }
             FileInput::Documents(access) => {
                 let access = Arc::clone(access);
                 let relative = relative.to_owned();

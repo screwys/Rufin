@@ -56,7 +56,7 @@ impl HomeBlockKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum HomeEntryKind {
     Track,
     Album,
@@ -75,7 +75,7 @@ impl HomeEntryKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HomeEntryInput {
     pub position: i64,
     pub kind: HomeEntryKind,

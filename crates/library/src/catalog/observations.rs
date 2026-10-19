@@ -1,8 +1,10 @@
 use crate::{
     AlbumMetadata, ArtistMetadata, FolderMetadata, NativeUserState, TagMetadata, TrackMetadata,
 };
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TrackObservation {
     pub object_id: String,
     pub media_uri: Option<String>,
@@ -47,6 +49,7 @@ pub struct GenreObservation {
 pub struct MoodObservation {
     pub object_id: String,
     pub metadata: TagMetadata,
+    pub artwork_binding: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -73,7 +76,7 @@ pub struct PlaylistEntryObservation {
     pub track_id: String,
 }
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CatalogBatch {
     pub reference: bool,
     pub tracks: Vec<TrackObservation>,
