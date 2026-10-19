@@ -34,18 +34,11 @@ pub(super) fn library_page(
     dialog: &adw::Dialog,
     navigation_controls: &PreferencesNavigationControls,
     open_add_server: bool,
-    focus_download_queue: bool,
 ) -> gtk::Widget {
     let navigation = adw::NavigationView::new();
     navigation_controls.set_navigation(&navigation);
     navigation_controls.set_nested_page_visible(false);
-    let page = library_sources_page(
-        shell,
-        dialog,
-        &navigation,
-        navigation_controls,
-        focus_download_queue,
-    );
+    let page = library_sources_page(shell, dialog, &navigation, navigation_controls);
     let root = adw::NavigationPage::new(&page, &tr("Library"));
     navigation.push(&root);
     let shell_for_pop = Rc::clone(shell);
@@ -65,33 +58,16 @@ fn library_sources_page(
     dialog: &adw::Dialog,
     navigation: &adw::NavigationView,
     navigation_controls: &PreferencesNavigationControls,
-    focus_download_queue: bool,
 ) -> adw::PreferencesPage {
     let resource = crate::ui_resource::LIBRARY_PREFERENCES_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
         library_page: adw::PreferencesPage,
+        activity_source: gtk::MenuButton,
+        listenbrainz: gtk::ToggleButton, jsonl: gtk::ToggleButton,
+        activity_export: gtk::Button,
         servers_group: adw::PreferencesGroup,
         empty_remote_row: adw::ActionRow,
-        source_downloads_group: adw::PreferencesGroup,
-        download_artwork: adw::ActionRow,
-        download_lyrics: adw::ActionRow,
-        cache_group: adw::PreferencesGroup,
-        clear_artwork_cache: adw::ActionRow,
-        clear_lyrics_cache: adw::ActionRow,
-        artwork_cache_cleared: gtk::Label,
-        lyrics_cache_cleared: gtk::Label,
-        downloads_group: adw::PreferencesGroup,
-        download_folder_row: adw::ActionRow,
-        open_folder: gtk::Button,
-        reset_folder: gtk::Button,
-        choose_folder: gtk::Button,
-        downloaded_badge: adw::SwitchRow,
-        download_actions_row: adw::PreferencesRow,
-        download_action_buttons: gtk::Box,
-        remove_all: gtk::Button,
-        download_queue_header: adw::PreferencesRow,
-        pause_downloads: gtk::Button,
         local_source_row: adw::ActionRow, add_source: gtk::Button,
     });
 
@@ -253,232 +229,254 @@ fn library_sources_page(
     });
     servers_group.set_header_suffix(Some(&add_source));
 
-    if let Some(source_id) = configured.selected_source_id.clone() {
-        for (row, artwork) in [(download_artwork, true), (download_lyrics, false)] {
-            let source = shell.products.source.clone();
-            let source_id = source_id.clone();
-            let weak_shell = Rc::downgrade(shell);
-            let dialog = dialog.downgrade();
-            row.connect_activated(move |_| {
-                let result = if artwork {
-                    source.download_artwork(source_id.clone())
-                } else {
-                    source.download_lyrics(source_id.clone())
-                };
-                match result {
-                    Ok(()) => {
-                        if let Some(dialog) = dialog.upgrade() {
-                            dialog.close();
-                        }
-                    }
-                    Err(error) => {
-                        if let Some(shell) = weak_shell.upgrade() {
-                            shell
-                                .control_feedback
-                                .show_feedback_toast(error.to_string());
-                        }
-                    }
-                }
-            });
+    let sources: Rc<[_]> = shell.source.configured.borrow().sources.clone().into();
+    let selection =
+        gtk_widgets::source_labels::bind_source_picker(&activity_source, sources.clone(), 0, true);
+    let weak = Rc::downgrade(shell);
+    let (listenbrainz, jsonl, activity_scope) = (
+        listenbrainz.downgrade(),
+        jsonl.downgrade(),
+        selection.downgrade(),
+    );
+    activity_export.connect_clicked(move |_| {
+        if let Some(shell) = weak.upgrade() {
+            let format = if jsonl.upgrade().is_some_and(|button| button.is_active()) {
+                None
+            } else if listenbrainz
+                .upgrade()
+                .is_some_and(|button| button.is_active())
+            {
+                Some(library::ActivityCsvFormat::ListenBrainz)
+            } else {
+                Some(library::ActivityCsvFormat::LastFm)
+            };
+            let source = activity_scope
+                .upgrade()
+                .and_then(|row| row.selected().checked_sub(1))
+                .and_then(|index| sources.get(index as usize))
+                .map(|source| source.id.clone());
+            (shell.effects)(crate::Effect::ExportActivity(format, source));
         }
-        library_page.add(&source_downloads_group);
-    }
+    });
+    library_page
+}
 
-    for (row, artwork, message) in [
-        (clear_artwork_cache, true, artwork_cache_cleared.label()),
-        (clear_lyrics_cache, false, lyrics_cache_cleared.label()),
-    ] {
-        let downloads = shell.products.downloads.clone();
-        let weak_shell = Rc::downgrade(shell);
-        let group = cache_group.downgrade();
-        row.connect_activated(move |_| {
-            let Some(group) = group.upgrade() else { return };
-            group.set_sensitive(false);
-            let group = group.downgrade();
-            let downloads = downloads.clone();
-            let weak_shell = weak_shell.clone();
-            let message = message.to_string();
-            gtk::glib::spawn_future_local(async move {
-                let result = if artwork {
-                    downloads.clear_artwork_cache().await
-                } else {
-                    downloads.clear_lyrics_cache().await
-                };
-                if let Some(group) = group.upgrade() {
-                    group.set_sensitive(true);
-                }
-                if let Some(shell) = weak_shell.upgrade() {
-                    shell.control_feedback.show_feedback_toast(match result {
-                        Ok(()) => message,
-                        Err(error) => error.to_string(),
-                    });
-                }
-            });
-        });
+pub(super) fn downloads_page(
+    shell: &Rc<Preferences>,
+    dialog: &adw::Dialog,
+    focus_download_queue: bool,
+) -> adw::PreferencesPage {
+    let resource = crate::ui_resource::LIBRARY_PREFERENCES_RESOURCE;
+    let builder = gtk_widgets::ui_resource::builder(resource);
+    gtk_widgets::objects!(builder, resource, {
+        downloads_page: adw::PreferencesPage,
+        download_source: gtk::MenuButton,
+        downloads_group: adw::PreferencesGroup,
+        empty_remote_row: adw::ActionRow,
+    });
+    let (sources, selection) = super::source::preference_source_choices(shell, &download_source);
+    if sources.is_empty() {
+        downloads_group.add(&empty_remote_row);
+        downloads_page.add(&downloads_group);
+        return downloads_page;
     }
-    library_page.add(&cache_group);
+    let current_group = Rc::new(RefCell::new(None::<adw::PreferencesGroup>));
+    let weak = Rc::downgrade(shell);
+    let page = downloads_page.downgrade();
+    let dialog = dialog.downgrade();
+    let render = move |row: &gtk::SingleSelection, focus| {
+        let (Some(shell), Some(page), Some(dialog), Some(source)) = (
+            weak.upgrade(),
+            page.upgrade(),
+            dialog.upgrade(),
+            sources.get(row.selected() as usize),
+        ) else {
+            return;
+        };
+        let previous = current_group.borrow_mut().take();
+        if let Some(previous) = previous {
+            page.remove(&previous);
+        }
+        let group = source_downloads_group(&shell, &dialog, source, focus);
+        page.add(&group);
+        *current_group.borrow_mut() = Some(group);
+    };
+    render(&selection, focus_download_queue);
+    selection.connect_selected_notify(move |row| render(row, false));
+    downloads_page
+}
 
-    if let Some(source) = configured
-        .sources
-        .iter()
-        .find(|source| configured.selected_source_id.as_ref() == Some(&source.id))
-    {
-        let download_settings = shell
+fn source_downloads_group(
+    shell: &Rc<Preferences>,
+    dialog: &adw::Dialog,
+    server: &SourceSummary,
+    focus_download_queue: bool,
+) -> adw::PreferencesGroup {
+    let resource = crate::ui_resource::LIBRARY_PREFERENCES_RESOURCE;
+    let builder = gtk_widgets::ui_resource::builder(resource);
+    gtk_widgets::objects!(builder, resource, {
+        downloads_group: adw::PreferencesGroup,
+        download_folder_row: adw::ActionRow,
+        open_folder: gtk::Button,
+        reset_folder: gtk::Button,
+        choose_folder: gtk::Button,
+        downloaded_badge: adw::SwitchRow,
+        download_actions_row: adw::PreferencesRow,
+        download_action_buttons: gtk::Box,
+        remove_all: gtk::Button,
+        download_queue_header: adw::PreferencesRow,
+        pause_downloads: gtk::Button,
+    });
+    let download_settings = shell
+        .settings
+        .current
+        .borrow()
+        .download_settings(&server.id);
+    download_folder_row.set_subtitle(
+        &download_settings
+            .directory
+            .as_ref()
+            .map(|directory| {
+                directory
+                    .native()
+                    .map(desktop_integration::display_path)
+                    .unwrap_or_else(|| directory.to_string())
+            })
+            .unwrap_or_else(|| tr(DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE)),
+    );
+    reset_folder.set_visible(download_settings.directory.is_some());
+    let weak = Rc::downgrade(shell);
+    let source_id = server.id.clone();
+    open_folder.connect_clicked(move |_| {
+        let Some(shell) = weak.upgrade() else { return };
+        let directory = shell
             .settings
             .current
             .borrow()
-            .download_settings(&source.id);
-        download_folder_row.set_subtitle(
-            &download_settings
-                .directory
-                .as_ref()
-                .map(|directory| {
-                    directory
-                        .native()
-                        .map(desktop_integration::display_path)
-                        .unwrap_or_else(|| directory.to_string())
-                })
-                .unwrap_or_else(|| tr(DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE)),
-        );
-        reset_folder.set_visible(download_settings.directory.is_some());
-        let weak = Rc::downgrade(shell);
-        let source_id = source.id.clone();
-        open_folder.connect_clicked(move |_| {
-            let Some(shell) = weak.upgrade() else { return };
-            let directory = shell
+            .download_directory(&source_id)
+            .unwrap_or_else(|| shell.products.downloads.default_directory().to_path_buf());
+        super::open_folder(&shell, gio::File::for_path(directory));
+    });
+    let choose_shell = Rc::clone(shell);
+    let choose_source_id = server.id.clone();
+    let choose_row = download_folder_row.downgrade();
+    let choose_reset = reset_folder.downgrade();
+    choose_folder.connect_clicked(move |_| {
+        let shell = Rc::clone(&choose_shell);
+        let source_id = choose_source_id.clone();
+        let row = choose_row.clone();
+        let reset = choose_reset.clone();
+        gtk::glib::spawn_future_local(async move {
+            let chooser = gtk::FileDialog::builder()
+                .title(tr("Select Download Folder"))
+                .build();
+            let initial_directory = shell
                 .settings
                 .current
                 .borrow()
-                .download_directory(&source_id)
-                .unwrap_or_else(|| shell.products.downloads.default_directory().to_path_buf());
-            super::open_folder(&shell, gio::File::for_path(directory));
-        });
-        let choose_shell = Rc::clone(shell);
-        let choose_source_id = source.id.clone();
-        let choose_row = download_folder_row.downgrade();
-        let choose_reset = reset_folder.downgrade();
-        choose_folder.connect_clicked(move |_| {
-            let shell = Rc::clone(&choose_shell);
-            let source_id = choose_source_id.clone();
-            let row = choose_row.clone();
-            let reset = choose_reset.clone();
-            gtk::glib::spawn_future_local(async move {
-                let chooser = gtk::FileDialog::builder()
-                    .title(tr("Select Download Folder"))
-                    .build();
-                let initial_directory = shell
-                    .settings
-                    .current
-                    .borrow()
-                    .download_directory(&source_id);
-                if let Some(directory) = initial_directory.as_ref() {
-                    chooser.set_initial_folder(Some(&gio::File::for_path(directory)));
-                }
-                let Ok(folder) = chooser.select_folder_future(Some(&shell.window)).await else {
-                    return;
-                };
-                let Some(path) = folder.path() else {
-                    return;
-                };
-                if shell
-                    .settings
-                    .update_app_settings("download folder", |settings| {
-                        settings.set_download_directory(source_id, Some(path.clone()))
-                    })
-                    .is_some()
-                {
-                    if let Some(row) = row.upgrade() {
-                        row.set_subtitle(&desktop_integration::display_path(&path));
-                    }
-                    if let Some(reset) = reset.upgrade() {
-                        reset.set_visible(true);
-                    }
-                }
-            });
-        });
-        let reset_shell = Rc::clone(shell);
-        let reset_source_id = source.id.clone();
-        let reset_row = download_folder_row.downgrade();
-        let reset_button = reset_folder.downgrade();
-        reset_folder.connect_clicked(move |_| {
-            let Some(reset_button) = reset_button.upgrade() else {
+                .download_directory(&source_id);
+            if let Some(directory) = initial_directory.as_ref() {
+                chooser.set_initial_folder(Some(&gio::File::for_path(directory)));
+            }
+            let Ok(folder) = chooser.select_folder_future(Some(&shell.window)).await else {
                 return;
             };
-            if reset_shell
+            let Some(path) = folder.path() else {
+                return;
+            };
+            if shell
                 .settings
-                .update_app_settings("reset download folder", |settings| {
-                    settings.set_download_directory(reset_source_id.clone(), None)
+                .update_app_settings("download folder", |settings| {
+                    settings.set_download_directory(source_id, Some(path.clone()))
                 })
                 .is_some()
             {
-                if let Some(row) = reset_row.upgrade() {
-                    row.set_subtitle(&tr(DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE));
+                if let Some(row) = row.upgrade() {
+                    row.set_subtitle(&desktop_integration::display_path(&path));
                 }
-                reset_button.set_visible(false);
+                if let Some(reset) = reset.upgrade() {
+                    reset.set_visible(true);
+                }
             }
         });
-        downloads_group.add(&download_folder_row);
-
-        let quality_shell = Rc::clone(shell);
-        let quality_source_id = source.id.clone();
-        for row in crate::download_quality::rows(download_settings.quality, move |quality, _| {
-            quality_shell
-                .settings
-                .update_app_settings("download quality", |settings| {
-                    settings.set_download_quality(quality_source_id.clone(), quality)
-                });
-        }) {
-            downloads_group.add(&row);
+    });
+    let reset_shell = Rc::clone(shell);
+    let reset_source_id = server.id.clone();
+    let reset_row = download_folder_row.downgrade();
+    let reset_button = reset_folder.downgrade();
+    reset_folder.connect_clicked(move |_| {
+        let Some(reset_button) = reset_button.upgrade() else {
+            return;
+        };
+        if reset_shell
+            .settings
+            .update_app_settings("reset download folder", |settings| {
+                settings.set_download_directory(reset_source_id.clone(), None)
+            })
+            .is_some()
+        {
+            if let Some(row) = reset_row.upgrade() {
+                row.set_subtitle(&tr(DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE));
+            }
+            reset_button.set_visible(false);
         }
-        downloaded_badge.set_active(
-            shell
-                .settings
-                .current
-                .borrow()
-                .application
-                .show_downloaded_badges,
-        );
-        let downloaded_badge_shell = Rc::clone(shell);
-        downloaded_badge.connect_active_notify(move |row| {
-            downloaded_badge_shell
-                .downloads
-                .set_downloaded_badges_visible(row.is_active());
-        });
-        downloads_group.add(&downloaded_badge);
-        let add_rule = add_download_rules(
-            &downloads_group,
-            shell,
-            dialog,
-            &source.id,
-            download_settings.rules,
-        );
+    });
+    downloads_group.add(&download_folder_row);
 
-        download_action_buttons.prepend(&add_rule);
-        let remove_shell = Rc::clone(shell);
-        let source_id = source.id.clone();
-        let preferences_dialog = dialog.downgrade();
-        remove_all.connect_clicked(move |_| {
-            let Some(preferences_dialog) = preferences_dialog.upgrade() else {
-                return;
-            };
-            confirm_remove_all_downloads(&remove_shell, &preferences_dialog, source_id.clone());
-        });
-        downloads_group.add(&download_actions_row);
-
-        downloads_group.add(&download_queue_header);
-        let queue_focus = add_download_queue(&downloads_group, shell, &source.id, &pause_downloads);
-        if focus_download_queue {
-            gtk::glib::idle_add_local_once(move || {
-                queue_focus.grab_focus();
+    let quality_shell = Rc::clone(shell);
+    let quality_source_id = server.id.clone();
+    for row in crate::download_quality::rows(download_settings.quality, move |quality, _| {
+        quality_shell
+            .settings
+            .update_app_settings("download quality", |settings| {
+                settings.set_download_quality(quality_source_id.clone(), quality)
             });
-        }
-        library_page.add(&downloads_group);
+    }) {
+        downloads_group.add(&row);
     }
+    downloaded_badge.set_active(
+        shell
+            .settings
+            .current
+            .borrow()
+            .application
+            .show_downloaded_badges,
+    );
+    let downloaded_badge_shell = Rc::clone(shell);
+    downloaded_badge.connect_active_notify(move |row| {
+        downloaded_badge_shell
+            .downloads
+            .set_downloaded_badges_visible(row.is_active());
+    });
+    downloads_group.add(&downloaded_badge);
+    let add_rule = add_download_rules(
+        &downloads_group,
+        shell,
+        dialog,
+        &server.id,
+        download_settings.rules,
+    );
 
-    for group in super::backup::groups(shell, navigation, navigation_controls) {
-        library_page.add(&group);
+    download_action_buttons.prepend(&add_rule);
+    let remove_shell = Rc::clone(shell);
+    let source_id = server.id.clone();
+    let preferences_dialog = dialog.downgrade();
+    remove_all.connect_clicked(move |_| {
+        let Some(preferences_dialog) = preferences_dialog.upgrade() else {
+            return;
+        };
+        confirm_remove_all_downloads(&remove_shell, &preferences_dialog, source_id.clone());
+    });
+    downloads_group.add(&download_actions_row);
+
+    downloads_group.add(&download_queue_header);
+    let queue_focus = add_download_queue(&downloads_group, shell, &server.id, &pause_downloads);
+    if focus_download_queue {
+        gtk::glib::idle_add_local_once(move || {
+            queue_focus.grab_focus();
+        });
     }
-    library_page
+    downloads_group
 }
 
 pub fn local_sources_page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw::PreferencesPage {

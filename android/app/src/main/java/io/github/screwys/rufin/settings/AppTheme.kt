@@ -24,22 +24,39 @@ internal fun AppTheme(preferences: PreferencesConnection, content: @Composable (
     val dark = selected?.dark ?: when (state?.themeId) { "light" -> false; "dark" -> true; else -> systemDark }
     val theme = selected ?: state?.themes?.find { it.id == if (dark) "builtin:dark" else "builtin:light" }
     val systemAccent = selected == null && (state == null || state.accentId == "System")
+    val defaults = themeDefaults(dark, systemAccent)
+    val colors = theme?.colors.orEmpty()
+    val resolver = remember(colors) { ThemeColors(colors) }
+    val scheme = remember(resolver, defaults, systemAccent) {
+        resolveThemeScheme(resolver, defaults, systemAccent)
+    }
+    SideEffect { preferences.showThemeErrors(resolver.errors.toList()) }
+    CompositionLocalProvider(LocalTranslationRevision provides preferences.translationRevision,
+        LocalShowDownloadedBadges provides preferences.showDownloadedBadges,
+        LocalReduceMotion provides preferences.reduceMotion) {
+        MaterialTheme(colorScheme = scheme, content = content)
+    }
+}
+
+@Composable
+internal fun themeDefaults(dark: Boolean, systemAccent: Boolean): ColorScheme {
+    val configuration = LocalConfiguration.current
     val context = LocalContext.current
-    val defaults = remember(dark, systemAccent, context, configuration) {
+    return remember(dark, systemAccent, context, configuration) {
         if (systemAccent && android.os.Build.VERSION.SDK_INT >= 31) {
         if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         } else if (dark) darkColorScheme() else lightColorScheme()
     }
-    val colors = theme?.colors.orEmpty()
-    val resolver = remember(colors) { ThemeColors(colors) }
-    val scheme = remember(resolver, defaults, systemAccent) {
+}
+
+internal fun resolveThemeScheme(resolver: ThemeColors, defaults: ColorScheme, systemAccent: Boolean): ColorScheme {
     val window = resolver.named("window-bg-color") ?: defaults.background
     val surface = resolver.named("view-bg-color") ?: window
     val foreground = resolver.named("view-fg-color") ?: defaults.onSurface
     val card = (resolver.named("card-bg-color") ?: defaults.surfaceContainer).compositeOver(surface)
     val accent = if (systemAccent) defaults.primary else resolver.named("accent-bg-color") ?: defaults.primary
     val accentContainer = accent.copy(alpha = .16f).compositeOver(surface)
-    defaults.copy(
+    return defaults.copy(
         primary = accent, onPrimary = if (systemAccent) defaults.onPrimary else resolver.named("accent-fg-color") ?: defaults.onPrimary,
         secondary = if (systemAccent) accent else resolver.named("accent-color") ?: accent,
         primaryContainer = accentContainer, onPrimaryContainer = foreground,
@@ -56,13 +73,6 @@ internal fun AppTheme(preferences: PreferencesConnection, content: @Composable (
         outline = foreground.copy(alpha = .42f).compositeOver(surface),
         outlineVariant = (resolver.named("sidebar-border-color") ?: foreground.copy(alpha = .18f)).compositeOver(surface),
     )
-    }
-    SideEffect { preferences.showThemeErrors(resolver.errors.toList()) }
-    CompositionLocalProvider(LocalTranslationRevision provides preferences.translationRevision,
-        LocalShowDownloadedBadges provides preferences.showDownloadedBadges,
-        LocalReduceMotion provides preferences.reduceMotion) {
-        MaterialTheme(colorScheme = scheme, content = content)
-    }
 }
 
 /** Converts the shared theme's CSS color values into Compose colors. */

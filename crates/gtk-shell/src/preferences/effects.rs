@@ -25,6 +25,10 @@ impl Shell {
             Effect::LyricsPanelVisible(enabled) => self.set_lyrics_panel_visible(enabled),
             Effect::VisualizerPanelVisible(enabled) => self.set_visualizer_panel_visible(enabled),
             Effect::Quit(reason) => self.request_quit(reason),
+            Effect::ResetStorage(request) => {
+                self.storage_reset.replace(Some(Ok(*request)));
+                self.request_quit("storage reset");
+            }
             Effect::ExportActivity(format, source) => self.export_activity_dialog(format, source),
         }
     }

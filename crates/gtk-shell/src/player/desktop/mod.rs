@@ -94,15 +94,25 @@ impl Shell {
 
         let transport = self.products.playback.clone();
         let scrobbling = self.products.scrobbling.clone();
+        let storage_reset = Rc::clone(&self.storage_reset);
+        let resetting = storage_reset.borrow().is_some();
+        let products = resetting.then(|| self.products.clone());
         let (completed, completion) = channel();
         if let Err(error) = std::thread::Builder::new()
             .name("rufin-shutdown".to_string())
             .spawn(move || {
                 transport.shutdown();
                 scrobbling.shutdown();
-                let _ = completed.send(());
+                let result = match products {
+                    Some(products) => products.runtime.block_on(products.close_storage()),
+                    None => Ok(()),
+                };
+                let _ = completed.send(result);
             })
         {
+            if resetting {
+                storage_reset.replace(Some(Err(error.to_string())));
+            }
             warn!(%error, "could not start playback shutdown");
             self.chrome.application.quit();
             return;
@@ -111,7 +121,10 @@ impl Shell {
         let application = self.chrome.application.clone();
         let started_at = Instant::now();
         glib::timeout_add_local(QUIT_POLL_INTERVAL, move || match completion.try_recv() {
-            Ok(()) => {
+            Ok(result) => {
+                if let Err(error) = result {
+                    storage_reset.replace(Some(Err(error)));
+                }
                 info!(
                     elapsed_ms = started_at.elapsed().as_millis(),
                     "playback shutdown finished"
@@ -120,6 +133,11 @@ impl Shell {
                 glib::ControlFlow::Break
             }
             Err(TryRecvError::Disconnected) => {
+                if resetting {
+                    storage_reset.replace(Some(Err(
+                        "Rufin could not finish closing its storage".into()
+                    )));
+                }
                 warn!(
                     elapsed_ms = started_at.elapsed().as_millis(),
                     "playback shutdown worker stopped before reporting completion"
@@ -127,7 +145,7 @@ impl Shell {
                 application.quit();
                 glib::ControlFlow::Break
             }
-            Err(TryRecvError::Empty) if started_at.elapsed() >= QUIT_TIMEOUT => {
+            Err(TryRecvError::Empty) if !resetting && started_at.elapsed() >= QUIT_TIMEOUT => {
                 warn!(
                     elapsed_ms = started_at.elapsed().as_millis(),
                     "playback shutdown did not finish before the quit deadline"

@@ -11,6 +11,7 @@ mod inputs;
 pub mod release_update;
 pub mod scrobbling;
 pub mod source;
+mod storage;
 mod waveform;
 pub use backup::{BackupHandle, BackupPreview, BackupSettings};
 pub use diagnostics::DiagnosticsHandle;
@@ -28,6 +29,7 @@ pub use scrobbling::{
     ScrobblingConnectionEvent, ScrobblingHandle, ScrobblingPreferences,
 };
 pub use source::SourceHandle;
+pub use storage::{CacheKind, CacheSummary, CacheUsage, StorageSummary};
 pub use waveform::WaveformProjection;
 
 #[derive(Clone)]

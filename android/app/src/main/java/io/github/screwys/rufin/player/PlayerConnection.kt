@@ -10,6 +10,7 @@ import android.util.Log
 import androidx.compose.runtime.*
 import io.github.screwys.rufin.core.AndroidLyricsState
 import io.github.screwys.rufin.core.AndroidPlayer
+import io.github.screwys.rufin.core.AndroidCastNetwork
 import io.github.screwys.rufin.core.AndroidPlaybackUpdate
 import io.github.screwys.rufin.core.AndroidPlayerMetadata
 import io.github.screwys.rufin.shared.rufin_core.PlayerPreferences
@@ -375,6 +376,9 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     }
     fun clearQueue(includeCurrent: Boolean) = action { playbackOwner?.clear(includeCurrent) }
     fun visualizer(enabled: Boolean) = action { bridge?.setVisualizerEnabled(enabled) }
+    suspend fun castingNetworks(): List<AndroidCastNetwork> = withContext(Dispatchers.IO) {
+        bridge?.castNetworks().orEmpty()
+    }
     suspend fun outputs(): List<RemoteOutput> {
         outputChoices = emptyList()
         val choices = playbackOwner?.remoteOutputs().orEmpty()

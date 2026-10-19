@@ -185,6 +185,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     var playlist by remember { mutableStateOf<BrowseItem?>(null) }
     var createPlaylist by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
+    val importTheme = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(preferences::importTheme) }
     val importPlaylist = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val intent = result.data
@@ -314,6 +315,11 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     AppSection.More -> label(moreDestination.title)
                 }, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge)
             }, actions = {
+                if (browse.section == AppSection.More && moreDestination == MoreDestination.Theme) {
+                    IconButton({ importTheme.launch(arrayOf("*/*")) }, enabled = preferences.state != null) {
+                        RufinIcon("rufin-document-open-symbolic", translate("Import theme"))
+                    }
+                }
                 if (browse.section == AppSection.Browse && !browse.detail && browse.rootId == "Playlists") {
                     PlayerIconButton("rufin-list-add-symbolic", "New Playlist", { createPlaylist = true })
                     PlayerIconButton("rufin-document-open-symbolic", "Import Playlist", {
@@ -358,7 +364,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                                     routeMenu = true
                                 }
                                 section == AppSection.Search && selected -> focusSearch++
-                                section == AppSection.More && selected -> openMore(MoreDestination.Settings)
+                                section == AppSection.More && selected -> openMore(MoreDestination.Root)
                                 else -> {
                                     keyboard?.hide(); focusManager.clearFocus(); routeMenu = false
                                     if (section == AppSection.Search) browse.searchText = ""

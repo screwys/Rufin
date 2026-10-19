@@ -287,6 +287,26 @@ impl Artwork {
         self.pipeline.preview(&binding, allow_cached_external)
     }
 
+    pub async fn cache_usage(&self) -> Result<library::CacheUsage, ArtworkError> {
+        let cache = self.pipeline.cache().clone();
+        Ok(tokio::task::spawn_blocking(move || {
+            let mut usage = library::CacheUsage::default();
+            for entry in cache.entries()? {
+                match entry?.path.metadata() {
+                    Ok(metadata) => {
+                        usage.entries += 1;
+                        usage.bytes += metadata.len();
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            Ok::<_, std::io::Error>(usage)
+        })
+        .await
+        .map_err(|error| std::io::Error::other(error.to_string()))??)
+    }
+
     pub async fn clear_cache(
         &self,
         database: &library::Database,

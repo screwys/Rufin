@@ -6,6 +6,14 @@ use rufin_core::settings::ControllerSettings;
 
 use crate::Preferences;
 
+pub(super) fn page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
+    let resource = crate::ui_resource::CONTROLLER_PREFERENCES_RESOURCE;
+    let builder = gtk_widgets::ui_resource::builder(resource);
+    let page = gtk_widgets::ui_resource::object(&builder, resource, "controller_page");
+    bind(shell, &page, &builder, resource);
+    page
+}
+
 pub(super) fn bind(
     shell: &Rc<Preferences>,
     page: &adw::PreferencesPage,
@@ -41,7 +49,7 @@ pub(super) fn bind(
         let token = token.clone();
         let status = status.clone();
         gtk::glib::spawn_future_local(async move {
-            let resource = crate::ui_resource::INTEGRATIONS_RESOURCE;
+            let resource = crate::ui_resource::CONTROLLER_PREFERENCES_RESOURCE;
             let builder = gtk_widgets::ui_resource::builder(resource);
             let dialog: adw::AlertDialog =
                 gtk_widgets::ui_resource::object(&builder, resource, "controller_regenerate");
@@ -123,7 +131,7 @@ pub fn bind_popover(shell: &Rc<Preferences>, button: &gtk::MenuButton) {
             if let Some(shell) = weak.upgrade() {
                 super::present_preferences_dialog_with_page(
                     &shell,
-                    super::PreferencesPageKind::Integrations,
+                    super::PreferencesPageKind::Controller,
                     false,
                     false,
                 );

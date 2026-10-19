@@ -37,6 +37,14 @@ pub struct PlayerPreferenceOptions {
     pub equalizer_presets: Vec<String>,
     pub lyrics_scroll_pause_millis: u64,
     pub visualizer_stale_micros: u64,
+    pub min_crossfade_seconds: u8,
+    pub max_crossfade_seconds: u8,
+    pub min_playback_rate: f64,
+    pub max_playback_rate: f64,
+    pub min_ebu_r128_target_lufs: f64,
+    pub max_ebu_r128_target_lufs: f64,
+    pub min_auto_dj_refill_threshold: u8,
+    pub max_auto_dj_refill_threshold: u8,
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
@@ -63,6 +71,18 @@ impl SettingsOwner {
         }
     }
 
+    pub fn cast_network_interface(&self) -> Option<String> {
+        self.load().cast_network_interface
+    }
+
+    pub fn set_cast_network_interface(&self, value: Option<String>) -> Result<(), SettingsError> {
+        self.update_preferences(move |ui| {
+            ui.cast_network_interface = value;
+            Ok(())
+        })
+        .map_err(Into::into)
+    }
+
     pub fn player_preference_options(&self) -> PlayerPreferenceOptions {
         PlayerPreferenceOptions {
             equalizer_band_titles: (0..playback::EQUALIZER_BAND_COUNT)
@@ -74,6 +94,14 @@ impl SettingsOwner {
                 .collect(),
             lyrics_scroll_pause_millis: lyrics::LYRICS_USER_SCROLL_PAUSE_MS,
             visualizer_stale_micros: visualizer::VISUALIZER_STALE_MICROS as u64,
+            min_crossfade_seconds: playback::MIN_CROSSFADE_SECONDS,
+            max_crossfade_seconds: playback::MAX_CROSSFADE_SECONDS,
+            min_playback_rate: playback::MIN_PLAYBACK_RATE,
+            max_playback_rate: playback::MAX_PLAYBACK_RATE,
+            min_ebu_r128_target_lufs: playback::MIN_EBU_R128_TARGET_LUFS,
+            max_ebu_r128_target_lufs: playback::MAX_EBU_R128_TARGET_LUFS,
+            min_auto_dj_refill_threshold: playback::MIN_AUTO_DJ_REFILL_THRESHOLD,
+            max_auto_dj_refill_threshold: playback::MAX_AUTO_DJ_REFILL_THRESHOLD,
         }
     }
 

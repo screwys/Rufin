@@ -3,6 +3,13 @@ use adw::prelude::*;
 use rufin_core::themes::Accent;
 use std::rc::Rc;
 
+pub(super) fn page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
+    let resource = crate::ui_resource::THEME_PREFERENCES_RESOURCE;
+    let builder = gtk_widgets::ui_resource::builder(resource);
+    bind(shell, &builder, resource);
+    gtk_widgets::ui_resource::object(&builder, resource, "theme_page")
+}
+
 pub(super) fn bind(shell: &Rc<Preferences>, builder: &gtk::Builder, resource: &str) {
     gtk_widgets::objects!(builder, resource, {
         theme_grid: gtk::FlowBox, theme_errors: gtk::Label,

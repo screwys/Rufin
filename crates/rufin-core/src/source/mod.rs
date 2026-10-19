@@ -551,6 +551,16 @@ impl SourceOwner {
         Ok(())
     }
 
+    pub(crate) async fn close_storage(&self) {
+        self.shared.started.store(false, Ordering::Release);
+        self.release_selected(true).await;
+        self.shared
+            .clients
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clear();
+    }
+
     pub(crate) async fn restore_user_state<F, Work, T>(
         &self,
         setup: bool,

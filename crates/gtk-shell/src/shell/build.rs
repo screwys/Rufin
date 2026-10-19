@@ -57,6 +57,7 @@ pub async fn build(
     settings: rufin_core::settings::Settings,
     bootstrap: impl std::future::Future<Output = Result<RuntimeInputs, String>>,
     quitting: Rc<Cell<bool>>,
+    storage_reset: crate::application::StorageResetResult,
     force_initial_presentation: bool,
     presented: Option<Box<dyn FnOnce()>>,
     window_bar_preview: Option<crate::application::WindowBarPreview>,
@@ -86,7 +87,6 @@ pub async fn build(
         source_refresh_feedback: gtk::Box,
         source_refresh_feedback_label: gtk::Label,
         source_refresh_feedback_progress: gtk::ProgressBar,
-        source_download_cancel: gtk::Button,
         operation_feedback: gtk::Box,
         operation_feedback_artwork: gtk::Box,
         operation_feedback_title: gtk::Label,
@@ -198,6 +198,7 @@ pub async fn build(
         dictionary_toast: RefCell::new(None),
     };
     let preferences = PreferencesState {
+        source_choice: RefCell::new(None),
         connect_dialog: gtk::glib::WeakRef::new(),
         connect_feedback: RefCell::new(None),
         secret_storage_row: gtk::glib::WeakRef::new(),
@@ -285,7 +286,6 @@ pub async fn build(
         source_refresh_feedback,
         source_refresh_feedback_label,
         source_refresh_feedback_progress,
-        source_download_cancel,
         operation_feedback,
         operation_feedback_artwork,
         operation_feedback_title,
@@ -468,6 +468,7 @@ pub async fn build(
             web_controller,
             media_menus: super::media_menus::build(weak, &products, Rc::clone(&settings_state)),
             quitting,
+            storage_reset,
             diagnostics,
             appearance,
             settings: Rc::clone(&settings_state),
@@ -493,19 +494,6 @@ pub async fn build(
     });
 
     shell.connect_operation_feedback();
-    let weak = Rc::downgrade(&shell);
-    shell
-        .chrome
-        .source_download_cancel
-        .connect_clicked(move |_| {
-            let Some(shell) = weak.upgrade() else { return };
-            let operation = shell.source.operation.borrow().clone();
-            if let rufin_core::runtime::source::SourceOperation::Downloading { source_id, .. } =
-                operation
-            {
-                shell.products.source.cancel_source_download(source_id);
-            }
-        });
     shell.preferences.bind_controller_appearance();
     shell.bind_sidebar_settings();
     let weak = Rc::downgrade(&shell);
@@ -514,7 +502,9 @@ pub async fn build(
             shell.web_controller.stop();
             shell.products.scrobbling.shutdown();
             shell.close_activity();
-            if let Err(error) = shell.products.release_updates.install_on_exit() {
+            if shell.storage_reset.borrow().is_none()
+                && let Err(error) = shell.products.release_updates.install_on_exit()
+            {
                 tracing::warn!(%error, "could not start update on exit");
             }
         }

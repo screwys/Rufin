@@ -1,8 +1,8 @@
 use gtk_player::equalizer::EqualizerSurface;
 use gtk_player::outputs::audio_output_dropdown;
 use gtk_player::playback_settings::{
-    crossfade_duration_row, playback_rate_row, preserve_pitch_row, transition_from_index,
-    transition_index, volume_scale_from_index, volume_scale_index,
+    playback_rate_row, preserve_pitch_row, transition_rows, volume_scale_from_index,
+    volume_scale_index,
 };
 use gtk_widgets::forms::{controlled_selection_row, quality_selection_row, selection_row};
 use gtk_widgets::scale::{install_scale_scroll_forwarding, install_sliding_value_bubble};
@@ -13,8 +13,13 @@ use std::{
 
 use super::{
     LASTFM_API_CREATE_URL, LISTENBRAINZ_TOKEN_URL, configure_sidebar_items_expander,
-    context_menu::configure_context_menus_expander, layout::populate_home_block_rows,
-    populate_layout_group,
+    context_menu::configure_context_menus_expander,
+    layout::populate_home_block_rows,
+    layout::{
+        discord_display_from_index, discord_display_index, discord_link_from_index,
+        discord_link_index,
+    },
+    populate_layout_group, show_discord_flatpak_help,
 };
 
 use crate::Preferences;
@@ -39,10 +44,18 @@ pub fn scrobbling_page(
     let builder = gtk_widgets::ui_resource::builder(resource);
     let page: adw::PreferencesPage =
         gtk_widgets::ui_resource::object(&builder, resource, "integrations_page");
-    super::controller::bind(shell, &page, &builder, resource);
     super::source::login::bind_integrations(shell, &page, &builder);
     let settings = shell.products.scrobbling.preferences();
     gtk_widgets::objects!(builder, resource, {
+        external_links_row: adw::SwitchRow,
+        lastfm_links_row: adw::SwitchRow,
+        musicbrainz_links_row: adw::SwitchRow,
+        server_links_row: adw::SwitchRow,
+        presence_row: adw::SwitchRow,
+        display_row: adw::ComboRow,
+        link_row: adw::ComboRow,
+        paused_row: adw::SwitchRow,
+        listening_row: adw::SwitchRow,
         lastfm_enabled: adw::SwitchRow,
         lastfm_api_help: adw::ActionRow,
         lastfm_api_key: adw::PasswordEntryRow,
@@ -59,6 +72,137 @@ pub fn scrobbling_page(
         listenbrainz_token: adw::PasswordEntryRow,
         listenbrainz_now_playing: adw::SwitchRow,
     });
+
+    {
+        let settings = shell.settings.current.borrow().clone();
+        let external_links = settings.application.external_site_links.clone();
+        external_links_row.set_active(external_links.enabled);
+        lastfm_links_row.set_active(external_links.lastfm);
+        lastfm_links_row.set_sensitive(external_links.enabled);
+        musicbrainz_links_row.set_active(external_links.musicbrainz);
+        musicbrainz_links_row.set_sensitive(external_links.enabled);
+        server_links_row.set_active(external_links.server);
+        server_links_row.set_sensitive(external_links.enabled);
+        let external_links_shell = Rc::clone(shell);
+        let lastfm_links_for_master = lastfm_links_row.clone();
+        let musicbrainz_links_for_master = musicbrainz_links_row.clone();
+        let server_links_for_master = server_links_row.clone();
+        external_links_row.connect_active_notify(move |row| {
+            let enabled = row.is_active();
+            lastfm_links_for_master.set_sensitive(enabled);
+            musicbrainz_links_for_master.set_sensitive(enabled);
+            server_links_for_master.set_sensitive(enabled);
+            if external_links_shell
+                .settings
+                .set_app_setting("external site links setting", enabled, |settings| {
+                    &mut settings.application.external_site_links.enabled
+                })
+                .is_some()
+            {
+                (external_links_shell.effects)(crate::Effect::CatalogChanged);
+            }
+        });
+        let lastfm_links_shell = Rc::clone(shell);
+        lastfm_links_row.connect_active_notify(move |row| {
+            if lastfm_links_shell
+                .settings
+                .set_app_setting("Last.fm site links setting", row.is_active(), |settings| {
+                    &mut settings.application.external_site_links.lastfm
+                })
+                .is_some()
+            {
+                (lastfm_links_shell.effects)(crate::Effect::CatalogChanged);
+            }
+        });
+        let musicbrainz_links_shell = Rc::clone(shell);
+        musicbrainz_links_row.connect_active_notify(move |row| {
+            if musicbrainz_links_shell
+                .settings
+                .set_app_setting(
+                    "MusicBrainz site links setting",
+                    row.is_active(),
+                    |settings| &mut settings.application.external_site_links.musicbrainz,
+                )
+                .is_some()
+            {
+                (musicbrainz_links_shell.effects)(crate::Effect::CatalogChanged);
+            }
+        });
+        let server_links_shell = Rc::clone(shell);
+        server_links_row.connect_active_notify(move |row| {
+            if server_links_shell
+                .settings
+                .set_app_setting("server site links setting", row.is_active(), |settings| {
+                    &mut settings.application.external_site_links.server
+                })
+                .is_some()
+            {
+                (server_links_shell.effects)(crate::Effect::CatalogChanged);
+            }
+        });
+        presence_row.set_active(settings.rich_presence.enabled);
+        let presence_shell = Rc::clone(shell);
+        presence_row.connect_active_notify(move |row| {
+            presence_shell.settings.set_app_setting(
+                "Discord presence setting",
+                row.is_active(),
+                |settings| &mut settings.rich_presence.enabled,
+            );
+            show_discord_flatpak_help(row);
+        });
+        let display_titles = [tr("Application name"), tr("Song title"), tr("Artist name")];
+        let display_refs = display_titles
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let display_options = gtk::StringList::new(&display_refs);
+        display_row.set_model(Some(&display_options));
+        display_row.set_selected(discord_display_index(settings.rich_presence.display_type));
+        let display_shell = Rc::clone(shell);
+        display_row.connect_selected_notify(move |row| {
+            display_shell.settings.set_app_setting(
+                "Discord display setting",
+                discord_display_from_index(row.selected()),
+                |settings| &mut settings.rich_presence.display_type,
+            );
+        });
+        let link_titles = [
+            tr("None"),
+            tr("Last.fm"),
+            tr("MusicBrainz"),
+            tr("MusicBrainz + Last.fm"),
+        ];
+        let link_refs = link_titles.iter().map(String::as_str).collect::<Vec<_>>();
+        let link_options = gtk::StringList::new(&link_refs);
+        link_row.set_model(Some(&link_options));
+        link_row.set_selected(discord_link_index(settings.rich_presence.link_type));
+        let link_shell = Rc::clone(shell);
+        link_row.connect_selected_notify(move |row| {
+            link_shell.settings.set_app_setting(
+                "Discord link setting",
+                discord_link_from_index(row.selected()),
+                |settings| &mut settings.rich_presence.link_type,
+            );
+        });
+        paused_row.set_active(settings.rich_presence.show_paused);
+        let paused_shell = Rc::clone(shell);
+        paused_row.connect_active_notify(move |row| {
+            paused_shell.settings.set_app_setting(
+                "Discord paused setting",
+                row.is_active(),
+                |settings| &mut settings.rich_presence.show_paused,
+            );
+        });
+        listening_row.set_active(settings.rich_presence.show_as_listening);
+        let listening_shell = Rc::clone(shell);
+        listening_row.connect_active_notify(move |row| {
+            listening_shell.settings.set_app_setting(
+                "Discord activity type setting",
+                row.is_active(),
+                |settings| &mut settings.rich_presence.show_as_listening,
+            );
+        });
+    }
 
     lastfm_enabled.set_active(settings.lastfm.enabled);
     bind_scrobbling_switch(
@@ -422,7 +566,6 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
     let settings = app_settings.playback.clone();
     gtk_widgets::objects!(builder, resource, {
         transition_group: adw::PreferencesGroup,
-        skip_same_album_crossfade_row: adw::SwitchRow,
         audio_fade_row: adw::SwitchRow,
         refill_row: adw::ActionRow,
         refill: gtk::SpinButton,
@@ -432,43 +575,17 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
         ebu_target: gtk::Scale,
         write_ebu_tags_row: adw::SwitchRow,
         output_row: adw::ActionRow,
-        equalizer_group: adw::PreferencesGroup,
     });
 
-    let transition_shell = Rc::clone(shell);
-    let transition_row = selection_row(
-        &tr("Transition mode"),
-        &[tr("Gapless"), tr("Crossfade")],
-        transition_index(settings.transition_mode),
-        move |selected| {
-            transition_shell
-                .player_ui
-                .update_playback_settings(|settings| {
-                    settings.transition_mode = transition_from_index(selected);
-                });
-        },
-    );
+    let (transition_row, crossfade_options) = transition_rows(&shell.player_ui, &settings, 220);
     transition_group.add(&transition_row);
-
-    let crossfade_row = crossfade_duration_row(&shell.player_ui, settings.crossfade_seconds, 220);
-    transition_group.add(&crossfade_row);
+    transition_group.add(&crossfade_options);
 
     let speed_row = playback_rate_row(&shell.player_ui, settings.playback_rate, 220);
     transition_group.add(&speed_row);
 
     let pitch_row = preserve_pitch_row(&shell.player_ui, settings.preserve_pitch);
     transition_group.add(&pitch_row);
-
-    skip_same_album_crossfade_row.set_active(settings.skip_same_album_crossfade);
-    let skip_same_album_crossfade_shell = Rc::clone(shell);
-    skip_same_album_crossfade_row.connect_active_notify(move |row| {
-        skip_same_album_crossfade_shell
-            .player_ui
-            .update_playback_settings(|settings| {
-                settings.skip_same_album_crossfade = row.is_active();
-            });
-    });
-    transition_group.add(&skip_same_album_crossfade_row);
 
     audio_fade_row.set_active(settings.audio_fade_on_status_change);
     let audio_fade_shell = Rc::clone(shell);
@@ -699,6 +816,17 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
     output_row.set_activatable_widget(Some(&output_dropdown));
     audio_group.add(&output_row);
 
+    page
+}
+
+pub fn equalizer_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
+    let resource = crate::ui_resource::PLAYBACK_PREFERENCES_RESOURCE;
+    let builder = gtk_widgets::ui_resource::builder(resource);
+    gtk_widgets::objects!(builder, resource, {
+        equalizer_page: adw::PreferencesPage,
+        equalizer_group: adw::PreferencesGroup,
+    });
+    let settings = shell.settings.current.borrow().playback.clone();
     let equalizer = EqualizerSurface::new(&settings.equalizer);
     equalizer.set_band_height_request(PREFERENCES_EQUALIZER_BAND_HEIGHT);
     equalizer
@@ -714,7 +842,7 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
     });
     equalizer_group.add(&equalizer.root);
 
-    page
+    equalizer_page
 }
 pub fn appearance_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
     let resource = crate::ui_resource::APPEARANCE_PREFERENCES_RESOURCE;
@@ -722,21 +850,13 @@ pub fn appearance_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
     let page: adw::PreferencesPage =
         gtk_widgets::ui_resource::object(&builder, resource, "appearance_page");
     gtk_widgets::objects!(builder, resource, {
-        waveform_row: adw::SwitchRow,
         reduce_motion: adw::SwitchRow,
-        layout_group: adw::PreferencesGroup,
-        lyrics_panel_row: adw::SwitchRow,
-        visualizer_panel_row: adw::SwitchRow,
-        bottom_bar_rating_row: adw::SwitchRow,
-        narrow_row: adw::SwitchRow,
-        threshold_row: adw::SpinRow,
         sidebar_items: adw::ExpanderRow,
         sidebar_pins_row: adw::SwitchRow,
         home_blocks: adw::ExpanderRow,
         context_menus: adw::ExpanderRow,
     });
 
-    super::themes::bind(shell, &builder, resource);
     reduce_motion.set_active(shell.settings.current.borrow().application.reduce_motion);
     let motion_shell = Rc::clone(shell);
     reduce_motion.connect_active_notify(move |row| {
@@ -750,35 +870,7 @@ pub fn appearance_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
             motion_shell.appearance.apply(&settings);
         }
     });
-    waveform_row.set_active(
-        shell
-            .settings
-            .current
-            .borrow()
-            .player_display
-            .seekbar_waveform_enabled,
-    );
-    let waveform_shell = Rc::clone(shell);
-    waveform_row.connect_active_notify(move |row| {
-        if waveform_shell
-            .settings
-            .set_app_setting("seekbar waveform setting", row.is_active(), |settings| {
-                &mut settings.player_display.seekbar_waveform_enabled
-            })
-            .is_some()
-        {
-            waveform_shell.player_ui.update_bottom_player_transport();
-        }
-    });
-    populate_layout_group(
-        shell,
-        &layout_group,
-        lyrics_panel_row,
-        visualizer_panel_row,
-        bottom_bar_rating_row,
-        narrow_row,
-        threshold_row,
-    );
+    populate_layout_group(shell, &builder);
 
     configure_sidebar_items_expander(shell, &sidebar_items, &sidebar_pins_row);
 

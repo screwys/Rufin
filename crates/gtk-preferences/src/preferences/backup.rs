@@ -40,11 +40,11 @@ fn selected_contents(rows: &[adw::SwitchRow; 7]) -> BackupContents {
     contents
 }
 
-pub(super) fn groups(
+pub(super) fn group(
     shell: &Rc<Preferences>,
     navigation: &adw::NavigationView,
     navigation_controls: &super::PreferencesNavigationControls,
-) -> [adw::PreferencesGroup; 2] {
+) -> adw::PreferencesGroup {
     let resource = crate::ui_resource::BACKUP_PREFERENCES_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
@@ -54,9 +54,6 @@ pub(super) fn groups(
         folder_row: adw::ActionRow, choose_folder: gtk::Button, reset_folder: gtk::Button, open_folder: gtk::Button,
         encrypt: adw::SwitchRow, scheduled_password: adw::PasswordEntryRow,
         schedule: gtk::DropDown, weekday: gtk::DropDown, weekday_field: gtk::Box, hour: gtk::DropDown,
-        activity_group: adw::PreferencesGroup, activity_scope: adw::PreferencesRow,
-        listenbrainz: gtk::ToggleButton, jsonl: gtk::ToggleButton, current_source: gtk::ToggleButton, current_source_label: gtk::Label,
-        activity_export: gtk::Button,
     });
     let settings = shell.settings.current.borrow().application.backup.clone();
     enabled.set_active(settings.enabled);
@@ -295,50 +292,6 @@ pub(super) fn groups(
             import_dialog(&shell);
         }
     });
-    let selected = {
-        let configured = shell.source.configured.borrow();
-        configured
-            .sources
-            .iter()
-            .find(|source| Some(&source.id) == configured.selected_source_id.as_ref())
-            .cloned()
-    };
-    activity_scope.set_visible(selected.is_some());
-    if let Some(source) = &selected {
-        let name = gtk_widgets::source_labels::configured_source_display_name(source);
-        current_source_label.set_label(&name);
-        current_source.set_tooltip_text(Some(&name));
-        current_source.update_property(&[gtk::accessible::Property::Label(&name)]);
-    }
-    let weak = Rc::downgrade(shell);
-    let (listenbrainz, jsonl, current_source) = (
-        listenbrainz.downgrade(),
-        jsonl.downgrade(),
-        current_source.downgrade(),
-    );
-    activity_export.connect_clicked(move |_| {
-        if let Some(shell) = weak.upgrade() {
-            let format = if jsonl.upgrade().is_some_and(|button| button.is_active()) {
-                None
-            } else if listenbrainz
-                .upgrade()
-                .is_some_and(|button| button.is_active())
-            {
-                Some(library::ActivityCsvFormat::ListenBrainz)
-            } else {
-                Some(library::ActivityCsvFormat::LastFm)
-            };
-            let source = selected
-                .as_ref()
-                .filter(|_| {
-                    current_source
-                        .upgrade()
-                        .is_some_and(|button| button.is_active())
-                })
-                .map(|source| source.id.clone());
-            (shell.effects)(crate::Effect::ExportActivity(format, source));
-        }
-    });
     let resource = crate::ui_resource::BACKUP_DIALOG_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
     let contents_group: adw::PreferencesGroup =
@@ -370,7 +323,7 @@ pub(super) fn groups(
                 });
         }
     });
-    [backup_group, activity_group]
+    backup_group
 }
 
 fn export_dialog(shell: &Rc<Preferences>) {

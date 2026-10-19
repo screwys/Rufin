@@ -1466,7 +1466,10 @@ impl LyricsHandle {
                     ));
                 });
                 let status = match result {
-                    Ok(path) => JapaneseDictionaryStatus::Ready(path),
+                    Ok(path) => {
+                        ::lyrics::release_japanese_reader();
+                        JapaneseDictionaryStatus::Ready(path)
+                    }
                     Err(error) => {
                         warn!(%error, "could not prepare Japanese dictionary");
                         JapaneseDictionaryStatus::Failed
@@ -1480,6 +1483,66 @@ impl LyricsHandle {
             });
         }
         status.clone()
+    }
+}
+
+impl LyricsHandle {
+    pub(crate) async fn dictionary_cache_usage(&self) -> Result<library::CacheUsage, String> {
+        let directory = ::lyrics::japanese_dictionary_path(&self.service.dictionary_directory);
+        self.service
+            .runtime
+            .spawn_blocking(move || {
+                let mut usage = library::CacheUsage::default();
+                let mut directories = vec![directory];
+                while let Some(directory) = directories.pop() {
+                    let entries = match std::fs::read_dir(directory) {
+                        Ok(entries) => entries,
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                        Err(error) => return Err(error),
+                    };
+                    usage.entries = 1;
+                    for entry in entries {
+                        let entry = entry?;
+                        let kind = entry.file_type()?;
+                        if kind.is_dir() {
+                            directories.push(entry.path());
+                        } else if kind.is_file() {
+                            match entry.metadata() {
+                                Ok(metadata) => {
+                                    usage.bytes += metadata.len();
+                                }
+                                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                                Err(error) => return Err(error),
+                            }
+                        }
+                    }
+                }
+                Ok::<_, std::io::Error>(usage)
+            })
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) async fn clear_dictionary_cache(&self) -> Result<(), String> {
+        use ::lyrics::JapaneseDictionaryStatus;
+        let directory = ::lyrics::japanese_dictionary_path(&self.service.dictionary_directory);
+        let result = self
+            .service
+            .runtime
+            .spawn_blocking(move || ::lyrics::clear_japanese_dictionary(&directory))
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|result| result.map_err(|error| error.to_string()));
+        *self
+            .service
+            .dictionary_status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = JapaneseDictionaryStatus::Idle;
+        self.service.publish(LyricsEvent::JapaneseDictionaryChanged(
+            JapaneseDictionaryStatus::Idle,
+        ));
+        result
     }
 }
 

@@ -17,7 +17,6 @@ pub(crate) struct WindowChrome {
     pub(crate) source_refresh_feedback: gtk::Box,
     pub(crate) source_refresh_feedback_label: gtk::Label,
     pub(crate) source_refresh_feedback_progress: gtk::ProgressBar,
-    pub(crate) source_download_cancel: gtk::Button,
     pub(crate) operation_feedback: gtk::Box,
     pub(crate) operation_feedback_artwork: gtk::Box,
     pub(crate) operation_feedback_title: gtk::Label,

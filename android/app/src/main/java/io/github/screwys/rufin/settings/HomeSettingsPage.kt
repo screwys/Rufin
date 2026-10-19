@@ -12,7 +12,7 @@ internal fun HomeSettingsPage(preferences: PreferencesConnection, embedded: Bool
     val enabled = preferences.applicationSettings?.homeBlocks.orEmpty().map { it.name }
     val order = enabled + names.map { it.first }.filter { it !in enabled }
     SettingsPage(embedded = embedded) {
-        SettingsGroup(translate("Home Blocks")) {
+        SettingsGroup(if (embedded) null else translate("Home Blocks")) {
             SettingsReorderRows(order.map { id -> SettingsReorderItem(id, names.first { it.first == id }.second, id in enabled, id in enabled) },
                 onReorder = { next, _, _, _ -> preferences.changePreference { setHomeBlocks(next.filter { it in enabled }.map(HomeBlockKind::valueOf)) } },
                 onToggle = { id, on -> preferences.changePreference { setHomeBlocks((if (on) enabled + id else enabled - id).map(HomeBlockKind::valueOf)) } })

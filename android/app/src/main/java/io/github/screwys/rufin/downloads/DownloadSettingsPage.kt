@@ -15,6 +15,8 @@ import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.shared.downloads.*
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.core.trackCountText
+import io.github.screwys.rufin.settings.PreferencesConnection
+import io.github.screwys.rufin.settings.SettingsSwitch
 import io.github.screwys.rufin.settings.PreferenceChoice
 import io.github.screwys.rufin.settings.LocalTranslationRevision
 import io.github.screwys.rufin.settings.SettingsPage
@@ -22,10 +24,10 @@ import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsRow
 
 @Composable
-internal fun DownloadSettingsPage(model: RufinConnection, embedded: Boolean = false) {
+internal fun DownloadSettingsPage(model: RufinConnection, preferences: PreferencesConnection, embedded: Boolean = false) {
     val downloads = model.downloads
     val translation = LocalTranslationRevision.current
-    LaunchedEffect(translation) { downloads.refreshSources() }
+    LaunchedEffect(translation) { downloads.refreshSources(); preferences.refreshApplicationSettings() }
     val sources = downloads.sources
     fun DownloadSource.directory() = when (val directory = settings.directory) { is DownloadDirectory.Native -> directory.v1; is DownloadDirectory.Document -> directory.uri; null -> null }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
@@ -53,6 +55,13 @@ internal fun DownloadSettingsPage(model: RufinConnection, embedded: Boolean = fa
         folderSource = null
     }
     SettingsPage(embedded = embedded) {
+        preferences.applicationSettings?.let { settings ->
+            SettingsGroup {
+                SettingsSwitch(translate("Show downloaded badge"), settings.showDownloadedBadges) {
+                    preferences.changePreference { setShowDownloadedBadges(it) }
+                }
+            }
+        }
         if (sources.isEmpty()) Text(translate("Add a source to configure downloads."))
         else if (source != null) {
             SettingsGroup {

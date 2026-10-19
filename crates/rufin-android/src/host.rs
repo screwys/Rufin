@@ -11,7 +11,7 @@ use rufin_core::{
 };
 
 // Diagnostics installs process-wide tracing and GLib handlers. A service may restart.
-static DIAGNOSTICS: OnceLock<(DiagnosticsHandle, Mutex<StderrGuard>)> = OnceLock::new();
+static DIAGNOSTICS: OnceLock<(DiagnosticsHandle, Mutex<Option<StderrGuard>>)> = OnceLock::new();
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum AndroidError {
@@ -100,7 +100,7 @@ pub fn seek_preview_matches_position(target_millis: u64, position_millis: u64) -
 /// The Android service retains this object independently of screen navigation.
 #[derive(uniffi::Object)]
 pub struct AndroidRuntime {
-    products: ProductHandles,
+    pub(crate) products: ProductHandles,
     diagnostics: DiagnosticsHandle,
     player: Arc<crate::player::AndroidPlayer>,
     preferences: Arc<crate::preferences::AndroidPreferences>,
@@ -108,7 +108,8 @@ pub struct AndroidRuntime {
     controller_owner: Arc<web::Controller>,
     release_events: async_channel::Receiver<rufin_core::runtime::ReleaseUpdate>,
     library_events: Arc<crate::library_events::AndroidLibraryEvents>,
-    runtime: Option<tokio::runtime::Runtime>,
+    runtime: Mutex<Option<tokio::runtime::Runtime>>,
+    paths: Paths,
 }
 
 #[uniffi::export]
@@ -126,7 +127,7 @@ impl AndroidRuntime {
         let theme_directory = paths.config_dir().join("themes");
         let (diagnostics, _) = DIAGNOSTICS.get_or_init(|| {
             let (diagnostics, guard) = Diagnostics::install(paths.state_dir());
-            (diagnostics, Mutex::new(guard))
+            (diagnostics, Mutex::new(Some(guard)))
         });
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -138,7 +139,7 @@ impl AndroidRuntime {
                 Arc::clone(diagnostics),
                 false,
                 settings,
-                paths,
+                paths.clone(),
                 || {
                     playback_gstreamer::GStreamerPlaybackBackend::new()
                         .map(|backend| Box::new(backend) as Box<dyn playback::PlaybackBackend>)
@@ -173,7 +174,8 @@ impl AndroidRuntime {
             controller_owner,
             release_events: inputs.receivers.release_updates,
             library_events,
-            runtime: Some(runtime),
+            runtime: Mutex::new(Some(runtime)),
+            paths,
         }))
     }
 
@@ -226,6 +228,10 @@ impl AndroidRuntime {
     pub fn source(&self) -> Arc<rufin_core::source::SourceOwner> {
         self.products.source.clone()
     }
+    pub fn storage(self: Arc<Self>) -> Arc<crate::storage::AndroidStorage> {
+        Arc::new(crate::storage::AndroidStorage::new(self))
+    }
+
     pub fn downloads(&self) -> Arc<downloads::Downloads> {
         Arc::new(self.products.downloads.clone())
     }
@@ -315,12 +321,43 @@ impl AndroidRuntime {
     }
 }
 
+impl AndroidRuntime {
+    pub(crate) fn reset_storage(
+        &self,
+        kind: rufin_core::settings::StorageReset,
+    ) -> Result<(), AndroidError> {
+        let request = self.products.prepare_storage_reset(kind).map_err(error)?;
+        self.controller_owner.stop();
+        self.products.playback.shutdown();
+        self.products.scrobbling.shutdown();
+        let runtime = self
+            .runtime
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .ok_or_else(|| error("Rufin is shutting down"))?;
+        let closed = runtime.block_on(self.products.close_storage());
+        // File workers must finish before the reset can remove their output.
+        drop(runtime);
+        closed.map_err(error)?;
+        if let Some((_, guard)) = DIAGNOSTICS.get() {
+            guard.lock().unwrap_or_else(|p| p.into_inner()).take();
+        }
+        request.apply(&self.paths).map_err(error)
+    }
+}
+
 impl Drop for AndroidRuntime {
     fn drop(&mut self) {
         self.controller_owner.stop();
         self.products.playback.shutdown();
         self.products.scrobbling.shutdown();
-        if let Some(runtime) = self.runtime.take() {
+        if let Some(runtime) = self
+            .runtime
+            .get_mut()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
             runtime.shutdown_timeout(std::time::Duration::from_secs(1));
         }
     }

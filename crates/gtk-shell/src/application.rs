@@ -40,7 +40,18 @@ struct ApplicationOptions {
     window_bar_preview: Option<WindowBarPreview>,
 }
 
-pub fn run_application<F, Fut>(settings: rufin_core::settings::Settings, bootstrap: F) -> ExitCode
+pub struct ApplicationExit {
+    pub code: ExitCode,
+    pub storage_reset: Option<Result<rufin_core::settings::StorageResetRequest, String>>,
+}
+
+pub(crate) type StorageResetResult =
+    Rc<RefCell<Option<Result<rufin_core::settings::StorageResetRequest, String>>>>;
+
+pub fn run_application<F, Fut>(
+    settings: rufin_core::settings::Settings,
+    bootstrap: F,
+) -> ApplicationExit
 where
     F: FnOnce() -> Fut + 'static,
     Fut: std::future::Future<Output = Result<RuntimeInputs, String>> + 'static,
@@ -52,7 +63,7 @@ pub fn run_application_after_update<F, Fut>(
     settings: rufin_core::settings::Settings,
     bootstrap: F,
     presented: impl FnOnce() + 'static,
-) -> ExitCode
+) -> ApplicationExit
 where
     F: FnOnce() -> Fut + 'static,
     Fut: std::future::Future<Output = Result<RuntimeInputs, String>> + 'static,
@@ -65,12 +76,14 @@ fn run_application_with_presentation<F, Fut>(
     bootstrap: F,
     force_initial_presentation: bool,
     presented: Option<Box<dyn FnOnce()>>,
-) -> ExitCode
+) -> ApplicationExit
 where
     F: FnOnce() -> Fut + 'static,
     Fut: std::future::Future<Output = Result<RuntimeInputs, String>> + 'static,
 {
     let (app, options) = application();
+    let storage_reset = StorageResetResult::default();
+    let reset_result = Rc::clone(&storage_reset);
     connect_startup_configuration(&app, Rc::clone(&options));
     let bootstrap = Rc::new(RefCell::new(Some(bootstrap)));
     let presented = Rc::new(RefCell::new(presented));
@@ -98,6 +111,7 @@ where
         let hold = app.hold();
         let settings = settings.clone();
         let quitting = Rc::clone(&quitting);
+        let storage_reset = Rc::clone(&storage_reset);
         let presented = presented.borrow_mut().take();
         let window_bar_preview = options.borrow().window_bar_preview;
         let open_receiver = open_receiver.clone();
@@ -108,6 +122,7 @@ where
                 settings,
                 bootstrap(),
                 quitting,
+                storage_reset,
                 force_initial_presentation,
                 presented,
                 window_bar_preview,
@@ -121,7 +136,14 @@ where
         });
     });
 
-    app.run().into()
+    let code = app.run().into();
+    for window in app.windows() {
+        window.destroy();
+    }
+    ApplicationExit {
+        code,
+        storage_reset: reset_result.take(),
+    }
 }
 
 pub fn run_startup_error_application(error: String) -> ExitCode {

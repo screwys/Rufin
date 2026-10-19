@@ -38,16 +38,15 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
     var remove by remember { mutableStateOf<Pair<String, String>?>(null) }
     var editingConnection by remember { mutableStateOf<String?>(null) }
     var addingConnection by remember { mutableStateOf(false) }
-    var clearingCache by remember { mutableStateOf(false) }
     LaunchedEffect(model.service, model.ready) {
         val runtime = model.service?.runtime?.value?.getOrNull() ?: return@LaunchedEffect
         val setup = runtime.source()
         bridge = setup
-        try { connections = withContext(Dispatchers.IO) { setup.fileIntegrations().filter { !it.musicSource } } }
+        try { if (connectionsOnly) connections = withContext(Dispatchers.IO) { setup.fileIntegrations().filter { !it.musicSource } } }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { model.runAction { throw error } }
     }
-    LaunchedEffect(state, bridge) { bridge?.let { setup -> connections = withContext(Dispatchers.IO) { setup.fileIntegrations().filter { !it.musicSource } } } }
+    LaunchedEffect(state, bridge) { if (connectionsOnly) bridge?.let { setup -> connections = withContext(Dispatchers.IO) { setup.fileIntegrations().filter { !it.musicSource } } } }
     DisposableEffect(bridge) { val owned = bridge; onDispose { owned?.destroy() } }
     SettingsPage(embedded = embedded) {
         if (!connectionsOnly) {
@@ -73,53 +72,15 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
                 leading = { RufinIcon("rufin-list-add-symbolic", null, Modifier.size(24.dp)) },
                 trailing = { RufinIcon("rufin-go-next-symbolic", null, Modifier.size(20.dp)) }, modifier = Modifier.clickable(onClick = onAdd))
         }
-        state?.selectedSourceId?.let { sourceId ->
-            SettingsGroup {
-                SettingsRow(translate("Download artwork"), shape = settingsRowShape(0, 2),
-                    leading = { RufinIcon("rufin-download-symbolic", null, Modifier.size(24.dp)) },
-                    modifier = Modifier.clickable(enabled = bridge != null) {
-                        model.runAction { bridge?.downloadArtwork(sourceId) }
-                    })
-                SettingsRow(translate("Download lyrics"), shape = settingsRowShape(1, 2),
-                    leading = { RufinIcon("rufin-download-symbolic", null, Modifier.size(24.dp)) },
-                    modifier = Modifier.clickable(enabled = bridge != null) {
-                        model.runAction { bridge?.downloadLyrics(sourceId) }
-                    })
-            }
         }
-        SettingsGroup {
-            listOf(
-                Triple(true, translate("Clear artwork cache"), translate("Artwork cache cleared")),
-                Triple(false, translate("Clear lyrics cache"), translate("Lyrics cache cleared")),
-            ).forEachIndexed { index, (artwork, title, success) ->
-                SettingsRow(title, shape = settingsRowShape(index, 2),
-                    leading = { RufinIcon("rufin-user-trash-symbolic", null, Modifier.size(24.dp)) },
-                    modifier = Modifier.clickable(enabled = model.ready && !clearingCache) {
-                        clearingCache = true
-                        model.runAction {
-                            try {
-                                withContext(Dispatchers.IO) {
-                                    model.connectedService().runtime.value!!.getOrThrow().downloads().use {
-                                        if (artwork) it.clearArtworkCache() else it.clearLyricsCache()
-                                    }
-                                }
-                                model.showFeedback(success)
-                            } finally { clearingCache = false }
-                        }
-                    })
-            }
-        }
-        }
-        if (connectionsOnly) SettingsGroup {
+        if (connectionsOnly) SettingsGroup(translate("File connections")) {
             SettingsRow(translate("File connection"), leading = { RufinIcon("rufin-list-add-symbolic", null) },
                 modifier = Modifier.clickable { addingConnection = true })
-        }
-        if (connections.isNotEmpty()) SettingsGroup(translate("File connections")) {
         connections.forEach { connection -> key(connection.id) {
             SettingsRow(connection.name, summary = connection.kind,
                 leading = { SourceIcon(connection.kind, Modifier.size(24.dp)) },
                 trailing = { RufinIcon("rufin-go-next-symbolic", null) }, modifier = Modifier.clickable {
-                    if (connectionsOnly) editingConnection = connection.id else onEdit(connection.id)
+                    editingConnection = connection.id
                 })
         } }
         }

@@ -23,6 +23,36 @@ pub struct SourceState {
     pub refresh_feedback_generation: Rc<Cell<u64>>,
 }
 
+pub(super) fn preference_source_choices(
+    shell: &Rc<crate::Preferences>,
+    button: &gtk::MenuButton,
+) -> (Rc<[SourceSummary]>, gtk::SingleSelection) {
+    let configured = shell.source.configured.borrow();
+    let sources: Rc<[SourceSummary]> = configured.sources.iter().cloned().collect();
+    let selected = shell
+        .state
+        .source_choice
+        .borrow()
+        .clone()
+        .or_else(|| configured.selected_source_id.clone());
+    let index = sources
+        .iter()
+        .position(|source| Some(&source.id) == selected.as_ref())
+        .unwrap_or(0) as u32;
+    let selection =
+        gtk_widgets::source_labels::bind_source_picker(button, sources.clone(), index, false);
+    let weak = Rc::downgrade(shell);
+    let choices = sources.clone();
+    selection.connect_selected_notify(move |selection| {
+        if let (Some(shell), Some(source)) =
+            (weak.upgrade(), choices.get(selection.selected() as usize))
+        {
+            *shell.state.source_choice.borrow_mut() = Some(source.id.clone());
+        }
+    });
+    (sources, selection)
+}
+
 pub fn configured_source_kind_display_name(kind: &str) -> String {
     gtk_widgets::source_labels::source_kind_title(kind).map_or_else(|| kind.to_string(), tr)
 }

@@ -847,11 +847,7 @@ impl ConnectOwner {
         let mut config = self.status().settings;
         let previous = config.pending_import.clone();
         edit(&mut config);
-        std::fs::create_dir_all(&self.directory).map_err(error)?;
-        crate::settings::write_private(
-            &self.directory.join("device.json"),
-            &serde_json::to_vec(&config).map_err(error)?,
-        )?;
+        write_device_config(&self.directory, &config)?;
         if previous != config.pending_import
             && let Some(PendingImport::Prepared { path, .. }) = previous
             && let Err(error) = std::fs::remove_file(path)
@@ -1331,6 +1327,19 @@ impl ConnectOwner {
                 .attach_documents(session.documents.clone())
                 .await
                 .map_err(error)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn close_storage(&self) -> Result<(), String> {
+        self.cancel_download();
+        let _actions = self.actions.lock().await;
+        if let Some(session) = self.session.write().await.take() {
+            session.stop.cancel();
+            session.documents.close().await.map_err(error)?;
+        }
+        if let Some(network) = self.network.lock().await.take() {
+            network.shutdown().await.map_err(error)?;
         }
         Ok(())
     }
@@ -3686,6 +3695,39 @@ impl ConnectOwner {
             Err(failure.unwrap_or_else(|| "The Connect file key is unavailable".into()))
         }
     }
+}
+
+pub(crate) fn write_device_config(
+    directory: &std::path::Path,
+    config: &ConnectSettings,
+) -> Result<(), String> {
+    std::fs::create_dir_all(directory).map_err(error)?;
+    crate::settings::write_private(
+        &directory.join("device.json"),
+        &serde_json::to_vec(config).map_err(error)?,
+    )
+}
+
+pub(crate) fn secret_keys(settings: &ConnectSettings) -> Vec<SecretKey> {
+    let Some(identity) = &settings.identity_ref else {
+        return Vec::new();
+    };
+    let mut keys = vec![identity_key(identity)];
+    let profiles = settings
+        .profile
+        .iter()
+        .chain(settings.file_profiles.iter())
+        .map(String::as_str)
+        .chain(settings.pending_import.as_ref().map(PendingImport::profile))
+        .collect::<std::collections::BTreeSet<_>>();
+    for profile in profiles {
+        keys.extend([
+            file_key(identity, profile),
+            previous_file_keys(identity, profile),
+            local_key(identity, profile),
+        ]);
+    }
+    keys
 }
 
 fn identity_key(identity_ref: &str) -> SecretKey {

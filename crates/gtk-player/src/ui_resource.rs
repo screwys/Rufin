@@ -3,6 +3,7 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     VISUALIZER_SETTINGS_RESOURCE,
     VISUALIZER_PASTE_RESOURCE,
     PLAYBACK_SETTINGS_POPOVER_RESOURCE,
+    TRANSITION_SETTINGS_RESOURCE,
     COLOR_CHOOSER_RESOURCE,
     LYRICS_SETTINGS_RESOURCE,
     RIGHT_PANEL_RESOURCE,
@@ -47,6 +48,9 @@ pub const SIDEBAR_SPLIT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/sid
 pub const LYRICS_SETTINGS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/lyrics/settings.ui";
 
 pub const COLOR_CHOOSER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/color_chooser.ui";
+
+pub const TRANSITION_SETTINGS_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/player/transition_settings.ui";
 
 pub const PLAYBACK_SETTINGS_POPOVER_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/player/playback_settings.ui";

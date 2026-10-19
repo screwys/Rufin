@@ -4,9 +4,9 @@ uniffi::setup_scaffolding!();
 use lindera::{dictionary::load_fs_dictionary, mode::Mode, segmenter::Segmenter};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
 use wana_kana::ConvertJapanese;
 
 mod timing;
@@ -19,7 +19,7 @@ pub use timing::{
 mod dictionary;
 mod lyrics;
 
-pub use dictionary::{JapaneseDictionaryStatus, prepare_dictionary};
+pub use dictionary::{JapaneseDictionaryStatus, japanese_dictionary_path, prepare_dictionary};
 pub use lyrics::{
     LocalLyricsInput, LyricsLookup, LyricsPlan, cached_lyrics_allowed, external_best_lyrics,
     local_sidecar_lyrics, lyrics_from_edited_text, lyrics_from_search_result, lyrics_to_lrc_text,
@@ -610,9 +610,7 @@ enum JapaneseReaderState {
     Unavailable,
 }
 
-thread_local! {
-    static JAPANESE_READER: RefCell<Option<JapaneseReaderState>> = const { RefCell::new(None) };
-}
+static JAPANESE_READER: Mutex<Option<JapaneseReaderState>> = Mutex::new(None);
 
 pub fn japanese_reading(text: &str) -> Option<JapaneseReading> {
     japanese_reading_for_language(text, None)
@@ -634,67 +632,64 @@ pub fn japanese_reading_for_language_options(
     if !japanese_reader_needed(text, language, show_furigana, show_romanization) {
         return None;
     }
-    JAPANESE_READER.with(|reader| {
-        let reader = reader.borrow();
-        let JapaneseReaderState::Ready(tokenizer) = reader.as_ref()? else {
-            return None;
-        };
-        let mut tokens = tokenizer.segment(Cow::Borrowed(text)).ok()?;
-        let source_tokens = tokens
-            .iter_mut()
-            .map(|token| {
-                let surface = token.surface.to_string();
-                let reading = token.details().get(7).copied().unwrap_or("*");
-                let reading = match reading {
-                    "" | "*" => surface.as_str(),
-                    reading => reading,
-                }
-                .to_hiragana();
-                (surface, reading)
-            })
-            .collect::<Vec<_>>();
-        let mut romanization_spans = Vec::new();
-        let romanization = show_romanization
-            .then(|| {
-                source_tokens
-                    .iter()
-                    .fold(
-                        (String::new(), false, 0),
-                        |(mut output, previous_was_word, cursor), (surface, reading)| {
-                            let is_word =
-                                surface.chars().any(|character| character.is_alphanumeric());
-                            if previous_was_word && is_word {
-                                output.push(' ');
-                            }
-                            let romanized = if contains_japanese_script(surface) {
-                                reading.to_romaji()
-                            } else {
-                                surface.clone()
-                            };
-                            output.push_str(&romanized);
-                            let end = cursor + surface.len();
-                            romanization_spans.push((cursor..end, romanized));
-                            (output, is_word, end)
-                        },
-                    )
-                    .0
-            })
-            .unwrap_or_default();
-        let segments = show_furigana
-            .then(|| {
-                source_tokens
-                    .iter()
-                    .flat_map(|(surface, reading)| {
-                        japanese_reading_segments(surface.clone(), reading.clone())
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        Some(JapaneseReading {
-            segments,
-            romanization,
-            romanization_spans,
+    let reader = JAPANESE_READER.lock().unwrap_or_else(|e| e.into_inner());
+    let JapaneseReaderState::Ready(tokenizer) = reader.as_ref()? else {
+        return None;
+    };
+    let mut tokens = tokenizer.segment(Cow::Borrowed(text)).ok()?;
+    let source_tokens = tokens
+        .iter_mut()
+        .map(|token| {
+            let surface = token.surface.to_string();
+            let reading = token.details().get(7).copied().unwrap_or("*");
+            let reading = match reading {
+                "" | "*" => surface.as_str(),
+                reading => reading,
+            }
+            .to_hiragana();
+            (surface, reading)
         })
+        .collect::<Vec<_>>();
+    let mut romanization_spans = Vec::new();
+    let romanization = show_romanization
+        .then(|| {
+            source_tokens
+                .iter()
+                .fold(
+                    (String::new(), false, 0),
+                    |(mut output, previous_was_word, cursor), (surface, reading)| {
+                        let is_word = surface.chars().any(|character| character.is_alphanumeric());
+                        if previous_was_word && is_word {
+                            output.push(' ');
+                        }
+                        let romanized = if contains_japanese_script(surface) {
+                            reading.to_romaji()
+                        } else {
+                            surface.clone()
+                        };
+                        output.push_str(&romanized);
+                        let end = cursor + surface.len();
+                        romanization_spans.push((cursor..end, romanized));
+                        (output, is_word, end)
+                    },
+                )
+                .0
+        })
+        .unwrap_or_default();
+    let segments = show_furigana
+        .then(|| {
+            source_tokens
+                .iter()
+                .flat_map(|(surface, reading)| {
+                    japanese_reading_segments(surface.clone(), reading.clone())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(JapaneseReading {
+        segments,
+        romanization,
+        romanization_spans,
     })
 }
 
@@ -741,30 +736,37 @@ fn japanese_reader_needed(
 }
 
 pub fn release_japanese_reader() {
-    JAPANESE_READER.with(|reader| {
-        *reader.borrow_mut() = None;
-    });
+    *JAPANESE_READER.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+pub fn clear_japanese_dictionary(directory: &Path) -> std::io::Result<()> {
+    let mut reader = JAPANESE_READER.lock().unwrap_or_else(|e| e.into_inner());
+    *reader = None;
+    // Keep readers closed until deletion finishes, including mapped files on Windows.
+    match std::fs::remove_dir_all(directory) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 pub fn prepare_japanese_reader(path: &Path) {
-    JAPANESE_READER.with(|reader| {
-        let mut reader = reader.borrow_mut();
-        if reader.is_some() {
-            return;
+    let mut reader = JAPANESE_READER.lock().unwrap_or_else(|e| e.into_inner());
+    if reader.is_some() {
+        return;
+    }
+    *reader = Some(match load_fs_dictionary(path) {
+        Ok(dictionary) => JapaneseReaderState::Ready(Box::new(
+            Segmenter::new(Mode::Normal, dictionary, None).keep_whitespace(true),
+        )),
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "could not load Japanese readings dictionary"
+            );
+            JapaneseReaderState::Unavailable
         }
-        *reader = Some(match load_fs_dictionary(path) {
-            Ok(dictionary) => JapaneseReaderState::Ready(Box::new(
-                Segmenter::new(Mode::Normal, dictionary, None).keep_whitespace(true),
-            )),
-            Err(error) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    %error,
-                    "could not load Japanese readings dictionary"
-                );
-                JapaneseReaderState::Unavailable
-            }
-        });
     });
 }
 
@@ -1175,7 +1177,7 @@ mod tests {
         assert!(
             japanese_reading_for_language_options("君の名は", Some("ja"), false, false).is_none()
         );
-        JAPANESE_READER.with(|reader| assert!(reader.borrow().is_none()));
+        assert!(JAPANESE_READER.lock().unwrap().is_none());
     }
 
     fn document(role: LyricsRole, language: Option<&str>, text: &str) -> LyricsDocument {

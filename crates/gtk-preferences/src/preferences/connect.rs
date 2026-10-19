@@ -305,10 +305,19 @@ fn present(shell: &Rc<Preferences>) {
         present_light_dismiss_dialog(&dialog, &shell.window);
         return;
     }
+    super::present_preferences_dialog_with_page(
+        shell,
+        super::PreferencesPageKind::Connect,
+        false,
+        false,
+    );
+}
+
+pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk::Widget {
     let resource = crate::ui_resource::CONNECT_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
-        connect_dialog: adw::Dialog, page_title: adw::WindowTitle,
+        connect_content: gtk::Overlay, page_title: gtk::Label,
         choose_join: gtk::ToggleButton, choose_invite: gtk::ToggleButton,
         connection_choices: gtk::Box,
         join_method: adw::ComboRow, pairing: adw::PreferencesGroup,
@@ -340,14 +349,7 @@ fn present(shell: &Rc<Preferences>) {
     *shell.state.connect_feedback.borrow_mut() = Some(
         gtk_widgets::feedback::ControlFeedbackState::new(&feedback_label, shell.settings.clone()),
     );
-    let weak = Rc::downgrade(shell);
-    connect_dialog.connect_closed(move |_| {
-        if let Some(shell) = weak.upgrade() {
-            shell.state.connect_dialog.set(None::<&adw::Dialog>);
-            shell.state.connect_feedback.borrow_mut().take();
-        }
-    });
-    shell.state.connect_dialog.set(Some(&connect_dialog));
+    shell.state.connect_dialog.set(Some(connect_dialog));
     let initial = shell.products.connect.status();
     device_name.set_text(&initial.settings.name);
     nearby.set_active(initial.settings.nearby);
@@ -411,11 +413,9 @@ fn present(shell: &Rc<Preferences>) {
                 dialog.set_can_close(!state.connecting);
             }
             if let Some(title) = title.upgrade() {
-                title.set_subtitle(if joining && !busy && state.error.is_none() {
-                    &state.profile_status
-                } else {
-                    ""
-                });
+                let visible = joining && !busy && state.error.is_none();
+                title.set_visible(visible);
+                title.set_label(if visible { &state.profile_status } else { "" });
             }
             if let Some(choices) = connection_choices.upgrade() {
                 choices.set_visible(!has_profile && !busy);
@@ -1056,7 +1056,18 @@ fn present(shell: &Rc<Preferences>) {
             }
         }
     });
-    connect_dialog.connect_closed(move |_| task.abort());
+    let weak = Rc::downgrade(shell);
+    let parent = connect_dialog.downgrade();
+    connect_content.connect_destroy(move |_| {
+        task.abort();
+        if let Some(parent) = parent.upgrade() {
+            parent.set_can_close(true);
+        }
+        if let Some(shell) = weak.upgrade() {
+            shell.state.connect_dialog.set(None::<&adw::Dialog>);
+            shell.state.connect_feedback.borrow_mut().take();
+        }
+    });
     let state = shell.products.connect.status();
     if state.settings.enabled
         && state.settings.profile.is_none()
@@ -1065,7 +1076,7 @@ fn present(shell: &Rc<Preferences>) {
     {
         run(shell, Action::Enable { enabled: true });
     }
-    present_light_dismiss_dialog(&connect_dialog, &shell.window);
+    connect_content.upcast()
 }
 
 fn collection_progress_text(progress: &CollectionProgress) -> String {

@@ -32,6 +32,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 private const val DOCUMENT_PAGE_SIZE = 128
+private const val ROOT_SEED_FILE = "document-root-seed"
 
 /** ContentResolver keeps provider identifiers and asset descriptor ownership here. */
 class AndroidDocuments(
@@ -39,11 +40,17 @@ class AndroidDocuments(
     private val requestConsent: (IntentSender) -> Boolean = { false },
     private val requestPermission: (String) -> Boolean = { false },
 ) : Closeable {
+    companion object {
+        internal fun clearStoredIdentity(context: Context) {
+            AtomicFile(File(context.noBackupFilesDir, ROOT_SEED_FILE)).delete()
+        }
+    }
+
     private val resolver = context.contentResolver
     private val nextHandle = AtomicLong(1)
     private val handles = ConcurrentHashMap<Long, OpenDocument>()
     private val rootSeed: ByteArray by lazy {
-        val seed = AtomicFile(File(context.noBackupFilesDir, "document-root-seed"))
+        val seed = AtomicFile(File(context.noBackupFilesDir, ROOT_SEED_FILE))
         try {
             seed.openRead().use { it.readBytes() }
         } catch (_: FileNotFoundException) {

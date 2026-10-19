@@ -11,6 +11,8 @@ mod library_lists;
 mod pins;
 pub mod presentation;
 pub mod right_panel;
+mod storage_reset;
+pub use storage_reset::{StorageReset, StorageResetRequest};
 mod secret_storage;
 pub use secret_storage::KeyringSecretStore;
 pub mod sidebar;
@@ -801,13 +803,17 @@ pub(crate) fn backup_password_store(
     }
 }
 
-fn settings_key(secrets: &dyn SecretStore, create: bool) -> Result<age::x25519::Identity, String> {
-    use age::secrecy::ExposeSecret as _;
-    let key = SecretKey::namespaced(
+fn settings_encryption_key() -> SecretKey {
+    SecretKey::namespaced(
         "settings",
         "encryption-key",
         "Rufin settings encryption key",
-    );
+    )
+}
+
+fn settings_key(secrets: &dyn SecretStore, create: bool) -> Result<age::x25519::Identity, String> {
+    use age::secrecy::ExposeSecret as _;
+    let key = settings_encryption_key();
     if let Some(value) = secrets
         .load_secret(&key)
         .map_err(|error| error.to_string())?
@@ -1206,7 +1212,7 @@ fn merge_settings(
     }
 }
 
-pub(crate) fn write_settings(path: &Path, value: &StoredSettings) -> Result<(), String> {
+fn persistent_settings(value: &StoredSettings) -> StoredSettings {
     let mut persistent = value.clone();
     for source in persistent.sources.connections_mut() {
         if source.credential.as_ref().is_some_and(Credential::session) {
@@ -1217,7 +1223,12 @@ pub(crate) fn write_settings(path: &Path, value: &StoredSettings) -> Result<(), 
         .scrobbling_credentials
         .retain(|_, credential| !credential.session());
     persistent.shared_settings.remove_session_credentials();
-    let next = serde_json::to_value(&persistent).map_err(|error| error.to_string())?;
+    persistent
+}
+
+pub(crate) fn write_settings(path: &Path, value: &StoredSettings) -> Result<(), String> {
+    let next =
+        serde_json::to_value(persistent_settings(value)).map_err(|error| error.to_string())?;
     let merged = match read_settings_json(path)? {
         None => next,
         Some(mut saved) => {
@@ -1582,6 +1593,7 @@ impl SettingsOwner {
     pub fn set_theme_accent(&self, theme: String, accent: String) -> Result<(), SettingsError> {
         self.restore(
             move |stored| {
+                stored.ui.appearance.theme_preference = ThemePreference::Named(theme.clone());
                 stored.ui.appearance.theme_accents.insert(theme, accent);
                 Ok(())
             },

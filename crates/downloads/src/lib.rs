@@ -941,6 +941,12 @@ impl Downloads {
         self.send(Command::ClearJob { source_id, job_id });
     }
 
+    pub async fn shutdown(&self) -> Result<(), String> {
+        let _suspended = self.suspend().await?;
+        self.commands.close();
+        Ok(())
+    }
+
     pub async fn suspend(&self) -> Result<DownloadSuspension, String> {
         let (ready, completed) = async_channel::bounded(1);
         let (resume, release) = async_channel::bounded(1);
@@ -1012,6 +1018,10 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
     retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut active = Vec::new();
     loop {
+        if receiver.is_closed() {
+            actor.abort_matching(&mut active, true, |_| true).await;
+            break;
+        }
         if let Ok(command) = receiver.try_recv() {
             actor.apply(command, &mut active).await;
             continue;

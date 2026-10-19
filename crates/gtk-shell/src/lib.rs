@@ -11,7 +11,7 @@ mod shell;
 mod ui_resource;
 
 pub use application::{
-    run_application, run_application_after_update, run_startup_error_application,
+    ApplicationExit, run_application, run_application_after_update, run_startup_error_application,
 };
 
 use rufin_core::settings::*;

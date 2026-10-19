@@ -1,0 +1,465 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20" />
+  <requires lib="libadwaita" version="1.9" />
+  <object class="GtkLabel" id="unavailable_text">
+    <property name="label" translatable="yes">Unavailable</property>
+  </object>
+  <object class="AdwNavigationView" id="navigation">
+    <child>
+      <object class="AdwNavigationPage" id="storage_root">
+        <property name="title" translatable="yes">Storage</property>
+        <property name="child">
+          <object class="AdwPreferencesPage" id="storage_page">
+            <property name="title" translatable="yes">Storage</property>
+            <child>
+              <object class="AdwPreferencesGroup">
+                <property name="title" translatable="yes">Downloads</property>
+                <child>
+                  <object class="AdwActionRow" id="download_source_row">
+                    <property name="title" translatable="yes">Source</property>
+                    <child type="suffix">
+                      <object class="GtkMenuButton" id="download_source">
+                        <property name="valign">center</property>
+                      </object>
+                    </child>
+                    <child type="suffix">
+                      <object class="GtkButton" id="download_artwork">
+                        <property name="icon-name">rufin-image-x-generic-symbolic</property>
+                        <property name="tooltip-text" translatable="yes">Download artwork</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Download artwork</property>
+                        </accessibility>
+                        <property name="valign">center</property>
+                        <style>
+                          <class name="flat" />
+                        </style>
+                      </object>
+                    </child>
+                    <child type="suffix">
+                      <object class="GtkButton" id="download_lyrics">
+                        <property name="icon-name">rufin-text-justify-center-symbolic</property>
+                        <property name="tooltip-text" translatable="yes">Download lyrics</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Download lyrics</property>
+                        </accessibility>
+                        <property name="valign">center</property>
+                        <style>
+                          <class name="flat" />
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="download_status">
+                    <property name="visible">false</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                    <property name="margin-top">8</property>
+                    <style>
+                      <class name="dim-label" />
+                      <class name="caption" />
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup">
+                <child>
+                  <object class="GtkBox">
+                    <property name="spacing">18</property>
+                    <style>
+                      <class name="card" />
+                      <class name="storage-summary" />
+                    </style>
+                    <child>
+                      <object class="GtkImage">
+                        <property name="icon-name">rufin-drive-harddisk-symbolic</property>
+                        <property name="pixel-size">32</property>
+                        <style>
+                          <class name="accent" />
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkBox">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">4</property>
+                        <property name="hexpand">true</property>
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="label" translatable="yes">Cached data</property>
+                            <property name="xalign">0</property>
+                            <style>
+                              <class name="heading" />
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="total_size">
+                            <property name="label">...</property>
+                            <property name="xalign">0</property>
+                            <property name="tooltip-text" translatable="yes">Database sizes show stored data, excluding database overhead.</property>
+                            <style>
+                              <class name="title-1" />
+                              <class name="numeric" />
+                            </style>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSpinner" id="spinner">
+                        <property name="spinning">true</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup">
+                <child>
+                  <object class="AdwPreferencesRow" id="waveforms_row">
+                    <property name="title" translatable="yes">Waveforms</property>
+                    <property name="activatable">false</property>
+                    <property name="focusable">true</property>
+                    <property name="child">
+                      <object class="GtkBox">
+                        <property name="spacing">12</property>
+                        <property name="margin-top">10</property>
+                        <property name="margin-bottom">10</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <child>
+                          <object class="AdwWrapBox">
+                            <property name="child-spacing">8</property>
+                            <property name="line-spacing">2</property>
+                            <property name="hexpand">true</property>
+                            <property name="valign">center</property>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label" translatable="yes">Waveforms</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="waveforms_count">
+                                <property name="label">...</property>
+                                <property name="xalign">0</property>
+                                <style>
+                                  <class name="dim-label" />
+                                  <class name="caption" />
+                                </style>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="waveforms_size">
+                            <property name="label">...</property>
+                            <property name="valign">center</property>
+                            <style>
+                              <class name="numeric" />
+                              <class name="dim-label" />
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkButton" id="clear_waveforms">
+                            <property name="tooltip-text" translatable="yes">Clear waveform cache</property>
+                            <property name="valign">center</property>
+                            <property name="sensitive">false</property>
+                            <property name="icon-name">rufin-user-trash-symbolic</property>
+                            <style>
+                              <class name="flat" />
+                            </style>
+                            <accessibility>
+                              <property name="label" translatable="yes">Clear waveform cache</property>
+                            </accessibility>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesRow" id="loudness_row">
+                    <property name="title" translatable="yes">EBU R128 analysis</property>
+                    <property name="activatable">false</property>
+                    <property name="focusable">true</property>
+                    <property name="child">
+                      <object class="GtkBox">
+                        <property name="spacing">12</property>
+                        <property name="margin-top">10</property>
+                        <property name="margin-bottom">10</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <child>
+                          <object class="AdwWrapBox">
+                            <property name="child-spacing">8</property>
+                            <property name="line-spacing">2</property>
+                            <property name="hexpand">true</property>
+                            <property name="valign">center</property>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label" translatable="yes">EBU R128 analysis</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="loudness_count">
+                                <property name="label">...</property>
+                                <property name="xalign">0</property>
+                                <style>
+                                  <class name="dim-label" />
+                                  <class name="caption" />
+                                </style>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="loudness_size">
+                            <property name="label">...</property>
+                            <property name="valign">center</property>
+                            <style>
+                              <class name="numeric" />
+                              <class name="dim-label" />
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkButton" id="clear_loudness">
+                            <property name="tooltip-text" translatable="yes">Clear EBU R128 cache</property>
+                            <property name="valign">center</property>
+                            <property name="sensitive">false</property>
+                            <property name="icon-name">rufin-user-trash-symbolic</property>
+                            <style>
+                              <class name="flat" />
+                            </style>
+                            <accessibility>
+                              <property name="label" translatable="yes">Clear EBU R128 cache</property>
+                            </accessibility>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesRow" id="artwork_row">
+                    <property name="title" translatable="yes">Artwork</property>
+                    <property name="activatable">false</property>
+                    <property name="focusable">true</property>
+                    <property name="child">
+                      <object class="GtkBox">
+                        <property name="spacing">12</property>
+                        <property name="margin-top">10</property>
+                        <property name="margin-bottom">10</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <child>
+                          <object class="AdwWrapBox">
+                            <property name="child-spacing">8</property>
+                            <property name="line-spacing">2</property>
+                            <property name="hexpand">true</property>
+                            <property name="valign">center</property>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label" translatable="yes">Artwork</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="artwork_count">
+                                <property name="label">...</property>
+                                <property name="xalign">0</property>
+                                <style>
+                                  <class name="dim-label" />
+                                  <class name="caption" />
+                                </style>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="artwork_size">
+                            <property name="label">...</property>
+                            <property name="valign">center</property>
+                            <style>
+                              <class name="numeric" />
+                              <class name="dim-label" />
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkButton" id="clear_artwork">
+                            <property name="tooltip-text" translatable="yes">Clear artwork cache</property>
+                            <property name="valign">center</property>
+                            <property name="sensitive">false</property>
+                            <property name="icon-name">rufin-user-trash-symbolic</property>
+                            <style>
+                              <class name="flat" />
+                            </style>
+                            <accessibility>
+                              <property name="label" translatable="yes">Clear artwork cache</property>
+                            </accessibility>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesRow" id="lyrics_row">
+                    <property name="title" translatable="yes">Lyrics</property>
+                    <property name="activatable">false</property>
+                    <property name="focusable">true</property>
+                    <property name="child">
+                      <object class="GtkBox">
+                        <property name="spacing">12</property>
+                        <property name="margin-top">10</property>
+                        <property name="margin-bottom">10</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <child>
+                          <object class="AdwWrapBox">
+                            <property name="child-spacing">8</property>
+                            <property name="line-spacing">2</property>
+                            <property name="hexpand">true</property>
+                            <property name="valign">center</property>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label" translatable="yes">Lyrics</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="lyrics_count">
+                                <property name="label">...</property>
+                                <property name="xalign">0</property>
+                                <style>
+                                  <class name="dim-label" />
+                                  <class name="caption" />
+                                </style>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="lyrics_size">
+                            <property name="label">...</property>
+                            <property name="valign">center</property>
+                            <style>
+                              <class name="numeric" />
+                              <class name="dim-label" />
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkButton" id="clear_lyrics">
+                            <property name="tooltip-text" translatable="yes">Clear lyrics cache</property>
+                            <property name="valign">center</property>
+                            <property name="sensitive">false</property>
+                            <property name="icon-name">rufin-user-trash-symbolic</property>
+                            <style>
+                              <class name="flat" />
+                            </style>
+                            <accessibility>
+                              <property name="label" translatable="yes">Clear lyrics cache</property>
+                            </accessibility>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow" id="dictionary_row">
+                    <property name="title" translatable="yes">Japanese dictionary</property>
+                    <child type="suffix">
+                      <object class="GtkLabel" id="dictionary_size">
+                        <property name="label">...</property>
+                        <property name="valign">center</property>
+                        <style><class name="numeric"/><class name="dim-label"/></style>
+                      </object>
+                    </child>
+                    <child type="suffix">
+                      <object class="GtkButton" id="clear_dictionary">
+                        <property name="icon-name">rufin-user-trash-symbolic</property>
+                        <property name="tooltip-text" translatable="yes">Clear Japanese dictionary</property>
+                        <property name="valign">center</property>
+                        <property name="sensitive">false</property>
+                        <style><class name="flat"/></style>
+                        <accessibility><property name="label" translatable="yes">Clear Japanese dictionary</property></accessibility>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="error">
+                    <property name="visible">false</property>
+                    <property name="wrap">true</property>
+                    <property name="selectable">true</property>
+                    <property name="xalign">0</property>
+                    <style>
+                      <class name="error" />
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </child>
+  </object>
+  <object class="AdwAlertDialog" id="clear_cache_confirmation">
+    <property name="heading" translatable="yes">Clear all cache?</property>
+    <property name="body" translatable="yes">Remove all Rufin data and settings except saved connections and credentials? Rufin will restart after clearing the data.</property>
+    <property name="default-response">cancel</property>
+    <property name="close-response">cancel</property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="clear" appearance="destructive" translatable="yes">Clear</response>
+    </responses>
+  </object>
+  <object class="AdwAlertDialog" id="clear_data_confirmation">
+    <property name="heading" translatable="yes">Clear all data?</property>
+    <property name="body" translatable="yes">Remove all Rufin data, settings and saved logins? Rufin will restart after clearing the data.</property>
+    <property name="default-response">cancel</property>
+    <property name="close-response">cancel</property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="clear" appearance="destructive" translatable="yes">Clear</response>
+    </responses>
+  </object>
+  <object class="AdwPreferencesGroup" id="reset_group">
+    <child>
+      <object class="AdwWrapBox">
+        <property name="child-spacing">12</property>
+        <property name="line-spacing">8</property>
+        <property name="justify">fill</property>
+        <property name="justify-last-line">true</property>
+        <child>
+          <object class="GtkButton" id="clear_all_cache">
+            <property name="label" translatable="yes">Clear all cache</property>
+            <property name="hexpand">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="clear_all_data">
+            <property name="label" translatable="yes">Clear all data</property>
+            <property name="hexpand">true</property>
+            <style>
+              <class name="destructive-action" />
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

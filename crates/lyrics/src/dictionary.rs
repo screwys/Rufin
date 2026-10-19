@@ -30,12 +30,16 @@ pub fn prepare_dictionary(directory: &Path, downloading: impl FnOnce()) -> Resul
     install_dictionary(directory, DICTIONARY_URL, downloading).map_err(|error| error.to_string())
 }
 
+pub fn japanese_dictionary_path(directory: &Path) -> PathBuf {
+    directory.join(DICTIONARY_DIRECTORY)
+}
+
 fn install_dictionary(
     directory: &Path,
     url: &str,
     downloading: impl FnOnce(),
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let destination = directory.join(DICTIONARY_DIRECTORY);
+    let destination = japanese_dictionary_path(directory);
     if destination.is_dir() {
         load_fs_dictionary(&destination)?;
         return Ok(destination);

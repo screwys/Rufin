@@ -13,7 +13,10 @@ use crate::shell::{Shell, navigation::popdown_primary_menu};
 use rufin_core::runtime::SelectedLibrary;
 use rufin_core::runtime::source::{ConfiguredSources, LocalFolder, SourceSummary};
 
-use gtk_widgets::source_labels::{configured_source_display_name, configured_source_icon_name};
+use gtk_widgets::source_labels::{
+    choice_action, configured_source_display_name, configured_source_icon_name, source_menu_item,
+    source_order,
+};
 
 const SOURCE_CHOICE_ACTION_PREFIX: &str = "source-choice-";
 const MUSIC_FOLDER_CHOICE_ACTION_PREFIX: &str = "music-folder-choice-";
@@ -159,12 +162,6 @@ pub(crate) fn source_submenu(shell: &Rc<Shell>) -> (String, &'static str, gio::M
     (content.name, content.icon_name, menu)
 }
 
-fn source_menu_item(label: &str, action: &str, icon_name: &str) -> gio::MenuItem {
-    let item = gio::MenuItem::new(Some(label), Some(action));
-    item.set_icon(&gio::ThemedIcon::new(icon_name));
-    item
-}
-
 fn source_menu_content<'a>(
     configured: &'a ConfiguredSources,
     selected: Option<&'a SelectedLibrary>,
@@ -276,15 +273,6 @@ fn next_source_id(sources: &[SourceSummary], selected: Option<&SourceId>) -> Opt
     sources.get(index).map(|source| source.id.clone())
 }
 
-fn choice_action(name: &str, active: bool, select: impl Fn() + 'static) -> gio::SimpleAction {
-    let action = gio::SimpleAction::new_stateful(name, None, &active.to_variant());
-    action.connect_activate(move |action, _| {
-        action.set_state(&true.to_variant());
-        select();
-    });
-    action
-}
-
 fn select_music_folder(shell: &Shell, folder_id: Option<String>) {
     popdown_primary_menu(shell);
     let selected_folder_id = shell
@@ -304,22 +292,6 @@ fn select_music_folder(shell: &Shell, folder_id: Option<String>) {
 
 fn source_menu_label(source: &SourceSummary) -> String {
     configured_source_display_name(source)
-}
-
-fn source_order(sources: &[SourceSummary], selected: Option<&SourceId>) -> Vec<usize> {
-    let mut order = Vec::with_capacity(sources.len());
-    if let Some(selected) = selected
-        && let Some(index) = sources.iter().position(|source| &source.id == selected)
-    {
-        order.push(index);
-    }
-    order.extend(
-        sources
-            .iter()
-            .enumerate()
-            .filter_map(|(index, source)| (Some(&source.id) != selected).then_some(index)),
-    );
-    order
 }
 
 #[cfg(test)]

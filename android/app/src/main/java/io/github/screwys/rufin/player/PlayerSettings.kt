@@ -23,6 +23,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -92,28 +98,41 @@ internal fun PlayerSettingsContent(player: PlayerConnection, page: PlayerSetting
 }
 
 @Composable
-internal fun PlaybackPreferences(player: PlayerConnection, preferences: PreferencesConnection?, output: (() -> Unit)? = null) {
+internal fun PlaybackPreferences(player: PlayerConnection, preferences: PreferencesConnection?, output: (() -> Unit)? = null, includeDisplaySettings: Boolean = true) {
     val state = player.settings ?: return
+    val options = player.preferenceOptions ?: return
     val playback = state.playback
+    val transitionDuration = if (LocalReduceMotion.current) 0 else 180
     var confirmEbu by remember { mutableStateOf(false) }
     fun change(edit: SettingsOwner.() -> Unit) { player.editPreferences(edit) }
     SettingsGroup {
         PreferenceChoice(translate("Transition mode"), playback.transitionMode.name,
             listOf(PlaybackTransitionMode.GAPLESS.name to translate("Gapless"), PlaybackTransitionMode.CROSSFADE.name to translate("Crossfade")),
             select = { change { setTransitionMode(PlaybackTransitionMode.valueOf(it)) } })
-        if (playback.transitionMode == PlaybackTransitionMode.CROSSFADE) SettingsSliderNumber(translate("Crossfade duration"), playback.crossfadeSeconds.toDouble(), 1.0..30.0, 1.0, integer = true, unit = "s") {
-            change { setCrossfadeSeconds((it as Number).toInt().toUByte()) }
+        AnimatedVisibility(playback.transitionMode == PlaybackTransitionMode.CROSSFADE,
+            enter = expandVertically(tween(transitionDuration)) + fadeIn(tween(transitionDuration)),
+            exit = shrinkVertically(tween(transitionDuration)) + fadeOut(tween(transitionDuration))) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                SettingsSliderNumber(translate("Crossfade duration"), playback.crossfadeSeconds.toDouble(),
+                    options.minCrossfadeSeconds.toDouble()..options.maxCrossfadeSeconds.toDouble(), 1.0, integer = true, unit = "s") {
+                    change { setCrossfadeSeconds((it as Number).toInt().toUByte()) }
+                }
+                PreferenceSwitch("Skip same-album crossfade", playback.skipSameAlbumCrossfade) { change { setSkipSameAlbumCrossfade(it) } }
+            }
         }
-        PreferenceSwitch("Skip same-album crossfade", playback.skipSameAlbumCrossfade) { change { setSkipSameAlbumCrossfade(it) } }
         PreferenceSwitch("Audio fade on play/pause", playback.audioFadeOnStatusChange) { change { setAudioFadeOnStatusChange(it) } }
-        SettingsSliderNumber(translate("Playback speed"), playback.playbackRate, .5..2.0, .05, unit = "×") { change { setPlaybackRate((it as Number).toDouble()) } }
+        SettingsSliderNumber(translate("Playback speed"), playback.playbackRate,
+            options.minPlaybackRate..options.maxPlaybackRate, .05, unit = "×") { change { setPlaybackRate((it as Number).toDouble()) } }
         PreferenceSwitch("Preserve pitch", playback.preservePitch) { change { setPreservePitch(it) } }
         PreferenceChoice(translate("Volume scale"), playback.volumeScale.name,
             listOf(VolumeScale.PERCEPTUAL.name to translate("Perceptual"), VolumeScale.LINEAR.name to translate("Linear")),
             select = { change { setVolumeScale(VolumeScale.valueOf(it)) } })
         PreferenceSwitch("Clearing queue also clears the current song", state.display.clearQueueIncludesCurrent) { change { setClearQueueIncludesCurrent(it) } }
         if (output != null) preferences?.applicationSettings?.let { application ->
-            SettingsNumber(translate("Auto DJ refill threshold"), application.autoDjRefillThreshold.toDouble(), 1.0..10.0) { preferences.changePreference { setAutoDjRefillThreshold((it as Number).toInt().toUByte()) } }
+            SettingsNumber(translate("Auto DJ refill threshold"), application.autoDjRefillThreshold.toDouble(),
+                options.minAutoDjRefillThreshold.toDouble()..options.maxAutoDjRefillThreshold.toDouble()) {
+                preferences.changePreference { setAutoDjRefillThreshold((it as Number).toInt().toUByte()) }
+            }
         }
     }
     if (output != null) SettingsGroup(translate("Audio")) {
@@ -127,27 +146,39 @@ internal fun PlaybackPreferences(player: PlayerConnection, preferences: Preferen
         PreferenceChoice(translate("Normalization scope"), playback.loudnessNormalizationScope.name,
             listOf(LoudnessNormalizationScope.TRACK.name to translate("Track"), LoudnessNormalizationScope.ALBUM.name to translate("Album")),
             select = { change { setLoudnessNormalizationScope(LoudnessNormalizationScope.valueOf(it)) } })
-        SettingsNumber(translate("Target loudness"), playback.ebuR128TargetLufs, -48.0..0.0, false) { change { setEbuR128TargetLufs((it as Number).toDouble()) } }
+        SettingsSliderNumber(translate("Target loudness"), playback.ebuR128TargetLufs,
+            options.minEbuR128TargetLufs..options.maxEbuR128TargetLufs, .1, unit = "LUFS") { change { setEbuR128TargetLufs((it as Number).toDouble()) } }
         PreferenceSwitch("Write EBU R128 tags to files", playback.writeEbuR128Tags) { change { setWriteEbuR128Tags(it) } }
         val bitrate = (playback.streamQuality as? StreamQuality.MaxBitrateKbps)?.v1?.toString() ?: "original"
         PreferenceChoice(translate("Stream quality"), bitrate,
             listOf("original" to translate("Original")) + listOf(320, 256, 192, 128).map { it.toString() to "$it kbps" },
             select = { change { setStreamQuality(if (it == "original") StreamQuality.Original else StreamQuality.MaxBitrateKbps(it.toUInt())) } })
     }
-    SettingsGroup {
-        PreferenceSwitch("Show lyrics", state.display.fullscreenLyricsVisible) { change { setFullscreenLyricsVisible(it) } }
-        PreferenceSwitch("Show visualizer", state.display.fullscreenVisualizerVisible) { change { setFullscreenVisualizerVisible(it) } }
-        PreferenceSwitch("Show current lyrics line", state.display.fullscreenCurrentLyricsLineVisible) { change { setFullscreenCurrentLyricsLineVisible(it) } }
-        PreferenceSwitch("Combine lyrics and visualizer", state.rightPanel.combined) { change { setRightPanelCombined(it) } }
-        PreferenceSwitch("Dynamic background", state.display.fullscreenDynamicBackground) { change { setFullscreenDynamicBackground(it) } }
-        PreferenceSwitch("Enable background image", state.display.fullscreenBackgroundImage) { change { setFullscreenBackgroundImage(it) } }
-        PreferenceSwitch("Waveform seekbar", state.display.seekbarWaveformEnabled) { change { setSeekbarWaveformEnabled(it) } }
+    if (includeDisplaySettings) {
+        PlayerLayoutPreferences(player)
+        SettingsGroup {
+            PreferenceSwitch("Waveform seekbar", state.display.seekbarWaveformEnabled) { change { setSeekbarWaveformEnabled(it) } }
+        }
     }
     if (confirmEbu) AlertDialog(onDismissRequest = { confirmEbu = false },
         title = { Text(translate("Enable EBU R128 Analysis?")) },
         text = { Text(translate("Rufin will calculate the missing EBU R128 metadata for the whole library. This can use significant CPU, battery, and network bandwidth for a long time.")) },
         confirmButton = { TextButton({ confirmEbu = false; change { setLoudnessNormalization(LoudnessNormalization.EBU_R128) } }) { Text(translate("Enable")) } },
         dismissButton = { TextButton({ confirmEbu = false }) { Text(translate("Cancel")) } })
+}
+
+@Composable
+internal fun PlayerLayoutPreferences(player: PlayerConnection) {
+    val state = player.settings ?: return
+    fun change(edit: SettingsOwner.() -> Unit) { player.editPreferences(edit) }
+    SettingsGroup(translate("Layout")) {
+        PreferenceSwitch("Show lyrics", state.display.fullscreenLyricsVisible) { change { setFullscreenLyricsVisible(it) } }
+        PreferenceSwitch("Show visualizer", state.display.fullscreenVisualizerVisible) { change { setFullscreenVisualizerVisible(it) } }
+        PreferenceSwitch("Show current lyrics line", state.display.fullscreenCurrentLyricsLineVisible) { change { setFullscreenCurrentLyricsLineVisible(it) } }
+        PreferenceSwitch("Combine lyrics and visualizer", state.rightPanel.combined) { change { setRightPanelCombined(it) } }
+        PreferenceSwitch("Dynamic background", state.display.fullscreenDynamicBackground) { change { setFullscreenDynamicBackground(it) } }
+        PreferenceSwitch("Enable background image", state.display.fullscreenBackgroundImage) { change { setFullscreenBackgroundImage(it) } }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)

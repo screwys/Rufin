@@ -500,11 +500,6 @@ fn apply_source_refresh_feedback(
     operation: &SourceOperation,
 ) {
     let downloading = matches!(operation, SourceOperation::Downloading { .. });
-    shell.chrome.source_download_cancel.set_visible(downloading);
-    shell
-        .chrome
-        .source_refresh_feedback
-        .set_can_target(downloading);
     match operation {
         SourceOperation::Refreshing {
             source_id,

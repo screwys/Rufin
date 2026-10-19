@@ -87,16 +87,46 @@ fn main() -> ExitCode {
         )
         .await
     };
-    match app::with_runtime(|_| {
+    let runtime = match app::worker_runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => return gtk_shell::run_startup_error_application(error.to_string()),
+    };
+    let result = {
+        let _guard = runtime.enter();
         if updated_restart {
             gtk_shell::run_application_after_update(initial_settings, bootstrap, || {})
         } else {
             gtk_shell::run_application(initial_settings, bootstrap)
         }
-    }) {
-        Ok(exit) => exit,
-        Err(error) => gtk_shell::run_startup_error_application(error.to_string()),
+    };
+    if let Some(reset) = result.storage_reset {
+        // Wait for file workers too; deleting data while they run can recreate it.
+        drop(runtime);
+        drop(_stderr_guard);
+        if let Err(error) = reset.and_then(|request| request.apply(&paths::roots())) {
+            return gtk_shell::run_startup_error_application(error);
+        }
+        return restart_after_storage_reset();
     }
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+    result.code
+}
+
+fn restart_after_storage_reset() -> ExitCode {
+    let result = env::current_exe().and_then(|executable| {
+        let mut command = Command::new(executable);
+        command.env_remove(UPDATED_RESTART_VERSION_ENV);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+            Err(command.exec())
+        }
+        #[cfg(not(unix))]
+        {
+            command.spawn().map(|_| ExitCode::SUCCESS)
+        }
+    });
+    result.unwrap_or_else(|error| gtk_shell::run_startup_error_application(error.to_string()))
 }
 
 fn restart_with_language(saved_language: &str, updated_restart: bool) -> Option<ExitCode> {

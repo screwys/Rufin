@@ -254,6 +254,37 @@ impl PlaybackOwner {
         Ok(projection)
     }
 
+    pub async fn waveform_cache_usage(&self) -> Result<library::CacheUsage, String> {
+        let mut usage = self
+            .database
+            .waveform_cache_usage()
+            .await
+            .map_err(string_error)?;
+        let waveform = self.waveform.clone();
+        let legacy = self
+            .runtime
+            .spawn_blocking(move || waveform.legacy_cache_usage())
+            .await
+            .map_err(string_error)?
+            .map_err(string_error)?;
+        usage.entries += legacy.entries;
+        usage.bytes += legacy.bytes;
+        Ok(usage)
+    }
+
+    pub async fn clear_waveform_cache(&self) -> Result<(), String> {
+        let waveform = self.waveform.clone();
+        self.runtime
+            .spawn_blocking(move || waveform.clear_legacy_cache())
+            .await
+            .map_err(string_error)?
+            .map_err(string_error)?;
+        self.database
+            .clear_waveform_cache()
+            .await
+            .map_err(string_error)
+    }
+
     pub(crate) fn remove_waveform_cache(&self, source: &sources::SourceId) -> Result<(), String> {
         self.waveform
             .remove_source_cache(source)

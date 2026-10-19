@@ -181,6 +181,61 @@ impl WaveformOwner {
         self.start_decode(request, key, input);
     }
 
+    pub(crate) fn legacy_cache_usage(&self) -> std::io::Result<library::CacheUsage> {
+        let mut usage = library::CacheUsage::default();
+        self.visit_cache_files(|path| {
+            match path.metadata() {
+                Ok(metadata) => {
+                    usage.entries += 1;
+                    usage.bytes += metadata.len();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+            Ok(())
+        })?;
+        Ok(usage)
+    }
+
+    pub(crate) fn clear_legacy_cache(&self) -> std::io::Result<()> {
+        self.visit_cache_files(|path| match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        })
+    }
+
+    fn visit_cache_files(
+        &self,
+        mut visit: impl FnMut(PathBuf) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        let directories = match fs::read_dir(self.cache_root.join(CACHE_DIRECTORY)) {
+            Ok(directories) => directories,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        for directory in directories {
+            let directory = directory?;
+            if !directory.file_type()?.is_dir() {
+                continue;
+            }
+            let files = match fs::read_dir(directory.path()) {
+                Ok(files) => files,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
+            for file in files {
+                let file = file?;
+                if file.file_type()?.is_file()
+                    && file.path().extension().is_some_and(|ext| ext == "json")
+                {
+                    visit(file.path())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn remove_source_cache(&self, source: &sources::SourceId) -> std::io::Result<()> {
         if self
             .current

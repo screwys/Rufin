@@ -586,12 +586,7 @@ async fn icon(
         icon!("rufin-smart-playlists-symbolic.svg"),
         icon!("rufin-shuffle-symbolic.svg"),
         icon!("rufin-external-link-compact-symbolic.svg"),
-        (
-            "rufin-edit-clear-symbolic.svg",
-            include_bytes!(
-                "../../../resources/icons/hicolor/16x16/actions/rufin-edit-clear-symbolic.svg"
-            ) as &'static [u8],
-        ),
+        icon!("rufin-edit-clear-symbolic.svg"),
         icon!("rufin-window-close-symbolic.svg"),
         icon!("rufin-repeat-symbolic.svg"),
         icon!("rufin-repeat-one-symbolic.svg"),

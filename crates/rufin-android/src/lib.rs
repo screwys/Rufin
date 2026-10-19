@@ -24,6 +24,8 @@ mod player;
 mod playlists;
 #[cfg(target_os = "android")]
 mod preferences;
+#[cfg(target_os = "android")]
+mod storage;
 
 uniffi::setup_scaffolding!();
 #[cfg(target_os = "android")]

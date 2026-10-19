@@ -2,6 +2,11 @@ package io.github.screwys.rufin.settings
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.animateBounds
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -9,6 +14,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.foundation.clickable
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +60,20 @@ internal fun SettingsGroup(title: String? = null, content: @Composable ColumnSco
         }
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)),
             verticalArrangement = Arrangement.spacedBy(3.dp), content = content)
+    }
+}
+
+@Composable
+internal fun SettingsExpander(title: String, content: @Composable () -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val duration = if (LocalReduceMotion.current) 0 else 180
+    val rotation by animateFloatAsState(if (expanded) 90f else 0f, tween(duration), label = "settingsExpansion")
+    SettingsGroup {
+        SettingsRow(title, modifier = Modifier.clickable(role = Role.Button) { expanded = !expanded },
+            trailing = { RufinIcon("rufin-go-next-symbolic", translate(if (expanded) "Hide" else "Show"),
+                Modifier.size(20.dp).graphicsLayer { rotationZ = rotation }) })
+        AnimatedVisibility(expanded, enter = expandVertically(tween(duration)) + fadeIn(tween(duration)),
+            exit = shrinkVertically(tween(duration)) + fadeOut(tween(duration))) { content() }
     }
 }
 

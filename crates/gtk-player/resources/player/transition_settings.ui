@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="AdwActionRow" id="mode">
+    <property name="title" translatable="yes">Transition mode</property>
+    <child type="suffix">
+      <object class="GtkBox">
+        <property name="valign">center</property>
+        <style><class name="linked"/><class name="preference-selection-buttons"/></style>
+        <child><object class="GtkToggleButton" id="gapless">
+          <style><class name="preference-selection-button"/></style>
+          <property name="label" translatable="yes">Gapless</property>
+          <property name="active">true</property>
+        </object></child>
+        <child><object class="GtkToggleButton" id="crossfade">
+          <style><class name="preference-selection-button"/></style>
+          <property name="label" translatable="yes">Crossfade</property>
+          <property name="group">gapless</property>
+        </object></child>
+      </object>
+    </child>
+  </object>
+  <object class="AdwPreferencesRow" id="options">
+    <property name="activatable">false</property>
+    <property name="selectable">false</property>
+    <style><class name="playback-transition-options"/></style>
+    <property name="child">
+      <object class="GtkRevealer" id="revealer">
+        <property name="transition-type">slide-down</property>
+        <property name="transition-duration">200</property>
+        <property name="child">
+          <object class="GtkListBox" id="rows">
+            <property name="selection-mode">none</property>
+            <child><object class="AdwSwitchRow" id="skip_same_album">
+              <property name="title" translatable="yes">Skip same-album crossfade</property>
+            </object></child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+</interface>

@@ -12,7 +12,6 @@ use playback::{
 };
 
 use crate::PlayerUi;
-use gtk_widgets::forms::selection_row;
 
 const PLAYBACK_RATE_COMMIT_DELAY: Duration = Duration::from_millis(200);
 const PLAYBACK_SETTINGS_SCALE_WIDTH: i32 = 180;
@@ -49,6 +48,7 @@ fn playback_settings_popover(
         visualizer: adw::SwitchRow,
         combine: adw::SwitchRow,
         audio_output: adw::ActionRow,
+        waveform_row: adw::SwitchRow,
     });
     if !local_output {
         settings_group.set_description(Some(&tr("Audio processing is unavailable while casting")));
@@ -57,31 +57,12 @@ fn playback_settings_popover(
     audio_output.add_suffix(&device);
     audio_output.set_activatable_widget(Some(&device));
     audio_output.set_sensitive(local_output);
-    let crossfade_row = crossfade_duration_row(
-        shell,
-        playback.crossfade_seconds,
-        PLAYBACK_SETTINGS_SCALE_WIDTH,
-    );
-    crossfade_row.set_sensitive(playback.transition_mode == PlaybackTransitionMode::Crossfade);
-
-    let transition_shell = Rc::clone(shell);
-    let crossfade_row_for_transition = crossfade_row.clone();
-    let transition_row = selection_row(
-        &tr("Transition mode"),
-        &[tr("Gapless"), tr("Crossfade")],
-        transition_index(playback.transition_mode),
-        move |selected| {
-            let mode = transition_from_index(selected);
-            crossfade_row_for_transition.set_sensitive(mode == PlaybackTransitionMode::Crossfade);
-            transition_shell.update_playback_settings(|settings| settings.transition_mode = mode);
-        },
-    );
+    let (transition_row, crossfade_options) =
+        transition_rows(shell, &playback, PLAYBACK_SETTINGS_SCALE_WIDTH);
     transition_row.set_sensitive(local_output);
+    crossfade_options.set_sensitive(local_output);
     settings_group.add(&transition_row);
-    crossfade_row.set_sensitive(
-        local_output && playback.transition_mode == PlaybackTransitionMode::Crossfade,
-    );
-    settings_group.add(&crossfade_row);
+    settings_group.add(&crossfade_options);
     let playback_rate =
         playback_rate_row(shell, playback.playback_rate, PLAYBACK_SETTINGS_SCALE_WIDTH);
     playback_rate.set_sensitive(local_output);
@@ -90,20 +71,27 @@ fn playback_settings_popover(
     preserve_pitch.set_sensitive(local_output);
     settings_group.add(&preserve_pitch);
 
-    let volume_scale_shell = Rc::clone(shell);
-    let volume_scale_row = selection_row(
-        &tr("Volume scale"),
-        &[tr("Perceptual"), tr("Linear")],
-        volume_scale_index(playback.volume_scale),
-        move |selected| {
-            let scale = volume_scale_from_index(selected);
-            volume_scale_shell.update_playback_settings(|settings| {
-                settings.set_volume_scale_preserving_gain(scale);
-            });
-        },
+    waveform_row.set_active(
+        shell
+            .settings
+            .current
+            .borrow()
+            .player_display
+            .seekbar_waveform_enabled,
     );
-    volume_scale_row.set_sensitive(local_output);
-    settings_group.add(&volume_scale_row);
+    let waveform_shell = Rc::clone(shell);
+    waveform_row.connect_active_notify(move |row| {
+        if waveform_shell
+            .settings
+            .set_app_setting("seekbar waveform setting", row.is_active(), |settings| {
+                &mut settings.player_display.seekbar_waveform_enabled
+            })
+            .is_some()
+        {
+            waveform_shell.update_bottom_player_transport();
+        }
+    });
+    settings_group.add(&waveform_row);
 
     queue.set_active(settings.right_panel.queue_visible);
     let queue_shell = Rc::downgrade(shell);
@@ -142,7 +130,73 @@ fn playback_settings_popover(
     popover
 }
 
-pub fn crossfade_duration_row(
+pub fn transition_rows(
+    shell: &Rc<PlayerUi>,
+    settings: &playback::PlaybackSettings,
+    scale_width: i32,
+) -> (adw::ActionRow, adw::PreferencesRow) {
+    let resource = crate::ui_resource::TRANSITION_SETTINGS_RESOURCE;
+    let builder = gtk_widgets::ui_resource::builder(resource);
+    gtk_widgets::objects!(builder, resource, {
+        mode: adw::ActionRow,
+        crossfade: gtk::ToggleButton,
+        options: adw::PreferencesRow,
+        revealer: gtk::Revealer,
+        rows: gtk::ListBox,
+        skip_same_album: adw::SwitchRow,
+    });
+    rows.prepend(&crossfade_duration_row(
+        shell,
+        settings.crossfade_seconds,
+        scale_width,
+    ));
+    let active = settings.transition_mode == PlaybackTransitionMode::Crossfade;
+    crossfade.set_active(active);
+    options.set_visible(active);
+    revealer.set_reveal_child(active);
+    skip_same_album.set_active(settings.skip_same_album_crossfade);
+    let weak = Rc::downgrade(shell);
+    skip_same_album.connect_active_notify(move |row| {
+        if let Some(shell) = weak.upgrade() {
+            shell.update_playback_settings(|settings| {
+                settings.skip_same_album_crossfade = row.is_active()
+            });
+        }
+    });
+    let row = options.downgrade();
+    revealer.connect_child_revealed_notify(move |revealer| {
+        if !revealer.reveals_child()
+            && !revealer.is_child_revealed()
+            && let Some(row) = row.upgrade()
+        {
+            row.set_visible(false);
+        }
+    });
+    let row = options.downgrade();
+    let revealer = revealer.downgrade();
+    let weak = Rc::downgrade(shell);
+    crossfade.connect_active_notify(move |button| {
+        let active = button.is_active();
+        if let (Some(row), Some(revealer)) = (row.upgrade(), revealer.upgrade()) {
+            if active {
+                row.set_visible(true);
+            }
+            revealer.set_reveal_child(active);
+        }
+        if let Some(shell) = weak.upgrade() {
+            shell.update_playback_settings(|settings| {
+                settings.transition_mode = if active {
+                    PlaybackTransitionMode::Crossfade
+                } else {
+                    PlaybackTransitionMode::Gapless
+                };
+            });
+        }
+    });
+    (mode, options)
+}
+
+fn crossfade_duration_row(
     shell: &Rc<PlayerUi>,
     initial_seconds: u8,
     scale_width: i32,
@@ -266,18 +320,6 @@ mod tests {
 }
 
 use playback::VolumeScale;
-pub fn transition_index(mode: PlaybackTransitionMode) -> u32 {
-    match mode {
-        PlaybackTransitionMode::Gapless => 0,
-        PlaybackTransitionMode::Crossfade => 1,
-    }
-}
-pub fn transition_from_index(index: u32) -> PlaybackTransitionMode {
-    match index {
-        1 => PlaybackTransitionMode::Crossfade,
-        _ => PlaybackTransitionMode::Gapless,
-    }
-}
 pub fn volume_scale_index(scale: VolumeScale) -> u32 {
     match scale {
         VolumeScale::Perceptual => 0,

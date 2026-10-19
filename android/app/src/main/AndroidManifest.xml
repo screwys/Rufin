@@ -24,6 +24,9 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".StorageRestartActivity" android:exported="false"
+            android:process=":restart" android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <service android:name=".RufinService" android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>

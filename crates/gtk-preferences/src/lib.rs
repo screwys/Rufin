@@ -45,6 +45,7 @@ pub enum Effect {
     LyricsPanelVisible(bool),
     VisualizerPanelVisible(bool),
     Quit(&'static str),
+    ResetStorage(Box<rufin_core::settings::StorageResetRequest>),
     ExportActivity(
         Option<library::ActivityCsvFormat>,
         Option<sources::SourceId>,

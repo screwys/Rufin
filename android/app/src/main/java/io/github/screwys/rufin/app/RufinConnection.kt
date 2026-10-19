@@ -10,6 +10,8 @@ import io.github.screwys.rufin.connect.ConnectConnection
 import io.github.screwys.rufin.downloads.DownloadsConnection
 import io.github.screwys.rufin.sources.SourceSetupConnection
 import io.github.screwys.rufin.RufinService
+import io.github.screwys.rufin.StorageRestartActivity
+import io.github.screwys.rufin.shared.rufin_core.StorageReset
 
 import android.app.Application
 import android.content.ComponentName
@@ -230,6 +232,26 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
                     libraryEvents = null
                     events.destroy()
                 }
+            }
+        }
+    }
+
+    internal suspend fun resetStorage(kind: StorageReset) {
+        val connected = connectedService()
+        val storage = connected.runtime.value!!.getOrThrow().storage()
+        // A confirmed reset must finish even when dropping the runtime unmounts this screen.
+        withContext(NonCancellable) {
+            val jobs = viewModelScope.coroutineContext[Job]!!.children.toList()
+            jobs.forEach { it.cancel() }
+            jobs.joinAll()
+            var failure: String? = null
+            try {
+                connected.resetStorage(storage, kind)
+            } catch (error: Exception) {
+                failure = error.userMessage()
+            } finally {
+                storage.destroy()
+                StorageRestartActivity.restart(getApplication(), failure)
             }
         }
     }

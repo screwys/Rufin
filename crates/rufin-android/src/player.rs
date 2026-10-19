@@ -11,6 +11,13 @@ use crate::browse::AndroidArtistLink;
 use crate::host::{AndroidError, error};
 
 #[derive(uniffi::Record)]
+pub struct AndroidCastNetwork {
+    pub id: String,
+    pub name: String,
+    pub address: String,
+}
+
+#[derive(uniffi::Record)]
 pub struct AndroidPlayerMetadata {
     pub media_uri: String,
     pub source_id: Option<String>,
@@ -70,6 +77,19 @@ pub struct AndroidPlayer {
 
 #[uniffi::export]
 impl AndroidPlayer {
+    pub fn cast_networks(&self) -> Vec<AndroidCastNetwork> {
+        self.products
+            .playback
+            .available_cast_networks()
+            .into_iter()
+            .map(|network| AndroidCastNetwork {
+                id: network.id,
+                name: network.name,
+                address: network.address.to_string(),
+            })
+            .collect()
+    }
+
     pub async fn next_waveform(
         &self,
     ) -> Result<Arc<rufin_core::runtime::WaveformProjection>, AndroidError> {

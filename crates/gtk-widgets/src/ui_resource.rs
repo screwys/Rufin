@@ -1,3 +1,4 @@
+pub const SOURCE_PICKER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/preferences/source/picker.ui";
 use gtk::glib;
 use gtk::prelude::*;
 
@@ -91,6 +92,7 @@ pub const RECYCLED_TEXT_CELL_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/routes/recycled_text_cell.ui";
 
 pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
+    SOURCE_PICKER_RESOURCE,
     TEXT_SLIDE_RESOURCE,
     DISPLAY_SETTINGS_RESOURCE,
     "/io/github/screwys/Rufin/ui/routes/row_actions.ui",
@@ -130,6 +132,8 @@ pub fn verify_icons() -> Result<(), String> {
         "64x64/apps/io.github.screwys.Rufin.source.smb.png",
         "64x64/apps/io.github.screwys.Rufin.source.plex.png",
         "64x64/apps/io.github.screwys.Rufin.source.emby.png",
+        "scalable/actions/rufin-drive-harddisk-symbolic.svg",
+        "scalable/actions/rufin-edit-clear-symbolic.svg",
         "scalable/actions/rufin-go-last-symbolic.svg",
         "scalable/actions/rufin-activity-overview-symbolic.svg",
         "scalable/actions/rufin-audio-only-symbolic.svg",

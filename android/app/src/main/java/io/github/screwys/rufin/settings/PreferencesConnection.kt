@@ -43,6 +43,8 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
         private set
     var applicationSettings by mutableStateOf<ApplicationPreferences?>(null)
         private set
+    var castNetworkInterface by mutableStateOf<String?>(null)
+        private set
     val reduceMotion by derivedStateOf { applicationSettings?.reduceMotion == true }
     val showDownloadedBadges by derivedStateOf { applicationSettings?.showDownloadedBadges != false }
 
@@ -71,6 +73,7 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
                 val subscription = preferences.subscribe(packaged.map { it.removeSuffix(".po") })
                 try {
                     applicationSettings = settings!!.applicationPreferences()
+                    castNetworkInterface = settings!!.castNetworkInterface()
                     connection.more.setReleaseCheckInterval(applicationSettings!!.releaseCheckIntervalHours.toLong())
                     while (currentCoroutineContext().isActive) {
                         val next = withContext(Dispatchers.Default) { subscription.next() }
@@ -125,6 +128,7 @@ internal class PreferencesConnection(private val connection: RufinConnection, co
     fun refreshApplicationSettings() = connection.runAction { refreshSettings() }
     private fun refreshSettings() {
         applicationSettings = settings?.applicationPreferences()
+        castNetworkInterface = settings?.castNetworkInterface()
         applicationSettings?.let { connection.more.setReleaseCheckInterval(it.releaseCheckIntervalHours.toLong()) }
     }
     fun changePreference(edit: SettingsOwner.() -> Unit) = connection.runAction {

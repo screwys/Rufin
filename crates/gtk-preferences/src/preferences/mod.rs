@@ -1,4 +1,3 @@
-use gtk_player::outputs::casting_network_dropdown;
 mod activity;
 pub mod backup;
 use crate::Preferences;
@@ -7,13 +6,9 @@ use crate::{
     SidebarRouteItemSettings,
 };
 use adw::prelude::*;
-use gtk_widgets::layout::{
-    LARGE_POPUP_BASE_HEIGHT, LARGE_POPUP_BASE_WIDTH, large_popup_content_height,
-    large_popup_content_width, width_allocation_owner,
-};
+use gtk_widgets::layout::{LARGE_POPUP_BASE_HEIGHT, large_popup_content_height};
 use gtk_widgets::popup::present_light_dismiss_dialog;
 use localization::{language_option_index, language_options, tr};
-use secrets::SecretStorageMode;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -27,15 +22,18 @@ mod general;
 mod layout;
 mod library;
 pub mod persistence;
+mod privacy;
 pub mod source;
+mod storage;
 mod themes;
 
-use general::{ScrobblingCredentialDrafts, appearance_page, playback_page, scrobbling_page};
+use general::{
+    ScrobblingCredentialDrafts, appearance_page, equalizer_page, playback_page, scrobbling_page,
+};
 
 use layout::{
-    ReorderRowPresentation, discord_display_from_index, discord_display_index,
-    discord_link_from_index, discord_link_index, left_sidebar_mode_from_index, left_sidebar_row,
-    reorder_row, right_sidebar_mode_from_index, right_sidebar_row, visibility_position_subtitle,
+    ReorderRowPresentation, left_sidebar_mode_from_index, left_sidebar_row, reorder_row,
+    right_sidebar_mode_from_index, right_sidebar_row, visibility_position_subtitle,
 };
 pub use library::locate_local_folder;
 
@@ -68,9 +66,9 @@ fn show_discord_flatpak_help(row: &adw::SwitchRow) {
 
 const LASTFM_API_CREATE_URL: &str = "https://www.last.fm/api/account/create";
 const LISTENBRAINZ_TOKEN_URL: &str = "https://listenbrainz.org/settings/";
-const INTEGRATIONS_ICON_NAME: &str = "rufin-network-workgroup-symbolic";
 
 pub struct PreferencesState {
+    pub source_choice: RefCell<Option<sources::SourceId>>,
     pub connect_dialog: gtk::glib::WeakRef<adw::Dialog>,
     pub connect_feedback: RefCell<Option<Rc<gtk_widgets::feedback::ControlFeedbackState>>>,
     pub secret_storage_row: gtk::glib::WeakRef<adw::ComboRow>,
@@ -115,7 +113,7 @@ pub fn present_add_server_preferences_dialog(shell: &Rc<Preferences>) {
     }
 }
 pub fn present_downloads_preferences_dialog(shell: &Rc<Preferences>) {
-    present_preferences_dialog_with_page(shell, PreferencesPageKind::Library, false, true);
+    present_preferences_dialog_with_page(shell, PreferencesPageKind::Downloads, false, true);
 }
 
 impl Preferences {
@@ -145,69 +143,83 @@ impl Preferences {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PreferencesPageKind {
     General,
-    Appearance,
-    Integrations,
+    Customization,
+    Theme,
     Playback,
+    Equalizer,
     Library,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PreferencesTabLayout {
-    Top,
-    BottomLabels,
-    BottomIcons,
-}
-
-fn preferences_tab_layout_for(
-    width: i32,
-    top_required: i32,
-    bottom_tabs_width: i32,
-) -> PreferencesTabLayout {
-    if width >= top_required {
-        PreferencesTabLayout::Top
-    } else if width >= bottom_tabs_width {
-        PreferencesTabLayout::BottomLabels
-    } else {
-        PreferencesTabLayout::BottomIcons
-    }
+    Downloads,
+    Storage,
+    Integrations,
+    Controller,
+    Connect,
+    Privacy,
 }
 
 impl PreferencesPageKind {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 12] = [
         Self::General,
-        Self::Appearance,
+        Self::Customization,
+        Self::Theme,
         Self::Integrations,
         Self::Playback,
+        Self::Equalizer,
         Self::Library,
+        Self::Downloads,
+        Self::Connect,
+        Self::Controller,
+        Self::Storage,
+        Self::Privacy,
     ];
 
     fn name(self) -> &'static str {
         match self {
             Self::General => "general",
-            Self::Appearance => "appearance",
-            Self::Integrations => "integrations",
+            Self::Customization => "customization",
+            Self::Theme => "theme",
             Self::Playback => "playback",
+            Self::Equalizer => "equalizer",
             Self::Library => "library",
+            Self::Downloads => "downloads",
+            Self::Storage => "storage",
+            Self::Integrations => "integrations",
+            Self::Controller => "controller",
+            Self::Connect => "connect",
+            Self::Privacy => "privacy",
         }
     }
 
     fn title(self) -> String {
         match self {
             Self::General => tr("General"),
-            Self::Appearance => tr("Appearance"),
-            Self::Integrations => tr("Integrations"),
+            Self::Customization => tr("Customization"),
+            Self::Theme => tr("Theme"),
             Self::Playback => tr("Playback"),
+            Self::Equalizer => tr("Equalizer"),
             Self::Library => tr("Library"),
+            Self::Downloads => tr("Downloads"),
+            Self::Storage => tr("Storage"),
+            Self::Integrations => tr("Integrations"),
+            Self::Controller => tr("Controller"),
+            Self::Connect => tr("Connect"),
+            Self::Privacy => tr("Privacy & Security"),
         }
     }
 
     fn icon_name(self) -> &'static str {
         match self {
             Self::General => "rufin-preferences-system-symbolic",
-            Self::Appearance => "rufin-preferences-desktop-appearance-symbolic",
-            Self::Integrations => INTEGRATIONS_ICON_NAME,
+            Self::Customization => "rufin-sliders-2-symbolic",
+            Self::Theme => "rufin-preferences-desktop-appearance-symbolic",
             Self::Playback => "rufin-music-queue-symbolic",
+            Self::Equalizer => "rufin-sliders-vertical-symbolic",
             Self::Library => "rufin-library-symbolic",
+            Self::Downloads => "rufin-download-symbolic",
+            Self::Storage => "rufin-drive-harddisk-symbolic",
+            Self::Integrations => "rufin-network-workgroup-symbolic",
+            Self::Controller => "rufin-phonelink-symbolic",
+            Self::Connect => "rufin-network-hotspot-symbolic",
+            Self::Privacy => "rufin-system-lock-screen-symbolic",
         }
     }
 
@@ -267,9 +279,7 @@ impl PreferencesNavigationControls {
 }
 
 fn set_preferences_back_visible(button: &gtk::Button, visible: bool) {
-    // Keep its allocation so opening a subpage cannot move the category tabs.
-    button.set_opacity(if visible { 1.0 } else { 0.0 });
-    button.set_sensitive(visible);
+    button.set_visible(visible);
     button.update_state(&[gtk::accessible::State::Hidden(!visible)]);
 }
 
@@ -296,7 +306,7 @@ fn present_preferences_dialog_with_page(
 
     let dialog = adw::Dialog::builder()
         .title(tr("Preferences"))
-        .content_width(large_popup_content_width(LARGE_POPUP_BASE_WIDTH))
+        .content_width(900)
         .content_height(large_popup_content_height(
             shell.window.height(),
             LARGE_POPUP_BASE_HEIGHT,
@@ -333,33 +343,96 @@ fn rebuild_preferences_dialog(
     let resource = crate::ui_resource::PREFERENCES_DIALOG_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
-        toolbar: adw::ToolbarView,
+        responsive: adw::BreakpointBin,
+        split_view: adw::NavigationSplitView,
+        categories: gtk::ListBox,
+        content_page: adw::NavigationPage,
+        page_header: adw::HeaderBar,
+        page_title: gtk::Label,
+        category_back: gtk::Button,
         stack: adw::ViewStack,
-        switcher: adw::ViewSwitcher,
-        bottom_tab_bar: gtk::CenterBox,
-        bottom_switcher: adw::ViewSwitcher,
         back: gtk::Button,
         search_button: gtk::ToggleButton,
-        switcher_bar: adw::HeaderBar,
         search_entry: gtk::SearchEntry,
-        search_bar: gtk::SearchBar,
-        search_results: adw::PreferencesPage,
+        header_content: gtk::Stack,
         search_results_group: adw::PreferencesGroup,
         content_stack: gtk::Stack,
     });
     gtk_widgets::controls::configure_search_entry(&search_entry);
-    let navigation_controls = PreferencesNavigationControls::new(back);
+    if let Some(settings) = gtk::Settings::default() {
+        settings
+            .bind_property("gtk-decoration-layout", &page_header, "decoration-layout")
+            .sync_create()
+            .build();
+    }
+    let navigation_controls = PreferencesNavigationControls::new(back.clone());
+    let update_header: Rc<dyn Fn()> = {
+        let split = split_view.downgrade();
+        let nested_back = back.downgrade();
+        let category_back = category_back.downgrade();
+        let title = page_title.downgrade();
+        let content = content_page.downgrade();
+        Rc::new(move || {
+            let (Some(split), Some(nested_back), Some(category_back), Some(title), Some(content)) = (
+                split.upgrade(),
+                nested_back.upgrade(),
+                category_back.upgrade(),
+                title.upgrade(),
+                content.upgrade(),
+            ) else {
+                return;
+            };
+            category_back.set_visible(
+                split.is_collapsed() && split.shows_content() && !nested_back.is_visible(),
+            );
+            let page_title = if split.is_collapsed() && !split.shows_content() {
+                split.sidebar().unwrap().title()
+            } else {
+                content.title()
+            };
+            title.set_label(&page_title);
+        })
+    };
+    let update = update_header.clone();
+    split_view.connect_collapsed_notify(move |_| update());
+    let update = update_header.clone();
+    split_view.connect_show_content_notify(move |_| update());
+    let update = update_header.clone();
+    content_page.connect_title_notify(move |_| update());
+    back.connect_visible_notify(move |_| update_header());
+    let category_split = split_view.downgrade();
+    let category_search = search_button.downgrade();
+    category_back.connect_clicked(move |_| {
+        if let Some(split) = category_split.upgrade() {
+            split.set_show_content(false);
+        }
+        if let Some(search) = category_search.upgrade() {
+            search.set_active(false);
+        }
+    });
+    dialog
+        .bind_property("can-close", &category_back, "sensitive")
+        .sync_create()
+        .build();
     search_button.update_property(&[gtk::accessible::Property::Label(&tr("Search"))]);
-    toolbar.add_top_bar(&switcher_bar);
-    toolbar.add_bottom_bar(&bottom_tab_bar);
-
-    search_bar.connect_entry(&search_entry);
-    toolbar.add_top_bar(&search_bar);
-
-    content_stack.add_named(&stack, Some("pages"));
-    content_stack.add_named(&search_results, Some("search"));
-    content_stack.set_visible_child_name("pages");
-    toolbar.set_content(Some(&content_stack));
+    dialog
+        .bind_property("can-close", &categories, "sensitive")
+        .sync_create()
+        .build();
+    dialog
+        .bind_property("can-close", &search_button, "sensitive")
+        .sync_create()
+        .build();
+    dialog
+        .bind_property("can-close", &content_page, "can-pop")
+        .sync_create()
+        .build();
+    let breakpoint = adw::Breakpoint::new(
+        adw::BreakpointCondition::parse("max-width: 760sp").expect("preferences breakpoint"),
+    );
+    breakpoint.add_setter(&split_view, "collapsed", Some(&true.to_value()));
+    responsive.add_breakpoint(breakpoint);
+    dialog.set_child(Some(&responsive));
 
     let page_slots = Rc::new(
         PreferencesPageKind::ALL
@@ -385,6 +458,38 @@ fn rebuild_preferences_dialog(
         focus_download_queue,
     );
     stack.set_visible_child_name(initial_page.name());
+    content_page.set_title(&initial_page.title());
+    categories.select_row(
+        categories
+            .row_at_index(
+                PreferencesPageKind::ALL
+                    .iter()
+                    .position(|kind| *kind == initial_page)
+                    .unwrap() as i32,
+            )
+            .as_ref(),
+    );
+    split_view.set_show_content(true);
+    let category_stack = stack.downgrade();
+    let category_split = split_view.downgrade();
+    let category_search = search_button.downgrade();
+    categories.connect_row_activated(move |_, row| {
+        let Some(kind) = PreferencesPageKind::ALL.get(row.index() as usize) else {
+            return;
+        };
+        if let Some(stack) = category_stack.upgrade() {
+            stack.set_visible_child_name(kind.name());
+        }
+        if let Some(search) = category_search.upgrade() {
+            search.set_active(false);
+        }
+        if let Some(split) = category_split.upgrade() {
+            split.set_show_content(true);
+        }
+    });
+    let selected_categories = categories.downgrade();
+    let selected_content = content_page.downgrade();
+    let selected_split = split_view.downgrade();
     let page_shell = Rc::clone(shell);
     let page_dialog = dialog.downgrade();
     let page_slots_for_switch = Rc::clone(&page_slots);
@@ -400,6 +505,24 @@ fn rebuild_preferences_dialog(
         let Some(kind) = PreferencesPageKind::from_name(name.as_str()) else {
             return;
         };
+        if let Some(content) = selected_content.upgrade() {
+            content.set_title(&kind.title());
+        }
+        if let Some(categories) = selected_categories.upgrade() {
+            categories.select_row(
+                categories
+                    .row_at_index(
+                        PreferencesPageKind::ALL
+                            .iter()
+                            .position(|page| *page == kind)
+                            .unwrap() as i32,
+                    )
+                    .as_ref(),
+            );
+        }
+        if let Some(split) = selected_split.upgrade() {
+            split.set_show_content(true);
+        }
         mount_preferences_page(
             &page_shell,
             &page_dialog,
@@ -417,23 +540,25 @@ fn rebuild_preferences_dialog(
     let search_shell = Rc::clone(shell);
     let search_dialog = dialog.downgrade();
     let search_slots = Rc::clone(&page_slots);
-    let search_navigation = navigation_controls.clone();
     let search_drafts = credential_drafts.clone();
     let search_items_for_button = Rc::clone(&search_items);
     let search_entry_for_button = search_entry.downgrade();
-    let search_bar_for_button = search_bar.downgrade();
+    let header_for_search = header_content.downgrade();
+    let content_for_search = content_stack.downgrade();
     let page_stack_for_button = stack.downgrade();
     search_button.connect_toggled(move |button| {
         let Some(search_entry) = search_entry_for_button.upgrade() else {
             return;
         };
-        let Some(search_bar) = search_bar_for_button.upgrade() else {
-            return;
-        };
         let enabled = button.is_active();
-        search_bar.set_search_mode(enabled);
+        if let Some(header) = header_for_search.upgrade() {
+            header.set_visible_child_name(if enabled { "search" } else { "title" });
+        }
         if !enabled {
             search_entry.set_text("");
+            if let Some(content) = content_for_search.upgrade() {
+                content.set_visible_child_name("pages");
+            }
             return;
         }
         let Some(search_dialog) = search_dialog.upgrade() else {
@@ -451,7 +576,6 @@ fn rebuild_preferences_dialog(
                 &search_shell,
                 &search_dialog,
                 &search_slots,
-                &search_navigation,
                 &search_drafts,
                 retained,
             );
@@ -460,17 +584,10 @@ fn rebuild_preferences_dialog(
         search_entry.grab_focus();
     });
 
-    let search_button_for_bar = search_button.downgrade();
-    let content_stack_for_bar = content_stack.downgrade();
-    search_bar.connect_search_mode_enabled_notify(move |bar| {
-        let Some(search_button) = search_button_for_bar.upgrade() else {
-            return;
-        };
-        search_button.set_active(bar.is_search_mode());
-        if !bar.is_search_mode() {
-            if let Some(content_stack) = content_stack_for_bar.upgrade() {
-                content_stack.set_visible_child_name("pages");
-            }
+    let stop_search = search_button.downgrade();
+    search_entry.connect_stop_search(move |_| {
+        if let Some(button) = stop_search.upgrade() {
+            button.set_active(false);
         }
     });
 
@@ -479,7 +596,7 @@ fn rebuild_preferences_dialog(
     let results_group_for_entry = search_results_group.clone();
     let page_stack_for_entry = stack.downgrade();
     let content_stack_for_entry = content_stack.downgrade();
-    let search_bar_for_entry = search_bar.downgrade();
+    let search_button_for_entry = search_button.downgrade();
     let navigation_for_entry = navigation_controls.clone();
     search_entry.connect_search_changed(move |entry| {
         let Some(content_stack) = content_stack_for_entry.upgrade() else {
@@ -515,18 +632,18 @@ fn rebuild_preferences_dialog(
                 .find(|(kind, _)| *kind == page)
                 .map(|(_, slot)| slot.downgrade());
             let page_stack = page_stack_for_entry.clone();
-            let search_bar = search_bar_for_entry.clone();
+            let search_button = search_button_for_entry.clone();
             let navigation = navigation_for_entry.clone();
             row.connect_activated(move |_| {
                 let Some(page_stack) = page_stack.upgrade() else {
                     return;
                 };
-                let Some(search_bar) = search_bar.upgrade() else {
+                let Some(search_button) = search_button.upgrade() else {
                     return;
                 };
                 navigation.return_to_root();
                 page_stack.set_visible_child_name(page.name());
-                search_bar.set_search_mode(false);
+                search_button.set_active(false);
                 let item = item.clone();
                 let target_slot = target_slot.clone();
                 gtk::glib::idle_add_local_once(move || {
@@ -550,74 +667,6 @@ fn rebuild_preferences_dialog(
                 .push(row.upcast::<gtk::Widget>());
         }
     });
-
-    let top_tabs_width = Rc::new(Cell::new(0));
-    let bottom_tabs_min_width = Rc::new(Cell::new(0));
-    let applied_tab_layout = Rc::new(Cell::new(None));
-    let responsive_switcher = switcher.clone();
-    let responsive_bottom_bar = bottom_tab_bar.clone();
-    let responsive_bottom_switcher = bottom_switcher.clone();
-    let responsive_toolbar_view = toolbar.clone();
-    let responsive_header = switcher_bar.clone();
-    let responsive_top_tabs_width = Rc::clone(&top_tabs_width);
-    let responsive_bottom_tabs_min_width = Rc::clone(&bottom_tabs_min_width);
-    let responsive_applied_layout = Rc::clone(&applied_tab_layout);
-    let responsive_toolbar = width_allocation_owner(&toolbar, move |width| {
-        let top_tabs_width =
-            cached_widget_natural_width(&responsive_switcher, &responsive_top_tabs_width);
-        let bottom_tabs_width = cached_widget_minimum_width(
-            &responsive_bottom_switcher,
-            &responsive_bottom_tabs_min_width,
-        );
-        let (header_min_width, _, _, _) =
-            responsive_header.measure(gtk::Orientation::Horizontal, -1);
-        let (visible_tabs_min_width, _, _, _) =
-            responsive_switcher.measure(gtk::Orientation::Horizontal, -1);
-        // The header's natural width reserves extra space for exact centering.
-        // Keep full tab labels, but allow the header to shift them beside its controls.
-        let top_required = header_min_width
-            .saturating_sub(visible_tabs_min_width)
-            .saturating_add(top_tabs_width);
-        let layout = preferences_tab_layout_for(width, top_required, bottom_tabs_width);
-        if responsive_applied_layout.replace(Some(layout)) == Some(layout) {
-            return;
-        }
-        responsive_switcher.set_visible(layout == PreferencesTabLayout::Top);
-        responsive_bottom_bar.set_visible(layout != PreferencesTabLayout::Top);
-        if layout == PreferencesTabLayout::Top {
-            responsive_toolbar_view.remove_css_class("preferences-tabs-bottom");
-        } else {
-            responsive_toolbar_view.add_css_class("preferences-tabs-bottom");
-        }
-        if layout == PreferencesTabLayout::BottomIcons {
-            responsive_bottom_switcher.add_css_class("preferences-tabs-icon-only");
-            responsive_bottom_bar.add_css_class("preferences-tabs-icon-only");
-        } else {
-            responsive_bottom_switcher.remove_css_class("preferences-tabs-icon-only");
-            responsive_bottom_bar.remove_css_class("preferences-tabs-icon-only");
-        }
-    });
-    dialog.set_child(Some(&responsive_toolbar));
-}
-
-fn cached_widget_natural_width(widget: &impl IsA<gtk::Widget>, cache: &Cell<i32>) -> i32 {
-    let cached = cache.get();
-    if cached > 0 {
-        return cached;
-    }
-    let (_, natural, _, _) = widget.measure(gtk::Orientation::Horizontal, -1);
-    cache.set(natural);
-    natural
-}
-
-fn cached_widget_minimum_width(widget: &impl IsA<gtk::Widget>, cache: &Cell<i32>) -> i32 {
-    let cached = cache.get();
-    if cached > 0 {
-        return cached;
-    }
-    let (minimum, _, _, _) = widget.measure(gtk::Orientation::Horizontal, -1);
-    cache.set(minimum);
-    minimum
 }
 
 fn collect_preferences_search_items(
@@ -754,38 +803,61 @@ fn build_preferences_search_index(
     shell: &Rc<Preferences>,
     dialog: &adw::Dialog,
     page_slots: &[(PreferencesPageKind, gtk::Box)],
-    navigation_controls: &PreferencesNavigationControls,
     credential_drafts: &ScrobblingCredentialDrafts,
     retained: PreferencesPageKind,
 ) -> Vec<PreferencesSearchItem> {
     let mut items = Vec::new();
     for kind in PreferencesPageKind::ALL {
-        mount_preferences_page(
-            shell,
-            dialog,
-            page_slots,
-            navigation_controls,
-            credential_drafts,
+        let page = if kind == retained {
+            page_slots
+                .iter()
+                .find(|(page, _)| *page == kind)
+                .and_then(|(_, slot)| slot.first_child())
+                .unwrap()
+        } else if matches!(
             kind,
-            false,
-            false,
-        );
-        let Some((_, slot)) = page_slots.iter().find(|(page, _)| *page == kind) else {
-            continue;
+            PreferencesPageKind::Connect | PreferencesPageKind::Storage
+        ) {
+            let (resource, id) = if kind == PreferencesPageKind::Connect {
+                (crate::ui_resource::CONNECT_RESOURCE, "connect_content")
+            } else {
+                (
+                    crate::ui_resource::STORAGE_PREFERENCES_RESOURCE,
+                    "storage_page",
+                )
+            };
+            let builder = gtk_widgets::ui_resource::builder(resource);
+            let page: gtk::Widget = gtk_widgets::ui_resource::object(&builder, resource, id);
+            if kind == PreferencesPageKind::Storage {
+                let storage = page.clone().downcast::<adw::PreferencesPage>().unwrap();
+                let backup_resource = crate::ui_resource::BACKUP_PREFERENCES_RESOURCE;
+                let backup_builder = gtk_widgets::ui_resource::builder(backup_resource);
+                let backups: adw::PreferencesGroup = gtk_widgets::ui_resource::object(
+                    &backup_builder,
+                    backup_resource,
+                    "backup_group",
+                );
+                let reset: adw::PreferencesGroup =
+                    gtk_widgets::ui_resource::object(&builder, resource, "reset_group");
+                storage.add(&backups);
+                storage.add(&reset);
+            }
+            page
+        } else {
+            let navigation = PreferencesNavigationControls::new(gtk::Button::new());
+            build_preferences_page(
+                shell,
+                dialog,
+                &navigation,
+                credential_drafts,
+                kind,
+                false,
+                false,
+            )
         };
-        materialize_preferences_expanders(slot.upcast_ref());
-        collect_preferences_search_items(slot.upcast_ref(), kind, "", None, &mut items);
+        materialize_preferences_expanders(&page);
+        collect_preferences_search_items(&page, kind, "", None, &mut items);
     }
-    mount_preferences_page(
-        shell,
-        dialog,
-        page_slots,
-        navigation_controls,
-        credential_drafts,
-        retained,
-        false,
-        false,
-    );
     items
 }
 
@@ -816,7 +888,7 @@ fn preferences_search_matches(searchable_text: &str, query: &str) -> bool {
 
 #[cfg(test)]
 mod search_tests {
-    use super::{PreferencesTabLayout, preferences_search_matches, preferences_tab_layout_for};
+    use super::preferences_search_matches;
 
     #[test]
     fn preference_search_matches_terms_across_row_context() {
@@ -825,22 +897,6 @@ mod search_tests {
         assert!(preferences_search_matches(searchable, "tray general"));
         assert!(preferences_search_matches(searchable, "GENERAL ICON"));
         assert!(!preferences_search_matches(searchable, "tray playback"));
-    }
-
-    #[test]
-    fn preference_tabs_move_then_drop_labels_as_width_contracts() {
-        assert_eq!(
-            preferences_tab_layout_for(524, 524, 330),
-            PreferencesTabLayout::Top
-        );
-        assert_eq!(
-            preferences_tab_layout_for(523, 524, 330),
-            PreferencesTabLayout::BottomLabels
-        );
-        assert_eq!(
-            preferences_tab_layout_for(329, 524, 330),
-            PreferencesTabLayout::BottomIcons
-        );
     }
 }
 
@@ -860,7 +916,9 @@ fn mount_preferences_page(
         }
         if matches!(
             slot_kind,
-            PreferencesPageKind::Library | PreferencesPageKind::General
+            PreferencesPageKind::Library
+                | PreferencesPageKind::General
+                | PreferencesPageKind::Storage
         ) {
             navigation_controls.return_to_root();
         }
@@ -874,30 +932,56 @@ fn mount_preferences_page(
     if slot.first_child().is_some() {
         return;
     }
-    let page: gtk::Widget = match kind {
-        PreferencesPageKind::General => general_page(shell, dialog, navigation_controls),
-        PreferencesPageKind::Appearance => appearance_page(shell).upcast(),
+    slot.append(&build_preferences_page(
+        shell,
+        dialog,
+        navigation_controls,
+        credential_drafts,
+        kind,
+        open_add_server,
+        focus_download_queue,
+    ));
+}
+
+fn build_preferences_page(
+    shell: &Rc<Preferences>,
+    dialog: &adw::Dialog,
+    navigation_controls: &PreferencesNavigationControls,
+    credential_drafts: &ScrobblingCredentialDrafts,
+    kind: PreferencesPageKind,
+    open_add_server: bool,
+    focus_download_queue: bool,
+) -> gtk::Widget {
+    match kind {
+        PreferencesPageKind::General => general_page(shell, navigation_controls),
+        PreferencesPageKind::Customization => appearance_page(shell).upcast(),
+        PreferencesPageKind::Theme => themes::page(shell).upcast(),
+        PreferencesPageKind::Privacy => privacy::page(shell, dialog).upcast(),
+        PreferencesPageKind::Equalizer => equalizer_page(shell).upcast(),
+        PreferencesPageKind::Downloads => {
+            library::downloads_page(shell, dialog, focus_download_queue).upcast()
+        }
+        PreferencesPageKind::Storage => storage::page(shell, navigation_controls),
+        PreferencesPageKind::Controller => controller::page(shell).upcast(),
+        PreferencesPageKind::Connect => connect::page(shell, dialog),
         PreferencesPageKind::Integrations => scrobbling_page(shell, credential_drafts).upcast(),
         PreferencesPageKind::Playback => playback_page(shell).upcast(),
-        PreferencesPageKind::Library => library::library_page(
-            shell,
-            dialog,
-            navigation_controls,
-            open_add_server,
-            focus_download_queue,
-        ),
-    };
-    slot.append(&page);
+        PreferencesPageKind::Library => {
+            library::library_page(shell, dialog, navigation_controls, open_add_server)
+        }
+    }
 }
 fn general_page(
     shell: &Rc<Preferences>,
-    dialog: &adw::Dialog,
     navigation_controls: &PreferencesNavigationControls,
 ) -> gtk::Widget {
     let resource = crate::ui_resource::GENERAL_PREFERENCES_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
         page: adw::PreferencesPage,
+        prefer_distinct_track_covers_row: adw::SwitchRow,
+        external_metadata_row: adw::SwitchRow,
+        external_lyrics_row: adw::SwitchRow,
         language_row: adw::ComboRow,
         starting_page_row: adw::ComboRow,
         window_group: adw::PreferencesGroup,
@@ -911,24 +995,45 @@ fn general_page(
         control_notifications_row: adw::SwitchRow,
         notifications_row: adw::SwitchRow,
         release_notifications_row: adw::SwitchRow,
-        prefer_distinct_track_covers_row: adw::SwitchRow,
-        external_metadata_row: adw::SwitchRow,
-        external_lyrics_row: adw::SwitchRow,
-        external_links_row: adw::SwitchRow,
-        lastfm_links_row: adw::SwitchRow,
-        musicbrainz_links_row: adw::SwitchRow,
-        server_links_row: adw::SwitchRow,
-        presence_row: adw::SwitchRow,
-        display_row: adw::ComboRow,
-        link_row: adw::ComboRow,
-        paused_row: adw::SwitchRow,
-        listening_row: adw::SwitchRow,
-        private_row: adw::SwitchRow,
-        cast_proxy_row: adw::SwitchRow,
-        cast_network_row: adw::ActionRow,
-        secret_storage_row: adw::ComboRow,
     });
     let settings = shell.settings.current.borrow().clone();
+    prefer_distinct_track_covers_row.set_active(settings.application.prefer_distinct_track_covers);
+    let distinct_track_covers_shell = Rc::clone(shell);
+    prefer_distinct_track_covers_row.connect_active_notify(move |row| {
+        if distinct_track_covers_shell
+            .settings
+            .set_app_setting("track cover setting", row.is_active(), |settings| {
+                &mut settings.application.prefer_distinct_track_covers
+            })
+            .is_some()
+        {
+            if let Some(selected) = distinct_track_covers_shell
+                .products
+                .source
+                .selected_library()
+            {
+                let source = distinct_track_covers_shell.products.source.clone();
+                gtk::glib::spawn_future_local(async move {
+                    let _ = source.refresh_source(selected.source_id, false).await;
+                });
+            }
+        }
+    });
+
+    external_metadata_row.set_active(settings.application.external_metadata_enabled);
+    let metadata_shell = Rc::clone(shell);
+    external_metadata_row.connect_active_notify(move |row| {
+        metadata_shell.set_external_metadata_enabled(row.is_active());
+    });
+
+    external_lyrics_row.set_active(settings.lyrics.preferences.external_lyrics_enabled);
+    let weak = Rc::downgrade(shell);
+    external_lyrics_row.connect_active_notify(move |row| {
+        if let Some(shell) = weak.upgrade() {
+            shell.player_ui.set_external_lyrics_enabled(row.is_active());
+        }
+    });
+
     let starting_pages = SidebarRouteItem::all();
     let starting_page_titles = starting_pages
         .iter()
@@ -1119,283 +1224,20 @@ fn general_page(
             |settings| &mut settings.application.release_notifications_enabled,
         );
     });
-    prefer_distinct_track_covers_row.set_active(settings.application.prefer_distinct_track_covers);
-    let distinct_track_covers_shell = Rc::clone(shell);
-    prefer_distinct_track_covers_row.connect_active_notify(move |row| {
-        if distinct_track_covers_shell
-            .settings
-            .set_app_setting("track cover setting", row.is_active(), |settings| {
-                &mut settings.application.prefer_distinct_track_covers
-            })
-            .is_some()
-        {
-            if let Some(selected) = distinct_track_covers_shell
-                .products
-                .source
-                .selected_library()
-            {
-                let source = distinct_track_covers_shell.products.source.clone();
-                gtk::glib::spawn_future_local(async move {
-                    let _ = source.refresh_source(selected.source_id, false).await;
-                });
-            }
-        }
-    });
-
-    external_metadata_row.set_active(settings.application.external_metadata_enabled);
-    let metadata_shell = Rc::clone(shell);
-    external_metadata_row.connect_active_notify(move |row| {
-        metadata_shell.set_external_metadata_enabled(row.is_active());
-    });
-
-    external_lyrics_row.set_active(settings.lyrics.preferences.external_lyrics_enabled);
-    let weak = Rc::downgrade(shell);
-    external_lyrics_row.connect_active_notify(move |row| {
-        if let Some(shell) = weak.upgrade() {
-            shell.player_ui.set_external_lyrics_enabled(row.is_active());
-        }
-    });
-
-    let external_links = settings.application.external_site_links.clone();
-    external_links_row.set_active(external_links.enabled);
-    lastfm_links_row.set_active(external_links.lastfm);
-    lastfm_links_row.set_sensitive(external_links.enabled);
-    musicbrainz_links_row.set_active(external_links.musicbrainz);
-    musicbrainz_links_row.set_sensitive(external_links.enabled);
-    server_links_row.set_active(external_links.server);
-    server_links_row.set_sensitive(external_links.enabled);
-    let external_links_shell = Rc::clone(shell);
-    let lastfm_links_for_master = lastfm_links_row.clone();
-    let musicbrainz_links_for_master = musicbrainz_links_row.clone();
-    let server_links_for_master = server_links_row.clone();
-    external_links_row.connect_active_notify(move |row| {
-        let enabled = row.is_active();
-        lastfm_links_for_master.set_sensitive(enabled);
-        musicbrainz_links_for_master.set_sensitive(enabled);
-        server_links_for_master.set_sensitive(enabled);
-        if external_links_shell
-            .settings
-            .set_app_setting("external site links setting", enabled, |settings| {
-                &mut settings.application.external_site_links.enabled
-            })
-            .is_some()
-        {
-            (external_links_shell.effects)(crate::Effect::CatalogChanged);
-        }
-    });
-    let lastfm_links_shell = Rc::clone(shell);
-    lastfm_links_row.connect_active_notify(move |row| {
-        if lastfm_links_shell
-            .settings
-            .set_app_setting("Last.fm site links setting", row.is_active(), |settings| {
-                &mut settings.application.external_site_links.lastfm
-            })
-            .is_some()
-        {
-            (lastfm_links_shell.effects)(crate::Effect::CatalogChanged);
-        }
-    });
-    let musicbrainz_links_shell = Rc::clone(shell);
-    musicbrainz_links_row.connect_active_notify(move |row| {
-        if musicbrainz_links_shell
-            .settings
-            .set_app_setting(
-                "MusicBrainz site links setting",
-                row.is_active(),
-                |settings| &mut settings.application.external_site_links.musicbrainz,
-            )
-            .is_some()
-        {
-            (musicbrainz_links_shell.effects)(crate::Effect::CatalogChanged);
-        }
-    });
-    let server_links_shell = Rc::clone(shell);
-    server_links_row.connect_active_notify(move |row| {
-        if server_links_shell
-            .settings
-            .set_app_setting("server site links setting", row.is_active(), |settings| {
-                &mut settings.application.external_site_links.server
-            })
-            .is_some()
-        {
-            (server_links_shell.effects)(crate::Effect::CatalogChanged);
-        }
-    });
-    presence_row.set_active(settings.rich_presence.enabled);
-    let presence_shell = Rc::clone(shell);
-    presence_row.connect_active_notify(move |row| {
-        presence_shell.settings.set_app_setting(
-            "Discord presence setting",
-            row.is_active(),
-            |settings| &mut settings.rich_presence.enabled,
-        );
-        show_discord_flatpak_help(row);
-    });
-    let display_titles = [tr("Application name"), tr("Song title"), tr("Artist name")];
-    let display_refs = display_titles
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    let display_options = gtk::StringList::new(&display_refs);
-    display_row.set_model(Some(&display_options));
-    display_row.set_selected(discord_display_index(settings.rich_presence.display_type));
-    let display_shell = Rc::clone(shell);
-    display_row.connect_selected_notify(move |row| {
-        display_shell.settings.set_app_setting(
-            "Discord display setting",
-            discord_display_from_index(row.selected()),
-            |settings| &mut settings.rich_presence.display_type,
-        );
-    });
-    let link_titles = [
-        tr("None"),
-        tr("Last.fm"),
-        tr("MusicBrainz"),
-        tr("MusicBrainz + Last.fm"),
-    ];
-    let link_refs = link_titles.iter().map(String::as_str).collect::<Vec<_>>();
-    let link_options = gtk::StringList::new(&link_refs);
-    link_row.set_model(Some(&link_options));
-    link_row.set_selected(discord_link_index(settings.rich_presence.link_type));
-    let link_shell = Rc::clone(shell);
-    link_row.connect_selected_notify(move |row| {
-        link_shell.settings.set_app_setting(
-            "Discord link setting",
-            discord_link_from_index(row.selected()),
-            |settings| &mut settings.rich_presence.link_type,
-        );
-    });
-    paused_row.set_active(settings.rich_presence.show_paused);
-    let paused_shell = Rc::clone(shell);
-    paused_row.connect_active_notify(move |row| {
-        paused_shell.settings.set_app_setting(
-            "Discord paused setting",
-            row.is_active(),
-            |settings| &mut settings.rich_presence.show_paused,
-        );
-    });
-    listening_row.set_active(settings.rich_presence.show_as_listening);
-    let listening_shell = Rc::clone(shell);
-    listening_row.connect_active_notify(move |row| {
-        listening_shell.settings.set_app_setting(
-            "Discord activity type setting",
-            row.is_active(),
-            |settings| &mut settings.rich_presence.show_as_listening,
-        );
-    });
-    private_row.set_active(settings.application.private_mode);
-    let private_shell = Rc::clone(shell);
-    private_row.connect_active_notify(move |row| {
-        private_shell.set_private_mode(row.is_active());
-    });
-    cast_proxy_row.set_active(settings.application.cast_proxy_enabled);
-    let cast_proxy_shell = Rc::clone(shell);
-    cast_proxy_row.connect_active_notify(move |row| {
-        cast_proxy_shell.settings.set_app_setting(
-            "cast proxy setting",
-            row.is_active(),
-            |settings| &mut settings.application.cast_proxy_enabled,
-        );
-    });
-    let cast_network_dropdown = casting_network_dropdown(&shell.player_ui, 220);
-    cast_network_row.add_suffix(&cast_network_dropdown);
-    cast_network_row.set_activatable_widget(Some(&cast_network_dropdown));
-
-    let secret_storage_titles = [tr("Legacy"), tr("System keyring")];
-    let secret_storage_refs = secret_storage_titles
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    secret_storage_row.set_model(Some(&gtk::StringList::new(&secret_storage_refs)));
-    shell
-        .state
-        .secret_storage_row
-        .set(Some(&secret_storage_row));
-    secret_storage_row.set_selected(secret_storage_mode_index(
-        settings.application.secret_storage_mode,
-    ));
-    let secret_storage_shell = Rc::clone(shell);
-    let secret_storage_guard = Rc::new(Cell::new(false));
-    let secret_storage_guard_for_row = Rc::clone(&secret_storage_guard);
-    let preferences_dialog_for_secret_storage = dialog.downgrade();
-    secret_storage_row.connect_selected_notify(move |row| {
-        if secret_storage_guard_for_row.get() {
-            return;
-        }
-        let mode = secret_storage_mode_from_index(row.selected());
-        let previous_mode = secret_storage_shell
-            .settings
-            .current
-            .borrow()
-            .application.secret_storage_mode;
-        if mode == previous_mode {
-            return;
-        }
-
-        let confirm = adw::AlertDialog::builder()
-            .heading(tr("Change Secret Storage"))
-            .body(tr(
-                "This will log you out and clear your secrets including API ones. Your app cache is not touched.",
-            ))
-            .build();
-        let cancel = tr("Cancel");
-        let change = tr("Change");
-        confirm.add_responses(&[("cancel", cancel.as_str()), ("change", change.as_str())]);
-        confirm.set_default_response(Some("cancel"));
-        confirm.set_close_response("cancel");
-        confirm.set_response_appearance("change", adw::ResponseAppearance::Destructive);
-        let row = row.clone();
-        let shell = Rc::clone(&secret_storage_shell);
-        let guard = Rc::clone(&secret_storage_guard_for_row);
-        let preferences_dialog = preferences_dialog_for_secret_storage.clone();
-        let window = shell.window.clone();
-        confirm.choose(
-            Some(&window),
-            None::<&gtk::gio::Cancellable>,
-            move |response| {
-                if response.as_str() != "change" {
-                    guard.set(true);
-                    row.set_selected(secret_storage_mode_index(previous_mode));
-                    guard.set(false);
-                    return;
-                }
-                gtk::glib::spawn_future_local(async move {
-                    if shell.set_secret_storage_mode(mode).await {
-                        if let Some(preferences_dialog) = preferences_dialog.upgrade() {
-                            preferences_dialog.close();
-                        }
-                        return;
-                    }
-                    guard.set(true);
-                    row.set_selected(secret_storage_mode_index(previous_mode));
-                    guard.set(false);
-                });
-            },
-        );
-    });
     activity::wrap_general(shell, &page, &activity_overview_row, navigation_controls)
 }
-fn secret_storage_mode_index(mode: SecretStorageMode) -> u32 {
-    match mode {
-        SecretStorageMode::ConfigFile => 0,
-        SecretStorageMode::SystemKeyring => 1,
-    }
-}
-fn secret_storage_mode_from_index(index: u32) -> SecretStorageMode {
-    match index {
-        1 => SecretStorageMode::SystemKeyring,
-        _ => SecretStorageMode::ConfigFile,
-    }
-}
-fn populate_layout_group(
-    shell: &Rc<Preferences>,
-    group: &adw::PreferencesGroup,
-    lyrics_panel_row: adw::SwitchRow,
-    visualizer_panel_row: adw::SwitchRow,
-    bottom_bar_rating_row: adw::SwitchRow,
-    narrow_row: adw::SwitchRow,
-    threshold_row: adw::SpinRow,
-) {
+fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
+    let resource = crate::ui_resource::APPEARANCE_PREFERENCES_RESOURCE;
+    gtk_widgets::objects!(builder, resource, {
+        layout_group: adw::PreferencesGroup,
+        lyrics_panel_row: adw::SwitchRow,
+        visualizer_panel_row: adw::SwitchRow,
+        combine_panels_row: adw::SwitchRow,
+        bottom_bar_rating_row: adw::SwitchRow,
+        narrow_row: adw::SwitchRow,
+        threshold_row: adw::SpinRow,
+    });
+    let group = &layout_group;
     let settings = shell.settings.current.borrow().clone();
 
     let default_left_shell = Rc::clone(shell);
@@ -1452,6 +1294,15 @@ fn populate_layout_group(
         (visualizer_panel_shell.effects)(crate::Effect::VisualizerPanelVisible(row.is_active()));
     });
     group.add(&visualizer_panel_row);
+
+    combine_panels_row.set_active(settings.right_panel.combined);
+    let player = Rc::downgrade(&shell.player_ui);
+    combine_panels_row.connect_active_notify(move |row| {
+        if let Some(player) = player.upgrade() {
+            player.set_right_panel_combined(row.is_active());
+        }
+    });
+    group.add(&combine_panels_row);
 
     bottom_bar_rating_row.set_active(settings.show_bottom_bar_rating);
     let bottom_bar_rating_shell = Rc::clone(shell);

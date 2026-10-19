@@ -13,6 +13,10 @@
     <file compressed="true">preferences/dialog.ui</file>
     <file compressed="true">preferences/general.ui</file>
     <file compressed="true">preferences/appearance.ui</file>
+    <file compressed="true">preferences/theme.ui</file>
+    <file compressed="true">preferences/controller.ui</file>
+    <file compressed="true">preferences/storage.ui</file>
+    <file compressed="true">preferences/privacy.ui</file>
     <file compressed="true">preferences/theme_accent.ui</file>
     <file compressed="true">preferences/theme_tile.ui</file>
     <file compressed="true">preferences/dialogs/backup.ui</file>

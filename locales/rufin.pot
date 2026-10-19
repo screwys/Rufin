@@ -111,6 +111,16 @@ msgid ""
 "deleted."
 msgstr ""
 
+msgid ""
+"Remove all Rufin data and settings except saved connections and credentials? "
+"Rufin will restart after clearing the data."
+msgstr ""
+
+msgid ""
+"Remove all Rufin data, settings and saved logins? Rufin will restart after "
+"clearing the data."
+msgstr ""
+
 #, rust-format
 msgid ""
 "Replace the selected contents and remove these configured sources?\n"
@@ -548,6 +558,9 @@ msgstr ""
 msgid "Browse"
 msgstr ""
 
+msgid "Cached data"
+msgstr ""
+
 msgid "Cached"
 msgstr ""
 
@@ -647,10 +660,28 @@ msgstr ""
 msgid "Classical"
 msgstr ""
 
+msgid "Clear EBU R128 cache"
+msgstr ""
+
+msgid "Clear Japanese dictionary"
+msgstr ""
+
 msgid "Clear Mapping"
 msgstr ""
 
 msgid "Clear album"
+msgstr ""
+
+msgid "Clear all cache"
+msgstr ""
+
+msgid "Clear all cache?"
+msgstr ""
+
+msgid "Clear all data"
+msgstr ""
+
+msgid "Clear all data?"
 msgstr ""
 
 msgid "Clear artist"
@@ -669,6 +700,9 @@ msgid "Clear queue"
 msgstr ""
 
 msgid "Clear title"
+msgstr ""
+
+msgid "Clear waveform cache"
 msgstr ""
 
 msgid "Clear"
@@ -946,6 +980,9 @@ msgstr ""
 msgid "Custom"
 msgstr ""
 
+msgid "Customization"
+msgstr ""
+
 msgid "Customize display"
 msgstr ""
 
@@ -962,6 +999,9 @@ msgid "Dance"
 msgstr ""
 
 msgid "Dark"
+msgstr ""
+
+msgid "Database sizes show stored data, excluding database overhead."
 msgstr ""
 
 msgid "Date added"
@@ -1159,6 +1199,9 @@ msgid "Duration"
 msgstr ""
 
 msgid "Dynamic background"
+msgstr ""
+
+msgid "EBU R128 analysis"
 msgstr ""
 
 msgid "EBU R128 reference level"
@@ -1472,9 +1515,6 @@ msgstr ""
 msgid "General"
 msgstr ""
 
-msgid "Generate and cache waveforms for the current track"
-msgstr ""
-
 msgid "Genius"
 msgstr ""
 
@@ -1630,6 +1670,9 @@ msgstr ""
 msgid "January {year}"
 msgstr ""
 
+msgid "Japanese dictionary"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr ""
 
@@ -1660,9 +1703,6 @@ msgid "Karaoke mode"
 msgstr ""
 
 msgid "Keep Rufin running after closing the window"
-msgstr ""
-
-msgid "Keep album transitions gapless when possible"
 msgstr ""
 
 msgid "Keep music available offline. Folder changes only affect new downloads"
@@ -2626,6 +2666,9 @@ msgstr ""
 msgid "Previous"
 msgstr ""
 
+msgid "Privacy & Security"
+msgstr ""
+
 msgid "Privacy and Security"
 msgstr ""
 
@@ -3113,9 +3156,6 @@ msgstr ""
 
 #, rust-format
 msgid "Seek to {time}"
-msgstr ""
-
-msgid "Seekbar"
 msgstr ""
 
 msgid "Segmented bars"
@@ -3632,6 +3672,9 @@ msgstr ""
 msgid "UPnP"
 msgstr ""
 
+msgid "Unavailable"
+msgstr ""
+
 msgid "Undo identified value"
 msgstr ""
 
@@ -3808,6 +3851,9 @@ msgstr ""
 msgid "Waveform seekbar"
 msgstr ""
 
+msgid "Waveforms"
+msgstr ""
+
 msgid "WebDAV / Nextcloud"
 msgstr ""
 
@@ -3928,6 +3974,12 @@ msgstr[1] ""
 #, rust-format
 msgid "{count} day ago"
 msgid_plural "{count} days ago"
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
+msgid "{count} entry"
+msgid_plural "{count} entries"
 msgstr[0] ""
 msgstr[1] ""
 

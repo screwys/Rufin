@@ -1283,48 +1283,46 @@ entry.metadata-identified-change:dir(rtl) {
   margin-top: -4px;
 }
 
-.preferences-bottom-tab-bar {
-  min-height: 46px;
-  padding: 1px 0;
-  background: var(--headerbar-bg-color);
-  box-shadow: 0 -1px color-mix(in srgb, var(--window-fg-color) 10%, transparent);
+.preferences-header,
+.preferences-header:backdrop,
+.preferences-sidebar,
+.preferences-sidebar:backdrop,
+.preferences-split > .sidebar-pane,
+.preferences-split > .sidebar-pane:backdrop {
+  background-color: var(--sidebar-bg-color);
+  --sidebar-backdrop-color: var(--sidebar-bg-color);
 }
 
-.preferences-tabs-bottom preferencespage > scrolledwindow > viewport > clamp > box {
-  margin-top: 12px;
+.preferences-header:backdrop > windowhandle {
+  filter: none;
 }
 
-.preferences-bottom-tab-bar.preferences-tabs-icon-only {
-  min-height: 46px;
-  padding-top: 1px;
-  padding-bottom: 1px;
+.preferences-categories {
+  padding: 4px 8px 8px;
 }
 
-.preferences-bottom-switcher.preferences-tabs-icon-only {
-  min-height: 36px;
-  margin-top: 0;
-  margin-bottom: 0;
-}
-
-.preferences-bottom-switcher.preferences-tabs-icon-only button > stack > box.narrow {
-  min-height: 20px;
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-
-.preferences-bottom-switcher.preferences-tabs-icon-only label {
-  min-height: 0;
+.preferences-categories > row {
+  min-height: 38px;
+  padding: 0;
   margin: 0;
-  padding: 0;
-  font-size: 0;
+  border-radius: 9px;
 }
 
-.preferences-search-button,
-.preferences-nested-back {
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0;
-  border-radius: 999px;
+.preferences-category-content {
+  padding: 6px 8px;
+}
+
+.preferences-category-label {
+  font-size: 13px;
+  font-weight: 475;
+}
+
+.preferences-category-content image {
+  opacity: 0.85;
+}
+
+.preferences-categories > row:selected image {
+  opacity: 1;
 }
 
 button.rufin-ownership-icon image {
@@ -1646,6 +1644,15 @@ scale.volume-slider:focus-visible trough highlight {
 scale.player-progress trough,
 scale.volume-slider trough {
   background: color-mix(in srgb, var(--window-fg-color) 20%, transparent);
+}
+
+row.playback-transition-options {
+  padding: 0;
+}
+
+row.playback-transition-options > revealer > list {
+  background: transparent;
+  color: inherit;
 }
 
 scale.playback-setting-scale > trough,
@@ -2852,4 +2859,9 @@ button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
 .drop-feedback.order-drop-right:focus {
   border-radius: 0;
   box-shadow: 2px 0 var(--accent-color);
+}
+
+.storage-summary {
+  padding: 24px;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent-bg-color) 12%, var(--card-bg-color)), var(--card-bg-color));
 }

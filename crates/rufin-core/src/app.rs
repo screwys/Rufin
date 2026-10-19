@@ -20,16 +20,20 @@ use crate::waveform::WaveformOwner;
 /// Runs an application host with Rufin's worker runtime available on its calling thread.
 /// The host shuts down playback before returning; workers are stopped afterwards.
 pub fn with_runtime<T>(host: impl FnOnce(&tokio::runtime::Runtime) -> T) -> std::io::Result<T> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("rufin-async")
-        .build()?;
+    let runtime = worker_runtime()?;
     let result = {
         let _guard = runtime.enter();
         host(&runtime)
     };
     runtime.shutdown_timeout(std::time::Duration::from_secs(1));
     Ok(result)
+}
+
+pub fn worker_runtime() -> std::io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("rufin-async")
+        .build()
 }
 
 pub async fn runtime_inputs<StartBackend>(
@@ -366,7 +370,7 @@ where
         }
     }
     let connect = crate::connect::ConnectOwner::new(
-        paths.data_dir().join("connect"),
+        paths.connect_dir(),
         Arc::clone(&library),
         settings_handle.as_ref().clone(),
         Arc::clone(&secrets),

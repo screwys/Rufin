@@ -55,6 +55,8 @@ mod search;
 mod selection;
 pub use selection::{TrackScope, TrackSelection};
 mod smart_playlists;
+mod storage;
+pub use storage::CacheUsage;
 mod tracks;
 pub use tracks::AudioProperties;
 

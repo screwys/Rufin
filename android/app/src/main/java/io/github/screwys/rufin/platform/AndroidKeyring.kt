@@ -80,6 +80,12 @@ internal class AndroidKeyring(context: Context) {
         file(identifier).delete()
     }
 
+    @Synchronized
+    fun clear() {
+        check(!directory.exists() || directory.deleteRecursively()) { "Could not clear saved credentials" }
+        keyStore.deleteEntry(alias)
+    }
+
     private fun file(identifier: String): AtomicFile {
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(identifier.toByteArray(Charsets.UTF_8))

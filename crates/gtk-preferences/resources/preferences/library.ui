@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface domain="rufin">
-  <requires lib="gtk" version="4.20"/>
-  <requires lib="libadwaita" version="1.9"/>
-
+  <requires lib="gtk" version="4.20" />
+  <requires lib="libadwaita" version="1.9" />
   <object class="AdwPreferencesPage" id="library_page">
     <property name="title" translatable="yes">Library</property>
     <property name="icon-name">rufin-library-music-symbolic</property>
@@ -11,73 +10,142 @@
         <property name="title" translatable="yes">Sources</property>
       </object>
     </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="activity_group">
+        <property name="title" translatable="yes">Activity</property>
+        <child>
+          <object class="AdwPreferencesRow">
+            <property name="activatable">false</property>
+            <property name="child">
+              <object class="AdwWrapBox">
+                <property name="child-spacing">12</property>
+                <property name="line-spacing">8</property>
+                <property name="margin-start">12</property>
+                <property name="margin-end">12</property>
+                <property name="margin-top">12</property>
+                <property name="margin-bottom">12</property>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label" translatable="yes">Export format</property>
+                    <property name="hexpand">true</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox" id="activity_format">
+                    <property name="valign">center</property>
+                    <style>
+                      <class name="linked" />
+                      <class name="preference-selection-buttons" />
+                    </style>
+                    <child>
+                      <object class="GtkToggleButton" id="lastfm">
+                        <property name="label">Last.fm</property>
+                        <property name="active">true</property>
+                        <style>
+                          <class name="preference-selection-button" />
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkToggleButton" id="listenbrainz">
+                        <property name="label">ListenBrainz</property>
+                        <property name="active">false</property>
+                        <property name="group">lastfm</property>
+                        <style>
+                          <class name="preference-selection-button" />
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkToggleButton" id="jsonl">
+                        <property name="label">JSONL</property>
+                        <property name="active">false</property>
+                        <property name="group">lastfm</property>
+                        <style>
+                          <class name="preference-selection-button" />
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="activity_scope_row">
+            <property name="title" translatable="yes">Source</property>
+            <child type="suffix">
+              <object class="GtkMenuButton" id="activity_source">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow">
+            <property name="title" translatable="yes">Export your listening history in Rufin</property>
+            <property name="title-lines">0</property>
+            <child type="suffix">
+              <object class="GtkButton" id="activity_export">
+                <property name="label" translatable="yes">Export</property>
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
   </object>
-
+  <object class="AdwPreferencesPage" id="downloads_page">
+    <property name="title" translatable="yes">Downloads</property>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <child>
+          <object class="AdwActionRow" id="download_source_row">
+            <property name="title" translatable="yes">Source</property>
+            <child type="suffix">
+              <object class="GtkMenuButton" id="download_source">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
   <object class="AdwActionRow" id="empty_remote_row">
     <property name="title" translatable="yes">No sources configured</property>
-
   </object>
-
-  <object class="AdwPreferencesGroup" id="source_downloads_group">
-    <child>
-      <object class="AdwActionRow" id="download_artwork">
-        <property name="title" translatable="yes">Download artwork</property>
-        <property name="activatable">true</property>
-        <child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-download-symbolic</property></object></child>
-      </object>
-    </child>
-    <child>
-      <object class="AdwActionRow" id="download_lyrics">
-        <property name="title" translatable="yes">Download lyrics</property>
-        <property name="activatable">true</property>
-        <child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-download-symbolic</property></object></child>
-      </object>
-    </child>
-  </object>
-
   <object class="AdwPreferencesGroup" id="downloads_group">
     <property name="title" translatable="yes">Downloads</property>
     <property name="description" translatable="yes">Keep music available offline. Folder changes only affect new downloads</property>
   </object>
-  <object class="AdwPreferencesGroup" id="cache_group">
-    <child>
-      <object class="AdwActionRow" id="clear_artwork_cache">
-        <property name="title" translatable="yes">Clear artwork cache</property>
-        <property name="activatable">true</property>
-        <child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-user-trash-symbolic</property></object></child>
-      </object>
-    </child>
-    <child>
-      <object class="AdwActionRow" id="clear_lyrics_cache">
-        <property name="title" translatable="yes">Clear lyrics cache</property>
-        <property name="activatable">true</property>
-        <child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-user-trash-symbolic</property></object></child>
-      </object>
-    </child>
-  </object>
-  <object class="GtkLabel" id="artwork_cache_cleared">
-    <property name="label" translatable="yes">Artwork cache cleared</property>
-  </object>
-  <object class="GtkLabel" id="lyrics_cache_cleared">
-    <property name="label" translatable="yes">Lyrics cache cleared</property>
-  </object>
   <object class="AdwActionRow" id="download_folder_row">
     <property name="title" translatable="yes">Download Folder</property>
-
     <child type="suffix">
       <object class="GtkButton" id="reset_folder">
         <property name="icon-name">rufin-view-refresh-symbolic</property>
         <property name="tooltip-text" translatable="yes">Use default folder</property>
         <property name="valign">center</property>
-        <style><class name="flat"/></style>
+        <style>
+          <class name="flat" />
+        </style>
       </object>
     </child>
-    <child type="suffix"><object class="GtkButton" id="open_folder">
-      <property name="icon-name">rufin-document-open-symbolic</property>
-      <property name="tooltip-text" translatable="yes">Open Folder</property>
-      <property name="valign">center</property><style><class name="flat"/></style>
-    </object></child>
-<child type="suffix">
+    <child type="suffix">
+      <object class="GtkButton" id="open_folder">
+        <property name="icon-name">rufin-document-open-symbolic</property>
+        <property name="tooltip-text" translatable="yes">Open Folder</property>
+        <property name="valign">center</property>
+        <style>
+          <class name="flat" />
+        </style>
+      </object>
+    </child>
+    <child type="suffix">
       <object class="GtkButton" id="choose_folder">
         <property name="label" translatable="yes">Choose</property>
         <property name="valign">center</property>
@@ -87,7 +155,6 @@
   <object class="AdwSwitchRow" id="downloaded_badge">
     <property name="title" translatable="yes">Show downloaded badge</property>
   </object>
-
   <object class="AdwPreferencesRow" id="download_actions_row">
     <property name="activatable">false</property>
     <property name="selectable">false</property>
@@ -107,14 +174,21 @@
             <property name="tooltip-text" translatable="yes">Remove all downloads</property>
             <property name="halign">fill</property>
             <property name="hexpand">true</property>
-            <style><class name="flat"/><class name="destructive-action"/></style>
+            <style>
+              <class name="flat" />
+              <class name="destructive-action" />
+            </style>
             <property name="child">
               <object class="GtkBox">
                 <property name="orientation">horizontal</property>
                 <property name="spacing">6</property>
                 <property name="halign">center</property>
                 <property name="valign">center</property>
-                <child><object class="GtkImage"><property name="icon-name">rufin-user-trash-symbolic</property></object></child>
+                <child>
+                  <object class="GtkImage">
+                    <property name="icon-name">rufin-user-trash-symbolic</property>
+                  </object>
+                </child>
                 <child>
                   <object class="GtkLabel" id="remove_all_label">
                     <property name="label" translatable="yes">Remove all downloads</property>
@@ -133,7 +207,6 @@
       </object>
     </property>
   </object>
-
   <object class="AdwPreferencesRow" id="download_queue_header">
     <property name="activatable">false</property>
     <property name="selectable">false</property>
@@ -149,7 +222,9 @@
           <object class="GtkLabel" id="download_queue_label">
             <property name="label" translatable="yes">Download Queue</property>
             <property name="halign">start</property>
-            <style><class name="heading"/></style>
+            <style>
+              <class name="heading" />
+            </style>
           </object>
         </child>
         <child>
@@ -157,13 +232,16 @@
             <property name="icon-name">rufin-media-playback-pause-symbolic</property>
             <property name="valign">center</property>
             <property name="visible">false</property>
-            <style><class name="circular"/><class name="suggested-action"/><class name="download-queue-pause"/></style>
+            <style>
+              <class name="circular" />
+              <class name="suggested-action" />
+              <class name="download-queue-pause" />
+            </style>
           </object>
         </child>
       </object>
     </property>
   </object>
-
   <object class="AdwPreferencesGroup" id="local_group">
     <property name="title" translatable="yes">Local files and folders</property>
   </object>
@@ -189,14 +267,20 @@
             <property name="tooltip-text" translatable="yes">Add a music folder</property>
             <property name="halign">fill</property>
             <property name="hexpand">true</property>
-            <style><class name="flat"/></style>
+            <style>
+              <class name="flat" />
+            </style>
             <property name="child">
               <object class="GtkBox">
                 <property name="orientation">horizontal</property>
                 <property name="spacing">6</property>
                 <property name="halign">center</property>
                 <property name="valign">center</property>
-                <child><object class="GtkImage"><property name="icon-name">rufin-folder-new-symbolic</property></object></child>
+                <child>
+                  <object class="GtkImage">
+                    <property name="icon-name">rufin-folder-new-symbolic</property>
+                  </object>
+                </child>
                 <child>
                   <object class="GtkLabel" id="add_local_label">
                     <property name="label" translatable="yes">Add a music folder</property>
@@ -217,14 +301,20 @@
             <property name="tooltip-text" translatable="yes">Resync Library</property>
             <property name="halign">fill</property>
             <property name="hexpand">true</property>
-            <style><class name="flat"/></style>
+            <style>
+              <class name="flat" />
+            </style>
             <property name="child">
               <object class="GtkBox">
                 <property name="orientation">horizontal</property>
                 <property name="spacing">6</property>
                 <property name="halign">center</property>
                 <property name="valign">center</property>
-                <child><object class="GtkImage"><property name="icon-name">rufin-view-refresh-symbolic</property></object></child>
+                <child>
+                  <object class="GtkImage">
+                    <property name="icon-name">rufin-view-refresh-symbolic</property>
+                  </object>
+                </child>
                 <child>
                   <object class="GtkLabel" id="resync_local_label">
                     <property name="label" translatable="yes">Resync Library</property>
@@ -241,23 +331,72 @@
           </object>
         </child>
         <child>
-              <object class="GtkButton" id="forget_local">
-                <property name="tooltip-text" translatable="yes">Forget Source</property><property name="halign">fill</property><property name="hexpand">true</property>
-                <style><class name="flat"/><class name="destructive-action"/></style>
-                <property name="child"><object class="GtkBox"><property name="orientation">horizontal</property><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkImage"><property name="icon-name">rufin-window-close-symbolic</property></object></child><child><object class="GtkLabel"><property name="label" translatable="yes">Forget Source</property><property name="ellipsize">end</property><property name="width-chars">0</property><property name="max-width-chars">18</property><property name="wrap">true</property><property name="wrap-mode">word-char</property><property name="lines">2</property></object></child></object></property>
+          <object class="GtkButton" id="forget_local">
+            <property name="tooltip-text" translatable="yes">Forget Source</property>
+            <property name="halign">fill</property>
+            <property name="hexpand">true</property>
+            <style>
+              <class name="flat" />
+              <class name="destructive-action" />
+            </style>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">6</property>
+                <property name="halign">center</property>
+                <property name="valign">center</property>
+                <child>
+                  <object class="GtkImage">
+                    <property name="icon-name">rufin-window-close-symbolic</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label" translatable="yes">Forget Source</property>
+                    <property name="ellipsize">end</property>
+                    <property name="width-chars">0</property>
+                    <property name="max-width-chars">18</property>
+                    <property name="wrap">true</property>
+                    <property name="wrap-mode">word-char</property>
+                    <property name="lines">2</property>
+                  </object>
+                </child>
               </object>
+            </property>
+          </object>
         </child>
       </object>
     </property>
   </object>
-  <object class="AdwPreferencesPage" id="local_page"><property name="title" translatable="yes">Local</property></object>
-  <object class="AdwActionRow" id="local_source_row"><property name="title" translatable="yes">Local</property><property name="activatable">true</property><child type="prefix"><object class="GtkImage"><property name="icon-name">io.github.screwys.Rufin-symbolic</property><property name="pixel-size">28</property></object></child><child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-go-next-symbolic</property></object></child></object>
-  <object class="GtkButton" id="add_source"><property name="label" translatable="yes">Add Source</property></object>
+  <object class="AdwPreferencesPage" id="local_page">
+    <property name="title" translatable="yes">Local</property>
+  </object>
+  <object class="AdwActionRow" id="local_source_row">
+    <property name="title" translatable="yes">Local</property>
+    <property name="activatable">true</property>
+    <child type="prefix">
+      <object class="GtkImage">
+        <property name="icon-name">io.github.screwys.Rufin-symbolic</property>
+        <property name="pixel-size">28</property>
+      </object>
+    </child>
+    <child type="suffix">
+      <object class="GtkImage">
+        <property name="icon-name">rufin-go-next-symbolic</property>
+      </object>
+    </child>
+  </object>
+  <object class="GtkButton" id="add_source">
+    <property name="label" translatable="yes">Add Source</property>
+  </object>
   <object class="AdwAlertDialog" id="forget_local_confirm">
     <property name="heading" translatable="yes">Forget Source</property>
     <property name="body" translatable="yes">Remove Local and its cached library from Rufin? Your music files will not be deleted.</property>
     <property name="close-response">cancel</property>
     <property name="default-response">cancel</property>
-    <responses><response id="cancel" translatable="yes">Cancel</response><response id="forget" appearance="destructive" translatable="yes">Forget Source</response></responses>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="forget" appearance="destructive" translatable="yes">Forget Source</response>
+    </responses>
   </object>
 </interface>

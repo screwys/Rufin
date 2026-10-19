@@ -1,89 +1,537 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <interface domain="rufin">
-  <requires lib="gtk" version="4.20"/>
-  <requires lib="libadwaita" version="1.9"/>
-
-  <object class="AdwToolbarView" id="toolbar"/>
-
-  <object class="AdwViewStack" id="stack">
-    <property name="hexpand">true</property>
-    <property name="vexpand">true</property>
-  </object>
-  <object class="AdwViewSwitcher" id="switcher">
-    <property name="policy">wide</property>
-    <property name="stack">stack</property>
-  </object>
-  <object class="GtkCenterBox" id="bottom_tab_bar">
-    <property name="visible">false</property>
-    <property name="hexpand">true</property>
-    <style><class name="preferences-bottom-tab-bar"/></style>
-    <property name="center-widget">
-      <object class="AdwViewSwitcher" id="bottom_switcher">
-        <property name="policy">narrow</property>
-        <property name="stack">stack</property>
-        <property name="halign">center</property>
-        <property name="valign">center</property>
-        <style><class name="preferences-bottom-switcher"/></style>
-      </object>
-    </property>
-  </object>
-
-  <object class="AdwHeaderBar" id="switcher_bar">
-    <property name="hexpand">true</property>
-    <child type="start">
-      <object class="GtkBox" id="top_start_controls">
-        <property name="spacing">4</property>
-        <child>
-          <object class="GtkToggleButton" id="search_button">
-            <property name="icon-name">rufin-search-symbolic</property>
-            <property name="tooltip-text" translatable="yes">Search</property>
-            <style>
-              <class name="flat"/>
-              <class name="preferences-search-button"/>
-            </style>
-          </object>
-        </child>
-        <child>
-          <object class="GtkButton" id="back">
-            <property name="opacity">0</property>
-            <property name="sensitive">false</property>
-            <property name="icon-name">rufin-go-previous-symbolic</property>
-            <style>
-              <class name="flat"/>
-              <class name="preferences-nested-back"/>
-            </style>
-          </object>
-        </child>
-      </object>
-    </child>
-    <property name="title-widget">switcher</property>
-  </object>
-
-  <object class="GtkSizeGroup">
-    <property name="mode">vertical</property>
-    <widgets>
-      <widget name="switcher"/>
-      <widget name="top_start_controls"/>
-    </widgets>
-  </object>
-
-  <object class="GtkSearchBar" id="search_bar">
+  <requires lib="gtk" version="4.20" />
+  <requires lib="libadwaita" version="1.9" />
+  <object class="AdwBreakpointBin" id="responsive">
+    <property name="width-request">320</property>
+    <property name="height-request">200</property>
     <property name="child">
-      <object class="GtkSearchEntry" id="search_entry">
-        <property name="hexpand">true</property>
-        <property name="placeholder-text" translatable="yes">Search preferences</property>
+      <object class="AdwToolbarView" id="preferences_toolbar">
+        <child type="top">
+          <object class="AdwHeaderBar" id="page_header">
+            <child type="start">
+              <object class="GtkButton" id="category_back">
+                <property name="visible">false</property>
+                <property name="icon-name">rufin-go-previous-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Back</property>
+                <style>
+                  <class name="flat" />
+                </style>
+              </object>
+            </child>
+            <child type="start">
+              <object class="GtkButton" id="back">
+                <property name="visible">false</property>
+                <property name="icon-name">rufin-go-previous-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Back</property>
+                <style>
+                  <class name="flat" />
+                </style>
+              </object>
+            </child>
+            <child type="end">
+              <object class="GtkToggleButton" id="search_button">
+                <property name="icon-name">rufin-search-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Search</property>
+                <style>
+                  <class name="flat" />
+                </style>
+              </object>
+            </child>
+            <property name="show-back-button">false</property>
+            <property name="title-widget">
+              <object class="GtkStack" id="header_content">
+                <property name="hhomogeneous">false</property>
+                <property name="vhomogeneous">false</property>
+                <child>
+                  <object class="GtkStackPage">
+                    <property name="name">title</property>
+                    <property name="child">
+                      <object class="GtkLabel" id="page_title">
+                        <property name="label" translatable="yes">General</property>
+                        <property name="ellipsize">end</property>
+                        <style>
+                          <class name="heading" />
+                        </style>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkStackPage">
+                    <property name="name">search</property>
+                    <property name="child">
+                      <object class="GtkSearchEntry" id="search_entry">
+                        <property name="hexpand">true</property>
+                        <property name="placeholder-text" translatable="yes">Search preferences</property>
+                        <property name="width-chars">1</property>
+                        <property name="max-width-chars">28</property>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+              </object>
+            </property>
+            <style>
+              <class name="preferences-header" />
+            </style>
+          </object>
+        </child>
+        <property name="content">
+          <object class="AdwNavigationSplitView" id="split_view">
+            <style><class name="preferences-split"/></style>
+            <property name="min-sidebar-width">190</property>
+            <property name="max-sidebar-width">210</property>
+            <property name="sidebar-width-fraction">0.22</property>
+            <property name="sidebar">
+              <object class="AdwNavigationPage">
+                <property name="title" translatable="yes">Preferences</property>
+                <property name="child">
+                  <object class="GtkScrolledWindow">
+                    <property name="hscrollbar-policy">never</property>
+                    <property name="child">
+                      <object class="GtkListBox" id="categories">
+                        <property name="selection-mode">single</property>
+                        <property name="activate-on-single-click">true</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Preferences</property>
+                        </accessibility>
+                        <style>
+                          <class name="navigation-sidebar" />
+                          <class name="preferences-categories" />
+                        </style>
+                        <child>
+                          <object class="GtkListBoxRow" id="category_general">
+                            <property name="activatable">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="spacing">10</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="icon-name">rufin-preferences-system-symbolic</property>
+                                    <property name="pixel-size">20</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label" translatable="yes">General</property>
+                                    <property name="xalign">0</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="ellipsize">end</property>
+                                    <style>
+                                      <class name="preferences-category-label" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkListBoxRow" id="category_customization">
+                            <property name="activatable">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="spacing">10</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="icon-name">rufin-sliders-2-symbolic</property>
+                                    <property name="pixel-size">20</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label" translatable="yes">Customization</property>
+                                    <property name="xalign">0</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="ellipsize">end</property>
+                                    <style>
+                                      <class name="preferences-category-label" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkListBoxRow" id="category_theme">
+                            <property name="activatable">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="spacing">10</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="icon-name">rufin-preferences-desktop-appearance-symbolic</property>
+                                    <property name="pixel-size">20</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label" translatable="yes">Theme</property>
+                                    <property name="xalign">0</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="ellipsize">end</property>
+                                    <style>
+                                      <class name="preferences-category-label" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkListBoxRow" id="category_integrations">
+                            <property name="activatable">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="spacing">10</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="icon-name">rufin-network-workgroup-symbolic</property>
+                                    <property name="pixel-size">20</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label" translatable="yes">Integrations</property>
+                                    <property name="xalign">0</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="ellipsize">end</property>
+                                    <style>
+                                      <class name="preferences-category-label" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkListBoxRow" id="category_playback">
+                            <property name="activatable">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="spacing">10</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="icon-name">rufin-music-queue-symbolic</property>
+                                    <property name="pixel-size">20</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label" translatable="yes">Playback</property>
+                                    <property name="xalign">0</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="ellipsize">end</property>
+                                    <style>
+                                      <class name="preferences-category-label" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkListBoxRow" id="category_equalizer">
+                            <property name="activatable">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="spacing">10</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="icon-name">rufin-sliders-vertical-symbolic</property>
+                                    <property name="pixel-size">20</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label" translatable="yes">Equalizer</property>
+                                    <property name="xalign">0</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="ellipsize">end</property>
+                                    <style>
+                                      <class name="preferences-category-label" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkListBoxRow" id="category_library">
+                            <property name="activatable">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="spacing">10</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="icon-name">rufin-library-symbolic</property>
+                                    <property name="pixel-size">20</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label" translatable="yes">Library</property>
+                                    <property name="xalign">0</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="ellipsize">end</property>
+                                    <style>
+                                      <class name="preferences-category-label" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkListBoxRow" id="category_downloads">
+                            <property name="activatable">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="spacing">10</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="icon-name">rufin-download-symbolic</property>
+                                    <property name="pixel-size">20</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label" translatable="yes">Downloads</property>
+                                    <property name="xalign">0</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="ellipsize">end</property>
+                                    <style>
+                                      <class name="preferences-category-label" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkListBoxRow" id="category_connect">
+                            <property name="activatable">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="spacing">10</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="icon-name">rufin-network-hotspot-symbolic</property>
+                                    <property name="pixel-size">20</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label" translatable="yes">Connect</property>
+                                    <property name="xalign">0</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="ellipsize">end</property>
+                                    <style>
+                                      <class name="preferences-category-label" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkListBoxRow" id="category_controller">
+                            <property name="activatable">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="spacing">10</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="icon-name">rufin-phonelink-symbolic</property>
+                                    <property name="pixel-size">20</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label" translatable="yes">Controller</property>
+                                    <property name="xalign">0</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="ellipsize">end</property>
+                                    <style>
+                                      <class name="preferences-category-label" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkListBoxRow" id="category_storage">
+                            <property name="activatable">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="spacing">10</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="icon-name">rufin-drive-harddisk-symbolic</property>
+                                    <property name="pixel-size">20</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label" translatable="yes">Storage</property>
+                                    <property name="xalign">0</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="ellipsize">end</property>
+                                    <style>
+                                      <class name="preferences-category-label" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkListBoxRow" id="category_privacy">
+                            <property name="activatable">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="spacing">10</property>
+                                <property name="valign">center</property>
+                                <style>
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="icon-name">rufin-system-lock-screen-symbolic</property>
+                                    <property name="pixel-size">20</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label" translatable="yes">Privacy &amp; Security</property>
+                                    <property name="xalign">0</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="ellipsize">end</property>
+                                    <style>
+                                      <class name="preferences-category-label" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </property>
+                <style>
+                  <class name="preferences-sidebar" />
+                </style>
+              </object>
+            </property>
+            <property name="content">
+              <object class="AdwNavigationPage" id="content_page">
+                <property name="title" translatable="yes">General</property>
+                <property name="child">
+                  <object class="GtkStack" id="content_stack">
+                    <property name="hexpand">true</property>
+                    <property name="vexpand">true</property>
+                    <property name="hhomogeneous">false</property>
+                    <property name="vhomogeneous">false</property>
+                    <child>
+                      <object class="GtkStackPage">
+                        <property name="name">pages</property>
+                        <property name="child">
+                          <object class="AdwViewStack" id="stack">
+                            <property name="hexpand">true</property>
+                            <property name="vexpand">true</property>
+                          </object>
+                        </property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkStackPage">
+                        <property name="name">search</property>
+                        <property name="child">
+                          <object class="AdwPreferencesPage" id="search_results">
+                            <child>
+                              <object class="AdwPreferencesGroup" id="search_results_group" />
+                            </child>
+                          </object>
+                        </property>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </property>
+          </object>
+        </property>
       </object>
     </property>
-  </object>
-
-  <object class="GtkStack" id="content_stack">
-    <property name="hexpand">true</property>
-    <property name="vexpand">true</property>
-    <property name="transition-type">crossfade</property>
-  </object>
-  <object class="AdwPreferencesPage" id="search_results">
-    <child>
-      <object class="AdwPreferencesGroup" id="search_results_group"/>
-    </child>
   </object>
 </interface>

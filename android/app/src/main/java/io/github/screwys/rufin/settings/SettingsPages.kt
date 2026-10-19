@@ -20,6 +20,7 @@ import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
 import io.github.screwys.rufin.more.MoreDestination
 import io.github.screwys.rufin.core.translate
+import io.github.screwys.rufin.core.AndroidCastNetwork
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.browse.BrowseConnection
 import io.github.screwys.rufin.player.PlayerConnection
@@ -29,19 +30,6 @@ import io.github.screwys.rufin.player.PlaybackPreferences
 import io.github.screwys.rufin.sources.SourcesPage
 import kotlin.math.round
 import kotlin.math.roundToInt
-
-@Composable
-internal fun SettingsIndexPage(navigate: (MoreDestination) -> Unit) {
-    SettingsPage {
-        SettingsGroup {
-            SettingsLink("rufin-preferences-system-symbolic", translate("General")) { navigate(MoreDestination.General) }
-            SettingsLink("rufin-preferences-desktop-appearance-symbolic", translate("Appearance")) { navigate(MoreDestination.Appearance) }
-            SettingsLink("rufin-music-queue-symbolic", translate("Playback")) { navigate(MoreDestination.Playback) }
-            SettingsLink("rufin-download-symbolic", translate("Downloads")) { navigate(MoreDestination.DownloadSettings) }
-            SettingsLink("rufin-system-lock-screen-symbolic", translate("Privacy and Security")) { navigate(MoreDestination.Privacy) }
-        }
-    }
-}
 
 @Composable
 internal fun SettingsLink(icon: String?, title: String, summary: String? = null, open: () -> Unit) {
@@ -112,7 +100,12 @@ internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFlo
 internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnection, preferences: PreferencesConnection,
     player: PlayerConnection, browse: BrowseConnection, output: () -> Unit, addSource: () -> Unit, editSource: (String) -> Unit,
     navigate: (MoreDestination) -> Unit) {
-    LaunchedEffect(destination) { preferences.refreshApplicationSettings(); player.refreshSettings() }
+    var castNetworks by remember { mutableStateOf<List<AndroidCastNetwork>>(emptyList()) }
+    LaunchedEffect(destination, model.ready, player.bridge) {
+        preferences.refreshApplicationSettings()
+        player.refreshSettings()
+        if (destination == MoreDestination.Privacy && model.ready) castNetworks = player.castingNetworks()
+    }
     val state = preferences.applicationSettings
     if (state == null) { Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { CircularProgressIndicator() }; return }
     SettingsPage {
@@ -140,19 +133,9 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                     SettingsSwitch(translate("External metadata lookup"), state.externalMetadataEnabled) { preferences.changePreference { setExternalMetadataEnabled(it) } }
                     player.settings?.lyrics?.let { lyrics -> SettingsSwitch(translate("External lyrics lookup"), lyrics.externalLyricsEnabled) { player.lyricsPreference { setExternalLyricsEnabled(it) } } }
                 }
-                val links = state.externalSiteLinks
-                SettingsGroup(translate("External site links")) {
-                    SettingsSwitch(translate("Show external site links"), links.enabled) { preferences.changePreference { setExternalSiteLinks(links.copy(enabled = it)) } }
-                    SettingsSwitch("Last.fm", links.lastfm) { preferences.changePreference { setExternalSiteLinks(links.copy(lastfm = it)) } }
-                    SettingsSwitch("MusicBrainz", links.musicbrainz) { preferences.changePreference { setExternalSiteLinks(links.copy(musicbrainz = it)) } }
-                    SettingsSwitch(translate("Server"), links.server) { preferences.changePreference { setExternalSiteLinks(links.copy(server = it)) } }
-                }
-                BackupsPage(model, preferences, embedded = true, openSettings = { navigate(MoreDestination.BackupSettings) })
             }
             MoreDestination.Playback -> {
-                PlaybackPreferences(player, preferences, output)
-                Text(translate("Equalizer"), style = MaterialTheme.typography.titleMedium)
-                PlayerSettingsContent(player, PlayerSettingsPage.EQUALIZER, embedded = true)
+                PlaybackPreferences(player, preferences, output, includeDisplaySettings = false)
                 Text(translate("Lyrics"), style = MaterialTheme.typography.titleMedium)
                 PlayerSettingsContent(player, PlayerSettingsPage.LYRICS, embedded = true)
                 Text(translate("Visualizer"), style = MaterialTheme.typography.titleMedium)
@@ -160,13 +143,22 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
             }
             MoreDestination.Integrations -> {
                 ScrobblingPage(preferences, embedded = true)
-                Text(translate("File connections"), style = MaterialTheme.typography.titleMedium)
+                val links = state.externalSiteLinks
+                SettingsGroup(translate("External site links")) {
+                    SettingsSwitch(translate("Show external site links"), links.enabled) { preferences.changePreference { setExternalSiteLinks(links.copy(enabled = it)) } }
+                    SettingsSwitch("Last.fm", links.lastfm) { preferences.changePreference { setExternalSiteLinks(links.copy(lastfm = it)) } }
+                    SettingsSwitch("MusicBrainz", links.musicbrainz) { preferences.changePreference { setExternalSiteLinks(links.copy(musicbrainz = it)) } }
+                    SettingsSwitch(translate("Server"), links.server) { preferences.changePreference { setExternalSiteLinks(links.copy(server = it)) } }
+                }
                 SourcesPage(model, addSource, editSource, embedded = true, connectionsOnly = true)
             }
             MoreDestination.Privacy -> {
                 SettingsGroup {
                     SettingsSwitch(translate("Private mode"), state.privateMode) { preferences.changePreference { setPrivateMode(it) } }
                     SettingsSwitch(translate("Proxy casting through Rufin"), state.castProxyEnabled) { preferences.changePreference { setCastProxyEnabled(it) } }
+                    PreferenceChoice(translate("Casting network"), preferences.castNetworkInterface.orEmpty(),
+                        listOf("" to translate("Automatic")) + castNetworks.map { it.id to "${it.name} (${it.address})" },
+                        select = { network -> preferences.changePreference { setCastNetworkInterface(network.takeIf { it.isNotEmpty() }) } })
                     PreferenceChoice(translate("Secret storage"), if (state.secretStorageMode == io.github.screwys.rufin.shared.secrets.SecretStorageMode.SYSTEM_KEYRING) "system-keyring" else "config-file", listOf("system-keyring" to translate("System keyring"), "config-file" to translate("Legacy")), select = preferences::changeSecretStorage)
                 }
             }

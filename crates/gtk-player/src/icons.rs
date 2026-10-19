@@ -92,7 +92,6 @@ pub fn set_play_icon(icon: &gtk::Image, playing: bool) {
 
 fn transport_image(name: &str) -> gtk::Image {
     let icon = gtk::Image::from_icon_name(name);
-    icon.set_pixel_size(TRANSPORT_ICON_SIZE);
     icon.set_halign(gtk::Align::Center);
     icon.set_valign(gtk::Align::Center);
     icon
@@ -123,11 +122,15 @@ pub fn volume_icon_button(label: &str) -> (gtk::Button, gtk::Image, Rc<Cell<Volu
 }
 
 pub fn auto_dj_icon_button(label: &str) -> gtk::Button {
-    widget_icon_button(label, &transport_image("rufin-auto-dj-symbolic"))
+    let icon = transport_image("rufin-auto-dj-symbolic");
+    icon.set_pixel_size(TRANSPORT_ICON_SIZE);
+    widget_icon_button(label, &icon)
 }
 
 pub fn random_clover_icon_button(label: &str) -> gtk::Button {
-    widget_icon_button(label, &transport_image("rufin-random-symbolic"))
+    let icon = transport_image("rufin-random-symbolic");
+    icon.set_pixel_size(TRANSPORT_ICON_SIZE);
+    widget_icon_button(label, &icon)
 }
 
 pub fn queue_sidebar_button(label: &str) -> (gtk::Button, gtk::Image) {

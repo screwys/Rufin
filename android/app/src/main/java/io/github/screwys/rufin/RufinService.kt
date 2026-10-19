@@ -34,6 +34,10 @@ import androidx.media3.session.MediaStyleNotificationHelper
 import io.github.screwys.rufin.core.AndroidPlaybackUpdate
 import io.github.screwys.rufin.shared.playback.*
 import io.github.screwys.rufin.shared.library.QueueRepeatMode
+import io.github.screwys.rufin.core.AndroidStorage
+import io.github.screwys.rufin.shared.rufin_core.StorageReset
+import io.github.screwys.rufin.platform.AndroidKeyring
+import io.github.screwys.rufin.platform.AndroidDocuments
 import io.github.screwys.rufin.core.AndroidRuntime
 import io.github.screwys.rufin.core.installCatalogs
 import kotlinx.coroutines.*
@@ -237,6 +241,32 @@ class RufinService : MediaSessionService() {
             withContext(NonCancellable + Dispatchers.IO) { core?.destroy() }
         }
 
+    }
+
+    internal suspend fun resetStorage(storage: AndroidStorage, kind: StorageReset) {
+        mutableRuntime.value = null
+        runtimeJob?.cancelAndJoin()
+        AndroidPermissions.cancel()
+        nativePlayer.update(null)
+        mutablePlayback.value = null
+        libraryObserver.update(emptyList())
+        audioFocus.abandon()
+        if (wakeLock.isHeld) wakeLock.release()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        withContext(Dispatchers.IO) {
+            storage.reset(kind)
+            check(deleteSharedPreferences("appearance")) { "Could not clear appearance settings" }
+            if (kind == StorageReset.ALL_DATA) {
+                AndroidKeyring(this@RufinService).clear()
+                AndroidDocuments.clearStoredIdentity(this@RufinService)
+                contentResolver.persistedUriPermissions.forEach { permission ->
+                    val flags = (if (permission.isReadPermission) Intent.FLAG_GRANT_READ_URI_PERMISSION else 0) or
+                        (if (permission.isWritePermission) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0)
+                    contentResolver.releasePersistableUriPermission(permission.uri, flags)
+                }
+            }
+        }
     }
 
     fun retryStartup() {

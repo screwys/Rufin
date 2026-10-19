@@ -51,14 +51,6 @@
     <file>hicolor/scalable/actions/rufin-view-grid-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-view-list-ordered-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-view-list-symbolic.svg</file>
-    <file>hicolor/16x16/actions/rufin-edit-clear-symbolic.svg</file>
-    <file>hicolor/16x16@2/actions/rufin-edit-clear-symbolic.svg</file>
-    <file>hicolor/22x22/actions/rufin-edit-clear-symbolic.svg</file>
-    <file>hicolor/22x22@2/actions/rufin-edit-clear-symbolic.svg</file>
-    <file>hicolor/24x24/actions/rufin-edit-clear-symbolic.svg</file>
-    <file>hicolor/24x24@2/actions/rufin-edit-clear-symbolic.svg</file>
-    <file>hicolor/32x32/actions/rufin-edit-clear-symbolic.svg</file>
-    <file>hicolor/32x32@2/actions/rufin-edit-clear-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-external-link-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-external-link-compact-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-appointment-new-symbolic.svg</file>
@@ -74,7 +66,8 @@
     <file>hicolor/scalable/actions/rufin-audio-x-generic-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-document-edit-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-document-save-symbolic.svg</file>
-    <file>hicolor/scalable/actions/rufin-document-save-disk-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-drive-harddisk-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-edit-clear-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-document-open-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-document-send-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-download-symbolic.svg</file>
@@ -148,6 +141,7 @@
     <file compressed="true">routes/text_slide.ui</file>
     <file compressed="true">routes/play_menu.ui</file>
     <file compressed="true">preferences/source/manage_server.ui</file>
+    <file compressed="true">preferences/source/picker.ui</file>
     <file compressed="true">routes/recycled_artwork_cell.ui</file>
     <file compressed="true">routes/recycled_badged_text_cell.ui</file>
     <file compressed="true">routes/recycled_folder_cell.ui</file>

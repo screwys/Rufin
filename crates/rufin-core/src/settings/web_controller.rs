@@ -87,7 +87,7 @@ impl SettingsOwner {
 
     pub fn web_controller_token(&self, regenerate: bool) -> Result<String, String> {
         let store = self.secrets.current().map_err(|error| error.to_string())?;
-        let key = SecretKey::namespaced("web-controller", "token", "Rufin Web Controller token");
+        let key = secret_key();
         if !regenerate
             && let Some(token) = store.load_secret(&key).map_err(|error| error.to_string())?
             && !token.is_empty()
@@ -109,4 +109,8 @@ impl SettingsOwner {
         }
         Ok(token)
     }
+}
+
+pub(super) fn secret_key() -> SecretKey {
+    SecretKey::namespaced("web-controller", "token", "Rufin Web Controller token")
 }

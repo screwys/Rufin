@@ -1,51 +1,45 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface domain="rufin">
-  <object class="AdwDialog" id="connect_dialog">
-    <property name="title" translatable="yes">Rufin Connect</property>
-    <property name="follows-content-size">true</property>
-    <style>
-      <class name="preferences" />
-    </style>
+  <object class="GtkOverlay" id="connect_content">
     <property name="child">
-      <object class="GtkOverlay">
-        <property name="width-request">460</property>
-        <property name="child">
-          <object class="AdwToolbarView">
-            <child type="top">
-              <object class="AdwHeaderBar">
-                <property name="title-widget">
-                  <object class="AdwWindowTitle" id="page_title">
-                    <property name="title" translatable="yes">Rufin Connect</property>
-                  </object>
-                </property>
-
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="GtkLabel" id="page_title">
+            <property name="visible">false</property>
+            <property name="wrap">true</property>
+            <property name="margin-start">18</property>
+            <property name="margin-end">18</property>
+            <style>
+              <class name="caption" />
+              <class name="dim-label" />
+            </style>
+          </object>
+        </child>
+        <property name="content">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <child>
+              <object class="AdwBanner" id="connection_error">
+                <property name="revealed">false</property>
+                <property name="use-markup">false</property>
+                <property name="button-label" translatable="yes">Retry</property>
               </object>
             </child>
-            <property name="content">
-              <object class="GtkBox">
-                <property name="orientation">vertical</property>
-                <child>
-                  <object class="AdwBanner" id="connection_error">
-                    <property name="revealed">false</property>
-                    <property name="use-markup">false</property>
-                    <property name="button-label" translatable="yes">Retry</property>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkScrolledWindow">
-                    <property name="vexpand">true</property>
-                    <property name="hscrollbar-policy">never</property>
-                    <property name="propagate-natural-height">true</property>
-                    <property name="max-content-height">520</property>
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="vexpand">true</property>
+                <property name="hscrollbar-policy">never</property>
+                <property name="child">
+                  <object class="AdwClamp">
                     <property name="child">
                       <object class="GtkBox">
                         <property name="orientation">vertical</property>
                         <property name="vexpand">true</property>
-                        <property name="spacing">18</property>
-                        <property name="margin-start">18</property>
-                        <property name="margin-end">18</property>
-                        <property name="margin-top">8</property>
-                        <property name="margin-bottom">18</property>
+                        <property name="spacing">24</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <property name="margin-top">24</property>
+                        <property name="margin-bottom">24</property>
                         <child>
                           <object class="GtkBox" id="start_section">
                             <property name="orientation">vertical</property>
@@ -264,7 +258,9 @@
                               <object class="GtkLabel" id="connecting_status">
                                 <property name="wrap">true</property>
                                 <property name="justify">center</property>
-                                <style><class name="title-2" /></style>
+                                <style>
+                                  <class name="title-2" />
+                                </style>
                               </object>
                             </child>
                             <child>
@@ -278,8 +274,13 @@
                             <child>
                               <object class="GtkProgressBar" id="collection_progress">
                                 <property name="visible">false</property>
-                                <accessibility><relation name="labelled-by">connecting_status</relation><relation name="described-by">collection_counter</relation></accessibility>
-                                <style><class name="connect-progress" /></style>
+                                <accessibility>
+                                  <relation name="labelled-by">connecting_status</relation>
+                                  <relation name="described-by">collection_counter</relation>
+                                </accessibility>
+                                <style>
+                                  <class name="connect-progress" />
+                                </style>
                               </object>
                             </child>
                             <child>
@@ -287,7 +288,10 @@
                                 <property name="wrap">true</property>
                                 <property name="justify">center</property>
                                 <property name="visible">false</property>
-                                <style><class name="dim-label" /><class name="numeric" /></style>
+                                <style>
+                                  <class name="dim-label" />
+                                  <class name="numeric" />
+                                </style>
                               </object>
                             </child>
                             <child>
@@ -304,16 +308,21 @@
                             <property name="orientation">vertical</property>
                             <property name="spacing">12</property>
                             <property name="visible">false</property>
-                            <child><object class="GtkBox">
-                                  <property name="spacing">6</property>
-                                  <child><object class="GtkLabel">
+                            <child>
+                              <object class="GtkBox">
+                                <property name="spacing">6</property>
+                                <child>
+                                  <object class="GtkLabel">
                                     <property name="label" translatable="yes">Import</property>
-                                    <style><class name="heading" /></style>
-                                  </object></child>
-                                </object></child>
+                                    <style>
+                                      <class name="heading" />
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                             <child>
                               <object class="AdwPreferencesGroup" id="storage_group">
-                                
                                 <child>
                                   <object class="AdwComboRow" id="storage">
                                     <property name="title" translatable="yes">Storage</property>
@@ -326,11 +335,13 @@
                                         </items>
                                       </object>
                                     </property>
-                                    <child type="suffix"><object class="GtkButton" id="choose_connection">
-                                      <property name="tooltip-text" translatable="yes">Choose connection</property>
-                                      <property name="icon-name">rufin-document-edit-symbolic</property>
-                                      <property name="valign">center</property>
-                                    </object></child>
+                                    <child type="suffix">
+                                      <object class="GtkButton" id="choose_connection">
+                                        <property name="tooltip-text" translatable="yes">Choose connection</property>
+                                        <property name="icon-name">rufin-document-edit-symbolic</property>
+                                        <property name="valign">center</property>
+                                      </object>
+                                    </child>
                                   </object>
                                 </child>
                                 <child>
@@ -351,8 +362,6 @@
                                     </child>
                                   </object>
                                 </child>
-                                
-                                
                               </object>
                             </child>
                           </object>
@@ -362,29 +371,36 @@
                             <property name="orientation">vertical</property>
                             <property name="spacing">12</property>
                             <property name="visible">false</property>
-                            <child><object class="GtkBox" id="folders_section">
-                              <property name="orientation">vertical</property>
-                              <property name="spacing">12</property>
-                              <child><object class="GtkBox">
-                                  <property name="spacing">6</property>
-                                  <child><object class="GtkLabel">
-                                    <property name="label" translatable="yes">Local music folders</property>
-                                    <style><class name="heading" /></style>
-                                  </object></child>
-                                  <child><object class="GtkImage" id="folders_help">
-                                  <property name="icon-name">rufin-help-about-symbolic</property>
-                                  <property name="tooltip-text" translatable="yes">Choose where this device stores local music received through Connect. Matching files already in the folder are reused; missing files are downloaded here.</property>
-                                </object></child>
-                                </object></child>
                             <child>
-                              <object class="AdwPreferencesGroup" id="folders">
-                                
-                                
-                                
-                                <property name="visible">false</property>
+                              <object class="GtkBox" id="folders_section">
+                                <property name="orientation">vertical</property>
+                                <property name="spacing">12</property>
+                                <child>
+                                  <object class="GtkBox">
+                                    <property name="spacing">6</property>
+                                    <child>
+                                      <object class="GtkLabel">
+                                        <property name="label" translatable="yes">Local music folders</property>
+                                        <style>
+                                          <class name="heading" />
+                                        </style>
+                                      </object>
+                                    </child>
+                                    <child>
+                                      <object class="GtkImage" id="folders_help">
+                                        <property name="icon-name">rufin-help-about-symbolic</property>
+                                        <property name="tooltip-text" translatable="yes">Choose where this device stores local music received through Connect. Matching files already in the folder are reused; missing files are downloaded here.</property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwPreferencesGroup" id="folders">
+                                    <property name="visible">false</property>
+                                  </object>
+                                </child>
                               </object>
                             </child>
-                            </object></child>
                           </object>
                         </child>
                         <child>
@@ -394,72 +410,92 @@
                             <property name="visible">false</property>
                             <child>
                               <object class="AdwPreferencesGroup">
-                                <child><object class="AdwSwitchRow" id="nearby">
-                                  <property name="title" translatable="yes">Nearby discovery</property>
-                                  <property name="subtitle" translatable="yes">This can be turned off after pairing if you want</property>
-                                </object></child>
-                                <child><object class="AdwActionRow">
-                                  <property name="activatable-widget">relay_enabled</property>
-                                  <child type="prefix"><object class="GtkBox">
-                                    <property name="spacing">6</property>
-                                    <child><object class="GtkLabel" id="relay_label">
-                                      <property name="label" translatable="yes">Relay</property>
-                                    </object></child>
-                                  <child><object class="GtkLinkButton">
-                                    <style><class name="connect-relay-link" /></style>
-                                    <property name="icon-name">rufin-external-link-symbolic</property>
-                                    <property name="tooltip-text" translatable="yes">Self-host an Iroh Relay</property>
-                                    <property name="uri">https://docs.iroh.computer/iroh-services/relays/self-hosted</property>
-                                    <property name="valign">center</property>
-                                  </object></child>
-                                  <child><object class="GtkLinkButton">
-                                    <style><class name="connect-relay-link" /></style>
-                                    <property name="icon-name">rufin-external-link-symbolic</property>
-                                    <property name="tooltip-text" translatable="yes">Use a public relay</property>
-                                    <property name="uri">https://github.com/n0-computer/iroh/blob/v1.0.3/iroh/src/defaults.rs#L25-L33</property>
-                                    <property name="valign">center</property>
-                                  </object></child>
-
-                                  </object></child>
-                                  <child type="suffix"><object class="GtkSwitch" id="relay_enabled">
-                                    <property name="valign">center</property>
-                                    <accessibility><relation name="labelled-by">relay_label</relation></accessibility>
-                                  </object></child>
-                                </object></child>
-                                <child><object class="AdwEntryRow" id="relay">
-                                  <property name="title" translatable="yes">Relay address</property>
-                                  <property name="show-apply-button">true</property>
-                                </object></child>
+                                <child>
+                                  <object class="AdwSwitchRow" id="nearby">
+                                    <property name="title" translatable="yes">Nearby discovery</property>
+                                    <property name="subtitle" translatable="yes">This can be turned off after pairing if you want</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwActionRow">
+                                    <property name="activatable-widget">relay_enabled</property>
+                                    <child type="prefix">
+                                      <object class="GtkBox">
+                                        <property name="spacing">6</property>
+                                        <child>
+                                          <object class="GtkLabel" id="relay_label">
+                                            <property name="label" translatable="yes">Relay</property>
+                                          </object>
+                                        </child>
+                                        <child>
+                                          <object class="GtkLinkButton">
+                                            <style>
+                                              <class name="connect-relay-link" />
+                                            </style>
+                                            <property name="icon-name">rufin-external-link-symbolic</property>
+                                            <property name="tooltip-text" translatable="yes">Self-host an Iroh Relay</property>
+                                            <property name="uri">https://docs.iroh.computer/iroh-services/relays/self-hosted</property>
+                                            <property name="valign">center</property>
+                                          </object>
+                                        </child>
+                                        <child>
+                                          <object class="GtkLinkButton">
+                                            <style>
+                                              <class name="connect-relay-link" />
+                                            </style>
+                                            <property name="icon-name">rufin-external-link-symbolic</property>
+                                            <property name="tooltip-text" translatable="yes">Use a public relay</property>
+                                            <property name="uri">https://github.com/n0-computer/iroh/blob/v1.0.3/iroh/src/defaults.rs#L25-L33</property>
+                                            <property name="valign">center</property>
+                                          </object>
+                                        </child>
+                                      </object>
+                                    </child>
+                                    <child type="suffix">
+                                      <object class="GtkSwitch" id="relay_enabled">
+                                        <property name="valign">center</property>
+                                        <accessibility>
+                                          <relation name="labelled-by">relay_label</relation>
+                                        </accessibility>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="AdwEntryRow" id="relay">
+                                    <property name="title" translatable="yes">Relay address</property>
+                                    <property name="show-apply-button">true</property>
+                                  </object>
+                                </child>
                                 <property name="title" translatable="yes">Connection settings</property>
                               </object>
                             </child>
                           </object>
                         </child>
-
                       </object>
                     </property>
                   </object>
-                </child>
+                </property>
               </object>
-            </property>
+            </child>
           </object>
         </property>
-        <child type="overlay">
-          <object class="GtkLabel" id="feedback_label">
-            <property name="visible">false</property>
-            <property name="halign">center</property>
-            <property name="valign">end</property>
-            <property name="wrap">true</property>
-            <property name="margin-bottom">24</property>
-            <property name="margin-start">18</property>
-            <property name="margin-end">18</property>
-            <style>
-              <class name="control-feedback-toast" />
-            </style>
-          </object>
-        </child>
       </object>
     </property>
+    <child type="overlay">
+      <object class="GtkLabel" id="feedback_label">
+        <property name="visible">false</property>
+        <property name="halign">center</property>
+        <property name="valign">end</property>
+        <property name="wrap">true</property>
+        <property name="margin-bottom">24</property>
+        <property name="margin-start">18</property>
+        <property name="margin-end">18</property>
+        <style>
+          <class name="control-feedback-toast" />
+        </style>
+      </object>
+    </child>
   </object>
   <object class="GtkFileDialog" id="file_chooser">
     <property name="title" translatable="yes">Connect file</property>

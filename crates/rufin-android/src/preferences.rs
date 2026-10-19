@@ -21,6 +21,7 @@ pub struct AndroidThemeOption {
     pub dark: bool,
     pub colors: HashMap<String, String>,
     pub accents: Vec<AndroidAccentOption>,
+    pub accent_id: Option<String>,
 }
 
 #[derive(uniffi::Record)]
@@ -33,7 +34,6 @@ pub struct AndroidLanguageOption {
 pub struct AndroidPreferencesState {
     pub theme_id: String,
     pub accent_id: String,
-    pub theme_accent: Option<String>,
     pub language: String,
     pub themes: Vec<AndroidThemeOption>,
     pub accents: Vec<AndroidAccentOption>,
@@ -90,7 +90,6 @@ fn state(
         ThemePreference::Named(id) => id.clone(),
     };
     AndroidPreferencesState {
-        theme_accent: settings.theme_accents.get(&theme_id).cloned(),
         theme_id,
         accent_id: accent_id(settings.accent_preference).into(),
         language: settings.language.clone(),
@@ -111,6 +110,9 @@ fn state(
                     name: theme.name.clone(),
                     dark: theme.mode == rufin_core::themes::Mode::Dark,
                     colors,
+                    accent_id: theme
+                        .accent(settings.theme_accents.get(&theme.id).map(String::as_str))
+                        .map(|accent| accent.name.clone()),
                     accents: theme
                         .accents
                         .iter()
