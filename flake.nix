@@ -204,6 +204,8 @@
             GIO_EXTRA_MODULES = "${pkgs.glib-networking}/lib/gio/modules";
             JAVA_HOME = "${pkgs.jdk21}";
             RUSTUP_TOOLCHAIN = "stable";
+            # Use Nix's linker to embed library paths with rustup toolchains.
+            CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-C linker-features=-lld";
           };
         in
         {
@@ -219,7 +221,11 @@
           };
           packaging = pkgs.mkShell {
             inputsFrom = [ defaultShell ];
-            inherit (defaultShell) JAVA_HOME RUSTUP_TOOLCHAIN;
+            inherit (defaultShell)
+              JAVA_HOME
+              RUSTUP_TOOLCHAIN
+              CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS
+              ;
             packages = with pkgs; [
               bubblewrap
               dbus
