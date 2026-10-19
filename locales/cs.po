@@ -51,8 +51,12 @@ msgid ""
 "Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
 
+#, fuzzy
+#| msgid ""
+#| "Downloads from this server will be removed, and automatic rules will be "
+#| "turned off"
 msgid ""
-"Downloads from this server will be removed, and automatic rules will be "
+"Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
 "Soubory stažené z tohoto serveru budou odstraněny a automatická pravidla "
@@ -155,11 +159,6 @@ msgid ""
 msgstr ""
 "Děkujeme, že jste vyzkoušeli Rufin! Pokud máte problémy nebo návrhy, "
 "otevřete prosím issue na Githubu."
-
-msgid ""
-"The folder is relative to the selected account. Applying it changes storage "
-"on all devices."
-msgstr ""
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
@@ -273,9 +272,6 @@ msgstr "Získat token"
 msgid "Accessibility"
 msgstr ""
 
-msgid "Action required"
-msgstr ""
-
 #, fuzzy
 #| msgid "Server Actions"
 msgid "Actions"
@@ -306,8 +302,10 @@ msgstr ""
 msgid "Add a new source"
 msgstr "Přidat nový zdroj"
 
-msgid "Add a server to configure downloads."
-msgstr ""
+#, fuzzy
+#| msgid "No sources configured"
+msgid "Add a source to configure downloads."
+msgstr "Nejsou nakonfigurovány žádné zdroje"
 
 msgid "Add a title"
 msgstr "Přidat název"
@@ -350,11 +348,6 @@ msgstr "Přidat"
 
 msgid "Added to"
 msgstr "Přidáno do"
-
-#, fuzzy
-#| msgid "Sources"
-msgid "Adding source"
-msgstr "Zdroje"
 
 msgid "Album Artists"
 msgstr "Interpreti alba"
@@ -467,9 +460,9 @@ msgid "Apply"
 msgstr ""
 
 #, fuzzy
-#| msgid "Saving..."
-msgid "Applying..."
-msgstr "Ukládání..."
+#| msgid "Saved Sources"
+msgid "Applying profile"
+msgstr "Uložené zdroje"
 
 msgid "Approve sign-in in your browser"
 msgstr ""
@@ -698,20 +691,17 @@ msgid "Changes take effect after restarting Rufin"
 msgstr ""
 
 #, fuzzy
-#| msgid "Saved Sources"
-msgid "Changing source"
-msgstr "Uložené zdroje"
-
-msgid "Changing this will redownload all local files."
-msgstr ""
-
-#, fuzzy
 #| msgid "Change"
 msgid "Channels"
 msgstr "Změnit"
 
 msgid "Check for updates"
 msgstr ""
+
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Checking profile"
+msgstr "Uložené zdroje"
 
 #, fuzzy
 #| msgid "Locate Folder"
@@ -722,9 +712,6 @@ msgstr "Vyhledat složku"
 #| msgid "Locate Folder"
 msgid "Choose Server"
 msgstr "Vyhledat složku"
-
-msgid "Choose a connection for profile storage."
-msgstr ""
 
 msgid "Choose a local music folder"
 msgstr "Vyberte místní hudební složku"
@@ -904,11 +891,6 @@ msgstr "Spojení selhalo"
 
 #, fuzzy
 #| msgid "Connection failed"
-msgid "Connect folder"
-msgstr "Spojení selhalo"
-
-#, fuzzy
-#| msgid "Connection failed"
 msgid "Connect is not enabled"
 msgstr "Spojení selhalo"
 
@@ -954,11 +936,6 @@ msgstr "Připojování k {device}..."
 
 #, fuzzy
 #| msgid "Connection"
-msgid "Connecting"
-msgstr "Spojení"
-
-#, fuzzy
-#| msgid "Connection"
 msgid "Connecting..."
 msgstr "Spojení"
 
@@ -1001,11 +978,10 @@ msgstr "Kontextové menu"
 msgid "Context Menus"
 msgstr "Kontextové menu"
 
-msgid "Continue from where {device} left off"
-msgstr ""
-
-msgid "Continue from where {device} left off?"
-msgstr ""
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Continue from {device}"
+msgstr "Připojování k {device}..."
 
 msgid "Continue"
 msgstr "Pokračovat"
@@ -1367,8 +1343,18 @@ msgstr "Staženo"
 msgid "Downloading Japanese dictionary..."
 msgstr ""
 
+#, fuzzy
+#| msgid "Download started"
+msgid "Downloading artwork"
+msgstr "Stahování začalo"
+
 msgid "Downloading artwork... {count} checked"
 msgstr ""
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Downloading lyrics"
+msgstr "Stahování"
 
 msgid "Downloading lyrics... {count} checked"
 msgstr ""
@@ -1608,6 +1594,37 @@ msgstr "Vybrané žánry"
 msgid "February {year}"
 msgstr ""
 
+msgid "Fetching Home"
+msgstr ""
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Fetching albums"
+msgstr "Alba interpretů"
+
+msgid "Fetching artists"
+msgstr ""
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Fetching artwork"
+msgstr "Hledat Texty"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Fetching genres"
+msgstr "Hledat znovu"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Fetching lyrics"
+msgstr "Hledat texty"
+
+#, fuzzy
+#| msgid "Smart playlists"
+msgid "Fetching playlists"
+msgstr "Chytré playlisty"
+
 #, fuzzy
 #| msgid "Connection"
 msgid "File connection"
@@ -1633,12 +1650,6 @@ msgstr ""
 "Soubory musí obsahovat značky Mood/BPM. Tato funkce není v aplikaci Jellyfin "
 "podporována"
 
-msgid "Files received: {count}"
-msgstr ""
-
-msgid "Files"
-msgstr ""
-
 msgid "Filled spectrum"
 msgstr ""
 
@@ -1652,6 +1663,9 @@ msgstr "Najděte svůj uživatelský token ListenBrainz"
 #| msgid "Hide lyrics"
 msgid "Finding lyrics..."
 msgstr "Skrýt text skladby"
+
+msgid "Finishing setup"
+msgstr ""
 
 msgid "Fixed position"
 msgstr "Pevná pozice"
@@ -1882,6 +1896,11 @@ msgstr "Uživatelská podpora"
 #| msgid "Support"
 msgid "Import"
 msgstr "Uživatelská podpora"
+
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Importing profile"
+msgstr "Uložené zdroje"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2204,11 +2223,6 @@ msgstr "Maximální rok"
 msgid "May {year}"
 msgstr "Maximální rok"
 
-#, fuzzy
-#| msgid "This isn't available"
-msgid "Media available"
-msgstr "Toto není dostupné"
-
 msgid "Menu"
 msgstr "Menu"
 
@@ -2322,11 +2336,6 @@ msgstr ""
 
 msgid "Music folders on the Rufin machine"
 msgstr ""
-
-#, fuzzy
-#| msgid "This device"
-msgid "Music on this device"
-msgstr "Toto zařízení"
 
 #, fuzzy
 #| msgid "All Music"
@@ -3017,12 +3026,12 @@ msgstr "Upřednostnit překlady"
 msgid "Preferences"
 msgstr "Nastavení"
 
-msgid "Preparing library..."
-msgstr "Příprava knihovny..."
-
 #, fuzzy
-#| msgid "Preparing library..."
-msgid "Preparing smaller media"
+#| msgid "Selection"
+msgid "Preparing collection"
+msgstr "Výběr"
+
+msgid "Preparing library..."
 msgstr "Příprava knihovny..."
 
 #, fuzzy
@@ -3108,10 +3117,8 @@ msgstr "Soukromý režim"
 msgid "Profile PIN"
 msgstr ""
 
-#, fuzzy
-#| msgid "Secure storage"
-msgid "Profile storage"
-msgstr "Bezpečné úložiště"
+msgid "Profile download is incomplete. Retry to continue."
+msgstr ""
 
 msgid "Profile up to date"
 msgstr ""
@@ -3225,11 +3232,6 @@ msgid "Refresh source"
 msgstr "Obnovit sekci"
 
 msgid "Refresh"
-msgstr "Obnovit"
-
-#, fuzzy
-#| msgid "Refresh"
-msgid "Refreshing"
 msgstr "Obnovit"
 
 msgid "Regenerate access token"
@@ -3553,8 +3555,18 @@ msgstr "Uloženo"
 msgid "Saves lyrics to your source"
 msgstr ""
 
+#, fuzzy
+#| msgid "Search Again"
+msgid "Saving changes"
+msgstr "Hledat znovu"
+
 msgid "Saving..."
 msgstr "Ukládání..."
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "Scanning tracks"
+msgstr "Žádné odpovídající skladby"
 
 msgid "Schedule"
 msgstr ""
@@ -3756,11 +3768,6 @@ msgstr "Servery"
 
 msgid "Set the Discord activity type to Listening"
 msgstr "Nastavte typ aktivity v Discordu na „Poslech“"
-
-#, fuzzy
-#| msgid "This device"
-msgid "Set up this device"
-msgstr "Toto zařízení"
 
 #, fuzzy
 #| msgid "Metadata source"
@@ -4173,9 +4180,6 @@ msgstr "Název (sloučeno)"
 msgid "Title"
 msgstr "Název"
 
-msgid "To use a file-sync app, choose a folder it synchronizes."
-msgstr ""
-
 msgid "Toggle Fullscreen"
 msgstr "Přepnout do režimu celé obrazovky"
 
@@ -4350,6 +4354,11 @@ msgstr "Čekání na připojení"
 #| msgid "Favorite tracks"
 msgid "Use current artwork"
 msgstr "Oblíbené skladby"
+
+#, fuzzy
+#| msgid "Use Rufin data folder"
+msgid "Use default folder"
+msgstr "Použít datovou složku aplikace Rufin"
 
 msgid "Use different layout below a threshold width"
 msgstr "Při šířce menší než stanovená hodnota použít jiné rozložení"
@@ -4646,7 +4655,16 @@ msgstr[0] "Před {count} rokem"
 msgstr[1] "Před {count} roky"
 msgstr[2] "Před {count} roky"
 
-msgid "{status} · {stage} {completed}{total}"
+msgid "{current} / {total} MiB ({percent}%)"
+msgstr ""
+
+msgid "{current} MiB"
+msgstr ""
+
+msgid "{stage}: {completed} / {total}"
+msgstr ""
+
+msgid "{stage}: {completed}"
 msgstr ""
 
 #. Windows installer: FinishText.
@@ -4721,6 +4739,61 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Sources"
+#~ msgid "Adding source"
+#~ msgstr "Zdroje"
+
+#, fuzzy
+#~| msgid "Saving..."
+#~ msgid "Applying..."
+#~ msgstr "Ukládání..."
+
+#, fuzzy
+#~| msgid "Saved Sources"
+#~ msgid "Changing source"
+#~ msgstr "Uložené zdroje"
+
+#, fuzzy
+#~| msgid "Connection failed"
+#~ msgid "Connect folder"
+#~ msgstr "Spojení selhalo"
+
+#, fuzzy
+#~| msgid "Connection"
+#~ msgid "Connecting"
+#~ msgstr "Spojení"
+
+#, fuzzy
+#~| msgid "This isn't available"
+#~ msgid "Media available"
+#~ msgstr "Toto není dostupné"
+
+#, fuzzy
+#~| msgid "This device"
+#~ msgid "Music on this device"
+#~ msgstr "Toto zařízení"
+
+#, fuzzy
+#~| msgid "Preparing library..."
+#~ msgid "Preparing smaller media"
+#~ msgstr "Příprava knihovny..."
+
+#, fuzzy
+#~| msgid "Secure storage"
+#~ msgid "Profile storage"
+#~ msgstr "Bezpečné úložiště"
+
+#, fuzzy
+#~| msgid "Refresh"
+#~ msgid "Refreshing"
+#~ msgstr "Obnovit"
+
+#, fuzzy
+#~| msgid "This device"
+#~ msgid "Set up this device"
+#~ msgstr "Toto zařízení"
 
 #~ msgid "Local file mapping is no longer available"
 #~ msgstr "Mapování místních souborů již není k dispozici"

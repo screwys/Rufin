@@ -65,8 +65,12 @@ msgstr ""
 "Seadmed mis kasutavad Rufin Connecti liidestust pole enam ühilduvad. Palun "
 "uuenda seda Rufini paigaldust."
 
+#, fuzzy
+#| msgid ""
+#| "Downloads from this server will be removed, and automatic rules will be "
+#| "turned off"
 msgid ""
-"Downloads from this server will be removed, and automatic rules will be "
+"Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
 "Sellest serverist tehtud allalaadimised kustutatakse ja automaatsed reeglid "
@@ -202,13 +206,6 @@ msgstr ""
 "soovitusi, palun koosta vastav teade meie GitHubi veahalduses."
 
 msgid ""
-"The folder is relative to the selected account. Applying it changes storage "
-"on all devices."
-msgstr ""
-"Kaust on valitud kasutajakonto suhtes suhteline. Selle rakendamine muudab "
-"andmeruumi kõikides seadmetes."
-
-msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
 "artwork?"
 msgstr ""
@@ -324,9 +321,6 @@ msgstr "Ligipääsu tunnusluba"
 msgid "Accessibility"
 msgstr "Hõlbustus"
 
-msgid "Action required"
-msgstr "Tegevus on vajalik"
-
 msgid "Actions"
 msgstr "Tegevused"
 
@@ -351,7 +345,9 @@ msgstr "Alustamaks kuulamist lisa muusikaallikas."
 msgid "Add a new source"
 msgstr "Lisa uus allikas"
 
-msgid "Add a server to configure downloads."
+#, fuzzy
+#| msgid "Add a server to configure downloads."
+msgid "Add a source to configure downloads."
 msgstr "Allalaadimiste seadistamiseks lisa server."
 
 msgid "Add a title"
@@ -389,9 +385,6 @@ msgstr "Lisa"
 
 msgid "Added to"
 msgstr "Lisatud asukohta"
-
-msgid "Adding source"
-msgstr "Lisan allikat"
 
 msgid "Album Artists"
 msgstr "Albumi esitajad"
@@ -489,8 +482,10 @@ msgstr "Rakenda mall"
 msgid "Apply"
 msgstr "Rakenda"
 
-msgid "Applying..."
-msgstr "Rakendan…"
+#, fuzzy
+#| msgid "Join profile"
+msgid "Applying profile"
+msgstr "Liitumisprofiil"
 
 msgid "Approve sign-in in your browser"
 msgstr "Kinnita sisselogimine oma veebibrauseris"
@@ -677,26 +672,22 @@ msgstr[1] "Muudatused rakenduvad {count}-le loole"
 msgid "Changes take effect after restarting Rufin"
 msgstr "Muudatused jõustuvad Rufini uuesti käivitamisel"
 
-msgid "Changing source"
-msgstr "Muudan allikat"
-
-msgid "Changing this will redownload all local files."
-msgstr "Selle muutmisel laaditakse kohalikud failid uuesti alla."
-
 msgid "Channels"
 msgstr "Kanaleid"
 
 msgid "Check for updates"
 msgstr "Kontrolli uuendusi"
 
+#, fuzzy
+#| msgid "Receiving profile"
+msgid "Checking profile"
+msgstr "Vastuvõttev profiil"
+
 msgid "Choose Folder"
 msgstr "Vali kaust"
 
 msgid "Choose Server"
 msgstr "Vali server"
-
-msgid "Choose a connection for profile storage."
-msgstr "Vali ühendus profiili salvestamiseks."
 
 msgid "Choose a local music folder"
 msgstr "Vali kohalik muusikakaust"
@@ -844,9 +835,6 @@ msgstr "Ühenda seade"
 msgid "Connect file"
 msgstr "Ühenda fail"
 
-msgid "Connect folder"
-msgstr "Ühenda kaust"
-
 msgid "Connect is not enabled"
 msgstr "Ühendamine pole sisselülitatud"
 
@@ -880,9 +868,6 @@ msgstr "Ühendan muusikaserveriga…"
 msgid "Connecting to {device}..."
 msgstr "Ühendan seadmega {device}..."
 
-msgid "Connecting"
-msgstr "Ühendan"
-
 msgid "Connecting..."
 msgstr "Ühendamisel..."
 
@@ -913,11 +898,10 @@ msgstr "Sisu"
 msgid "Context Menus"
 msgstr "Kontekstimenüüd"
 
-msgid "Continue from where {device} left off"
+#, fuzzy
+#| msgid "Continue from where {device} left off"
+msgid "Continue from {device}"
 msgstr "Jätka sealt, kus „{device}“ seade jäi pooleli"
-
-msgid "Continue from where {device} left off?"
-msgstr "Kas jätkad sealt, kus „{device}“ seade jäi pooleli?"
 
 msgid "Continue"
 msgstr "Jätka"
@@ -1217,8 +1201,18 @@ msgstr "Allalaaditud"
 msgid "Downloading Japanese dictionary..."
 msgstr "Jaapani keele sõnastik on allalaadimisel…"
 
+#, fuzzy
+#| msgid "Download artwork"
+msgid "Downloading artwork"
+msgstr "Laadi kaanepilt alla"
+
 msgid "Downloading artwork... {count} checked"
 msgstr "Kaanepildid on allalaadimisel... {count} on kontrollitud"
+
+#, fuzzy
+#| msgid "Download lyrics"
+msgid "Downloading lyrics"
+msgstr "Laadi laulusõnad alla"
 
 msgid "Downloading lyrics... {count} checked"
 msgstr "Laulusõnad on allalaadimisel... {count} on kontrollitud"
@@ -1418,6 +1412,37 @@ msgstr "Esiletõstetud žanrid"
 msgid "February {year}"
 msgstr "Veebruar {year}"
 
+msgid "Fetching Home"
+msgstr ""
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Fetching albums"
+msgstr "Esitajate albumid"
+
+msgid "Fetching artists"
+msgstr ""
+
+#, fuzzy
+#| msgid "Search artwork"
+msgid "Fetching artwork"
+msgstr "Otsi kaanepilte"
+
+#, fuzzy
+#| msgid "Search genres"
+msgid "Fetching genres"
+msgstr "Otsi žanre"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Fetching lyrics"
+msgstr "Otsi laulusõnu"
+
+#, fuzzy
+#| msgid "Search playlists"
+msgid "Fetching playlists"
+msgstr "Otsi esitusloenditest"
+
 msgid "File connection"
 msgstr "Failiühendus"
 
@@ -1435,12 +1460,6 @@ msgstr ""
 "Selleks peavad failides olema meeleolu/BPM-i sildid. Jellyfinis vastav tugi "
 "puudub"
 
-msgid "Files received: {count}"
-msgstr "Vastuvõetud faile: {count}"
-
-msgid "Files"
-msgstr "Failid"
-
 msgid "Filled spectrum"
 msgstr "Täidetud spekter"
 
@@ -1452,6 +1471,9 @@ msgstr "Vormista ListenBrainz-teenuse kasutaja tunnusluba"
 
 msgid "Finding lyrics..."
 msgstr "Otsin laulusõnu…"
+
+msgid "Finishing setup"
+msgstr ""
 
 msgid "Fixed position"
 msgstr "Fikseeritud asukoht"
@@ -1660,6 +1682,11 @@ msgstr "Impordi kujundus"
 
 msgid "Import"
 msgstr "Import"
+
+#, fuzzy
+#| msgid "Join profile"
+msgid "Importing profile"
+msgstr "Liitumisprofiil"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -1944,9 +1971,6 @@ msgstr "Maksimaalne aasta"
 msgid "May {year}"
 msgstr "Mai {year}"
 
-msgid "Media available"
-msgstr "Meedium on saadaval"
-
 msgid "Menu"
 msgstr "Menüü"
 
@@ -2051,9 +2075,6 @@ msgstr "Ligipääs muusikale on keelatud"
 
 msgid "Music folders on the Rufin machine"
 msgstr "Muusikakaustad arvutis, kus Rufin asub"
-
-msgid "Music on this device"
-msgstr "Muusika selles seadmes"
 
 msgid "Music"
 msgstr "Muusika"
@@ -2638,11 +2659,13 @@ msgstr "Eelista tõlkeid"
 msgid "Preferences"
 msgstr "Eelistused"
 
+#, fuzzy
+#| msgid "Receiving collection"
+msgid "Preparing collection"
+msgstr "Laadin kogumikku alla"
+
 msgid "Preparing library..."
 msgstr "Valmistan muusikakogu ette…"
-
-msgid "Preparing smaller media"
-msgstr "Valmistan väiksemat meediumi ette"
 
 msgid "Preserve channels"
 msgstr "Säilita kanalid"
@@ -2707,8 +2730,8 @@ msgstr "Privaatne režiim"
 msgid "Profile PIN"
 msgstr "Profiili PIN-kood"
 
-msgid "Profile storage"
-msgstr "Profiili andmeruum"
+msgid "Profile download is incomplete. Retry to continue."
+msgstr ""
 
 msgid "Profile up to date"
 msgstr "Profiil on ajakohane"
@@ -2805,9 +2828,6 @@ msgstr "Uuenda allikat"
 
 msgid "Refresh"
 msgstr "Uuenda andmeid"
-
-msgid "Refreshing"
-msgstr "Uuendamisel"
 
 msgid "Regenerate access token"
 msgstr "Loo ligipääsu tunnusluba uuesti"
@@ -3081,8 +3101,18 @@ msgstr "Salvestatud..."
 msgid "Saves lyrics to your source"
 msgstr "Salvestab laulusõnad sinu andmeallikasse"
 
+#, fuzzy
+#| msgid "Starting page"
+msgid "Saving changes"
+msgstr "Avaleht"
+
 msgid "Saving..."
 msgstr "Salvestan…"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "Scanning tracks"
+msgstr "Sobivaid lugusid pole"
 
 msgid "Schedule"
 msgstr "Ajagraafik"
@@ -3254,9 +3284,6 @@ msgstr "Serverid"
 
 msgid "Set the Discord activity type to Listening"
 msgstr "Märgi Discordis tegevuseks kuulamine (Listening)"
-
-msgid "Set up this device"
-msgstr "Seadista see seade"
 
 msgid "Settings and sources"
 msgstr "Seadistused ja allikad"
@@ -3612,9 +3639,6 @@ msgstr "Pealkiri (mestitud)"
 msgid "Title"
 msgstr "Pealkiri"
 
-msgid "To use a file-sync app, choose a folder it synchronizes."
-msgstr "Kasutamaks failide sünkroonimise rakendust, vali sünkroonitav kaust."
-
 msgid "Toggle Fullscreen"
 msgstr "Lülita täisekraanivaade sisse/välja"
 
@@ -3761,6 +3785,11 @@ msgstr "Kas kasutad olemasolevat ühendust?"
 
 msgid "Use current artwork"
 msgstr "Kasuta praegust kaanepilti"
+
+#, fuzzy
+#| msgid "Use Rufin data folder"
+msgid "Use default folder"
+msgstr "Kasuta Rufini andmekausta"
 
 msgid "Use different layout below a threshold width"
 msgstr ""
@@ -4023,7 +4052,20 @@ msgid_plural "{count} years ago"
 msgstr[0] "{count} aasta tagasi"
 msgstr[1] "{count} aastat tagasi"
 
-msgid "{status} · {stage} {completed}{total}"
+msgid "{current} / {total} MiB ({percent}%)"
+msgstr ""
+
+msgid "{current} MiB"
+msgstr ""
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage}: {completed} / {total}"
+msgstr "{status} · {stage} {completed}{total}"
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage}: {completed}"
 msgstr "{status} · {stage} {completed}{total}"
 
 #. Windows installer: FinishText.
@@ -4109,6 +4151,68 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid ""
+#~ "The folder is relative to the selected account. Applying it changes "
+#~ "storage on all devices."
+#~ msgstr ""
+#~ "Kaust on valitud kasutajakonto suhtes suhteline. Selle rakendamine muudab "
+#~ "andmeruumi kõikides seadmetes."
+
+#~ msgid "Action required"
+#~ msgstr "Tegevus on vajalik"
+
+#~ msgid "Adding source"
+#~ msgstr "Lisan allikat"
+
+#~ msgid "Applying..."
+#~ msgstr "Rakendan…"
+
+#~ msgid "Changing source"
+#~ msgstr "Muudan allikat"
+
+#~ msgid "Changing this will redownload all local files."
+#~ msgstr "Selle muutmisel laaditakse kohalikud failid uuesti alla."
+
+#~ msgid "Choose a connection for profile storage."
+#~ msgstr "Vali ühendus profiili salvestamiseks."
+
+#~ msgid "Connect folder"
+#~ msgstr "Ühenda kaust"
+
+#~ msgid "Connecting"
+#~ msgstr "Ühendan"
+
+#~ msgid "Continue from where {device} left off?"
+#~ msgstr "Kas jätkad sealt, kus „{device}“ seade jäi pooleli?"
+
+#~ msgid "Files received: {count}"
+#~ msgstr "Vastuvõetud faile: {count}"
+
+#~ msgid "Files"
+#~ msgstr "Failid"
+
+#~ msgid "Media available"
+#~ msgstr "Meedium on saadaval"
+
+#~ msgid "Music on this device"
+#~ msgstr "Muusika selles seadmes"
+
+#~ msgid "Preparing smaller media"
+#~ msgstr "Valmistan väiksemat meediumi ette"
+
+#~ msgid "Profile storage"
+#~ msgstr "Profiili andmeruum"
+
+#~ msgid "Refreshing"
+#~ msgstr "Uuendamisel"
+
+#~ msgid "Set up this device"
+#~ msgstr "Seadista see seade"
+
+#~ msgid "To use a file-sync app, choose a folder it synchronizes."
+#~ msgstr ""
+#~ "Kasutamaks failide sünkroonimise rakendust, vali sünkroonitav kaust."
 
 #~ msgid ""
 #~ "This only takes affect for new local files that are added by another "

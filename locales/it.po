@@ -52,8 +52,12 @@ msgid ""
 "Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
 
+#, fuzzy
+#| msgid ""
+#| "Downloads from this server will be removed, and automatic rules will be "
+#| "turned off"
 msgid ""
-"Downloads from this server will be removed, and automatic rules will be "
+"Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
 "Gli scaricamenti da questo server verranno rimossi e le regole automatiche "
@@ -181,11 +185,6 @@ msgstr ""
 "favore apri una issue su Github."
 
 msgid ""
-"The folder is relative to the selected account. Applying it changes storage "
-"on all devices."
-msgstr ""
-
-msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
 "artwork?"
 msgstr ""
@@ -295,9 +294,6 @@ msgstr "Token di accesso"
 msgid "Accessibility"
 msgstr ""
 
-msgid "Action required"
-msgstr ""
-
 msgid "Actions"
 msgstr "Azioni"
 
@@ -322,7 +318,7 @@ msgstr "Aggiungi una sorgente multimediale per iniziare ad ascoltare."
 msgid "Add a new source"
 msgstr "Aggiungi una sorgente"
 
-msgid "Add a server to configure downloads."
+msgid "Add a source to configure downloads."
 msgstr ""
 
 msgid "Add a title"
@@ -367,9 +363,6 @@ msgstr "Aggiungi"
 
 msgid "Added to"
 msgstr "Aggiunto a"
-
-msgid "Adding source"
-msgstr "Aggiungendo una sorgente"
 
 msgid "Album Artists"
 msgstr "Artisti dell'Album"
@@ -473,8 +466,10 @@ msgstr "Applica Template"
 msgid "Apply"
 msgstr ""
 
-msgid "Applying..."
-msgstr ""
+#, fuzzy
+#| msgid "Change Profile"
+msgid "Applying profile"
+msgstr "Cambia Profilo"
 
 msgid "Approve sign-in in your browser"
 msgstr "Approva l'accesso nel tuo browser"
@@ -669,12 +664,6 @@ msgstr[1] "I cambiamenti si applicano a {count} tracce"
 msgid "Changes take effect after restarting Rufin"
 msgstr "I cambiamenti avranno effetto una volta riaperto Rufin"
 
-msgid "Changing source"
-msgstr "Cambiando sorgente"
-
-msgid "Changing this will redownload all local files."
-msgstr ""
-
 #, fuzzy
 #| msgid "Change"
 msgid "Channels"
@@ -683,14 +672,16 @@ msgstr "Modifica"
 msgid "Check for updates"
 msgstr "Controlla aggiornamenti"
 
+#, fuzzy
+#| msgid "Change Profile"
+msgid "Checking profile"
+msgstr "Cambia Profilo"
+
 msgid "Choose Folder"
 msgstr "Seleziona una Cartella"
 
 msgid "Choose Server"
 msgstr "Seleziona un Server"
-
-msgid "Choose a connection for profile storage."
-msgstr ""
 
 msgid "Choose a local music folder"
 msgstr "Seleziona una cartella locale"
@@ -858,11 +849,6 @@ msgstr "Connessione fallita"
 
 #, fuzzy
 #| msgid "Connection failed"
-msgid "Connect folder"
-msgstr "Connessione fallita"
-
-#, fuzzy
-#| msgid "Connection failed"
 msgid "Connect is not enabled"
 msgstr "Connessione fallita"
 
@@ -899,9 +885,6 @@ msgstr "Connettendo al server musicale..."
 
 msgid "Connecting to {device}..."
 msgstr "Connettendo a {device}..."
-
-msgid "Connecting"
-msgstr "Connettendo"
 
 #, fuzzy
 #| msgid "Connecting"
@@ -941,11 +924,10 @@ msgstr "Contenuti"
 msgid "Context Menus"
 msgstr "Menu Contestuali"
 
-msgid "Continue from where {device} left off"
-msgstr ""
-
-msgid "Continue from where {device} left off?"
-msgstr ""
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Continue from {device}"
+msgstr "Connettendo a {device}..."
 
 msgid "Continue"
 msgstr "Continua"
@@ -1277,8 +1259,18 @@ msgstr "Scaricato"
 msgid "Downloading Japanese dictionary..."
 msgstr "Scaricando il dizionario giapponese..."
 
+#, fuzzy
+#| msgid "Download started"
+msgid "Downloading artwork"
+msgstr "Download iniziato"
+
 msgid "Downloading artwork... {count} checked"
 msgstr ""
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Downloading lyrics"
+msgstr "Scaricamenti"
 
 msgid "Downloading lyrics... {count} checked"
 msgstr ""
@@ -1484,6 +1476,33 @@ msgstr ""
 msgid "February {year}"
 msgstr ""
 
+msgid "Fetching Home"
+msgstr ""
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Fetching albums"
+msgstr "Album dell'artista"
+
+msgid "Fetching artists"
+msgstr ""
+
+#, fuzzy
+#| msgid "Casting network"
+msgid "Fetching artwork"
+msgstr "Rete di casting"
+
+msgid "Fetching genres"
+msgstr ""
+
+msgid "Fetching lyrics"
+msgstr ""
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Fetching playlists"
+msgstr "Cancella Playlist"
+
 #, fuzzy
 #| msgid "Connection"
 msgid "File connection"
@@ -1503,12 +1522,6 @@ msgstr ""
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
-msgid "Files received: {count}"
-msgstr ""
-
-msgid "Files"
-msgstr ""
-
 msgid "Filled spectrum"
 msgstr ""
 
@@ -1519,6 +1532,9 @@ msgid "Find your ListenBrainz user token"
 msgstr ""
 
 msgid "Finding lyrics..."
+msgstr ""
+
+msgid "Finishing setup"
 msgstr ""
 
 msgid "Fixed position"
@@ -1734,6 +1750,11 @@ msgstr ""
 
 msgid "Import"
 msgstr ""
+
+#, fuzzy
+#| msgid "Change Profile"
+msgid "Importing profile"
+msgstr "Cambia Profilo"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2029,11 +2050,6 @@ msgstr ""
 msgid "May {year}"
 msgstr ""
 
-#, fuzzy
-#| msgid "Artist unavailable"
-msgid "Media available"
-msgstr "Artista non disponibile"
-
 msgid "Menu"
 msgstr ""
 
@@ -2136,9 +2152,6 @@ msgid "Music access permission was denied"
 msgstr ""
 
 msgid "Music folders on the Rufin machine"
-msgstr ""
-
-msgid "Music on this device"
 msgstr ""
 
 #, fuzzy
@@ -2734,10 +2747,12 @@ msgstr ""
 msgid "Preferences"
 msgstr ""
 
-msgid "Preparing library..."
-msgstr ""
+#, fuzzy
+#| msgid "Collection"
+msgid "Preparing collection"
+msgstr "Collezione"
 
-msgid "Preparing smaller media"
+msgid "Preparing library..."
 msgstr ""
 
 msgid "Preserve channels"
@@ -2803,7 +2818,7 @@ msgstr ""
 msgid "Profile PIN"
 msgstr ""
 
-msgid "Profile storage"
+msgid "Profile download is incomplete. Retry to continue."
 msgstr ""
 
 msgid "Profile up to date"
@@ -2904,9 +2919,6 @@ msgid "Refresh source"
 msgstr ""
 
 msgid "Refresh"
-msgstr ""
-
-msgid "Refreshing"
 msgstr ""
 
 msgid "Regenerate access token"
@@ -3191,7 +3203,13 @@ msgstr ""
 msgid "Saves lyrics to your source"
 msgstr ""
 
+msgid "Saving changes"
+msgstr ""
+
 msgid "Saving..."
+msgstr ""
+
+msgid "Scanning tracks"
 msgstr ""
 
 msgid "Schedule"
@@ -3365,9 +3383,6 @@ msgid "Servers"
 msgstr ""
 
 msgid "Set the Discord activity type to Listening"
-msgstr ""
-
-msgid "Set up this device"
 msgstr ""
 
 msgid "Settings and sources"
@@ -3739,9 +3754,6 @@ msgstr ""
 msgid "Title"
 msgstr ""
 
-msgid "To use a file-sync app, choose a folder it synchronizes."
-msgstr ""
-
 msgid "Toggle Fullscreen"
 msgstr ""
 
@@ -3904,6 +3916,11 @@ msgstr "Seleziona una cartella locale esistente"
 #| msgid "Accent color"
 msgid "Use current artwork"
 msgstr "Colore d'accento"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Use default folder"
+msgstr "Aggiungi cartella"
 
 msgid "Use different layout below a threshold width"
 msgstr ""
@@ -4164,7 +4181,16 @@ msgid_plural "{count} years ago"
 msgstr[0] ""
 msgstr[1] ""
 
-msgid "{status} · {stage} {completed}{total}"
+msgid "{current} / {total} MiB ({percent}%)"
+msgstr ""
+
+msgid "{current} MiB"
+msgstr ""
+
+msgid "{stage}: {completed} / {total}"
+msgstr ""
+
+msgid "{stage}: {completed}"
 msgstr ""
 
 #. Windows installer: FinishText.
@@ -4237,6 +4263,25 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Adding source"
+#~ msgstr "Aggiungendo una sorgente"
+
+#~ msgid "Changing source"
+#~ msgstr "Cambiando sorgente"
+
+#, fuzzy
+#~| msgid "Connection failed"
+#~ msgid "Connect folder"
+#~ msgstr "Connessione fallita"
+
+#~ msgid "Connecting"
+#~ msgstr "Connettendo"
+
+#, fuzzy
+#~| msgid "Artist unavailable"
+#~ msgid "Media available"
+#~ msgstr "Artista non disponibile"
 
 #~ msgid ""
 #~ "Rufin started with fresh user state because the saved database could not "

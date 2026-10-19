@@ -55,8 +55,12 @@ msgid ""
 "Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
 
+#, fuzzy
+#| msgid ""
+#| "Downloads from this server will be removed, and automatic rules will be "
+#| "turned off"
 msgid ""
-"Downloads from this server will be removed, and automatic rules will be "
+"Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
 "Lejupielādes no šī servera tiks dzēstas un automātiskās funkcijas tiks "
@@ -183,11 +187,6 @@ msgstr ""
 "atveriet problēmu vietnē Github."
 
 msgid ""
-"The folder is relative to the selected account. Applying it changes storage "
-"on all devices."
-msgstr ""
-
-msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
 "artwork?"
 msgstr ""
@@ -304,9 +303,6 @@ msgstr "Piekļuves žetons"
 msgid "Accessibility"
 msgstr ""
 
-msgid "Action required"
-msgstr ""
-
 msgid "Actions"
 msgstr "Darbības"
 
@@ -331,8 +327,10 @@ msgstr "Pievienojiet mūzikas avotu, lai sāktu klausīties."
 msgid "Add a new source"
 msgstr "Pievienot jaunu avotu"
 
-msgid "Add a server to configure downloads."
-msgstr ""
+#, fuzzy
+#| msgid "No sources configured"
+msgid "Add a source to configure downloads."
+msgstr "Nav konfigurētu avotu"
 
 msgid "Add a title"
 msgstr "Pievienot nosaukumu"
@@ -375,9 +373,6 @@ msgstr "Pievienot"
 
 msgid "Added to"
 msgstr "Pievienots"
-
-msgid "Adding source"
-msgstr "Pievienojot avotu"
 
 msgid "Album Artists"
 msgstr "Albumu izpildītāji"
@@ -486,9 +481,9 @@ msgid "Apply"
 msgstr "Pielietot"
 
 #, fuzzy
-#| msgid "Apply"
-msgid "Applying..."
-msgstr "Pielietot"
+#| msgid "Home Profile"
+msgid "Applying profile"
+msgstr "Sākums Profils"
 
 msgid "Approve sign-in in your browser"
 msgstr "Apstipriniet pieteikšanos savā pārlūkprogrammā"
@@ -686,12 +681,6 @@ msgstr[2] "Izmaiņas attiecas uz {count} celiņiem"
 msgid "Changes take effect after restarting Rufin"
 msgstr "Izmaiņas stāsies spēkā pēc Rufin restartēšanas"
 
-msgid "Changing source"
-msgstr "Mainot avotu"
-
-msgid "Changing this will redownload all local files."
-msgstr ""
-
 #, fuzzy
 #| msgid "Change"
 msgid "Channels"
@@ -700,14 +689,16 @@ msgstr "Mainīt"
 msgid "Check for updates"
 msgstr "Pārbaudīt jaunumus"
 
+#, fuzzy
+#| msgid "Change Profile"
+msgid "Checking profile"
+msgstr "Mainīt profilu"
+
 msgid "Choose Folder"
 msgstr "Izvēlēties mapi"
 
 msgid "Choose Server"
 msgstr "Izvēlēties serveri"
-
-msgid "Choose a connection for profile storage."
-msgstr ""
 
 msgid "Choose a local music folder"
 msgstr "Izvēlieties lokālo mūzikas mapi"
@@ -881,11 +872,6 @@ msgstr "Savienojums neizdevās"
 
 #, fuzzy
 #| msgid "Connection failed"
-msgid "Connect folder"
-msgstr "Savienojums neizdevās"
-
-#, fuzzy
-#| msgid "Connection failed"
 msgid "Connect is not enabled"
 msgstr "Savienojums neizdevās"
 
@@ -922,9 +908,6 @@ msgstr "Savienojas ar mūzikas serveri…"
 
 msgid "Connecting to {device}..."
 msgstr "Izveido savienojumu ar {device}..."
-
-msgid "Connecting"
-msgstr "Savienojas"
 
 #, fuzzy
 #| msgid "Connecting"
@@ -964,11 +947,10 @@ msgstr "Saturs"
 msgid "Context Menus"
 msgstr "Konteksta izvēlnes"
 
-msgid "Continue from where {device} left off"
-msgstr ""
-
-msgid "Continue from where {device} left off?"
-msgstr ""
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Continue from {device}"
+msgstr "Izveido savienojumu ar {device}..."
 
 msgid "Continue"
 msgstr "Turpināt"
@@ -1308,8 +1290,18 @@ msgstr "Lejupielādēts"
 msgid "Downloading Japanese dictionary..."
 msgstr "Lejupielādē japāņu vārdnīcu..."
 
+#, fuzzy
+#| msgid "Show artwork"
+msgid "Downloading artwork"
+msgstr "Rādīt albuma vāciņu"
+
 msgid "Downloading artwork... {count} checked"
 msgstr ""
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Downloading lyrics"
+msgstr "Lejupielādes"
 
 msgid "Downloading lyrics... {count} checked"
 msgstr ""
@@ -1525,6 +1517,37 @@ msgstr "Ieteicamie žanri"
 msgid "February {year}"
 msgstr ""
 
+msgid "Fetching Home"
+msgstr ""
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Fetching albums"
+msgstr "Izpildītāja albumi"
+
+msgid "Fetching artists"
+msgstr ""
+
+#, fuzzy
+#| msgid "Show artwork"
+msgid "Fetching artwork"
+msgstr "Rādīt albuma vāciņu"
+
+#, fuzzy
+#| msgid "Search genres"
+msgid "Fetching genres"
+msgstr "Meklēt žanrus"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Fetching lyrics"
+msgstr "Meklēt tekstus"
+
+#, fuzzy
+#| msgid "Search playlists"
+msgid "Fetching playlists"
+msgstr "Meklēt atskaņošanas sarakstos"
+
 #, fuzzy
 #| msgid "Connection"
 msgid "File connection"
@@ -1548,12 +1571,6 @@ msgstr ""
 "Failiem jābūt pievienotām noskaņas/BPM tagām. Neatbalstīts programmai "
 "Jellyfin"
 
-msgid "Files received: {count}"
-msgstr ""
-
-msgid "Files"
-msgstr "Faili"
-
 msgid "Filled spectrum"
 msgstr "Aizpildīts spektrs"
 
@@ -1565,6 +1582,9 @@ msgstr "Atrodiet savu ListenBrainz lietotāja žetonu"
 
 msgid "Finding lyrics..."
 msgstr "Meklējam tekstus..."
+
+msgid "Finishing setup"
+msgstr ""
 
 msgid "Fixed position"
 msgstr "Fiksēta pozīcija"
@@ -1790,6 +1810,11 @@ msgstr "Importēt"
 
 msgid "Import"
 msgstr "Importēt"
+
+#, fuzzy
+#| msgid "Home Profile"
+msgid "Importing profile"
+msgstr "Sākums Profils"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2102,11 +2127,6 @@ msgstr "Maksimālais gads"
 msgid "May {year}"
 msgstr "Maksimālais gads"
 
-#, fuzzy
-#| msgid "Artist unavailable"
-msgid "Media available"
-msgstr "Izpildītājs nav pieejams"
-
 msgid "Menu"
 msgstr "Izvēlne"
 
@@ -2208,11 +2228,6 @@ msgstr ""
 
 msgid "Music folders on the Rufin machine"
 msgstr "Mūzikas mapes Rufin ierīcē"
-
-#, fuzzy
-#| msgid "On this device"
-msgid "Music on this device"
-msgstr "Šajā ierīcē"
 
 #, fuzzy
 #| msgid "My music"
@@ -2841,12 +2856,12 @@ msgstr "Izmantot tulkojumus"
 msgid "Preferences"
 msgstr "Iestatījumi"
 
-msgid "Preparing library..."
-msgstr "Sagatavo bibliotēku…"
-
 #, fuzzy
-#| msgid "Preparing library..."
-msgid "Preparing smaller media"
+#| msgid "Range selection"
+msgid "Preparing collection"
+msgstr "Diapazona atlase"
+
+msgid "Preparing library..."
 msgstr "Sagatavo bibliotēku…"
 
 #, fuzzy
@@ -2916,10 +2931,8 @@ msgstr "Privātais režīms"
 msgid "Profile PIN"
 msgstr "Profila PIN kods"
 
-#, fuzzy
-#| msgid "Secure storage"
-msgid "Profile storage"
-msgstr "Droša krātuve"
+msgid "Profile download is incomplete. Retry to continue."
+msgstr ""
 
 msgid "Profile up to date"
 msgstr ""
@@ -3024,9 +3037,6 @@ msgstr "Atsvaidzināt avotu"
 
 msgid "Refresh"
 msgstr "Atsvaidzināt"
-
-msgid "Refreshing"
-msgstr "Atjaunina"
 
 msgid "Regenerate access token"
 msgstr "Ģenerēt piekļuves tokenu vēlreiz"
@@ -3325,8 +3335,18 @@ msgstr "Saglabāts"
 msgid "Saves lyrics to your source"
 msgstr "Saglabāt tekstus avotā"
 
+#, fuzzy
+#| msgid "Search in page"
+msgid "Saving changes"
+msgstr "Meklēt lapā"
+
 msgid "Saving..."
 msgstr "Saglabāšana..."
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "Scanning tracks"
+msgstr "Nav atrasts neviens atbilstošs celiņš"
 
 msgid "Schedule"
 msgstr "Plānot"
@@ -3502,11 +3522,6 @@ msgstr "Serveri"
 
 msgid "Set the Discord activity type to Listening"
 msgstr "Iestatīt Discord aktivitātes veidu uz Klausīšanās"
-
-#, fuzzy
-#| msgid "On this device"
-msgid "Set up this device"
-msgstr "Šajā ierīcē"
 
 msgid "Settings and sources"
 msgstr "Iestatījumi un avoti"
@@ -3901,9 +3916,6 @@ msgstr "Nosaukums (apvienots)"
 msgid "Title"
 msgstr "Nosaukums"
 
-msgid "To use a file-sync app, choose a folder it synchronizes."
-msgstr ""
-
 msgid "Toggle Fullscreen"
 msgstr "Pārslēgt pilnekrāna režīmu"
 
@@ -4066,6 +4078,11 @@ msgstr "Gaida savienojumu"
 #| msgid "Current server"
 msgid "Use current artwork"
 msgstr "Pašreizējais serveris"
+
+#, fuzzy
+#| msgid "Use Rufin data folder"
+msgid "Use default folder"
+msgstr "Izmantot Rufin datu mapi"
 
 msgid "Use different layout below a threshold width"
 msgstr "Izmantot citu izkārtojumu zem sliekšņa platuma"
@@ -4353,7 +4370,20 @@ msgstr[0] "pirms {count} gadiem"
 msgstr[1] "pirms {count} gada"
 msgstr[2] "pirms {count} gadiem"
 
-msgid "{status} · {stage} {completed}{total}"
+msgid "{current} / {total} MiB ({percent}%)"
+msgstr ""
+
+msgid "{current} MiB"
+msgstr ""
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage}: {completed} / {total}"
+msgstr "{statuss} · {posms} {pabeigts}{kopā}"
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage}: {completed}"
 msgstr "{statuss} · {posms} {pabeigts}{kopā}"
 
 #. Windows installer: FinishText.
@@ -4438,6 +4468,56 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Adding source"
+#~ msgstr "Pievienojot avotu"
+
+#, fuzzy
+#~| msgid "Apply"
+#~ msgid "Applying..."
+#~ msgstr "Pielietot"
+
+#~ msgid "Changing source"
+#~ msgstr "Mainot avotu"
+
+#, fuzzy
+#~| msgid "Connection failed"
+#~ msgid "Connect folder"
+#~ msgstr "Savienojums neizdevās"
+
+#~ msgid "Connecting"
+#~ msgstr "Savienojas"
+
+#~ msgid "Files"
+#~ msgstr "Faili"
+
+#, fuzzy
+#~| msgid "Artist unavailable"
+#~ msgid "Media available"
+#~ msgstr "Izpildītājs nav pieejams"
+
+#, fuzzy
+#~| msgid "On this device"
+#~ msgid "Music on this device"
+#~ msgstr "Šajā ierīcē"
+
+#, fuzzy
+#~| msgid "Preparing library..."
+#~ msgid "Preparing smaller media"
+#~ msgstr "Sagatavo bibliotēku…"
+
+#, fuzzy
+#~| msgid "Secure storage"
+#~ msgid "Profile storage"
+#~ msgstr "Droša krātuve"
+
+#~ msgid "Refreshing"
+#~ msgstr "Atjaunina"
+
+#, fuzzy
+#~| msgid "On this device"
+#~ msgid "Set up this device"
+#~ msgstr "Šajā ierīcē"
 
 #~ msgid ""
 #~ "Rufin started with fresh user state because the saved database could not "
