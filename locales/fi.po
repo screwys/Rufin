@@ -50,8 +50,12 @@ msgid ""
 "Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
 
+#, fuzzy
+#| msgid ""
+#| "Downloads from this server will be removed, and automatic rules will be "
+#| "turned off"
 msgid ""
-"Downloads from this server will be removed, and automatic rules will be "
+"Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
 "Lataukset tältä palvelimelta poistetaan, ja automaattiset säännöt poistetaan "
@@ -152,11 +156,6 @@ msgid ""
 msgstr ""
 "Kiitos, että kokeilit Rufinia! Jos kohtasit ongelmia tai sinulla on "
 "ehdotuksia, avaa ongelma Githubiin."
-
-msgid ""
-"The folder is relative to the selected account. Applying it changes storage "
-"on all devices."
-msgstr ""
 
 msgid ""
 "This is a fallback artwork Rufin uses, do you want to set this as the item "
@@ -262,9 +261,6 @@ msgstr "Pääsypoletti"
 msgid "Accessibility"
 msgstr ""
 
-msgid "Action required"
-msgstr ""
-
 #, fuzzy
 #| msgid "Server Actions"
 msgid "Actions"
@@ -291,8 +287,10 @@ msgstr "Lisää musiikkilähde aloittaaksesi kuuntelun."
 msgid "Add a new source"
 msgstr "Lisää uusi lähde"
 
-msgid "Add a server to configure downloads."
-msgstr ""
+#, fuzzy
+#| msgid "No sources configured"
+msgid "Add a source to configure downloads."
+msgstr "Lähteitä ei ole määritetty"
 
 msgid "Add a title"
 msgstr ""
@@ -333,11 +331,6 @@ msgstr "Lisää"
 
 msgid "Added to"
 msgstr ""
-
-#, fuzzy
-#| msgid "Add Source"
-msgid "Adding source"
-msgstr "Lisää lähde"
 
 msgid "Album Artists"
 msgstr "Albumiesittäjät"
@@ -446,9 +439,9 @@ msgid "Apply"
 msgstr "Toteuta"
 
 #, fuzzy
-#| msgid "Saving..."
-msgid "Applying..."
-msgstr "Tallennetaan..."
+#| msgid "Home Profile"
+msgid "Applying profile"
+msgstr "Kotiprofiili"
 
 #, fuzzy
 #| msgid "Complete sign-in in your browser"
@@ -652,14 +645,6 @@ msgid "Changes take effect after restarting Rufin"
 msgstr "Muutokset tulevat voimaan, kun Rufin on käynnistetty uudelleen"
 
 #, fuzzy
-#| msgid "Change Source"
-msgid "Changing source"
-msgstr "Vaihda lähdettä"
-
-msgid "Changing this will redownload all local files."
-msgstr ""
-
-#, fuzzy
 #| msgid "Change"
 msgid "Channels"
 msgstr "Vaihda"
@@ -667,14 +652,16 @@ msgstr "Vaihda"
 msgid "Check for updates"
 msgstr "Tarkista päivitykset"
 
+#, fuzzy
+#| msgid "Change Profile"
+msgid "Checking profile"
+msgstr "Vaihda profiilia"
+
 msgid "Choose Folder"
 msgstr "Valitse kansio"
 
 msgid "Choose Server"
 msgstr "Valitse palvelin"
-
-msgid "Choose a connection for profile storage."
-msgstr ""
 
 msgid "Choose a local music folder"
 msgstr "Valitse paikallinen musiikkikansio"
@@ -848,11 +835,6 @@ msgstr "Yhteys epäonnistui"
 
 #, fuzzy
 #| msgid "Connection failed"
-msgid "Connect folder"
-msgstr "Yhteys epäonnistui"
-
-#, fuzzy
-#| msgid "Connection failed"
 msgid "Connect is not enabled"
 msgstr "Yhteys epäonnistui"
 
@@ -898,11 +880,6 @@ msgstr "Yhdistetään laitteeseen {device}..."
 
 #, fuzzy
 #| msgid "Connection"
-msgid "Connecting"
-msgstr "Yhteys"
-
-#, fuzzy
-#| msgid "Connection"
 msgid "Connecting..."
 msgstr "Yhteys"
 
@@ -941,11 +918,10 @@ msgstr ""
 msgid "Context Menus"
 msgstr "Kontekstivalikot"
 
-msgid "Continue from where {device} left off"
+#, fuzzy
+#| msgid "Continue from where {device} left off"
+msgid "Continue from {device}"
 msgstr "Jatka siitä mihin toisto jäi laitteella {device}"
-
-msgid "Continue from where {device} left off?"
-msgstr "Jatketaanko siitä, mihin toisto jäi laitteella {device}?"
 
 msgid "Continue"
 msgstr "Jatka"
@@ -1295,8 +1271,18 @@ msgstr "Ladattu"
 msgid "Downloading Japanese dictionary..."
 msgstr "Ladataan japaninkielistä sanastoa..."
 
+#, fuzzy
+#| msgid "Show artwork"
+msgid "Downloading artwork"
+msgstr "Näytä kuvitus"
+
 msgid "Downloading artwork... {count} checked"
 msgstr ""
+
+#, fuzzy
+#| msgid "Downloads"
+msgid "Downloading lyrics"
+msgstr "Lataukset"
 
 msgid "Downloading lyrics... {count} checked"
 msgstr ""
@@ -1516,6 +1502,35 @@ msgstr ""
 msgid "February {year}"
 msgstr ""
 
+msgid "Fetching Home"
+msgstr ""
+
+msgid "Fetching albums"
+msgstr ""
+
+msgid "Fetching artists"
+msgstr ""
+
+#, fuzzy
+#| msgid "Show artwork"
+msgid "Fetching artwork"
+msgstr "Näytä kuvitus"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Fetching genres"
+msgstr "Hae uudelleen"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Fetching lyrics"
+msgstr "Hae sanoituksia"
+
+#, fuzzy
+#| msgid "Smart playlists"
+msgid "Fetching playlists"
+msgstr "Älykkäät soittolistat"
+
 #, fuzzy
 #| msgid "Connection"
 msgid "File connection"
@@ -1539,12 +1554,6 @@ msgstr "Nimeä uudelleen"
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
-msgid "Files received: {count}"
-msgstr ""
-
-msgid "Files"
-msgstr "Tiedostot"
-
 msgid "Filled spectrum"
 msgstr ""
 
@@ -1558,6 +1567,9 @@ msgstr ""
 #| msgid "Edit lyrics"
 msgid "Finding lyrics..."
 msgstr "Muokkaa sanoituksia"
+
+msgid "Finishing setup"
+msgstr ""
 
 msgid "Fixed position"
 msgstr ""
@@ -1780,6 +1792,11 @@ msgstr "Vie"
 #| msgid "Export"
 msgid "Import"
 msgstr "Vie"
+
+#, fuzzy
+#| msgid "Home Profile"
+msgid "Importing profile"
+msgstr "Kotiprofiili"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2081,11 +2098,6 @@ msgstr "Vuosi enintään"
 msgid "May {year}"
 msgstr "Vuosi enintään"
 
-#, fuzzy
-#| msgid "Search is unavailable"
-msgid "Media available"
-msgstr "Haku ei ole saatavilla"
-
 msgid "Menu"
 msgstr "Valikko"
 
@@ -2189,11 +2201,6 @@ msgstr ""
 
 msgid "Music folders on the Rufin machine"
 msgstr ""
-
-#, fuzzy
-#| msgid "On this device"
-msgid "Music on this device"
-msgstr "Tällä laitteella"
 
 #, fuzzy
 #| msgid "My music"
@@ -2843,12 +2850,12 @@ msgstr "Suosi käännöksiä"
 msgid "Preferences"
 msgstr "Asetukset"
 
-msgid "Preparing library..."
-msgstr "Valmistellaan kirjastoa..."
-
 #, fuzzy
-#| msgid "Preparing library..."
-msgid "Preparing smaller media"
+#| msgid "Waiting for connection"
+msgid "Preparing collection"
+msgstr "Odotetaan yhteyttä"
+
+msgid "Preparing library..."
 msgstr "Valmistellaan kirjastoa..."
 
 #, fuzzy
@@ -2918,10 +2925,8 @@ msgstr "Yksityinen tila"
 msgid "Profile PIN"
 msgstr ""
 
-#, fuzzy
-#| msgid "Lyrics storage"
-msgid "Profile storage"
-msgstr "Sanoitusten tallennustila"
+msgid "Profile download is incomplete. Retry to continue."
+msgstr ""
 
 msgid "Profile up to date"
 msgstr ""
@@ -3031,9 +3036,6 @@ msgid "Refresh source"
 msgstr "Seuraava lähde"
 
 msgid "Refresh"
-msgstr ""
-
-msgid "Refreshing"
 msgstr ""
 
 msgid "Regenerate access token"
@@ -3344,8 +3346,18 @@ msgstr "Tallennettu"
 msgid "Saves lyrics to your source"
 msgstr ""
 
+#, fuzzy
+#| msgid "Search in page"
+msgid "Saving changes"
+msgstr "Hae sivulta"
+
 msgid "Saving..."
 msgstr "Tallennetaan..."
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Scanning tracks"
+msgstr "Hae sanoituksia"
 
 msgid "Schedule"
 msgstr ""
@@ -3533,11 +3545,6 @@ msgstr "Palvelimet"
 
 msgid "Set the Discord activity type to Listening"
 msgstr ""
-
-#, fuzzy
-#| msgid "On this device"
-msgid "Set up this device"
-msgstr "Tällä laitteella"
 
 msgid "Settings and sources"
 msgstr "Asetukset ja lähteet"
@@ -3942,9 +3949,6 @@ msgstr ""
 msgid "Title"
 msgstr ""
 
-msgid "To use a file-sync app, choose a folder it synchronizes."
-msgstr ""
-
 msgid "Toggle Fullscreen"
 msgstr "Koko näyttö päällä/pois"
 
@@ -4113,6 +4117,11 @@ msgstr "Odotetaan yhteyttä"
 #| msgid "Favorite tracks"
 msgid "Use current artwork"
 msgstr "Suosikkikappaleet"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Use default folder"
+msgstr "Lisää kansio"
 
 msgid "Use different layout below a threshold width"
 msgstr ""
@@ -4396,7 +4405,16 @@ msgid_plural "{count} years ago"
 msgstr[0] "{count} vuosi sitten"
 msgstr[1] "{count} vuotta sitten"
 
-msgid "{status} · {stage} {completed}{total}"
+msgid "{current} / {total} MiB ({percent}%)"
+msgstr ""
+
+msgid "{current} MiB"
+msgstr ""
+
+msgid "{stage}: {completed} / {total}"
+msgstr ""
+
+msgid "{stage}: {completed}"
 msgstr ""
 
 #. Windows installer: FinishText.
@@ -4483,6 +4501,62 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#, fuzzy
+#~| msgid "Add Source"
+#~ msgid "Adding source"
+#~ msgstr "Lisää lähde"
+
+#, fuzzy
+#~| msgid "Saving..."
+#~ msgid "Applying..."
+#~ msgstr "Tallennetaan..."
+
+#, fuzzy
+#~| msgid "Change Source"
+#~ msgid "Changing source"
+#~ msgstr "Vaihda lähdettä"
+
+#, fuzzy
+#~| msgid "Connection failed"
+#~ msgid "Connect folder"
+#~ msgstr "Yhteys epäonnistui"
+
+#, fuzzy
+#~| msgid "Connection"
+#~ msgid "Connecting"
+#~ msgstr "Yhteys"
+
+#~ msgid "Continue from where {device} left off?"
+#~ msgstr "Jatketaanko siitä, mihin toisto jäi laitteella {device}?"
+
+#~ msgid "Files"
+#~ msgstr "Tiedostot"
+
+#, fuzzy
+#~| msgid "Search is unavailable"
+#~ msgid "Media available"
+#~ msgstr "Haku ei ole saatavilla"
+
+#, fuzzy
+#~| msgid "On this device"
+#~ msgid "Music on this device"
+#~ msgstr "Tällä laitteella"
+
+#, fuzzy
+#~| msgid "Preparing library..."
+#~ msgid "Preparing smaller media"
+#~ msgstr "Valmistellaan kirjastoa..."
+
+#, fuzzy
+#~| msgid "Lyrics storage"
+#~ msgid "Profile storage"
+#~ msgstr "Sanoitusten tallennustila"
+
+#, fuzzy
+#~| msgid "On this device"
+#~ msgid "Set up this device"
+#~ msgstr "Tällä laitteella"
 
 #~ msgid "MP3"
 #~ msgstr "MP3"
