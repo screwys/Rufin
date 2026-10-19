@@ -1401,7 +1401,6 @@ dialog.alert.playlist-delete-dialog .message-area {
 .cover-hover-button {
   border-radius: 999px;
   background: white;
-  color: #111111;
   box-shadow:
     0 8px 22px rgba(0, 0, 0, 0.26),
     inset 0 0 0 1px rgba(0, 0, 0, 0.08);
@@ -1430,6 +1429,7 @@ dialog.alert.playlist-delete-dialog .message-area {
 .cover-hover-face {
   border-radius: 999px;
   background: white;
+  color: #111111;
   transform: scale(1);
   transition:
     background 120ms ease-out,
@@ -1520,6 +1520,7 @@ dialog.alert.playlist-delete-dialog .message-area {
 
 .cover-hover-button.cover-hover-animated.favorite-toggle.active-toggle .cover-hover-face {
   background: white;
+  color: var(--error-color);
 }
 
 .cover-hover-button.cover-hover-animated.favorite-toggle.active-toggle:hover .cover-hover-face {
@@ -1770,9 +1771,12 @@ scale.volume-slider:dir(rtl) {
   background: radial-gradient(circle closest-side,
     color-mix(in srgb, var(--window-fg-color) 92%, transparent) calc(100% - 1px),
     transparent 100%);
-  color: var(--window-bg-color);
   transform: scale(1);
   transition: transform 120ms ease-out;
+}
+
+.player-play-button image {
+  color: var(--window-bg-color);
 }
 
 .player-play-button:hover {
@@ -2086,7 +2090,6 @@ button.download-queue-pause image {
   min-height: 48px;
   padding: 0;
   background: transparent;
-  color: #111111;
   box-shadow: none;
   transition: background 120ms ease-out;
 }
@@ -2096,6 +2099,7 @@ button.download-queue-pause image {
   min-height: 48px;
   border-radius: 999px;
   background: white;
+  color: #111111;
   transform: scale(1);
   transition:
     background 120ms ease-out,
@@ -2132,7 +2136,6 @@ button.download-queue-pause image {
   min-width: 56px;
   min-height: 56px;
   background: transparent;
-  color: #111111;
   -gtk-icon-size: 18px;
 }
 
@@ -2149,6 +2152,7 @@ button.download-queue-pause image {
 
 .detail-showcase-action-button.favorite-toggle.active-toggle .detail-showcase-action-face {
   background: white;
+  color: var(--error-color);
 }
 
 .detail-showcase-action-button.favorite-toggle.active-toggle:hover .detail-showcase-action-face {
