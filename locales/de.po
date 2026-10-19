@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-10-11 17:31+0000\n"
+"PO-Revision-Date: 2026-10-19 15:10+0000\n"
 "Last-Translator: Sebastian <sevachka@users.noreply.hosted.weblate.org>\n"
 "Language-Team: German <https://hosted.weblate.org/projects/rufin/app/de/>\n"
 "Language: de\n"
@@ -15,7 +15,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.10.1.dev0\n"
+"X-Generator: Weblate 2026.11.dev0\n"
 
 msgid ""
 "A Japanese dictionary is downloaded for furigana and romaji readings. This "
@@ -533,10 +533,8 @@ msgstr "Künstler"
 msgid "Artists"
 msgstr "Künstler"
 
-#, fuzzy
-#| msgid "Artwork selected"
 msgid "Artwork cache cleared"
-msgstr "Cover ausgewählt"
+msgstr "Cover-Cache geleert"
 
 msgid "Artwork editing is no longer available"
 msgstr "Die Bearbeitung von Covern ist nicht mehr verfügbar"
@@ -753,18 +751,14 @@ msgstr "Album entfernen"
 msgid "Clear artist"
 msgstr "Künstler entfernen"
 
-#, fuzzy
-#| msgid "Search artwork"
 msgid "Clear artwork cache"
-msgstr "Cover suchen"
+msgstr "Cover-Cache leeren"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Abgerufene Liedtexte für diesen Titel löschen"
 
-#, fuzzy
-#| msgid "Clear Cache"
 msgid "Clear lyrics cache"
-msgstr "Cache leeren"
+msgstr "Liedtext-Cache leeren"
 
 msgid "Clear queue"
 msgstr "Warteschlange leeren"
@@ -970,10 +964,8 @@ msgstr "Copyright"
 msgid "Could not load listening overview"
 msgstr "Höraktivität konnte nicht geladen werden"
 
-#, fuzzy
-#| msgid "Could not load this page"
 msgid "Could not load page"
-msgstr "Diese Seite konnte nicht geladen werden"
+msgstr "Die Seite konnte nicht geladen werden"
 
 msgid "Could not load related tracks"
 msgstr "Verwandte Titel konnten nicht geladen werden"
@@ -1132,10 +1124,8 @@ msgstr "Geräteeinladung"
 msgid "Device name"
 msgstr "Gerätename"
 
-#, fuzzy
-#| msgid "Device name"
 msgid "Device"
-msgstr "Gerätename"
+msgstr "Gerät"
 
 msgid "Diagnostic log saved"
 msgstr "Diagnoseprotokoll gespeichert"
@@ -1212,15 +1202,11 @@ msgstr "Download-Ordner"
 msgid "Download Queue"
 msgstr "Download-Warteschlange"
 
-#, fuzzy
-#| msgid "Upload artwork"
 msgid "Download artwork"
-msgstr "Cover hochladen"
+msgstr "Cover herunterladen"
 
-#, fuzzy
-#| msgid "Downloads"
 msgid "Download lyrics"
-msgstr "Downloads"
+msgstr "Liedtexte herunterladen"
 
 msgid "Download quality"
 msgstr "Downloadqualität"
@@ -1241,10 +1227,10 @@ msgid "Downloading Japanese dictionary..."
 msgstr "Japanisches Wörterbuch wird heruntergeladen …"
 
 msgid "Downloading artwork... {count} checked"
-msgstr ""
+msgstr "Cover werden heruntergeladen … {count} geprüft"
 
 msgid "Downloading lyrics... {count} checked"
-msgstr ""
+msgstr "Lade Liedtexte herunter … {count} überprüft"
 
 msgid "Downloading"
 msgstr "Wird heruntergeladen"
@@ -1943,10 +1929,8 @@ msgstr "Lautstärkenormalisierung"
 msgid "Lyrics background opacity"
 msgstr "Deckkraft des Liedtext-Hintergrunds"
 
-#, fuzzy
-#| msgid "Lyrics loaded"
 msgid "Lyrics cache cleared"
-msgstr "Liedtexte geladen"
+msgstr "Liedtext-Cache geleert"
 
 msgid "Lyrics loaded"
 msgstr "Liedtexte geladen"
@@ -2182,10 +2166,8 @@ msgstr "Neue Smart-Playlist"
 msgid "New download rule"
 msgstr "Neue Download-Regel"
 
-#, fuzzy
-#| msgid "Image files"
 msgid "New file"
-msgstr "Bilddateien"
+msgstr "Neue Datei"
 
 msgid "New release is available"
 msgstr "Neue Veröffentlichung verfügbar"
@@ -2684,10 +2666,8 @@ msgstr "Bibliothek wird vorbereitet …"
 msgid "Preparing smaller media"
 msgstr "Kleinere Medien werden vorbereitet …"
 
-#, fuzzy
-#| msgid "Preserve pitch"
 msgid "Preserve channels"
-msgstr "Tonhöhe beibehalten"
+msgstr "Kanäle beibehalten"
 
 msgid "Preserve pitch"
 msgstr "Tonhöhe beibehalten"
@@ -3408,10 +3388,8 @@ msgstr "Im Browser anmelden"
 msgid "Sign In with Password"
 msgstr "Mit Passwort anmelden"
 
-#, fuzzy
-#| msgid "Sign in with Nextcloud"
 msgid "Sign in to Plex first"
-msgstr "Mit Nextcloud anmelden"
+msgstr "Melde dich zuerst bei Plex an"
 
 msgid "Sign in with Nextcloud"
 msgstr "Mit Nextcloud anmelden"
@@ -3485,10 +3463,8 @@ msgstr "Sortieren"
 msgid "Source by position"
 msgstr "Quelle nach Position"
 
-#, fuzzy
-#| msgid "Artwork editing is no longer available"
 msgid "Source is no longer available"
-msgstr "Die Bearbeitung von Covern ist nicht mehr verfügbar"
+msgstr "Quelle ist nicht mehr verfügbar"
 
 msgid "Source setup is unavailable"
 msgstr "Quelleneinrichtung ist nicht verfügbar"
@@ -3514,10 +3490,8 @@ msgstr "Minimiert starten"
 msgid "Start playing automatically"
 msgstr "Automatisch mit der Wiedergabe beginnen"
 
-#, fuzzy
-#| msgid "Search in page"
 msgid "Starting page"
-msgstr "Auf der Seite suchen"
+msgstr "Startseite"
 
 msgid "Starting..."
 msgstr "Wird gestartet …"
@@ -3526,10 +3500,10 @@ msgid "Status display"
 msgstr "Statusanzeige"
 
 msgid "Stereo for lossy formats"
-msgstr ""
+msgstr "Stereo für verlustbehaftete Formate"
 
 msgid "Stereo"
-msgstr ""
+msgstr "Stereo"
 
 msgid "Stop"
 msgstr "Stopp"
@@ -3543,10 +3517,8 @@ msgstr "Berechnete Lautheit in unterstützten lokalen Musikdateien speichern"
 msgid "Stream quality"
 msgstr "Streaming-Qualität"
 
-#, fuzzy
-#| msgid "Stream quality"
 msgid "Streaming"
-msgstr "Streaming-Qualität"
+msgstr "Streaming"
 
 msgid "Studio"
 msgstr "Studio"
@@ -3618,7 +3590,7 @@ msgid "The API token was not accepted. Please connect again."
 msgstr "Das API-Token wurde nicht akzeptiert. Bitte erneut verbinden."
 
 msgid "The connection no longer exists"
-msgstr ""
+msgstr "Die Verbindung existiert nicht mehr"
 
 msgid "TheAudioDB album ID"
 msgstr "TheAudioDB-Album-ID"
