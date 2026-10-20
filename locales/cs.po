@@ -122,6 +122,16 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Remove all Rufin data and settings except saved connections and credentials? "
+"Rufin will restart after clearing the data."
+msgstr ""
+
+msgid ""
+"Remove all Rufin data, settings and saved logins? Rufin will restart after "
+"clearing the data."
+msgstr ""
+
+msgid ""
 "Replace the selected contents and remove these configured sources?\n"
 "{sources}\n"
 "Their retained user state and saved logins will remain unless selected."
@@ -631,6 +641,11 @@ msgstr "Modrá"
 msgid "Browse"
 msgstr ""
 
+#, fuzzy
+#| msgid "Cached"
+msgid "Cached data"
+msgstr "V mezipaměti"
+
 msgid "Cached"
 msgstr "V mezipaměti"
 
@@ -754,12 +769,40 @@ msgstr ""
 msgid "Classical"
 msgstr "Klasická hudba"
 
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear EBU R128 cache"
+msgstr "Hledat texty"
+
+msgid "Clear Japanese dictionary"
+msgstr ""
+
 msgid "Clear Mapping"
 msgstr "Vymazat mapování"
 
 #, fuzzy
 #| msgid "Play album"
 msgid "Clear album"
+msgstr "Přehrát album"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear all cache"
+msgstr "Hledat texty"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear all cache?"
+msgstr "Hledat texty"
+
+#, fuzzy
+#| msgid "Play album"
+msgid "Clear all data"
+msgstr "Přehrát album"
+
+#, fuzzy
+#| msgid "Play album"
+msgid "Clear all data?"
 msgstr "Přehrát album"
 
 #, fuzzy
@@ -787,6 +830,11 @@ msgstr "Vymazat frontu"
 #| msgid "Sort title"
 msgid "Clear title"
 msgstr "Seřadit podle názvu"
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Clear waveform cache"
+msgstr "Hledat Texty"
 
 #, fuzzy
 #| msgid "Clear queue"
@@ -1129,6 +1177,11 @@ msgstr ""
 msgid "Custom"
 msgstr "Přizpůsobené"
 
+#, fuzzy
+#| msgid "Collection"
+msgid "Customization"
+msgstr "Sbírka"
+
 msgid "Customize display"
 msgstr "Přizpůsobit zobrazení"
 
@@ -1148,6 +1201,9 @@ msgstr "Taneční hudba"
 
 msgid "Dark"
 msgstr "Tmavý"
+
+msgid "Database sizes show stored data, excluding database overhead."
+msgstr ""
 
 msgid "Date added"
 msgstr "Datum přidání"
@@ -1372,6 +1428,9 @@ msgid "Duration"
 msgstr "Délka"
 
 msgid "Dynamic background"
+msgstr ""
+
+msgid "EBU R128 analysis"
 msgstr ""
 
 msgid "EBU R128 reference level"
@@ -1757,9 +1816,6 @@ msgstr "Přehrávání bez mezer"
 msgid "General"
 msgstr "Obecné"
 
-msgid "Generate and cache waveforms for the current track"
-msgstr "Vygenerovat a uložit do mezipaměti průběhy pro aktuální skladbu"
-
 msgid "Genius"
 msgstr "Genius"
 
@@ -1929,6 +1985,9 @@ msgstr ""
 msgid "January {year}"
 msgstr ""
 
+msgid "Japanese dictionary"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
 
@@ -1962,9 +2021,6 @@ msgstr "Režim Karaoke"
 
 msgid "Keep Rufin running after closing the window"
 msgstr "Po zavření okna ponechat Rufin spuštěný"
-
-msgid "Keep album transitions gapless when possible"
-msgstr "Pokud je to možné, zachovejte plynulé přechody mezi skladbami v albu"
 
 msgid "Keep music available offline. Folder changes only affect new downloads"
 msgstr ""
@@ -3102,6 +3158,11 @@ msgstr "Předchozí stránka"
 msgid "Previous"
 msgstr "Předchozí"
 
+#, fuzzy
+#| msgid "Privacy and Security"
+msgid "Privacy & Security"
+msgstr "Soukromí a bezpečnost"
+
 msgid "Privacy and Security"
 msgstr "Soukromí a bezpečnost"
 
@@ -3679,9 +3740,6 @@ msgstr "Vyhledávání v přehrávání"
 
 msgid "Seek to {time}"
 msgstr ""
-
-msgid "Seekbar"
-msgstr "Indikátor průběhu"
 
 #, fuzzy
 #| msgid "Select Music Folder"
@@ -4272,6 +4330,11 @@ msgstr "Diskografie"
 msgid "UPnP"
 msgstr "UPnP"
 
+#, fuzzy
+#| msgid "Album title"
+msgid "Unavailable"
+msgstr "Název alba"
+
 msgid "Undo identified value"
 msgstr "Vrátit zpět určenou hodnotu"
 
@@ -4486,6 +4549,11 @@ msgstr ""
 msgid "Waveform seekbar"
 msgstr "Indikátor průběhu ve formě vlnové křivky"
 
+#, fuzzy
+#| msgid "Waveform seekbar"
+msgid "Waveforms"
+msgstr "Indikátor průběhu ve formě vlnové křivky"
+
 msgid "WebDAV / Nextcloud"
 msgstr ""
 
@@ -4609,6 +4677,15 @@ msgid_plural "{count} days ago"
 msgstr[0] "{count} dnem"
 msgstr[1] "{count} dny"
 msgstr[2] "{count} dny"
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "{count} entry"
+msgid_plural "{count} entries"
+msgstr[0] "{count} skladba"
+msgstr[1] "{count} skladby"
+msgstr[2] "{count} skladeb"
 
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
@@ -4739,6 +4816,16 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Generate and cache waveforms for the current track"
+#~ msgstr "Vygenerovat a uložit do mezipaměti průběhy pro aktuální skladbu"
+
+#~ msgid "Keep album transitions gapless when possible"
+#~ msgstr ""
+#~ "Pokud je to možné, zachovejte plynulé přechody mezi skladbami v albu"
+
+#~ msgid "Seekbar"
+#~ msgstr "Indikátor průběhu"
 
 #, fuzzy
 #~| msgid "Sources"
