@@ -285,11 +285,17 @@ msgstr ""
 msgid "1 hour"
 msgstr "1 час"
 
+msgid "10 bands"
+msgstr ""
+
 msgid "12 hours"
 msgstr "12 часов"
 
 msgid "128 kbps"
 msgstr "128 кбит/с"
+
+msgid "18 bands"
+msgstr ""
 
 msgid "192 kbps"
 msgstr "192 кбит/с"
@@ -299,6 +305,9 @@ msgstr "24 часа"
 
 msgid "256 kbps"
 msgstr "256 кбит/с"
+
+msgid "31 bands"
+msgstr ""
 
 msgid "320 kbps"
 msgstr "320 кбит/с"
@@ -367,6 +376,11 @@ msgstr "Добавьте сервер для настройки загрузок
 
 msgid "Add a title"
 msgstr "Добавить название"
+
+#, fuzzy
+#| msgid "Add Last"
+msgid "Add band"
+msgstr "Добавить последний"
 
 msgid "Add current"
 msgstr "Добавить текущий"
@@ -553,6 +567,9 @@ msgstr "Хранилище обложек"
 msgid "Artwork"
 msgstr "Обложка"
 
+msgid "Audio effects"
+msgstr ""
+
 msgid "Audio fade on play/pause"
 msgstr "Плавное затухание звука при воспроизведении/паузе"
 
@@ -580,7 +597,25 @@ msgstr "Порог автоматического пополнения плей�
 msgid "Auto DJ"
 msgstr "Авто-DJ"
 
+#, fuzzy
+#| msgid "Auto DJ"
+msgid "Auto"
+msgstr "Авто-DJ"
+
+msgid "AutoEQ / APO"
+msgstr ""
+
 msgid "Automatic Backups"
+msgstr "Автоматическое создание резервных копий"
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Automatic headroom"
+msgstr "Автоматически"
+
+#, fuzzy
+#| msgid "Automatic Backups"
+msgid "Automatic preamp"
 msgstr "Автоматическое создание резервных копий"
 
 msgid "Automatic updates"
@@ -620,12 +655,34 @@ msgid "Backups"
 msgstr "Резервные копии"
 
 #, fuzzy
+#| msgid "Dance"
+msgid "Balance"
+msgstr "Танцевальная"
+
+msgid "Band layout"
+msgstr ""
+
+msgid "Band"
+msgstr ""
+
+msgid "Bands"
+msgstr ""
+
+msgid "Bandwidth"
+msgstr ""
+
+#, fuzzy
 #| msgid "Play count"
 msgid "Bar count"
 msgstr "Количество воспроизведений"
 
 msgid "Bar spacing (px)"
 msgstr "Интервал между панелями (в пикселях)"
+
+#, fuzzy
+#| msgid "Full Bass"
+msgid "Bass"
+msgstr "Максимальные басы"
 
 msgid "Bearer token (WebDAV)"
 msgstr "Токен аутентификации (WebDAV)"
@@ -670,6 +727,11 @@ msgstr "Отмена загрузки"
 
 msgid "Cancel"
 msgstr "Отмена"
+
+#, fuzzy
+#| msgid "Path format"
+msgid "Cast format"
+msgstr "Формат пути"
 
 msgid "Casting network"
 msgstr "Сеть для трансляции"
@@ -824,6 +886,11 @@ msgstr "Очистить"
 
 msgid "Clearing queue also clears the current song"
 msgstr "Очистка очереди также очищает текущую песню"
+
+#, fuzzy
+#| msgid "Clear Mapping"
+msgid "Clipping"
+msgstr "Удалить Соответствия"
 
 msgid "Close Window"
 msgstr "Закрыть окно"
@@ -995,6 +1062,9 @@ msgstr "Скопировать приглашение"
 msgid "Copy link"
 msgstr "Копировать ссылку"
 
+msgid "Copy of {name}"
+msgstr ""
+
 msgid "Copy preset"
 msgstr "Скопировать предустановку"
 
@@ -1081,11 +1151,21 @@ msgstr "Режим кроссфейда"
 msgid "Crossfade"
 msgstr "Кроссфейд"
 
+#, fuzzy
+#| msgid "Crossfade"
+msgid "Crossfeed"
+msgstr "Кроссфейд"
+
 msgid "Current artwork"
 msgstr "Текущая обложка"
 
 msgid "Custom HTTP headers"
 msgstr "Настраиваемые HTTP-заголовки"
+
+#, fuzzy
+#| msgid "Custom"
+msgid "Custom bands"
+msgstr "Настраиваемый"
 
 msgid "Custom"
 msgstr "Настраиваемый"
@@ -1161,6 +1241,11 @@ msgstr "Удалить \"{name}\"?"
 
 msgid "Delete playlist file"
 msgstr "Удалить файл плейлиста"
+
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Delete preset"
+msgstr "Вставить предустановку"
 
 msgid "Delete"
 msgstr "Удалить"
@@ -1313,6 +1398,16 @@ msgstr "Загрузки"
 msgid "Drag to reorder"
 msgstr "Перетащите, чтобы изменить порядок"
 
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Duplicate preset"
+msgstr "Вставить предустановку"
+
+#, fuzzy
+#| msgid "Don't duplicate"
+msgid "Duplicate"
+msgstr "Не дублировать"
+
 msgid "Duration"
 msgstr "Продолжительность"
 
@@ -1393,6 +1488,19 @@ msgstr "Включить приватный режим"
 msgid "Enable"
 msgstr "Активировать"
 
+#, fuzzy
+#| msgid "Enable"
+msgid "Enabled"
+msgstr "Активировать"
+
+msgid "Encoding peak"
+msgstr ""
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Encoding"
+msgstr "Загрузка"
+
 msgid "Encrypt backups"
 msgstr "Шифровать резервные копии"
 
@@ -1410,6 +1518,9 @@ msgstr "Введите адрес вашего сервера Nextcloud, что�
 
 msgid "Entire Library"
 msgstr "Вся библиотека"
+
+msgid "Equalizer is controlled by the receiver"
+msgstr ""
 
 msgid "Equalizer"
 msgstr "Эквалайзер"
@@ -1453,6 +1564,11 @@ msgstr "Формат экспорта"
 msgid "Export playlist"
 msgstr "Экспортировать плейлист"
 
+#, fuzzy
+#| msgid "Export playlist"
+msgid "Export preset"
+msgstr "Экспортировать плейлист"
+
 msgid "Export to connection"
 msgstr "Экспорт в подключение"
 
@@ -1473,6 +1589,9 @@ msgstr "Поиск метаданных в интернете"
 
 msgid "External site links"
 msgstr "Ссылки на внешние сайты"
+
+msgid "FLAC"
+msgstr ""
 
 msgid "Fade audio when playback is paused or resumed"
 msgstr ""
@@ -1543,6 +1662,11 @@ msgstr "Подключение к файлу"
 msgid "File connections"
 msgstr "Файловые подключения"
 
+#, fuzzy
+#| msgid "Format"
+msgid "File format"
+msgstr "Формат"
+
 msgid "File path"
 msgstr "Путь к файлу"
 
@@ -1556,6 +1680,9 @@ msgstr ""
 
 msgid "Filled spectrum"
 msgstr "Заполненный спектр"
+
+msgid "Filter type"
+msgstr ""
 
 msgid "Find shares"
 msgstr "Найти общие папки"
@@ -1622,8 +1749,19 @@ msgstr "Предел частоты кадров"
 msgid "Frames per second"
 msgstr "Кадры в секунду"
 
+msgid "Frequency · Hz"
+msgstr ""
+
+msgid "Frequency"
+msgstr ""
+
 msgid "Friday"
 msgstr "Пятница"
+
+#, fuzzy
+#| msgid "Full Treble"
+msgid "Full Bass & Treble"
+msgstr "Максимальные высокие частоты"
 
 msgid "Full Bass"
 msgstr "Максимальные басы"
@@ -1642,6 +1780,12 @@ msgstr "Полноэкранный режим"
 
 msgid "Furigana"
 msgstr "Фуригана"
+
+msgid "Gain · dB"
+msgstr ""
+
+msgid "Gain"
+msgstr ""
 
 msgid "Gapless mode"
 msgstr "Бесшовный режим"
@@ -1691,6 +1835,9 @@ msgstr "Конечный цвет градиента"
 msgid "Gradient start"
 msgstr "Начало градиента"
 
+msgid "Graphic"
+msgstr ""
+
 msgid "Green"
 msgstr "Зелёный"
 
@@ -1721,6 +1868,9 @@ msgstr "Скрыт"
 msgid "Hide sidebar"
 msgstr "Скрыть боковую панель"
 
+msgid "High shelf"
+msgstr ""
+
 msgid "Highlight hovered row"
 msgstr "Выделить строку при наведении"
 
@@ -1744,6 +1894,9 @@ msgstr "Час"
 
 msgid "Hours"
 msgstr "Часы"
+
+msgid "Hz"
+msgstr ""
 
 msgid "Identify"
 msgstr "Идентифицировать"
@@ -1779,6 +1932,11 @@ msgstr "Импортировать плейлист"
 msgid "Import from connection"
 msgstr "Импорт из подключения"
 
+#, fuzzy
+#| msgid "Import theme"
+msgid "Import preset"
+msgstr "Импортировать тему"
+
 msgid "Import theme"
 msgstr "Импортировать тему"
 
@@ -1793,6 +1951,9 @@ msgstr "Присоединиться к профилю"
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
 "Импортирует файлы в библиотеку и отслеживает изменения в добавленных папках."
+
+msgid "Inactive at this sample rate"
+msgstr ""
 
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Включить подробную диагностику Rufin в текущей сессии"
@@ -2044,6 +2205,9 @@ msgstr "Журналы скопированы"
 msgid "Loudness normalization"
 msgstr "Нормализация громкости"
 
+msgid "Low shelf"
+msgstr ""
+
 msgid "Lyrics background opacity"
 msgstr "Прозрачность фона текста песни"
 
@@ -2066,6 +2230,9 @@ msgstr "Текст песни появится здесь."
 
 msgid "Lyrics"
 msgstr "Текст песни"
+
+msgid "MP3"
+msgstr "MP3"
 
 msgid "Manage"
 msgstr "Управление"
@@ -2119,8 +2286,14 @@ msgstr "Отражённые полосы"
 msgid "Mirrored"
 msgstr "Отражённые полосы"
 
+msgid "Mode"
+msgstr ""
+
 msgid "Monday"
 msgstr "Понедельник"
+
+msgid "Mono"
+msgstr ""
 
 msgid "Month"
 msgstr "Месяц"
@@ -2578,8 +2751,14 @@ msgstr "Другие выпуски"
 msgid "Outline bars"
 msgstr "Обводка полос"
 
+msgid "Output gain"
+msgstr ""
+
 msgid "Overview"
 msgstr "Обзор"
+
+msgid "Parametric"
+msgstr ""
 
 msgid "Password or token"
 msgstr "Пароль или токен"
@@ -2610,6 +2789,9 @@ msgstr "Максимальная скорость снижения пиков (%
 
 msgid "Peak hold (seconds)"
 msgstr "Время удержания пикового значения (в секундах)"
+
+msgid "Peak"
+msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -2766,6 +2948,9 @@ msgstr "Порт"
 msgid "Position"
 msgstr "Позиция"
 
+msgid "Preamp"
+msgstr ""
+
 msgid "Prefer distinct track covers"
 msgstr "Предпочитать отдельные обложки для треков"
 
@@ -2809,8 +2994,18 @@ msgstr "Предустановка 4"
 msgid "Preset 5"
 msgstr "Предустановка 5"
 
+#, fuzzy
+#| msgid "Preset saved"
+msgid "Preset name"
+msgstr "Предустановка сохранена"
+
 msgid "Preset saved"
 msgstr "Предустановка сохранена"
+
+#, fuzzy
+#| msgid "Preset 1"
+msgid "Preset text"
+msgstr "Предустановка 1"
 
 msgid "Preset"
 msgstr "Предустановка"
@@ -2875,6 +3070,9 @@ msgstr "Общедоступный"
 
 msgid "Purple"
 msgstr "Фиолетовый"
+
+msgid "Q"
+msgstr ""
 
 msgid "Queue a track to begin"
 msgstr "Добавьте трек в очередь, чтобы начать воспроизведение"
@@ -3032,6 +3230,11 @@ msgstr "Удалить все загрузки"
 msgid "Remove and Delete"
 msgstr "Убрать и удалить"
 
+#, fuzzy
+#| msgid "Remove and Delete"
+msgid "Remove band"
+msgstr "Убрать и удалить"
+
 msgid "Remove device"
 msgstr "Удалить устройство"
 
@@ -3067,6 +3270,14 @@ msgstr "Удалено из"
 
 msgid "Rename file"
 msgstr "Переименовать файл"
+
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Rename preset"
+msgstr "Вставить предустановку"
+
+msgid "Rename"
+msgstr "Переименовать"
 
 msgid "Reorder"
 msgstr "Изменить порядок"
@@ -3106,6 +3317,9 @@ msgstr "Восстановить настройки по умолчанию"
 
 msgid "Reset"
 msgstr "Сбросить"
+
+msgid "Response"
+msgstr ""
 
 msgid "Restart now"
 msgstr "Перезапустить сейчас"
@@ -3156,6 +3370,11 @@ msgstr "Строки"
 msgid "Rufin Connect"
 msgstr "Rufin Connect"
 
+#, fuzzy
+#| msgid "Rufin host"
+msgid "Rufin JSON"
+msgstr "Хост Rufin"
+
 msgid "Rufin data folder"
 msgstr "Папка с данными Rufin"
 
@@ -3170,6 +3389,11 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB-домен"
+
+#, fuzzy
+#| msgid "Sample rate"
+msgid "Sample peak"
+msgstr "Частота дискретизации"
 
 msgid "Sample rate"
 msgstr "Частота дискретизации"
@@ -3202,8 +3426,18 @@ msgstr "Автоматически сохранять текст песни"
 msgid "Save playlist changes automatically"
 msgstr "Автоматически сохранять изменения в плейлисте"
 
+#, fuzzy
+#| msgid "Saved preset"
+msgid "Save preset"
+msgstr "Сохраненная предустановка"
+
 msgid "Save"
 msgstr "Сохранить"
+
+#, fuzzy
+#| msgid "Saved..."
+msgid "Save..."
+msgstr "Сохранено..."
 
 msgid "Saved Plex Login"
 msgstr "Сохраненные данные для входа в Plex"
@@ -3622,7 +3856,17 @@ msgstr "Источник"
 msgid "Sources"
 msgstr "Источники"
 
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "Spectrum · dBFS"
+msgstr "Линия спектра"
+
 msgid "Spectrum line"
+msgstr "Линия спектра"
+
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "Spectrum"
 msgstr "Линия спектра"
 
 msgid "Start minimized"
@@ -3786,6 +4030,9 @@ msgstr "Название"
 msgid "Toggle Fullscreen"
 msgstr "Полноэкранный режим"
 
+msgid "Tone and channels"
+msgstr ""
+
 msgid "Tools"
 msgstr "Инструменты"
 
@@ -3830,6 +4077,11 @@ msgstr "Режим перехода"
 
 msgid "Translation language"
 msgstr "Язык перевода"
+
+#, fuzzy
+#| msgid "Full Treble"
+msgid "Treble"
+msgstr "Максимальные высокие частоты"
 
 msgid "Troubleshooting"
 msgstr "Устранение неполадок"
@@ -3886,6 +4138,11 @@ msgstr "Включить звук"
 
 msgid "Unmuted"
 msgstr "Звук включен"
+
+#, fuzzy
+#| msgid "Saved"
+msgid "Unsaved"
+msgstr "Сохранено"
 
 msgid "Untitled"
 msgstr "Без названия"
@@ -3954,6 +4211,9 @@ msgstr "Использовать существующий"
 msgid "Use folder"
 msgstr "Использовать папку"
 
+msgid "Use for this output"
+msgstr ""
+
 msgid "Use listening activity"
 msgstr "Использовать данные о прослушиваниях"
 
@@ -3967,6 +4227,11 @@ msgstr "Использовать максимальный год"
 
 msgid "Use minimum year"
 msgstr "Использовать минимальный год"
+
+#, fuzzy
+#| msgid "Use source setting"
+msgid "Use output settings"
+msgstr "Использовать настройки источника"
 
 msgid "Use source setting"
 msgstr "Использовать настройки источника"
@@ -4068,6 +4333,12 @@ msgstr "Еженедельно"
 
 msgid "Wide"
 msgstr "Широкий"
+
+msgid "Width unit"
+msgstr ""
+
+msgid "Width"
+msgstr ""
 
 msgid "Window"
 msgstr "Окно"
@@ -4403,9 +4674,6 @@ msgstr "Добро пожаловать в программу установки
 #~ "Это применяется только к новым локальным файлам, добавленным с другого "
 #~ "устройства"
 
-#~ msgid "MP3"
-#~ msgstr "MP3"
-
 #~ msgid ""
 #~ "Rufin started with fresh user state because the saved database could not "
 #~ "be used. Your settings and saved logins are unchanged."
@@ -4489,9 +4757,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Переименовать плейлист"
-
-#~ msgid "Rename"
-#~ msgstr "Переименовать"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Выбрать существующую локальную папку"
@@ -4660,9 +4925,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Activity links and MusicBrainz covers"
 #~ msgstr "Ссылки на активность и обложки с сайта MusicBrainz"
-
-#~ msgid "Add Last"
-#~ msgstr "Добавить последний"
 
 #~ msgid "Add Local Folder"
 #~ msgstr "Добавить Локальную Папку"

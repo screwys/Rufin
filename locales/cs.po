@@ -227,11 +227,17 @@ msgstr ". Stačí vyplnit pouze e-mail a název části aplikace"
 msgid "1 hour"
 msgstr ""
 
+msgid "10 bands"
+msgstr ""
+
 msgid "12 hours"
 msgstr ""
 
 msgid "128 kbps"
 msgstr "128 kbps"
+
+msgid "18 bands"
+msgstr ""
 
 msgid "192 kbps"
 msgstr "192 kbps"
@@ -241,6 +247,9 @@ msgstr ""
 
 msgid "256 kbps"
 msgstr "256 kbps"
+
+msgid "31 bands"
+msgstr ""
 
 msgid "320 kbps"
 msgstr "320 kbps"
@@ -319,6 +328,9 @@ msgstr "Nejsou nakonfigurovány žádné zdroje"
 
 msgid "Add a title"
 msgstr "Přidat název"
+
+msgid "Add band"
+msgstr ""
 
 msgid "Add current"
 msgstr "Přidat aktuální"
@@ -534,6 +546,9 @@ msgstr "Tajné úložiště"
 msgid "Artwork"
 msgstr ""
 
+msgid "Audio effects"
+msgstr ""
+
 msgid "Audio fade on play/pause"
 msgstr "Ztlumení zvuku při přehrávání/pozastavení"
 
@@ -562,8 +577,26 @@ msgid "Auto DJ"
 msgstr "Auto DJ"
 
 #, fuzzy
+#| msgid "Auto DJ"
+msgid "Auto"
+msgstr "Auto DJ"
+
+msgid "AutoEQ / APO"
+msgstr ""
+
+#, fuzzy
 #| msgid "Automatic updates"
 msgid "Automatic Backups"
+msgstr "Automatické aktualizace"
+
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Automatic headroom"
+msgstr "Automatické aktualizace"
+
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Automatic preamp"
 msgstr "Automatické aktualizace"
 
 msgid "Automatic updates"
@@ -617,12 +650,34 @@ msgid "Backups"
 msgstr "Zpět"
 
 #, fuzzy
+#| msgid "Dance"
+msgid "Balance"
+msgstr "Taneční hudba"
+
+msgid "Band layout"
+msgstr ""
+
+msgid "Band"
+msgstr ""
+
+msgid "Bands"
+msgstr ""
+
+msgid "Bandwidth"
+msgstr ""
+
+#, fuzzy
 #| msgid "Play count"
 msgid "Bar count"
 msgstr "Počet přehrání"
 
 msgid "Bar spacing (px)"
 msgstr ""
+
+#, fuzzy
+#| msgid "Full Bass"
+msgid "Bass"
+msgstr "Posílení basů"
 
 #, fuzzy
 #| msgid "User token"
@@ -671,6 +726,9 @@ msgstr "Zrušit stahování"
 
 msgid "Cancel"
 msgstr "Zrušit"
+
+msgid "Cast format"
+msgstr ""
 
 #, fuzzy
 #| msgid "Casting"
@@ -851,6 +909,11 @@ msgstr "Vymazat frontu"
 
 msgid "Clearing queue also clears the current song"
 msgstr ""
+
+#, fuzzy
+#| msgid "Clear Mapping"
+msgid "Clipping"
+msgstr "Vymazat mapování"
 
 msgid "Close Window"
 msgstr "Zavřít okno"
@@ -1064,6 +1127,9 @@ msgstr ""
 msgid "Copy link"
 msgstr "Kopírovat"
 
+msgid "Copy of {name}"
+msgstr ""
+
 msgid "Copy preset"
 msgstr ""
 
@@ -1176,11 +1242,21 @@ msgstr "Režim prolínání"
 msgid "Crossfade"
 msgstr "Přechod"
 
+#, fuzzy
+#| msgid "Crossfade"
+msgid "Crossfeed"
+msgstr "Přechod"
+
 msgid "Current artwork"
 msgstr ""
 
 msgid "Custom HTTP headers"
 msgstr ""
+
+#, fuzzy
+#| msgid "Custom"
+msgid "Custom bands"
+msgstr "Přizpůsobené"
 
 msgid "Custom"
 msgstr "Přizpůsobené"
@@ -1262,6 +1338,11 @@ msgstr ""
 #| msgid "Delete Playlist"
 msgid "Delete playlist file"
 msgstr "Smazat playlist"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Delete preset"
+msgstr "Předvolba"
 
 msgid "Delete"
 msgstr "Smazat"
@@ -1432,6 +1513,16 @@ msgstr "Stahování"
 msgid "Drag to reorder"
 msgstr "Přetažením změňte pořadí"
 
+#, fuzzy
+#| msgid "Preset"
+msgid "Duplicate preset"
+msgstr "Předvolba"
+
+#, fuzzy
+#| msgid "Don't duplicate"
+msgid "Duplicate"
+msgstr "Neduplikujte"
+
 msgid "Duration"
 msgstr "Délka"
 
@@ -1530,6 +1621,17 @@ msgstr "Zapnout soukromý režim"
 msgid "Enable"
 msgstr ""
 
+msgid "Enabled"
+msgstr ""
+
+msgid "Encoding peak"
+msgstr ""
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Encoding"
+msgstr "Stahování"
+
 msgid "Encrypt backups"
 msgstr ""
 
@@ -1547,6 +1649,9 @@ msgstr ""
 
 msgid "Entire Library"
 msgstr "Celá knihovna"
+
+msgid "Equalizer is controlled by the receiver"
+msgstr ""
 
 msgid "Equalizer"
 msgstr "Ekvalizér"
@@ -1601,6 +1706,11 @@ msgid "Export playlist"
 msgstr "Chytré playlisty"
 
 #, fuzzy
+#| msgid "Smart playlists"
+msgid "Export preset"
+msgstr "Chytré playlisty"
+
+#, fuzzy
 #| msgid "Connection"
 msgid "Export to connection"
 msgstr "Spojení"
@@ -1626,6 +1736,9 @@ msgstr "Externí vyhledávání metadat"
 
 msgid "External site links"
 msgstr "Odkazy na externí stránky"
+
+msgid "FLAC"
+msgstr ""
 
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Ztlumit zvuk při pozastavení nebo obnovení přehrávání"
@@ -1704,6 +1817,11 @@ msgstr "Spojení"
 
 #, fuzzy
 #| msgid "Folder"
+msgid "File format"
+msgstr "Složka"
+
+#, fuzzy
+#| msgid "Folder"
 msgid "File path"
 msgstr "Složka"
 
@@ -1718,6 +1836,9 @@ msgstr ""
 "podporována"
 
 msgid "Filled spectrum"
+msgstr ""
+
+msgid "Filter type"
 msgstr ""
 
 msgid "Find shares"
@@ -1793,8 +1914,19 @@ msgstr ""
 msgid "Frames per second"
 msgstr "Obnovit sekci"
 
+msgid "Frequency · Hz"
+msgstr ""
+
+msgid "Frequency"
+msgstr ""
+
 msgid "Friday"
 msgstr ""
+
+#, fuzzy
+#| msgid "Full Treble"
+msgid "Full Bass & Treble"
+msgstr "Zesílení výšek"
 
 msgid "Full Bass"
 msgstr "Posílení basů"
@@ -1817,6 +1949,12 @@ msgstr "Přepnout do režimu celé obrazovky"
 
 msgid "Furigana"
 msgstr "Furigana"
+
+msgid "Gain · dB"
+msgstr ""
+
+msgid "Gain"
+msgstr ""
 
 msgid "Gapless mode"
 msgstr "Režim přehrávání bez mezer"
@@ -1868,6 +2006,9 @@ msgstr ""
 msgid "Gradient start"
 msgstr ""
 
+msgid "Graphic"
+msgstr ""
+
 msgid "Green"
 msgstr "Zelená"
 
@@ -1898,6 +2039,9 @@ msgstr "Skryté"
 msgid "Hide sidebar"
 msgstr "Skrýt postranní panel"
 
+msgid "High shelf"
+msgstr ""
+
 msgid "Highlight hovered row"
 msgstr ""
 
@@ -1920,6 +2064,9 @@ msgid "Hour"
 msgstr ""
 
 msgid "Hours"
+msgstr ""
+
+msgid "Hz"
 msgstr ""
 
 msgid "Identify"
@@ -1964,6 +2111,11 @@ msgstr "Čekání na připojení"
 
 #, fuzzy
 #| msgid "Support"
+msgid "Import preset"
+msgstr "Uživatelská podpora"
+
+#, fuzzy
+#| msgid "Support"
 msgid "Import theme"
 msgstr "Uživatelská podpora"
 
@@ -1978,6 +2130,9 @@ msgid "Importing profile"
 msgstr "Uložené zdroje"
 
 msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
+msgid "Inactive at this sample rate"
 msgstr ""
 
 msgid "Include detailed Rufin diagnostics in this session"
@@ -2256,6 +2411,9 @@ msgstr ""
 msgid "Loudness normalization"
 msgstr "Normalizace hlasitosti"
 
+msgid "Low shelf"
+msgstr ""
+
 msgid "Lyrics background opacity"
 msgstr ""
 
@@ -2280,6 +2438,9 @@ msgstr ""
 
 msgid "Lyrics"
 msgstr "Text skladby"
+
+msgid "MP3"
+msgstr ""
 
 msgid "Manage"
 msgstr "Spravovat"
@@ -2333,7 +2494,13 @@ msgstr ""
 msgid "Mirrored"
 msgstr ""
 
+msgid "Mode"
+msgstr ""
+
 msgid "Monday"
+msgstr ""
+
+msgid "Mono"
 msgstr ""
 
 msgid "Month"
@@ -2872,8 +3039,14 @@ msgstr "Otevřít poznámky k verzi"
 msgid "Outline bars"
 msgstr ""
 
+msgid "Output gain"
+msgstr ""
+
 msgid "Overview"
 msgstr "Přehled"
+
+msgid "Parametric"
+msgstr ""
 
 #, fuzzy
 #| msgid "Password"
@@ -2909,6 +3082,9 @@ msgid "Peak fall speed (% per second)"
 msgstr ""
 
 msgid "Peak hold (seconds)"
+msgstr ""
+
+msgid "Peak"
 msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
@@ -3092,6 +3268,9 @@ msgstr ""
 msgid "Position"
 msgstr "Pozice"
 
+msgid "Preamp"
+msgstr ""
+
 msgid "Prefer distinct track covers"
 msgstr ""
 
@@ -3147,7 +3326,17 @@ msgstr "Předvolba"
 
 #, fuzzy
 #| msgid "Preset"
+msgid "Preset name"
+msgstr "Předvolba"
+
+#, fuzzy
+#| msgid "Preset"
 msgid "Preset saved"
+msgstr "Předvolba"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset text"
 msgstr "Předvolba"
 
 msgid "Preset"
@@ -3217,6 +3406,9 @@ msgstr ""
 
 msgid "Purple"
 msgstr "Fialová"
+
+msgid "Q"
+msgstr ""
 
 msgid "Queue a track to begin"
 msgstr "Zařadit skladbu na začátek fronty"
@@ -3409,6 +3601,11 @@ msgid "Remove and Delete"
 msgstr "Odebrat a smazat"
 
 #, fuzzy
+#| msgid "Remove and Delete"
+msgid "Remove band"
+msgstr "Odebrat a smazat"
+
+#, fuzzy
 #| msgid "Remove folder"
 msgid "Remove device"
 msgstr "Odebrat složku"
@@ -3454,6 +3651,16 @@ msgstr "Odepnout"
 msgid "Rename file"
 msgstr "Přejmenovat"
 
+#, fuzzy
+#| msgid "Preset"
+msgid "Rename preset"
+msgstr "Předvolba"
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename"
+msgstr "Přejmenovat"
+
 msgid "Reorder"
 msgstr ""
 
@@ -3494,6 +3701,9 @@ msgstr "Obnovit výchozí nastavení"
 
 msgid "Reset"
 msgstr "Obnovit"
+
+msgid "Response"
+msgstr ""
 
 msgid "Restart now"
 msgstr ""
@@ -3547,6 +3757,9 @@ msgstr "Řádky"
 msgid "Rufin Connect"
 msgstr "Připojit"
 
+msgid "Rufin JSON"
+msgstr ""
+
 msgid "Rufin data folder"
 msgstr "Složka s daty aplikace Rufin"
 
@@ -3560,6 +3773,9 @@ msgid "SMB / Samba"
 msgstr ""
 
 msgid "SMB Domain"
+msgstr ""
+
+msgid "Sample peak"
 msgstr ""
 
 msgid "Sample rate"
@@ -3600,8 +3816,18 @@ msgstr "Vyhledávání se spustí automaticky"
 msgid "Save playlist changes automatically"
 msgstr "Vyhledávání se spustí automaticky"
 
+#, fuzzy
+#| msgid "Saved to"
+msgid "Save preset"
+msgstr "Uložit do"
+
 msgid "Save"
 msgstr "Uložit"
+
+#, fuzzy
+#| msgid "Saved"
+msgid "Save..."
+msgstr "Uloženo"
 
 #, fuzzy
 #| msgid "Saved to"
@@ -4084,7 +4310,13 @@ msgstr "Zdroje"
 msgid "Sources"
 msgstr "Zdroje"
 
+msgid "Spectrum · dBFS"
+msgstr ""
+
 msgid "Spectrum line"
+msgstr ""
+
+msgid "Spectrum"
 msgstr ""
 
 msgid "Start minimized"
@@ -4266,6 +4498,9 @@ msgstr "Název"
 msgid "Toggle Fullscreen"
 msgstr "Přepnout do režimu celé obrazovky"
 
+msgid "Tone and channels"
+msgstr ""
+
 msgid "Tools"
 msgstr ""
 
@@ -4320,6 +4555,11 @@ msgstr "Režim přechodu"
 
 msgid "Translation language"
 msgstr "Jazyk překladu"
+
+#, fuzzy
+#| msgid "Full Treble"
+msgid "Treble"
+msgstr "Zesílení výšek"
 
 msgid "Troubleshooting"
 msgstr "Řešení problémů"
@@ -4382,6 +4622,11 @@ msgstr "Zrušeno ztlumení"
 
 msgid "Unmuted"
 msgstr "Zrušeno ztlumení"
+
+#, fuzzy
+#| msgid "Saved"
+msgid "Unsaved"
+msgstr "Uloženo"
 
 #, fuzzy
 #| msgid "Song title"
@@ -4464,6 +4709,9 @@ msgstr "Nastavení textu skladeb"
 msgid "Use folder"
 msgstr "Přidat složku"
 
+msgid "Use for this output"
+msgstr ""
+
 msgid "Use listening activity"
 msgstr "Využít funkci poslechu"
 
@@ -4481,6 +4729,11 @@ msgstr "Maximální rok"
 #| msgid "Minimum year"
 msgid "Use minimum year"
 msgstr "Minimální rok"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use output settings"
+msgstr "Nastavení textu skladeb"
 
 #, fuzzy
 #| msgid "Lyrics settings"
@@ -4595,6 +4848,12 @@ msgid "Weekly"
 msgstr ""
 
 msgid "Wide"
+msgstr ""
+
+msgid "Width unit"
+msgstr ""
+
+msgid "Width"
 msgstr ""
 
 msgid "Window"
@@ -4963,11 +5222,6 @@ msgstr ""
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Přejmenovat Playlist"
-
-#, fuzzy
-#~| msgid "Rename"
-#~ msgid "Rename"
-#~ msgstr "Přejmenovat"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Vyberte existující lokální složku"

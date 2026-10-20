@@ -218,11 +218,17 @@ msgstr ""
 msgid "1 hour"
 msgstr "1 tunti"
 
+msgid "10 bands"
+msgstr ""
+
 msgid "12 hours"
 msgstr "12 tuntia"
 
 msgid "128 kbps"
 msgstr "128 kbps"
+
+msgid "18 bands"
+msgstr ""
 
 msgid "192 kbps"
 msgstr "192 kbps"
@@ -232,6 +238,9 @@ msgstr "24 tuntia"
 
 msgid "256 kbps"
 msgstr "256 kbps"
+
+msgid "31 bands"
+msgstr ""
 
 msgid "320 kbps"
 msgstr "320 kbps"
@@ -303,6 +312,9 @@ msgid "Add a source to configure downloads."
 msgstr "Lähteitä ei ole määritetty"
 
 msgid "Add a title"
+msgstr ""
+
+msgid "Add band"
 msgstr ""
 
 msgid "Add current"
@@ -515,6 +527,9 @@ msgstr "Salaisuuden tallennustila"
 msgid "Artwork"
 msgstr "Kuvitus"
 
+msgid "Audio effects"
+msgstr ""
+
 msgid "Audio fade on play/pause"
 msgstr "Äänen häivennys toistossa/keskeytyksessä"
 
@@ -542,7 +557,25 @@ msgstr ""
 msgid "Auto DJ"
 msgstr "Automaattinen DJ"
 
+#, fuzzy
+#| msgid "Auto DJ"
+msgid "Auto"
+msgstr "Automaattinen DJ"
+
+msgid "AutoEQ / APO"
+msgstr ""
+
 msgid "Automatic Backups"
+msgstr "Automaattiset varmuuskopiot"
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Automatic headroom"
+msgstr "Automaattinen"
+
+#, fuzzy
+#| msgid "Automatic Backups"
+msgid "Automatic preamp"
 msgstr "Automaattiset varmuuskopiot"
 
 msgid "Automatic updates"
@@ -582,11 +615,31 @@ msgid "Backups"
 msgstr "Varmuuskopiot"
 
 #, fuzzy
+#| msgid "Cancel"
+msgid "Balance"
+msgstr "Peru"
+
+msgid "Band layout"
+msgstr ""
+
+msgid "Band"
+msgstr ""
+
+msgid "Bands"
+msgstr ""
+
+msgid "Bandwidth"
+msgstr ""
+
+#, fuzzy
 #| msgid "Play count"
 msgid "Bar count"
 msgstr "Toistokerrat"
 
 msgid "Bar spacing (px)"
+msgstr ""
+
+msgid "Bass"
 msgstr ""
 
 msgid "Bearer token (WebDAV)"
@@ -632,6 +685,11 @@ msgstr "Peru lataus"
 
 msgid "Cancel"
 msgstr "Peru"
+
+#, fuzzy
+#| msgid "Export format"
+msgid "Cast format"
+msgstr "Vientimuoto"
 
 msgid "Casting network"
 msgstr ""
@@ -798,6 +856,9 @@ msgid "Clear"
 msgstr "Tyhjennä jono"
 
 msgid "Clearing queue also clears the current song"
+msgstr ""
+
+msgid "Clipping"
 msgstr ""
 
 msgid "Close Window"
@@ -1004,6 +1065,9 @@ msgstr "Kopioi kutsu"
 msgid "Copy link"
 msgstr "Kopioi"
 
+msgid "Copy of {name}"
+msgstr ""
+
 msgid "Copy preset"
 msgstr "Kopioi esiasetus"
 
@@ -1114,11 +1178,21 @@ msgstr "Ristihäivytystila"
 msgid "Crossfade"
 msgstr "Ristihäivytys"
 
+#, fuzzy
+#| msgid "Crossfade"
+msgid "Crossfeed"
+msgstr "Ristihäivytys"
+
 msgid "Current artwork"
 msgstr ""
 
 msgid "Custom HTTP headers"
 msgstr "Mukautetut HTTP-otsakkeet"
+
+#, fuzzy
+#| msgid "Custom"
+msgid "Custom bands"
+msgstr "Mukautettu"
 
 msgid "Custom"
 msgstr "Mukautettu"
@@ -1198,6 +1272,11 @@ msgstr "Poistetaanko \"{name}\"?"
 #| msgid "Delete Playlist"
 msgid "Delete playlist file"
 msgstr "Poista soittolista"
+
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Delete preset"
+msgstr "Liitä esiasetus"
 
 msgid "Delete"
 msgstr "Poista"
@@ -1362,6 +1441,16 @@ msgstr "Lataukset"
 msgid "Drag to reorder"
 msgstr "Vedä järjestääksesi uudelleen"
 
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Duplicate preset"
+msgstr "Liitä esiasetus"
+
+#, fuzzy
+#| msgid "Don't duplicate"
+msgid "Duplicate"
+msgstr "Älä kahdenna"
+
 msgid "Duration"
 msgstr "Kesto"
 
@@ -1452,6 +1541,19 @@ msgstr "Käytä yksityistä tilaa"
 msgid "Enable"
 msgstr "Käytä"
 
+#, fuzzy
+#| msgid "Enable"
+msgid "Enabled"
+msgstr "Käytä"
+
+msgid "Encoding peak"
+msgstr ""
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Encoding"
+msgstr "Ladataan"
+
 msgid "Encrypt backups"
 msgstr "Salaa varmuuskopiot"
 
@@ -1469,6 +1571,9 @@ msgstr "Kirjoita Nextcloud-palvelimesi osoite kirjautuaksesi selaimella"
 
 msgid "Entire Library"
 msgstr "Koko kirjasto"
+
+msgid "Equalizer is controlled by the receiver"
+msgstr ""
 
 msgid "Equalizer"
 msgstr "Taajuuskorjain"
@@ -1519,6 +1624,11 @@ msgid "Export playlist"
 msgstr "Vie soittolista"
 
 #, fuzzy
+#| msgid "Export playlist"
+msgid "Export preset"
+msgstr "Vie soittolista"
+
+#, fuzzy
 #| msgid "Connection"
 msgid "Export to connection"
 msgstr "Yhteys"
@@ -1540,6 +1650,9 @@ msgstr "Ulkoinen metatietojen nouto"
 
 msgid "External site links"
 msgstr "Ulkoisten sivujen linkit"
+
+msgid "FLAC"
+msgstr ""
 
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Häivytä ääni kun toisto keskeytetään tai palautetaan"
@@ -1614,6 +1727,11 @@ msgstr "Yhteys"
 
 #, fuzzy
 #| msgid "Folder"
+msgid "File format"
+msgstr "Kansio"
+
+#, fuzzy
+#| msgid "Folder"
 msgid "File path"
 msgstr "Kansio"
 
@@ -1626,6 +1744,9 @@ msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
 msgid "Filled spectrum"
+msgstr ""
+
+msgid "Filter type"
 msgstr ""
 
 msgid "Find shares"
@@ -1699,8 +1820,17 @@ msgstr ""
 msgid "Frames per second"
 msgstr "Monivalinta"
 
+msgid "Frequency · Hz"
+msgstr ""
+
+msgid "Frequency"
+msgstr ""
+
 msgid "Friday"
 msgstr "Perjantai"
+
+msgid "Full Bass & Treble"
+msgstr ""
 
 msgid "Full Bass"
 msgstr ""
@@ -1720,6 +1850,12 @@ msgid "Fullscreen"
 msgstr "Koko näyttö"
 
 msgid "Furigana"
+msgstr ""
+
+msgid "Gain · dB"
+msgstr ""
+
+msgid "Gain"
 msgstr ""
 
 msgid "Gapless mode"
@@ -1770,6 +1906,9 @@ msgstr ""
 msgid "Gradient start"
 msgstr ""
 
+msgid "Graphic"
+msgstr ""
+
 msgid "Green"
 msgstr "Vihreä"
 
@@ -1800,6 +1939,9 @@ msgstr "Piilotettu"
 msgid "Hide sidebar"
 msgstr "Piilota sivupalkki"
 
+msgid "High shelf"
+msgstr ""
+
 msgid "Highlight hovered row"
 msgstr ""
 
@@ -1825,6 +1967,9 @@ msgstr "Tunti"
 #| msgid "Hour"
 msgid "Hours"
 msgstr "Tunti"
+
+msgid "Hz"
+msgstr ""
 
 msgid "Identify"
 msgstr ""
@@ -1864,6 +2009,11 @@ msgstr "Odotetaan yhteyttä"
 
 #, fuzzy
 #| msgid "Export"
+msgid "Import preset"
+msgstr "Vie"
+
+#, fuzzy
+#| msgid "Export"
 msgid "Import theme"
 msgstr "Vie"
 
@@ -1878,6 +2028,9 @@ msgid "Importing profile"
 msgstr "Kotiprofiili"
 
 msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
+msgid "Inactive at this sample rate"
 msgstr ""
 
 msgid "Include detailed Rufin diagnostics in this session"
@@ -2139,6 +2292,9 @@ msgstr ""
 msgid "Loudness normalization"
 msgstr ""
 
+msgid "Low shelf"
+msgstr ""
+
 msgid "Lyrics background opacity"
 msgstr ""
 
@@ -2161,6 +2317,9 @@ msgstr "Sanoitukset ilmestyvät tähän."
 
 msgid "Lyrics"
 msgstr "Sanoitukset"
+
+msgid "MP3"
+msgstr "MP3"
 
 msgid "Manage"
 msgstr "Hallitse"
@@ -2212,8 +2371,14 @@ msgstr ""
 msgid "Mirrored"
 msgstr ""
 
+msgid "Mode"
+msgstr ""
+
 msgid "Monday"
 msgstr "Maanantai"
+
+msgid "Mono"
+msgstr ""
 
 msgid "Month"
 msgstr ""
@@ -2716,7 +2881,13 @@ msgstr "Muut julkaisut"
 msgid "Outline bars"
 msgstr ""
 
+msgid "Output gain"
+msgstr ""
+
 msgid "Overview"
+msgstr ""
+
+msgid "Parametric"
 msgstr ""
 
 msgid "Password or token"
@@ -2747,6 +2918,9 @@ msgid "Peak fall speed (% per second)"
 msgstr ""
 
 msgid "Peak hold (seconds)"
+msgstr ""
+
+msgid "Peak"
 msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
@@ -2922,6 +3096,9 @@ msgstr "Portti"
 msgid "Position"
 msgstr ""
 
+msgid "Preamp"
+msgstr ""
+
 msgid "Prefer distinct track covers"
 msgstr ""
 
@@ -2965,8 +3142,18 @@ msgstr "Esiasetus 4"
 msgid "Preset 5"
 msgstr "Esiasetus 5"
 
+#, fuzzy
+#| msgid "Preset saved"
+msgid "Preset name"
+msgstr "Esiasetus tallennettu"
+
 msgid "Preset saved"
 msgstr "Esiasetus tallennettu"
+
+#, fuzzy
+#| msgid "Preset 1"
+msgid "Preset text"
+msgstr "Esiasetus 1"
 
 msgid "Preset"
 msgstr "Esiasetus"
@@ -3031,6 +3218,9 @@ msgstr "Julkinen"
 
 msgid "Purple"
 msgstr "Violetti"
+
+msgid "Q"
+msgstr ""
 
 msgid "Queue a track to begin"
 msgstr "Aseta kappale jonoon aloittaaksesi"
@@ -3217,6 +3407,11 @@ msgid "Remove and Delete"
 msgstr ""
 
 #, fuzzy
+#| msgid "Remove Download"
+msgid "Remove band"
+msgstr "Poista lataus"
+
+#, fuzzy
 #| msgid "Remove rule"
 msgid "Remove device"
 msgstr "Poista sääntö"
@@ -3260,6 +3455,16 @@ msgstr ""
 msgid "Rename file"
 msgstr "Nimeä uudelleen"
 
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Rename preset"
+msgstr "Liitä esiasetus"
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename"
+msgstr "Nimeä uudelleen"
+
 msgid "Reorder"
 msgstr ""
 
@@ -3300,6 +3505,9 @@ msgstr "Palauta oletusarvot"
 
 msgid "Reset"
 msgstr "Palauta oletukset"
+
+msgid "Response"
+msgstr ""
 
 msgid "Restart now"
 msgstr ""
@@ -3353,6 +3561,9 @@ msgstr "Rivit"
 msgid "Rufin Connect"
 msgstr "Yhdistä"
 
+msgid "Rufin JSON"
+msgstr ""
+
 msgid "Rufin data folder"
 msgstr "Rufin-datakansio"
 
@@ -3367,6 +3578,9 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB-toimialue"
+
+msgid "Sample peak"
+msgstr ""
 
 msgid "Sample rate"
 msgstr ""
@@ -3404,8 +3618,18 @@ msgstr "Tallenna sanoitukset automaattisesti"
 msgid "Save playlist changes automatically"
 msgstr "Tallenna sanoitukset automaattisesti"
 
+#, fuzzy
+#| msgid "Saved preset"
+msgid "Save preset"
+msgstr "Tallennettu esiasetus"
+
 msgid "Save"
 msgstr "Tallenna"
+
+#, fuzzy
+#| msgid "Saved"
+msgid "Save..."
+msgstr "Tallennettu"
 
 msgid "Saved Plex Login"
 msgstr ""
@@ -3863,7 +4087,13 @@ msgstr "Lähde"
 msgid "Sources"
 msgstr "Lähteet"
 
+msgid "Spectrum · dBFS"
+msgstr ""
+
 msgid "Spectrum line"
+msgstr ""
+
+msgid "Spectrum"
 msgstr ""
 
 msgid "Start minimized"
@@ -4041,6 +4271,9 @@ msgstr ""
 msgid "Toggle Fullscreen"
 msgstr "Koko näyttö päällä/pois"
 
+msgid "Tone and channels"
+msgstr ""
+
 msgid "Tools"
 msgstr "Työkalut"
 
@@ -4095,6 +4328,9 @@ msgstr "Siirtymätila"
 
 msgid "Translation language"
 msgstr "Käännöskieli"
+
+msgid "Treble"
+msgstr ""
 
 msgid "Troubleshooting"
 msgstr "Vianmääritys"
@@ -4155,6 +4391,11 @@ msgstr "Ääni palautettu"
 
 msgid "Unmuted"
 msgstr "Ääni palautettu"
+
+#, fuzzy
+#| msgid "Saved"
+msgid "Unsaved"
+msgstr "Tallennettu"
 
 msgid "Untitled"
 msgstr ""
@@ -4233,6 +4474,9 @@ msgstr "Sanoitusten asetukset"
 msgid "Use folder"
 msgstr "Lisää kansio"
 
+msgid "Use for this output"
+msgstr ""
+
 msgid "Use listening activity"
 msgstr ""
 
@@ -4248,6 +4492,11 @@ msgstr "Vuosi enintään"
 #| msgid "Minimum year"
 msgid "Use minimum year"
 msgstr "Vuosi vähintään"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use output settings"
+msgstr "Sanoitusten asetukset"
 
 #, fuzzy
 #| msgid "Lyrics settings"
@@ -4362,6 +4611,12 @@ msgid "Weekly"
 msgstr "Viikottain"
 
 msgid "Wide"
+msgstr ""
+
+msgid "Width unit"
+msgstr ""
+
+msgid "Width"
 msgstr ""
 
 msgid "Window"
@@ -4671,9 +4926,6 @@ msgstr "Tervetuloa Rufinin asennukseen"
 #~ msgid "Set up this device"
 #~ msgstr "Tällä laitteella"
 
-#~ msgid "MP3"
-#~ msgstr "MP3"
-
 #~ msgid "Added to favorites"
 #~ msgstr "Lisätty suosikkeihin"
 
@@ -4738,11 +4990,6 @@ msgstr "Tervetuloa Rufinin asennukseen"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Nimeä soittolista uudelleen"
-
-#, fuzzy
-#~| msgid "Rename"
-#~ msgid "Rename"
-#~ msgstr "Nimeä uudelleen"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Valitse olemassa oleva paikallinen kansio"
