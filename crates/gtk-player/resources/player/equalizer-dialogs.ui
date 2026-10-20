@@ -216,7 +216,7 @@
                 <property name="halign">end</property>
                 <child>
                   <object class="GtkButton" id="export_save">
-                    <property name="label" translatable="yes">Save…</property>
+                    <property name="label" translatable="yes">Save...</property>
                   </object>
                 </child>
                 <child>

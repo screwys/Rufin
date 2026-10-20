@@ -3226,7 +3226,7 @@ msgstr ""
 msgid "Save"
 msgstr ""
 
-msgid "Save\342\200\246"
+msgid "Save..."
 msgstr ""
 
 msgid "Saved Plex Login"
