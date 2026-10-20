@@ -607,23 +607,37 @@ jobs:
           args=(--locked --all-targets
             -p library -p sources -p secrets -p desktop-integration
             -p audio-processing -p playback-gstreamer -p windows-updater)
-          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
-            args+=(--no-run)
-          fi
           cargo nextest run --no-run --config-file nextest.toml --test-threads 4 "${args[@]}"
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            exit 0
+          fi
           (
-            sleep 50
-            while IFS= read -r test_pid; do
-              test_pid="${test_pid//$'\r'/}"
+            sleep 65
+            if process_snapshot="$(timeout --kill-after=5s 10s powershell.exe -NoProfile -NonInteractive -Command \
+              '$ErrorActionPreference="Stop"; Get-Process | Where-Object { $_.ProcessName -like "playback_gstreamer-*" } | ForEach-Object { "{0} name={1} started={2:o} exited={3}" -f $_.Id, $_.ProcessName, $_.StartTime.ToUniversalTime(), $_.HasExited }')"; then
+              echo "Windows playback process lookup succeeded"
+            else
+              echo "Windows playback process lookup failed with status $?"
+              exit 0
+            fi
+            observed_processes=0
+            while IFS= read -r process; do
+              process="${process//$'\r'/}"
+              test_pid="${process%% *}"
               [[ "$test_pid" =~ ^[0-9]+$ ]] || continue
-              echo "Windows playback stack for process $test_pid"
-              timeout 20s gdb -nx -batch \
+              observed_processes=$((observed_processes + 1))
+              echo "Windows playback process: $process"
+              if timeout --kill-after=5s 20s gdb -nx -batch \
                 -ex "attach $test_pid" \
                 -ex 'thread apply all bt' \
                 -ex detach \
-                -ex quit || true
-            done < <(powershell.exe -NoProfile -Command \
-              "Get-Process -Name 'playback_gstreamer-*' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id")
+                -ex quit; then
+                echo "GDB completed for process $test_pid"
+              else
+                echo "GDB for process $test_pid exited with status $?"
+              fi
+            done <<< "$process_snapshot"
+            echo "Playback processes observed: $observed_processes"
           ) &
           stack_capture_pid=$!
           trap 'kill "$stack_capture_pid" 2>/dev/null || true' EXIT

@@ -1113,8 +1113,15 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::print_stderr)]
     fn tracker_decoder_preserves_transport_without_format_metadata_or_extension() {
+        let started = std::time::SystemTime::now();
+        eprintln!(
+            "tracker pid={} started at {started:?}: initialize",
+            std::process::id()
+        );
         ensure_gstreamer_initialized().unwrap();
+        eprintln!("tracker: create fixture directory");
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("stream");
         let mut module = vec![0_u8; 1_084 + 1_024 + 64];
@@ -1126,8 +1133,11 @@ mod tests {
         module[1_084..1_088].copy_from_slice(&[1, 172, 16, 0]);
         module[2_108..2_140].fill(96);
         module[2_140..].fill(160);
+        eprintln!("tracker: write fixture");
         std::fs::write(&path, module).unwrap();
+        eprintln!("tracker: make file URI");
         let uri = glib::filename_to_uri(&path, None).unwrap();
+        eprintln!("tracker: construct player");
         let shared = Arc::new(Mutex::new(SharedBackendState::new()));
         let mut player = PlayerPipeline::new("tracker-decoder-check", shared);
         let item = PreparedRun {
@@ -1138,6 +1148,7 @@ mod tests {
             audio_output: Some("appsink".to_string()),
             ..BackendAudioSettings::default()
         };
+        eprintln!("tracker: start");
         player
             .play_item(
                 PipelineId(1),
@@ -1150,6 +1161,7 @@ mod tests {
                 gst::State::Paused,
             )
             .unwrap();
+        eprintln!("tracker: preroll");
         let state = player
             .native
             .as_ref()
@@ -1165,15 +1177,39 @@ mod tests {
             ),
             "tracker pipeline did not finish starting"
         );
+        eprintln!("tracker: inspect decoders");
+        let decoder = player
+            .native
+            .as_ref()
+            .unwrap()
+            .0
+            .clone()
+            .downcast::<gst::Bin>()
+            .unwrap()
+            .iterate_recurse()
+            .find(|element| {
+                !element.is::<gst::Bin>()
+                    && element.factory().is_some_and(|factory| {
+                        factory.klass().split('/').any(|class| class == "Decoder")
+                    })
+            })
+            .and_then(|element| element.factory())
+            .map(|factory| factory.name().to_string());
+        eprintln!("tracker decoder: {decoder:?}");
+        eprintln!("tracker: seekable");
         assert_eq!(player.seekable(), Some(true));
+        eprintln!("tracker: duration");
         assert!(player.duration().is_some());
+        eprintln!("tracker: seek");
         player.seek_millis(1_000).unwrap();
+        eprintln!("tracker: finish seek");
         let deadline = Instant::now() + Duration::from_secs(5);
         while player.seek_in_progress() && Instant::now() < deadline {
             player.complete_seek().unwrap();
             thread::sleep(Duration::from_millis(5));
         }
         assert!(!player.seek_in_progress(), "tracker seek did not finish");
+        eprintln!("tracker: read preroll");
         let sink = player
             .audio_output()
             .unwrap()
@@ -1192,13 +1228,36 @@ mod tests {
         // This module uses 120 ms rows; native seeking lands on a row boundary.
         assert!((1_000..1_120).contains(&position.mseconds()));
         assert!(sample.buffer().unwrap().size() > 0);
+        eprintln!("tracker: resume");
         player.set_state(gst::State::Playing).unwrap();
+        eprintln!("tracker: first resumed sample");
         sink.try_pull_sample(gst::ClockTime::SECOND)
             .expect("resumed audio");
+        eprintln!("tracker: second resumed sample");
         sink.try_pull_sample(gst::ClockTime::SECOND)
             .expect("continued audio");
+        eprintln!("tracker: position");
         assert!(player.position().unwrap() > position);
+        eprintln!("tracker: stop");
         player.stop();
+        eprintln!("tracker: stopped");
+        eprintln!("tracker: release preroll sample");
+        drop(sample);
+        eprintln!("tracker: release sink reference");
+        drop(sink);
+        drop(settings);
+        drop(item);
+        eprintln!("tracker: release player");
+        drop(player);
+        drop(uri);
+        drop(path);
+        eprintln!("tracker: remove fixture directory");
+        drop(directory);
+        eprintln!(
+            "tracker pid={} finished at {:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+        );
     }
 
     #[test]
