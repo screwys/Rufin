@@ -1278,6 +1278,13 @@ msgstr "Poista soittolista"
 msgid "Delete preset"
 msgstr "Liitä esiasetus"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete {count} playlist?"
+msgid_plural "Delete {count} playlists?"
+msgstr[0] "Poista soittolista"
+msgstr[1] "Poista soittolista"
+
 msgid "Delete"
 msgstr "Poista"
 
