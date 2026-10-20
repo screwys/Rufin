@@ -26,6 +26,7 @@ struct CastMedia {
     stream: PreparedStream,
     processing: ProcessingRequest,
     position_millis: u64,
+    position_observed: Instant,
 }
 
 enum SdkEvent {
@@ -120,6 +121,8 @@ pub(crate) struct GoogleCastController {
     muted: bool,
     processing: ProcessingRequest,
     playing: bool,
+    visualizer_enabled: bool,
+    visualizer_playing: bool,
     pending_reload: bool,
     awaiting_load: bool,
     seekable: bool,
@@ -177,6 +180,8 @@ impl GoogleCastController {
             muted: false,
             processing: ProcessingRequest::default(),
             playing: false,
+            visualizer_enabled: false,
+            visualizer_playing: false,
             pending_reload: false,
             awaiting_load: false,
             seekable: false,
@@ -212,6 +217,9 @@ impl GoogleCastController {
                     self.device.resume_playback().map_err(string_error)?;
                 }
                 self.playing = true;
+                if let Some(current) = &mut self.current {
+                    current.position_observed = Instant::now();
+                }
                 Ok(vec![BackendEvent::State {
                     run,
                     state: BackendState::Playing,
@@ -220,6 +228,7 @@ impl GoogleCastController {
             BackendCommand::Pause { run } if self.current_run() == Some(run) => {
                 self.device.pause_playback().map_err(string_error)?;
                 self.playing = false;
+                self.visualizer_playing = false;
                 Ok(vec![BackendEvent::State {
                     run,
                     state: BackendState::Paused,
@@ -276,11 +285,27 @@ impl GoogleCastController {
                     output: None,
                 }])
             }
+            BackendCommand::SetVisualizerEnabled(enabled) => {
+                if self.visualizer_enabled == enabled {
+                    return Ok(Vec::new());
+                }
+                self.visualizer_enabled = enabled;
+                if enabled
+                    && let Some(current) = &self.current
+                    && current.published.native_seek
+                {
+                    if self.playing {
+                        self.reload(current.position_millis, relay)?;
+                    } else {
+                        self.pending_reload = true;
+                    }
+                }
+                Ok(Vec::new())
+            }
             BackendCommand::PrepareNext { .. }
             | BackendCommand::ConfigureAudio(_)
             | BackendCommand::UpdateLoudness { .. }
             | BackendCommand::SetPlaybackRate(_)
-            | BackendCommand::SetVisualizerEnabled(_)
             | BackendCommand::Play { .. }
             | BackendCommand::Pause { .. }
             | BackendCommand::Stop { .. }
@@ -349,11 +374,13 @@ impl GoogleCastController {
             stream: stream.clone(),
             processing: self.processing.clone(),
             position_millis,
+            position_observed: Instant::now(),
         });
         self.playback_observed = false;
+        self.visualizer_playing = false;
         self.playing = true;
         self.awaiting_load = true;
-        self.seekable = published.native_seek;
+        self.seekable = true;
         self.pending_reload = false;
         let mut events = vec![
             BackendEvent::Started { run },
@@ -379,6 +406,7 @@ impl GoogleCastController {
         reload: bool,
     ) -> PublishRequest {
         let generated = reload
+            || self.visualizer_enabled
             || self.processing.config != Default::default()
             || stream.window().is_some()
             || !crate::relay::directly_supported(&crate::relay::source_content_type(stream))
@@ -471,10 +499,12 @@ impl GoogleCastController {
             stream,
             processing: self.processing.clone(),
             position_millis: position,
+            position_observed: Instant::now(),
         });
         self.awaiting_load = true;
         self.pending_reload = false;
         self.playback_observed = false;
+        self.visualizer_playing = false;
         Ok(())
     }
 
@@ -542,6 +572,7 @@ impl GoogleCastController {
                     if !self.pending_reload {
                         if let Some(current) = &mut self.current {
                             current.position_millis = logical_position;
+                            current.position_observed = Instant::now();
                         }
                         update.push(BackendEvent::Position {
                             run,
@@ -584,6 +615,13 @@ impl GoogleCastController {
                 match outcome {
                     CastStateOutcome::Ignore => {}
                     CastStateOutcome::State(state) => {
+                        if state == BackendState::Playing
+                            && !self.visualizer_playing
+                            && let Some(current) = &mut self.current
+                        {
+                            current.position_observed = Instant::now();
+                        }
+                        self.visualizer_playing = state == BackendState::Playing;
                         if matches!(state, BackendState::Playing | BackendState::Paused) {
                             self.playback_observed = true;
                         }
@@ -685,6 +723,21 @@ impl GoogleCastController {
 
     pub(super) fn current_run(&self) -> Option<RunId> {
         self.current.as_ref().map(|current| current.run)
+    }
+
+    pub(crate) fn visualizer(&self, relay: &RelayServer) -> Option<BackendEvent> {
+        if !self.visualizer_enabled
+            || !self.visualizer_playing
+            || self.awaiting_load
+            || self.pending_reload
+        {
+            return None;
+        }
+        let current = self.current.as_ref()?;
+        let position = current
+            .position_millis
+            .saturating_add(current.position_observed.elapsed().as_millis() as u64);
+        relay.visualizer(&current.published, current.run, position)
     }
 }
 

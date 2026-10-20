@@ -4,6 +4,7 @@ pub mod plex;
 mod relay;
 mod upnp;
 mod upnp_transport;
+mod visualizer;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -362,6 +363,13 @@ impl Controller {
             Self::GoogleCast(controller) => controller.shutdown(),
         }
     }
+
+    fn visualizer(&self, relay: &RelayServer) -> Option<BackendEvent> {
+        match self {
+            Self::Upnp(controller) => controller.visualizer(relay),
+            Self::GoogleCast(controller) => controller.visualizer(relay),
+        }
+    }
 }
 
 fn run_controller(
@@ -373,9 +381,12 @@ fn run_controller(
 ) {
     publish(&events, controller.initial_events());
     let mut last_poll = Instant::now();
+    let mut last_frame = Instant::now();
+    let mut visualizing = false;
     let mut initial_processing = true;
     loop {
-        let command = commands.recv_timeout(Duration::from_millis(100));
+        let command =
+            commands.recv_timeout(Duration::from_millis(if visualizing { 33 } else { 100 }));
         if initial_processing || processing.has_changed().unwrap_or(false) {
             initial_processing = false;
             let request = processing.borrow_and_update().clone();
@@ -417,6 +428,14 @@ fn run_controller(
                 Err(error) => publish_error(&events, run, controller.current_run(), None, error),
             }
             last_poll = Instant::now();
+        }
+        if last_frame.elapsed() >= Duration::from_millis(33) {
+            let frame = controller.visualizer(&relay);
+            visualizing = frame.is_some();
+            if let Some(frame) = frame {
+                publish(&events, vec![frame]);
+            }
+            last_frame = Instant::now();
         }
     }
     controller.shutdown();

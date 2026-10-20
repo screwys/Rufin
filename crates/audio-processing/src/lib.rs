@@ -17,10 +17,12 @@ mod waveform;
 pub use loudness::{
     AnalyzedLoudness, LoudnessAnalysis, album_loudness, analyze_loudness_cancellable,
 };
-pub use transcode::{TranscodeOptions, TranscodedAudioReader, transcode_audio};
+pub use transcode::{TranscodeOptions, TranscodedAudioReader, VisualizerFrame, transcode_audio};
 pub use waveform::generate_waveform_peaks_cancellable;
 
-pub use visualizer::VisualizerFft;
+pub use visualizer::{
+    VISUALIZER_BAND_COUNT, VisualizerFft, copy_audio_samples, copy_visualizer_samples,
+};
 
 /// Initialize GStreamer once before playback or waveform work starts.
 pub fn ensure_gstreamer_initialized() -> Result<(), String> {

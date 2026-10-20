@@ -2,7 +2,9 @@
 
 use super::engine::{EventMailbox, PipelineId, SharedBackendState, Slot, push_event};
 use super::lock_recover;
-use audio_processing::VisualizerFft;
+#[cfg(test)]
+use audio_processing::copy_audio_samples;
+use audio_processing::{VisualizerFft, copy_visualizer_samples};
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_audio as gst_audio;
@@ -41,7 +43,9 @@ impl VisualizerTap {
             let Some(buffer) = info.buffer() else {
                 return gst::PadProbeReturn::Ok;
             };
-            let Some((samples, sample_rate)) = copy_visualizer_samples(pad, buffer) else {
+            let Some((samples, sample_rate)) =
+                copy_visualizer_samples(pad, buffer, VISUALIZER_COPY_FRAMES)
+            else {
                 return gst::PadProbeReturn::Ok;
             };
             let frame = VisualizerFrame {
@@ -188,61 +192,6 @@ impl VisualizerAnalyzer {
             output: None,
         }
     }
-}
-fn copy_visualizer_samples(pad: &gst::Pad, buffer: &gst::Buffer) -> Option<(Vec<f32>, u32)> {
-    let caps = pad.current_caps()?;
-    let info = gst_audio::AudioInfo::from_caps(caps.as_ref()).ok()?;
-    let map = buffer.map_readable().ok()?;
-    copy_audio_samples(map.as_slice(), &info, VISUALIZER_COPY_FRAMES)
-        .map(|samples| (samples, info.rate()))
-}
-fn copy_audio_samples(
-    bytes: &[u8],
-    info: &gst_audio::AudioInfo,
-    max_frames: usize,
-) -> Option<Vec<f32>> {
-    if !info.is_valid() || info.layout() != gst_audio::AudioLayout::Interleaved {
-        return None;
-    }
-    let channels = info.channels() as usize;
-    let frame_size = info.bpf() as usize;
-    let frames = (bytes.len() / frame_size).min(max_frames);
-    if frames == 0 {
-        return None;
-    }
-    let format = info.format_info();
-    let sample_size = if format.is_float() { 8 } else { 4 };
-    let mut unpacked = vec![0; frames * channels * sample_size];
-    // GStreamer handles integer alignment, signedness and byte order. Its
-    // canonical unpacked formats are native-endian S32 and F64.
-    format.unpack(
-        gst_audio::AudioPackFlags::empty(),
-        &mut unpacked,
-        &bytes[..frames * frame_size],
-    );
-    Some(
-        unpacked
-            .chunks_exact(channels * sample_size)
-            .map(|frame| {
-                let total: f32 = frame
-                    .chunks_exact(sample_size)
-                    .map(|sample| {
-                        let value = if format.is_float() {
-                            f64::from_ne_bytes(sample.try_into().unwrap()) as f32
-                        } else {
-                            i32::from_ne_bytes(sample.try_into().unwrap()) as f32 / 2_147_483_648.0
-                        };
-                        if value.is_finite() {
-                            value.clamp(-1.0, 1.0)
-                        } else {
-                            0.0
-                        }
-                    })
-                    .sum();
-                total / channels as f32
-            })
-            .collect(),
-    )
 }
 fn run_visualizer_worker(
     receiver: Receiver<VisualizerFrame>,

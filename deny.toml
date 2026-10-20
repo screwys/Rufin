@@ -10,6 +10,7 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "ashpd, oo7, mpris-server and ksni still require zbus 5 / zvariant 5. Maintenance advisory after the zbus 6 crate merge; remove when upstream dependencies drop standalone zvariant." },
     { id = "RUSTSEC-2026-0371", reason = "zbus 5 and its macros require zbus_names 4. Maintenance advisory after the zbus 6 crate merge; remove when upstream dependencies migrate to zbus 6 and drop zbus_names." },
     { id = "RUSTSEC-2026-0372", reason = "zvariant 5 requires zvariant_derive 5. Maintenance advisory after the zbus 6 crate merge; remove when upstream dependencies drop standalone zvariant." },
+    { id = "RUSTSEC-2026-0374", reason = "Askama 0.16 and i18n-config 0.4 still use basic-toml for build-time configuration. Maintenance advisory with no patched release; remove when these dependencies migrate to toml." },
     { id = "RUSTSEC-2023-0071", reason = "rsa is pulled by smb -> sspi -> picky; Rufin enables only NTLM, with Kerberos and PKU2U disabled, so the affected RSA private-key operations are unused. Reassess if SMB authentication features change." },
     { id = "RUSTSEC-2024-0436", reason = "lofty uses paste, can be removed if they change it to pastey" },
 ]

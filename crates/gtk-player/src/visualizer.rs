@@ -570,7 +570,9 @@ impl crate::PlayerUi {
         let sidebar_visible = !self.fullscreen_player_visible()
             && self.right_sidebar_visible()
             && self.right_panel.visualizer_visible.get();
-        let active = (fullscreen_visible || sidebar_visible)
+        let visible = fullscreen_visible || sidebar_visible;
+        self.playback_owner.set_visualizer_enabled(visible);
+        let active = visible
             && self.selected_playback().as_deref().is_some_and(|player| {
                 matches!(
                     player.transport.effective_state(),
@@ -579,12 +581,10 @@ impl crate::PlayerUi {
             });
         let changed = self.views.visualizer.active.replace(active) != active;
         if active {
-            self.playback_owner.set_visualizer_enabled(true);
             self.start_visualizer_tick();
             return;
         }
         if changed {
-            self.playback_owner.set_visualizer_enabled(false);
             self.stop_visualizer_tick();
             self.clear_visualizer();
         }

@@ -881,6 +881,7 @@ fn bottom_player_can_update_position_only(
         previous.transport.current == next.transport.current
             && previous.transport.effective_state() == next.transport.effective_state()
             && previous.transport.duration_millis == next.transport.duration_millis
+            && previous.transport.can_seek == next.transport.can_seek
             && previous.transport.buffering_percent == next.transport.buffering_percent
             && previous.transport.error == next.transport.error
             && previous.controls == next.controls
@@ -895,6 +896,7 @@ fn media_controls_static_state_changed(
         previous.transport.current != next.transport.current
             || previous.transport.effective_state() != next.transport.effective_state()
             || previous.transport.duration_millis != next.transport.duration_millis
+            || previous.transport.can_seek != next.transport.can_seek
             || previous.controls.repeat_mode != next.controls.repeat_mode
             || previous.controls.shuffle_enabled != next.controls.shuffle_enabled
             || previous.controls.auto_dj_enabled != next.controls.auto_dj_enabled
@@ -1112,6 +1114,16 @@ mod tests {
             &tick
         ));
         assert!(!media_controls_static_state_changed(Some(&previous), &tick));
+
+        let mut seekability_change = tick.clone();
+        seekability_change.transport.can_seek = true;
+        for (previous, next) in [(&tick, &seekability_change), (&seekability_change, &tick)] {
+            assert!(!bottom_player_can_update_position_only(
+                Some(previous),
+                next
+            ));
+            assert!(media_controls_static_state_changed(Some(previous), next));
+        }
 
         let mut state_change = tick.clone();
         state_change.transport.state = TransportStatus::Playing;

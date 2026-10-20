@@ -1,12 +1,15 @@
 //! Bounded spectrum analysis.
 
+use gst::prelude::*;
+use gstreamer as gst;
+use gstreamer_audio as gst_audio;
 use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const VISUALIZER_FFT_SIZE: usize = 2_048;
-const VISUALIZER_BAND_COUNT: usize = 52;
+pub const VISUALIZER_BAND_COUNT: usize = 52;
 const VISUALIZER_MIN_FREQUENCY_HZ: f32 = 30.0;
 const VISUALIZER_MAX_FREQUENCY_HZ: f32 = 12_000.0;
 const VISUALIZER_VISIBLE_FLOOR: f64 = 0.28;
@@ -119,17 +122,79 @@ impl VisualizerFft {
             return None;
         }
         self.last_emit = Some(now);
-        Some(self.levels(sample_rate))
+        self.levels(sample_rate)
     }
 
-    fn levels(&mut self, sample_rate: u32) -> Vec<f64> {
+    pub fn levels(&mut self, sample_rate: u32) -> Option<Vec<f64>> {
+        if self.samples.len() < VISUALIZER_FFT_SIZE {
+            return None;
+        }
         self.transform();
         if self.band_sample_rate != sample_rate {
             self.band_ranges = visualizer_band_ranges(sample_rate);
             self.band_sample_rate = sample_rate;
         }
-        fft_band_levels(&self.input, &self.band_ranges)
+        Some(fft_band_levels(&self.input, &self.band_ranges))
     }
+}
+
+pub fn copy_visualizer_samples(
+    pad: &gst::Pad,
+    buffer: &gst::Buffer,
+    max_frames: usize,
+) -> Option<(Vec<f32>, u32)> {
+    let caps = pad.current_caps()?;
+    let info = gst_audio::AudioInfo::from_caps(caps.as_ref()).ok()?;
+    let map = buffer.map_readable().ok()?;
+    copy_audio_samples(map.as_slice(), &info, max_frames).map(|samples| (samples, info.rate()))
+}
+pub fn copy_audio_samples(
+    bytes: &[u8],
+    info: &gst_audio::AudioInfo,
+    max_frames: usize,
+) -> Option<Vec<f32>> {
+    if !info.is_valid() || info.layout() != gst_audio::AudioLayout::Interleaved {
+        return None;
+    }
+    let channels = info.channels() as usize;
+    let frame_size = info.bpf() as usize;
+    let frames = (bytes.len() / frame_size).min(max_frames);
+    if frames == 0 {
+        return None;
+    }
+    let format = info.format_info();
+    let sample_size = if format.is_float() { 8 } else { 4 };
+    let mut unpacked = vec![0; frames * channels * sample_size];
+    // GStreamer handles integer alignment, signedness and byte order. Its
+    // canonical unpacked formats are native-endian S32 and F64.
+    format.unpack(
+        gst_audio::AudioPackFlags::empty(),
+        &mut unpacked,
+        &bytes[..frames * frame_size],
+    );
+    Some(
+        unpacked
+            .chunks_exact(channels * sample_size)
+            .map(|frame| {
+                let total: f32 = frame
+                    .chunks_exact(sample_size)
+                    .map(|sample| {
+                        let value = if format.is_float() {
+                            f64::from_ne_bytes(sample.try_into().unwrap()) as f32
+                        } else {
+                            i32::from_ne_bytes(sample.try_into().unwrap()) as f32 / 2_147_483_648.0
+                        };
+                        if value.is_finite() {
+                            value.clamp(-1.0, 1.0)
+                        } else {
+                            0.0
+                        }
+                    })
+                    .sum();
+                total / channels as f32
+            })
+            .collect(),
+    )
 }
 
 fn visualizer_band_ranges(sample_rate: u32) -> Vec<(usize, usize)> {
@@ -217,7 +282,7 @@ mod visualizer_tests {
     fn visualizer_fft_distinguishes_silence_from_bounded_energy() {
         let mut fft = VisualizerFft::new();
         fft.push_samples(&vec![0.0; VISUALIZER_FFT_SIZE]);
-        let silence = fft.levels(48_000);
+        let silence = fft.levels(48_000).expect("full FFT window");
         assert_eq!(silence, vec![0.0; VISUALIZER_BAND_COUNT]);
 
         fft.clear();
@@ -229,7 +294,7 @@ mod visualizer_tests {
             })
             .collect::<Vec<_>>();
         fft.push_samples(&samples);
-        let levels = fft.levels(48_000);
+        let levels = fft.levels(48_000).expect("full FFT window");
         assert!(levels.iter().copied().fold(0.0_f64, f64::max) > 0.3);
         assert!(levels.iter().all(|level| (0.0..=1.0).contains(level)));
     }
@@ -246,7 +311,7 @@ mod visualizer_tests {
                 })
                 .collect::<Vec<_>>();
             fft.push_samples(&samples);
-            fft.levels(sample_rate)
+            fft.levels(sample_rate).expect("full FFT window")
         };
         let peak_band = |levels: &[f64]| {
             levels
@@ -281,7 +346,7 @@ mod visualizer_tests {
             })
             .collect::<Vec<_>>();
         fft.push_samples(&samples);
-        let levels = fft.levels(48_000);
+        let levels = fft.levels(48_000).expect("full FFT window");
         let peak = levels.iter().copied().fold(0.0_f64, f64::max);
 
         assert!(peak > 0.5);

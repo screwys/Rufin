@@ -132,6 +132,11 @@ struct HeldOutput {
     muted: bool,
 }
 
+struct PendingMedia {
+    processing: ProcessingRequest,
+    previous_uri: Option<String>,
+}
+
 struct QueuedMedia {
     run: RunId,
     published: PublishedResource,
@@ -169,6 +174,8 @@ pub(crate) struct UpnpController {
     current: Option<QueuedMedia>,
     next_media: Option<QueuedMedia>,
     last_position_millis: u64,
+    position_observed: Instant,
+    visualizer_enabled: bool,
     pending_seek: Option<PendingSeek>,
     pending_start_position_millis: Option<u64>,
     started: bool,
@@ -177,7 +184,7 @@ pub(crate) struct UpnpController {
     startup_output: Option<HeldOutput>,
     observation_unavailable: bool,
     processing: ProcessingRequest,
-    pending_processing: Option<ProcessingRequest>,
+    pending_media: Option<PendingMedia>,
     pending_reload: bool,
     playing: bool,
 }
@@ -196,6 +203,8 @@ impl UpnpController {
             current: None,
             next_media: None,
             last_position_millis: 0,
+            position_observed: Instant::now(),
+            visualizer_enabled: false,
             pending_seek: None,
             pending_start_position_millis: None,
             started: false,
@@ -204,7 +213,7 @@ impl UpnpController {
             startup_output: None,
             observation_unavailable: false,
             processing: ProcessingRequest::default(),
-            pending_processing: None,
+            pending_media: None,
             pending_reload: false,
             playing: false,
         })
@@ -279,6 +288,7 @@ impl UpnpController {
                     return Err(error);
                 }
                 self.started = true;
+                self.position_observed = Instant::now();
                 self.playing = true;
                 Ok(vec![BackendEvent::State {
                     run,
@@ -311,6 +321,7 @@ impl UpnpController {
             } if self.current_run() == Some(run) && self.seekable => {
                 if !self.playing {
                     self.last_position_millis = position_millis;
+                    self.position_observed = Instant::now();
                     self.pending_reload = true;
                     return Ok(vec![BackendEvent::Position {
                         run,
@@ -355,11 +366,44 @@ impl UpnpController {
                     output: None,
                 }])
             }
+            BackendCommand::SetVisualizerEnabled(enabled) => {
+                if self.visualizer_enabled == enabled {
+                    return Ok(Vec::new());
+                }
+                self.visualizer_enabled = enabled;
+                if enabled
+                    && self
+                        .current
+                        .as_ref()
+                        .is_some_and(|media| media.published.native_seek)
+                {
+                    if self.playing {
+                        return self.reload(self.last_position_millis, relay);
+                    }
+                    self.pending_reload = true;
+                } else if enabled
+                    && let Some(next) = self
+                        .next_media
+                        .as_ref()
+                        .filter(|next| next.published.native_seek)
+                {
+                    let next = PreparedNext::new(
+                        next.run,
+                        next.stream.clone(),
+                        playback::NextTransition::Gapless,
+                    );
+                    return self.prepare_next(
+                        self.current_run().expect("current media"),
+                        Some(next),
+                        relay,
+                    );
+                }
+                Ok(Vec::new())
+            }
             BackendCommand::PrepareNext { .. }
             | BackendCommand::ConfigureAudio(_)
             | BackendCommand::UpdateLoudness { .. }
             | BackendCommand::SetPlaybackRate(_)
-            | BackendCommand::SetVisualizerEnabled(_)
             | BackendCommand::Play { .. }
             | BackendCommand::Pause { .. }
             | BackendCommand::Stop { .. }
@@ -375,6 +419,7 @@ impl UpnpController {
     ) -> Result<PublishRequest, String> {
         let processing = self.processing.config.clone();
         let representation = if reload
+            || self.visualizer_enabled
             || processing != Default::default()
             || stream.window().is_some()
             || self.processing.cast_encoding.codec == library::AudioCodec::Flac
@@ -424,24 +469,31 @@ impl UpnpController {
             .ok_or("UPnP current media is unavailable")?;
         let run = current.run;
         let stream = current.stream.clone();
+        let previous_uri = Some(current.published.uri.clone());
         let published = relay.publish(&stream, self.publish_request(&stream, position, true)?)?;
         let metadata = didl_metadata(&stream, &published);
+        if let Err(error) = self.hold_startup_output() {
+            tracing::debug!(%error, "UPnP output could not be silenced for seeking");
+        }
         if let Err(error) = self
-            .set_uri(&published.uri, &metadata)
+            .reset_transport()
+            .and_then(|()| self.set_uri(&published.uri, &metadata))
             .and_then(|()| self.start_transport())
         {
             relay.remove(&published);
+            let _ = self.stop();
+            self.finish_current(relay);
             return Err(error);
         }
         if let Some(previous) = self.current.take() {
             relay.remove(&previous.published);
         }
-        self.install_current(run, stream, published);
+        self.install_current(run, stream, published, previous_uri);
         self.last_position_millis = position;
+        self.position_observed = Instant::now();
         self.pending_reload = false;
         self.pending_seek = None;
         self.pending_start_position_millis = None;
-        self.seekable = false;
         self.started = true;
         self.playing = true;
         let mut events = vec![
@@ -449,13 +501,9 @@ impl UpnpController {
                 run,
                 millis: position,
             },
-            BackendEvent::Seekable {
-                run,
-                seekable: false,
-            },
             BackendEvent::State {
                 run,
-                state: BackendState::Playing,
+                state: BackendState::Buffering,
             },
         ];
         if let Some(next) = self.next_media.as_ref() {
@@ -509,6 +557,24 @@ impl UpnpController {
             .get("TrackURI")
             .map(String::as_str)
             .unwrap_or_default();
+        let is_current_uri = self
+            .current
+            .as_ref()
+            .is_some_and(|current| track_uri == current.published.uri);
+        // Status can still describe the previous URI after SetAVTransportURI returns.
+        if let Some(pending) = &self.pending_media
+            && ((pending.previous_uri.as_deref() == Some(track_uri) && !is_current_uri)
+                || ((track_uri.is_empty() || is_current_uri)
+                    && !matches!(
+                        transport_state,
+                        Some("PLAYING" | "PAUSED_PLAYBACK" | "PAUSED_RECORDING")
+                    )))
+        {
+            return Ok(vec![BackendEvent::TransportObserved {
+                run,
+                state: BackendState::Buffering,
+            }]);
+        }
         if self
             .next_media
             .as_ref()
@@ -590,9 +656,10 @@ impl UpnpController {
             }
             self.restore_startup_output()?;
         }
-        if self
-            .current_duration_millis()
-            .is_some_and(|duration| position_millis >= duration)
+        if publish_position
+            && self
+                .current_duration_millis()
+                .is_some_and(|duration| position_millis >= duration)
         {
             self.stop()?;
             self.finish_current(relay);
@@ -608,11 +675,13 @@ impl UpnpController {
         self.playing = state == BackendState::Playing;
         if publish_position && !self.pending_reload {
             self.last_position_millis = position_millis;
+            self.position_observed = Instant::now();
         }
         let mut events = vec![BackendEvent::TransportObserved { run, state }];
         if matches!(state, BackendState::Playing | BackendState::Paused)
-            && let Some(processing) = self.pending_processing.take()
+            && let Some(pending) = self.pending_media.take()
         {
+            let processing = pending.processing;
             if self
                 .current
                 .as_ref()
@@ -630,8 +699,11 @@ impl UpnpController {
                     spectrum_db: Vec::new(),
                 });
             }
+            if self.pending_start_position_millis.is_none() && self.pending_seek.is_none() {
+                self.restore_startup_output()?;
+            }
         }
-        if self.pending_processing.is_none()
+        if self.pending_media.is_none()
             && let Some(current) = &self.current
         {
             events.extend(relay.processing_events(&current.published, &self.processing.output));
@@ -684,6 +756,10 @@ impl UpnpController {
         position_millis: u64,
         relay: &RelayServer,
     ) -> Result<Vec<BackendEvent>, String> {
+        let previous_uri = self
+            .current
+            .as_ref()
+            .map(|current| current.published.uri.clone());
         let _ = self.restore_startup_output();
         self.reset_transport()?;
         self.finish_current(relay);
@@ -694,7 +770,7 @@ impl UpnpController {
             relay.remove(&media);
             return Err(error);
         }
-        self.install_current(run, stream.clone(), media.clone());
+        self.install_current(run, stream.clone(), media.clone(), previous_uri);
         let hold_output = position_millis > 0
             && media.native_seek
             && match self.hold_startup_output() {
@@ -714,8 +790,8 @@ impl UpnpController {
             return Err(error);
         }
         self.pending_start_position_millis = None;
-        self.seekable = media.native_seek
-            && self
+        self.seekable = !media.native_seek
+            || self
                 .transport_actions()
                 .is_ok_and(|actions| actions.allows("Seek"));
         if position_millis > 0 && media.native_seek {
@@ -746,10 +822,20 @@ impl UpnpController {
         Ok(events)
     }
 
-    fn install_current(&mut self, run: RunId, stream: PreparedStream, media: PublishedResource) {
+    fn install_current(
+        &mut self,
+        run: RunId,
+        stream: PreparedStream,
+        media: PublishedResource,
+        previous_uri: Option<String>,
+    ) {
         self.last_position_millis = media.logical_offset_millis;
+        self.position_observed = Instant::now();
         self.current = Some(QueuedMedia::new(run, stream, media));
-        self.pending_processing = Some(self.processing.clone());
+        self.pending_media = Some(PendingMedia {
+            processing: self.processing.clone(),
+            previous_uri,
+        });
         self.renderer_owned = true;
     }
 
@@ -820,17 +906,16 @@ impl UpnpController {
             relay.remove(&current.published);
         }
         let new_run = next.run;
+        let native_seek = next.published.native_seek;
         self.last_position_millis = next.published.logical_offset_millis;
+        self.position_observed = Instant::now();
         self.current = Some(next);
         self.pending_seek = None;
         self.pending_start_position_millis = None;
         self.renderer_owned = true;
         self.started = true;
-        self.seekable = self
-            .current
-            .as_ref()
-            .is_some_and(|media| media.published.native_seek)
-            && self
+        self.seekable = !native_seek
+            || self
                 .transport_actions()
                 .is_ok_and(|actions| actions.allows("Seek"));
         let position_millis = position
@@ -839,12 +924,14 @@ impl UpnpController {
             .map(|renderer_position| self.current_logical_position_millis(renderer_position))
             .unwrap_or(self.current_logical_offset_millis());
         self.last_position_millis = position_millis;
+        self.position_observed = Instant::now();
         let state = match transport_state {
             Some("PLAYING") => BackendState::Playing,
             Some("PAUSED_PLAYBACK") | Some("PAUSED_RECORDING") => BackendState::Paused,
             Some("STOPPED") | Some("NO_MEDIA_PRESENT") => BackendState::Stopped,
             _ => BackendState::Buffering,
         };
+        self.playing = state == BackendState::Playing;
         let mut events = vec![
             BackendEvent::Transitioned { old_run, new_run },
             BackendEvent::Seekable {
@@ -906,12 +993,28 @@ impl UpnpController {
         self.renderer_owned = false;
         self.seekable = false;
         self.pending_reload = false;
-        self.pending_processing = None;
+        self.pending_media = None;
         self.playing = false;
     }
 
     pub(super) fn current_run(&self) -> Option<RunId> {
         self.current.as_ref().map(|media| media.run)
+    }
+
+    pub(crate) fn visualizer(&self, relay: &RelayServer) -> Option<BackendEvent> {
+        if !self.visualizer_enabled
+            || !self.playing
+            || self.pending_media.is_some()
+            || self.pending_reload
+            || self.pending_seek.is_some()
+        {
+            return None;
+        }
+        let current = self.current.as_ref()?;
+        let position = self
+            .last_position_millis
+            .saturating_add(self.position_observed.elapsed().as_millis() as u64);
+        relay.visualizer(&current.published, current.run, position)
     }
 
     fn current_logical_offset_millis(&self) -> u64 {
@@ -984,6 +1087,7 @@ impl UpnpController {
         match pending.observe(observed_millis) {
             SeekObservation::Reached => {
                 self.last_position_millis = observed_millis;
+                self.position_observed = Instant::now();
                 false
             }
             SeekObservation::Expired => true,
@@ -1187,6 +1291,9 @@ impl UpnpController {
     }
 
     fn hold_startup_output(&mut self) -> Result<(), String> {
+        if self.startup_output.is_some() {
+            return Ok(());
+        }
         let (volume, muted) = self.volume()?;
         self.startup_output = Some(HeldOutput { volume, muted });
         if let Err(error) = self.set_volume(volume, true) {

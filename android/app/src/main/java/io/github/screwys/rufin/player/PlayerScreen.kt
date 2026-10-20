@@ -108,7 +108,7 @@ internal fun PlayerScreen(player: PlayerConnection, preferences: PreferencesConn
     LaunchedEffect(lyricsEnabled, visualizerEnabled) {
         if (surface == PlayerSurface.LYRICS && !lyricsEnabled || surface == PlayerSurface.VISUALIZER && !visualizerEnabled) surface = null
     }
-    LaunchedEffect(surface, combined) { player.visualizer(surface == PlayerSurface.VISUALIZER || surface == PlayerSurface.LYRICS && combined) }
+    LaunchedEffect(surface, combined, player.playback?.controls?.playbackOutput) { player.visualizer(surface == PlayerSurface.VISUALIZER || surface == PlayerSurface.LYRICS && combined) }
     DisposableEffect(player) { onDispose { player.visualizer(false) } }
     BackHandler { if (surface != null) surface = null else onClose() }
     Surface(Modifier.fillMaxSize().graphicsLayer { translationY = verticalOffset.value }
