@@ -616,6 +616,11 @@ msgstr "Bezpečné úložiště"
 msgid "Backups"
 msgstr "Zpět"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Bar count"
+msgstr "Počet přehrání"
+
 msgid "Bar spacing (px)"
 msgstr ""
 
@@ -637,6 +642,9 @@ msgstr ""
 
 msgid "Blue"
 msgstr "Modrá"
+
+msgid "Brightness (%)"
+msgstr ""
 
 msgid "Browse"
 msgstr ""
@@ -1726,6 +1734,9 @@ msgstr "Skrýt text skladby"
 msgid "Finishing setup"
 msgstr ""
 
+msgid "Fit to height"
+msgstr ""
+
 msgid "Fixed position"
 msgstr "Pevná pozice"
 
@@ -1875,6 +1886,9 @@ msgstr ""
 msgid "Guest / public access"
 msgstr ""
 
+msgid "Height (%)"
+msgstr ""
+
 msgid "Help"
 msgstr "Nápověda"
 
@@ -1921,6 +1935,11 @@ msgstr ""
 
 msgid "If you do not have API keys, create them"
 msgstr "Pokud nemáte klíče API, vytvořte si je"
+
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Ignore playback volume"
+msgstr "Vyberte výstup přehrávání"
 
 #, fuzzy
 #| msgid "Saved Sources"
@@ -2309,6 +2328,9 @@ msgid "Minimum year"
 msgstr "Minimální rok"
 
 msgid "Mirrored bars"
+msgstr ""
+
+msgid "Mirrored"
 msgstr ""
 
 msgid "Monday"
@@ -3836,6 +3858,9 @@ msgstr "Zdroj metadat"
 #| msgid "App settings"
 msgid "Settings"
 msgstr "Nastavení aplikace"
+
+msgid "Shadow"
+msgstr ""
 
 msgid "Share"
 msgstr ""
