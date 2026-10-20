@@ -122,6 +122,12 @@ mod imp {
             let output = gst::GhostPad::builder(gst::PadDirection::Src)
                 .name("src")
                 .build();
+            // Decodebin3 drops allocation queries after the URI queue. Decline them
+            // here so a paused queue cannot block a decoder holding its own lock.
+            output
+                .internal()
+                .unwrap()
+                .unset_pad_flags(gst::PadFlags::PROXY_ALLOCATION);
             bin.add_pad(&output).unwrap();
 
             decoder.connect("autoplug-select", false, |values| {

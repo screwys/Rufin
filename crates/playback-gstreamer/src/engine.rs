@@ -3388,22 +3388,11 @@ mod tests {
     const ACTIVE_PIPELINE: PipelineId = PipelineId(7);
 
     #[test]
-    #[allow(clippy::print_stderr)]
     fn crossfade_trigger_tracks_playback_rate() {
-        eprintln!(
-            "crossfade pid={} started at {:?}",
-            std::process::id(),
-            std::time::SystemTime::now()
-        );
         assert_eq!(crossfade_start_remaining_millis(5_000, 0.5), 2_500);
         assert_eq!(crossfade_start_remaining_millis(5_000, 1.0), 5_000);
         assert_eq!(crossfade_start_remaining_millis(5_000, 1.5), 7_500);
         assert_eq!(crossfade_start_remaining_millis(5_000, 2.0), 10_000);
-        eprintln!(
-            "crossfade pid={} finished at {:?}",
-            std::process::id(),
-            std::time::SystemTime::now()
-        );
     }
 
     const INCOMING_PIPELINE: PipelineId = PipelineId(8);
