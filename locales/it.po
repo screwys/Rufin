@@ -134,6 +134,16 @@ msgstr ""
 "verranno eliminati."
 
 msgid ""
+"Remove all Rufin data and settings except saved connections and credentials? "
+"Rufin will restart after clearing the data."
+msgstr ""
+
+msgid ""
+"Remove all Rufin data, settings and saved logins? Rufin will restart after "
+"clearing the data."
+msgstr ""
+
+msgid ""
 "Replace the selected contents and remove these configured sources?\n"
 "{sources}\n"
 "Their retained user state and saved logins will remain unless selected."
@@ -614,6 +624,11 @@ msgstr "Blu"
 msgid "Browse"
 msgstr ""
 
+#, fuzzy
+#| msgid "Cached"
+msgid "Cached data"
+msgstr "In cache"
+
 msgid "Cached"
 msgstr "In cache"
 
@@ -722,12 +737,42 @@ msgstr ""
 msgid "Classical"
 msgstr "Classico"
 
+#, fuzzy
+#| msgid "Clear artist"
+msgid "Clear EBU R128 cache"
+msgstr "Rimuovi artista"
+
+#, fuzzy
+#| msgid "Downloading Japanese dictionary..."
+msgid "Clear Japanese dictionary"
+msgstr "Scaricando il dizionario giapponese..."
+
 msgid "Clear Mapping"
 msgstr ""
 
 #, fuzzy
 #| msgid "Clear queue"
 msgid "Clear album"
+msgstr "Rimuovi coda"
+
+#, fuzzy
+#| msgid "Clear artist"
+msgid "Clear all cache"
+msgstr "Rimuovi artista"
+
+#, fuzzy
+#| msgid "Clear artist"
+msgid "Clear all cache?"
+msgstr "Rimuovi artista"
+
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear all data"
+msgstr "Rimuovi coda"
+
+#, fuzzy
+#| msgid "Clear queue"
+msgid "Clear all data?"
 msgstr "Rimuovi coda"
 
 msgid "Clear artist"
@@ -749,6 +794,11 @@ msgstr "Rimuovi coda"
 
 msgid "Clear title"
 msgstr "Rimuovi titolo"
+
+#, fuzzy
+#| msgid "Clear artist"
+msgid "Clear waveform cache"
+msgstr "Rimuovi artista"
 
 #, fuzzy
 #| msgid "Clear queue"
@@ -1061,6 +1111,11 @@ msgstr "Header HTTP personalizzati"
 msgid "Custom"
 msgstr "Personalizzato"
 
+#, fuzzy
+#| msgid "Collection"
+msgid "Customization"
+msgstr "Collezione"
+
 msgid "Customize display"
 msgstr "Personalizza visualizzazione"
 
@@ -1080,6 +1135,9 @@ msgstr "Balla"
 
 msgid "Dark"
 msgstr "Scuro"
+
+msgid "Database sizes show stored data, excluding database overhead."
+msgstr ""
 
 msgid "Date added"
 msgstr "Data aggiunta"
@@ -1289,6 +1347,9 @@ msgstr "Durata"
 
 msgid "Dynamic background"
 msgstr "Sfondo dinamico"
+
+msgid "EBU R128 analysis"
+msgstr ""
 
 msgid "EBU R128 reference level"
 msgstr ""
@@ -1619,9 +1680,6 @@ msgstr ""
 msgid "General"
 msgstr ""
 
-msgid "Generate and cache waveforms for the current track"
-msgstr ""
-
 msgid "Genius"
 msgstr ""
 
@@ -1783,6 +1841,11 @@ msgstr ""
 msgid "January {year}"
 msgstr ""
 
+#, fuzzy
+#| msgid "Downloading Japanese dictionary..."
+msgid "Japanese dictionary"
+msgstr "Scaricando il dizionario giapponese..."
+
 msgid "Jellyfin"
 msgstr ""
 
@@ -1813,9 +1876,6 @@ msgid "Karaoke mode"
 msgstr ""
 
 msgid "Keep Rufin running after closing the window"
-msgstr ""
-
-msgid "Keep album transitions gapless when possible"
 msgstr ""
 
 msgid "Keep music available offline. Folder changes only affect new downloads"
@@ -2803,6 +2863,9 @@ msgstr ""
 msgid "Previous"
 msgstr ""
 
+msgid "Privacy & Security"
+msgstr ""
+
 msgid "Privacy and Security"
 msgstr ""
 
@@ -3302,9 +3365,6 @@ msgid "Seek playback"
 msgstr ""
 
 msgid "Seek to {time}"
-msgstr ""
-
-msgid "Seekbar"
 msgstr ""
 
 msgid "Segmented bars"
@@ -3842,6 +3902,11 @@ msgstr ""
 msgid "UPnP"
 msgstr ""
 
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Unavailable"
+msgstr "Album non disponibile"
+
 msgid "Undo identified value"
 msgstr ""
 
@@ -4028,6 +4093,9 @@ msgstr ""
 msgid "Waveform seekbar"
 msgstr ""
 
+msgid "Waveforms"
+msgstr ""
+
 msgid "WebDAV / Nextcloud"
 msgstr ""
 
@@ -4143,6 +4211,11 @@ msgstr[1] ""
 
 msgid "{count} day ago"
 msgid_plural "{count} days ago"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "{count} entry"
+msgid_plural "{count} entries"
 msgstr[0] ""
 msgstr[1] ""
 

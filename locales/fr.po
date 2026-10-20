@@ -157,6 +157,16 @@ msgstr ""
 "musicaux ne seront pas supprimés."
 
 msgid ""
+"Remove all Rufin data and settings except saved connections and credentials? "
+"Rufin will restart after clearing the data."
+msgstr ""
+
+msgid ""
+"Remove all Rufin data, settings and saved logins? Rufin will restart after "
+"clearing the data."
+msgstr ""
+
+msgid ""
 "Replace the selected contents and remove these configured sources?\n"
 "{sources}\n"
 "Their retained user state and saved logins will remain unless selected."
@@ -629,6 +639,11 @@ msgstr "Bleu"
 msgid "Browse"
 msgstr "Parcourir"
 
+#, fuzzy
+#| msgid "Cached"
+msgid "Cached data"
+msgstr "Mise en cache"
+
 msgid "Cached"
 msgstr "Mise en cache"
 
@@ -731,10 +746,40 @@ msgstr "Spectre circulaire"
 msgid "Classical"
 msgstr "Classique"
 
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear EBU R128 cache"
+msgstr "Rechercher des paroles"
+
+#, fuzzy
+#| msgid "Downloading Japanese dictionary..."
+msgid "Clear Japanese dictionary"
+msgstr "Téléchargement du dictionnaire japonais..."
+
 msgid "Clear Mapping"
 msgstr "Effacer le mappage"
 
 msgid "Clear album"
+msgstr "Effacer l’album"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear all cache"
+msgstr "Rechercher des paroles"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear all cache?"
+msgstr "Rechercher des paroles"
+
+#, fuzzy
+#| msgid "Clear album"
+msgid "Clear all data"
+msgstr "Effacer l’album"
+
+#, fuzzy
+#| msgid "Clear album"
+msgid "Clear all data?"
 msgstr "Effacer l’album"
 
 msgid "Clear artist"
@@ -758,6 +803,11 @@ msgstr "Effacer la file d'attente"
 
 msgid "Clear title"
 msgstr "Effacer le titre"
+
+#, fuzzy
+#| msgid "Search artwork"
+msgid "Clear waveform cache"
+msgstr "Rechercher l’illustration"
 
 msgid "Clear"
 msgstr "Effacer"
@@ -1028,6 +1078,11 @@ msgstr "En-têtes HTTP personnalisés"
 msgid "Custom"
 msgstr "Personnalisé"
 
+#, fuzzy
+#| msgid "Compilation"
+msgid "Customization"
+msgstr "Compilation"
+
 msgid "Customize display"
 msgstr "Affichage personnalisé"
 
@@ -1045,6 +1100,9 @@ msgstr "Dance"
 
 msgid "Dark"
 msgstr "Sombre"
+
+msgid "Database sizes show stored data, excluding database overhead."
+msgstr ""
 
 msgid "Date added"
 msgstr "Date d'ajout"
@@ -1242,6 +1300,11 @@ msgstr "Durée"
 
 msgid "Dynamic background"
 msgstr "Fonds dynamique"
+
+#, fuzzy
+#| msgid "Enable EBU R128 Analysis?"
+msgid "EBU R128 analysis"
+msgstr "Activer l'analyse EBU R128 ?"
 
 msgid "EBU R128 reference level"
 msgstr "Niveau de référence EBU R128"
@@ -1569,9 +1632,6 @@ msgstr "Sans interruption"
 msgid "General"
 msgstr "Général"
 
-msgid "Generate and cache waveforms for the current track"
-msgstr "Générer et mettre en cache les formes d’onde de la piste actuelle"
-
 msgid "Genius"
 msgstr "Genius"
 
@@ -1729,6 +1789,11 @@ msgstr "Inviter"
 msgid "January {year}"
 msgstr "Janvier {year}"
 
+#, fuzzy
+#| msgid "Downloading Japanese dictionary..."
+msgid "Japanese dictionary"
+msgstr "Téléchargement du dictionnaire japonais..."
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
 
@@ -1758,9 +1823,6 @@ msgstr "Mode Karaoke"
 
 msgid "Keep Rufin running after closing the window"
 msgstr "Garder Rufin actif après la fermeture de la fenêtre"
-
-msgid "Keep album transitions gapless when possible"
-msgstr "Conserver des transitions d’album sans interruption lorsque possible"
 
 msgid "Keep music available offline. Folder changes only affect new downloads"
 msgstr ""
@@ -2739,6 +2801,11 @@ msgstr "Période précédente"
 msgid "Previous"
 msgstr "Précédent"
 
+#, fuzzy
+#| msgid "Privacy and Security"
+msgid "Privacy & Security"
+msgstr "Confidentialité et sécurité"
+
 msgid "Privacy and Security"
 msgstr "Confidentialité et sécurité"
 
@@ -3231,9 +3298,6 @@ msgstr "Se déplacer dans la lecture"
 
 msgid "Seek to {time}"
 msgstr "Cherchez à {temps}"
-
-msgid "Seekbar"
-msgstr "Bar de recherche"
 
 msgid "Segmented bars"
 msgstr "Barres segmentées"
@@ -3752,6 +3816,11 @@ msgstr "Typographie"
 msgid "UPnP"
 msgstr "UPnP"
 
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Unavailable"
+msgstr "Album non disponible"
+
 msgid "Undo identified value"
 msgstr "Annuler la valeur identifiée"
 
@@ -3931,6 +4000,11 @@ msgstr "En attente de l’approbation de l’autre appareil"
 msgid "Waveform seekbar"
 msgstr "Barre de recherche de forme d’onde"
 
+#, fuzzy
+#| msgid "Waveform seekbar"
+msgid "Waveforms"
+msgstr "Barre de recherche de forme d’onde"
+
 msgid "WebDAV / Nextcloud"
 msgstr "WebDAV / Nextcloud"
 
@@ -4048,6 +4122,14 @@ msgid "{count} day ago"
 msgid_plural "{count} days ago"
 msgstr[0] "depuis {count} jour"
 msgstr[1] "depuis {count} jours"
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "{count} entry"
+msgid_plural "{count} entries"
+msgstr[0] "{count} morceau"
+msgstr[1] "{count} morceaux"
 
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
@@ -4183,6 +4265,16 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue sur l'installateur de Rufin"
+
+#~ msgid "Generate and cache waveforms for the current track"
+#~ msgstr "Générer et mettre en cache les formes d’onde de la piste actuelle"
+
+#~ msgid "Keep album transitions gapless when possible"
+#~ msgstr ""
+#~ "Conserver des transitions d’album sans interruption lorsque possible"
+
+#~ msgid "Seekbar"
+#~ msgstr "Bar de recherche"
 
 #~ msgid ""
 #~ "The folder is relative to the selected account. Applying it changes "
