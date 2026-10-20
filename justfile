@@ -1,4 +1,5 @@
 set shell := ["bash", "-euc"]
+set positional-arguments
 
 default:
     @just --list
@@ -403,7 +404,6 @@ fmt:
 i18n *args:
     @scripts/container run default none cargo run -p xtask -- generate i18n-template {{ args }}
 
-[positional-arguments]
 test *args:
     @if [[ "$*" == "android" ]]; then \
         android/gradlew -p android -PandroidAbis=arm64-v8a testDevelopmentDebugUnitTest lintDevelopmentDebug; \
@@ -411,7 +411,6 @@ test *args:
         scripts/container run default none just _test "$@"; \
     fi
 
-[positional-arguments]
 _test *args:
     @if [[ "$(uname -s)" == Darwin ]]; then \
         gettext_prefix="$(brew --prefix gettext)"; \
