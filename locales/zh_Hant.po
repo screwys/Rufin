@@ -117,6 +117,16 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Remove all Rufin data and settings except saved connections and credentials? "
+"Rufin will restart after clearing the data."
+msgstr ""
+
+msgid ""
+"Remove all Rufin data, settings and saved logins? Rufin will restart after "
+"clearing the data."
+msgstr ""
+
+msgid ""
 "Replace the selected contents and remove these configured sources?\n"
 "{sources}\n"
 "Their retained user state and saved logins will remain unless selected."
@@ -608,6 +618,11 @@ msgstr "藍色"
 msgid "Browse"
 msgstr ""
 
+#, fuzzy
+#| msgid "Cached"
+msgid "Cached data"
+msgstr "已快取"
+
 msgid "Cached"
 msgstr "已快取"
 
@@ -725,12 +740,40 @@ msgstr ""
 msgid "Classical"
 msgstr "古典"
 
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear EBU R128 cache"
+msgstr "搜尋歌詞"
+
+msgid "Clear Japanese dictionary"
+msgstr ""
+
 msgid "Clear Mapping"
 msgstr ""
 
 #, fuzzy
 #| msgid "Play album"
 msgid "Clear album"
+msgstr "播放專輯"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear all cache"
+msgstr "搜尋歌詞"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear all cache?"
+msgstr "搜尋歌詞"
+
+#, fuzzy
+#| msgid "Play album"
+msgid "Clear all data"
+msgstr "播放專輯"
+
+#, fuzzy
+#| msgid "Play album"
+msgid "Clear all data?"
 msgstr "播放專輯"
 
 #, fuzzy
@@ -758,6 +801,11 @@ msgstr "清除播放佇列"
 #| msgid "Add a title"
 msgid "Clear title"
 msgstr "新增標題"
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Clear waveform cache"
+msgstr "搜尋歌詞"
 
 #, fuzzy
 #| msgid "Clear queue"
@@ -1096,6 +1144,11 @@ msgstr ""
 msgid "Custom"
 msgstr ""
 
+#, fuzzy
+#| msgid "Collection"
+msgid "Customization"
+msgstr "收藏"
+
 msgid "Customize display"
 msgstr ""
 
@@ -1113,6 +1166,9 @@ msgstr "舞曲"
 
 msgid "Dark"
 msgstr "深色"
+
+msgid "Database sizes show stored data, excluding database overhead."
+msgstr ""
 
 msgid "Date added"
 msgstr "新增日期"
@@ -1335,6 +1391,9 @@ msgid "Duration"
 msgstr "時長"
 
 msgid "Dynamic background"
+msgstr ""
+
+msgid "EBU R128 analysis"
 msgstr ""
 
 msgid "EBU R128 reference level"
@@ -1716,9 +1775,6 @@ msgstr "無縫銜接"
 msgid "General"
 msgstr ""
 
-msgid "Generate and cache waveforms for the current track"
-msgstr "生成並快取目前曲目的波形圖"
-
 msgid "Genius"
 msgstr ""
 
@@ -1884,6 +1940,9 @@ msgstr ""
 msgid "January {year}"
 msgstr ""
 
+msgid "Japanese dictionary"
+msgstr ""
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
 
@@ -1917,9 +1976,6 @@ msgstr ""
 
 msgid "Keep Rufin running after closing the window"
 msgstr "讓 Rufin 在視窗關閉後仍然保持運行"
-
-msgid "Keep album transitions gapless when possible"
-msgstr ""
 
 msgid "Keep music available offline. Folder changes only affect new downloads"
 msgstr "使音樂在離線時仍然可用。資料夾的變更只會影響新的下載"
@@ -3036,6 +3092,11 @@ msgstr "上一頁"
 msgid "Previous"
 msgstr "上一首"
 
+#, fuzzy
+#| msgid "Privacy and Security"
+msgid "Privacy & Security"
+msgstr "隱私與安全"
+
 msgid "Privacy and Security"
 msgstr "隱私與安全"
 
@@ -3590,9 +3651,6 @@ msgid "Seek playback"
 msgstr ""
 
 msgid "Seek to {time}"
-msgstr ""
-
-msgid "Seekbar"
 msgstr ""
 
 #, fuzzy
@@ -4178,6 +4236,11 @@ msgstr ""
 msgid "UPnP"
 msgstr "UPnP"
 
+#, fuzzy
+#| msgid "Album title"
+msgid "Unavailable"
+msgstr "專輯標題"
+
 msgid "Undo identified value"
 msgstr ""
 
@@ -4380,6 +4443,9 @@ msgstr ""
 msgid "Waveform seekbar"
 msgstr ""
 
+msgid "Waveforms"
+msgstr ""
+
 msgid "WebDAV / Nextcloud"
 msgstr ""
 
@@ -4500,6 +4566,13 @@ msgid "{count} day ago"
 msgid_plural "{count} days ago"
 msgstr[0] "{count} 天之前"
 
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "{count} entry"
+msgid_plural "{count} entries"
+msgstr[0] "{count} 首曲目"
+
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
 msgstr[0] "已選擇 {count} 個資料夾"
@@ -4615,6 +4688,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Generate and cache waveforms for the current track"
+#~ msgstr "生成並快取目前曲目的波形圖"
 
 #, fuzzy
 #~| msgid "Add a new source"
