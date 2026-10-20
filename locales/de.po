@@ -619,6 +619,11 @@ msgstr "Sicherung wiederhergestellt"
 msgid "Backups"
 msgstr "Sicherungen"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Bar count"
+msgstr "Wiedergabezähler"
+
 msgid "Bar spacing (px)"
 msgstr "Leistenabstand (px)"
 
@@ -636,6 +641,9 @@ msgstr "Bitrate"
 
 msgid "Blue"
 msgstr "Blau"
+
+msgid "Brightness (%)"
+msgstr ""
 
 msgid "Browse"
 msgstr "Durchsuchen"
@@ -1551,6 +1559,9 @@ msgstr "Liedtext wird gesucht …"
 msgid "Finishing setup"
 msgstr ""
 
+msgid "Fit to height"
+msgstr ""
+
 msgid "Fixed position"
 msgstr "Feste Position"
 
@@ -1688,6 +1699,9 @@ msgstr "Gruppierung"
 msgid "Guest / public access"
 msgstr "Gast-/öffentlicher Zugriff"
 
+msgid "Height (%)"
+msgstr ""
+
 msgid "Help"
 msgstr "Hilfe"
 
@@ -1733,6 +1747,11 @@ msgstr ""
 
 msgid "If you do not have API keys, create them"
 msgstr "Wenn du keine API-Schlüssel hast, erstelle sie"
+
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Ignore playback volume"
+msgstr "Wiedergabeausgabe auswählen"
 
 msgid "Image files"
 msgstr "Bilddateien"
@@ -2082,6 +2101,11 @@ msgid "Minimum year"
 msgstr "Mindestjahr"
 
 msgid "Mirrored bars"
+msgstr "Gespiegelte Balken"
+
+#, fuzzy
+#| msgid "Mirrored bars"
+msgid "Mirrored"
 msgstr "Gespiegelte Balken"
 
 msgid "Monday"
@@ -3378,6 +3402,9 @@ msgstr "Einstellungen und Quellen"
 
 msgid "Settings"
 msgstr "Einstellungen"
+
+msgid "Shadow"
+msgstr ""
 
 msgid "Share"
 msgstr "Freigabe"

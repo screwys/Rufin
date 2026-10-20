@@ -593,6 +593,11 @@ msgstr "安全儲存空間"
 msgid "Backups"
 msgstr "返回"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Bar count"
+msgstr "播放次數"
+
 msgid "Bar spacing (px)"
 msgstr ""
 
@@ -614,6 +619,9 @@ msgstr ""
 
 msgid "Blue"
 msgstr "藍色"
+
+msgid "Brightness (%)"
+msgstr ""
 
 msgid "Browse"
 msgstr ""
@@ -1685,6 +1693,9 @@ msgstr "無歌詞"
 msgid "Finishing setup"
 msgstr ""
 
+msgid "Fit to height"
+msgstr ""
+
 msgid "Fixed position"
 msgstr "固定位置"
 
@@ -1834,6 +1845,9 @@ msgstr ""
 msgid "Guest / public access"
 msgstr ""
 
+msgid "Height (%)"
+msgstr ""
+
 msgid "Help"
 msgstr "幫助"
 
@@ -1878,6 +1892,11 @@ msgstr "如果頁面沒有載入，表示 Libre.fm 阻擋了您的 IP 區段或 
 
 msgid "If you do not have API keys, create them"
 msgstr "如果你尚未擁有 API 金鑰，請建立它"
+
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Ignore playback volume"
+msgstr "選擇播放裝置"
 
 #, fuzzy
 #| msgid "Change Secret Storage"
@@ -2254,6 +2273,9 @@ msgid "Minimum year"
 msgstr "最小年份"
 
 msgid "Mirrored bars"
+msgstr ""
+
+msgid "Mirrored"
 msgstr ""
 
 msgid "Monday"
@@ -3748,6 +3770,9 @@ msgstr "元資料來源"
 #| msgid "App settings"
 msgid "Settings"
 msgstr "應用程式設定"
+
+msgid "Shadow"
+msgstr ""
 
 msgid "Share"
 msgstr ""

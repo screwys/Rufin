@@ -581,6 +581,11 @@ msgstr "Varmuuskopio palautettu"
 msgid "Backups"
 msgstr "Varmuuskopiot"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Bar count"
+msgstr "Toistokerrat"
+
 msgid "Bar spacing (px)"
 msgstr ""
 
@@ -598,6 +603,9 @@ msgstr ""
 
 msgid "Blue"
 msgstr "Sininen"
+
+msgid "Brightness (%)"
+msgstr ""
 
 msgid "Browse"
 msgstr ""
@@ -1634,6 +1642,9 @@ msgstr "Muokkaa sanoituksia"
 msgid "Finishing setup"
 msgstr ""
 
+msgid "Fit to height"
+msgstr ""
+
 msgid "Fixed position"
 msgstr ""
 
@@ -1777,6 +1788,9 @@ msgstr ""
 msgid "Guest / public access"
 msgstr ""
 
+msgid "Height (%)"
+msgstr ""
+
 msgid "Help"
 msgstr "Ohje"
 
@@ -1823,6 +1837,11 @@ msgstr "Jos sivu ei avaudu, Libre.fm estää käyttämäsi IP-osoitealueen/VPN:n
 
 msgid "If you do not have API keys, create them"
 msgstr "Jos sinulla ei ole API-avaimia, luo ne"
+
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Ignore playback volume"
+msgstr "Valitse toiston ulostulo"
 
 #, fuzzy
 #| msgid "Change Profile"
@@ -2188,6 +2207,9 @@ msgid "Minimum year"
 msgstr "Vuosi vähintään"
 
 msgid "Mirrored bars"
+msgstr ""
+
+msgid "Mirrored"
 msgstr ""
 
 msgid "Monday"
@@ -3617,6 +3639,9 @@ msgstr "Asetukset ja lähteet"
 #| msgid "App settings"
 msgid "Settings"
 msgstr "Sovelluksen asetukset"
+
+msgid "Shadow"
+msgstr ""
 
 msgid "Share"
 msgstr ""
