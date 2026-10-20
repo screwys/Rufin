@@ -336,6 +336,16 @@ private fun VisualizerSettings(player: PlayerConnection) {
         VisualizerStyle.CIRCULAR -> "Circular spectrum"
     }) },
         select = { change { setVisualizerStyle(VisualizerStyle.valueOf(it)) } })
+    PreferenceSwitch("Ignore playback volume", settings.playback.visualizerIgnoreVolume) { change { setVisualizerIgnoreVolume(it) } }
+    PreferenceSlider("Bar count", appearance.barCount.toFloat(), 8f..128f, 119) { change { setVisualizerBarCount(it.toUInt()) } }
+    PreferenceSwitch("Mirrored", appearance.mirrored) { change { setVisualizerMirrored(it) } }
+    PreferenceSwitch("Shadow", appearance.shadow) { change { setVisualizerShadow(it) } }
+    if (appearance.shadow) {
+        PreferenceSlider("Height (%)", (appearance.shadowRatio * 100).toFloat(), 0f..95f, 94) { change { setVisualizerShadowRatio(it / 100.0) } }
+        PreferenceSlider("Opacity (%)", (appearance.shadowOpacity * 100).toFloat(), 0f..100f, 99) { change { setVisualizerShadowOpacity(it / 100.0) } }
+        PreferenceSlider("Brightness (%)", (appearance.shadowBrightness * 100).toFloat(), 0f..200f, 199) { change { setVisualizerShadowBrightness(it / 100.0) } }
+        PreferenceSwitch("Fit to height", appearance.shadowFit) { change { setVisualizerShadowFit(it) } }
+    }
     val accent = MaterialTheme.colorScheme.primary
     PreferenceSwitch("Use accent color", (appearance.colors == null)) { enabled ->
         if (enabled) change { setVisualizerColors(null) }

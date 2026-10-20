@@ -2126,7 +2126,9 @@ mod tests {
 
     #[test]
     fn ordinary_lyrics_complete_acquisition_while_karaoke_is_off() {
-        let plan = Settings::default().automatic_lyrics_plan(false, "track");
+        let mut settings = Settings::default();
+        settings.preferences.karaoke_mode = false;
+        let plan = settings.automatic_lyrics_plan(false, "track");
 
         assert!(acquisition_complete(
             &bundle(LyricsOrigin::Local, false),

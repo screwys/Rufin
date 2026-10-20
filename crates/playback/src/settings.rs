@@ -158,6 +158,8 @@ macro_rules! playback_preference_fields {
                 preserve_pitch: bool = true => set_preserve_pitch;
                 #[serde(default)]
                 muted: bool = false;
+                #[serde(default = "default_true")]
+                visualizer_ignore_volume: bool = true => set_visualizer_ignore_volume;
             }
             migrated {
                 loudness_normalization: LoudnessNormalization = LoudnessNormalization::ReplayGain => set_loudness_normalization;
@@ -445,13 +447,15 @@ mod tests {
     }
 
     #[test]
-    fn preserve_pitch_defaults_on_and_round_trips_off() {
+    fn pitch_preservation_and_visualizer_volume_defaults_round_trip() {
         let restored = serde_json::from_str::<PlaybackSettings>("{}")
             .expect("restore playback settings without pitch preservation");
         assert!(restored.preserve_pitch);
+        assert!(restored.visualizer_ignore_volume);
 
         let settings = PlaybackSettings {
             preserve_pitch: false,
+            visualizer_ignore_volume: false,
             ..PlaybackSettings::default()
         };
         let restored = serde_json::from_value::<PlaybackSettings>(
@@ -459,6 +463,7 @@ mod tests {
         )
         .expect("restore pitch preservation");
         assert!(!restored.preserve_pitch);
+        assert!(!restored.visualizer_ignore_volume);
     }
 
     #[test]

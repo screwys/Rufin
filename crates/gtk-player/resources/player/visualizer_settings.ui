@@ -86,6 +86,136 @@
           </object>
         </child>
         <child>
+          <object class="AdwSwitchRow" id="ignore_volume">
+            <property name="title" translatable="yes">Ignore playback volume</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="bar_count_row">
+            <property name="title" translatable="yes">Bar count</property>
+            <property name="activatable-widget">bar_count</property>
+            <child type="suffix">
+              <object class="GtkScale" id="bar_count">
+                <property name="orientation">horizontal</property>
+                <property name="width-request">180</property>
+                <property name="valign">center</property>
+                <property name="digits">0</property>
+                <property name="round-digits">0</property>
+                <property name="adjustment">
+                  <object class="GtkAdjustment">
+                    <property name="lower">8</property>
+                    <property name="upper">128</property>
+                    <property name="step-increment">1</property>
+                    <property name="page-increment">8</property>
+                    <property name="value">52</property>
+                  </object>
+                </property>
+                <marks>
+                  <mark value="8" position="bottom">8</mark>
+                  <mark value="32" position="bottom">32</mark>
+                  <mark value="52" position="bottom">52</mark>
+                  <mark value="80" position="bottom">80</mark>
+                  <mark value="104" position="bottom">104</mark>
+                  <mark value="128" position="bottom">128</mark>
+                </marks>
+                <style><class name="playback-setting-scale" /></style>
+                <accessibility><relation name="labelled-by">bar_count_row</relation></accessibility>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="mirrored">
+            <property name="title" translatable="yes">Mirrored</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwExpanderRow" id="shadow">
+            <property name="title" translatable="yes">Shadow</property>
+            <property name="show-enable-switch">true</property>
+            <child>
+              <object class="AdwActionRow" id="shadow_ratio_row">
+                <property name="title" translatable="yes">Height (%)</property>
+                <property name="activatable-widget">shadow_ratio</property>
+                <child type="suffix">
+                  <object class="GtkScale" id="shadow_ratio">
+                    <property name="orientation">horizontal</property>
+                    <property name="width-request">180</property>
+                    <property name="valign">center</property>
+                    <property name="digits">0</property>
+                    <property name="round-digits">0</property>
+                    <property name="adjustment">
+                      <object class="GtkAdjustment">
+                        <property name="lower">0</property>
+                        <property name="upper">95</property>
+                        <property name="step-increment">1</property>
+                        <property name="page-increment">5</property>
+                      </object>
+                    </property>
+                    <style><class name="playback-setting-scale" /></style>
+                    <accessibility><relation name="labelled-by">shadow_ratio_row</relation></accessibility>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwActionRow" id="shadow_opacity_row">
+                <property name="title" translatable="yes">Opacity (%)</property>
+                <property name="activatable-widget">shadow_opacity</property>
+                <child type="suffix">
+                  <object class="GtkScale" id="shadow_opacity">
+                    <property name="orientation">horizontal</property>
+                    <property name="width-request">180</property>
+                    <property name="valign">center</property>
+                    <property name="digits">0</property>
+                    <property name="round-digits">0</property>
+                    <property name="adjustment">
+                      <object class="GtkAdjustment">
+                        <property name="lower">0</property>
+                        <property name="upper">100</property>
+                        <property name="step-increment">1</property>
+                        <property name="page-increment">5</property>
+                      </object>
+                    </property>
+                    <style><class name="playback-setting-scale" /></style>
+                    <accessibility><relation name="labelled-by">shadow_opacity_row</relation></accessibility>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwActionRow" id="shadow_brightness_row">
+                <property name="title" translatable="yes">Brightness (%)</property>
+                <property name="activatable-widget">shadow_brightness</property>
+                <child type="suffix">
+                  <object class="GtkScale" id="shadow_brightness">
+                    <property name="orientation">horizontal</property>
+                    <property name="width-request">180</property>
+                    <property name="valign">center</property>
+                    <property name="digits">0</property>
+                    <property name="round-digits">0</property>
+                    <property name="adjustment">
+                      <object class="GtkAdjustment">
+                        <property name="lower">0</property>
+                        <property name="upper">200</property>
+                        <property name="step-increment">1</property>
+                        <property name="page-increment">5</property>
+                      </object>
+                    </property>
+                    <style><class name="playback-setting-scale" /></style>
+                    <accessibility><relation name="labelled-by">shadow_brightness_row</relation></accessibility>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwSwitchRow" id="shadow_fit">
+                <property name="title" translatable="yes">Fit to height</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
           <object class="AdwSwitchRow" id="accent">
             <property name="title" translatable="yes">Use accent color</property>
             <property name="subtitle" translatable="yes">Follow the app accent with lighter and darker tones</property>

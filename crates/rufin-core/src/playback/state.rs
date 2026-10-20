@@ -2002,7 +2002,8 @@ impl Player {
             || settings.audio_output != self.settings.audio_output
             || settings.equalizer != self.settings.equalizer
             || settings.preserve_pitch != self.settings.preserve_pitch
-            || settings.audio_fade_on_status_change != self.settings.audio_fade_on_status_change;
+            || settings.audio_fade_on_status_change != self.settings.audio_fade_on_status_change
+            || settings.visualizer_ignore_volume != self.settings.visualizer_ignore_volume;
         self.settings = settings.clone();
         self.dirty = true;
         if self.playback_output.is_local() {

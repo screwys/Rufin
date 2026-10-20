@@ -1080,7 +1080,7 @@ async fn volume_commit_persists_the_requested_value_after_older_backend_feedback
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn stream_access_changes_and_unchanged_settings_leave_the_audible_run_untouched() {
+async fn stream_access_and_visualizer_settings_leave_the_audible_run_untouched() {
     let (_directory, _database, mut session, _owner, commands, _playback, _inbox) =
         active_two_track_session().await;
     let sample = ClockSample {
@@ -1110,6 +1110,24 @@ async fn stream_access_changes_and_unchanged_settings_leave_the_audible_run_unto
                 .all(|command| matches!(command, BackendCommand::PrepareNext { .. })),
             "background access changes may only replace prepared-next"
         );
+        assert_eq!(session.current_run(), Some(run));
+        assert_eq!(session.sequence.selected().unwrap().position, position);
+        assert_eq!(session.sequence.progress_millis(), 42_000);
+    }
+    for ignore_volume in [false, true] {
+        commands.lock().unwrap().clear();
+        let mut settings = session.settings.clone();
+        settings.visualizer_ignore_volume = ignore_volume;
+        session
+            .handle_command(Command::UpdateSettings(settings), &sample)
+            .unwrap();
+        let commands = commands.lock().unwrap();
+        assert!(commands.iter().any(|command| matches!(command,
+            BackendCommand::ConfigureAudio(settings) if settings.visualizer_ignore_volume == ignore_volume)));
+        assert!(commands.iter().all(|command| matches!(
+            command,
+            BackendCommand::ConfigureAudio(_) | BackendCommand::PrepareNext { .. }
+        )));
         assert_eq!(session.current_run(), Some(run));
         assert_eq!(session.sequence.selected().unwrap().position, position);
         assert_eq!(session.sequence.progress_millis(), 42_000);

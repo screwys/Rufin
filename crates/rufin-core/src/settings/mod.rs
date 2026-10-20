@@ -187,6 +187,8 @@ pub struct StoredSettings {
     pub(crate) secret_scope_id: String,
     #[serde(default)]
     pub(crate) jellyfin_device_id: String,
+    #[serde(default)]
+    visualizer_preset_bar_counts_updated: bool,
     #[serde(default, rename = "home_sections", skip_serializing)]
     pub(crate) legacy_home_sections: Option<Vec<HomeSectionKind>>,
     #[serde(default, rename = "track_table", skip_serializing)]
@@ -204,6 +206,7 @@ impl Default for StoredSettings {
             sources: SourceSettings::default(),
             secret_scope_id: String::new(),
             jellyfin_device_id: String::new(),
+            visualizer_preset_bar_counts_updated: true,
             legacy_home_sections: None,
             legacy_track_table: None,
         }
@@ -217,6 +220,10 @@ impl StoredSettings {
         }
         self.scrobbling.lastfm.api_key.clear();
         self.scrobbling.sanitize();
+        if !self.visualizer_preset_bar_counts_updated {
+            self.ui.visualizer.migrate_preset_bar_counts();
+            self.visualizer_preset_bar_counts_updated = true;
+        }
         self.migrate_home_blocks();
         self.migrate_legacy_track_table();
         self.ui.sanitize();

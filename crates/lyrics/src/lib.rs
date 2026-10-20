@@ -105,8 +105,8 @@ macro_rules! lyrics_preference_fields {
             show_furigana: bool = false => set_show_furigana;
             #[serde(default)]
             show_romanization: bool = false => set_show_romanization;
-            #[serde(default)]
-            karaoke_mode: bool = false => set_karaoke_mode;
+            #[serde(default = "default_true")]
+            karaoke_mode: bool = true => set_karaoke_mode;
             #[serde(default)]
             lyrics_font_family: Option<String> = None => set_lyrics_font_family;
             #[serde(default)]
@@ -955,7 +955,15 @@ mod tests {
         settings.sanitize();
 
         assert!(!settings.preferences.external_lyrics_enabled);
-        assert!(!settings.preferences.karaoke_mode);
+        assert!(settings.preferences.karaoke_mode);
+        assert!(
+            !serde_json::from_str::<Settings>(
+                r#"{"external_lyrics_enabled":true,"karaoke_mode":false}"#
+            )
+            .unwrap()
+            .preferences
+            .karaoke_mode
+        );
         assert!(settings.preferences.prefer_server_lyrics);
         assert!(settings.preferences.save_lyrics_as_sidecar);
         assert_eq!(

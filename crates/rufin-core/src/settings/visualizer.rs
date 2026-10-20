@@ -56,6 +56,13 @@ macro_rules! visualizer_preference_fields {
             style: VisualizerStyle = VisualizerStyle::Rounded => set_visualizer_style;
             /// None follows the application's accent. Custom gradients store their two endpoints.
             colors: Option<VisualizerColors> = None => set_visualizer_colors;
+            bar_count: u32 = 52 => set_visualizer_bar_count;
+            mirrored: bool = false => set_visualizer_mirrored;
+            shadow: bool = false => set_visualizer_shadow;
+            shadow_ratio: f64 = 0.25 => set_visualizer_shadow_ratio;
+            shadow_opacity: f64 = 0.15 => set_visualizer_shadow_opacity;
+            shadow_brightness: f64 = 1.0 => set_visualizer_shadow_brightness;
+            shadow_fit: bool = true => set_visualizer_shadow_fit;
             spacing: f64 = 1.0 => set_visualizer_spacing;
             opacity: f64 = 1.0 => set_visualizer_opacity;
             sidebar_lyrics_opacity: f64 = 0.48 => set_visualizer_sidebar_lyrics_opacity;
@@ -81,6 +88,7 @@ macro_rules! define_visualizer_appearance {
     };
 }
 visualizer_preference_fields!(define_visualizer_appearance);
+
 pub(super) use visualizer_preference_fields;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -99,9 +107,13 @@ impl VisualizerPreset {
         let preset: Self = serde_json::from_str(text).ok()?;
         let appearance = &preset.appearance;
         // Clipboard values must fit the controls and the renderer's normalized ranges.
-        let valid = (0.0..=12.0).contains(&appearance.spacing)
+        let valid = (8..=128).contains(&appearance.bar_count)
+            && (0.0..=12.0).contains(&appearance.spacing)
+            && (0.0..=0.95).contains(&appearance.shadow_ratio)
+            && (0.0..=2.0).contains(&appearance.shadow_brightness)
             && [
                 appearance.opacity,
+                appearance.shadow_opacity,
                 appearance.sidebar_lyrics_opacity,
                 appearance.fullscreen_lyrics_opacity,
             ]
@@ -151,6 +163,7 @@ fn default_preset(slot: usize) -> VisualizerAppearance {
     match slot {
         1 => VisualizerAppearance {
             style: VisualizerStyle::Circular,
+            bar_count: 32,
             spacing: 2.0,
             rise: 0.55,
             fall: 0.12,
@@ -161,6 +174,7 @@ fn default_preset(slot: usize) -> VisualizerAppearance {
         },
         2 => VisualizerAppearance {
             style: VisualizerStyle::Filled,
+            bar_count: 96,
             opacity: 0.8,
             sidebar_lyrics_opacity: 0.3,
             fullscreen_lyrics_opacity: 0.18,
@@ -170,6 +184,7 @@ fn default_preset(slot: usize) -> VisualizerAppearance {
         },
         3 => VisualizerAppearance {
             style: VisualizerStyle::Mirrored,
+            bar_count: 40,
             spacing: 3.0,
             rise: 0.8,
             fall: 0.2,
@@ -177,6 +192,7 @@ fn default_preset(slot: usize) -> VisualizerAppearance {
         },
         4 => VisualizerAppearance {
             style: VisualizerStyle::Segmented,
+            bar_count: 64,
             spacing: 2.0,
             rise: 0.9,
             fall: 0.24,
@@ -190,6 +206,20 @@ fn default_preset(slot: usize) -> VisualizerAppearance {
 }
 
 impl VisualizerSettings {
+    pub(crate) fn migrate_preset_bar_counts(&mut self) {
+        for (slot, preset) in self.presets.iter_mut().enumerate().take(5) {
+            let updated = default_preset(slot);
+            let mut previous = updated.clone();
+            previous.bar_count = 52;
+            if preset.appearance == previous {
+                if self.appearance == previous {
+                    self.appearance = updated.clone();
+                }
+                preset.appearance = updated;
+            }
+        }
+    }
+
     pub fn selected_preset(&self) -> usize {
         self.selected_preset.unwrap_or_else(|| {
             (0..5)
@@ -252,6 +282,7 @@ mod tests {
         let settings: VisualizerSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings, VisualizerSettings::default());
         assert_eq!(settings.appearance.colors, None);
+        assert_eq!(settings.appearance.bar_count, 52);
     }
 
     #[test]
@@ -259,6 +290,7 @@ mod tests {
         let mut settings = VisualizerSettings::default();
         settings.appearance.colors = Some([[0.1, 0.2, 0.3], [0.7, 0.8, 0.9]]);
         settings.appearance.rise = 0.4;
+        settings.appearance.bar_count = 96;
         settings.save_preset(0);
         settings.appearance.style = VisualizerStyle::Circular;
         settings.appearance.rise = 0.9;
@@ -272,6 +304,7 @@ mod tests {
         let restored: VisualizerSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert_eq!(restored, settings);
+        assert_eq!(restored.presets[0].appearance.bar_count, 96);
         assert_eq!(
             restored.presets[0].appearance.style,
             VisualizerStyle::Circular
@@ -285,6 +318,7 @@ mod tests {
         for slot in 0..5 {
             assert_eq!(settings.preset(slot), defaults.preset(slot));
             assert_eq!(settings.preset(slot).colors, None);
+            assert_eq!(settings.preset(slot).bar_count, [52, 32, 96, 40, 64][slot]);
             for other in 0..slot {
                 assert_ne!(settings.preset(slot).style, settings.preset(other).style);
             }
@@ -297,6 +331,31 @@ mod tests {
         }
         assert_eq!(settings.preset(4), settings.appearance);
         assert_eq!(settings.presets.len(), 5);
+
+        let mut legacy = crate::settings::StoredSettings::default();
+        for preset in &mut legacy.ui.visualizer.presets {
+            preset.appearance.bar_count = 52;
+        }
+        legacy.ui.visualizer.select_preset(1);
+        legacy.ui.visualizer.presets[4].appearance.spacing = 7.0;
+        let mut json = serde_json::to_value(&legacy).unwrap();
+        json.as_object_mut()
+            .unwrap()
+            .remove("visualizer_preset_bar_counts_updated");
+        let mut restored: crate::settings::StoredSettings = serde_json::from_value(json).unwrap();
+        restored.migrate_defaults();
+        assert_eq!(restored.ui.visualizer.appearance.bar_count, 32);
+        assert_eq!(restored.ui.visualizer.preset(2).bar_count, 96);
+        assert_eq!(restored.ui.visualizer.preset(3).bar_count, 40);
+        assert_eq!(restored.ui.visualizer.preset(4).bar_count, 52);
+        assert_eq!(restored.ui.visualizer.preset(4).spacing, 7.0);
+        restored.ui.visualizer.appearance.bar_count = 52;
+        restored.ui.visualizer.save_preset(1);
+        let mut reloaded: crate::settings::StoredSettings =
+            serde_json::from_value(serde_json::to_value(restored).unwrap()).unwrap();
+        reloaded.migrate_defaults();
+        assert_eq!(reloaded.ui.visualizer.appearance.bar_count, 52);
+        assert_eq!(reloaded.ui.visualizer.preset(1).bar_count, 52);
     }
 
     #[test]
@@ -305,6 +364,13 @@ mod tests {
             appearance: VisualizerAppearance {
                 colors: Some([[0.1, 0.2, 0.3], [0.7, 0.8, 0.9]]),
                 rise: 0.35,
+                bar_count: 128,
+                mirrored: true,
+                shadow: true,
+                shadow_ratio: 0.4,
+                shadow_opacity: 0.6,
+                shadow_brightness: 1.5,
+                shadow_fit: false,
                 peaks: true,
                 ..Default::default()
             },
@@ -315,6 +381,21 @@ mod tests {
         assert!(VisualizerPreset::from_json("{}").is_none());
         assert!(VisualizerPreset::from_json(r#"{"appearance":{"rise":2}}"#).is_none());
         assert!(VisualizerPreset::from_json("not a preset").is_none());
+        for count in [0, 7, 129, u32::MAX] {
+            assert!(
+                VisualizerPreset::from_json(&format!(
+                    r#"{{"appearance":{{"bar_count":{count}}}}}"#
+                ))
+                .is_none()
+            );
+        }
+        let old = VisualizerPreset::from_json(r#"{"appearance":{"spacing":2}}"#).unwrap();
+        assert_eq!(old.appearance.bar_count, 52);
+        assert!(!old.appearance.mirrored);
+        assert!(!old.appearance.shadow);
+        assert!(VisualizerPreset::from_json(r#"{"appearance":{"shadow_ratio":1}}"#).is_none());
+        assert!(VisualizerPreset::from_json(r#"{"appearance":{"shadow_opacity":2}}"#).is_none());
+        assert!(VisualizerPreset::from_json(r#"{"appearance":{"shadow_brightness":3}}"#).is_none());
     }
 }
 
@@ -352,8 +433,11 @@ pub fn visualizer_column_geometry(width: f64, level_count: usize, gap: f64) -> (
 }
 
 pub fn visualizer_row_geometry(height: f64, cell: f64, gap: f64) -> (usize, f64) {
-    let grid_height = (height - VISUALIZER_TOP_GAP).max(height * 0.64);
-    let rows = (((grid_height + gap) / (cell + gap)).floor() as usize).clamp(8, 32);
+    let grid_height = (height - VISUALIZER_TOP_GAP).max(height * 0.64).max(1.0);
+    let fitting_rows = (((grid_height + gap) / (1.0 + gap)).floor() as usize).max(1);
+    let rows = (((grid_height + gap) / (cell + gap)).floor() as usize)
+        .clamp(8, 32)
+        .min(fitting_rows);
     let row_height = ((grid_height - gap * rows.saturating_sub(1) as f64) / rows as f64).max(1.0);
     (rows, row_height)
 }
@@ -369,12 +453,54 @@ pub fn visualizer_lerp(start: f64, end: f64, mix: f64) -> f64 {
     start + (end - start) * mix
 }
 
-pub fn visualizer_bar_levels(levels: &[f64], columns: usize) -> Vec<f64> {
+pub fn visualizer_shadow_geometry(height: f64, appearance: &VisualizerAppearance) -> (f64, f64) {
+    if !appearance.shadow || appearance.style == VisualizerStyle::Circular {
+        return (height, 0.0);
+    }
+    let reserved = height * appearance.shadow_ratio.clamp(0.0, 0.95);
+    let main = height - reserved;
+    let reflected = if reserved == 0.0 {
+        0.0
+    } else if appearance.shadow_fit {
+        reserved
+    } else {
+        main
+    };
+    (main, reflected)
+}
+
+pub fn visualizer_radial_shadow_geometry(
+    radius: f64,
+    extent: f64,
+    appearance: &VisualizerAppearance,
+) -> (f64, f64) {
+    if !appearance.shadow {
+        return (0.0, 0.0);
+    }
+    let limit = radius * appearance.shadow_ratio.clamp(0.0, 0.95);
+    let scale = if appearance.shadow_fit { limit } else { extent };
+    (scale, limit)
+}
+
+pub fn visualizer_bar_levels(levels: &[f64], columns: usize, mirrored: bool) -> Vec<f64> {
     if columns == 0 || levels.is_empty() {
         return Vec::new();
     }
+    if mirrored {
+        let half = visualizer_bar_levels(levels, columns.div_ceil(2), false);
+        return (0..columns)
+            .map(|column| half[(2 * column + 1).abs_diff(columns) / 2])
+            .collect();
+    }
     (0..columns)
         .map(|column| {
+            if columns > levels.len() {
+                let position = column as f64 * (levels.len() - 1) as f64 / (columns - 1) as f64;
+                let lower = position.floor() as usize;
+                let upper = (lower + 1).min(levels.len() - 1);
+                return visualizer_lerp(levels[lower], levels[upper], position.fract())
+                    .clamp(0.0, 1.0);
+            }
             let start = column * levels.len() / columns;
             let end = ((column + 1) * levels.len() / columns).max(start + 1);
             let mut total = 0.0;

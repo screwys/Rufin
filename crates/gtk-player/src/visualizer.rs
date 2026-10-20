@@ -6,8 +6,9 @@ use gtk::subclass::prelude::*;
 use rufin_core::settings::visualizer::{
     VISUALIZER_REFERENCE_FRAME_MICROS, VISUALIZER_STALE_MICROS, VisualizerAppearance,
     VisualizerPeak as Peak, VisualizerStyle, visualizer_accent_gradient, visualizer_bar_levels,
-    visualizer_column_geometry, visualizer_lerp as lerp, visualizer_row_geometry,
-    visualizer_smoothed_level, visualizer_smoothing_weights,
+    visualizer_column_geometry, visualizer_lerp as lerp, visualizer_radial_shadow_geometry,
+    visualizer_row_geometry, visualizer_shadow_geometry, visualizer_smoothed_level,
+    visualizer_smoothing_weights,
 };
 
 pub struct VisualizerParts {
@@ -44,15 +45,56 @@ mod imp {
     impl WidgetImpl for Visualizer {
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let widget = self.obj();
+            let appearance = self.appearance.get().unwrap().borrow();
+            let (main_height, shadow_height) =
+                visualizer_shadow_geometry(f64::from(widget.height().max(1)), &appearance);
+            let effects = shadow_height > 0.0;
+            let frame = if effects {
+                gtk::Snapshot::new()
+            } else {
+                snapshot.clone()
+            };
             draw_visualizer(
-                snapshot,
+                &frame,
                 widget.width(),
-                widget.height(),
+                main_height,
                 &self.levels.get().unwrap().borrow(),
                 &self.peaks.get().unwrap().borrow(),
-                &self.appearance.get().unwrap().borrow(),
+                &appearance,
                 widget.color(),
             );
+            if !effects {
+                return;
+            }
+            let Some(node) = frame.to_node() else {
+                return;
+            };
+            snapshot.push_clip(&rect(
+                0.0,
+                0.0,
+                widget.width().into(),
+                widget.height().into(),
+            ));
+            snapshot.append_node(&node);
+            if shadow_height > 0.0 {
+                snapshot.save();
+                snapshot.translate(&gtk::graphene::Point::new(
+                    0.0,
+                    (main_height + shadow_height) as f32,
+                ));
+                snapshot.scale(1.0, -(shadow_height / main_height) as f32);
+                let brightness = appearance.shadow_brightness as f32;
+                snapshot.push_opacity(appearance.shadow_opacity);
+                snapshot.push_color_matrix(
+                    &gtk::graphene::Matrix::new_scale(brightness, brightness, brightness),
+                    &gtk::graphene::Vec4::zero(),
+                );
+                snapshot.append_node(&node);
+                snapshot.pop();
+                snapshot.pop();
+                snapshot.restore();
+            }
+            snapshot.pop();
         }
     }
 }
@@ -113,7 +155,7 @@ fn build_visualizer_area(
 fn draw_visualizer(
     snapshot: &gtk::Snapshot,
     width: i32,
-    height: i32,
+    height: f64,
     levels: &[f64],
     peaks: &[Peak],
     appearance: &VisualizerAppearance,
@@ -123,23 +165,32 @@ fn draw_visualizer(
         return;
     }
     let width = f64::from(width.max(1));
-    let height = f64::from(height.max(1));
+    let height = height.max(1.0);
     let column_gap = appearance.spacing;
     let row_gap = 2.0;
     let left = width * 0.008;
-    let (columns, cell) = visualizer_column_geometry(width, levels.len(), column_gap);
+    let (columns, cell) = visualizer_column_geometry(
+        width,
+        appearance.bar_count.clamp(8, 128) as usize,
+        column_gap,
+    );
     let (rows, row_height) = visualizer_row_geometry(height, cell, row_gap);
     let row_stride = row_height + row_gap;
     let bottom = height;
-    let bars = visualizer_bar_levels(levels, columns);
+    let bars = visualizer_bar_levels(levels, columns, appearance.mirrored);
     let colors = appearance.colors.unwrap_or_else(|| accent_gradient(accent));
+    let shadow_colors = colors.map(|rgb| {
+        rgb.map(|component| {
+            (f64::from(component) * appearance.shadow_brightness).clamp(0.0, 1.0) as f32
+        })
+    });
     if bars.is_empty() {
         return;
     }
 
     let peak_bars = if appearance.peaks {
         let peak_levels = peaks.iter().map(|peak| peak.level).collect::<Vec<_>>();
-        visualizer_bar_levels(&peak_levels, columns)
+        visualizer_bar_levels(&peak_levels, columns, appearance.mirrored)
     } else {
         Vec::new()
     };
@@ -199,15 +250,32 @@ fn draw_visualizer(
             let center = (width / 2.0, height / 2.0);
             let radius = width.min(height) * 0.22;
             let extent = width.min(height) * 0.25;
-            let angle = column as f64 / columns as f64 * std::f64::consts::TAU
+            let angle = (column as f64 + if appearance.mirrored { 0.5 } else { 0.0 })
+                / columns as f64
+                * std::f64::consts::TAU
                 - std::f64::consts::FRAC_PI_2;
             let (sin, cos) = angle.sin_cos();
+            let (shadow_scale, shadow_limit) =
+                visualizer_radial_shadow_geometry(radius, extent, appearance);
+            let shadow_length = (level * shadow_scale).min(shadow_limit);
+            let shadow_color = color(shadow_colors, level, appearance.shadow_opacity);
             let color = color(colors, level, 1.0);
             let thickness = (std::f64::consts::TAU * radius / columns as f64 - column_gap).max(1.0);
             if level > 0.0 {
                 snapshot.save();
                 snapshot.translate(&gtk::graphene::Point::new(center.0 as f32, center.1 as f32));
                 snapshot.rotate(angle.to_degrees() as f32);
+                if shadow_length > 0.0 {
+                    snapshot.append_color(
+                        &shadow_color,
+                        &rect(
+                            radius - shadow_length,
+                            -thickness / 2.0,
+                            shadow_length,
+                            thickness,
+                        ),
+                    );
+                }
                 snapshot.append_color(
                     &color,
                     &rect(radius, -thickness / 2.0, extent * level, thickness),
@@ -226,6 +294,18 @@ fn draw_visualizer(
                 snapshot.push_rounded_clip(&gtk::gsk::RoundedRect::from_rect(bounds, 1.5));
                 snapshot.append_color(&color, &bounds);
                 snapshot.pop();
+                let shadow_peak = peak * shadow_scale;
+                if shadow_peak > 0.0 && shadow_peak <= shadow_limit {
+                    let bounds = rect(
+                        center.0 + cos * (radius - shadow_peak) - 1.5,
+                        center.1 + sin * (radius - shadow_peak) - 1.5,
+                        3.0,
+                        3.0,
+                    );
+                    snapshot.push_rounded_clip(&gtk::gsk::RoundedRect::from_rect(bounds, 1.5));
+                    snapshot.append_color(&shadow_color, &bounds);
+                    snapshot.pop();
+                }
             }
             continue;
         }
@@ -357,17 +437,71 @@ mod visualizer_tests {
     pub fn sidebar_visualizer_fits_all_received_bands() {
         let width = 213.0;
         let gap = 1.0;
-        let (columns, cell) = visualizer_column_geometry(width, 52, gap);
-        let occupied = columns as f64 * cell + columns.saturating_sub(1) as f64 * gap;
-
-        assert_eq!(columns, 52);
-        assert!(cell >= 3.0);
-        assert!(occupied <= width * 0.984 + f64::EPSILON);
+        for (count, expected_columns) in [(8, 8), (24, 24), (52, 52), (96, 70), (128, 70)] {
+            let (columns, cell) = visualizer_column_geometry(width, count, gap);
+            let occupied = columns as f64 * cell + columns.saturating_sub(1) as f64 * gap;
+            assert_eq!(columns, expected_columns);
+            if count == 52 {
+                assert!(cell >= 3.0);
+            }
+            assert_eq!(
+                visualizer_bar_levels(&[0.5; 52], columns, false),
+                vec![0.5; columns]
+            );
+            assert!(cell >= 2.0);
+            assert!(occupied <= width * 0.984 + f64::EPSILON);
+            let (wide_columns, _) = visualizer_column_geometry(1200.0, count, gap);
+            assert_eq!(wide_columns, count);
+        }
+        let interpolated = visualizer_bar_levels(&[0.0, 1.0], 3, false);
+        assert_eq!(interpolated, vec![0.0, 0.5, 1.0]);
+        let mut appearance = VisualizerAppearance::default();
+        assert_eq!(visualizer_shadow_geometry(400.0, &appearance), (400.0, 0.0));
+        assert_eq!(
+            visualizer_bar_levels(&[0.0, 1.0], 4, true),
+            vec![1.0, 0.0, 0.0, 1.0]
+        );
+        assert_eq!(
+            visualizer_bar_levels(&[0.0, 0.5, 1.0], 5, true),
+            vec![1.0, 0.5, 0.0, 0.5, 1.0]
+        );
+        appearance.shadow = true;
+        assert_eq!(
+            visualizer_shadow_geometry(400.0, &appearance),
+            (300.0, 100.0)
+        );
+        appearance.shadow_fit = false;
+        assert_eq!(
+            visualizer_shadow_geometry(400.0, &appearance),
+            (300.0, 300.0)
+        );
+        appearance.shadow_ratio = 0.95;
+        let (main, _) = visualizer_shadow_geometry(400.0, &appearance);
+        let (rows, row_height) = visualizer_row_geometry(main / 2.0, 4.0, 2.0);
+        assert!(rows as f64 * (row_height + 2.0) - 2.0 <= main / 2.0);
+        appearance.style = VisualizerStyle::Circular;
+        appearance.shadow_ratio = 0.25;
+        appearance.shadow_fit = true;
+        assert_eq!(visualizer_shadow_geometry(400.0, &appearance), (400.0, 0.0));
+        assert_eq!(
+            visualizer_radial_shadow_geometry(88.0, 100.0, &appearance),
+            (22.0, 22.0)
+        );
+        appearance.shadow_fit = false;
+        assert_eq!(
+            visualizer_radial_shadow_geometry(88.0, 100.0, &appearance),
+            (100.0, 22.0)
+        );
+        appearance.shadow = false;
+        assert_eq!(
+            visualizer_radial_shadow_geometry(88.0, 100.0, &appearance),
+            (0.0, 0.0)
+        );
     }
 
     #[test]
     pub fn silent_visualizer_bands_remain_zero() {
-        assert_eq!(visualizer_bar_levels(&[0.0; 52], 52), vec![0.0; 52]);
+        assert_eq!(visualizer_bar_levels(&[0.0; 52], 52, false), vec![0.0; 52]);
     }
 }
 

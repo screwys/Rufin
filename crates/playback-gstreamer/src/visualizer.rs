@@ -16,6 +16,7 @@ const VISUALIZER_CHANNEL_CAPACITY: usize = 2;
 const VISUALIZER_COPY_FRAMES: usize = 4_096;
 #[derive(Clone)]
 pub(super) struct VisualizerTap {
+    pub(super) ignore_volume: bool,
     slot: Slot,
     pipeline_id: PipelineId,
     run: RunId,
@@ -69,8 +70,15 @@ impl VisualizerAnalyzer {
         Self { sender }
     }
 
-    pub(super) fn tap(&self, slot: Slot, pipeline_id: PipelineId, run: RunId) -> VisualizerTap {
+    pub(super) fn tap(
+        &self,
+        slot: Slot,
+        pipeline_id: PipelineId,
+        run: RunId,
+        ignore_volume: bool,
+    ) -> VisualizerTap {
         VisualizerTap {
+            ignore_volume,
             slot,
             pipeline_id,
             run,

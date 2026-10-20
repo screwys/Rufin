@@ -71,7 +71,7 @@ pub(super) struct PlayerPipeline {
     trust_invalid_certificate: Arc<AtomicBool>,
     about_to_finish_id: Option<glib::SignalHandlerId>,
     audio_graph: Option<AudioGraph>,
-    visualizer_probe: Option<gst::PadProbeId>,
+    visualizer_probe: Option<(gst::Pad, gst::PadProbeId)>,
     current_stream: Option<PreparedStream>,
     queued_loudness: SharedQueuedLoudness,
     gapless: Arc<Mutex<GaplessPlayback>>,
@@ -727,26 +727,20 @@ impl PlayerPipeline {
 
     pub(super) fn set_visualizer_tap(&mut self, tap: Option<VisualizerTap>) {
         self.clear_visualizer_tap();
-        if let (Some(tap), Some(pad)) = (
-            tap,
-            self.audio_graph
+        if let Some(tap) = tap
+            && let Some(pad) = self
+                .audio_graph
                 .as_ref()
-                .and_then(AudioGraph::visualizer_pad),
-        ) {
-            self.visualizer_probe = tap.install(pad);
+                .and_then(|graph| graph.visualizer_pad(tap.ignore_volume))
+            && let Some(probe) = tap.install(&pad)
+        {
+            self.visualizer_probe = Some((pad, probe));
         }
     }
 
     pub(super) fn clear_visualizer_tap(&mut self) {
-        if let (Some(pad), Some(probe)) = (
-            self.audio_graph
-                .as_ref()
-                .and_then(AudioGraph::visualizer_pad),
-            self.visualizer_probe.take(),
-        ) {
+        if let Some((pad, probe)) = self.visualizer_probe.take() {
             pad.remove_probe(probe);
-        } else {
-            self.visualizer_probe = None;
         }
     }
 

@@ -1078,6 +1078,11 @@ impl GstEngine {
                             self.set_playback_rate(self.playback_rate())?;
                         }
                     }
+                    if settings.visualizer_ignore_volume
+                        != previous_settings.visualizer_ignore_volume
+                    {
+                        self.sync_visualizer_taps(self.visualizer_enabled());
+                    }
                     let (gain, muted) = self.output_gain_state();
                     self.apply_output_gain_to_pipelines(gain, muted);
                     push_event(
@@ -2993,14 +2998,18 @@ impl GstEngine {
         if !enabled {
             return None;
         }
-        let (pipeline_id, run) = (|| {
+        let (pipeline_id, run, ignore_volume) = (|| {
             let shared = lock_recover(&self.shared);
             if shared.active != slot {
                 return None;
             }
-            Some((shared.pipeline_id(slot)?, shared.current.as_ref()?.run))
+            Some((
+                shared.pipeline_id(slot)?,
+                shared.current.as_ref()?.run,
+                shared.settings.visualizer_ignore_volume,
+            ))
         })()?;
-        Some(self.visualizer.tap(slot, pipeline_id, run))
+        Some(self.visualizer.tap(slot, pipeline_id, run, ignore_volume))
     }
 
     fn sync_visualizer_taps(&mut self, enabled: bool) {

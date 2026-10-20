@@ -1,6 +1,7 @@
 use rufin_core::settings::visualizer::{
     VisualizerPeak, visualizer_accent_gradient, visualizer_bar_levels, visualizer_column_geometry,
-    visualizer_row_geometry, visualizer_smoothed_level, visualizer_smoothing_weights,
+    visualizer_radial_shadow_geometry, visualizer_row_geometry, visualizer_shadow_geometry,
+    visualizer_smoothed_level, visualizer_smoothing_weights,
 };
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -46,6 +47,13 @@ impl From<[f32; 3]> for AndroidRgb {
 
 #[derive(uniffi::Record)]
 pub struct AndroidVisualizerDrawing {
+    pub mirrored: bool,
+    pub main_height: f64,
+    pub shadow_height: f64,
+    pub inward_shadow_scale: f64,
+    pub inward_shadow_limit: f64,
+    pub shadow_opacity: f64,
+    pub shadow_brightness: f64,
     pub bars: Vec<f64>,
     pub peaks: Vec<f64>,
     pub cell: f64,
@@ -565,8 +573,20 @@ impl AndroidPlayer {
             }
             state.last_frame = Some(frame_nanos);
         }
-        let (columns, cell) = visualizer_column_geometry(width, len, appearance.spacing);
-        let (rows, row_height) = visualizer_row_geometry(height, cell, 2.0);
+        let (columns, cell) = visualizer_column_geometry(
+            width,
+            appearance.bar_count.clamp(8, 128) as usize,
+            appearance.spacing,
+        );
+        let (main_height, shadow_height) = visualizer_shadow_geometry(height, &appearance);
+        let (inward_shadow_scale, inward_shadow_limit) =
+            if appearance.style == rufin_core::settings::visualizer::VisualizerStyle::Circular {
+                let size = width.min(main_height);
+                visualizer_radial_shadow_geometry(size * 0.22, size * 0.25, &appearance)
+            } else {
+                (0.0, 0.0)
+            };
+        let (rows, row_height) = visualizer_row_geometry(main_height, cell, 2.0);
         let peak_levels = state
             .peaks
             .iter()
@@ -581,9 +601,16 @@ impl AndroidPlayer {
             blue: value[2],
         };
         AndroidVisualizerDrawing {
-            bars: visualizer_bar_levels(&state.levels, columns),
+            mirrored: appearance.mirrored,
+            main_height,
+            shadow_height,
+            inward_shadow_scale,
+            inward_shadow_limit,
+            shadow_opacity: appearance.shadow_opacity,
+            shadow_brightness: appearance.shadow_brightness,
+            bars: visualizer_bar_levels(&state.levels, columns, appearance.mirrored),
             peaks: if appearance.peaks {
-                visualizer_bar_levels(&peak_levels, columns)
+                visualizer_bar_levels(&peak_levels, columns, appearance.mirrored)
             } else {
                 Vec::new()
             },

@@ -537,6 +537,9 @@ msgstr ""
 msgid "Backups"
 msgstr ""
 
+msgid "Bar count"
+msgstr ""
+
 msgid "Bar spacing (px)"
 msgstr ""
 
@@ -553,6 +556,9 @@ msgid "Bitrate"
 msgstr ""
 
 msgid "Blue"
+msgstr ""
+
+msgid "Brightness (%)"
 msgstr ""
 
 msgid "Browse"
@@ -1436,6 +1442,9 @@ msgstr ""
 msgid "Finishing setup"
 msgstr ""
 
+msgid "Fit to height"
+msgstr ""
+
 msgid "Fixed position"
 msgstr ""
 
@@ -1573,6 +1582,9 @@ msgstr ""
 msgid "Guest / public access"
 msgstr ""
 
+msgid "Height (%)"
+msgstr ""
+
 msgid "Help"
 msgstr ""
 
@@ -1616,6 +1628,9 @@ msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr ""
 
 msgid "If you do not have API keys, create them"
+msgstr ""
+
+msgid "Ignore playback volume"
 msgstr ""
 
 msgid "Image files"
@@ -1954,6 +1969,9 @@ msgid "Minimum year"
 msgstr ""
 
 msgid "Mirrored bars"
+msgstr ""
+
+msgid "Mirrored"
 msgstr ""
 
 msgid "Monday"
@@ -3244,6 +3262,9 @@ msgid "Settings and sources"
 msgstr ""
 
 msgid "Settings"
+msgstr ""
+
+msgid "Shadow"
 msgstr ""
 
 msgid "Share"

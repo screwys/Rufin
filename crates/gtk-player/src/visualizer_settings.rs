@@ -10,6 +10,14 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
     gtk_widgets::objects!(builder, resource, {
         page: adw::PreferencesPage,
         fps_limit: gtk::Scale,
+        ignore_volume: adw::SwitchRow,
+        bar_count: gtk::Scale,
+        mirrored: adw::SwitchRow,
+        shadow: adw::ExpanderRow,
+        shadow_ratio: gtk::Scale,
+        shadow_opacity: gtk::Scale,
+        shadow_brightness: gtk::Scale,
+        shadow_fit: adw::SwitchRow,
         style: adw::ComboRow,
         accent: adw::SwitchRow,
         start_color: gtk::Button,
@@ -37,6 +45,10 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
 
     for scale in [
         &fps_limit,
+        &bar_count,
+        &shadow_ratio,
+        &shadow_opacity,
+        &shadow_brightness,
         &spacing,
         &opacity,
         &sidebar_opacity,
@@ -51,6 +63,25 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
             format!("{value:.digits$}")
         });
     }
+
+    ignore_volume.set_active(
+        shell
+            .settings
+            .current
+            .borrow()
+            .playback
+            .visualizer_ignore_volume,
+    );
+    let weak_shell = Rc::downgrade(shell);
+    ignore_volume.connect_active_notify(move |row| {
+        if let Some(shell) = weak_shell.upgrade() {
+            shell
+                .settings
+                .set_app_setting("visualizer volume", row.is_active(), |settings| {
+                    &mut settings.playback.visualizer_ignore_volume
+                });
+        }
+    });
 
     let limit = shell.settings.current.borrow().visualizer.fps_limit;
     fps_limit.set_value(limit as f64);
@@ -80,6 +111,10 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         let colors = [start_color_swatch.downgrade(), end_color_swatch.downgrade()];
         let color_rows = [start_color_row.downgrade(), end_color_row.downgrade()];
         let scales = [
+            &bar_count,
+            &shadow_ratio,
+            &shadow_opacity,
+            &shadow_brightness,
             &spacing,
             &opacity,
             &sidebar_opacity,
@@ -91,6 +126,9 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         ]
         .map(|row| row.downgrade());
         let peaks = peaks.downgrade();
+        let mirrored = mirrored.downgrade();
+        let shadow = shadow.downgrade();
+        let shadow_fit = shadow_fit.downgrade();
         Rc::new(move || {
             let Some(shell) = shell.upgrade() else {
                 return;
@@ -120,6 +158,10 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
                 }
             }
             let values = [
+                f64::from(appearance.bar_count),
+                appearance.shadow_ratio * 100.0,
+                appearance.shadow_opacity * 100.0,
+                appearance.shadow_brightness * 100.0,
                 appearance.spacing,
                 appearance.opacity * 100.0,
                 appearance.sidebar_lyrics_opacity * 100.0,
@@ -137,6 +179,16 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
             if let Some(peaks) = peaks.upgrade() {
                 peaks.set_enable_expansion(appearance.peaks);
                 peaks.set_expanded(appearance.peaks);
+            }
+            if let Some(row) = mirrored.upgrade() {
+                row.set_active(appearance.mirrored);
+            }
+            if let Some(row) = shadow.upgrade() {
+                row.set_enable_expansion(appearance.shadow);
+                row.set_expanded(appearance.shadow);
+            }
+            if let Some(row) = shadow_fit.upgrade() {
+                row.set_active(appearance.shadow_fit);
             }
             syncing.set(false);
         })
@@ -167,12 +219,16 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
                 }
                 if let Some(shell) = shell.upgrade() {
                     update_appearance(&shell, |appearance| {
-                        appearance.$field = row.value() / $scale
+                        appearance.$field = (row.value() / $scale) as _
                     });
                 }
             });
         }};
     }
+    slider!(bar_count, bar_count, 1.0);
+    slider!(shadow_ratio, shadow_ratio, 100.0);
+    slider!(shadow_opacity, shadow_opacity, 100.0);
+    slider!(shadow_brightness, shadow_brightness, 100.0);
     slider!(spacing, spacing, 1.0);
     slider!(opacity, opacity, 100.0);
     slider!(sidebar_opacity, sidebar_lyrics_opacity, 100.0);
@@ -181,6 +237,35 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
     slider!(fall, fall, 100.0);
     slider!(peak_hold, peak_hold, 1.0);
     slider!(peak_fall, peak_fall, 100.0);
+
+    macro_rules! switch {
+        ($row:ident, $field:ident) => {{
+            let weak_shell = Rc::downgrade(shell);
+            let changing = Rc::clone(&syncing);
+            $row.connect_active_notify(move |row| {
+                if changing.get() {
+                    return;
+                }
+                if let Some(shell) = weak_shell.upgrade() {
+                    update_appearance(&shell, |appearance| appearance.$field = row.is_active());
+                }
+            });
+        }};
+    }
+    switch!(mirrored, mirrored);
+    switch!(shadow_fit, shadow_fit);
+    let weak_shell = Rc::downgrade(shell);
+    let changing = Rc::clone(&syncing);
+    shadow.connect_enable_expansion_notify(move |row| {
+        if changing.get() {
+            return;
+        }
+        if let Some(shell) = weak_shell.upgrade() {
+            update_appearance(&shell, |appearance| {
+                appearance.shadow = row.enables_expansion()
+            });
+        }
+    });
 
     let weak_shell = Rc::downgrade(shell);
     let changing = Rc::clone(&syncing);

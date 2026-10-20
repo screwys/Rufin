@@ -34,7 +34,6 @@ pub(super) struct AudioGraph {
     gain_frontier: Arc<AtomicU64>,
     audio_output: Option<String>,
     state: Arc<Mutex<AudioGraphState>>,
-    visualizer_pad: Option<gst::Pad>,
 }
 
 #[derive(Clone, Default)]
@@ -209,8 +208,6 @@ impl AudioGraph {
             .apply_loudness();
         install_loudness_boundary(&convert_in, Arc::clone(&state), queued_loudness)?;
 
-        // Sample after playbin's queue so visualization follows audible output.
-        let visualizer_pad = output.static_pad("sink");
         elements.push(convert_out.clone());
         elements.push(split);
         elements.push(resample.clone());
@@ -250,7 +247,6 @@ impl AudioGraph {
             gain_frontier,
             audio_output: settings.audio_output.clone(),
             state,
-            visualizer_pad,
         })
     }
 
@@ -426,8 +422,14 @@ impl AudioGraph {
         Ok(true)
     }
 
-    pub(super) fn visualizer_pad(&self) -> Option<&gst::Pad> {
-        self.visualizer_pad.as_ref()
+    pub(super) fn visualizer_pad(&self, ignore_volume: bool) -> Option<gst::Pad> {
+        // Both taps stay after playbin's queue. The gain input also retains
+        // samples when the output is muted or the volume is zero.
+        if ignore_volume {
+            self.gain.static_pad("sink")
+        } else {
+            self.output.static_pad("sink")
+        }
     }
 
     pub(super) fn output_factory(&self) -> Option<String> {

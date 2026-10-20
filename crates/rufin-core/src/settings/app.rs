@@ -247,8 +247,8 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Play
     fullscreen_lyrics_visible: bool = true => set_fullscreen_lyrics_visible;
     #[serde(default = "default_lyrics_panel_visible")]
     fullscreen_current_lyrics_line_visible: bool = true => set_fullscreen_current_lyrics_line_visible;
-    #[serde(default)]
-    fullscreen_visualizer_visible: bool = false => set_fullscreen_visualizer_visible;
+    #[serde(default = "default_lyrics_panel_visible")]
+    fullscreen_visualizer_visible: bool = true => set_fullscreen_visualizer_visible;
     #[serde(default)]
     seekbar_waveform_enabled: bool = false => set_seekbar_waveform_enabled;
 });
@@ -711,7 +711,7 @@ mod tests {
         }
         let restored: Settings = serde_json::from_value(old).unwrap();
         assert!(restored.player_display.fullscreen_lyrics_visible);
-        assert!(!restored.player_display.fullscreen_visualizer_visible);
+        assert!(restored.player_display.fullscreen_visualizer_visible);
         assert!(!restored.player_display.fullscreen_dynamic_background);
         for choice in 0..16 {
             let settings = Settings {
