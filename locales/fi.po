@@ -121,6 +121,16 @@ msgstr ""
 "Musiikkitiedostoja ei poisteta."
 
 msgid ""
+"Remove all Rufin data and settings except saved connections and credentials? "
+"Rufin will restart after clearing the data."
+msgstr ""
+
+msgid ""
+"Remove all Rufin data, settings and saved logins? Rufin will restart after "
+"clearing the data."
+msgstr ""
+
+msgid ""
 "Replace the selected contents and remove these configured sources?\n"
 "{sources}\n"
 "Their retained user state and saved logins will remain unless selected."
@@ -592,6 +602,11 @@ msgstr "Sininen"
 msgid "Browse"
 msgstr ""
 
+#, fuzzy
+#| msgid "Cached"
+msgid "Cached data"
+msgstr "Välimuistissa"
+
 msgid "Cached"
 msgstr "Välimuistissa"
 
@@ -704,12 +719,42 @@ msgstr ""
 msgid "Classical"
 msgstr "Klassinen"
 
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear EBU R128 cache"
+msgstr "Hae sanoituksia"
+
+#, fuzzy
+#| msgid "Downloading Japanese dictionary..."
+msgid "Clear Japanese dictionary"
+msgstr "Ladataan japaninkielistä sanastoa..."
+
 msgid "Clear Mapping"
 msgstr ""
 
 #, fuzzy
 #| msgid "Play album"
 msgid "Clear album"
+msgstr "Toista albumi"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear all cache"
+msgstr "Hae sanoituksia"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear all cache?"
+msgstr "Hae sanoituksia"
+
+#, fuzzy
+#| msgid "Play album"
+msgid "Clear all data"
+msgstr "Toista albumi"
+
+#, fuzzy
+#| msgid "Play album"
+msgid "Clear all data?"
 msgstr "Toista albumi"
 
 msgid "Clear artist"
@@ -733,6 +778,11 @@ msgstr "Tyhjennä jono"
 
 msgid "Clear title"
 msgstr ""
+
+#, fuzzy
+#| msgid "Show artwork"
+msgid "Clear waveform cache"
+msgstr "Näytä kuvitus"
 
 #, fuzzy
 #| msgid "Clear queue"
@@ -1065,6 +1115,11 @@ msgstr "Mukautetut HTTP-otsakkeet"
 msgid "Custom"
 msgstr "Mukautettu"
 
+#, fuzzy
+#| msgid "Copy invitation"
+msgid "Customization"
+msgstr "Kopioi kutsu"
+
 msgid "Customize display"
 msgstr "Mukauta näkymää"
 
@@ -1084,6 +1139,9 @@ msgstr ""
 
 msgid "Dark"
 msgstr "Tumma"
+
+msgid "Database sizes show stored data, excluding database overhead."
+msgstr ""
 
 msgid "Date added"
 msgstr "Lisäyspäivä"
@@ -1301,6 +1359,11 @@ msgstr "Kesto"
 
 msgid "Dynamic background"
 msgstr "Dynaaminen tausta"
+
+#, fuzzy
+#| msgid "EBU R128"
+msgid "EBU R128 analysis"
+msgstr "EBU R128"
 
 msgid "EBU R128 reference level"
 msgstr ""
@@ -1657,9 +1720,6 @@ msgstr "Tauoton"
 msgid "General"
 msgstr "Yleiset"
 
-msgid "Generate and cache waveforms for the current track"
-msgstr ""
-
 msgid "Genius"
 msgstr ""
 
@@ -1825,6 +1885,11 @@ msgstr "Kutsu"
 msgid "January {year}"
 msgstr ""
 
+#, fuzzy
+#| msgid "Downloading Japanese dictionary..."
+msgid "Japanese dictionary"
+msgstr "Ladataan japaninkielistä sanastoa..."
+
 msgid "Jellyfin"
 msgstr "Jellyfin"
 
@@ -1856,9 +1921,6 @@ msgstr "Karaoketila"
 
 msgid "Keep Rufin running after closing the window"
 msgstr "Pidä Rufin käynnissä ikkunan sulkemisen jälkeen"
-
-msgid "Keep album transitions gapless when possible"
-msgstr "Pidä albumisiirtymät tauottomina jos mahdollista"
 
 msgid "Keep music available offline. Folder changes only affect new downloads"
 msgstr ""
@@ -2910,6 +2972,11 @@ msgstr "Edellinen sivu"
 msgid "Previous"
 msgstr "Edellinen"
 
+#, fuzzy
+#| msgid "Privacy and Security"
+msgid "Privacy & Security"
+msgstr "Tietosuoja ja turvallisuus"
+
 msgid "Privacy and Security"
 msgstr "Tietosuoja ja turvallisuus"
 
@@ -3462,9 +3529,6 @@ msgstr "Kelaa toistoa"
 
 msgid "Seek to {time}"
 msgstr "Siirry kohtaan {time}"
-
-msgid "Seekbar"
-msgstr "Kelauspalkki"
 
 msgid "Segmented bars"
 msgstr ""
@@ -4039,6 +4103,11 @@ msgstr ""
 msgid "UPnP"
 msgstr "UPnP"
 
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Unavailable"
+msgstr "Haku ei ole saatavilla"
+
 msgid "Undo identified value"
 msgstr ""
 
@@ -4247,6 +4316,11 @@ msgstr "Odotetaan toisen laitteen hyväksyntää"
 msgid "Waveform seekbar"
 msgstr "Aaltomuotoinen kelauspalkki"
 
+#, fuzzy
+#| msgid "Waveform seekbar"
+msgid "Waveforms"
+msgstr "Aaltomuotoinen kelauspalkki"
+
 msgid "WebDAV / Nextcloud"
 msgstr "WebDAV / Nextcloud"
 
@@ -4366,6 +4440,14 @@ msgid "{count} day ago"
 msgid_plural "{count} days ago"
 msgstr[0] "{count} päivä sitten"
 msgstr[1] "{count} päivää sitten"
+
+#, fuzzy
+#| msgid "{count} track"
+#| msgid_plural "{count} tracks"
+msgid "{count} entry"
+msgid_plural "{count} entries"
+msgstr[0] "{count} kappale"
+msgstr[1] "{count} kappaletta"
 
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
@@ -4501,6 +4583,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Keep album transitions gapless when possible"
+#~ msgstr "Pidä albumisiirtymät tauottomina jos mahdollista"
+
+#~ msgid "Seekbar"
+#~ msgstr "Kelauspalkki"
 
 #, fuzzy
 #~| msgid "Add Source"
