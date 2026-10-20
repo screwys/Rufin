@@ -212,11 +212,17 @@ msgstr ""
 msgid "1 hour"
 msgstr ""
 
+msgid "10 bands"
+msgstr ""
+
 msgid "12 hours"
 msgstr ""
 
 msgid "128 kbps"
 msgstr "128 kbps"
+
+msgid "18 bands"
+msgstr ""
 
 msgid "192 kbps"
 msgstr "192 kbps"
@@ -226,6 +232,9 @@ msgstr ""
 
 msgid "256 kbps"
 msgstr "256 kbps"
+
+msgid "31 bands"
+msgstr ""
 
 msgid "320 kbps"
 msgstr "320 kbps"
@@ -304,6 +313,9 @@ msgstr "未設置來源"
 
 msgid "Add a title"
 msgstr "新增標題"
+
+msgid "Add band"
+msgstr ""
 
 msgid "Add current"
 msgstr ""
@@ -515,6 +527,9 @@ msgstr "私密儲存空間"
 msgid "Artwork"
 msgstr ""
 
+msgid "Audio effects"
+msgstr ""
+
 msgid "Audio fade on play/pause"
 msgstr "播放/暫停時淡入淡出"
 
@@ -543,8 +558,26 @@ msgid "Auto DJ"
 msgstr "自動 DJ"
 
 #, fuzzy
+#| msgid "Auto DJ"
+msgid "Auto"
+msgstr "自動 DJ"
+
+msgid "AutoEQ / APO"
+msgstr ""
+
+#, fuzzy
 #| msgid "Automatic updates"
 msgid "Automatic Backups"
+msgstr "自動更新"
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Automatic headroom"
+msgstr "自動"
+
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Automatic preamp"
 msgstr "自動更新"
 
 msgid "Automatic updates"
@@ -594,11 +627,31 @@ msgid "Backups"
 msgstr "返回"
 
 #, fuzzy
+#| msgid "Dance"
+msgid "Balance"
+msgstr "舞曲"
+
+msgid "Band layout"
+msgstr ""
+
+msgid "Band"
+msgstr ""
+
+msgid "Bands"
+msgstr ""
+
+msgid "Bandwidth"
+msgstr ""
+
+#, fuzzy
 #| msgid "Play count"
 msgid "Bar count"
 msgstr "播放次數"
 
 msgid "Bar spacing (px)"
+msgstr ""
+
+msgid "Bass"
 msgstr ""
 
 #, fuzzy
@@ -648,6 +701,9 @@ msgstr "取消下載"
 
 msgid "Cancel"
 msgstr "取消"
+
+msgid "Cast format"
+msgstr ""
 
 msgid "Casting network"
 msgstr ""
@@ -821,6 +877,9 @@ msgid "Clear"
 msgstr "清除播放佇列"
 
 msgid "Clearing queue also clears the current song"
+msgstr ""
+
+msgid "Clipping"
 msgstr ""
 
 msgid "Close Window"
@@ -1031,6 +1090,9 @@ msgstr ""
 msgid "Copy link"
 msgstr "複製"
 
+msgid "Copy of {name}"
+msgstr ""
+
 msgid "Copy preset"
 msgstr ""
 
@@ -1143,11 +1205,21 @@ msgstr "交叉淡入淡出模式"
 msgid "Crossfade"
 msgstr "交叉淡入淡出"
 
+#, fuzzy
+#| msgid "Crossfade"
+msgid "Crossfeed"
+msgstr "交叉淡入淡出"
+
 msgid "Current artwork"
 msgstr ""
 
 msgid "Custom HTTP headers"
 msgstr ""
+
+#, fuzzy
+#| msgid "Collection"
+msgid "Custom bands"
+msgstr "收藏"
 
 msgid "Custom"
 msgstr ""
@@ -1227,6 +1299,11 @@ msgstr ""
 #| msgid "Delete Playlist"
 msgid "Delete playlist file"
 msgstr "刪除播放清單"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Delete preset"
+msgstr "預設集"
 
 msgid "Delete"
 msgstr "刪除"
@@ -1395,6 +1472,14 @@ msgstr "下載"
 msgid "Drag to reorder"
 msgstr "拖曳以重新排序"
 
+#, fuzzy
+#| msgid "Preset"
+msgid "Duplicate preset"
+msgstr "預設集"
+
+msgid "Duplicate"
+msgstr ""
+
 msgid "Duration"
 msgstr "時長"
 
@@ -1493,6 +1578,17 @@ msgstr "啟用無痕模式"
 msgid "Enable"
 msgstr ""
 
+msgid "Enabled"
+msgstr ""
+
+msgid "Encoding peak"
+msgstr ""
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Encoding"
+msgstr "正在下載"
+
 msgid "Encrypt backups"
 msgstr ""
 
@@ -1510,6 +1606,9 @@ msgstr ""
 
 msgid "Entire Library"
 msgstr "整個媒體庫"
+
+msgid "Equalizer is controlled by the receiver"
+msgstr ""
 
 msgid "Equalizer"
 msgstr "等化器"
@@ -1564,6 +1663,11 @@ msgid "Export playlist"
 msgstr "智慧播放清單"
 
 #, fuzzy
+#| msgid "Smart playlists"
+msgid "Export preset"
+msgstr "智慧播放清單"
+
+#, fuzzy
 #| msgid "Connection"
 msgid "Export to connection"
 msgstr "連接"
@@ -1587,6 +1691,9 @@ msgstr "外部元資料查找"
 
 msgid "External site links"
 msgstr "外部網站連結"
+
+msgid "FLAC"
+msgstr ""
 
 msgid "Fade audio when playback is paused or resumed"
 msgstr "當播放暫停或繼續時淡出或淡入"
@@ -1665,6 +1772,11 @@ msgstr "連接"
 
 #, fuzzy
 #| msgid "Folder"
+msgid "File format"
+msgstr "資料夾"
+
+#, fuzzy
+#| msgid "Folder"
 msgid "File path"
 msgstr "資料夾"
 
@@ -1677,6 +1789,9 @@ msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr "檔案需要有 Mood/BPM 的標籤。不支援 Jellyfin"
 
 msgid "Filled spectrum"
+msgstr ""
+
+msgid "Filter type"
 msgstr ""
 
 msgid "Find shares"
@@ -1752,7 +1867,16 @@ msgstr ""
 msgid "Frames per second"
 msgstr "重新整理區塊"
 
+msgid "Frequency · Hz"
+msgstr ""
+
+msgid "Frequency"
+msgstr ""
+
 msgid "Friday"
+msgstr ""
+
+msgid "Full Bass & Treble"
 msgstr ""
 
 msgid "Full Bass"
@@ -1776,6 +1900,12 @@ msgstr "切換全螢幕"
 
 msgid "Furigana"
 msgstr "注音假名"
+
+msgid "Gain · dB"
+msgstr ""
+
+msgid "Gain"
+msgstr ""
 
 msgid "Gapless mode"
 msgstr "無縫銜接模式"
@@ -1827,6 +1957,9 @@ msgstr ""
 msgid "Gradient start"
 msgstr ""
 
+msgid "Graphic"
+msgstr ""
+
 msgid "Green"
 msgstr "綠色"
 
@@ -1857,6 +1990,9 @@ msgstr "隱藏"
 msgid "Hide sidebar"
 msgstr "隱藏側邊欄"
 
+msgid "High shelf"
+msgstr ""
+
 msgid "Highlight hovered row"
 msgstr ""
 
@@ -1879,6 +2015,9 @@ msgid "Hour"
 msgstr ""
 
 msgid "Hours"
+msgstr ""
+
+msgid "Hz"
 msgstr ""
 
 msgid "Identify"
@@ -1921,6 +2060,11 @@ msgstr "正在等候連線"
 
 #, fuzzy
 #| msgid "Edit metadata"
+msgid "Import preset"
+msgstr "編輯元資料"
+
+#, fuzzy
+#| msgid "Edit metadata"
 msgid "Import theme"
 msgstr "編輯元資料"
 
@@ -1933,6 +2077,9 @@ msgid "Importing profile"
 msgstr "變更敏感存儲空間"
 
 msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
+msgid "Inactive at this sample rate"
 msgstr ""
 
 msgid "Include detailed Rufin diagnostics in this session"
@@ -2201,6 +2348,9 @@ msgstr ""
 msgid "Loudness normalization"
 msgstr "響度正規化"
 
+msgid "Low shelf"
+msgstr ""
+
 msgid "Lyrics background opacity"
 msgstr ""
 
@@ -2225,6 +2375,9 @@ msgstr ""
 
 msgid "Lyrics"
 msgstr "歌詞"
+
+msgid "MP3"
+msgstr ""
 
 msgid "Manage"
 msgstr "管理"
@@ -2278,7 +2431,13 @@ msgstr ""
 msgid "Mirrored"
 msgstr ""
 
+msgid "Mode"
+msgstr ""
+
 msgid "Monday"
+msgstr ""
+
+msgid "Mono"
 msgstr ""
 
 msgid "Month"
@@ -2810,8 +2969,14 @@ msgstr "開啟更新記錄"
 msgid "Outline bars"
 msgstr ""
 
+msgid "Output gain"
+msgstr ""
+
 msgid "Overview"
 msgstr "總覽"
+
+msgid "Parametric"
+msgstr ""
 
 #, fuzzy
 #| msgid "Password"
@@ -2847,6 +3012,9 @@ msgid "Peak fall speed (% per second)"
 msgstr ""
 
 msgid "Peak hold (seconds)"
+msgstr ""
+
+msgid "Peak"
 msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
@@ -3028,6 +3196,9 @@ msgstr ""
 msgid "Position"
 msgstr "位置"
 
+msgid "Preamp"
+msgstr ""
+
 msgid "Prefer distinct track covers"
 msgstr ""
 
@@ -3083,7 +3254,17 @@ msgstr "預設集"
 
 #, fuzzy
 #| msgid "Preset"
+msgid "Preset name"
+msgstr "預設集"
+
+#, fuzzy
+#| msgid "Preset"
 msgid "Preset saved"
+msgstr "預設集"
+
+#, fuzzy
+#| msgid "Preset"
+msgid "Preset text"
 msgstr "預設集"
 
 msgid "Preset"
@@ -3150,6 +3331,9 @@ msgid "Public"
 msgstr ""
 
 msgid "Purple"
+msgstr ""
+
+msgid "Q"
 msgstr ""
 
 msgid "Queue a track to begin"
@@ -3333,6 +3517,11 @@ msgid "Remove and Delete"
 msgstr "移除並刪除"
 
 #, fuzzy
+#| msgid "Remove and Delete"
+msgid "Remove band"
+msgstr "移除並刪除"
+
+#, fuzzy
 #| msgid "Remove folder"
 msgid "Remove device"
 msgstr "移除資料夾"
@@ -3378,6 +3567,16 @@ msgstr "從釘選中移除"
 msgid "Rename file"
 msgstr "重新命名"
 
+#, fuzzy
+#| msgid "Preset"
+msgid "Rename preset"
+msgstr "預設集"
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename"
+msgstr "重新命名"
+
 msgid "Reorder"
 msgstr ""
 
@@ -3418,6 +3617,9 @@ msgstr "重置回預設值"
 
 msgid "Reset"
 msgstr "重置"
+
+msgid "Response"
+msgstr ""
 
 msgid "Restart now"
 msgstr ""
@@ -3471,6 +3673,9 @@ msgstr "列表"
 msgid "Rufin Connect"
 msgstr "連接"
 
+msgid "Rufin JSON"
+msgstr ""
+
 msgid "Rufin data folder"
 msgstr "Rufin 資料資料夾"
 
@@ -3484,6 +3689,9 @@ msgid "SMB / Samba"
 msgstr ""
 
 msgid "SMB Domain"
+msgstr ""
+
+msgid "Sample peak"
 msgstr ""
 
 msgid "Sample rate"
@@ -3518,8 +3726,18 @@ msgstr ""
 msgid "Save playlist changes automatically"
 msgstr ""
 
+#, fuzzy
+#| msgid "Saved to"
+msgid "Save preset"
+msgstr "儲存至"
+
 msgid "Save"
 msgstr "儲存"
+
+#, fuzzy
+#| msgid "Saved"
+msgid "Save..."
+msgstr "已儲存"
 
 #, fuzzy
 #| msgid "Saved to"
@@ -3996,7 +4214,13 @@ msgstr "無來源"
 msgid "Sources"
 msgstr ""
 
+msgid "Spectrum · dBFS"
+msgstr ""
+
 msgid "Spectrum line"
+msgstr ""
+
+msgid "Spectrum"
 msgstr ""
 
 msgid "Start minimized"
@@ -4174,6 +4398,9 @@ msgstr "標題"
 msgid "Toggle Fullscreen"
 msgstr "切換全螢幕"
 
+msgid "Tone and channels"
+msgstr ""
+
 msgid "Tools"
 msgstr ""
 
@@ -4228,6 +4455,9 @@ msgstr ""
 
 msgid "Translation language"
 msgstr "翻譯語言"
+
+msgid "Treble"
+msgstr ""
 
 msgid "Troubleshooting"
 msgstr ""
@@ -4286,6 +4516,11 @@ msgstr ""
 
 msgid "Unmuted"
 msgstr ""
+
+#, fuzzy
+#| msgid "Saved"
+msgid "Unsaved"
+msgstr "已儲存"
 
 #, fuzzy
 #| msgid "Song title"
@@ -4366,6 +4601,9 @@ msgstr "歌詞設定"
 msgid "Use folder"
 msgstr "新增資料夾"
 
+msgid "Use for this output"
+msgstr ""
+
 msgid "Use listening activity"
 msgstr ""
 
@@ -4381,6 +4619,11 @@ msgstr "最大年份"
 #| msgid "Minimum year"
 msgid "Use minimum year"
 msgstr "最小年份"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Use output settings"
+msgstr "歌詞設定"
 
 #, fuzzy
 #| msgid "Lyrics settings"
@@ -4487,6 +4730,12 @@ msgid "Weekly"
 msgstr ""
 
 msgid "Wide"
+msgstr ""
+
+msgid "Width unit"
+msgstr ""
+
+msgid "Width"
 msgstr ""
 
 msgid "Window"
@@ -4818,11 +5067,6 @@ msgstr ""
 
 #~ msgid "Rename Playlist"
 #~ msgstr "重新命名播放清單"
-
-#, fuzzy
-#~| msgid "Rename"
-#~ msgid "Rename"
-#~ msgstr "重新命名"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "選擇已存在的本地資料夾"

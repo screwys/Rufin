@@ -280,11 +280,17 @@ msgstr ". Sa pead vaid sisestama e-posti aadressi ja rakenduse nime"
 msgid "1 hour"
 msgstr "1 tund"
 
+msgid "10 bands"
+msgstr ""
+
 msgid "12 hours"
 msgstr "12 tundi"
 
 msgid "128 kbps"
 msgstr "128 kbps"
+
+msgid "18 bands"
+msgstr ""
 
 msgid "192 kbps"
 msgstr "192 kbps"
@@ -294,6 +300,9 @@ msgstr "24 tundi"
 
 msgid "256 kbps"
 msgstr "256 kbps"
+
+msgid "31 bands"
+msgstr ""
 
 msgid "320 kbps"
 msgstr "320 kbps"
@@ -362,6 +371,11 @@ msgstr "Allalaadimiste seadistamiseks lisa server."
 
 msgid "Add a title"
 msgstr "Lisa pealkiri"
+
+#, fuzzy
+#| msgid "Add Last"
+msgid "Add band"
+msgstr "Viimatilisatud"
 
 msgid "Add current"
 msgstr "Lisa praegune"
@@ -545,6 +559,9 @@ msgstr "Kaanepildi salvestusruum"
 msgid "Artwork"
 msgstr "Kaanepildid"
 
+msgid "Audio effects"
+msgstr ""
+
 msgid "Audio fade on play/pause"
 msgstr "Esitamisel/peatamisel hajuta heli sujuvalt"
 
@@ -572,7 +589,25 @@ msgstr "Automaatse diskori muusika täiendamise lävend"
 msgid "Auto DJ"
 msgstr "Automaatne diskor"
 
+#, fuzzy
+#| msgid "Auto DJ"
+msgid "Auto"
+msgstr "Automaatne diskor"
+
+msgid "AutoEQ / APO"
+msgstr ""
+
 msgid "Automatic Backups"
+msgstr "Automaatsed varundused"
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Automatic headroom"
+msgstr "Automaatne"
+
+#, fuzzy
+#| msgid "Automatic Backups"
+msgid "Automatic preamp"
 msgstr "Automaatsed varundused"
 
 msgid "Automatic updates"
@@ -612,12 +647,34 @@ msgid "Backups"
 msgstr "Varukoopiad"
 
 #, fuzzy
+#| msgid "Dance"
+msgid "Balance"
+msgstr "Tantsumuusika"
+
+msgid "Band layout"
+msgstr ""
+
+msgid "Band"
+msgstr ""
+
+msgid "Bands"
+msgstr ""
+
+msgid "Bandwidth"
+msgstr ""
+
+#, fuzzy
 #| msgid "Play count"
 msgid "Bar count"
 msgstr "Esituskordi"
 
 msgid "Bar spacing (px)"
 msgstr "Ruum riba ümber (pikslites)"
+
+#, fuzzy
+#| msgid "Full Bass"
+msgid "Bass"
+msgstr "Täisbass"
 
 msgid "Bearer token (WebDAV)"
 msgstr "Esitaja tunnusluba (Bearer token - WebDAV)"
@@ -662,6 +719,11 @@ msgstr "Katkesta allalaadimine"
 
 msgid "Cancel"
 msgstr "Katkesta"
+
+#, fuzzy
+#| msgid "Path format"
+msgid "Cast format"
+msgstr "Asukoha vorming"
 
 msgid "Casting network"
 msgstr "Meediumilevivõrk"
@@ -811,6 +873,11 @@ msgstr "Tühjenda"
 
 msgid "Clearing queue also clears the current song"
 msgstr "Esitusjärjekorra tühjendamine eemaldab ka hetkel esitamisel oleva loo"
+
+#, fuzzy
+#| msgid "Clear Mapping"
+msgid "Clipping"
+msgstr "Eemalda vastendus"
 
 msgid "Close Window"
 msgstr "Sulge aken"
@@ -982,6 +1049,9 @@ msgstr "Kopeeri kutse"
 msgid "Copy link"
 msgstr "Kopeeri link"
 
+msgid "Copy of {name}"
+msgstr ""
+
 msgid "Copy preset"
 msgstr "Kopeeri eelseadistus"
 
@@ -1066,11 +1136,21 @@ msgstr "Risthajumise viis"
 msgid "Crossfade"
 msgstr "Risthajutamine"
 
+#, fuzzy
+#| msgid "Crossfade"
+msgid "Crossfeed"
+msgstr "Risthajutamine"
+
 msgid "Current artwork"
 msgstr "Praegune kaanepilt"
 
 msgid "Custom HTTP headers"
 msgstr "Sinu seadistatud HTTP-päised"
+
+#, fuzzy
+#| msgid "Custom"
+msgid "Custom bands"
+msgstr "Kohandatud"
 
 msgid "Custom"
 msgstr "Kohandatud"
@@ -1146,6 +1226,11 @@ msgstr "Kas kustutad: „{name}“?"
 
 msgid "Delete playlist file"
 msgstr "Kustuta esitusloendi fail"
+
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Delete preset"
+msgstr "Aseta eelseadistus"
 
 msgid "Delete"
 msgstr "Kustuta"
@@ -1292,6 +1377,16 @@ msgstr "Allalaadimised"
 msgid "Drag to reorder"
 msgstr "Järjekorra muutmiseks lohista"
 
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Duplicate preset"
+msgstr "Aseta eelseadistus"
+
+#, fuzzy
+#| msgid "Don't duplicate"
+msgid "Duplicate"
+msgstr "Ära tee koopiat"
+
 msgid "Duration"
 msgstr "Kestus"
 
@@ -1372,6 +1467,19 @@ msgstr "Lülita privaatne režiim sisse"
 msgid "Enable"
 msgstr "Lülita sisse"
 
+#, fuzzy
+#| msgid "Enable"
+msgid "Enabled"
+msgstr "Lülita sisse"
+
+msgid "Encoding peak"
+msgstr ""
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Encoding"
+msgstr "Allalaadimisel"
+
 msgid "Encrypt backups"
 msgstr "Krüpti varukoopiad"
 
@@ -1389,6 +1497,9 @@ msgstr "Logimaks sisse oma brauserist, sisesta oma Nextcloudi serveri aadress"
 
 msgid "Entire Library"
 msgstr "Terve muusikakogu"
+
+msgid "Equalizer is controlled by the receiver"
+msgstr ""
 
 msgid "Equalizer"
 msgstr "Ekvalaiser"
@@ -1432,6 +1543,11 @@ msgstr "Ekspordivorming"
 msgid "Export playlist"
 msgstr "Ekspordi esitusloend"
 
+#, fuzzy
+#| msgid "Export playlist"
+msgid "Export preset"
+msgstr "Ekspordi esitusloend"
+
 msgid "Export to connection"
 msgstr "Ekspordi ühendusse"
 
@@ -1452,6 +1568,9 @@ msgstr "Metateabe otsing välisest teenusest"
 
 msgid "External site links"
 msgstr "Väliste veebisaitide lingid"
+
+msgid "FLAC"
+msgstr ""
 
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Sujuv helivaljuse muutmine taasesituse peatamisel või jätkamisel"
@@ -1520,6 +1639,11 @@ msgstr "Failiühendus"
 msgid "File connections"
 msgstr "Failiühendused"
 
+#, fuzzy
+#| msgid "Format"
+msgid "File format"
+msgstr "Vorming"
+
 msgid "File path"
 msgstr "Faili asukoht"
 
@@ -1533,6 +1657,9 @@ msgstr ""
 
 msgid "Filled spectrum"
 msgstr "Täidetud spekter"
+
+msgid "Filter type"
+msgstr ""
 
 msgid "Find shares"
 msgstr "Otsi jagatud võrgukaustu"
@@ -1599,8 +1726,19 @@ msgstr "Kaadrisageduse piirang"
 msgid "Frames per second"
 msgstr "Kaadrit sekundis"
 
+msgid "Frequency · Hz"
+msgstr ""
+
+msgid "Frequency"
+msgstr ""
+
 msgid "Friday"
 msgstr "Reede"
+
+#, fuzzy
+#| msgid "Full Treble"
+msgid "Full Bass & Treble"
+msgstr "Täiskõrged"
 
 msgid "Full Bass"
 msgstr "Täisbass"
@@ -1619,6 +1757,12 @@ msgstr "Täisekraanivaade"
 
 msgid "Furigana"
 msgstr "Furigana"
+
+msgid "Gain · dB"
+msgstr ""
+
+msgid "Gain"
+msgstr ""
 
 msgid "Gapless mode"
 msgstr "Vahepausideta režiim"
@@ -1668,6 +1812,9 @@ msgstr "Gradiendi lõpp"
 msgid "Gradient start"
 msgstr "Gradiendi algus"
 
+msgid "Graphic"
+msgstr ""
+
 msgid "Green"
 msgstr "Roheline"
 
@@ -1698,6 +1845,9 @@ msgstr "Peidetud"
 msgid "Hide sidebar"
 msgstr "Peida külgriba"
 
+msgid "High shelf"
+msgstr ""
+
 msgid "Highlight hovered row"
 msgstr "Tõsta esile see rida, mille kohal on kursori fookus"
 
@@ -1721,6 +1871,9 @@ msgstr "Tund"
 
 msgid "Hours"
 msgstr "Tunde"
+
+msgid "Hz"
+msgstr ""
 
 msgid "Identify"
 msgstr "Tuvasta"
@@ -1756,6 +1909,11 @@ msgstr "Impordi esitusloend"
 msgid "Import from connection"
 msgstr "Impordi ühendusest"
 
+#, fuzzy
+#| msgid "Import theme"
+msgid "Import preset"
+msgstr "Impordi kujundus"
+
 msgid "Import theme"
 msgstr "Impordi kujundus"
 
@@ -1770,6 +1928,9 @@ msgstr "Liitumisprofiil"
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
 "Impordib failid muusikakogusse ja jälgib kaustades tekkivaid muudatusi."
+
+msgid "Inactive at this sample rate"
+msgstr ""
 
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Kaasa sellest sessioonist Rufini üksikasjalik statistika"
@@ -2016,6 +2177,9 @@ msgstr "Logid on kopeeritud"
 msgid "Loudness normalization"
 msgstr "Helivaljuse normaliseerimine"
 
+msgid "Low shelf"
+msgstr ""
+
 msgid "Lyrics background opacity"
 msgstr "Laulusõnade tausta läbipaistmatus"
 
@@ -2036,6 +2200,9 @@ msgstr "Laulusõnad saavad olema nähtavad siin."
 
 msgid "Lyrics"
 msgstr "Laulusõnad"
+
+msgid "MP3"
+msgstr "MP3"
 
 msgid "Manage"
 msgstr "Halda"
@@ -2090,8 +2257,14 @@ msgstr "Peegeldatud ribad"
 msgid "Mirrored"
 msgstr "Peegeldatud ribad"
 
+msgid "Mode"
+msgstr ""
+
 msgid "Monday"
 msgstr "Esmaspäev"
+
+msgid "Mono"
+msgstr ""
 
 msgid "Month"
 msgstr "Kuu"
@@ -2545,8 +2718,16 @@ msgstr "Muud versioonid"
 msgid "Outline bars"
 msgstr "Kontuuriga ribad"
 
+#, fuzzy
+#| msgid "Output"
+msgid "Output gain"
+msgstr "Väljund"
+
 msgid "Overview"
 msgstr "Ülevaade"
+
+msgid "Parametric"
+msgstr ""
 
 msgid "Password or token"
 msgstr "Salasõna või tunnusluba"
@@ -2577,6 +2758,9 @@ msgstr "Tipumarkeri allalangemise kiirus (% sekundis)"
 
 msgid "Peak hold (seconds)"
 msgstr "Tipumarkeri kuvamine (sekundites)"
+
+msgid "Peak"
+msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -2733,6 +2917,9 @@ msgstr "Port"
 msgid "Position"
 msgstr "Asukoht"
 
+msgid "Preamp"
+msgstr ""
+
 msgid "Prefer distinct track covers"
 msgstr "Eelista lugude eraldi kaanepilte"
 
@@ -2774,8 +2961,18 @@ msgstr "4. eelseadistus"
 msgid "Preset 5"
 msgstr "5. eelseadistus"
 
+#, fuzzy
+#| msgid "Preset saved"
+msgid "Preset name"
+msgstr "Eelseadistus on salvestatud"
+
 msgid "Preset saved"
 msgstr "Eelseadistus on salvestatud"
+
+#, fuzzy
+#| msgid "Preset 1"
+msgid "Preset text"
+msgstr "1. eelseadistus"
 
 msgid "Preset"
 msgstr "Eelseadistus"
@@ -2838,6 +3035,9 @@ msgstr "Avalik"
 
 msgid "Purple"
 msgstr "Purpurpunane"
+
+msgid "Q"
+msgstr ""
 
 msgid "Queue a track to begin"
 msgstr "Alustamiseks lisa midagi esitusjärjekorda"
@@ -2995,6 +3195,11 @@ msgstr "Eemalda kõik allalaadimised"
 msgid "Remove and Delete"
 msgstr "Eemalda ja kustuta"
 
+#, fuzzy
+#| msgid "Remove and Delete"
+msgid "Remove band"
+msgstr "Eemalda ja kustuta"
+
 msgid "Remove device"
 msgstr "Eemalda seade"
 
@@ -3030,6 +3235,16 @@ msgstr "Eemaldatud asukohast"
 
 msgid "Rename file"
 msgstr "Muuda failinime"
+
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Rename preset"
+msgstr "Aseta eelseadistus"
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename"
+msgstr "Muuda nime"
 
 msgid "Reorder"
 msgstr "Muuda järjestust"
@@ -3069,6 +3284,9 @@ msgstr "Taasta vaikimisi väärtus"
 
 msgid "Reset"
 msgstr "Lähtesta"
+
+msgid "Response"
+msgstr ""
 
 msgid "Restart now"
 msgstr "Taaskäivita kohe"
@@ -3118,6 +3336,11 @@ msgstr "Read"
 msgid "Rufin Connect"
 msgstr "Rufin Connect"
 
+#, fuzzy
+#| msgid "Rufin host"
+msgid "Rufin JSON"
+msgstr "Rufini host"
+
 msgid "Rufin data folder"
 msgstr "Rufini andmekaust"
 
@@ -3132,6 +3355,11 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB domeen"
+
+#, fuzzy
+#| msgid "Sample rate"
+msgid "Sample peak"
+msgstr "Diskreetimissagedus"
 
 msgid "Sample rate"
 msgstr "Diskreetimissagedus"
@@ -3163,8 +3391,18 @@ msgstr "Salvesta laulusõnad automaatselt"
 msgid "Save playlist changes automatically"
 msgstr "Salvesta esitusloendi muudatused automaatselt"
 
+#, fuzzy
+#| msgid "Saved preset"
+msgid "Save preset"
+msgstr "Salvestatud eelseadistus"
+
 msgid "Save"
 msgstr "Salvesta"
+
+#, fuzzy
+#| msgid "Saved..."
+msgid "Save..."
+msgstr "Salvestatud..."
 
 msgid "Saved Plex Login"
 msgstr "Salvestatud Plexi sisselogimine"
@@ -3574,7 +3812,17 @@ msgstr "Allikas"
 msgid "Sources"
 msgstr "Allikad"
 
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "Spectrum · dBFS"
+msgstr "Spektrijoon"
+
 msgid "Spectrum line"
+msgstr "Spektrijoon"
+
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "Spectrum"
 msgstr "Spektrijoon"
 
 msgid "Start minimized"
@@ -3733,6 +3981,9 @@ msgstr "Pealkiri"
 msgid "Toggle Fullscreen"
 msgstr "Lülita täisekraanivaade sisse/välja"
 
+msgid "Tone and channels"
+msgstr ""
+
 msgid "Tools"
 msgstr "Tarvikud"
 
@@ -3777,6 +4028,11 @@ msgstr "Lugudevahetuse viis"
 
 msgid "Translation language"
 msgstr "Tõlke keel"
+
+#, fuzzy
+#| msgid "Full Treble"
+msgid "Treble"
+msgstr "Täiskõrged"
 
 msgid "Troubleshooting"
 msgstr "Veaotsing"
@@ -3833,6 +4089,11 @@ msgstr "Lõpeta summutamine"
 
 msgid "Unmuted"
 msgstr "Summutamine on lõpetatud"
+
+#, fuzzy
+#| msgid "Saved"
+msgid "Unsaved"
+msgstr "Salvestatud"
 
 msgid "Untitled"
 msgstr "Ilma pealkirjata"
@@ -3900,6 +4161,9 @@ msgstr "Kasta olemasolevat"
 msgid "Use folder"
 msgstr "Kasuta kausta"
 
+msgid "Use for this output"
+msgstr ""
+
 msgid "Use listening activity"
 msgstr "Kasuta kuulamisaktiivsust"
 
@@ -3913,6 +4177,11 @@ msgstr "Kasuta maksimaalset aastat"
 
 msgid "Use minimum year"
 msgstr "Kasuta minimaalset aastat"
+
+#, fuzzy
+#| msgid "Use source setting"
+msgid "Use output settings"
+msgstr "Kasuta allika seadistust"
 
 msgid "Use source setting"
 msgstr "Kasuta allika seadistust"
@@ -4017,6 +4286,12 @@ msgstr "Iganädalaselt"
 
 msgid "Wide"
 msgstr "Lai"
+
+msgid "Width unit"
+msgstr ""
+
+msgid "Width"
+msgstr ""
 
 msgid "Window"
 msgstr "Aken"
@@ -4339,9 +4614,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 #~ "See kehtib ainult uute kohalike failide puhul, mis on lisatud mõne teise "
 #~ "seadme poolt"
 
-#~ msgid "MP3"
-#~ msgstr "MP3"
-
 #~ msgid ""
 #~ "Rufin started with fresh user state because the saved database could not "
 #~ "be used. Your settings and saved logins are unchanged."
@@ -4419,11 +4691,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Rename Playlist"
 #~ msgstr "Muuda esitusloendi nime"
-
-#, fuzzy
-#~| msgid "Rename"
-#~ msgid "Rename"
-#~ msgstr "Muuda nime"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Vali olemasolev kohalik kaust"
@@ -4582,9 +4849,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Activity links and MusicBrainz covers"
 #~ msgstr "Tegevuste lingid ja kaanepildid MusicBrainz’ist"
-
-#~ msgid "Add Last"
-#~ msgstr "Viimatilisatud"
 
 #~ msgid "Add Your Music Library"
 #~ msgstr "Lisa oma muusikakogu"
@@ -4874,9 +5138,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 #~ msgid "Optionally map server tracks to files on this computer"
 #~ msgstr ""
 #~ "Soovi korral saad serveris olevad lood vastendada failidega selles arvutis"
-
-#~ msgid "Output"
-#~ msgstr "Väljund"
 
 #, fuzzy
 #~ msgid "Play Last"
