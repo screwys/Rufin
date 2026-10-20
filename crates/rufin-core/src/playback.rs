@@ -1,6 +1,11 @@
 //! Playback controls, source jobs, and persistent playback facts.
 pub(crate) mod actor;
 mod commands;
+pub mod equalizer;
+pub use equalizer::{
+    EqCastFormat, EqEdit, EqPresetFormat, EqPresetSummary, EqSubscription, EqView,
+    EqualizerPreferences,
+};
 mod connect;
 mod continuation;
 mod plex;
@@ -63,9 +68,16 @@ pub struct PlaybackOwner {
     connect: Mutex<std::sync::Weak<crate::connect::ConnectOwner>>,
     active: Mutex<Option<Playback>>,
     pending_queue: Mutex<Option<QueueUpdate>>,
+    equalizer: Mutex<equalizer::EqualizerState>,
     store_sender: async_channel::Sender<PlaybackStoreWork>,
     monotonic_origin: Instant,
-    start_backend: Box<dyn Fn() -> Result<Box<dyn PlaybackBackend>, String> + Send + Sync>,
+    start_backend: Box<
+        dyn Fn(
+                tokio::sync::watch::Receiver<playback::ProcessingRequest>,
+            ) -> Result<Box<dyn PlaybackBackend>, String>
+            + Send
+            + Sync,
+    >,
     cast: playback_cast::CastManager,
     output: Mutex<OutputSelection>,
     plex_targets: Mutex<std::collections::HashMap<String, playback_cast::plex::PlexPlayer>>,
@@ -86,6 +98,10 @@ enum PlaybackStoreWork {
         audio_output: Option<String>,
     },
     Settings,
+    Equalizer {
+        snapshot: EqualizerPreferences,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
 }
 
 fn enqueue_queue_save(
@@ -144,9 +160,19 @@ impl PlaybackOwner {
         start_backend: StartBackend,
     ) -> Arc<Self>
     where
-        StartBackend: Fn() -> Result<Box<dyn PlaybackBackend>, String> + Send + Sync + 'static,
+        StartBackend: Fn(
+                tokio::sync::watch::Receiver<playback::ProcessingRequest>,
+            ) -> Result<Box<dyn PlaybackBackend>, String>
+            + Send
+            + Sync
+            + 'static,
     {
-        let ui = settings.load().ui;
+        let stored = settings.load();
+        let eq = equalizer::EqualizerState::new(
+            stored.equalizer,
+            stored.ui.playback.audio_output.as_deref(),
+        );
+        let ui = stored.ui;
         let (store_sender, store_receiver) = async_channel::unbounded();
         let artwork_settings = settings.clone();
         let cast_artwork = artwork.clone();
@@ -174,6 +200,7 @@ impl PlaybackOwner {
             connect: Mutex::new(std::sync::Weak::new()),
             active: Mutex::new(None),
             pending_queue: Mutex::new(None),
+            equalizer: Mutex::new(eq),
             store_sender,
             monotonic_origin: Instant::now(),
             start_backend: Box::new(start_backend),
@@ -362,6 +389,14 @@ impl PlaybackOwner {
         failed_queue_save: &mut Option<QueueUpdate>,
     ) {
         match work {
+            PlaybackStoreWork::Equalizer { snapshot, reply } => {
+                let result = self.settings.update(|stored| {
+                    stored.equalizer = snapshot;
+                    Ok(())
+                });
+                self.equalizer_write_finished(&result);
+                let _ = reply.send(result);
+            }
             PlaybackStoreWork::Continue { prepared, reply } => {
                 let _ = reply.send(self.commit_continuation(*prepared, failed_queue_save).await);
             }
@@ -576,6 +611,7 @@ impl PlaybackOwner {
         );
     }
     pub(crate) fn playback_settings_changed(&self, settings: playback::PlaybackSettings) {
+        self.equalizer_output_changed(settings.audio_output.as_deref());
         self.loudness.settings_changed(
             settings.loudness_normalization,
             settings.loudness_normalization_scope,
@@ -722,10 +758,15 @@ impl PlaybackOwner {
         output: &playback::PlaybackOutput,
     ) -> Result<Box<dyn PlaybackBackend>, String> {
         match output {
-            playback::PlaybackOutput::Local => (self.start_backend)(),
+            playback::PlaybackOutput::Local => {
+                (self.start_backend)(self.processing_receiver(output))
+            }
             playback::PlaybackOutput::Remote(output) => self
                 .cast
-                .connect(output)
+                .connect(
+                    output,
+                    self.processing_receiver(&playback::PlaybackOutput::Remote(output.clone())),
+                )
                 .map(|backend| Box::new(backend) as Box<dyn PlaybackBackend>),
         }
     }
@@ -745,7 +786,9 @@ impl PlaybackOwner {
         }
         if matches!(&selected, playback::PlaybackOutput::Remote(output) if output.protocol == playback::RemoteOutputProtocol::RufinConnect)
         {
-            return self.select_rufin(selected, cancelled);
+            self.select_rufin(selected, cancelled)?;
+            self.equalizer_output_changed(self.settings.load().ui.playback.audio_output.as_deref());
+            return Ok(());
         }
         if self
             .rufin
@@ -755,12 +798,17 @@ impl PlaybackOwner {
         {
             self.leave_rufin(cancelled.clone())?;
             if selected.is_local() {
+                self.equalizer_output_changed(
+                    self.settings.load().ui.playback.audio_output.as_deref(),
+                );
                 return Ok(());
             }
         }
         if matches!(&selected, playback::PlaybackOutput::Remote(output) if output.protocol == playback::RemoteOutputProtocol::PlexCompanion)
         {
-            return self.select_plex(selected, cancelled);
+            self.select_plex(selected, cancelled)?;
+            self.equalizer_output_changed(self.settings.load().ui.playback.audio_output.as_deref());
+            return Ok(());
         }
         if self
             .plex
@@ -770,6 +818,9 @@ impl PlaybackOwner {
         {
             self.leave_plex(cancelled)?;
             if selected.is_local() {
+                self.equalizer_output_changed(
+                    self.settings.load().ui.playback.audio_output.as_deref(),
+                );
                 return Ok(());
             }
         }
@@ -786,6 +837,7 @@ impl PlaybackOwner {
             output.selected = selected;
             output.prepared = Some(backend);
         }
+        self.equalizer_output_changed(self.settings.load().ui.playback.audio_output.as_deref());
         Ok(())
     }
     fn clock_sample(&self) -> ClockSample {

@@ -63,6 +63,50 @@ impl VisualizerFft {
         }
     }
 
+    pub fn push_channel_samples(&mut self, samples: &[f32], channels: usize, channel: usize) {
+        for frame in samples.chunks_exact(channels) {
+            if self.samples.len() == VISUALIZER_FFT_SIZE {
+                self.samples.pop_front();
+            }
+            self.samples.push_back(frame[channel]);
+        }
+    }
+
+    /// One-sided power at each FFT frequency, normalized by the window's coherent gain.
+    pub fn spectrum_power(&mut self) -> Option<Vec<f64>> {
+        if self.samples.len() < VISUALIZER_FFT_SIZE {
+            return None;
+        }
+        self.transform();
+        let coherent_gain = self.window.iter().map(|v| f64::from(*v)).sum::<f64>();
+        Some(
+            self.input[..=VISUALIZER_FFT_SIZE / 2]
+                .iter()
+                .enumerate()
+                .map(|(i, value)| {
+                    let factor = if i == 0 || i == VISUALIZER_FFT_SIZE / 2 {
+                        1.0
+                    } else {
+                        2.0
+                    };
+                    f64::from(value.norm_sqr()) * (factor / coherent_gain).powi(2)
+                })
+                .collect(),
+        )
+    }
+
+    fn transform(&mut self) {
+        for ((slot, sample), window) in self
+            .input
+            .iter_mut()
+            .zip(self.samples.iter().copied())
+            .zip(self.window.iter().copied())
+        {
+            *slot = Complex::new(sample * window, 0.0);
+        }
+        self.fft.process(&mut self.input);
+    }
+
     pub fn maybe_levels(&mut self, sample_rate: u32) -> Option<Vec<f64>> {
         if self.samples.len() < VISUALIZER_FFT_SIZE {
             return None;
@@ -79,15 +123,7 @@ impl VisualizerFft {
     }
 
     fn levels(&mut self, sample_rate: u32) -> Vec<f64> {
-        for ((slot, sample), window) in self
-            .input
-            .iter_mut()
-            .zip(self.samples.iter().copied())
-            .zip(self.window.iter().copied())
-        {
-            *slot = Complex::new(sample * window, 0.0);
-        }
-        self.fft.process(&mut self.input);
+        self.transform();
         if self.band_sample_rate != sample_rate {
             self.band_ranges = visualizer_band_ranges(sample_rate);
             self.band_sample_rate = sample_rate;

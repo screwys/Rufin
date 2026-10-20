@@ -18,6 +18,7 @@
   </head>
   <body>
     {% include "connect.html" %}
+    {% include "equalizer.html" %}
     <dialog id="login-dialog" aria-labelledby="login-title" {% if !page.connected %}open{% endif %}>
       <form id="login-form" method="post" action="/session">
         <div class="login-heading">
@@ -337,6 +338,7 @@
           </div>
         </div>
         <div class="volume">
+          <button id="open-equalizer" type="button">{{ localization::tr("Equalizer") }}</button>
           <button
             id="current-favorite" form="current-track-form" formaction="/api/favorite"
             class="icon-button"

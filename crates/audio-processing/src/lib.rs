@@ -4,6 +4,7 @@ use gst::prelude::*;
 use gstreamer as gst;
 use std::sync::OnceLock;
 
+pub mod effects;
 mod loudness;
 mod media_input;
 pub use media_input::{ResolvedStream, StreamWindow};
@@ -16,7 +17,7 @@ mod waveform;
 pub use loudness::{
     AnalyzedLoudness, LoudnessAnalysis, album_loudness, analyze_loudness_cancellable,
 };
-pub use transcode::{TranscodedAudioReader, transcode_audio};
+pub use transcode::{TranscodeOptions, TranscodedAudioReader, transcode_audio};
 pub use waveform::generate_waveform_peaks_cancellable;
 
 pub use visualizer::VisualizerFft;
@@ -95,3 +96,6 @@ mod tests {
         assert!(!source.property::<bool>("ssl-strict"));
     }
 }
+
+#[cfg(feature = "bindings")]
+uniffi::setup_scaffolding!();

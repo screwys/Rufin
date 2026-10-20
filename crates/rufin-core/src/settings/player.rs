@@ -33,8 +33,6 @@ pub struct PlayerPreferences {
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlayerPreferenceOptions {
-    pub equalizer_band_titles: Vec<String>,
-    pub equalizer_presets: Vec<String>,
     pub lyrics_scroll_pause_millis: u64,
     pub visualizer_stale_micros: u64,
     pub min_crossfade_seconds: u8,
@@ -56,9 +54,7 @@ impl SettingsOwner {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let ui = &stored.ui;
-        let mut playback = ui.playback.clone();
-        playback.equalizer.selected_preset =
-            playback::equalizer_selected_preset(&playback.equalizer);
+        let playback = ui.playback.clone();
         let mut visualizer = ui.visualizer.clone();
         visualizer.selected_preset = Some(visualizer.selected_preset());
         PlayerPreferences {
@@ -85,13 +81,6 @@ impl SettingsOwner {
 
     pub fn player_preference_options(&self) -> PlayerPreferenceOptions {
         PlayerPreferenceOptions {
-            equalizer_band_titles: (0..playback::EQUALIZER_BAND_COUNT)
-                .map(playback::equalizer_band_title)
-                .collect(),
-            equalizer_presets: playback::equalizer_preset_names()
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
             lyrics_scroll_pause_millis: lyrics::LYRICS_USER_SCROLL_PAUSE_MS,
             visualizer_stale_micros: visualizer::VISUALIZER_STALE_MICROS as u64,
             min_crossfade_seconds: playback::MIN_CROSSFADE_SECONDS,
@@ -116,43 +105,6 @@ impl SettingsOwner {
     pub fn set_right_panel_combined(&self, value: bool) -> Result<(), SettingsError> {
         self.update_preferences(move |ui| {
             ui.right_panel.combined = value;
-            Ok(())
-        })
-        .map_err(Into::into)
-    }
-
-    pub fn set_equalizer_enabled(&self, enabled: bool) -> Result<(), SettingsError> {
-        self.restore(
-            move |stored| {
-                stored.ui.playback.equalizer.enabled = enabled;
-                Ok(())
-            },
-            false,
-        )
-        .map_err(Into::into)
-    }
-
-    pub fn select_equalizer_preset(&self, preset: String) -> Result<(), SettingsError> {
-        self.update_preferences(move |ui| {
-            ui.playback.equalizer.select_preset(preset);
-            Ok(())
-        })
-        .map_err(Into::into)
-    }
-
-    pub fn set_equalizer_band(
-        &self,
-        index: PreferenceIndex,
-        value: f64,
-    ) -> Result<(), SettingsError> {
-        self.update_preferences(move |ui| {
-            let equalizer = &mut ui.playback.equalizer;
-            let band = equalizer
-                .bands
-                .get_mut(index)
-                .ok_or_else(|| localization::tr("This isn't available"))?;
-            *band = value;
-            equalizer.mark_custom();
             Ok(())
         })
         .map_err(Into::into)

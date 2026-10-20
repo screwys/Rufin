@@ -27,6 +27,8 @@ import io.github.screwys.rufin.shared.rufin_core.*
 import io.github.screwys.rufin.shared.lyrics.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import java.util.concurrent.Executors
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -45,7 +47,8 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         private set
     var lyricsSearching by mutableStateOf(false)
         private set
-    private var playbackOwner: PlaybackOwner? = null
+    internal var playbackOwner by mutableStateOf<PlaybackOwner?>(null)
+        private set
     private var lyricsOwner: LyricsHandle? = null
     private var sourceOwner: SourceOwner? = null
     var dictionaryState by mutableStateOf<JapaneseDictionaryStatus?>(null)
@@ -118,7 +121,8 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                 val runtime = result?.getOrNull() ?: return@collectLatest
                 val player = runtime.player()
                 bridge = player
-                playbackOwner = runtime.playbackOwner()
+                val playbackControls = runtime.playbackOwner()
+                playbackOwner = playbackControls
                 lyricsOwner = runtime.lyricsOwner()
                 sourceOwner = runtime.source()
                 val owner = runtime.settings()
@@ -130,6 +134,12 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                     withContext(Dispatchers.IO) { owner.playerPreferenceOptions() }.let { preferenceOptions = it }
                     settings = withContext(Dispatchers.IO) { owner.playerPreferences() }
                     coroutineScope {
+                        launch {
+                            service.outputs.routes.map { routes -> routes.firstOrNull { it.selected }?.id }
+                                .distinctUntilChanged().collect { route ->
+                                    playbackControls.observeLocalOutput(route?.let { "android:$it" })
+                                }
+                        }
                         launch { while (isActive) {
                             val frame = withContext(Dispatchers.Default) { player.nextWaveform() }
                             try { waveform = frame.mediaId() to frame.amplitudes() } finally { frame.destroy() }
@@ -250,9 +260,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     }
     fun refreshSettings() = action { changeSettings {} }
     fun editPreferences(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }
-    fun equalizerEnabled(enabled: Boolean) = action { changeSettings { it.setEqualizerEnabled(enabled) } }
-    fun equalizerPreset(preset: String) = action { changeSettings { it.selectEqualizerPreset(preset) } }
-    fun equalizerBand(index: Int, value: Double) = action { changeSettings { it.setEqualizerBand(index.toULong(), value) } }
     fun lyricsPreference(edit: SettingsOwner.() -> Unit) = action {
         val current = bridge ?: return@action
         changeSettings(edit)

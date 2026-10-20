@@ -1,6 +1,5 @@
 use crate::PlayerUi;
 use gtk::prelude::*;
-use gtk_widgets::interactions::keep_parent_grab_for_dropdown;
 use localization::tr;
 use playback::AudioOutput;
 use std::cell::{Cell, RefCell};
@@ -71,10 +70,9 @@ pub fn audio_output_dropdown(shell: &Rc<PlayerUi>, width: i32) -> gtk::DropDown 
     dropdown.set_valign(gtk::Align::Center);
     dropdown.set_width_request(width);
     configure_output_dropdown_factory(&dropdown);
-    keep_parent_grab_for_dropdown(&dropdown);
     refresh_audio_output_dropdown(&dropdown, shell, &options, &selected, &syncing);
 
-    let output_shell = Rc::clone(shell);
+    let output_shell = Rc::downgrade(shell);
     let output_options = Rc::clone(&options);
     let output_selected = Rc::clone(&selected);
     let output_syncing = Rc::clone(&syncing);
@@ -82,6 +80,9 @@ pub fn audio_output_dropdown(shell: &Rc<PlayerUi>, width: i32) -> gtk::DropDown 
         if output_syncing.get() {
             return;
         }
+        let Some(output_shell) = output_shell.upgrade() else {
+            return;
+        };
         let Some((id, title)) = output_options
             .borrow()
             .get(dropdown.selected() as usize)
@@ -138,7 +139,6 @@ pub fn casting_network_dropdown(shell: &Rc<PlayerUi>, width: i32) -> gtk::DropDo
     dropdown.set_valign(gtk::Align::Center);
     dropdown.set_width_request(width);
     configure_output_dropdown_factory(&dropdown);
-    keep_parent_grab_for_dropdown(&dropdown);
 
     let network_shell = Rc::clone(shell);
     dropdown.connect_selected_notify(move |dropdown| {
@@ -166,6 +166,7 @@ fn configure_output_dropdown_factory(dropdown: &gtk::DropDown) {
         label.set_halign(gtk::Align::Fill);
         label.set_hexpand(true);
         label.set_width_request(1);
+        label.set_max_width_chars(24);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         item.set_child(Some(&label));
     });

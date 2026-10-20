@@ -360,9 +360,10 @@ impl BackupOwner {
         let contents = preview.contents.intersect(preview.staged.manifest.contents);
         let previous = self.settings.load();
         let incoming = if contents.settings {
-            let mut incoming: StoredSettings =
+            let raw =
                 serde_json::from_slice(&preview.staged.settings().map_err(|e| e.to_string())?)
                     .map_err(|e| e.to_string())?;
+            let mut incoming = crate::settings::decode_settings(&raw)?.0;
             incoming.migrate_defaults();
             if removed_sources(&previous, &incoming) != preview.removed_sources {
                 return Err("Configured sources changed; open the backup again to review the sources being removed".into());
@@ -408,6 +409,7 @@ impl BackupOwner {
                         return Err(error);
                     }
                     let mut report = result?;
+                    let equalizer = incoming.as_ref().map(|stored| stored.equalizer.clone());
                     if contents.settings || contents.saved_logins || contents.playlists {
                         let owner = self.clone();
                         report.warnings = tokio::task::spawn_blocking(move || {
@@ -422,6 +424,11 @@ impl BackupOwner {
                         })
                         .await
                         .map_err(|e| e.to_string())?;
+                    }
+                    if let Some(equalizer) = equalizer {
+                        if let Err(error) = self.playback.restore_equalizer(equalizer).await {
+                            report.warnings.push(error.to_string());
+                        }
                     }
                     if contents.queue {
                         if let Err(error) = self.playback.start().await {
@@ -487,9 +494,10 @@ impl BackupOwner {
                 let (input, passphrase) = open()?;
                 let staged = backup::stage_backup(input, passphrase).map_err(|e| e.to_string())?;
                 let removed_sources = if contents.settings && staged.manifest.contents.settings {
-                    let incoming: StoredSettings =
+                    let raw =
                         serde_json::from_slice(&staged.settings().map_err(|e| e.to_string())?)
                             .map_err(|e| e.to_string())?;
+                    let incoming = crate::settings::decode_settings(&raw)?.0;
                     removed_sources(&settings.load(), &incoming)
                 } else {
                     Vec::new()
@@ -604,6 +612,7 @@ fn restore_preferences_and_logins(
             |current| {
                 if let Some(mut incoming) = incoming {
                     preserve_destination_settings(current, &mut incoming)?;
+                    incoming.equalizer = current.equalizer.clone();
                     *current = incoming;
                 }
                 if let Some(pins) = pins {

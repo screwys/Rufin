@@ -35,10 +35,44 @@ pub(super) struct EventMailbox {
     next_sequence: u64,
     ready: VecDeque<BackendEvent>,
     latest: HashMap<(RunId, TelemetryKind), PendingTelemetry>,
+    processing_meter: Option<BackendEvent>,
 }
 
 impl EventMailbox {
     fn push(&mut self, event: BackendEvent) {
+        if let BackendEvent::ProcessingMeter {
+            output,
+            mut peak_db,
+            spectrum_db,
+        } = event
+        {
+            if let Some(BackendEvent::ProcessingMeter {
+                output: old_output,
+                peak_db: old_peak,
+                spectrum_db: old_spectrum,
+            }) = self.processing_meter.as_mut()
+                && *old_output == output
+            {
+                if peak_db.len() == old_peak.len() {
+                    for (peak, old) in peak_db.iter_mut().zip(old_peak.iter()) {
+                        *peak = peak.max(*old);
+                    }
+                }
+                if !peak_db.is_empty() {
+                    *old_peak = peak_db;
+                }
+                if !spectrum_db.is_empty() {
+                    *old_spectrum = spectrum_db;
+                }
+            } else {
+                self.processing_meter = Some(BackendEvent::ProcessingMeter {
+                    output,
+                    peak_db,
+                    spectrum_db,
+                });
+            }
+            return;
+        }
         let sequence = self.next_sequence;
         self.next_sequence += 1;
         if let Some(key) = telemetry_key(&event) {
@@ -52,6 +86,9 @@ impl EventMailbox {
 
     fn drain(&mut self) -> Vec<BackendEvent> {
         self.flush_telemetry();
+        if let Some(meter) = self.processing_meter.take() {
+            self.ready.push_back(meter);
+        }
         self.ready.drain(..).collect()
     }
 
@@ -83,6 +120,9 @@ fn telemetry_key(event: &BackendEvent) -> Option<(RunId, TelemetryKind)> {
         | BackendEvent::NextNeeded { .. }
         | BackendEvent::NextPreparationFailed { .. }
         | BackendEvent::AudioApplied { .. }
+        | BackendEvent::ProcessingApplied { .. }
+        | BackendEvent::ProcessingFailed { .. }
+        | BackendEvent::ProcessingMeter { .. }
         | BackendEvent::Visualizer { .. }
         | BackendEvent::OperationFailed { .. }
         | BackendEvent::TransportRejected { .. }
@@ -97,14 +137,16 @@ pub struct GStreamerPlaybackBackend {
     thread: Option<thread::JoinHandle<()>>,
 }
 impl GStreamerPlaybackBackend {
-    pub fn new() -> Result<Self, BackendError> {
+    pub fn new(
+        processing: tokio::sync::watch::Receiver<ProcessingRequest>,
+    ) -> Result<Self, BackendError> {
         let (commands, receiver) = channel();
         let events = Arc::new(Mutex::new(EventMailbox::default()));
         let thread_events = Arc::clone(&events);
         let (ready_sender, ready_receiver) = sync_channel(1);
         let thread = thread::Builder::new()
             .name("rufin-gstreamer-playback".to_string())
-            .spawn(move || run_gstreamer_thread(receiver, thread_events, ready_sender))
+            .spawn(move || run_gstreamer_thread(receiver, thread_events, ready_sender, processing))
             .map_err(|error| BackendError::Backend(error.to_string()))?;
         match ready_receiver.recv() {
             Ok(Ok(())) => Ok(Self {
@@ -357,6 +399,7 @@ impl RepeatedSeekGuard {
 #[derive(Debug)]
 pub(super) struct SharedBackendState {
     pub(super) settings: BackendAudioSettings,
+    pub(super) processing: Option<ProcessingRequest>,
     pub(super) playback_rate: f64,
     pub(super) current: Option<PreparedRun>,
     pub(super) next: Option<PreparedNext>,
@@ -370,6 +413,7 @@ impl SharedBackendState {
         let settings = BackendAudioSettings::default();
         Self {
             current: None,
+            processing: None,
             next: None,
             active: Slot::Primary,
             crossfade: None,
@@ -1535,6 +1579,83 @@ impl GstEngine {
         )
     }
 
+    fn set_processing(&mut self, request: ProcessingRequest) {
+        if let Err(message) =
+            audio_processing::effects::EffectsBin::validate_available(&request.config)
+        {
+            push_event(
+                &self.events,
+                BackendEvent::ProcessingFailed {
+                    output: request.output,
+                    message,
+                },
+            );
+            return;
+        }
+        lock_recover(&self.shared).processing = Some(request.clone());
+        let mut applied = true;
+        for slot in [Slot::Primary, Slot::Secondary] {
+            if let Err(message) = self
+                .pipeline_for_slot_mut(slot)
+                .configure_processing(&request)
+            {
+                applied = false;
+                push_event(
+                    &self.events,
+                    BackendEvent::ProcessingFailed {
+                        output: request.output.clone(),
+                        message,
+                    },
+                );
+            }
+        }
+        self.sync_processing_taps();
+        if applied && lock_recover(&self.shared).current.is_none() {
+            let rate = 48_000;
+            let preamp_db = request.config.equalizer.as_ref().map_or(0.0, |p| {
+                audio_processing::effects::effective_preamp_db(p, rate)
+            });
+            push_event(
+                &self.events,
+                BackendEvent::ProcessingApplied {
+                    output: request.output,
+                    config: request.config,
+                    sample_rate: None,
+                    preamp_db,
+                },
+            );
+        }
+    }
+
+    fn poll_processing(&mut self) {
+        for slot in [Slot::Primary, Slot::Secondary] {
+            match self.pipeline_for_slot_mut(slot).poll_processing() {
+                Ok(Some((config, sample_rate, preamp_db))) if self.is_active_slot(slot) => {
+                    if let Some(output) = self.pipeline_for_slot(slot).processing_output() {
+                        push_event(
+                            &self.events,
+                            BackendEvent::ProcessingApplied {
+                                output,
+                                config,
+                                sample_rate,
+                                preamp_db,
+                            },
+                        );
+                    }
+                }
+                Err(message) => {
+                    if let Some(output) = self.pipeline_for_slot(slot).processing_output() {
+                        push_event(
+                            &self.events,
+                            BackendEvent::ProcessingFailed { output, message },
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn poll_bus(&mut self) {
         while let Some((id, message)) = self.primary.pop_bus_message() {
             self.handle_message(Slot::Primary, id, &message);
@@ -1584,6 +1705,19 @@ impl GstEngine {
             return;
         }
         use gst::MessageView;
+        if self.is_active_slot(slot)
+            && let Some(peak_db) = self.pipeline_for_slot(slot).processing_peak(message)
+            && let Some(output) = self.pipeline_for_slot(slot).processing_output()
+        {
+            push_event(
+                &self.events,
+                BackendEvent::ProcessingMeter {
+                    output,
+                    peak_db,
+                    spectrum_db: Vec::new(),
+                },
+            );
+        }
 
         let preroll_message = matches!(message.view(), MessageView::AsyncDone(_))
             || matches!(message.view(), MessageView::StateChanged(state)
@@ -2388,6 +2522,8 @@ impl GstEngine {
     }
 
     fn tick(&mut self) {
+        self.poll_processing();
+        self.sync_processing_taps();
         if self.desired_playing
             && self.active_pipeline().is_playing()
             && !self.active_pipeline().is_buffering()
@@ -3012,6 +3148,32 @@ impl GstEngine {
         Some(self.visualizer.tap(slot, pipeline_id, run, ignore_volume))
     }
 
+    fn sync_processing_taps(&mut self) {
+        let output = lock_recover(&self.shared)
+            .processing
+            .as_ref()
+            .filter(|request| request.spectrum)
+            .map(|request| request.output.clone());
+        for slot in [Slot::Primary, Slot::Secondary] {
+            let tap = output
+                .as_ref()
+                .filter(|output| {
+                    self.pipeline_for_slot(slot).processing_output().as_ref() == Some(*output)
+                })
+                .and_then(|output| {
+                    let shared = lock_recover(&self.shared);
+                    let pipeline_id = shared.pipeline_id(slot)?;
+                    let run = shared.current.as_ref()?.run;
+                    Some(
+                        self.visualizer
+                            .tap(slot, pipeline_id, run, true)
+                            .measurement(output.clone()),
+                    )
+                });
+            self.pipeline_for_slot_mut(slot).set_processing_tap(tap);
+        }
+    }
+
     fn sync_visualizer_taps(&mut self, enabled: bool) {
         let primary_tap = self.visualizer_tap(Slot::Primary, enabled);
         let secondary_tap = self.visualizer_tap(Slot::Secondary, enabled);
@@ -3149,6 +3311,7 @@ fn run_gstreamer_thread(
     receiver: Receiver<BackendCommand>,
     events: Arc<Mutex<EventMailbox>>,
     ready: SyncSender<Result<(), String>>,
+    mut processing: tokio::sync::watch::Receiver<ProcessingRequest>,
 ) {
     let startup_started_at = Instant::now();
     if let Err(error) = ensure_gstreamer_initialized() {
@@ -3180,6 +3343,7 @@ fn run_gstreamer_thread(
     }
 
     let mut engine = GstEngine::new(Arc::clone(&events));
+    engine.set_processing(processing.borrow_and_update().clone());
     if ready.send(Ok(())).is_err() {
         gst::log::remove_log_function(audio_log);
         return;
@@ -3193,9 +3357,17 @@ fn run_gstreamer_thread(
         for warning in audio_warnings.try_iter() {
             engine.log_audio_warning(warning);
         }
+        if processing.has_changed().unwrap_or(false) {
+            engine.set_processing(processing.borrow_and_update().clone());
+        }
         engine.poll_bus();
         match receiver.recv_timeout(Duration::from_millis(50)) {
-            Ok(command) => engine.handle_command(command),
+            Ok(command) => {
+                if processing.has_changed().unwrap_or(false) {
+                    engine.set_processing(processing.borrow_and_update().clone());
+                }
+                engine.handle_command(command)
+            }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }

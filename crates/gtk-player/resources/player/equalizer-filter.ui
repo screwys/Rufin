@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20" />
+  <object class="GtkBox" id="filter">
+    <property name="orientation">horizontal</property>
+    <property name="spacing">4</property>
+    <style>
+      <class name="card" />
+      <class name="equalizer-filter" />
+    </style>
+    <child>
+      <object class="GtkBox">
+        <property name="spacing">4</property>
+        <property name="hexpand">true</property>
+        <property name="halign">start</property>
+        <child>
+          <object class="GtkCheckButton" id="enabled">
+            <accessibility>
+              <property name="label" translatable="yes">Band</property>
+            </accessibility>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel" id="number">
+            <property name="width-chars">2</property>
+            <property name="xalign">0</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkDropDown" id="kind">
+        <property name="valign">center</property>
+        <property name="model">
+          <object class="GtkStringList">
+            <items>
+              <item translatable="yes">Peak</item>
+              <item translatable="yes">Low shelf</item>
+              <item translatable="yes">High shelf</item>
+            </items>
+          </object>
+        </property>
+        <accessibility>
+          <property name="label" translatable="yes">Filter type</property>
+        </accessibility>
+        <property name="hexpand">true</property>
+        <property name="halign">start</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="spacing">4</property>
+        <property name="hexpand">true</property>
+        <property name="halign">start</property>
+        <child>
+          <object class="GtkEntry" id="frequency">
+            <property name="width-chars">5</property>
+            <property name="max-width-chars">6</property>
+            <property name="input-purpose">number</property>
+            <property name="xalign">1</property>
+            <property name="hexpand">false</property>
+            <property name="valign">center</property>
+            <property name="tooltip-text" translatable="yes">Frequency · Hz</property>
+            <accessibility>
+              <property name="label" translatable="yes">Frequency · Hz</property>
+            </accessibility>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Hz</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="spacing">4</property>
+        <property name="hexpand">true</property>
+        <property name="halign">start</property>
+        <child>
+          <object class="GtkEntry" id="gain">
+            <property name="width-chars">4</property>
+            <property name="max-width-chars">4</property>
+            <property name="input-purpose">number</property>
+            <property name="xalign">1</property>
+            <property name="hexpand">false</property>
+            <property name="valign">center</property>
+            <property name="tooltip-text" translatable="yes">Gain · dB</property>
+            <accessibility>
+              <property name="label" translatable="yes">Gain · dB</property>
+            </accessibility>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="label">dB</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="spacing">4</property>
+        <property name="hexpand">true</property>
+        <property name="halign">start</property>
+        <child>
+          <object class="GtkEntry" id="width">
+            <property name="width-chars">4</property>
+            <property name="max-width-chars">4</property>
+            <property name="input-purpose">number</property>
+            <property name="xalign">1</property>
+            <property name="hexpand">false</property>
+            <property name="valign">center</property>
+            <property name="tooltip-text" translatable="yes">Width</property>
+            <accessibility>
+              <property name="label" translatable="yes">Width</property>
+            </accessibility>
+          </object>
+        </child>
+        <child>
+          <object class="GtkDropDown" id="width_unit">
+            <property name="valign">center</property>
+            <property name="model">
+              <object class="GtkStringList">
+                <items>
+                  <item translatable="yes">Q</item>
+                  <item translatable="yes">Hz</item>
+                </items>
+              </object>
+            </property>
+            <accessibility>
+              <property name="label" translatable="yes">Width unit</property>
+            </accessibility>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="spacing">4</property>
+        <property name="halign">end</property>
+        <child>
+          <object class="GtkImage" id="inactive">
+            <property name="icon-name">dialog-information-symbolic</property>
+            <property name="tooltip-text" translatable="yes">Inactive at this sample rate</property>
+            <property name="visible">false</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="remove">
+            <property name="valign">center</property>
+            <property name="icon-name">list-remove-symbolic</property>
+            <property name="tooltip-text" translatable="yes">Remove band</property>
+            <style>
+              <class name="flat" />
+              <class name="equalizer-remove" />
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

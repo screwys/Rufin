@@ -355,7 +355,8 @@ impl ConnectOwner {
                 stream = stream.with_window(start, end);
             }
             let reader = tokio::task::spawn_blocking(move || {
-                audio_processing::TranscodedAudioReader::new(&stream, encoding)
+                audio_processing::TranscodedAudioReader::new(&stream, encoding.into(), || false)
+                    .map_err(error)
             })
             .await
             .map_err(error)??;

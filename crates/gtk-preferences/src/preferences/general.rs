@@ -32,8 +32,6 @@ use playback::{
 };
 use rufin_core::runtime::{ScrobblingConnection, ScrobblingConnectionEvent, ScrobblingPreferences};
 
-const PREFERENCES_EQUALIZER_BAND_HEIGHT: i32 = 280;
-
 pub(super) type ScrobblingCredentialDrafts = Rc<RefCell<ScrobblingPreferences>>;
 
 pub fn scrobbling_page(
@@ -826,20 +824,7 @@ pub fn equalizer_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
         equalizer_page: adw::PreferencesPage,
         equalizer_group: adw::PreferencesGroup,
     });
-    let settings = shell.settings.current.borrow().playback.clone();
-    let equalizer = EqualizerSurface::new(&settings.equalizer);
-    equalizer.set_band_height_request(PREFERENCES_EQUALIZER_BAND_HEIGHT);
-    equalizer
-        .root
-        .add_css_class("preferences-equalizer-surface");
-    let equalizer_shell = Rc::clone(shell);
-    equalizer.connect_changed(move |equalizer| {
-        equalizer_shell
-            .player_ui
-            .update_playback_settings(|settings| {
-                settings.equalizer = equalizer.clone();
-            });
-    });
+    let equalizer = EqualizerSurface::new(&shell.player_ui);
     equalizer_group.add(&equalizer.root);
 
     equalizer_page

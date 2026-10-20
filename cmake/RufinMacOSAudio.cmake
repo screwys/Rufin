@@ -2,7 +2,7 @@ include(ExternalProject)
 
 find_program(RUFIN_BREW brew REQUIRED)
 find_program(RUFIN_MESON meson REQUIRED)
-foreach(RUFIN_AUDIO_LIBRARY IN ITEMS game-music-emu libopenmpt)
+foreach(RUFIN_AUDIO_LIBRARY IN ITEMS game-music-emu libopenmpt libbs2b)
   execute_process(
     COMMAND "${RUFIN_BREW}" --prefix "${RUFIN_AUDIO_LIBRARY}"
     OUTPUT_VARIABLE RUFIN_AUDIO_PREFIX
@@ -11,8 +11,10 @@ foreach(RUFIN_AUDIO_LIBRARY IN ITEMS game-music-emu libopenmpt)
   )
   if(RUFIN_AUDIO_LIBRARY STREQUAL "game-music-emu")
     set(RUFIN_GME_PREFIX "${RUFIN_AUDIO_PREFIX}")
-  else()
+  elseif(RUFIN_AUDIO_LIBRARY STREQUAL "libopenmpt")
     set(RUFIN_OPENMPT_PREFIX "${RUFIN_AUDIO_PREFIX}")
+  else()
+    set(RUFIN_BS2B_PREFIX "${RUFIN_AUDIO_PREFIX}")
   endif()
 endforeach()
 
@@ -71,6 +73,7 @@ ExternalProject_Add(rufin-gst-wavpack
 set(RUFIN_EXTRA_AUDIO_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/gst-plugins-bad-build")
 set(RUFIN_GME_PLUGIN "${RUFIN_EXTRA_AUDIO_BUILD_DIR}/ext/gme/libgstgme.dylib")
 set(RUFIN_OPENMPT_PLUGIN "${RUFIN_EXTRA_AUDIO_BUILD_DIR}/ext/openmpt/libgstopenmpt.dylib")
+set(RUFIN_BS2B_PLUGIN "${RUFIN_EXTRA_AUDIO_BUILD_DIR}/ext/bs2b/libgstbs2b.dylib")
 ExternalProject_Add(rufin-gst-extra-audio
   PREFIX "${CMAKE_CURRENT_BINARY_DIR}/gst-plugins-bad"
   DOWNLOAD_DIR "${RUFIN_GSTREAMER_DOWNLOAD_DIR}"
@@ -78,14 +81,14 @@ ExternalProject_Add(rufin-gst-extra-audio
   URL_HASH "SHA256=${RUFIN_GSTREAMER_BAD_HASH}"
   BINARY_DIR "${RUFIN_EXTRA_AUDIO_BUILD_DIR}"
   CONFIGURE_COMMAND "${CMAKE_COMMAND}" -E env
-    "CFLAGS=-I${RUFIN_GME_PREFIX}/include $ENV{CFLAGS}"
+    "CFLAGS=-I${RUFIN_GME_PREFIX}/include -I${RUFIN_BS2B_PREFIX}/include $ENV{CFLAGS}"
     "LDFLAGS=-L${RUFIN_GME_PREFIX}/lib $ENV{LDFLAGS}"
-    "PKG_CONFIG_PATH=${RUFIN_OPENMPT_PREFIX}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}"
+    "PKG_CONFIG_PATH=${RUFIN_OPENMPT_PREFIX}/lib/pkgconfig:${RUFIN_BS2B_PREFIX}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}"
     "${RUFIN_MESON}" setup <BINARY_DIR> <SOURCE_DIR>
-    -Dauto_features=disabled -Dgme=enabled -Dopenmpt=enabled --buildtype=release
-  BUILD_COMMAND "${RUFIN_MESON}" compile -C <BINARY_DIR> gstgme gstopenmpt
+    -Dauto_features=disabled -Dgme=enabled -Dopenmpt=enabled -Dbs2b=enabled --buildtype=release
+  BUILD_COMMAND "${RUFIN_MESON}" compile -C <BINARY_DIR> gstgme gstopenmpt gstbs2b
   INSTALL_COMMAND ""
-  BUILD_BYPRODUCTS "${RUFIN_GME_PLUGIN}" "${RUFIN_OPENMPT_PLUGIN}"
+  BUILD_BYPRODUCTS "${RUFIN_GME_PLUGIN}" "${RUFIN_OPENMPT_PLUGIN}" "${RUFIN_BS2B_PLUGIN}"
   USES_TERMINAL_DOWNLOAD TRUE
   USES_TERMINAL_BUILD TRUE
 )
@@ -94,7 +97,7 @@ set(RUFIN_AUDIO_PLUGIN_DIR "${CMAKE_CURRENT_BINARY_DIR}/gst-plugins")
 add_custom_target(rufin-audio-runtime
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${RUFIN_AUDIO_PLUGIN_DIR}"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-    "${RUFIN_WAVPACK_PLUGIN}" "${RUFIN_GME_PLUGIN}" "${RUFIN_OPENMPT_PLUGIN}"
+    "${RUFIN_WAVPACK_PLUGIN}" "${RUFIN_GME_PLUGIN}" "${RUFIN_OPENMPT_PLUGIN}" "${RUFIN_BS2B_PLUGIN}"
     "${RUFIN_AUDIO_PLUGIN_DIR}"
   DEPENDS rufin-gst-wavpack rufin-gst-extra-audio
   VERBATIM

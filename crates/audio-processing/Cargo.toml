@@ -10,7 +10,13 @@ repository.workspace = true
 readme.workspace = true
 publish.workspace = true
 
+[features]
+bindings = ["dep:uniffi"]
+
 [dependencies]
+serde.workspace = true
+uniffi = { workspace = true, optional = true }
+gstreamer-controller = { workspace = true, features = ["v1_26"] }
 url.workspace = true
 ebur128.workspace = true
 library.workspace = true

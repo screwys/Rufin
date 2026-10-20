@@ -1467,7 +1467,8 @@ impl PlaybackOwner {
             .unwrap_or_else(|p| p.into_inner())
             .clone()
             .ok_or("The Plex player is not selected")?;
-        let backend = (self.start_backend)()?;
+        let backend =
+            (self.start_backend)(self.processing_receiver(&playback::PlaybackOutput::Local))?;
         self.runtime.block_on(async {
             let _guard = plex.commands.lock().await;
             check_cancelled(&plex.cancelled)?;

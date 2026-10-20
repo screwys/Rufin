@@ -6,6 +6,10 @@
     <file compressed="true">player/fullscreen.ui</file>
     <file compressed="true">player/fullscreen_settings.ui</file>
     <file compressed="true">player/equalizer.ui</file>
+    <file compressed="true">player/equalizer-band.ui</file>
+    <file compressed="true">player/equalizer-band-item.ui</file>
+    <file compressed="true">player/equalizer-filter.ui</file>
+    <file compressed="true">player/equalizer-dialogs.ui</file>
     <file compressed="true">player/lyrics/dictionary.ui</file>
     <file compressed="true">player/lyrics/edit.ui</file>
     <file compressed="true">player/lyrics/search.ui</file>

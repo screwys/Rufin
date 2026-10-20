@@ -174,6 +174,8 @@ pub struct StoredSettings {
     #[serde(flatten)]
     pub ui: UiSettings,
     #[serde(default)]
+    pub(crate) equalizer: crate::playback::EqualizerPreferences,
+    #[serde(default)]
     pub(crate) scrobbling: ScrobblingSettings,
     #[serde(default = "legacy_scrobbling_secrets_present")]
     pub(crate) scrobbling_secrets_present: bool,
@@ -199,6 +201,7 @@ impl Default for StoredSettings {
     fn default() -> Self {
         Self {
             ui: UiSettings::default(),
+            equalizer: Default::default(),
             scrobbling: ScrobblingSettings::default(),
             scrobbling_secrets_present: false,
             scrobbling_credentials: Default::default(),
@@ -327,9 +330,8 @@ impl SettingsFile {
         &self.config_dir
     }
     pub(crate) fn open(path: PathBuf) -> Result<Self, String> {
-        let mut value = read_startup_settings(&path)?;
+        let (mut value, mut changed) = read_startup_settings(&path)?;
         value.migrate_defaults();
-        let mut changed = false;
         for recent in &mut value.ui.recent_search_results {
             if let Some(binding) = &mut recent.artwork_binding {
                 let normalized = library::normalize_artwork_binding(binding)
@@ -399,6 +401,20 @@ impl SettingsFile {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
+    }
+
+    pub(crate) fn equalizer_preset(
+        &self,
+        id: &str,
+    ) -> Option<crate::playback::equalizer::SavedPreset> {
+        self.value
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .equalizer
+            .presets
+            .iter()
+            .find(|p| p.id == id)
+            .cloned()
     }
 
     pub(crate) fn source_name(&self, source_id: &sources::SourceId) -> String {
@@ -1153,8 +1169,20 @@ fn recover_setting(
     }
 }
 
-fn decode_settings(raw: &serde_json::Value) -> Result<(StoredSettings, Vec<Vec<String>>), String> {
-    if let Ok(stored) = serde_json::from_value(raw.clone()) {
+pub(crate) fn decode_settings(
+    raw: &serde_json::Value,
+) -> Result<(StoredSettings, Vec<Vec<String>>), String> {
+    let mut migrated = raw.clone();
+    if migrated.get("equalizer").is_none()
+        && let Some(legacy) = raw.get("playback").and_then(|p| p.get("equalizer"))
+    {
+        migrated["equalizer"] =
+            serde_json::to_value(crate::playback::EqualizerPreferences::from_legacy(legacy))
+                .map_err(|e| e.to_string())?;
+    }
+    let raw = &migrated;
+    if let Ok(stored) = serde_json::from_value::<StoredSettings>(raw.clone()) {
+        stored.equalizer.validate()?;
         return Ok((stored, Vec::new()));
     }
     let fields = raw.as_object().ok_or("settings must be a JSON object")?;
@@ -1174,16 +1202,21 @@ fn decode_settings(raw: &serde_json::Value) -> Result<(StoredSettings, Vec<Vec<S
         .map_err(|error| error.to_string())
 }
 
-fn read_startup_settings(path: &Path) -> Result<StoredSettings, String> {
+fn read_startup_settings(path: &Path) -> Result<(StoredSettings, bool), String> {
     let Some(raw) = read_settings_json(path)? else {
-        return Ok(StoredSettings::default());
+        return Ok((StoredSettings::default(), false));
     };
     let (stored, unsupported) = decode_settings(&raw)?;
     if !unsupported.is_empty() {
         warn!(?unsupported, path = %path.display(),
             "using defaults for incompatible preferences; saved values remain intact");
     }
-    Ok(stored)
+    let migrated = raw.get("equalizer").is_none()
+        && raw
+            .get("playback")
+            .and_then(|p| p.get("equalizer"))
+            .is_some();
+    Ok((stored, migrated))
 }
 
 // Apply typed changes without dropping fields this version does not understand.
@@ -1236,7 +1269,7 @@ fn persistent_settings(value: &StoredSettings) -> StoredSettings {
 pub(crate) fn write_settings(path: &Path, value: &StoredSettings) -> Result<(), String> {
     let next =
         serde_json::to_value(persistent_settings(value)).map_err(|error| error.to_string())?;
-    let merged = match read_settings_json(path)? {
+    let mut merged = match read_settings_json(path)? {
         None => next,
         Some(mut saved) => {
             let (mut previous, unsupported) = decode_settings(&saved)?;
@@ -1263,6 +1296,17 @@ pub(crate) fn write_settings(path: &Path, value: &StoredSettings) -> Result<(), 
             saved
         }
     };
+    // The decoded legacy value can compare equal before and after migration.
+    // Install its new key even when the ordinary merge has no changed fields.
+    if merged.get("equalizer").is_none() {
+        merged["equalizer"] = serde_json::to_value(&value.equalizer).map_err(|e| e.to_string())?;
+    }
+    if let Some(playback) = merged
+        .get_mut("playback")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        playback.remove("equalizer");
+    }
     let mut json = serde_json::to_vec_pretty(&merged).map_err(|error| error.to_string())?;
     json.push(b'\n');
     write_private(path, &json)
@@ -1346,7 +1390,7 @@ mod tests {
         let committed = file.load();
         assert!(committed.ui.shuffle_enabled);
         assert!(committed.ui.application.private_mode);
-        assert_eq!(read_startup_settings(&path).unwrap(), committed);
+        assert_eq!(read_startup_settings(&path).unwrap().0, committed);
     }
 
     #[test]
@@ -1381,7 +1425,7 @@ mod tests {
         assert_ne!(committed.ui.web_controller, initial.ui.web_controller);
         assert!(changes.has_changed().unwrap());
         assert_eq!(*changes.borrow(), committed.ui.web_controller);
-        assert_eq!(read_startup_settings(&path).unwrap(), committed);
+        assert_eq!(read_startup_settings(&path).unwrap().0, committed);
     }
 
     #[derive(Default)]
@@ -1436,7 +1480,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let restored = read_startup_settings(&path).unwrap();
+        let restored = read_startup_settings(&path).unwrap().0;
         assert_eq!(
             restored.ui.application.backup.schedule.schedule_id,
             identity

@@ -1,77 +1,762 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface domain="rufin">
-  <requires lib="gtk" version="4.20"/>
-  <requires lib="libadwaita" version="1.9"/>
-
+  <requires lib="gtk" version="4.20" />
   <object class="GtkBox" id="root">
-    <property name="orientation">vertical</property><property name="spacing">14</property>
-    <property name="hexpand">true</property><property name="vexpand">true</property><property name="width-request">1</property>
-    <style><class name="equalizer-surface"/></style>
+    <property name="orientation">vertical</property>
+    <property name="spacing">8</property>
     <child>
-      <object class="GtkFlowBox" id="header">
-        <property name="column-spacing">10</property><property name="row-spacing">6</property>
-        <property name="halign">center</property><property name="valign">center</property>
-        <property name="selection-mode">none</property><property name="max-children-per-line">3</property>
-        <style><class name="equalizer-surface-header"/></style>
+      <object class="GtkBox" id="header">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">8</property>
         <child>
-          <object class="GtkMenuButton" id="preset">
-            <property name="label" translatable="yes">Preset</property>
-            <property name="valign">center</property>
+          <object class="GtkLabel">
+            <property name="label" translatable="yes">Equalizer</property>
+            <property name="hexpand">true</property>
+            <property name="xalign">0</property>
           </object>
         </child>
         <child>
-          <object class="GtkButton" id="reset_button">
-            <property name="icon-name">edit-undo-symbolic</property>
-            <property name="tooltip-text" translatable="yes">Reset</property>
+          <object class="GtkSwitch" id="enabled">
             <property name="valign">center</property>
-            <style>
-              <class name="flat"/>
-              <class name="circular"/>
-            </style>
+            <accessibility>
+              <property name="label" translatable="yes">Equalizer</property>
+            </accessibility>
           </object>
         </child>
       </object>
     </child>
     <child>
-      <object class="GtkBox" id="band_row">
-        <property name="orientation">horizontal</property><property name="spacing">16</property>
-        <property name="halign">fill</property><property name="valign">fill</property>
-        <property name="hexpand">true</property><property name="vexpand">true</property>
-        <property name="width-request">1</property><property name="margin-bottom">6</property>
-                <child>
-                  <object class="GtkBox">
-                    <property name="orientation">vertical</property><property name="spacing">0</property><property name="width-request">48</property><property name="valign">fill</property><property name="vexpand">true</property>
-                    <style><class name="equalizer-surface-levels"/></style>
-                    <child><object class="GtkLabel"><property name="label">12 dB</property><property name="xalign">0</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
-                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
-                    <child><object class="GtkLabel"><property name="label">6 dB</property><property name="xalign">0</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
-                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
-                    <child><object class="GtkLabel"><property name="label">0 dB</property><property name="xalign">0</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
-                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
-                    <child><object class="GtkLabel"><property name="label">-6 dB</property><property name="xalign">0</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
-                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
-                    <child><object class="GtkLabel"><property name="label">-12 dB</property><property name="xalign">0</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
-                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="height-request">50</property></object></child>
-                  </object>
-                </child>
-                <child><object class="GtkBox" id="bands"><property name="orientation">horizontal</property><property name="spacing">8</property><property name="homogeneous">true</property><property name="width-request">1</property><property name="halign">fill</property><property name="valign">fill</property><property name="hexpand">true</property><property name="vexpand">true</property><style><class name="equalizer-surface-bands"/></style></object></child>
-                <child>
-                  <object class="GtkBox">
-                    <property name="orientation">vertical</property><property name="spacing">0</property><property name="width-request">48</property><property name="valign">fill</property><property name="vexpand">true</property>
-                    <style><class name="equalizer-surface-levels"/></style>
-                    <child><object class="GtkLabel"><property name="label">12 dB</property><property name="xalign">1</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
-                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
-                    <child><object class="GtkLabel"><property name="label">6 dB</property><property name="xalign">1</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
-                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
-                    <child><object class="GtkLabel"><property name="label">0 dB</property><property name="xalign">1</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
-                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
-                    <child><object class="GtkLabel"><property name="label">-6 dB</property><property name="xalign">1</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
-                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
-                    <child><object class="GtkLabel"><property name="label">-12 dB</property><property name="xalign">1</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
-                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="height-request">50</property></object></child>
-                  </object>
-                </child>
+      <object class="GtkBox" id="output_line">
+        <property name="spacing">8</property>
+        <child>
+          <object class="GtkBox" id="output_host">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">8</property>
+            <property name="hexpand">false</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkCheckButton" id="assigned">
+            <property name="label" translatable="yes">Use for this output</property>
+            <accessibility>
+              <property name="label" translatable="yes">Use for this output</property>
+            </accessibility>
+          </object>
+        </child>
       </object>
     </child>
+    <child>
+      <object class="GtkBox" id="toolbar">
+        <property name="spacing">8</property>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">4</property>
+            <property name="hexpand">true</property>
+            <child>
+              <object class="GtkMenuButton" id="preset">
+                <property name="hexpand">false</property>
+                <property name="tooltip-text" translatable="yes">Preset</property>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="spacing">6</property>
+                    <child>
+                      <object class="GtkLabel" id="preset_title">
+                        <property name="ellipsize">end</property>
+                        <property name="max-width-chars">18</property>
+                        <property name="hexpand">true</property>
+                        <property name="xalign">0</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkImage">
+                        <property name="icon-name">pan-down-symbolic</property>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="valign">center</property>
+                <style><class name="equalizer-preset-actions" /></style>
+                <child>
+                  <object class="GtkButton" id="save">
+                    <property name="icon-name">rufin-document-save-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Save preset</property>
+                    <accessibility><property name="label" translatable="yes">Save preset</property></accessibility>
+                    <style><class name="flat" /></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="duplicate">
+                    <property name="icon-name">rufin-edit-copy-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Duplicate preset</property>
+                    <accessibility><property name="label" translatable="yes">Duplicate preset</property></accessibility>
+                    <style><class name="flat" /></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="rename">
+                    <property name="icon-name">rufin-document-edit-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Rename preset</property>
+                    <accessibility><property name="label" translatable="yes">Rename preset</property></accessibility>
+                    <style><class name="flat" /></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="import">
+                    <property name="icon-name">rufin-document-open-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Import preset</property>
+                    <accessibility><property name="label" translatable="yes">Import preset</property></accessibility>
+                    <style><class name="flat" /></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="export">
+                    <property name="icon-name">rufin-document-send-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Export preset</property>
+                    <accessibility><property name="label" translatable="yes">Export preset</property></accessibility>
+                    <style><class name="flat" /></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="delete">
+                    <property name="icon-name">rufin-user-trash-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Delete preset</property>
+                    <accessibility><property name="label" translatable="yes">Delete preset</property></accessibility>
+                    <style><class name="flat" /></style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkToggleButton" id="mode">
+            <property name="halign">end</property>
+            <property name="valign">center</property>
+            <property name="icon-name">rufin-spring-graph-symbolic</property>
+            <property name="tooltip-text" translatable="yes">Parametric</property>
+            <accessibility><property name="label" translatable="yes">Parametric</property></accessibility>
+            <style><class name="equalizer-mode" /></style>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="unavailable">
+        <property name="label" translatable="yes">Equalizer is controlled by the receiver</property>
+        <property name="wrap">true</property>
+        <property name="visible">false</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="editor">
+        <property name="orientation">vertical</property>
+        <property name="spacing">8</property>
+        <child>
+          <object class="GtkBox" id="graph_options">
+            <property name="spacing">8</property>
+            <child>
+              <object class="GtkCheckButton" id="response">
+                <property name="label" translatable="yes">Response</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkCheckButton" id="spectrum">
+                <property name="label" translatable="yes">Spectrum</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="label" translatable="yes">Gain · dB</property>
+                <property name="ellipsize">end</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="spectrum_unit">
+                <property name="label" translatable="yes">Spectrum · dBFS</property>
+                <property name="ellipsize">end</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="graphic">
+            <property name="orientation">vertical</property>
+            <property name="spacing">8</property>
+            <child>
+              <object class="GtkBox" id="band_row">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">8</property>
+                <property name="height-request">300</property>
+                <child>
+                  <object class="GtkBox" id="preamp_column">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">8</property>
+                    <child>
+                      <object class="GtkEntry" id="preamp">
+                        <accessibility>
+                          <property name="label" translatable="yes">Preamp</property>
+                        </accessibility>
+                        <property name="width-chars">3</property>
+                        <property name="max-width-chars">5</property>
+                        <property name="xalign">0.5</property>
+                        <property name="input-purpose">number</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkScale" id="preamp_scale">
+                        <property name="orientation">vertical</property>
+                        <property name="inverted">true</property>
+                        <property name="draw-value">false</property>
+                        <property name="hexpand">true</property>
+                        <property name="vexpand">true</property>
+                        <property name="adjustment">
+                          <object class="GtkAdjustment">
+                            <property name="lower">-36</property>
+                            <property name="upper">12</property>
+                            <property name="step-increment">0.1</property>
+                            <property name="page-increment">1</property>
+                          </object>
+                        </property>
+                        <style>
+                          <class name="equalizer-surface-scale" />
+                        </style>
+                        <property name="round-digits">1</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Preamp</property>
+                        </accessibility>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label" translatable="yes">Preamp</property>
+                      </object>
+                    </child>
+                    <property name="hexpand">false</property>
+                    <style>
+                      <class name="equalizer-band" />
+                    </style>
+                    <property name="width-request">42</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkOverlay" id="graphic_overlay">
+                    <property name="hexpand">true</property>
+                    <child>
+                      <object class="RufinEqualizerPlot" id="graphic_plot">
+                        <property name="hexpand">true</property>
+                        <property name="vexpand">true</property>
+                        <style>
+                          <class name="equalizer-plot" />
+                        </style>
+                      </object>
+                    </child>
+                    <child type="overlay">
+                      <object class="GtkBox" id="bands">
+                        <property name="orientation">horizontal</property>
+                        <property name="spacing">0</property>
+                        <property name="homogeneous">true</property>
+                        <property name="hexpand">true</property>
+                        <layout>
+                          <property name="measure">true</property>
+                        </layout>
+                        <property name="margin-start">28</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <property name="vexpand">false</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">8</property>
+                <child>
+                  <object class="GtkBox">
+                    <property name="spacing">8</property>
+                    <property name="hexpand">true</property>
+                    <child>
+                      <object class="GtkDropDown" id="layout">
+                        <property name="model">
+                          <object class="GtkStringList">
+                            <items>
+                              <item translatable="yes">10 bands</item>
+                              <item translatable="yes">18 bands</item>
+                              <item translatable="yes">31 bands</item>
+                              <item translatable="yes">Custom bands</item>
+                            </items>
+                          </object>
+                        </property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Band layout</property>
+                        </accessibility>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkBox" id="band_value">
+                        <property name="spacing">6</property>
+                        <property name="visible">false</property>
+                        <child>
+                          <object class="GtkDropDown" id="band_picker">
+                            <property name="halign">start</property>
+                            <property name="factory">
+                              <object class="GtkBuilderListItemFactory">
+                                <property name="resource">/io/github/screwys/Rufin/ui/player/equalizer-band-item.ui</property>
+                              </object>
+                            </property>
+                            <accessibility>
+                              <property name="label" translatable="yes">Band</property>
+                            </accessibility>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkEntry" id="band_gain">
+                            <property name="width-chars">4</property>
+                            <property name="max-width-chars">5</property>
+                            <property name="input-purpose">number</property>
+                            <accessibility>
+                              <property name="label" translatable="yes">Gain</property>
+                            </accessibility>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="label">dB</property>
+                          </object>
+                        </child>
+                        <property name="hexpand">true</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="reset">
+                    <property name="label" translatable="yes">Reset</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <property name="vexpand">false</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="parametric">
+            <property name="orientation">vertical</property>
+            <property name="spacing">8</property>
+            <property name="visible">false</property>
+            <child>
+              <object class="RufinEqualizerPlot" id="parametric_plot">
+                <property name="height-request">200</property>
+                <property name="hexpand">true</property>
+                <style>
+                  <class name="equalizer-plot" />
+                </style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="hscrollbar-policy">automatic</property>
+                <property name="vscrollbar-policy">never</property>
+                <property name="propagate-natural-height">true</property>
+                <child>
+                  <object class="GtkBox" id="filters">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">8</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">8</property>
+                <child>
+                  <object class="GtkButton" id="add">
+                    <property name="label" translatable="yes">Add band</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label" translatable="yes">Preamp</property>
+                    <property name="hexpand">true</property>
+                    <property name="xalign">1</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkEntry" id="parametric_preamp">
+                    <property name="width-chars">4</property>
+                    <property name="max-width-chars">5</property>
+                    <accessibility>
+                      <property name="label" translatable="yes">Preamp</property>
+                    </accessibility>
+                    <property name="input-purpose">number</property>
+                    <property name="xalign">1</property>
+                    <property name="valign">center</property>
+                    <style>
+                      <class name="equalizer-number" />
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <style>
+          <class name="card" />
+          <class name="equalizer-editor" />
+        </style>
+        <property name="vexpand">false</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkListBox">
+        <property name="selection-mode">none</property>
+        <child>
+          <object class="AdwActionRow">
+            <property name="title" translatable="yes">Automatic headroom</property>
+            <child type="suffix">
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">8</property>
+                <child>
+                  <object class="GtkLabel" id="headroom">
+                    <property name="label" />
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkSwitch" id="automatic">
+                    <property name="valign">center</property>
+                    <accessibility>
+                      <property name="label" translatable="yes">Automatic headroom</property>
+                    </accessibility>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow">
+            <property name="title" translatable="yes">Output gain</property>
+            <child type="suffix">
+              <object class="GtkLabel" id="output_gain">
+                <property name="label" />
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="peak_row">
+            <property name="title" translatable="yes">Sample peak</property>
+            <child type="suffix">
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">8</property>
+                <child>
+                  <object class="GtkLabel" id="peak">
+                    <property name="label" />
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="clip">
+                    <property name="label" translatable="yes">Clipping</property>
+                    <style>
+                      <class name="error" />
+                    </style>
+                    <property name="visible">false</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <style>
+          <class name="boxed-list" />
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkListBox">
+        <property name="selection-mode">none</property>
+        <style>
+          <class name="boxed-list" />
+        </style>
+        <child>
+          <object class="AdwExpanderRow" id="effects">
+            <property name="title" translatable="yes">Audio effects</property>
+            <child>
+              <object class="AdwActionRow">
+                <property name="title" translatable="yes">Bass</property>
+                <child type="suffix">
+                  <object class="GtkBox">
+                    <property name="orientation">horizontal</property>
+                    <property name="spacing">8</property>
+                    <child>
+                      <object class="GtkScale" id="bass_scale">
+                        <property name="orientation">horizontal</property>
+                        <property name="inverted">false</property>
+                        <property name="draw-value">false</property>
+                        <property name="hexpand">true</property>
+                        <property name="vexpand">false</property>
+                        <property name="adjustment">
+                          <object class="GtkAdjustment">
+                            <property name="lower">-12</property>
+                            <property name="upper">12</property>
+                            <property name="step-increment">0.1</property>
+                            <property name="page-increment">1</property>
+                          </object>
+                        </property>
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
+                        <property name="round-digits">1</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Bass</property>
+                        </accessibility>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkEntry" id="bass">
+                        <property name="width-chars">4</property>
+                        <property name="max-width-chars">5</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Bass</property>
+                        </accessibility>
+                        <property name="input-purpose">number</property>
+                        <property name="xalign">1</property>
+                        <property name="valign">center</property>
+                        <style>
+                          <class name="equalizer-number" />
+                        </style>
+                      </object>
+                    </child>
+                    <property name="hexpand">true</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwActionRow">
+                <property name="title" translatable="yes">Treble</property>
+                <child type="suffix">
+                  <object class="GtkBox">
+                    <property name="orientation">horizontal</property>
+                    <property name="spacing">8</property>
+                    <child>
+                      <object class="GtkScale" id="treble_scale">
+                        <property name="orientation">horizontal</property>
+                        <property name="inverted">false</property>
+                        <property name="draw-value">false</property>
+                        <property name="hexpand">true</property>
+                        <property name="vexpand">false</property>
+                        <property name="adjustment">
+                          <object class="GtkAdjustment">
+                            <property name="lower">-12</property>
+                            <property name="upper">12</property>
+                            <property name="step-increment">0.1</property>
+                            <property name="page-increment">1</property>
+                          </object>
+                        </property>
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
+                        <property name="round-digits">1</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Treble</property>
+                        </accessibility>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkEntry" id="treble">
+                        <property name="width-chars">4</property>
+                        <property name="max-width-chars">5</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Treble</property>
+                        </accessibility>
+                        <property name="input-purpose">number</property>
+                        <property name="xalign">1</property>
+                        <property name="valign">center</property>
+                        <style>
+                          <class name="equalizer-number" />
+                        </style>
+                      </object>
+                    </child>
+                    <property name="hexpand">true</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwActionRow">
+                <property name="title" translatable="yes">Crossfeed</property>
+                <child type="suffix">
+                  <object class="GtkSwitch" id="crossfeed">
+                    <property name="valign">center</property>
+                    <accessibility>
+                      <property name="label" translatable="yes">Crossfeed</property>
+                    </accessibility>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwActionRow">
+                <property name="title" translatable="yes">Balance</property>
+                <child type="suffix">
+                  <object class="GtkBox">
+                    <property name="orientation">horizontal</property>
+                    <property name="spacing">8</property>
+                    <child>
+                      <object class="GtkScale" id="balance_scale">
+                        <property name="orientation">horizontal</property>
+                        <property name="inverted">false</property>
+                        <property name="draw-value">false</property>
+                        <property name="hexpand">true</property>
+                        <property name="vexpand">false</property>
+                        <property name="adjustment">
+                          <object class="GtkAdjustment">
+                            <property name="lower">-1</property>
+                            <property name="upper">1</property>
+                            <property name="step-increment">0.01</property>
+                            <property name="page-increment">1</property>
+                          </object>
+                        </property>
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
+                        <property name="round-digits">2</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Balance</property>
+                        </accessibility>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkEntry" id="balance">
+                        <property name="width-chars">4</property>
+                        <property name="max-width-chars">5</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Balance</property>
+                        </accessibility>
+                        <property name="input-purpose">number</property>
+                        <property name="xalign">1</property>
+                        <property name="valign">center</property>
+                        <style>
+                          <class name="equalizer-number" />
+                        </style>
+                      </object>
+                    </child>
+                    <property name="hexpand">true</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwActionRow">
+                <property name="title" translatable="yes">Mono</property>
+                <child type="suffix">
+                  <object class="GtkSwitch" id="mono">
+                    <property name="valign">center</property>
+                    <accessibility>
+                      <property name="label" translatable="yes">Mono</property>
+                    </accessibility>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="cast">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">8</property>
+        <property name="visible">false</property>
+        <child>
+          <object class="GtkDropDown" id="cast_format">
+            <property name="model">
+              <object class="GtkStringList">
+                <items>
+                  <item translatable="yes">MP3</item>
+                  <item translatable="yes">FLAC</item>
+                </items>
+              </object>
+            </property>
+            <accessibility>
+              <property name="label" translatable="yes">Cast format</property>
+            </accessibility>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="apply">
+            <property name="label" translatable="yes">Apply</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="error">
+        <property name="label" />
+        <property name="wrap">true</property>
+        <property name="xalign">0</property>
+        <property name="visible">false</property>
+        <style>
+          <class name="error" />
+        </style>
+      </object>
+    </child>
+    <style>
+      <class name="equalizer-surface" />
+    </style>
+    <property name="vexpand">false</property>
+    <property name="valign">start</property>
+  </object>
+  <object class="GtkPopover" id="preset_popover">
+    <child>
+      <object class="GtkScrolledWindow">
+        <property name="hscrollbar-policy">never</property>
+        <property name="vscrollbar-policy">automatic</property>
+        <property name="min-content-height">180</property>
+        <property name="max-content-height">360</property>
+        <property name="propagate-natural-height">true</property>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">2</property>
+            <child>
+              <object class="GtkBox" id="preset_items">
+                <property name="orientation">vertical</property>
+                <property name="spacing">2</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="custom">
+                <property name="label" translatable="yes">Custom</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+  <object class="GtkLabel" id="custom_title">
+    <property name="label" translatable="yes">Custom</property>
+  </object>
+  <object class="GtkStringList" id="peak_titles">
+    <items>
+      <item translatable="yes">Sample peak</item>
+      <item translatable="yes">Encoding peak</item>
+    </items>
+  </object>
+  <object class="GtkStringList" id="mode_titles">
+    <items>
+      <item translatable="yes">Graphic</item>
+      <item translatable="yes">Parametric</item>
+    </items>
   </object>
 </interface>

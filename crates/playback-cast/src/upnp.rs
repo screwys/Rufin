@@ -1,8 +1,13 @@
 use std::time::{Duration, Instant};
 
-use playback::{BackendCommand, BackendEvent, BackendState, PreparedNext, PreparedStream, RunId};
+use playback::{
+    BackendCommand, BackendEvent, BackendState, PreparedNext, PreparedStream, ProcessingRequest,
+    RunId,
+};
 
-use crate::relay::{PublishedResource, RelayRepresentation, RelayServer, source_content_type};
+use crate::relay::{
+    PublishRequest, PublishedResource, RelayRepresentation, RelayServer, source_content_type,
+};
 use crate::upnp_transport::UpnpDevice;
 
 const AV_TRANSPORT: &str = "AVTransport";
@@ -62,7 +67,7 @@ impl SinkProtocols {
             .iter()
             .any(|content_type| content_type == "*" || content_type == "audio/mpeg")
         {
-            return Ok(RelayRepresentation::Mp3);
+            return Ok(RelayRepresentation::Generated(library::AudioEncoding::mp3()));
         }
         Err(format!(
             "UPnP renderer does not accept {source_content_type} or audio/mpeg"
@@ -132,6 +137,7 @@ struct QueuedMedia {
     published: PublishedResource,
     metadata: String,
     duration_millis: Option<u64>,
+    stream: PreparedStream,
 }
 
 impl QueuedMedia {
@@ -141,7 +147,9 @@ impl QueuedMedia {
             .map(|end| end.saturating_sub(stream.start_millis()))
             .or_else(|| {
                 stream.row.as_ref().and_then(|occurrence| {
-                    u64::try_from(occurrence.track.metadata.duration_millis).ok()
+                    u64::try_from(occurrence.track.metadata.duration_millis)
+                        .ok()
+                        .filter(|value| *value > 0)
                 })
             });
         let metadata = didl_metadata(&stream, &published);
@@ -150,6 +158,7 @@ impl QueuedMedia {
             published,
             metadata,
             duration_millis,
+            stream,
         }
     }
 }
@@ -167,6 +176,10 @@ pub(crate) struct UpnpController {
     seekable: bool,
     startup_output: Option<HeldOutput>,
     observation_unavailable: bool,
+    processing: ProcessingRequest,
+    pending_processing: Option<ProcessingRequest>,
+    pending_reload: bool,
+    playing: bool,
 }
 
 impl UpnpController {
@@ -190,6 +203,10 @@ impl UpnpController {
             seekable: false,
             startup_output: None,
             observation_unavailable: false,
+            processing: ProcessingRequest::default(),
+            pending_processing: None,
+            pending_reload: false,
+            playing: false,
         })
     }
 
@@ -230,6 +247,11 @@ impl UpnpController {
                 ..
             } => self.start(run, current, next, start_position_millis, relay),
             BackendCommand::Play { run } if self.current_run() == Some(run) => {
+                if self.pending_reload {
+                    let events = self.reload(self.last_position_millis, relay)?;
+                    self.playing = true;
+                    return Ok(events);
+                }
                 let result = if self.renderer_owned {
                     if !self.transport_action_allowed("Play") {
                         return Ok(Vec::new());
@@ -257,6 +279,7 @@ impl UpnpController {
                     return Err(error);
                 }
                 self.started = true;
+                self.playing = true;
                 Ok(vec![BackendEvent::State {
                     run,
                     state: BackendState::Playing,
@@ -267,6 +290,7 @@ impl UpnpController {
                     return Ok(Vec::new());
                 }
                 self.pause()?;
+                self.playing = false;
                 Ok(vec![BackendEvent::State {
                     run,
                     state: BackendState::Paused,
@@ -285,6 +309,21 @@ impl UpnpController {
                 run,
                 position_millis,
             } if self.current_run() == Some(run) && self.seekable => {
+                if !self.playing {
+                    self.last_position_millis = position_millis;
+                    self.pending_reload = true;
+                    return Ok(vec![BackendEvent::Position {
+                        run,
+                        millis: position_millis,
+                    }]);
+                }
+                if self
+                    .current
+                    .as_ref()
+                    .is_some_and(|media| !media.published.native_seek)
+                {
+                    return self.reload(position_millis, relay);
+                }
                 let target = position_millis;
                 match self.seek_once(target) {
                     Ok(()) => Ok(vec![BackendEvent::Position {
@@ -328,10 +367,123 @@ impl UpnpController {
         }
     }
 
+    fn publish_request(
+        &self,
+        stream: &PreparedStream,
+        position: u64,
+        reload: bool,
+    ) -> Result<PublishRequest, String> {
+        let processing = self.processing.config.clone();
+        let representation = if reload
+            || processing != Default::default()
+            || stream.window().is_some()
+            || self.processing.cast_encoding.codec == library::AudioCodec::Flac
+        {
+            let content_type = self.processing.cast_encoding.codec.content_type();
+            if self.sink_protocols.0.as_ref().is_some_and(|types| {
+                !types
+                    .iter()
+                    .any(|value| value == "*" || value == content_type)
+            }) {
+                return Err(format!("UPnP renderer does not accept {content_type}"));
+            }
+            RelayRepresentation::Generated(self.processing.cast_encoding)
+        } else {
+            self.sink_protocols
+                .representation_for(&source_content_type(stream))?
+        };
+        Ok(PublishRequest {
+            representation,
+            processing,
+            logical_offset_millis: position,
+        })
+    }
+
+    pub(crate) fn set_processing(
+        &mut self,
+        processing: ProcessingRequest,
+        relay: &RelayServer,
+    ) -> Result<Vec<BackendEvent>, String> {
+        let changed = self.processing.config != processing.config
+            || self.processing.cast_encoding != processing.cast_encoding;
+        self.processing = processing;
+        if (!changed && !self.pending_reload) || self.current.is_none() {
+            return Ok(Vec::new());
+        }
+        self.pending_reload = true;
+        if !self.playing {
+            return Ok(Vec::new());
+        }
+        self.reload(self.last_position_millis, relay)
+    }
+
+    fn reload(&mut self, position: u64, relay: &RelayServer) -> Result<Vec<BackendEvent>, String> {
+        let current = self
+            .current
+            .as_ref()
+            .ok_or("UPnP current media is unavailable")?;
+        let run = current.run;
+        let stream = current.stream.clone();
+        let published = relay.publish(&stream, self.publish_request(&stream, position, true)?)?;
+        let metadata = didl_metadata(&stream, &published);
+        if let Err(error) = self
+            .set_uri(&published.uri, &metadata)
+            .and_then(|()| self.start_transport())
+        {
+            relay.remove(&published);
+            return Err(error);
+        }
+        if let Some(previous) = self.current.take() {
+            relay.remove(&previous.published);
+        }
+        self.install_current(run, stream, published);
+        self.last_position_millis = position;
+        self.pending_reload = false;
+        self.pending_seek = None;
+        self.pending_start_position_millis = None;
+        self.seekable = false;
+        self.started = true;
+        self.playing = true;
+        let mut events = vec![
+            BackendEvent::Position {
+                run,
+                millis: position,
+            },
+            BackendEvent::Seekable {
+                run,
+                seekable: false,
+            },
+            BackendEvent::State {
+                run,
+                state: BackendState::Playing,
+            },
+        ];
+        if let Some(next) = self.next_media.as_ref() {
+            let next = PreparedNext::new(
+                next.run,
+                next.stream.clone(),
+                playback::NextTransition::Gapless,
+            );
+            events.extend(self.prepare_next(run, Some(next), relay)?);
+        }
+        Ok(events)
+    }
+
     pub(crate) fn poll(&mut self, relay: &RelayServer) -> Result<Vec<BackendEvent>, String> {
         let Some(run) = self.current_run() else {
             return Ok(Vec::new());
         };
+        if let Some(error) = self
+            .current
+            .as_ref()
+            .and_then(|current| relay.error(&current.published))
+        {
+            self.pending_reload = true;
+            return Ok(vec![BackendEvent::ProcessingFailed {
+                output: self.processing.output.clone(),
+                message: error,
+            }]);
+        }
         let transport = match self.action(
             AV_TRANSPORT,
             "GetTransportInfo",
@@ -390,6 +542,14 @@ impl UpnpController {
             .unwrap_or(self.last_position_millis);
         let restore_was_pending = self.pending_start_position_millis.is_some();
         let mut seekability_changed = false;
+        if let Some(seekable) = self
+            .current
+            .as_ref()
+            .and_then(|current| relay.source_seekable(&current.published))
+        {
+            seekability_changed = self.seekable != seekable;
+            self.seekable = seekable;
+        }
         if matches!(state, BackendState::Playing | BackendState::Paused)
             && let Some(target) = self.pending_start_position_millis.take()
         {
@@ -445,17 +605,44 @@ impl UpnpController {
             }
             self.finish_current(relay);
         }
-        if publish_position {
+        self.playing = state == BackendState::Playing;
+        if publish_position && !self.pending_reload {
             self.last_position_millis = position_millis;
         }
         let mut events = vec![BackendEvent::TransportObserved { run, state }];
+        if matches!(state, BackendState::Playing | BackendState::Paused)
+            && let Some(processing) = self.pending_processing.take()
+        {
+            if self
+                .current
+                .as_ref()
+                .is_some_and(|current| current.published.native_seek)
+            {
+                events.push(BackendEvent::ProcessingApplied {
+                    output: processing.output.clone(),
+                    config: processing.config,
+                    sample_rate: None,
+                    preamp_db: 0.0,
+                });
+                events.push(BackendEvent::ProcessingMeter {
+                    output: processing.output,
+                    peak_db: Vec::new(),
+                    spectrum_db: Vec::new(),
+                });
+            }
+        }
+        if self.pending_processing.is_none()
+            && let Some(current) = &self.current
+        {
+            events.extend(relay.processing_events(&current.published, &self.processing.output));
+        }
         if seekability_changed {
             events.push(BackendEvent::Seekable {
                 run,
-                seekable: true,
+                seekable: self.seekable,
             });
         }
-        if publish_position {
+        if publish_position && !self.pending_reload {
             events.insert(
                 0,
                 BackendEvent::Position {
@@ -501,17 +688,15 @@ impl UpnpController {
         self.reset_transport()?;
         self.finish_current(relay);
         relay.clear();
-        let representation = self
-            .sink_protocols
-            .representation_for(&source_content_type(&stream))?;
-        let media = relay.publish_at(&stream, representation, position_millis)?;
+        let request = self.publish_request(&stream, position_millis, false)?;
+        let media = relay.publish(&stream, request)?;
         if let Err(error) = self.set_uri(&media.uri, &didl_metadata(&stream, &media)) {
             relay.remove(&media);
             return Err(error);
         }
         self.install_current(run, stream.clone(), media.clone());
         let hold_output = position_millis > 0
-            && media.seekable
+            && media.native_seek
             && match self.hold_startup_output() {
                 Ok(()) => true,
                 Err(error) => {
@@ -529,14 +714,16 @@ impl UpnpController {
             return Err(error);
         }
         self.pending_start_position_millis = None;
-        self.seekable = media.seekable
+        self.seekable = media.native_seek
             && self
                 .transport_actions()
                 .is_ok_and(|actions| actions.allows("Seek"));
-        if position_millis > 0 && media.seekable {
+        if position_millis > 0 && media.native_seek {
             self.pending_start_position_millis = Some(position_millis);
         }
         self.started = true;
+        self.playing = true;
+        self.pending_reload = false;
         let mut events = vec![
             BackendEvent::Started { run },
             BackendEvent::Seekable {
@@ -562,6 +749,7 @@ impl UpnpController {
     fn install_current(&mut self, run: RunId, stream: PreparedStream, media: PublishedResource) {
         self.last_position_millis = media.logical_offset_millis;
         self.current = Some(QueuedMedia::new(run, stream, media));
+        self.pending_processing = Some(self.processing.clone());
         self.renderer_owned = true;
     }
 
@@ -583,21 +771,22 @@ impl UpnpController {
             return Ok(Vec::new());
         };
         let next_run = next.run;
-        let representation = match self
-            .sink_protocols
-            .representation_for(&source_content_type(&next.stream))
-        {
-            Ok(representation) => representation,
+        let request = match self.publish_request(&next.stream, 0, false) {
+            Ok(request) => request,
             Err(error) => {
-                tracing::debug!(%error, %current_run, %next_run, "UPnP next item has no compatible representation");
-                return Ok(Vec::new());
+                return Ok(vec![BackendEvent::OperationFailed {
+                    run: Some(current_run),
+                    error: playback::BackendFailure::new(error),
+                }]);
             }
         };
-        let published = match relay.publish_as(&next.stream, representation) {
+        let published = match relay.publish(&next.stream, request) {
             Ok(published) => published,
             Err(error) => {
-                tracing::debug!(%error, %current_run, %next_run, "UPnP next item could not be published");
-                return Ok(Vec::new());
+                return Ok(vec![BackendEvent::OperationFailed {
+                    run: Some(current_run),
+                    error: playback::BackendFailure::new(error),
+                }]);
             }
         };
         if let Err(error) =
@@ -605,7 +794,10 @@ impl UpnpController {
         {
             relay.remove(&published);
             tracing::debug!(%error, %current_run, %next_run, "UPnP renderer did not accept a next item");
-            return Ok(Vec::new());
+            return Ok(vec![BackendEvent::OperationFailed {
+                run: Some(current_run),
+                error: playback::BackendFailure::new(error),
+            }]);
         }
         self.next_media = Some(QueuedMedia::new(next_run, next.stream, published));
         Ok(Vec::new())
@@ -637,7 +829,7 @@ impl UpnpController {
         self.seekable = self
             .current
             .as_ref()
-            .is_some_and(|media| media.published.seekable)
+            .is_some_and(|media| media.published.native_seek)
             && self
                 .transport_actions()
                 .is_ok_and(|actions| actions.allows("Seek"));
@@ -713,6 +905,9 @@ impl UpnpController {
         self.started = false;
         self.renderer_owned = false;
         self.seekable = false;
+        self.pending_reload = false;
+        self.pending_processing = None;
+        self.playing = false;
     }
 
     pub(super) fn current_run(&self) -> Option<RunId> {
@@ -1133,10 +1328,10 @@ fn dlna_protocol_info(media: &PublishedResource) -> String {
         "audio/mpeg" | "audio/mp3" => "DLNA.ORG_PN=MP3;",
         _ => "",
     };
-    let (operation, converted) = if media.seekable {
+    let (operation, converted) = if media.native_seek {
         ("01", "0")
     } else {
-        ("00", "1")
+        ("01", "1")
     };
     format!(
         "{profile}DLNA.ORG_OP={operation};DLNA.ORG_CI={converted};DLNA.ORG_FLAGS=01500000000000000000000000000000"
@@ -1256,7 +1451,7 @@ mod tests {
         let mp3_only = SinkProtocols::known("http-get:*:audio/mpeg:DLNA.ORG_PN=MP3");
         assert_eq!(
             mp3_only.representation_for("audio/flac"),
-            Ok(RelayRepresentation::Mp3)
+            Ok(RelayRepresentation::Generated(library::AudioEncoding::mp3()))
         );
 
         let flac = SinkProtocols::known("http-get:*:audio/flac:*");
@@ -1831,7 +2026,7 @@ mod tests {
             content_length: Some(12_345),
             logical_offset_millis: 0,
             resource_duration_millis: Some(60_000),
-            seekable: true,
+            native_seek: true,
             artwork_uri: Some("http://192.0.2.10:4000/media/artwork".to_string()),
             relay_token: None,
         };

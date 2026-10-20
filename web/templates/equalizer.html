@@ -1,0 +1,24 @@
+<dialog id="equalizer-dialog" aria-labelledby="equalizer-title">
+  <header class="eq-header"><h2 id="equalizer-title">{{ localization::tr("Equalizer") }}</h2><label><input id="eq-enabled" type="checkbox" />{{ localization::tr("Enabled") }}</label><button type="button" data-close="equalizer-dialog">{{ localization::tr("Close") }}</button></header>
+  <div class="eq-toolbar"><select id="eq-preset" aria-label="{{ localization::tr("Preset") }}"></select><button id="eq-save" type="button">{{ localization::tr("Save") }}</button><details class="eq-menu"><summary>{{ localization::tr("More") }}</summary><div>
+    <button id="eq-duplicate" type="button">{{ localization::tr("Duplicate") }}</button><button id="eq-rename" type="button">{{ localization::tr("Rename") }}</button><button id="eq-import" type="button">{{ localization::tr("Import") }}</button><button id="eq-export" type="button">{{ localization::tr("Export") }}</button><button id="eq-delete" type="button">{{ localization::tr("Delete") }}</button>
+  </div></details><select id="eq-format" aria-label="{{ localization::tr("File format") }}"><option value="Json">Rufin JSON</option><option value="Apo">Equalizer APO</option></select><input id="eq-file" type="file" accept=".json,.txt" hidden /></div>
+  <div class="eq-toolbar"><select id="eq-mode" aria-label="{{ localization::tr("Mode") }}"><option value="graphic">{{ localization::tr("Graphic") }}</option><option value="parametric">{{ localization::tr("Parametric") }}</option></select><select id="eq-layout" aria-label="{{ localization::tr("Bands") }}"><option value="Classic10">10</option><option value="Bands18">18</option><option value="Bands31">31</option></select><label><input id="eq-response" type="checkbox" />{{ localization::tr("Response") }}</label><label><input id="eq-spectrum" type="checkbox" />{{ localization::tr("Spectrum") }}</label><output id="eq-clip" aria-live="polite">{{ localization::tr("Clipping") }}</output><output id="eq-peak"></output></div>
+  <div class="eq-scroller"><div id="eq-graph"><svg id="eq-plot" aria-hidden="true"></svg><div id="eq-bands"></div></div></div>
+  <div id="eq-filters"></div><button id="eq-add" type="button" hidden>{{ localization::tr("Add band") }}</button>
+  <div class="eq-preamp"><label for="eq-preamp">{{ localization::tr("Preamp") }}</label><input id="eq-preamp" type="range" min="-36" max="12" step="0.1"/><input id="eq-preamp-number" aria-label="{{ localization::tr("Preamp") }}" type="number" min="-36" max="12" step="0.1"/><span>dB</span><label><input id="eq-auto" type="checkbox"/>{{ localization::tr("Auto") }}</label></div>
+  <details><summary>{{ localization::tr("Tone and channels") }}</summary><div class="eq-extra">
+    <label>{{ localization::tr("Bass") }}<input id="eq-bass" type="range" min="-12" max="12" step="0.1"/><output id="eq-bass-value"></output></label>
+    <label>{{ localization::tr("Treble") }}<input id="eq-treble" type="range" min="-12" max="12" step="0.1"/><output id="eq-treble-value"></output></label>
+    <label>{{ localization::tr("Balance") }}<input id="eq-balance" type="range" min="-1" max="1" step="0.01"/></label>
+    <label><input id="eq-crossfeed" type="checkbox"/>{{ localization::tr("Crossfeed") }}</label><label><input id="eq-mono" type="checkbox"/>{{ localization::tr("Mono") }}</label>
+  </div></details>
+  <footer class="eq-toolbar"><label><input id="eq-assigned" type="checkbox"/>{{ localization::tr("Use for this output") }}</label><select id="eq-cast-format" aria-label="{{ localization::tr("Cast format") }}"><option value="Mp3">MP3</option><option value="Flac">FLAC</option></select><button id="eq-apply" type="button" hidden>{{ localization::tr("Apply") }}</button><output id="eq-status" role="status"></output></footer>
+</dialog>
+<dialog id="eq-name-dialog" aria-labelledby="eq-name-title">
+  <form id="eq-name-form">
+    <h2 id="eq-name-title">{{ localization::tr("Preset name") }}</h2>
+    <label for="eq-name">{{ localization::tr("Name") }}</label><input id="eq-name" type="text" required autocomplete="off" />
+    <div class="eq-toolbar"><button type="button" data-close="eq-name-dialog">{{ localization::tr("Cancel") }}</button><button type="submit" id="eq-name-submit">{{ localization::tr("Save") }}</button></div>
+  </form>
+</dialog>

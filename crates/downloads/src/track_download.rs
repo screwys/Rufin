@@ -676,7 +676,7 @@ pub(super) async fn encode_download(
     let cancelled = tokio_util::sync::CancellationToken::new();
     let stop = cancelled.clone();
     let mut task = tokio::task::spawn_blocking(move || {
-        audio_processing::transcode_audio(&stream, encoding, &output, || stop.is_cancelled())
+        audio_processing::transcode_audio(&stream, encoding.into(), &output, || stop.is_cancelled())
             .map_err(|error| match error.kind() {
                 std::io::ErrorKind::Interrupted => SourceError::Cancelled,
                 std::io::ErrorKind::ConnectionAborted => SourceError::Network(error.to_string()),

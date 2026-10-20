@@ -1151,6 +1151,26 @@ impl Player {
                     self.report_error(error.message().to_string());
                 }
             }
+            BackendEvent::ProcessingApplied {
+                output,
+                config,
+                sample_rate,
+                preamp_db,
+            } => {
+                self.owner()
+                    .equalizer_applied(output, config, sample_rate, preamp_db);
+            }
+            BackendEvent::ProcessingFailed { output, message } => {
+                self.owner().equalizer_failed(output, message.clone());
+                self.report_error(message);
+            }
+            BackendEvent::ProcessingMeter {
+                output,
+                peak_db,
+                spectrum_db,
+            } => {
+                self.owner().equalizer_meter(output, peak_db, spectrum_db);
+            }
             BackendEvent::AudioApplied {
                 volume,
                 muted,
@@ -2000,7 +2020,6 @@ impl Player {
             || settings.loudness_normalization_scope != self.settings.loudness_normalization_scope
             || settings.ebu_r128_target_lufs != self.settings.ebu_r128_target_lufs
             || settings.audio_output != self.settings.audio_output
-            || settings.equalizer != self.settings.equalizer
             || settings.preserve_pitch != self.settings.preserve_pitch
             || settings.audio_fade_on_status_change != self.settings.audio_fade_on_status_change
             || settings.visualizer_ignore_volume != self.settings.visualizer_ignore_volume;

@@ -1,6 +1,5 @@
 use crate::{
-    EqualizerSettings, LoudnessNormalization, LoudnessNormalizationScope, PlaybackSettings,
-    StreamQuality, VolumeScale,
+    LoudnessNormalization, LoudnessNormalizationScope, PlaybackSettings, StreamQuality, VolumeScale,
 };
 use audio_processing::ResolvedStream;
 use library::LoudnessMeasurement;
@@ -148,7 +147,6 @@ pub struct BackendAudioSettings {
     pub loudness_normalization_scope: LoudnessNormalizationScope,
     pub ebu_r128_target_lufs: f64,
     pub audio_output: Option<String>,
-    pub equalizer: EqualizerSettings,
     pub preserve_pitch: bool,
     pub volume: f64,
     pub volume_scale: VolumeScale,
@@ -177,7 +175,6 @@ impl From<PlaybackSettings> for BackendAudioSettings {
             loudness_normalization_scope: settings.loudness_normalization_scope,
             ebu_r128_target_lufs: settings.ebu_r128_target_lufs,
             audio_output: settings.audio_output,
-            equalizer: settings.equalizer,
             preserve_pitch: settings.preserve_pitch,
             volume: settings.volume,
             volume_scale: settings.volume_scale,
@@ -196,6 +193,28 @@ pub enum BackendState {
     Paused,
     Playing,
 }
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProcessingRequest {
+    pub output: String,
+    pub local_device: Option<String>,
+    pub config: audio_processing::effects::ProcessingConfig,
+    pub meter: bool,
+    pub spectrum: bool,
+    pub cast_encoding: library::AudioEncoding,
+}
+impl Default for ProcessingRequest {
+    fn default() -> Self {
+        Self {
+            output: "local:default".into(),
+            local_device: None,
+            config: Default::default(),
+            meter: false,
+            spectrum: false,
+            cast_encoding: library::AudioEncoding::mp3(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum BackendCommand {
     Start {
@@ -297,6 +316,21 @@ pub enum BackendEvent {
         current_run: RunId,
         next_run: RunId,
         error: BackendFailure,
+    },
+    ProcessingApplied {
+        output: String,
+        config: audio_processing::effects::ProcessingConfig,
+        sample_rate: Option<u32>,
+        preamp_db: f64,
+    },
+    ProcessingFailed {
+        output: String,
+        message: String,
+    },
+    ProcessingMeter {
+        output: String,
+        peak_db: Vec<f64>,
+        spectrum_db: Vec<f64>,
     },
     AudioApplied {
         volume: f64,

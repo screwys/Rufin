@@ -34,7 +34,7 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
                     false,
                     app::startup_settings(&paths),
                     paths.clone(),
-                    || Ok(Box::new(IdleBackend) as Box<dyn PlaybackBackend>),
+                    |_| Ok(Box::new(IdleBackend) as Box<dyn PlaybackBackend>),
                     Vec::new,
                     Arc::new(|_, _| {}),
                     Arc::new(|_, _| {}),

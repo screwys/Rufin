@@ -11,7 +11,8 @@ pub(crate) struct PreparedContinuation {
 impl PlaybackOwner {
     pub(crate) async fn return_empty_local(&self) -> Result<(), String> {
         let active = self.active().ok_or("Playback is unavailable")?;
-        let backend = (self.start_backend)()?;
+        let backend =
+            (self.start_backend)(self.processing_receiver(&playback::PlaybackOutput::Local))?;
         if let Some(receiver) = self.rufin.lock().unwrap_or_else(|p| p.into_inner()).take() {
             receiver.cancel();
         }
@@ -162,7 +163,8 @@ impl PlaybackOwner {
         )
         .await;
         let stream = prepare_media_stream(stream, loudness, occurrence);
-        let backend = (self.start_backend)()?;
+        let backend =
+            (self.start_backend)(self.processing_receiver(&playback::PlaybackOutput::Local))?;
         Ok(PreparedContinuation {
             transfer,
             continuation: playback::Continuation { header, queue },

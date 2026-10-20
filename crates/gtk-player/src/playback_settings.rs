@@ -54,6 +54,7 @@ fn playback_settings_popover(
         settings_group.set_description(Some(&tr("Audio processing is unavailable while casting")));
     }
     let device = crate::outputs::audio_output_dropdown(shell, 180);
+    gtk_widgets::interactions::keep_parent_grab_for_dropdown(&device);
     audio_output.add_suffix(&device);
     audio_output.set_activatable_widget(Some(&device));
     audio_output.set_sensitive(local_output);

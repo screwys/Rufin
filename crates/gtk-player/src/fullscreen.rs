@@ -615,18 +615,7 @@ pub fn connect_fullscreen_player_controls(shell: &Rc<crate::PlayerUi>) {
                 return;
             };
             shell.views.fullscreen_player.equalizer.get_or_init(|| {
-                let equalizer =
-                    EqualizerSurface::new(&shell.settings.current.borrow().playback.equalizer);
-                equalizer.root.set_valign(gtk::Align::Center);
-                equalizer.set_band_height_request(500);
-                let changed_shell = Rc::downgrade(&shell);
-                equalizer.connect_changed(move |equalizer| {
-                    if let Some(shell) = changed_shell.upgrade() {
-                        shell.update_playback_settings(|settings| {
-                            settings.equalizer = equalizer.clone()
-                        });
-                    }
-                });
+                let equalizer = EqualizerSurface::new(&shell);
                 panel.set_child(Some(&equalizer.root));
                 equalizer
             });
@@ -845,7 +834,6 @@ impl crate::PlayerUi {
         self.apply_fullscreen_now_playing_text(presentation);
         self.apply_fullscreen_responsive_layout();
         self.apply_fullscreen_now_playing_cover(presentation);
-        self.sync_fullscreen_equalizer_controls(&self.settings.current.borrow().playback.equalizer);
     }
 
     pub fn refresh_fullscreen_player_layout(self: &Rc<Self>) {

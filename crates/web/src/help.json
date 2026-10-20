@@ -51,7 +51,9 @@
     "POST /api/sources": "Connect, save and select a source, then scan its music in the background. Returns the source ID after selection. Follow /api/sources/events for scan progress. See source_setup for examples.",
     "PATCH /api/sources": "Change source settings. See source_update for examples.",
     "POST /api/sources/local": {
-      "paths": ["/path/to/music"]
+      "paths": [
+        "/path/to/music"
+      ]
     },
     "POST /api/sources/select": {
       "id": "source ID"
@@ -92,7 +94,9 @@
     "POST /api/playlists": {
       "name": "Evening",
       "source": null,
-      "uris": ["track URI"]
+      "uris": [
+        "track URI"
+      ]
     },
     "Playlist ownership": "POST /api/playlists accepts source (owner, null for Rufin), selection_source (origin of a collection being added), current (optional saved destination preference), and public (optional visibility for supported server playlists). Omit public to keep the existing creation default. Newly created playlists are pinned like in the desktop app.",
     "PATCH /api/playlists": {
@@ -114,7 +118,9 @@
     "POST /api/playlists/remove-unavailable?id=...": "Remove confirmed missing tracks from a Rufin global or file playlist. A failed availability check leaves the playlist unchanged. Returns {removed}. Does not delete media files.",
     "POST /api/playlists/entries": {
       "id": 1,
-      "uris": ["track URI"],
+      "uris": [
+        "track URI"
+      ],
       "skip_duplicates": false
     },
     "PATCH /api/playlists/entries": {
@@ -124,11 +130,15 @@
     },
     "DELETE /api/playlists/entries": {
       "id": 1,
-      "entries": [2]
+      "entries": [
+        2
+      ]
     },
     "GET /api/queue": "Tracks around the current queue position and the total count. Set limit to choose how many nearby tracks to return (up to 100).",
     "POST /api/queue": {
-      "uris": ["track URI"],
+      "uris": [
+        "track URI"
+      ],
       "mode": "replace | append | next"
     },
     "POST /api/queue/album": {
@@ -163,7 +173,9 @@
     "GET /api/lyrics/events": "Follow lyrics updates. The media_uri and run match the current playback media.",
     "GET /api/artwork?uri=...": "Track or album cover as PNG. Set size to the displayed physical pixel size. Add original=true for the original format, including animation. Returns 404 if unavailable.",
     "POST /api/queue/reorder": {
-      "positions": [0],
+      "positions": [
+        0
+      ],
       "before": "zero-based queue position, or null for the end"
     },
     "POST /api/queue/next": {
@@ -173,7 +185,10 @@
     "GET /api/artists?source=...": "Browse artists. Use offset, limit (up to 128), q, sort, descending, favorites and album_artists.",
     "GET /api/artists/tracks?id=...": "Browse an artist’s tracks, up to 256 at a time. Use q, sort, descending and album_artists.",
     "GET /api/genres/tracks?id=...": "Browse tracks in a genre. Use q, sort, descending, offset and limit. To filter by library folder, include source and folder.",
-    "POST /api/queue/genre": { "id": 1, "mode": "replace | next | append" },
+    "POST /api/queue/genre": {
+      "id": 1,
+      "mode": "replace | next | append"
+    },
     "GET /api/smart-playlists?source=...": "Browse saved smart playlists, up to 64 at a time. Source is optional; use q, sort and descending.",
     "GET /api/smart-playlists/tracks?id=...": "Browse tracks selected by the saved playlist rules and limit. Use source, q, offset, limit (up to 256), sort and descending. Sort accepts track_sort choices or definition for the saved playlist order, the default.",
     "POST /api/queue/artist": {
@@ -197,7 +212,12 @@
       "genre": null,
       "played": "All | Played | Unplayed",
       "mode": "replace | next | append"
-    }
+    },
+    "GET /api/equalizer": "Current equalizer editor. Optional output selects an existing output identity; omitted follows the selected output.",
+    "POST /api/equalizer": "Shared EQ operations: preview {output,edit}, commit {output}, select {output,preset:null or ID}, save {output,name:null or text}, duplicate {output,name}, rename {id,name}, delete {id}, import {output,text,format:Json|Apo}, export {output,format}, assign {output,assigned}, apply {output}. Edits use enum objects such as {BandGain:{index:0,value:6}} and {Enabled:{value:true}}. Preview does not write settings; commit persists the final editor. Cast previews await apply except discrete bypass/format changes.",
+    "GET /api/equalizer/presets": "Built-in and named custom preset identities and names. Custom is the retained draft, selected with preset:null.",
+    "GET /api/equalizer/events": "Equalizer server-sent events. Optional output, meter=true and spectrum=true. Measurement stops when the connection closes.",
+    "GET /api/equalizer/response": "Calculated response from the shared filter model, with frequency and dB arrays. Uses actual stream sample rate or 48 kHz for preview."
   },
   "commands": "Playback and queue commands return 202 when received. Check playback status or follow playback updates to see the result or any error. Source and playlist changes return when finished. Use IDs exactly as returned, including negative numbers. Positions and offsets start at zero. Each copy of a track in a playlist or queue has its own ID.",
   "login": "Keep the login connection open until sign-in finishes. Closing it cancels sign-in. Updates use event: login with JSON {event,data}, or {error}. Plex also accepts {method: password, data: {username,password,verification_code:null}}; Emby accepts {method: password, data: {username,password}}. Use the returned login details unchanged when adding the source.",
@@ -205,7 +225,9 @@
     "local": {
       "type": "local",
       "data": {
-        "roots": ["/path/to/music"]
+        "roots": [
+          "/path/to/music"
+        ]
       }
     },
     "jellyfin_emby": {
@@ -244,7 +266,15 @@
   "source_update": {
     "local": {
       "type": "local",
-      "data": { "source_id": "source ID", "roots": ["/path/to/music"], "excluded_folders": ["Recordings"] }
+      "data": {
+        "source_id": "source ID",
+        "roots": [
+          "/path/to/music"
+        ],
+        "excluded_folders": [
+          "Recordings"
+        ]
+      }
     },
     "files": "{type: files, data: {source_id,name,settings: file_settings,credentials:{secret:null,headers:null}}}. Use null to keep the saved password and headers.",
     "plex": {
@@ -289,10 +319,24 @@
   },
   "folder_exclusions": "Local, WebDAV and SMB sources accept excluded_folders in their source settings. These paths skip folder discovery, including subfolders. Local paths may be absolute or relative to each music root. WebDAV and SMB paths are relative to the source URL, with forward slashes. Paths need not exist or belong to the current library. Included CUE files and playlists can still reference audio in excluded folders. An empty list clears exclusions. Omitting excluded_folders from a Local update preserves the saved list.",
   "choices": {
-    "file_authentication": ["anonymous", "password", "bearer"],
-    "server_kind": ["jellyfin", "emby"],
-    "subsonic_kind": ["navidrome", "open_subsonic"],
-    "subsonic_authentication": ["password", "legacy_password", "api_key"],
+    "file_authentication": [
+      "anonymous",
+      "password",
+      "bearer"
+    ],
+    "server_kind": [
+      "jellyfin",
+      "emby"
+    ],
+    "subsonic_kind": [
+      "navidrome",
+      "open_subsonic"
+    ],
+    "subsonic_authentication": [
+      "password",
+      "legacy_password",
+      "api_key"
+    ],
     "track_sort": [
       "title",
       "track_number",
@@ -323,7 +367,12 @@
       "duration",
       "favorite"
     ],
-    "playlist_sort": ["position", "title", "track_count", "duration"],
+    "playlist_sort": [
+      "position",
+      "title",
+      "track_count",
+      "duration"
+    ],
     "artist_sort": [
       "title",
       "album_count",

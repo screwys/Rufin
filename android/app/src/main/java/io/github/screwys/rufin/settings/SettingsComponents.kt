@@ -8,8 +8,11 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.animateBounds
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -18,6 +21,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +45,8 @@ import androidx.compose.ui.unit.dp
 import io.github.screwys.rufin.ui.LocalPlayerBottomPadding
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.ui.RufinIcon
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 
 @Composable
 internal fun SettingsPage(modifier: Modifier = Modifier, embedded: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
@@ -66,13 +73,23 @@ internal fun SettingsGroup(title: String? = null, content: @Composable ColumnSco
 @Composable
 internal fun SettingsExpander(title: String, content: @Composable () -> Unit) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    val visibility = remember { MutableTransitionState(expanded) }
+    val bringIntoView = remember { BringIntoViewRequester() }
+    visibility.targetState = expanded
+    LaunchedEffect(visibility) {
+        snapshotFlow { visibility.isIdle && visibility.currentState }
+            // Restoring an open section keeps the saved scroll position.
+            .drop(1)
+            .collectLatest { revealed -> if (revealed) bringIntoView.bringIntoView() }
+    }
     val duration = if (LocalReduceMotion.current) 0 else 180
     val rotation by animateFloatAsState(if (expanded) 90f else 0f, tween(duration), label = "settingsExpansion")
     SettingsGroup {
         SettingsRow(title, modifier = Modifier.clickable(role = Role.Button) { expanded = !expanded },
             trailing = { RufinIcon("rufin-go-next-symbolic", translate(if (expanded) "Hide" else "Show"),
                 Modifier.size(20.dp).graphicsLayer { rotationZ = rotation }) })
-        AnimatedVisibility(expanded, enter = expandVertically(tween(duration)) + fadeIn(tween(duration)),
+        AnimatedVisibility(visibleState = visibility, modifier = Modifier.bringIntoViewRequester(bringIntoView),
+            enter = expandVertically(tween(duration)) + fadeIn(tween(duration)),
             exit = shrinkVertically(tween(duration)) + fadeOut(tween(duration))) { content() }
     }
 }

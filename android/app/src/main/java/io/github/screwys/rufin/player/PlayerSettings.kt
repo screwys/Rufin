@@ -76,7 +76,7 @@ internal fun PlayerSettingsSheet(player: PlayerConnection, preferences: Preferen
                 beyondViewportPageCount = PlayerSettingsPage.entries.size - 1) { index ->
                 Box(Modifier.fillMaxSize()) {
                     if (index in visited) CompositionLocalProvider(LocalPlayerBottomPadding provides 0.dp) {
-                        PlayerSettingsContent(player, PlayerSettingsPage.entries[index], preferences = preferences)
+                        PlayerSettingsContent(player, PlayerSettingsPage.entries[index], preferences = preferences, active = index == settledPage)
                     }
                 }
             }
@@ -85,11 +85,11 @@ internal fun PlayerSettingsSheet(player: PlayerConnection, preferences: Preferen
 }
 
 @Composable
-internal fun PlayerSettingsContent(player: PlayerConnection, page: PlayerSettingsPage, embedded: Boolean = false, preferences: PreferencesConnection? = null) {
+internal fun PlayerSettingsContent(player: PlayerConnection, page: PlayerSettingsPage, embedded: Boolean = false, preferences: PreferencesConnection? = null, active: Boolean = true) {
     SettingsPage(embedded = embedded) {
         if (player.settings == null) Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         else when (page) {
-            PlayerSettingsPage.EQUALIZER -> EqualizerSettings(player)
+            PlayerSettingsPage.EQUALIZER -> EqualizerSettings(player, active)
             PlayerSettingsPage.LYRICS -> LyricsSettings(player)
             PlayerSettingsPage.VISUALIZER -> VisualizerSettings(player)
             PlayerSettingsPage.PREFERENCES -> PlaybackPreferences(player, preferences)
@@ -178,48 +178,6 @@ internal fun PlayerLayoutPreferences(player: PlayerConnection) {
         PreferenceSwitch("Combine lyrics and visualizer", state.rightPanel.combined) { change { setRightPanelCombined(it) } }
         PreferenceSwitch("Dynamic background", state.display.fullscreenDynamicBackground) { change { setFullscreenDynamicBackground(it) } }
         PreferenceSwitch("Enable background image", state.display.fullscreenBackgroundImage) { change { setFullscreenBackgroundImage(it) } }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-private fun EqualizerSettings(player: PlayerConnection) {
-    val settings = player.settings ?: return
-    val equalizer = settings.playback.equalizer
-    val options = player.preferenceOptions ?: return
-    val selected = equalizer.selectedPreset
-    var resetPreset by remember { mutableStateOf("Flat") }
-    var presetsOpen by remember { mutableStateOf(false) }
-    LaunchedEffect(selected) { if (selected != "Custom") resetPreset = selected }
-    SettingsGroup {
-        PreferenceSwitch("Equalizer", equalizer.enabled, player::equalizerEnabled)
-        Box {
-            SettingsRow(translate("Preset"), modifier = Modifier.clickable { presetsOpen = true }, trailing = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(translate(selected),
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    PlayerIconButton("rufin-edit-undo-symbolic", "Reset", { player.equalizerPreset(resetPreset) }, enabled = selected == "Custom")
-                }
-            })
-            DropdownMenu(presetsOpen, { presetsOpen = false }, Modifier.heightIn(max = 420.dp)) {
-                options.equalizerPresets.forEach { preset ->
-                    DropdownMenuItem(text = { Text(translate(preset)) }, onClick = {
-                        player.equalizerPreset(preset)
-                        presetsOpen = false
-                    }, trailingIcon = { RadioButton(selected == preset, null) })
-                }
-            }
-        }
-    }
-    val bands = equalizer.bands
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        options.equalizerBandTitles.forEachIndexed { index, title ->
-            key(index) {
-                SettingsSliderNumber(title, bands[index], -12.0..12.0, .1, unit = "dB") {
-                    player.equalizerBand(index, (it as Number).toDouble())
-                }
-            }
-        }
     }
 }
 

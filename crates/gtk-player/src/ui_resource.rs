@@ -14,6 +14,10 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     LYRICS_EDIT_RESOURCE,
     LYRICS_DICTIONARY_RESOURCE,
     EQUALIZER_RESOURCE,
+    EQUALIZER_BAND_RESOURCE,
+    EQUALIZER_BAND_ITEM_RESOURCE,
+    EQUALIZER_FILTER_RESOURCE,
+    EQUALIZER_DIALOGS_RESOURCE,
     FULLSCREEN_PLAYER_RESOURCE,
     FULLSCREEN_SETTINGS_RESOURCE,
     BOTTOM_PLAYER_RESOURCE,
@@ -66,3 +70,12 @@ mod resource_tests {
         }
     }
 }
+
+pub const EQUALIZER_BAND_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/equalizer-band.ui";
+pub const EQUALIZER_FILTER_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/player/equalizer-filter.ui";
+pub const EQUALIZER_DIALOGS_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/player/equalizer-dialogs.ui";
+
+pub const EQUALIZER_BAND_ITEM_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/player/equalizer-band-item.ui";

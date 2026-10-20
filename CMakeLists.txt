@@ -90,7 +90,7 @@ endif()
 # This minimum covers documented formats and the factories Rufin uses directly.
 set(RUFIN_REQUIRED_GSTREAMER_PLUGINS
   coreelements playback typefindfunctions
-  app audiobuffersplit audioconvert audioresample audiofx equalizer insertbin level volume
+  app audiobuffersplit audioconvert audioresample audiofx bs2b equalizer insertbin level volume
   lame debugutilsbad
   soup hls mpegtsdemux rtp rtpmanager rtsp srtp udp
   aiff alaw apetag asf audioparsers autodetect fdkaac flac gme id3demux
@@ -134,6 +134,8 @@ if(RUFIN_ENABLE_PACKAGING AND (APPLE OR WIN32))
       list(APPEND RUFIN_GSTREAMER_PLUGIN_FILES "${RUFIN_OPENMPT_PLUGIN}")
     elseif(APPLE AND RUFIN_PLUGIN STREQUAL "wavpack")
       list(APPEND RUFIN_GSTREAMER_PLUGIN_FILES "${RUFIN_WAVPACK_PLUGIN}")
+    elseif(APPLE AND RUFIN_PLUGIN STREQUAL "bs2b")
+      list(APPEND RUFIN_GSTREAMER_PLUGIN_FILES "${RUFIN_BS2B_PLUGIN}")
     else()
       execute_process(
         COMMAND "${RUFIN_GST_INSPECT}" --no-colors --plugin "${RUFIN_PLUGIN}"
@@ -179,11 +181,14 @@ if(RUFIN_VALIDATE_DEVELOPMENT_RUNTIME)
     "${RUFIN_AUDIO_SINK}"
     equalizer-nbands
     insertbin
+    level
     scaletempo
     souphttpsrc
   )
   if(APPLE)
     list(APPEND RUFIN_REQUIRED_GSTREAMER_ELEMENTS avdec_aac)
+  else()
+    list(APPEND RUFIN_REQUIRED_GSTREAMER_ELEMENTS bs2b)
   endif()
   foreach(RUFIN_GSTREAMER_ELEMENT IN LISTS RUFIN_REQUIRED_GSTREAMER_ELEMENTS)
     execute_process(

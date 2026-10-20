@@ -206,7 +206,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         Arc::new(|_, _| {}),
         Vec::new,
         scrobbler,
-        || Ok(Box::new(Idle)),
+        |_| Ok(Box::new(Idle)),
     );
     owner.install_source_owner(&source);
     owner.start().await.unwrap();

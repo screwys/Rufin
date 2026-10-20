@@ -1,5 +1,5 @@
 //! Persistent playback, queue and lyrics presentation.
-use playback::{EqualizerSettings, PlaybackSettings};
+use playback::PlaybackSettings;
 pub mod lyrics;
 pub mod queue;
 pub mod state;
@@ -204,7 +204,7 @@ impl PlayerUi {
 
 impl PlayerUi {
     pub fn update_playback_settings(self: &Rc<Self>, update: impl FnOnce(&mut PlaybackSettings)) {
-        if let Some(settings) = self
+        if self
             .settings
             .update_app_settings("playback settings", |settings| {
                 let previous = settings.playback.clone();
@@ -212,14 +212,9 @@ impl PlayerUi {
                 settings.playback.sanitize();
                 settings.playback != previous
             })
+            .is_some()
         {
-            self.sync_fullscreen_equalizer_controls(&settings.playback.equalizer);
             self.update_bottom_player();
-        }
-    }
-    pub fn sync_fullscreen_equalizer_controls(&self, equalizer: &EqualizerSettings) {
-        if let Some(surface) = self.views.fullscreen_player.equalizer.get() {
-            surface.set_settings(equalizer);
         }
     }
 }

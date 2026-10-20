@@ -72,6 +72,8 @@ pub(super) struct PlayerPipeline {
     about_to_finish_id: Option<glib::SignalHandlerId>,
     audio_graph: Option<AudioGraph>,
     visualizer_probe: Option<(gst::Pad, gst::PadProbeId)>,
+    processing_probe: Option<(gst::Pad, gst::PadProbeId)>,
+    processing_tap_key: Option<(PipelineId, RunId, String)>,
     current_stream: Option<PreparedStream>,
     queued_loudness: SharedQueuedLoudness,
     gapless: Arc<Mutex<GaplessPlayback>>,
@@ -117,6 +119,8 @@ impl PlayerPipeline {
             about_to_finish_id: None,
             audio_graph: None,
             visualizer_probe: None,
+            processing_probe: None,
+            processing_tap_key: None,
             current_stream: None,
             queued_loudness: Arc::new(Mutex::new(None)),
             gapless: Arc::new(Mutex::new(GaplessPlayback::default())),
@@ -617,10 +621,15 @@ impl PlayerPipeline {
         if let Some(graph) = self.audio_graph.as_mut()
             && graph.reconfigure(settings, self.playback_rate)?
         {
+            let request = lock_recover(&self.shared).processing.clone();
+            if let Some(request) = request {
+                self.configure_processing(&request)?;
+            }
             return Ok(());
         }
         self.clear_visualizer_tap();
-        let graph = AudioGraph::new(
+        self.set_processing_tap(None);
+        let mut graph = AudioGraph::new(
             settings,
             self.playback_rate,
             self.current_stream
@@ -628,6 +637,14 @@ impl PlayerPipeline {
                 .and_then(|stream| stream.loudness.clone()),
             Arc::clone(&self.queued_loudness),
         )?;
+        let processing = lock_recover(&self.shared).processing.clone();
+        if let Some(request) = processing
+            && graph.uses_output(request.local_device.as_deref())
+        {
+            graph.processing.update(&request.config)?;
+            graph.processing.set_meter(request.meter)?;
+            graph.set_processing_output(&request.output);
+        }
         graph
             .output()
             .set_property("name", format!("{}-audio-output", self.native()?.0.name()));
@@ -709,9 +726,16 @@ impl PlayerPipeline {
         &mut self,
         settings: &BackendAudioSettings,
     ) -> Result<bool, String> {
-        self.audio_graph.as_mut().map_or(Ok(false), |graph| {
+        let changed = self.audio_graph.as_mut().map_or(Ok(false), |graph| {
             graph.reconfigure(settings, self.playback_rate)
-        })
+        })?;
+        if changed {
+            let request = lock_recover(&self.shared).processing.clone();
+            if let Some(request) = request {
+                self.configure_processing(&request)?;
+            }
+        }
+        Ok(changed)
     }
 
     pub(super) fn set_stream(&mut self, stream: &PreparedStream) -> Result<(), String> {
@@ -723,6 +747,61 @@ impl PlayerPipeline {
             .store(stream.trust_invalid_certificate(), Ordering::SeqCst);
         self.native()?.0.set_property("uri", stream.uri());
         Ok(())
+    }
+
+    pub(super) fn configure_processing(
+        &mut self,
+        request: &ProcessingRequest,
+    ) -> Result<(), String> {
+        if let Some(graph) = self.audio_graph.as_mut()
+            && graph.uses_output(request.local_device.as_deref())
+        {
+            graph.processing.update(&request.config)?;
+            graph.processing.set_meter(request.meter)?;
+            graph.set_processing_output(&request.output);
+        }
+        Ok(())
+    }
+
+    pub(super) fn processing_output(&self) -> Option<String> {
+        self.audio_graph.as_ref().map(AudioGraph::processing_output)
+    }
+
+    pub(super) fn poll_processing(
+        &mut self,
+    ) -> Result<
+        Option<(
+            audio_processing::effects::ProcessingConfig,
+            Option<u32>,
+            f64,
+        )>,
+        String,
+    > {
+        self.audio_graph
+            .as_mut()
+            .map_or(Ok(None), |graph| graph.processing.poll())
+    }
+
+    pub(super) fn processing_peak(&self, message: &gst::MessageRef) -> Option<Vec<f64>> {
+        self.audio_graph.as_ref()?.processing.meter_message(message)
+    }
+
+    pub(super) fn set_processing_tap(&mut self, tap: Option<VisualizerTap>) {
+        let key = tap.as_ref().and_then(VisualizerTap::measurement_key);
+        if key == self.processing_tap_key {
+            return;
+        }
+        if let Some((pad, probe)) = self.processing_probe.take() {
+            pad.remove_probe(probe);
+        }
+        self.processing_tap_key = None;
+        if let (Some(tap), Some(graph)) = (tap, self.audio_graph.as_ref()) {
+            let pad = graph.measurement_pad();
+            if let Some(probe) = tap.install(&pad) {
+                self.processing_probe = Some((pad, probe));
+                self.processing_tap_key = key;
+            }
+        }
     }
 
     pub(super) fn set_visualizer_tap(&mut self, tap: Option<VisualizerTap>) {
@@ -835,6 +914,7 @@ impl PlayerPipeline {
                 .disconnect(handler_id);
         }
         self.clear_visualizer_tap();
+        self.set_processing_tap(None);
         if let Some((pipeline, _)) = self.native.as_ref() {
             let _ = pipeline.set_state(gst::State::Null);
         }

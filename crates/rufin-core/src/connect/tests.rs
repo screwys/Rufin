@@ -1398,7 +1398,7 @@ async fn device(
         false,
         settings,
         paths,
-        || Ok(Box::new(IdleBackend) as Box<dyn PlaybackBackend>),
+        |_| Ok(Box::new(IdleBackend) as Box<dyn PlaybackBackend>),
         Vec::new,
         Arc::new(|_, _| {}),
         Arc::new(|_, _| {}),

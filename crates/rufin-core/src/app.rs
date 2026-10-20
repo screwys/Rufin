@@ -49,7 +49,12 @@ pub async fn runtime_inputs<StartBackend>(
     >,
 ) -> Result<RuntimeInputs, String>
 where
-    StartBackend: Fn() -> Result<Box<dyn PlaybackBackend>, String> + Send + Sync + 'static,
+    StartBackend: Fn(
+            tokio::sync::watch::Receiver<playback::ProcessingRequest>,
+        ) -> Result<Box<dyn PlaybackBackend>, String>
+        + Send
+        + Sync
+        + 'static,
 {
     let runtime = tokio::runtime::Handle::current();
     let secret_storage_fallbacks = settings.secret_storage_fallbacks.1.clone();

@@ -7,6 +7,7 @@ mod browser;
 mod catalog;
 mod connect;
 mod controller;
+mod equalizer;
 mod media;
 mod pins;
 mod playlists;
@@ -131,6 +132,7 @@ fn routes() -> Router<ProductHandles> {
         .merge(pins::routes())
         .merge(catalog::routes())
         .merge(connect::routes())
+        .merge(equalizer::routes())
 }
 
 async fn help() -> Result<Response<Body>, Error> {

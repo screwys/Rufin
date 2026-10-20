@@ -578,11 +578,14 @@ dependencies = [
  "gstreamer",
  "gstreamer-app",
  "gstreamer-audio",
+ "gstreamer-controller",
  "library",
  "rustfft",
  "rustls-native-certs",
+ "serde",
  "tempfile",
  "tracing",
+ "uniffi",
  "url",
 ]
 
@@ -3368,6 +3371,7 @@ version = "0.16.6"
 dependencies = [
  "app-identity",
  "artwork",
+ "audio-processing",
  "glib-build-tools",
  "gtk-widgets",
  "gtk4",
@@ -6797,6 +6801,7 @@ dependencies = [
  "playback",
  "process-memory",
  "tempfile",
+ "tokio",
  "tracing",
 ]
 
@@ -10360,6 +10365,7 @@ dependencies = [
  "artwork",
  "askama",
  "async-channel",
+ "audio-processing",
  "axum",
  "base64 0.23.1",
  "blake3",

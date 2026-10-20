@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20" />
+  <object class="AdwDialog" id="name_dialog">
+    <property name="title" translatable="yes">Save preset</property>
+    <property name="content-width">440</property>
+    <property name="default-widget">name_accept</property>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top"><object class="AdwHeaderBar" /></child>
+        <property name="content">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="margin-start">16</property>
+            <property name="margin-end">16</property>
+            <property name="margin-bottom">16</property>
+            <child>
+              <object class="GtkEntry" id="name">
+                <property name="activates-default">true</property>
+                <accessibility><property name="label" translatable="yes">Name</property></accessibility>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="name_accept">
+                <property name="label" translatable="yes">Save</property>
+                <property name="halign">end</property>
+                <style><class name="suggested-action" /></style>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+  <object class="AdwAlertDialog" id="confirm">
+    <property name="heading" translatable="yes">Delete preset</property>
+    <property name="close-response">cancel</property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="accept" translatable="yes" appearance="destructive">Delete</response>
+    </responses>
+  </object>
+  <object class="AdwDialog" id="import_dialog">
+    <property name="title" translatable="yes">Import preset</property>
+    <property name="content-width">440</property>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar" />
+        </child>
+        <property name="content">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="margin-start">16</property>
+            <property name="margin-end">16</property>
+            <property name="margin-bottom">16</property>
+            <child>
+              <object class="GtkBox">
+                <property name="spacing">8</property>
+                <child>
+                  <object class="GtkBox">
+                    <property name="hexpand">true</property>
+                    <style><class name="linked" /></style>
+                    <child>
+                      <object class="GtkToggleButton" id="import_json">
+                        <property name="label" translatable="yes">Rufin JSON</property>
+                        <property name="active">true</property>
+                        <property name="hexpand">true</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkToggleButton" id="import_apo">
+                        <property name="label" translatable="yes">AutoEQ / APO</property>
+                        <property name="group">import_json</property>
+                        <property name="hexpand">true</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="choose_file">
+                    <property name="icon-name">rufin-document-open-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Open</property>
+                    <accessibility><property name="label" translatable="yes">Open</property></accessibility>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="paste">
+                    <property name="label" translatable="yes">Paste</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="min-content-height">220</property>
+                <property name="hscrollbar-policy">never</property>
+                <property name="has-frame">true</property>
+                <property name="vexpand">true</property>
+                <style><class name="equalizer-text" /></style>
+                <child>
+                  <object class="GtkTextView" id="import_text">
+                    <property name="wrap-mode">word-char</property>
+                    <property name="monospace">true</property>
+                    <property name="editable">true</property>
+                    <property name="accepts-tab">false</property>
+                    <property name="left-margin">10</property>
+                    <property name="right-margin">10</property>
+                    <property name="top-margin">10</property>
+                    <property name="bottom-margin">10</property>
+                    <accessibility><property name="label" translatable="yes">Preset text</property></accessibility>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="import_error">
+                <property name="visible">false</property>
+                <property name="wrap">true</property>
+                <property name="xalign">0</property>
+                <style><class name="error" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="spacing">8</property>
+                <property name="halign">end</property>
+                <child>
+                  <object class="GtkButton" id="import_accept">
+                    <property name="label" translatable="yes">Import</property>
+                    <style><class name="suggested-action" /></style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+  <object class="AdwDialog" id="export_dialog">
+    <property name="title" translatable="yes">Export preset</property>
+    <property name="content-width">440</property>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar" />
+        </child>
+        <property name="content">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="margin-start">16</property>
+            <property name="margin-end">16</property>
+            <property name="margin-bottom">16</property>
+            <child>
+              <object class="GtkBox">
+                <property name="spacing">8</property>
+                <child>
+                  <object class="GtkBox">
+                    <property name="hexpand">true</property>
+                    <style><class name="linked" /></style>
+                    <child>
+                      <object class="GtkToggleButton" id="export_json">
+                        <property name="label" translatable="yes">Rufin JSON</property>
+                        <property name="active">true</property>
+                        <property name="hexpand">true</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkToggleButton" id="export_apo">
+                        <property name="label" translatable="yes">AutoEQ / APO</property>
+                        <property name="group">export_json</property>
+                        <property name="hexpand">true</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="min-content-height">220</property>
+                <property name="hscrollbar-policy">never</property>
+                <property name="has-frame">true</property>
+                <property name="vexpand">true</property>
+                <style><class name="equalizer-text" /></style>
+                <child>
+                  <object class="GtkTextView" id="export_text">
+                    <property name="wrap-mode">word-char</property>
+                    <property name="monospace">true</property>
+                    <property name="editable">false</property>
+                    <property name="accepts-tab">false</property>
+                    <property name="left-margin">10</property>
+                    <property name="right-margin">10</property>
+                    <property name="top-margin">10</property>
+                    <property name="bottom-margin">10</property>
+                    <accessibility><property name="label" translatable="yes">Preset text</property></accessibility>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="export_error">
+                <property name="visible">false</property>
+                <property name="wrap">true</property>
+                <property name="xalign">0</property>
+                <style><class name="error" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="spacing">8</property>
+                <property name="halign">end</property>
+                <child>
+                  <object class="GtkButton" id="export_save">
+                    <property name="label" translatable="yes">Save…</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="export_accept">
+                    <property name="label" translatable="yes">Copy</property>
+                    <style><class name="suggested-action" /></style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+  <object class="GtkLabel" id="save_title">
+    <property name="label" translatable="yes">Save preset</property>
+  </object>
+  <object class="GtkLabel" id="duplicate_title">
+    <property name="label" translatable="yes">Duplicate preset</property>
+  </object>
+  <object class="GtkLabel" id="rename_title">
+    <property name="label" translatable="yes">Rename preset</property>
+  </object>
+  <object class="GtkLabel" id="rename_label">
+    <property name="label" translatable="yes">Rename</property>
+  </object>
+  <object class="GtkLabel" id="duplicate_label">
+    <property name="label" translatable="yes">Duplicate</property>
+  </object>
+  <object class="GtkFileDialog" id="file_open">
+    <property name="title" translatable="yes">Import preset</property>
+  </object>
+  <object class="GtkFileDialog" id="file_save">
+    <property name="title" translatable="yes">Export preset</property>
+  </object>
+</interface>

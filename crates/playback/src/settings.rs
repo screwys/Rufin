@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-pub const EQUALIZER_BAND_COUNT: usize = 10;
 pub const DEFAULT_EBU_R128_TARGET_LUFS: f64 = -23.0;
 pub const MIN_EBU_R128_TARGET_LUFS: f64 = -48.0;
 pub const MAX_EBU_R128_TARGET_LUFS: f64 = 0.0;
@@ -89,48 +88,6 @@ fn perceptual_gain_floor() -> f64 {
     10_f64.powf(-PERCEPTUAL_DB_RANGE / 20.0)
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct EqualizerSettings {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_equalizer_selected_preset")]
-    pub selected_preset: String,
-    #[serde(default = "default_equalizer_bands")]
-    pub bands: Vec<f64>,
-}
-
-impl Default for EqualizerSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            selected_preset: "Flat".to_string(),
-            bands: default_equalizer_bands(),
-        }
-    }
-}
-
-impl EqualizerSettings {
-    pub fn select_preset(&mut self, preset: String) {
-        self.enabled = true;
-        self.bands = equalizer_preset_bands(&preset);
-        self.selected_preset = preset;
-        self.sanitize();
-    }
-
-    pub fn mark_custom(&mut self) {
-        self.enabled = true;
-        self.selected_preset = EQUALIZER_CUSTOM_PRESET.into();
-    }
-
-    pub fn sanitize(&mut self) {
-        if self.selected_preset.trim().is_empty() {
-            self.selected_preset = default_equalizer_selected_preset();
-        }
-        sanitize_equalizer_bands(&mut self.bands);
-    }
-}
-
 #[macro_export]
 macro_rules! playback_preference_fields {
     ($callback:ident $(, $args:tt)*) => {
@@ -150,8 +107,6 @@ macro_rules! playback_preference_fields {
                 stream_quality: StreamQuality = StreamQuality::Original => set_stream_quality;
                 #[serde(default, skip_serializing_if = "Option::is_none")]
                 audio_output: Option<String> = None;
-                #[serde(default)]
-                equalizer: EqualizerSettings = EqualizerSettings::default();
                 #[serde(default = "default_playback_rate")]
                 playback_rate: f64 = DEFAULT_PLAYBACK_RATE => set_playback_rate;
                 #[serde(default = "default_true")]
@@ -268,7 +223,6 @@ impl PlaybackSettings {
         }) {
             self.audio_output = None;
         }
-        self.equalizer.sanitize();
     }
 }
 
@@ -341,26 +295,6 @@ fn sanitize_volume(volume: f64) -> f64 {
 
 fn default_crossfade_seconds() -> u8 {
     5
-}
-
-fn default_equalizer_bands() -> Vec<f64> {
-    vec![0.0; EQUALIZER_BAND_COUNT]
-}
-
-fn default_equalizer_selected_preset() -> String {
-    "Custom".to_string()
-}
-
-fn sanitize_equalizer_bands(bands: &mut Vec<f64>) {
-    if bands.len() != EQUALIZER_BAND_COUNT {
-        bands.resize(EQUALIZER_BAND_COUNT, 0.0);
-    }
-    for gain in bands {
-        if !gain.is_finite() {
-            *gain = 0.0;
-        }
-        *gain = gain.clamp(-12.0, 12.0);
-    }
 }
 
 #[cfg(test)]
@@ -637,97 +571,4 @@ mod tests {
         assert!((settings.volume - 0.5).abs() < 1e-12);
         assert!((settings.volume_scale.gain(settings.volume) - 0.5).abs() < 1e-12);
     }
-}
-
-pub const EQUALIZER_CUSTOM_PRESET: &str = "Custom";
-
-pub fn equalizer_band_title(index: usize) -> String {
-    const BANDS: [&str; EQUALIZER_BAND_COUNT] = [
-        "60 Hz", "170 Hz", "310 Hz", "600 Hz", "1 kHz", "3 kHz", "6 kHz", "12 kHz", "14 kHz",
-        "16 kHz",
-    ];
-    BANDS.get(index).copied().unwrap_or("Band").to_string()
-}
-
-pub fn equalizer_band_label_parts(index: usize) -> (String, String) {
-    let title = equalizer_band_title(index);
-    title
-        .split_once(' ')
-        .map(|(value, unit)| (value.to_string(), unit.to_string()))
-        .unwrap_or_else(|| (title, String::new()))
-}
-
-pub fn equalizer_presets() -> Vec<(&'static str, Vec<f64>)> {
-    vec![
-        ("Flat", vec![0.0; EQUALIZER_BAND_COUNT]),
-        (
-            "Classical",
-            vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -7.2, -7.2, -7.2, -9.6],
-        ),
-        (
-            "Club",
-            vec![0.0, 0.0, 3.2, 5.6, 5.6, 5.6, 3.2, 0.0, 0.0, 0.0],
-        ),
-        (
-            "Dance",
-            vec![9.6, 7.2, 2.4, 0.0, 0.0, -5.6, -7.2, -7.2, 0.0, 0.0],
-        ),
-        (
-            "Full Bass",
-            vec![9.6, 9.6, 9.6, 5.6, 1.6, -4.0, -8.0, -10.4, -11.2, -11.2],
-        ),
-        (
-            "Full Treble",
-            vec![-9.6, -9.6, -9.6, -4.0, 2.4, 11.2, 12.0, 12.0, 12.0, 12.0],
-        ),
-        (
-            "Laptop/Headphones",
-            vec![4.8, 11.2, 5.6, -3.2, -2.4, 1.6, 4.8, 9.6, 12.0, 12.0],
-        ),
-        (
-            "Rock",
-            vec![8.0, 4.8, -5.6, -8.0, -3.2, 4.0, 8.8, 11.2, 11.2, 11.2],
-        ),
-        (
-            "Pop",
-            vec![-1.6, 4.8, 7.2, 8.0, 5.6, 0.0, -2.4, -2.4, -1.6, -1.6],
-        ),
-        (
-            "Techno",
-            vec![8.0, 5.6, 0.0, -5.6, -4.8, 0.0, 8.0, 9.6, 9.6, 8.8],
-        ),
-    ]
-}
-
-pub fn equalizer_preset_names() -> Vec<&'static str> {
-    equalizer_presets()
-        .into_iter()
-        .map(|(name, _)| name)
-        .chain(std::iter::once(EQUALIZER_CUSTOM_PRESET))
-        .collect()
-}
-
-pub fn equalizer_selected_preset(equalizer: &EqualizerSettings) -> String {
-    if equalizer_preset_names()
-        .iter()
-        .any(|name| *name == equalizer.selected_preset)
-    {
-        equalizer.selected_preset.clone()
-    } else {
-        EQUALIZER_CUSTOM_PRESET.to_string()
-    }
-}
-
-pub fn equalizer_default_preset_bands(name: &str) -> Vec<f64> {
-    if name == EQUALIZER_CUSTOM_PRESET {
-        return vec![0.0; EQUALIZER_BAND_COUNT];
-    }
-    equalizer_presets()
-        .into_iter()
-        .find_map(|(preset, bands)| (preset == name).then_some(bands))
-        .unwrap_or_else(|| vec![0.0; EQUALIZER_BAND_COUNT])
-}
-
-pub fn equalizer_preset_bands(name: &str) -> Vec<f64> {
-    equalizer_default_preset_bands(name)
 }

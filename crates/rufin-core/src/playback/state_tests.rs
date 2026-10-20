@@ -130,7 +130,7 @@ pub(in crate::playback) async fn seeded(
         Arc::new(|_, _| {}),
         Vec::new,
         scrobbler,
-        move || Ok(Box::new(IdleBackend(backend_commands.clone()))),
+        move |_| Ok(Box::new(IdleBackend(backend_commands.clone()))),
     );
     owner.install_source_owner(&source);
     let (playback, inbox) = actor::channel();

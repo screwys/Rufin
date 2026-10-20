@@ -1,4 +1,5 @@
 use super::ensure_gstreamer_initialized;
+use audio_processing::effects::{EffectsBin, ProcessingConfig};
 use gstreamer as gst;
 #[cfg(test)]
 use gstreamer_app as gst_app;
@@ -6,8 +7,8 @@ use gstreamer_audio::gst_base::{BaseTransform, prelude::BaseTransformExt};
 use gstreamer_controller::{self as controller, prelude::*};
 use playback::TrackLoudness;
 use playback::{
-    AudioOutput, BackendAudioSettings, DEFAULT_PLAYBACK_RATE, EQUALIZER_BAND_COUNT,
-    EqualizerSettings, LoudnessNormalization, LoudnessNormalizationScope,
+    AudioOutput, BackendAudioSettings, DEFAULT_PLAYBACK_RATE, LoudnessNormalization,
+    LoudnessNormalizationScope,
 };
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -15,41 +16,32 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const AUDIO_OUTPUT_DEVICE_PREFIX: &str = "gst-device:";
-const CLASSIC_EQUALIZER_FREQUENCIES: [f64; EQUALIZER_BAND_COUNT] = [
-    60.0, 170.0, 310.0, 600.0, 1000.0, 3000.0, 6000.0, 12000.0, 14000.0, 16000.0,
-];
-const EQUALIZER_DUMMY_LOW_FREQUENCY: f64 = 20.0;
-const EQUALIZER_DUMMY_HIGH_FREQUENCY: f64 = 20_000.0;
-
 pub(super) type SharedQueuedLoudness = Arc<Mutex<Option<TrackLoudness>>>;
 
 pub(super) struct AudioGraph {
     root: gst::Element,
     input: gst::Element,
-    effect_bins: [gst::Element; 3],
+    effect_bins: [gst::Element; 2],
+    pub(super) processing: EffectsBin,
     output: gst::Element,
     sink: gst::Element,
     gain: BaseTransform,
     gain_curve: controller::InterpolationControlSource,
     gain_frontier: Arc<AtomicU64>,
     audio_output: Option<String>,
+    processing_output: String,
     state: Arc<Mutex<AudioGraphState>>,
 }
 
 #[derive(Clone, Default)]
 struct AudioEffects {
-    equalizer: Option<gst::Element>,
     volume: Option<gst::Element>,
     tempo: Option<gst::Element>,
 }
 
 impl AudioEffects {
-    fn stages(&self) -> [Option<&gst::Element>; 3] {
-        [
-            self.equalizer.as_ref(),
-            self.volume.as_ref(),
-            self.tempo.as_ref(),
-        ]
+    fn stages(&self) -> [Option<&gst::Element>; 2] {
+        [self.volume.as_ref(), self.tempo.as_ref()]
     }
 }
 
@@ -130,14 +122,34 @@ impl AudioGraph {
         gain.add_control_binding(&binding)
             .map_err(|error| error.to_string())?;
         binding.set_disabled(true);
+        let processing = EffectsBin::new(&ProcessingConfig::default())?;
         let tempo_bin = make_element("insertbin", "rufin-tempo-bin")?;
         let sink = gst::Bin::new();
-        sink.add_many([gain.upcast_ref::<gst::Element>(), &tempo_bin, &output])
-            .map_err(|error| error.to_string())?;
-        gst::Element::link_many([gain.upcast_ref::<gst::Element>(), &tempo_bin, &output])
-            .map_err(|error| error.to_string())?;
-        let sink_pad = gst::GhostPad::with_target(&gain.static_pad("sink").expect("gain input"))
-            .map_err(|error| error.to_string())?;
+        sink.add_many([
+            processing.element(),
+            gain.upcast_ref::<gst::Element>(),
+            &tempo_bin,
+            &resample,
+            &convert_out,
+            &output,
+        ])
+        .map_err(|error| error.to_string())?;
+        gst::Element::link_many([
+            processing.element(),
+            gain.upcast_ref::<gst::Element>(),
+            &tempo_bin,
+            &resample,
+            &convert_out,
+            &output,
+        ])
+        .map_err(|error| error.to_string())?;
+        let sink_pad = gst::GhostPad::with_target(
+            &processing
+                .element()
+                .static_pad("sink")
+                .expect("effects input"),
+        )
+        .map_err(|error| error.to_string())?;
         sink_pad
             .set_active(true)
             .map_err(|error| error.to_string())?;
@@ -188,13 +200,25 @@ impl AudioGraph {
         );
         let effects = prepare_effects(settings, playback_rate, &AudioEffects::default())?;
         let effect_bins = [
-            make_element("insertbin", "rufin-equalizer-bin")?,
             make_element("insertbin", "rufin-normalization-bin")?,
             tempo_bin,
         ];
         apply_effects(&effect_bins, &AudioEffects::default(), &effects);
-        let mut elements = vec![convert_in.clone()];
-        elements.extend(effect_bins[..2].iter().cloned());
+        let floating = make_element("capsfilter", "rufin-normalization-floating")?;
+        floating.set_property(
+            "caps",
+            gst::Caps::builder("audio/x-raw")
+                .field(
+                    "format",
+                    if cfg!(target_endian = "little") {
+                        "F64LE"
+                    } else {
+                        "F64BE"
+                    },
+                )
+                .build(),
+        );
+        let elements = vec![convert_in.clone(), floating, split, effect_bins[0].clone()];
         let state = Arc::new(Mutex::new(AudioGraphState {
             settings: settings.clone(),
             effects,
@@ -208,9 +232,6 @@ impl AudioGraph {
             .apply_loudness();
         install_loudness_boundary(&convert_in, Arc::clone(&state), queued_loudness)?;
 
-        elements.push(convert_out.clone());
-        elements.push(split);
-        elements.push(resample.clone());
         for element in &elements {
             bin.add(element).map_err(|error| error.to_string())?;
         }
@@ -227,7 +248,7 @@ impl AudioGraph {
             .map_err(|error| error.to_string())?;
         bin.add_pad(&ghost_sink)
             .map_err(|error| error.to_string())?;
-        let src_pad = resample
+        let src_pad = effect_bins[0]
             .static_pad("src")
             .ok_or_else(|| "audio chain is missing an output pad".to_string())?;
         let ghost_src = gst::GhostPad::with_target(&src_pad).map_err(|error| error.to_string())?;
@@ -240,12 +261,17 @@ impl AudioGraph {
             root: bin.upcast(),
             input: convert_in,
             effect_bins,
+            processing,
             output,
             sink: sink.upcast(),
             gain,
             gain_curve,
             gain_frontier,
             audio_output: settings.audio_output.clone(),
+            processing_output: format!(
+                "local:{}",
+                settings.audio_output.as_deref().unwrap_or("default")
+            ),
             state,
         })
     }
@@ -255,6 +281,9 @@ impl AudioGraph {
     }
 
     pub(super) fn clear_stream(&mut self) {
+        if let Err(error) = self.processing.reset() {
+            tracing::warn!(%error,"Could not reset audio processing");
+        }
         self.gain_frontier.store(0, Ordering::Release);
         self.gain.set_control_binding_disabled("volume", true);
         self.gain_curve.unset_all();
@@ -344,6 +373,14 @@ impl AudioGraph {
         self.audio_output.as_deref() == selected
     }
 
+    pub(super) fn processing_output(&self) -> String {
+        self.processing_output.clone()
+    }
+
+    pub(super) fn set_processing_output(&mut self, output: &str) {
+        self.processing_output = output.into();
+    }
+
     pub(super) fn set_loudness(&mut self, loudness: TrackLoudness) {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         state.current_loudness = Some(loudness);
@@ -358,7 +395,6 @@ impl AudioGraph {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let mut available = state.effects.clone();
         if let Some((_, pending)) = state.pending.as_ref() {
-            available.equalizer = available.equalizer.or_else(|| pending.equalizer.clone());
             available.volume = available.volume.or_else(|| pending.volume.clone());
             available.tempo = available.tempo.or_else(|| pending.tempo.clone());
         }
@@ -382,9 +418,6 @@ impl AudioGraph {
             apply_effects(&self.effect_bins, &state.effects, &effects);
             state.settings = settings.clone();
             state.effects = effects;
-            if let Some(equalizer) = state.effects.equalizer.as_ref() {
-                configure_equalizer(equalizer, &settings.equalizer);
-            }
             state.apply_loudness();
             return Ok(true);
         }
@@ -411,15 +444,17 @@ impl AudioGraph {
                     apply_effects(&bins, &state.effects, &effects);
                     state.settings = settings;
                     state.effects = effects;
-                    if let Some(equalizer) = state.effects.equalizer.as_ref() {
-                        configure_equalizer(equalizer, &state.settings.equalizer);
-                    }
                     state.apply_loudness();
                     pad.mark_reconfigure();
                     gst::PadProbeReturn::Remove
                 });
         }
         Ok(true)
+    }
+
+    pub(super) fn measurement_pad(&self) -> gst::Pad {
+        // This tap follows playbin's queue and precedes playback volume and output conversion.
+        self.gain.static_pad("sink").expect("output gain input")
     }
 
     pub(super) fn visualizer_pad(&self, ignore_volume: bool) -> Option<gst::Pad> {
@@ -444,19 +479,6 @@ fn prepare_effects(
     playback_rate: f64,
     available: &AudioEffects,
 ) -> Result<AudioEffects, String> {
-    let equalizer = if settings.equalizer.enabled {
-        Some(match available.equalizer.as_ref() {
-            Some(element) => element.clone(),
-            None => {
-                let element = make_element("equalizer-nbands", "rufin-equalizer")?;
-                element.set_property("num-bands", (EQUALIZER_BAND_COUNT + 2) as u32);
-                configure_equalizer(&element, &settings.equalizer);
-                element
-            }
-        })
-    } else {
-        None
-    };
     let volume = if settings.loudness_normalization != LoudnessNormalization::Off {
         Some(match available.volume.as_ref() {
             Some(element) => element.clone(),
@@ -473,14 +495,10 @@ fn prepare_effects(
     } else {
         None
     };
-    Ok(AudioEffects {
-        equalizer,
-        volume,
-        tempo,
-    })
+    Ok(AudioEffects { volume, tempo })
 }
 
-fn apply_effects(bins: &[gst::Element; 3], before: &AudioEffects, after: &AudioEffects) {
+fn apply_effects(bins: &[gst::Element; 2], before: &AudioEffects, after: &AudioEffects) {
     let no_callback = std::ptr::null_mut::<std::ffi::c_void>();
     for ((bin, old), new) in bins.iter().zip(before.stages()).zip(after.stages()) {
         if old == new {
@@ -826,44 +844,6 @@ fn set_output_target(output: &gst::Element, target: Option<&str>) -> bool {
         .is_some_and(|child| apply(&child))
 }
 
-fn set_equalizer_band(
-    equalizer: &gst::Element,
-    index: usize,
-    frequency: f64,
-    bandwidth: f64,
-    gain: f64,
-) {
-    let Some(proxy) = equalizer.dynamic_cast_ref::<gst::ChildProxy>() else {
-        return;
-    };
-    if let Some(band) = proxy.child_by_index(index as u32) {
-        band.set_property("freq", frequency);
-        band.set_property("bandwidth", bandwidth);
-        band.set_property("gain", gain);
-    }
-}
-
-fn configure_equalizer(equalizer: &gst::Element, settings: &EqualizerSettings) {
-    set_equalizer_band(equalizer, 0, EQUALIZER_DUMMY_LOW_FREQUENCY, 0.0, 0.0);
-    set_equalizer_band(
-        equalizer,
-        EQUALIZER_BAND_COUNT + 1,
-        EQUALIZER_DUMMY_HIGH_FREQUENCY,
-        0.0,
-        0.0,
-    );
-    let mut previous = 0.0;
-    for (index, frequency) in CLASSIC_EQUALIZER_FREQUENCIES.iter().copied().enumerate() {
-        let gain = if settings.enabled {
-            settings.bands.get(index).copied().unwrap_or(0.0)
-        } else {
-            0.0
-        };
-        set_equalizer_band(equalizer, index + 1, frequency, frequency - previous, gain);
-        previous = frequency;
-    }
-}
-
 fn make_element(factory: &str, name: &str) -> Result<gst::Element, String> {
     gst::ElementFactory::make(factory)
         .name(name)
@@ -1082,45 +1062,40 @@ mod tests {
     }
 
     #[test]
-    fn equalizer_changes_apply_live_and_disable_to_zero_gain() {
+    fn equalizer_changes_apply_and_bypass_retains_the_bank() {
+        use audio_processing::effects::{EqProfile, Filter, FilterKind, FilterWidth};
         initialize_gstreamer();
-        let equalizer =
-            make_element("equalizer-nbands", "test-live-equalizer").expect("packaged equalizer");
-        equalizer.set_property("num-bands", (EQUALIZER_BAND_COUNT + 2) as u32);
-        let mut settings = EqualizerSettings {
-            enabled: true,
-            bands: vec![5.0; EQUALIZER_BAND_COUNT],
-            ..EqualizerSettings::default()
+        let settings = BackendAudioSettings {
+            audio_output: Some("fakesink".into()),
+            ..Default::default()
         };
-        configure_equalizer(&equalizer, &settings);
-        assert_eq!(equalizer_band_gain(&equalizer, 1), Some(5.0));
-
-        settings.enabled = false;
-        configure_equalizer(&equalizer, &settings);
-        assert_eq!(equalizer_band_gain(&equalizer, 1), Some(0.0));
-    }
-
-    #[test]
-    fn disabled_equalizer_is_absent_and_enabling_updates_the_audio_graph() {
-        initialize_gstreamer();
-        let disabled = BackendAudioSettings {
-            audio_output: Some("fakesink".to_string()),
-            ..BackendAudioSettings::default()
+        let mut graph = test_graph(&settings, DEFAULT_PLAYBACK_RATE, empty_stream()).unwrap();
+        let profile = EqProfile {
+            bands: vec![Filter {
+                kind: FilterKind::Peak,
+                frequency_hz: 1000.0,
+                gain_db: 5.0,
+                width: FilterWidth::Hertz { value: 400.0 },
+                enabled: true,
+            }],
+            ..Default::default()
         };
-        let mut graph = test_graph(&disabled, DEFAULT_PLAYBACK_RATE, empty_stream())
-            .expect("audio graph without equalizer");
-        let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
-        assert!(bin.by_name("rufin-equalizer").is_none());
-
-        let mut enabled = disabled;
-        enabled.equalizer.enabled = true;
-        assert!(
-            graph
-                .reconfigure(&enabled, DEFAULT_PLAYBACK_RATE)
-                .expect("equalizer activation boundary")
-        );
-        let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
-        assert!(bin.by_name("rufin-equalizer").is_some());
+        graph
+            .processing
+            .update(&ProcessingConfig {
+                equalizer: Some(profile),
+                ..Default::default()
+            })
+            .unwrap();
+        let sink = graph.sink.downcast_ref::<gst::Bin>().unwrap();
+        let equalizer = sink.by_name("rufin-equalizer").unwrap();
+        assert_eq!(equalizer_band_gain(&equalizer, 0), Some(5.0));
+        graph
+            .processing
+            .update(&ProcessingConfig::default())
+            .unwrap();
+        assert_eq!(equalizer_band_gain(&equalizer, 0), Some(0.0));
+        assert_eq!(sink.by_name("rufin-equalizer"), Some(equalizer));
     }
 
     #[test]

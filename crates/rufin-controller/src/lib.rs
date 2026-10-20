@@ -96,8 +96,8 @@ fn run_inner(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), 
             false,
             settings,
             paths,
-            || {
-                playback_gstreamer::GStreamerPlaybackBackend::new()
+            |processing| {
+                playback_gstreamer::GStreamerPlaybackBackend::new(processing)
                     .map(|backend| Box::new(backend) as Box<dyn playback::PlaybackBackend>)
                     .map_err(|error| error.to_string())
             },

@@ -67,8 +67,8 @@ fn main() -> ExitCode {
             !updated_restart,
             settings,
             paths::roots(),
-            || {
-                playback_gstreamer::GStreamerPlaybackBackend::new()
+            |processing| {
+                playback_gstreamer::GStreamerPlaybackBackend::new(processing)
                     .map(|backend| Box::new(backend) as Box<dyn playback::PlaybackBackend>)
                     .map_err(|error| error.to_string())
             },
