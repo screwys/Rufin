@@ -610,6 +610,23 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == push ]]; then
             args+=(--no-run)
           fi
+          cargo nextest run --no-run --config-file nextest.toml --test-threads 4 "${args[@]}"
+          (
+            sleep 50
+            while IFS= read -r test_pid; do
+              test_pid="${test_pid//$'\r'/}"
+              [[ "$test_pid" =~ ^[0-9]+$ ]] || continue
+              echo "Windows playback stack for process $test_pid"
+              timeout 20s gdb -nx -batch \
+                -ex "attach $test_pid" \
+                -ex 'thread apply all bt' \
+                -ex detach \
+                -ex quit || true
+            done < <(powershell.exe -NoProfile -Command \
+              "Get-Process -Name 'playback_gstreamer-*' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id")
+          ) &
+          stack_capture_pid=$!
+          trap 'kill "$stack_capture_pid" 2>/dev/null || true' EXIT
           cargo nextest run --config-file nextest.toml --test-threads 4 "${args[@]}"
 
   cargo-deny:
