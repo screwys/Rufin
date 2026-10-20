@@ -1344,6 +1344,14 @@ msgstr "Smazat playlist"
 msgid "Delete preset"
 msgstr "Předvolba"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete {count} playlist?"
+msgid_plural "Delete {count} playlists?"
+msgstr[0] "Smazat playlist"
+msgstr[1] "Smazat playlist"
+msgstr[2] "Smazat playlist"
+
 msgid "Delete"
 msgstr "Smazat"
 

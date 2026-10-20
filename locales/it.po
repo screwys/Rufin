@@ -1270,6 +1270,13 @@ msgstr "Cancella Playlist"
 msgid "Delete preset"
 msgstr "Cancella Playlist"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete {count} playlist?"
+msgid_plural "Delete {count} playlists?"
+msgstr[0] "Cancella Playlist"
+msgstr[1] "Cancella Playlist"
+
 msgid "Delete"
 msgstr "Cancella"
 
