@@ -1247,6 +1247,14 @@ msgstr "Удалить файл плейлиста"
 msgid "Delete preset"
 msgstr "Вставить предустановку"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete {count} playlist?"
+msgid_plural "Delete {count} playlists?"
+msgstr[0] "Удалить плейлист"
+msgstr[1] "Удалить плейлист"
+msgstr[2] "Удалить плейлист"
+
 msgid "Delete"
 msgstr "Удалить"
 
