@@ -619,6 +619,11 @@ msgstr "Rezerves kopija atjaunota"
 msgid "Backups"
 msgstr "Rezerves kopijas"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Bar count"
+msgstr "Atskaņošanas skaits"
+
 msgid "Bar spacing (px)"
 msgstr "Joslu atstarpe (pikseļos)"
 
@@ -636,6 +641,9 @@ msgstr ""
 
 msgid "Blue"
 msgstr "Zils"
+
+msgid "Brightness (%)"
+msgstr ""
 
 msgid "Browse"
 msgstr ""
@@ -1649,6 +1657,9 @@ msgstr "Meklējam tekstus..."
 msgid "Finishing setup"
 msgstr ""
 
+msgid "Fit to height"
+msgstr ""
+
 msgid "Fixed position"
 msgstr "Fiksēta pozīcija"
 
@@ -1797,6 +1808,9 @@ msgstr ""
 msgid "Guest / public access"
 msgstr "Viesis / publiska piekļuve"
 
+msgid "Height (%)"
+msgstr ""
+
 msgid "Help"
 msgstr "Palīdzība"
 
@@ -1843,6 +1857,11 @@ msgstr "Ja lapa neielādējas, tad Libre.fm bloķē jūsu IP adrešu diapazonu/V
 
 msgid "If you do not have API keys, create them"
 msgstr "Ja jums nav API atslēgu, izveidojiet tās"
+
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Ignore playback volume"
+msgstr "Izvēlēties atskaņošanas izvadi"
 
 #, fuzzy
 #| msgid "Change Profile"
@@ -2217,6 +2236,11 @@ msgid "Minimum year"
 msgstr "Minimālais gads"
 
 msgid "Mirrored bars"
+msgstr "Atspoguļotas joslas"
+
+#, fuzzy
+#| msgid "Mirrored bars"
+msgid "Mirrored"
 msgstr "Atspoguļotas joslas"
 
 msgid "Monday"
@@ -3592,6 +3616,9 @@ msgstr "Iestatījumi un avoti"
 
 msgid "Settings"
 msgstr "Iestatījumi"
+
+msgid "Shadow"
+msgstr ""
 
 msgid "Share"
 msgstr "Dalīties"

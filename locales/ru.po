@@ -619,6 +619,11 @@ msgstr "Резервная копия восстановлена"
 msgid "Backups"
 msgstr "Резервные копии"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Bar count"
+msgstr "Количество воспроизведений"
+
 msgid "Bar spacing (px)"
 msgstr "Интервал между панелями (в пикселях)"
 
@@ -636,6 +641,9 @@ msgstr "Битрейт"
 
 msgid "Blue"
 msgstr "Синий"
+
+msgid "Brightness (%)"
+msgstr ""
 
 msgid "Browse"
 msgstr "Обзор"
@@ -1561,6 +1569,9 @@ msgstr "Поиск текста песни..."
 msgid "Finishing setup"
 msgstr ""
 
+msgid "Fit to height"
+msgstr ""
+
 msgid "Fixed position"
 msgstr "Фиксированное расположение"
 
@@ -1698,6 +1709,9 @@ msgstr "Группировка"
 msgid "Guest / public access"
 msgstr "Гостевой / публичный доступ"
 
+msgid "Height (%)"
+msgstr ""
+
 msgid "Help"
 msgstr "Помощь"
 
@@ -1744,6 +1758,11 @@ msgstr ""
 
 msgid "If you do not have API keys, create them"
 msgstr "Если у вас нет ключей API, создайте их"
+
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Ignore playback volume"
+msgstr "Выбрать устройство воспроизведения"
 
 msgid "Image files"
 msgstr "Файлы изображений"
@@ -2093,6 +2112,11 @@ msgid "Minimum year"
 msgstr "Минимальный год"
 
 msgid "Mirrored bars"
+msgstr "Отражённые полосы"
+
+#, fuzzy
+#| msgid "Mirrored bars"
+msgid "Mirrored"
 msgstr "Отражённые полосы"
 
 msgid "Monday"
@@ -3397,6 +3421,9 @@ msgstr "Настройки и источники"
 
 msgid "Settings"
 msgstr "Настройки"
+
+msgid "Shadow"
+msgstr ""
 
 msgid "Share"
 msgstr "Поделиться"

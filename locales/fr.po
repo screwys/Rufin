@@ -618,6 +618,11 @@ msgstr "Sauvegarde restaurée"
 msgid "Backups"
 msgstr "Sauvegarde"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Bar count"
+msgstr "Nombre de lectures"
+
 msgid "Bar spacing (px)"
 msgstr "Espacement des barres (px)"
 
@@ -635,6 +640,9 @@ msgstr "Bitrate"
 
 msgid "Blue"
 msgstr "Bleu"
+
+msgid "Brightness (%)"
+msgstr ""
 
 msgid "Browse"
 msgstr "Parcourir"
@@ -1551,6 +1559,9 @@ msgstr "Trouver les paroles..."
 msgid "Finishing setup"
 msgstr ""
 
+msgid "Fit to height"
+msgstr ""
+
 msgid "Fixed position"
 msgstr "Position fixe"
 
@@ -1689,6 +1700,9 @@ msgstr "Groupé"
 msgid "Guest / public access"
 msgstr "Invité / accès public"
 
+msgid "Height (%)"
+msgstr ""
+
 msgid "Help"
 msgstr "Aide"
 
@@ -1733,6 +1747,11 @@ msgstr "Si la page ne se charge pas, Libre.fm bloque sûrement votre IP/VPN"
 
 msgid "If you do not have API keys, create them"
 msgstr "Si vous n'avez pas de clés API, créez-les"
+
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Ignore playback volume"
+msgstr "Choisir la sortie de lecture"
 
 msgid "Image files"
 msgstr "Fichiers image"
@@ -2082,6 +2101,11 @@ msgid "Minimum year"
 msgstr "Année minimum"
 
 msgid "Mirrored bars"
+msgstr "Barres en miroir"
+
+#, fuzzy
+#| msgid "Mirrored bars"
+msgid "Mirrored"
 msgstr "Barres en miroir"
 
 msgid "Monday"
@@ -3382,6 +3406,9 @@ msgstr "Paramètres et sources"
 
 msgid "Settings"
 msgstr "Paramètres"
+
+msgid "Shadow"
+msgstr ""
 
 msgid "Share"
 msgstr "Partager"

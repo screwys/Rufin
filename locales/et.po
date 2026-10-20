@@ -611,6 +611,11 @@ msgstr "Varukoopia on taastatud"
 msgid "Backups"
 msgstr "Varukoopiad"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Bar count"
+msgstr "Esituskordi"
+
 msgid "Bar spacing (px)"
 msgstr "Ruum riba ümber (pikslites)"
 
@@ -628,6 +633,9 @@ msgstr "Bitikiirus"
 
 msgid "Blue"
 msgstr "Sinine"
+
+msgid "Brightness (%)"
+msgstr ""
 
 msgid "Browse"
 msgstr "Sirvi"
@@ -1538,6 +1546,9 @@ msgstr "Otsin laulusõnu…"
 msgid "Finishing setup"
 msgstr ""
 
+msgid "Fit to height"
+msgstr ""
+
 msgid "Fixed position"
 msgstr "Fikseeritud asukoht"
 
@@ -1675,6 +1686,9 @@ msgstr "Rühmitamine"
 msgid "Guest / public access"
 msgstr "Avalik ligipääs, sh külalistele"
 
+msgid "Height (%)"
+msgstr ""
+
 msgid "Help"
 msgstr "Abiteave"
 
@@ -1721,6 +1735,11 @@ msgstr ""
 
 msgid "If you do not have API keys, create them"
 msgstr "Kui sul pole APi võtmeid, siis saad nad luua"
+
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Ignore playback volume"
+msgstr "Vali taasesituse väljund"
 
 msgid "Image files"
 msgstr "Pildifailid"
@@ -2064,6 +2083,11 @@ msgid "Minimum year"
 msgstr "Minimaalne aasta"
 
 msgid "Mirrored bars"
+msgstr "Peegeldatud ribad"
+
+#, fuzzy
+#| msgid "Mirrored bars"
+msgid "Mirrored"
 msgstr "Peegeldatud ribad"
 
 msgid "Monday"
@@ -3354,6 +3378,9 @@ msgstr "Seadistused ja allikad"
 
 msgid "Settings"
 msgstr "Seadistused"
+
+msgid "Shadow"
+msgstr ""
 
 msgid "Share"
 msgstr "Jaga"
