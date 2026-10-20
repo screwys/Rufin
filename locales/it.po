@@ -603,6 +603,9 @@ msgstr "Backup ripristinato"
 msgid "Backups"
 msgstr "Backup"
 
+msgid "Bar count"
+msgstr ""
+
 msgid "Bar spacing (px)"
 msgstr ""
 
@@ -620,6 +623,9 @@ msgstr ""
 
 msgid "Blue"
 msgstr "Blu"
+
+msgid "Brightness (%)"
+msgstr ""
 
 msgid "Browse"
 msgstr ""
@@ -1598,6 +1604,9 @@ msgstr ""
 msgid "Finishing setup"
 msgstr ""
 
+msgid "Fit to height"
+msgstr ""
+
 msgid "Fixed position"
 msgstr ""
 
@@ -1737,6 +1746,9 @@ msgstr ""
 msgid "Guest / public access"
 msgstr ""
 
+msgid "Height (%)"
+msgstr ""
+
 msgid "Help"
 msgstr ""
 
@@ -1783,6 +1795,11 @@ msgstr ""
 
 msgid "If you do not have API keys, create them"
 msgstr ""
+
+#, fuzzy
+#| msgid "Choose playback output"
+msgid "Ignore playback volume"
+msgstr "Seleziona output del playback"
 
 #, fuzzy
 #| msgid "Change Profile"
@@ -2138,6 +2155,9 @@ msgid "Minimum year"
 msgstr ""
 
 msgid "Mirrored bars"
+msgstr ""
+
+msgid "Mirrored"
 msgstr ""
 
 msgid "Monday"
@@ -3452,6 +3472,9 @@ msgstr ""
 #| msgid "App settings"
 msgid "Settings"
 msgstr "Impostazioni dell'app"
+
+msgid "Shadow"
+msgstr ""
 
 msgid "Share"
 msgstr ""
