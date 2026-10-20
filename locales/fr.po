@@ -285,11 +285,17 @@ msgstr ""
 msgid "1 hour"
 msgstr "1 heure"
 
+msgid "10 bands"
+msgstr ""
+
 msgid "12 hours"
 msgstr "12 heures"
 
 msgid "128 kbps"
 msgstr "128 kbps"
+
+msgid "18 bands"
+msgstr ""
 
 msgid "192 kbps"
 msgstr "192 kbps"
@@ -299,6 +305,9 @@ msgstr "24 heures"
 
 msgid "256 kbps"
 msgstr "256 kbps"
+
+msgid "31 bands"
+msgstr ""
 
 msgid "320 kbps"
 msgstr "320 kbps"
@@ -367,6 +376,9 @@ msgstr "Ajouter un serveur pour configurer les téléchargements."
 
 msgid "Add a title"
 msgstr "Ajouter un morceau"
+
+msgid "Add band"
+msgstr ""
 
 msgid "Add current"
 msgstr "Ajouter en court"
@@ -552,6 +564,9 @@ msgstr "Stockage des illustrations"
 msgid "Artwork"
 msgstr "Illustration"
 
+msgid "Audio effects"
+msgstr ""
+
 msgid "Audio fade on play/pause"
 msgstr "Fondu de l'audio lors de lecture/pause"
 
@@ -579,7 +594,25 @@ msgstr "Seuil de remplissage Auto DJ"
 msgid "Auto DJ"
 msgstr "Auto DJ"
 
+#, fuzzy
+#| msgid "Auto DJ"
+msgid "Auto"
+msgstr "Auto DJ"
+
+msgid "AutoEQ / APO"
+msgstr ""
+
 msgid "Automatic Backups"
+msgstr "Sauvegarde automatique"
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Automatic headroom"
+msgstr "Automatique"
+
+#, fuzzy
+#| msgid "Automatic Backups"
+msgid "Automatic preamp"
 msgstr "Sauvegarde automatique"
 
 msgid "Automatic updates"
@@ -619,12 +652,34 @@ msgid "Backups"
 msgstr "Sauvegarde"
 
 #, fuzzy
+#| msgid "Dance"
+msgid "Balance"
+msgstr "Dance"
+
+msgid "Band layout"
+msgstr ""
+
+msgid "Band"
+msgstr ""
+
+msgid "Bands"
+msgstr ""
+
+msgid "Bandwidth"
+msgstr ""
+
+#, fuzzy
 #| msgid "Play count"
 msgid "Bar count"
 msgstr "Nombre de lectures"
 
 msgid "Bar spacing (px)"
 msgstr "Espacement des barres (px)"
+
+#, fuzzy
+#| msgid "Full Bass"
+msgid "Bass"
+msgstr "Basses au maximum"
 
 msgid "Bearer token (WebDAV)"
 msgstr "Bearer token (WebDAV)"
@@ -669,6 +724,11 @@ msgstr "Annuler le téléchargement"
 
 msgid "Cancel"
 msgstr "Annuler"
+
+#, fuzzy
+#| msgid "Path format"
+msgid "Cast format"
+msgstr "Format du chemin"
 
 msgid "Casting network"
 msgstr "Réseau de distribution"
@@ -822,6 +882,11 @@ msgstr "Effacer"
 
 msgid "Clearing queue also clears the current song"
 msgstr "Effacer la file d'attente efface également la chanson en cours"
+
+#, fuzzy
+#| msgid "Clear Mapping"
+msgid "Clipping"
+msgstr "Effacer le mappage"
 
 msgid "Close Window"
 msgstr "Fermer la fenêtre"
@@ -993,6 +1058,9 @@ msgstr "Copier l’invitation"
 msgid "Copy link"
 msgstr "Copier le lien"
 
+msgid "Copy of {name}"
+msgstr ""
+
 msgid "Copy preset"
 msgstr "Copier le préréglage"
 
@@ -1077,11 +1145,21 @@ msgstr "Mode du fondu enchaîné"
 msgid "Crossfade"
 msgstr "Fondu enchaîné"
 
+#, fuzzy
+#| msgid "Crossfade"
+msgid "Crossfeed"
+msgstr "Fondu enchaîné"
+
 msgid "Current artwork"
 msgstr "Illustration actuelle"
 
 msgid "Custom HTTP headers"
 msgstr "En-têtes HTTP personnalisés"
+
+#, fuzzy
+#| msgid "Custom"
+msgid "Custom bands"
+msgstr "Personnalisé"
 
 msgid "Custom"
 msgstr "Personnalisé"
@@ -1157,6 +1235,11 @@ msgstr "Supprimer \"{name}\" ?"
 
 msgid "Delete playlist file"
 msgstr "Supprimer le fichier de playlist"
+
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Delete preset"
+msgstr "Coller le préréglage"
 
 msgid "Delete"
 msgstr "Supprimer"
@@ -1303,6 +1386,16 @@ msgstr "Téléchargements"
 msgid "Drag to reorder"
 msgstr "Glisser pour réorganiser"
 
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Duplicate preset"
+msgstr "Coller le préréglage"
+
+#, fuzzy
+#| msgid "Don't duplicate"
+msgid "Duplicate"
+msgstr "Ne pas dupliquer"
+
 msgid "Duration"
 msgstr "Durée"
 
@@ -1383,6 +1476,19 @@ msgstr "Activer le mode privé"
 msgid "Enable"
 msgstr "Activé"
 
+#, fuzzy
+#| msgid "Enable"
+msgid "Enabled"
+msgstr "Activé"
+
+msgid "Encoding peak"
+msgstr ""
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Encoding"
+msgstr "Téléchargement"
+
 msgid "Encrypt backups"
 msgstr "Chiffrer les sauvegardes"
 
@@ -1402,6 +1508,9 @@ msgstr ""
 
 msgid "Entire Library"
 msgstr "Bibliothèque entière"
+
+msgid "Equalizer is controlled by the receiver"
+msgstr ""
 
 msgid "Equalizer"
 msgstr "Égaliseur"
@@ -1445,6 +1554,11 @@ msgstr "Exporter le format"
 msgid "Export playlist"
 msgstr "Exporter la playlist"
 
+#, fuzzy
+#| msgid "Export playlist"
+msgid "Export preset"
+msgstr "Exporter la playlist"
+
 msgid "Export to connection"
 msgstr "Exporter vers la connexion"
 
@@ -1465,6 +1579,9 @@ msgstr "Recherche externe des métadonnées"
 
 msgid "External site links"
 msgstr "Liens externes"
+
+msgid "FLAC"
+msgstr ""
 
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Fondu audio lorsque la lecture est interrompue ou reprise"
@@ -1533,6 +1650,11 @@ msgstr "Fichier de connexion"
 msgid "File connections"
 msgstr "Fichiers de connexion"
 
+#, fuzzy
+#| msgid "Format"
+msgid "File format"
+msgstr "Format"
+
 msgid "File path"
 msgstr "Chemin du fichier"
 
@@ -1546,6 +1668,9 @@ msgstr ""
 
 msgid "Filled spectrum"
 msgstr "Spectre rempli"
+
+msgid "Filter type"
+msgstr ""
 
 msgid "Find shares"
 msgstr "Rechercher des partages"
@@ -1613,8 +1738,19 @@ msgstr "Limite de fréquence d’images"
 msgid "Frames per second"
 msgstr "Images par seconde"
 
+msgid "Frequency · Hz"
+msgstr ""
+
+msgid "Frequency"
+msgstr ""
+
 msgid "Friday"
 msgstr "Vendredi"
+
+#, fuzzy
+#| msgid "Full Treble"
+msgid "Full Bass & Treble"
+msgstr "Aigus au maximum"
 
 msgid "Full Bass"
 msgstr "Basses au maximum"
@@ -1633,6 +1769,12 @@ msgstr "Plein écran"
 
 msgid "Furigana"
 msgstr "Furigana"
+
+msgid "Gain · dB"
+msgstr ""
+
+msgid "Gain"
+msgstr ""
 
 msgid "Gapless mode"
 msgstr "Mode sans interruption"
@@ -1682,6 +1824,9 @@ msgstr "Fin du dégradé"
 msgid "Gradient start"
 msgstr "Début du dégradé"
 
+msgid "Graphic"
+msgstr ""
+
 msgid "Green"
 msgstr "Vert"
 
@@ -1712,6 +1857,9 @@ msgstr "Cachée"
 msgid "Hide sidebar"
 msgstr "Cacher la barre latérale"
 
+msgid "High shelf"
+msgstr ""
+
 msgid "Highlight hovered row"
 msgstr "Mettre en surbrillance la ligne survolée"
 
@@ -1735,6 +1883,9 @@ msgstr "Heure"
 
 msgid "Hours"
 msgstr "Heures"
+
+msgid "Hz"
+msgstr ""
 
 msgid "Identify"
 msgstr "Identification"
@@ -1768,6 +1919,11 @@ msgstr "Importer une playlist"
 msgid "Import from connection"
 msgstr "Importer de la connexion"
 
+#, fuzzy
+#| msgid "Import theme"
+msgid "Import preset"
+msgstr "Importer thème"
+
 msgid "Import theme"
 msgstr "Importer thème"
 
@@ -1783,6 +1939,9 @@ msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
 "Importe des fichiers dans la bibliothèque, et surveiller les modifications "
 "des dossiers ajoutés."
+
+msgid "Inactive at this sample rate"
+msgstr ""
 
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Inclure des diagnostics détaillés dans cette session"
@@ -2035,6 +2194,9 @@ msgstr "Les journaux sont copiés"
 msgid "Loudness normalization"
 msgstr "Normalisation du volume sonore"
 
+msgid "Low shelf"
+msgstr ""
+
 msgid "Lyrics background opacity"
 msgstr "Opacité de l’arrière-plan des paroles"
 
@@ -2055,6 +2217,9 @@ msgstr "Les paroles apparaîtront ici."
 
 msgid "Lyrics"
 msgstr "Paroles"
+
+msgid "MP3"
+msgstr "MP3"
 
 msgid "Manage"
 msgstr "Gérer"
@@ -2108,8 +2273,14 @@ msgstr "Barres en miroir"
 msgid "Mirrored"
 msgstr "Barres en miroir"
 
+msgid "Mode"
+msgstr ""
+
 msgid "Monday"
 msgstr "Lundi"
+
+msgid "Mono"
+msgstr ""
 
 msgid "Month"
 msgstr "Mois"
@@ -2565,8 +2736,14 @@ msgstr "Autres versions"
 msgid "Outline bars"
 msgstr "Barres de contour"
 
+msgid "Output gain"
+msgstr ""
+
 msgid "Overview"
 msgstr "Aperçu"
+
+msgid "Parametric"
+msgstr ""
 
 msgid "Password or token"
 msgstr "Mot de passe ou jeton"
@@ -2597,6 +2774,9 @@ msgstr "Vitesse de chute des pics (% par seconde)"
 
 msgid "Peak hold (seconds)"
 msgstr "Maintien des pics (secondes)"
+
+msgid "Peak"
+msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -2753,6 +2933,9 @@ msgstr "Port"
 msgid "Position"
 msgstr "Position"
 
+msgid "Preamp"
+msgstr ""
+
 msgid "Prefer distinct track covers"
 msgstr "Privilégier des pochettes distinctes pour les morceaux"
 
@@ -2796,8 +2979,18 @@ msgstr "Préréglage 4"
 msgid "Preset 5"
 msgstr "Préréglage 5"
 
+#, fuzzy
+#| msgid "Preset saved"
+msgid "Preset name"
+msgstr "Préréglage enregistré"
+
 msgid "Preset saved"
 msgstr "Préréglage enregistré"
+
+#, fuzzy
+#| msgid "Preset 1"
+msgid "Preset text"
+msgstr "Préréglage 1"
 
 msgid "Preset"
 msgstr "Préréglage"
@@ -2862,6 +3055,9 @@ msgstr "Public"
 
 msgid "Purple"
 msgstr "Violet"
+
+msgid "Q"
+msgstr ""
 
 msgid "Queue a track to begin"
 msgstr "Mettre une piste en file d’attente pour commencer"
@@ -3019,6 +3215,11 @@ msgstr "Supprimer tous les téléchargements"
 msgid "Remove and Delete"
 msgstr "Supprimer et effacer"
 
+#, fuzzy
+#| msgid "Remove and Delete"
+msgid "Remove band"
+msgstr "Supprimer et effacer"
+
 msgid "Remove device"
 msgstr "Retirer l'appareil"
 
@@ -3054,6 +3255,16 @@ msgstr "Supprimé de"
 
 msgid "Rename file"
 msgstr "Renommer le fichier"
+
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Rename preset"
+msgstr "Coller le préréglage"
+
+#, fuzzy
+#| msgid "Files"
+msgid "Rename"
+msgstr "Fichiers"
 
 msgid "Reorder"
 msgstr "Réordonner"
@@ -3093,6 +3304,9 @@ msgstr "Rétablir les valeurs par défaut"
 
 msgid "Reset"
 msgstr "Réinitialiser"
+
+msgid "Response"
+msgstr ""
 
 msgid "Restart now"
 msgstr "Redémarrer maintenant"
@@ -3143,6 +3357,11 @@ msgstr "Lignes"
 msgid "Rufin Connect"
 msgstr "Rufin Connect"
 
+#, fuzzy
+#| msgid "Rufin host"
+msgid "Rufin JSON"
+msgstr "Hôte Rufin"
+
 msgid "Rufin data folder"
 msgstr "Dossier de données Rufin"
 
@@ -3157,6 +3376,11 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "Domaine SMB"
+
+#, fuzzy
+#| msgid "Sample rate"
+msgid "Sample peak"
+msgstr "Fréquence d’échantillonnage"
 
 msgid "Sample rate"
 msgstr "Fréquence d’échantillonnage"
@@ -3189,8 +3413,18 @@ msgstr "Enregistrer automatiquement les paroles"
 msgid "Save playlist changes automatically"
 msgstr "Enregistrer automatiquement les modifications de playlist"
 
+#, fuzzy
+#| msgid "Saved preset"
+msgid "Save preset"
+msgstr "Préréglage enregistré"
+
 msgid "Save"
 msgstr "Enregistrer"
+
+#, fuzzy
+#| msgid "Saved..."
+msgid "Save..."
+msgstr "Enregistré..."
 
 msgid "Saved Plex Login"
 msgstr "Connexion Plex enregistrée"
@@ -3605,7 +3839,17 @@ msgstr "Source"
 msgid "Sources"
 msgstr "Sources"
 
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "Spectrum · dBFS"
+msgstr "Ligne du spectre"
+
 msgid "Spectrum line"
+msgstr "Ligne du spectre"
+
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "Spectrum"
 msgstr "Ligne du spectre"
 
 msgid "Start minimized"
@@ -3768,6 +4012,9 @@ msgstr "Morceau"
 msgid "Toggle Fullscreen"
 msgstr "Afficher en plein écran"
 
+msgid "Tone and channels"
+msgstr ""
+
 msgid "Tools"
 msgstr "Outils"
 
@@ -3812,6 +4059,11 @@ msgstr "Mode de transition"
 
 msgid "Translation language"
 msgstr "Langue de traduction"
+
+#, fuzzy
+#| msgid "Full Treble"
+msgid "Treble"
+msgstr "Aigus au maximum"
 
 msgid "Troubleshooting"
 msgstr "Dépannage"
@@ -3868,6 +4120,11 @@ msgstr "Rétablir le son"
 
 msgid "Unmuted"
 msgstr "Son rétabli"
+
+#, fuzzy
+#| msgid "Saved"
+msgid "Unsaved"
+msgstr "Enregistré"
 
 msgid "Untitled"
 msgstr "Sans titre"
@@ -3934,6 +4191,9 @@ msgstr "Utiliser les éléments existants"
 msgid "Use folder"
 msgstr "Utiliser le dossier"
 
+msgid "Use for this output"
+msgstr ""
+
 msgid "Use listening activity"
 msgstr "Utiliser l’activité d’écoute"
 
@@ -3947,6 +4207,11 @@ msgstr "Utiliser l’année maximale"
 
 msgid "Use minimum year"
 msgstr "Utiliser l’année minimale"
+
+#, fuzzy
+#| msgid "Use source setting"
+msgid "Use output settings"
+msgstr "Utiliser les paramètres de la source"
 
 msgid "Use source setting"
 msgstr "Utiliser les paramètres de la source"
@@ -4049,6 +4314,12 @@ msgstr "Hebdomadaire"
 
 msgid "Wide"
 msgstr "Étendu"
+
+msgid "Width unit"
+msgstr ""
+
+msgid "Width"
+msgstr ""
 
 msgid "Window"
 msgstr "Fenêtre"
@@ -4373,9 +4644,6 @@ msgstr "Bienvenue sur l'installateur de Rufin"
 #~ "Cela ne prend effet que pour les nouveaux fichiers locaux qui sont "
 #~ "ajoutés par un autre appareil"
 
-#~ msgid "MP3"
-#~ msgstr "MP3"
-
 #~ msgid ""
 #~ "Rufin started with fresh user state because the saved database could not "
 #~ "be used. Your settings and saved logins are unchanged."
@@ -4454,11 +4722,6 @@ msgstr "Bienvenue sur l'installateur de Rufin"
 #~| msgid "Remove from Playlist"
 #~ msgid "Rename Playlist"
 #~ msgstr "Supprimer de la playlist"
-
-#, fuzzy
-#~| msgid "Files"
-#~ msgid "Rename"
-#~ msgstr "Fichiers"
 
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Choisissez un dossier local existant"

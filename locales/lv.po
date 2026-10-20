@@ -262,11 +262,17 @@ msgstr ". Jums jāaizpilda tikai e-pasta un lietojumprogrammas nosaukuma daļas"
 msgid "1 hour"
 msgstr "1 stunda"
 
+msgid "10 bands"
+msgstr ""
+
 msgid "12 hours"
 msgstr "12 stundas"
 
 msgid "128 kbps"
 msgstr "128 kbps"
+
+msgid "18 bands"
+msgstr ""
 
 msgid "192 kbps"
 msgstr "192 kbps"
@@ -276,6 +282,9 @@ msgstr "24 stundas"
 
 msgid "256 kbps"
 msgstr "256 kbps"
+
+msgid "31 bands"
+msgstr ""
 
 msgid "320 kbps"
 msgstr "320 kbps"
@@ -344,6 +353,11 @@ msgstr "Nav konfigurētu avotu"
 
 msgid "Add a title"
 msgstr "Pievienot nosaukumu"
+
+#, fuzzy
+#| msgid "Add Last"
+msgid "Add band"
+msgstr "Pievienot pēdējo"
 
 msgid "Add current"
 msgstr "Pievienot pašreizējo"
@@ -553,6 +567,9 @@ msgstr "Slēptā krātuve"
 msgid "Artwork"
 msgstr "Attēls"
 
+msgid "Audio effects"
+msgstr ""
+
 msgid "Audio fade on play/pause"
 msgstr "Skaņas pakāpeniska izdzišana atskaņošanā/pauzē"
 
@@ -580,7 +597,25 @@ msgstr "Automātiskā DJ papildināšanas slieksnis"
 msgid "Auto DJ"
 msgstr "Automātiskais DJ"
 
+#, fuzzy
+#| msgid "Auto DJ"
+msgid "Auto"
+msgstr "Automātiskais DJ"
+
+msgid "AutoEQ / APO"
+msgstr ""
+
 msgid "Automatic Backups"
+msgstr "Automātiskas dublējumkopijas"
+
+#, fuzzy
+#| msgid "Automatic"
+msgid "Automatic headroom"
+msgstr "Automātisks"
+
+#, fuzzy
+#| msgid "Automatic Backups"
+msgid "Automatic preamp"
 msgstr "Automātiskas dublējumkopijas"
 
 msgid "Automatic updates"
@@ -620,12 +655,34 @@ msgid "Backups"
 msgstr "Rezerves kopijas"
 
 #, fuzzy
+#| msgid "Dance"
+msgid "Balance"
+msgstr "Dejas"
+
+msgid "Band layout"
+msgstr ""
+
+msgid "Band"
+msgstr ""
+
+msgid "Bands"
+msgstr ""
+
+msgid "Bandwidth"
+msgstr ""
+
+#, fuzzy
 #| msgid "Play count"
 msgid "Bar count"
 msgstr "Atskaņošanas skaits"
 
 msgid "Bar spacing (px)"
 msgstr "Joslu atstarpe (pikseļos)"
+
+#, fuzzy
+#| msgid "Full Bass"
+msgid "Bass"
+msgstr "Pilns bass"
 
 msgid "Bearer token (WebDAV)"
 msgstr "Pārvadātāja žetons (WebDAV)"
@@ -670,6 +727,11 @@ msgstr "Atcelt lejupielādi"
 
 msgid "Cancel"
 msgstr "Atcelt"
+
+#, fuzzy
+#| msgid "Path format"
+msgid "Cast format"
+msgstr "Ceļa formāts"
 
 msgid "Casting network"
 msgstr "Pārraides tīkls"
@@ -834,6 +896,11 @@ msgstr "Notīrīt rindu"
 
 msgid "Clearing queue also clears the current song"
 msgstr "Rindas notīrīšana arī notīra pašreizējo dziesmu"
+
+#, fuzzy
+#| msgid "Clear Mapping"
+msgid "Clipping"
+msgstr "Notīrīt kartējumu"
 
 msgid "Close Window"
 msgstr "Aizvērt logu"
@@ -1031,6 +1098,9 @@ msgstr ""
 msgid "Copy link"
 msgstr "Kopēt saiti"
 
+msgid "Copy of {name}"
+msgstr ""
+
 msgid "Copy preset"
 msgstr "Kopēt iepriekš iestatīto"
 
@@ -1134,12 +1204,22 @@ msgid "Crossfade"
 msgstr "Sajaukšana"
 
 #, fuzzy
+#| msgid "Crossfade"
+msgid "Crossfeed"
+msgstr "Sajaukšana"
+
+#, fuzzy
 #| msgid "Current server"
 msgid "Current artwork"
 msgstr "Pašreizējais serveris"
 
 msgid "Custom HTTP headers"
 msgstr "Pielāgoti HTTP virsraksti"
+
+#, fuzzy
+#| msgid "Custom"
+msgid "Custom bands"
+msgstr "Pielāgots"
 
 msgid "Custom"
 msgstr "Pielāgots"
@@ -1217,6 +1297,11 @@ msgstr "Dzēst \"{name}\"?"
 
 msgid "Delete playlist file"
 msgstr "Dzēst atskaņošanas saraksta failu"
+
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Delete preset"
+msgstr "Ielīmēt iepriekš iestatīto"
 
 msgid "Delete"
 msgstr "Dzēst"
@@ -1381,6 +1466,16 @@ msgstr "Lejupielādes"
 msgid "Drag to reorder"
 msgstr "Pārvelciet, lai mainītu secību"
 
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Duplicate preset"
+msgstr "Ielīmēt iepriekš iestatīto"
+
+#, fuzzy
+#| msgid "Don't duplicate"
+msgid "Duplicate"
+msgstr "Nedublēt"
+
 msgid "Duration"
 msgstr "Ilgums"
 
@@ -1465,6 +1560,19 @@ msgstr "Ieslēgt privāto režīmu"
 msgid "Enable"
 msgstr "Ieslēgt"
 
+#, fuzzy
+#| msgid "Enable"
+msgid "Enabled"
+msgstr "Ieslēgt"
+
+msgid "Encoding peak"
+msgstr ""
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Encoding"
+msgstr "Lejupielādē"
+
 msgid "Encrypt backups"
 msgstr "Šifrēt dublējumus"
 
@@ -1484,6 +1592,9 @@ msgstr ""
 
 msgid "Entire Library"
 msgstr "Visa bibliotēka"
+
+msgid "Equalizer is controlled by the receiver"
+msgstr ""
 
 msgid "Equalizer"
 msgstr "Ekvalaizers"
@@ -1534,6 +1645,11 @@ msgid "Export playlist"
 msgstr "Eksportēt atskaņošanas sarakstu"
 
 #, fuzzy
+#| msgid "Export playlist"
+msgid "Export preset"
+msgstr "Eksportēt atskaņošanas sarakstu"
+
+#, fuzzy
 #| msgid "Connection"
 msgid "Export to connection"
 msgstr "Savienojums"
@@ -1555,6 +1671,9 @@ msgstr "Ārēju metadatu meklēšana"
 
 msgid "External site links"
 msgstr "Ārējās saites"
+
+msgid "FLAC"
+msgstr ""
 
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Samazināt skaņas skaļumu, kad atskaņošana tiek pauzēta vai atsākta"
@@ -1630,6 +1749,11 @@ msgid "File connections"
 msgstr "Atļaut attālinātās savienojumus"
 
 #, fuzzy
+#| msgid "Format"
+msgid "File format"
+msgstr "Formāts"
+
+#, fuzzy
 #| msgid "Folder"
 msgid "File path"
 msgstr "Mape"
@@ -1644,6 +1768,9 @@ msgstr ""
 
 msgid "Filled spectrum"
 msgstr "Aizpildīts spektrs"
+
+msgid "Filter type"
+msgstr ""
 
 msgid "Find shares"
 msgstr "Atrodiet koplietotos resursus"
@@ -1717,8 +1844,19 @@ msgstr ""
 msgid "Frames per second"
 msgstr "Atsvaidzināt sadaļu"
 
+msgid "Frequency · Hz"
+msgstr ""
+
+msgid "Frequency"
+msgstr ""
+
 msgid "Friday"
 msgstr "Piektdiena"
+
+#, fuzzy
+#| msgid "Full Treble"
+msgid "Full Bass & Treble"
+msgstr "Pilns augšējais"
 
 msgid "Full Bass"
 msgstr "Pilns bass"
@@ -1739,6 +1877,12 @@ msgstr "Pilnekrāna režīms"
 
 msgid "Furigana"
 msgstr "Furigana"
+
+msgid "Gain · dB"
+msgstr ""
+
+msgid "Gain"
+msgstr ""
 
 msgid "Gapless mode"
 msgstr "Režīms bez pauzēm"
@@ -1788,6 +1932,9 @@ msgstr "Gradienta beigas"
 msgid "Gradient start"
 msgstr "Gradienta sākums"
 
+msgid "Graphic"
+msgstr ""
+
 msgid "Green"
 msgstr "Zaļš"
 
@@ -1820,6 +1967,9 @@ msgstr "Paslēpts"
 msgid "Hide sidebar"
 msgstr "Paslēpt sānu paneli"
 
+msgid "High shelf"
+msgstr ""
+
 msgid "Highlight hovered row"
 msgstr ""
 
@@ -1845,6 +1995,9 @@ msgstr "Stunda"
 #| msgid "Hour"
 msgid "Hours"
 msgstr "Stunda"
+
+msgid "Hz"
+msgstr ""
 
 msgid "Identify"
 msgstr "Identificēt"
@@ -1884,6 +2037,11 @@ msgstr "Gaida savienojumu"
 
 #, fuzzy
 #| msgid "Import"
+msgid "Import preset"
+msgstr "Importēt"
+
+#, fuzzy
+#| msgid "Import"
 msgid "Import theme"
 msgstr "Importēt"
 
@@ -1896,6 +2054,9 @@ msgid "Importing profile"
 msgstr "Sākums Profils"
 
 msgid "Imports files into the library, and watches added folders for changes."
+msgstr ""
+
+msgid "Inactive at this sample rate"
 msgstr ""
 
 msgid "Include detailed Rufin diagnostics in this session"
@@ -2168,6 +2329,9 @@ msgstr "Žurnāls ir kopēts"
 msgid "Loudness normalization"
 msgstr "Skaļuma normalizācija"
 
+msgid "Low shelf"
+msgstr ""
+
 msgid "Lyrics background opacity"
 msgstr "Tekstu fona caurspīdīgums"
 
@@ -2190,6 +2354,9 @@ msgstr "Teksti tiks parādīti šeit."
 
 msgid "Lyrics"
 msgstr "Teksti"
+
+msgid "MP3"
+msgstr ""
 
 msgid "Manage"
 msgstr "Pārvaldīt"
@@ -2243,8 +2410,14 @@ msgstr "Atspoguļotas joslas"
 msgid "Mirrored"
 msgstr "Atspoguļotas joslas"
 
+msgid "Mode"
+msgstr ""
+
 msgid "Monday"
 msgstr "Pirmdiena"
+
+msgid "Mono"
+msgstr ""
 
 msgid "Month"
 msgstr ""
@@ -2734,8 +2907,14 @@ msgstr "Citi izdevumi"
 msgid "Outline bars"
 msgstr "Kontūru joslas"
 
+msgid "Output gain"
+msgstr ""
+
 msgid "Overview"
 msgstr "Pārskats"
+
+msgid "Parametric"
+msgstr ""
 
 msgid "Password or token"
 msgstr "Parole vai žetons"
@@ -2766,6 +2945,9 @@ msgstr "Maksimālais ātruma samazinājums (% sekundē)"
 
 msgid "Peak hold (seconds)"
 msgstr "Maksimālā vērtības uzturēšanas laiks (sekundēs)"
+
+msgid "Peak"
+msgstr ""
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -2930,6 +3112,9 @@ msgstr "Ports"
 msgid "Position"
 msgstr "Pozīcija"
 
+msgid "Preamp"
+msgstr ""
+
 msgid "Prefer distinct track covers"
 msgstr "Izmantot atšķirīgus dziesmu vākus"
 
@@ -2973,8 +3158,18 @@ msgstr "Iepriekš iestatīts 4"
 msgid "Preset 5"
 msgstr "Iepriekš iestatīts 5"
 
+#, fuzzy
+#| msgid "Preset saved"
+msgid "Preset name"
+msgstr "Iepriekš iestatīts profils saglabāts"
+
 msgid "Preset saved"
 msgstr "Iepriekš iestatīts profils saglabāts"
+
+#, fuzzy
+#| msgid "Preset 1"
+msgid "Preset text"
+msgstr "Iepriekš iestatīts 1"
 
 msgid "Preset"
 msgstr "Iepriekš iestatīts"
@@ -3039,6 +3234,9 @@ msgstr ""
 
 msgid "Purple"
 msgstr "Violets"
+
+msgid "Q"
+msgstr ""
 
 msgid "Queue a track to begin"
 msgstr "Pievienojiet dziesmu rindai, lai sāktu"
@@ -3213,6 +3411,11 @@ msgid "Remove and Delete"
 msgstr "Noņemt un dzēst"
 
 #, fuzzy
+#| msgid "Remove and Delete"
+msgid "Remove band"
+msgstr "Noņemt un dzēst"
+
+#, fuzzy
 #| msgid "Remove folder"
 msgid "Remove device"
 msgstr "Dzēst mapi"
@@ -3254,6 +3457,16 @@ msgstr "Noņemts no"
 msgid "Rename file"
 msgstr "Pārdēvēt failu"
 
+#, fuzzy
+#| msgid "Paste preset"
+msgid "Rename preset"
+msgstr "Ielīmēt iepriekš iestatīto"
+
+#, fuzzy
+#| msgid "Filename"
+msgid "Rename"
+msgstr "Faila nosaukums"
+
 msgid "Reorder"
 msgstr ""
 
@@ -3292,6 +3505,9 @@ msgstr "Atiestatīt uz noklusējuma iestatījumiem"
 
 msgid "Reset"
 msgstr "Atiestatīt"
+
+msgid "Response"
+msgstr ""
 
 msgid "Restart now"
 msgstr ""
@@ -3347,6 +3563,11 @@ msgstr "Rindas"
 msgid "Rufin Connect"
 msgstr "Ātrā savienošana"
 
+#, fuzzy
+#| msgid "Rufin host"
+msgid "Rufin JSON"
+msgstr "Rufin serveris"
+
 msgid "Rufin data folder"
 msgstr "Rufin datu mape"
 
@@ -3361,6 +3582,9 @@ msgstr "SMB / Samba"
 
 msgid "SMB Domain"
 msgstr "SMB domēns"
+
+msgid "Sample peak"
+msgstr ""
 
 msgid "Sample rate"
 msgstr ""
@@ -3394,8 +3618,18 @@ msgstr "Saglabāt tekstus automātiski"
 msgid "Save playlist changes automatically"
 msgstr "Automātiski saglabāt atskaņošanas saraksta izmaiņas"
 
+#, fuzzy
+#| msgid "Saved preset"
+msgid "Save preset"
+msgstr "Saglabāts iepriekš iestatījums"
+
 msgid "Save"
 msgstr "Saglabāt"
+
+#, fuzzy
+#| msgid "Saved"
+msgid "Save..."
+msgstr "Saglabāts"
 
 msgid "Saved Plex Login"
 msgstr "Saglabāts Plex konta pieslēgums"
@@ -3830,7 +4064,17 @@ msgstr "Avots"
 msgid "Sources"
 msgstr "Avoti"
 
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "Spectrum · dBFS"
+msgstr "Spektra līnija"
+
 msgid "Spectrum line"
+msgstr "Spektra līnija"
+
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "Spectrum"
 msgstr "Spektra līnija"
 
 msgid "Start minimized"
@@ -4010,6 +4254,9 @@ msgstr "Nosaukums"
 msgid "Toggle Fullscreen"
 msgstr "Pārslēgt pilnekrāna režīmu"
 
+msgid "Tone and channels"
+msgstr ""
+
 msgid "Tools"
 msgstr ""
 
@@ -4064,6 +4311,11 @@ msgstr "Pārejas režīms"
 
 msgid "Translation language"
 msgstr "Tulkošanas valoda"
+
+#, fuzzy
+#| msgid "Full Treble"
+msgid "Treble"
+msgstr "Pilns augšējais"
 
 msgid "Troubleshooting"
 msgstr "Problēmu novēršana"
@@ -4120,6 +4372,11 @@ msgstr "Ieslēgt skaņu"
 
 msgid "Unmuted"
 msgstr "Skaņa atjaunota"
+
+#, fuzzy
+#| msgid "Saved"
+msgid "Unsaved"
+msgstr "Saglabāts"
 
 msgid "Untitled"
 msgstr "Bez nosaukuma"
@@ -4196,6 +4453,9 @@ msgstr "Izmantot avota iestatījumu"
 msgid "Use folder"
 msgstr "mapes"
 
+msgid "Use for this output"
+msgstr ""
+
 msgid "Use listening activity"
 msgstr "Izmantot klausīšanās aktivitāti"
 
@@ -4209,6 +4469,11 @@ msgstr "Izmantot maksimālo gadu"
 
 msgid "Use minimum year"
 msgstr "Izmantojiet minimālo gadu"
+
+#, fuzzy
+#| msgid "Use source setting"
+msgid "Use output settings"
+msgstr "Izmantot avota iestatījumu"
 
 msgid "Use source setting"
 msgstr "Izmantot avota iestatījumu"
@@ -4318,6 +4583,12 @@ msgid "Weekly"
 msgstr "Nedēļā"
 
 msgid "Wide"
+msgstr ""
+
+msgid "Width unit"
+msgstr ""
+
+msgid "Width"
 msgstr ""
 
 msgid "Window"
@@ -4723,11 +4994,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 #~ msgid "Rename Playlist"
 #~ msgstr "Pārdēvēt atskaņošanas sarakstu"
 
-#, fuzzy
-#~| msgid "Filename"
-#~ msgid "Rename"
-#~ msgstr "Faila nosaukums"
-
 #~ msgid "Choose an existing local folder"
 #~ msgstr "Izvēlieties esošu lokālu mapi"
 
@@ -4884,9 +5150,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "Activity links and MusicBrainz covers"
 #~ msgstr "Aktivitātes saites un MusicBrainz vāki"
-
-#~ msgid "Add Last"
-#~ msgstr "Pievienot pēdējo"
 
 #~ msgid "Add Your Music Library"
 #~ msgstr "Pievienot savu mūzikas bibliotēku"
