@@ -1305,6 +1305,12 @@ msgstr "刪除播放清單"
 msgid "Delete preset"
 msgstr "預設集"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete {count} playlist?"
+msgid_plural "Delete {count} playlists?"
+msgstr[0] "刪除播放清單"
+
 msgid "Delete"
 msgstr "刪除"
 

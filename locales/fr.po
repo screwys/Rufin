@@ -1241,6 +1241,13 @@ msgstr "Supprimer le fichier de playlist"
 msgid "Delete preset"
 msgstr "Coller le préréglage"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete {count} playlist?"
+msgid_plural "Delete {count} playlists?"
+msgstr[0] "Supprimer la playlist"
+msgstr[1] "Supprimer la playlist"
+
 msgid "Delete"
 msgstr "Supprimer"
 

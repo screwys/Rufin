@@ -1232,6 +1232,13 @@ msgstr "Kustuta esitusloendi fail"
 msgid "Delete preset"
 msgstr "Aseta eelseadistus"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete {count} playlist?"
+msgid_plural "Delete {count} playlists?"
+msgstr[0] "Kustuta esitusloend"
+msgstr[1] "Kustuta esitusloend"
+
 msgid "Delete"
 msgstr "Kustuta"
 

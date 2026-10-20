@@ -1303,6 +1303,14 @@ msgstr "Dzēst atskaņošanas saraksta failu"
 msgid "Delete preset"
 msgstr "Ielīmēt iepriekš iestatīto"
 
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "Delete {count} playlist?"
+msgid_plural "Delete {count} playlists?"
+msgstr[0] "Dzēst atskaņošanas sarakstu"
+msgstr[1] "Dzēst atskaņošanas sarakstu"
+msgstr[2] "Dzēst atskaņošanas sarakstu"
+
 msgid "Delete"
 msgstr "Dzēst"
 
