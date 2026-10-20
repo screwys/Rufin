@@ -115,6 +115,16 @@ pub fn present_track_menu(
     popover_position: Option<gtk::PositionType>,
     queue_entry: Option<(usize, Option<u64>)>,
 ) {
+    if queue_entry.is_none()
+        && present_collection_selection_menu(
+            target,
+            menus,
+            track_play_request(track.track_key),
+            position,
+        )
+    {
+        return;
+    }
     let action_group = if queue_entry.is_some() {
         "queue"
     } else {
@@ -395,6 +405,155 @@ pub fn present_track_selection_menu(
     surface.popup(&menus.settings.current.borrow().application.context_menu);
 }
 
+pub fn present_collection_selection_menu(
+    target: &gtk::Widget,
+    menus: &Rc<MediaMenus>,
+    clicked: PlayRequest,
+    position: Option<(f64, f64)>,
+) -> bool {
+    let Some((surface, _)) = collection_selection_surface(target, menus, clicked, position) else {
+        return false;
+    };
+    surface.popup(&menus.settings.current.borrow().application.context_menu);
+    true
+}
+
+fn collection_selection_surface(
+    target: &gtk::Widget,
+    menus: &Rc<MediaMenus>,
+    clicked: PlayRequest,
+    position: Option<(f64, f64)>,
+) -> Option<(
+    ContextMenuSurface,
+    gtk_widgets::media_drag::CollectionTargets,
+)> {
+    let targets = gtk_widgets::media_drag::selected_collection_targets(target, &clicked)?;
+    let payload = gtk_widgets::media_drag::MediaDragSource::Targets {
+        targets: targets.clone(),
+    };
+    let surface = ContextMenuSurface::new(target, "collection-selection", position);
+    surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
+    (menus.picker_payload)(&surface, payload.clone());
+    for (action, placement, shuffled) in PLAY_ACTIONS {
+        let menus = Rc::clone(menus);
+        let payload = payload.clone();
+        surface.add_action(action, move || {
+            let payload = payload.clone();
+            let database = menus.library.clone();
+            let task = menus
+                .runtime
+                .spawn(async move { payload.play_request(&database).await });
+            let menus = Rc::clone(&menus);
+            glib::spawn_future_local(async move {
+                match task.await {
+                    Ok(Ok(request)) => (menus.play_target)(&request, placement, shuffled),
+                    Ok(Err(error)) => (menus.show_error)(error),
+                    Err(error) => (menus.show_error)(error.to_string()),
+                }
+            });
+        });
+    }
+    surface.append_configurable_action(
+        ContextMenuItem::Download,
+        msgid("Download"),
+        "download",
+        DOWNLOAD_ICON,
+    );
+    let download_menus = Rc::clone(menus);
+    let download_payload = payload.clone();
+    surface.add_action("download", move || {
+        (download_menus.download)(&download_payload)
+    });
+    surface.append_configurable_action(
+        ContextMenuItem::Download,
+        msgid("Remove Downloads"),
+        "remove-downloads",
+        TRASH_ICON,
+    );
+    let remove_menus = Rc::clone(menus);
+    surface.add_action("remove-downloads", move || {
+        (remove_menus.remove_download)(&payload)
+    });
+    Some((surface, targets))
+}
+
+fn present_playlist_selection_menu(
+    target: &gtk::Widget,
+    menus: &Rc<MediaMenus>,
+    clicked: PlayRequest,
+    position: Option<(f64, f64)>,
+) -> bool {
+    let Some((surface, targets)) = collection_selection_surface(target, menus, clicked, position)
+    else {
+        return false;
+    };
+    surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
+    let delete_menus = Rc::clone(menus);
+    let delete_target = target.downgrade();
+    surface.add_action("delete", move || {
+        let Some(target) = delete_target.upgrade() else {
+            return;
+        };
+        let menus = Rc::clone(&delete_menus);
+        let targets = targets.clone();
+        let dialog = gtk_widgets::playlists::delete_playlists_dialog(targets.count(), move || {
+            let targets = targets.clone();
+            let source = menus.source.clone();
+            let task = menus.runtime.spawn(async move {
+                let targets = targets.resolve().await?;
+                let mut smart = Vec::new();
+                let mut failure = None;
+                for target in targets {
+                    let Some(library::TrackSelection::Query {
+                        query:
+                            library::CatalogQuery {
+                                subject: library::CatalogSubject::Tracks { scope, .. },
+                                ..
+                            },
+                        ..
+                    }) = target.selection()
+                    else {
+                        unreachable!("playlist selection contains playlist queries");
+                    };
+                    match scope {
+                        library::TrackScope::Playlist(key) => {
+                            if let Err(error) =
+                                rufin_core::playlists::delete_playlist(&source, key).await
+                            {
+                                failure.get_or_insert_with(|| error.to_string());
+                            }
+                        }
+                        library::TrackScope::Smart { key, .. } => smart.push(key),
+                        _ => unreachable!("playlist selection contains playlists"),
+                    }
+                }
+                Ok::<_, String>((smart, failure))
+            });
+            let menus = Rc::clone(&menus);
+            glib::spawn_future_local(async move {
+                match task.await {
+                    Ok(Ok((smart, failure))) => {
+                        for key in smart {
+                            (menus.publish_smart_playlist_change)(
+                                SmartPlaylistChange::Delete(key),
+                                None,
+                            );
+                        }
+                        if let Some(error) = failure {
+                            (menus.show_error)(error);
+                        }
+                    }
+                    Ok(Err(error)) => (menus.show_error)(error),
+                    Err(error) => (menus.show_error)(error.to_string()),
+                }
+            });
+        });
+        dialog.present(Some(&target));
+    });
+    surface.popup(&menus.settings.current.borrow().application.context_menu);
+    true
+}
+
 pub fn present_playlist_entry_selection_menu(
     target: &gtk::Widget,
     menus: &Rc<MediaMenus>,
@@ -618,6 +777,9 @@ pub fn present_album_context_menu(
     let playback = playback_context
         .map(|context| base.clone().with_context(context.into()))
         .unwrap_or(base);
+    if present_collection_selection_menu(target, menus, playback.clone(), position) {
+        return;
+    }
     let favorite = (menus.projected_item_favorite)(
         &FavoriteTarget::Album(album.media_uri.clone()),
         album.state.favorite,
@@ -738,6 +900,14 @@ pub fn present_artist_context_menu(
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
+    if present_collection_selection_menu(
+        target,
+        menus,
+        gtk_widgets::selection::artist_play_request(&artist, album_artist),
+        position,
+    ) {
+        return;
+    }
     let favorite = (menus.projected_item_favorite)(
         &FavoriteTarget::Artist(artist.media_uri.clone()),
         artist.state.favorite,
@@ -859,6 +1029,14 @@ pub fn present_genre_context_menu(
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
+    if present_collection_selection_menu(
+        target,
+        menus,
+        collection_play_request(library::TrackScope::Genre(genre.genre_key)),
+        position,
+    ) {
+        return;
+    }
     let surface = ContextMenuSurface::new(target, "genre", position);
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     surface.append_configurable_submenu(
@@ -897,6 +1075,14 @@ pub fn present_mood_context_menu(
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
+    if present_collection_selection_menu(
+        target,
+        menus,
+        collection_play_request(library::TrackScope::Mood(mood.mood_key)),
+        position,
+    ) {
+        return;
+    }
     let surface = ContextMenuSurface::new(target, "mood", position);
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     let playback = collection_play_request(library::TrackScope::Mood(mood.mood_key));
@@ -921,6 +1107,14 @@ pub fn present_playlist_context_menu(
     position: Option<(f64, f64)>,
     current: Option<String>,
 ) {
+    if present_playlist_selection_menu(
+        target,
+        menus,
+        collection_play_request(library::TrackScope::Playlist(playlist.playlist_key)),
+        position,
+    ) {
+        return;
+    }
     let surface = ContextMenuSurface::new(target, "playlist", position);
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     surface.append_configurable_submenu(
@@ -1060,6 +1254,17 @@ pub fn present_smart_playlist_context_menu(
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
+    if present_playlist_selection_menu(
+        target,
+        menus,
+        gtk_widgets::selection::smart_play_request(
+            playlist.smart_playlist_key,
+            menus.source.selected_library().as_ref(),
+        ),
+        position,
+    ) {
+        return;
+    }
     let surface = ContextMenuSurface::new(target, "smart-playlist", position);
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     install_sidebar_pin_action(

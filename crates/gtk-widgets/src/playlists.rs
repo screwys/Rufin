@@ -13,6 +13,20 @@ pub fn delete_playlist_dialog(name: &str, delete: impl Fn() + 'static) -> adw::A
     dialog
 }
 
+pub fn delete_playlists_dialog(count: usize, delete: impl Fn() + 'static) -> adw::AlertDialog {
+    let resource = crate::ui_resource::PLAYLIST_DELETE_DIALOG_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::objects!(builder, resource, { selection_dialog: adw::AlertDialog });
+    selection_dialog.set_body(&localization::trn_with(
+        "Delete {count} playlist?",
+        "Delete {count} playlists?",
+        count as u64,
+        &[("count", &count.to_string())],
+    ));
+    selection_dialog.connect_response(Some("delete"), move |_, _| delete());
+    selection_dialog
+}
+
 pub fn add_media_to_playlist(
     source: &rufin_core::source::SourceOwner,
     playlist: PlaylistKey,

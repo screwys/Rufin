@@ -410,22 +410,6 @@ impl CollectionGridProjection {
     }
 }
 
-pub fn collection_grid<T, Cell, Make, Activate, M>(
-    model: M,
-    fields: &[LibraryField],
-    make_cell: Make,
-    activate: Activate,
-) -> CollectionGridProjection
-where
-    T: Clone + 'static,
-    Cell: ReusableCollectionGridCell<T>,
-    Make: Fn(&[LibraryField]) -> Cell + 'static,
-    Activate: Fn(u32, T) + 'static,
-    M: IsA<gio::ListModel> + Clone + 'static,
-{
-    collection_grid_with_demand(model, fields, make_cell, activate, |_| {})
-}
-
 pub fn collection_grid_with_demand<T, Cell, Make, Activate, Demand, M>(
     model: M,
     fields: &[LibraryField],

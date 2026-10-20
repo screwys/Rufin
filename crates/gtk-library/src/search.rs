@@ -30,10 +30,12 @@ use super::collections::{
 };
 use super::columns::column_fit_width;
 use super::grid_cells::{
-    CollectionGridCardCell, ReusableCollectionGridCell, collection_grid, install_grid_context,
-    install_grid_play,
+    CollectionGridCardCell, ReusableCollectionGridCell, collection_grid_with_selection_and_demand,
+    install_grid_context, install_grid_play,
 };
-use gtk_media_menus::media_menus::{present_album_context_menu, present_artist_context_menu};
+use gtk_media_menus::media_menus::{
+    present_album_context_menu, present_artist_context_menu, present_collection_selection_menu,
+};
 use rufin_core::settings::app::{RecentSearchKind, RecentSearchResult};
 
 use super::route_shell::{LibraryPageShell, LibraryToolbarProjection};
@@ -256,6 +258,14 @@ impl SearchItem {
         position: Option<(f64, f64)>,
         is_current: Rc<dyn Fn() -> bool>,
     ) {
+        if present_collection_selection_menu(
+            target,
+            &shell.media_menus,
+            self.play_request(),
+            position,
+        ) {
+            return;
+        }
         let media_uri = match self {
             Self::Track(row) => {
                 present_track_context_menu(target, shell, row.media_uri.clone(), position);
@@ -885,6 +895,23 @@ fn search_collection(
     playing: Option<super::columns::TrackRowPlayingIndicator>,
 ) -> LibraryCollectionProjection {
     let settings = shell.settings.current.borrow().library_list(category.key());
+    let selection = gtk_widgets::selection::PositionSelectionModel::new(model.clone());
+    let selected_model = model.downgrade();
+    selection.set_collection_selection(Box::new(move |clicked, positions| {
+        let model = selected_model.upgrade()?;
+        let (iter, first) = gtk::BitsetIter::init_first(positions)?;
+        let targets = std::iter::once(first)
+            .chain(iter)
+            .filter_map(|position| {
+                gtk_widgets::sparse_model::item_at::<SearchItem>(&model, position)
+            })
+            .map(|item| item.play_request())
+            .collect::<Vec<_>>();
+        targets
+            .iter()
+            .any(|target| target.selection() == clicked.selection())
+            .then_some(gtk_widgets::media_drag::CollectionTargets::Ready(targets))
+    }));
     let shell = Rc::clone(shell);
     LibraryCollectionProjection::new(
         settings,
@@ -898,11 +925,13 @@ fn search_collection(
                     .grid_fields;
                 let cell_shell = Rc::clone(&shell);
                 let activate_shell = Rc::clone(&shell);
-                LibraryPresentationProjection::Grid(collection_grid(
+                LibraryPresentationProjection::Grid(collection_grid_with_selection_and_demand(
                     model.clone(),
+                    Some(selection.clone().upcast()),
                     &fields,
                     move |fields| SearchGridCell::new(Rc::clone(&cell_shell), fields),
                     move |_, item: SearchItem| item.activate(&activate_shell),
+                    |_| {},
                 ))
             }
             LibraryLayout::Row | LibraryLayout::Detail => {
@@ -935,7 +964,7 @@ fn search_collection(
                     Some(Box::new(move |_, item: SearchItem| {
                         item.activate(&activate_shell)
                     })),
-                    None,
+                    Some(selection.clone().upcast()),
                     route_column_view_initial_width(&shell),
                 ))
             }
@@ -1002,6 +1031,18 @@ fn search_column(
         label.set_hexpand(true);
         add_field_skeleton_class(&label, field);
         cell.enable_links(setup_shell.route_navigation());
+        let context_shell = Rc::downgrade(&setup_shell);
+        let context_item = item.downgrade();
+        install_context_menu_openers(
+            &cell,
+            Rc::new(move |target, position| {
+                if let (Some(shell), Some(item)) = (context_shell.upgrade(), context_item.upgrade())
+                    && let Some(value) = item_at_from_item::<SearchItem>(&item)
+                {
+                    value.present_context(target, &shell, position, Rc::clone(&shell.is_current));
+                }
+            }),
+        );
         let drag_item = item.downgrade();
         let drag_shell = Rc::downgrade(&setup_shell);
         install_media_drag_source(&cell, move || {
@@ -1079,26 +1120,18 @@ fn search_merged_column(
         } else {
             subtitle.add_css_class("muted");
         }
-        if category == CollectionCategory::Tracks {
-            let context_shell = Rc::downgrade(&setup_shell);
-            let context_item = item.downgrade();
-            install_context_menu_openers(
-                &cell,
-                Rc::new(move |target, position| {
-                    if let (Some(shell), Some(item)) =
-                        (context_shell.upgrade(), context_item.upgrade())
-                        && let Some(value) = item_at_from_item::<SearchItem>(&item)
-                    {
-                        value.present_context(
-                            target,
-                            &shell,
-                            position,
-                            Rc::clone(&shell.is_current),
-                        );
-                    }
-                }),
-            );
-        }
+        let context_shell = Rc::downgrade(&setup_shell);
+        let context_item = item.downgrade();
+        install_context_menu_openers(
+            &cell,
+            Rc::new(move |target, position| {
+                if let (Some(shell), Some(item)) = (context_shell.upgrade(), context_item.upgrade())
+                    && let Some(value) = item_at_from_item::<SearchItem>(&item)
+                {
+                    value.present_context(target, &shell, position, Rc::clone(&shell.is_current));
+                }
+            }),
+        );
         let drag_item = item.downgrade();
         let drag_shell = Rc::downgrade(&setup_shell);
         install_media_drag_source(&cell, move || {

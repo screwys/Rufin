@@ -799,6 +799,15 @@ impl SparseObjectModel {
                 .ready
                 .iter()
                 .find_map(|(position, row)| matches(row).then_some(*position))
+                .or_else(|| {
+                    state.objects.iter().find_map(|(position, item)| {
+                        let item = item.upgrade()?;
+                        let SparseItem::Ready(row) = item.typed_value::<K, R>()? else {
+                            return None;
+                        };
+                        matches(&row).then_some(*position)
+                    })
+                })
         })
     }
 

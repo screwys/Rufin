@@ -37,7 +37,14 @@ pub enum CollectionTargets {
 }
 
 impl CollectionTargets {
-    async fn resolve(&self) -> Result<Vec<PlayRequest>, String> {
+    pub fn count(&self) -> usize {
+        match self {
+            Self::Ready(targets) => targets.len(),
+            Self::Query { ranges, .. } => ranges.iter().map(|range| range.len()).sum(),
+        }
+    }
+
+    pub async fn resolve(&self) -> Result<Vec<PlayRequest>, String> {
         match self {
             Self::Ready(targets) => Ok(targets.clone()),
             Self::Query { ranges, load } => {
@@ -433,6 +440,15 @@ fn capture_collection_selection(
     let Some(widget) = widget.upgrade() else {
         return source;
     };
+    selected_collection_targets(&widget, target)
+        .map(|targets| MediaDragSource::Targets { targets })
+        .unwrap_or(source)
+}
+
+pub fn selected_collection_targets(
+    widget: &gtk::Widget,
+    target: &PlayRequest,
+) -> Option<CollectionTargets> {
     let selection = widget
         .ancestor(gtk::GridView::static_type())
         .and_downcast::<gtk::GridView>()
@@ -449,20 +465,14 @@ fn capture_collection_selection(
                 .and_downcast::<gtk::ListView>()
                 .and_then(|list| list.model())
         });
-    let Some(selection) = selection else {
-        return source;
-    };
+    let selection = selection?;
     let positions = selection.selection();
     if positions.size() < 2 {
-        return source;
+        return None;
     }
-    if let Some(targets) = selection
+    selection
         .downcast_ref::<crate::selection::PositionSelectionModel>()
         .and_then(|selection| selection.collection_selection(target, &positions))
-    {
-        return MediaDragSource::Targets { targets };
-    }
-    source
 }
 
 fn compact_playlist_drag_icon(cover: Option<gtk::Widget>, title: &str) -> gtk::Widget {

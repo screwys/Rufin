@@ -1121,6 +1121,12 @@ msgstr ""
 msgid "Delete preset"
 msgstr ""
 
+#, rust-format
+msgid "Delete {count} playlist?"
+msgid_plural "Delete {count} playlists?"
+msgstr[0] ""
+msgstr[1] ""
+
 msgid "Delete"
 msgstr ""
 

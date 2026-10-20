@@ -526,7 +526,7 @@ pub fn artist_column(
 }
 pub fn playlist_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnViewColumn {
     let selected = shell.selected.clone();
-    match field {
+    let column = match field {
         LibraryField::Tools => super::named_collections::named_actions_column::<PlaylistRow>(shell),
         LibraryField::RowIndex => {
             mapped_row_index_column::<PlaylistRow>(shell, column_width(field), move |row| {
@@ -556,7 +556,40 @@ pub fn playlist_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::Colum
         _ => text_column::<PlaylistRow, _>(field, column_width(field), move |playlist| {
             playlist_field(playlist, field)
         }),
+    };
+    if field != LibraryField::Tools {
+        install_named_column_context_menu::<PlaylistRow>(&column, shell);
     }
+    column
+}
+
+fn install_named_column_context_menu<T: super::named_collections::NamedCollectionRow>(
+    column: &gtk::ColumnViewColumn,
+    shell: &Rc<CatalogUi>,
+) {
+    let factory = column
+        .factory()
+        .and_downcast::<gtk::SignalListItemFactory>()
+        .expect("collection column factory");
+    let shell = Rc::downgrade(shell);
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let child = item.child().expect("collection column child");
+        let item = item.downgrade();
+        let shell = shell.clone();
+        install_context_menu_openers(
+            &child,
+            Rc::new(move |target, position| {
+                if let (Some(shell), Some(item)) = (shell.upgrade(), item.upgrade())
+                    && let Some(row) = item_at_from_item::<T>(&item)
+                {
+                    row.present_context(target, &shell, position);
+                }
+            }),
+        );
+    });
 }
 
 fn playlist_title_column<F>(
@@ -639,7 +672,7 @@ where
 
 pub fn smart_playlist_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnViewColumn {
     let selected = shell.selected.clone();
-    match field {
+    let column = match field {
         LibraryField::Tools => {
             super::named_collections::named_actions_column::<SmartPlaylistRow>(shell)
         }
@@ -678,7 +711,11 @@ pub fn smart_playlist_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk:
         _ => text_column::<SmartPlaylistRow, _>(field, column_width(field), move |playlist| {
             smart_playlist_field(playlist, field)
         }),
+    };
+    if field != LibraryField::Tools {
+        install_named_column_context_menu::<SmartPlaylistRow>(&column, shell);
     }
+    column
 }
 
 fn smart_playlist_title_column<F>(

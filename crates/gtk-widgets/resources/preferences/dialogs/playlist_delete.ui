@@ -13,4 +13,14 @@
       <response id="delete" translatable="yes" appearance="destructive">Delete</response>
     </responses>
   </object>
+  <object class="AdwAlertDialog" id="selection_dialog">
+    <property name="heading" translatable="yes">Delete</property>
+    <property name="default-response">cancel</property>
+    <property name="close-response">cancel</property>
+    <style><class name="playlist-delete-dialog"/></style>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="delete" translatable="yes" appearance="destructive">Delete</response>
+    </responses>
+  </object>
 </interface>
