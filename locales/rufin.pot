@@ -1542,9 +1542,6 @@ msgstr ""
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
-msgid "Fill missing"
-msgstr ""
-
 msgid "Filled spectrum"
 msgstr ""
 
@@ -2507,6 +2504,9 @@ msgid "One folder path per line; leave empty to include the whole collection"
 msgstr ""
 
 msgid "One path per line"
+msgstr ""
+
+msgid "Only fill missing information"
 msgstr ""
 
 msgid "Only played tracks"

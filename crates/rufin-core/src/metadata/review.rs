@@ -218,10 +218,10 @@ impl MetadataLookupReview {
         Ok(tracks)
     }
 
-    pub async fn item(&self, index: u64, fill_missing: bool) -> Result<MetadataLookupItem, Error> {
+    pub async fn item(&self, index: u64) -> Result<MetadataLookupItem, Error> {
         let editor = self.editor(index, false).await?;
         let mut state = editor.state().clone();
-        state.apply_lookup_choice(&editor.draft, fill_missing);
+        state.apply_lookup_choice(&editor.draft, false);
         let fields = state.fields(&editor.draft);
         Ok(MetadataLookupItem {
             title: title_values(&state),

@@ -56,7 +56,7 @@ internal class MetadataConnection(
         private set
     var lookupAccepting by mutableStateOf(false)
         private set
-    var lookupFillMissing by mutableStateOf(true)
+    var lookupFillMissing by mutableStateOf(false)
         private set
     private var lookupRun: Job? = null
     private var lookupUpdates: Job? = null
@@ -134,16 +134,16 @@ internal class MetadataConnection(
         artworkTask?.cancelAndJoin()
         val review = MetadataLookupReview.open(editor)
         lookupReview = review
-        lookupFillMissing = true
+        lookupFillMissing = false
         lookupFailure = null
         lookupProgress = review.progress()
-        lookupItem = review.item(0UL, lookupFillMissing)
+        lookupItem = review.item(0UL)
         lookupRun = scope.launch { review.run() }
         lookupUpdates = scope.launch {
             while (true) {
                 val progress = review.nextUpdate() ?: break
                 lookupProgress = progress
-                if (!lookupBusy) lookupItem = review.item(0UL, lookupFillMissing)
+                if (!lookupBusy) lookupItem = review.item(0UL)
                 if (progress.finished) break
             }
         }
@@ -151,10 +151,12 @@ internal class MetadataConnection(
 
     private fun lookupAction(block: suspend (MetadataLookupReview) -> Unit) {
         val review = lookupReview ?: return
+        val previous = lookupAction
         lookupAction = scope.launch {
+            previous?.cancelAndJoin()
             lookupBusy = true
             lookupFailure = null
-            try { block(review); lookupItem = review.item(0UL, lookupFillMissing) }
+            try { block(review); lookupItem = review.item(0UL) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { lookupFailure = error }
             finally { lookupBusy = false }
@@ -162,10 +164,18 @@ internal class MetadataConnection(
     }
 
     fun chooseLookup(candidate: MetadataCandidate?) = lookupAction { it.choose(0UL, candidate) }
-    fun searchLookup(query: String) = lookupAction { it.search(0UL, query) }
+    fun searchLookup(query: String, delayed: Boolean = false) {
+        if (lookupAccepting) return
+        val text = query.trim()
+        lookupAction {
+            if (text.isNotEmpty()) {
+                if (delayed) delay(600)
+                it.search(0UL, text)
+            }
+        }
+    }
     fun updateLookupFillMissing(value: Boolean) {
         lookupFillMissing = value
-        lookupAction { }
     }
     fun stopLookup() { lookupReview?.cancel() }
     fun cancelLookup() {

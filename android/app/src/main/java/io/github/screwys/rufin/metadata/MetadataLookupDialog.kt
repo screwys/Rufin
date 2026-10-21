@@ -43,8 +43,8 @@ internal fun MetadataLookupDialog(connection: MetadataConnection) {
                     progress = { progress.completed.toFloat() / progress.total.toFloat() }, modifier = Modifier.fillMaxWidth())
                 val failure = connection.lookupFailure?.message ?: progress?.failure ?: item?.failure
                 failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text(translate("Search MusicBrainz")) }, enabled = editable && (item?.ready == true || progress?.finished == true),
+                OutlinedTextField(query, { query = it; connection.searchLookup(it, delayed = true) }, Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text(translate("Search MusicBrainz")) }, enabled = !connection.lookupAccepting && (item?.ready == true || progress?.finished == true),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { connection.searchLookup(query) }))
                 LazyColumn(Modifier.weight(1f)) {
@@ -69,7 +69,7 @@ internal fun MetadataLookupDialog(connection: MetadataConnection) {
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(connection.lookupFillMissing, connection::updateLookupFillMissing, enabled = editable)
-                    Text(translate("Fill missing"))
+                    Text(translate("Only fill missing information"))
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(translate("Original"), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)

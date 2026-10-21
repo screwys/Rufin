@@ -217,22 +217,15 @@ pub(super) fn present(
         view.start_action(&stage, async move { review.choose(index, candidate).await });
     });
     let weak = Rc::downgrade(&view);
-    view.fill_missing.connect_toggled(move |_| {
+    view.query.connect_activate(move |_| {
         if let Some(view) = weak.upgrade() {
-            view.load_item();
+            view.search(false);
         }
     });
     let weak = Rc::downgrade(&view);
-    view.query.connect_activate(move |query| {
-        if let Some(view) = weak.upgrade()
-            && !view.busy.get()
-        {
-            let review = view.review.clone();
-            let index = view.current.get() as u64;
-            let query = query.text().to_string();
-            view.start_action(&localization::tr("Searching MusicBrainz..."), async move {
-                review.search(index, query).await
-            });
+    view.query.connect_changed(move |_| {
+        if let Some(view) = weak.upgrade() {
+            view.search(true);
         }
     });
     let weak = Rc::downgrade(&view);
@@ -381,8 +374,34 @@ impl ReviewView {
 
     fn set_busy(&self, busy: bool) {
         self.busy.set(busy);
-        self.content.set_sensitive(!busy);
+        self.content.set_sensitive(!self.accepting.get());
+        self.matches.set_sensitive(!busy);
+        self.fill_missing.set_sensitive(!busy);
         self.done.set_sensitive(!busy);
+    }
+
+    fn search(self: &Rc<Self>, delayed: bool) {
+        if self.accepting.get() || !self.query.is_sensitive() {
+            return;
+        }
+        let query = self.query.text().trim().to_string();
+        if query.is_empty() {
+            if let Some(task) = self.action.borrow_mut().take() {
+                task.abort();
+            }
+            self.set_busy(false);
+            self.show_progress(&self.review.progress());
+            self.load_item();
+            return;
+        }
+        let review = self.review.clone();
+        let index = self.current.get() as u64;
+        self.start_action(&localization::tr("Searching MusicBrainz..."), async move {
+            if delayed {
+                gtk::glib::timeout_future(std::time::Duration::from_millis(600)).await;
+            }
+            review.search(index, query).await
+        });
     }
 
     fn message(&self, message: &str) {
@@ -395,8 +414,11 @@ impl ReviewView {
         stage: &str,
         operation: impl std::future::Future<Output = Result<(), sources::SourceMetadataError>> + 'static,
     ) {
-        if self.busy.get() {
+        if self.accepting.get() {
             return;
+        }
+        if let Some(task) = self.action.borrow_mut().take() {
+            task.abort();
         }
         if let Some(task) = self.load.borrow_mut().take() {
             task.abort();
@@ -436,10 +458,9 @@ impl ReviewView {
             return;
         }
         let review = self.review.clone();
-        let fill_missing = self.fill_missing.is_active();
         let weak = Rc::downgrade(self);
         let task = gtk::glib::spawn_future_local(async move {
-            let item = review.item(index as u64, fill_missing).await;
+            let item = review.item(index as u64).await;
             if let Some(view) = weak.upgrade()
                 && view.current.get() == index
             {

@@ -172,8 +172,7 @@
                                 </child>
                                 <child>
                                   <object class="GtkCheckButton" id="fill_missing">
-                                    <property name="label" translatable="yes">Fill missing</property>
-                                    <property name="active">true</property>
+                                    <property name="label" translatable="yes">Only fill missing information</property>
                                   </object>
                                 </child>
                                 <child>
