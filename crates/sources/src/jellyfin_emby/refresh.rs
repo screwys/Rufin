@@ -942,7 +942,7 @@ mod tests {
         );
         assert!(
             database
-                .tracks_by_uris(&([(&removed).to_owned()]), &cancellation)
+                .tracks_by_uris(std::slice::from_ref(&removed), &cancellation)
                 .await
                 .map(|rows| { rows.into_iter().next() })
                 .unwrap()

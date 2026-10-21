@@ -499,7 +499,7 @@ mod tests {
             );
             assert_eq!(
                 database
-                    .tracks_by_uris(&([(&track.media_uri).to_owned()]), &cancellation)
+                    .tracks_by_uris(std::slice::from_ref(&track.media_uri), &cancellation)
                     .await
                     .map(|rows| { rows.into_iter().next() })
                     .unwrap()

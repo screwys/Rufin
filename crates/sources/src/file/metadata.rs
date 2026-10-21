@@ -1319,7 +1319,10 @@ mod tests {
         let uri = url::Url::from_file_path(&audio).unwrap().to_string();
         assert!(
             database
-                .tracks_by_uris(&([(&uri).to_owned()]), &library::ReadCancellation::new())
+                .tracks_by_uris(
+                    std::slice::from_ref(&uri),
+                    &library::ReadCancellation::new()
+                )
                 .await
                 .map(|rows| { rows.into_iter().next() })
                 .unwrap()
@@ -1719,7 +1722,10 @@ mod tests {
         }
         assert!(
             database
-                .tracks_by_uris(&([(&uri).to_owned()]), &library::ReadCancellation::new())
+                .tracks_by_uris(
+                    std::slice::from_ref(&uri),
+                    &library::ReadCancellation::new()
+                )
                 .await
                 .map(|rows| { rows.into_iter().next() })
                 .unwrap()
@@ -1736,7 +1742,10 @@ mod tests {
             .unwrap();
         assert!(
             database
-                .tracks_by_uris(&([(&uri).to_owned()]), &library::ReadCancellation::new())
+                .tracks_by_uris(
+                    std::slice::from_ref(&uri),
+                    &library::ReadCancellation::new()
+                )
                 .await
                 .map(|rows| { rows.into_iter().next() })
                 .unwrap()
@@ -1769,7 +1778,10 @@ mod tests {
             .unwrap();
         assert!(
             database
-                .tracks_by_uris(&([(&uri).to_owned()]), &library::ReadCancellation::new())
+                .tracks_by_uris(
+                    std::slice::from_ref(&uri),
+                    &library::ReadCancellation::new()
+                )
                 .await
                 .map(|rows| { rows.into_iter().next() })
                 .unwrap()
@@ -1790,7 +1802,10 @@ mod tests {
         );
         assert!(
             database
-                .tracks_by_uris(&([(&uri).to_owned()]), &library::ReadCancellation::new())
+                .tracks_by_uris(
+                    std::slice::from_ref(&uri),
+                    &library::ReadCancellation::new()
+                )
                 .await
                 .map(|rows| { rows.into_iter().next() })
                 .unwrap()

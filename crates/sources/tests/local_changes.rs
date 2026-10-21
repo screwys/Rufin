@@ -2029,7 +2029,7 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
     }
     assert_eq!(
         database
-            .tracks_by_uris(&([(uri).to_owned()]), &ReadCancellation::new())
+            .tracks_by_uris(std::slice::from_ref(uri), &ReadCancellation::new())
             .await
             .map(|rows| { rows.into_iter().next() })
             .unwrap()
