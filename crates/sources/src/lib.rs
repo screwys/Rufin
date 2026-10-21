@@ -72,9 +72,9 @@ pub use jellyfin_emby::{
 };
 pub use library::SourceId;
 pub use operations::{
-    ArtworkChange, ArtworkEdit, ArtworkEditing, ArtworkStorage, ImageBytes, MetadataChanges,
-    MetadataDraft, MetadataEdit, MetadataField, MetadataFieldKind, SourceMetadataError,
-    artwork_file, finish_metadata_save,
+    ArtworkChange, ArtworkEdit, ArtworkEditing, ArtworkStorage, ImageBytes, LyricsStorage,
+    MetadataChanges, MetadataDraft, MetadataEdit, MetadataField, MetadataFieldKind,
+    SourceMetadataError, artwork_file, finish_metadata_save,
 };
 pub use source::*;
 

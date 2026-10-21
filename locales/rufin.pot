@@ -1524,6 +1524,9 @@ msgstr ""
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
+msgid "Fill missing"
+msgstr ""
+
 msgid "Filled spectrum"
 msgstr ""
 
@@ -1737,12 +1740,6 @@ msgid "Hours"
 msgstr ""
 
 msgid "Hz"
-msgstr ""
-
-msgid "Identify"
-msgstr ""
-
-msgid "Identifying..."
 msgstr ""
 
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
@@ -2027,6 +2024,12 @@ msgstr ""
 msgid "Logs are copied"
 msgstr ""
 
+msgid "Looking up..."
+msgstr ""
+
+msgid "Lookup"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr ""
 
@@ -2171,9 +2174,6 @@ msgid "Move up"
 msgstr ""
 
 msgid "Multi-selection"
-msgstr ""
-
-msgid "Multiple values"
 msgstr ""
 
 msgid "Music Folder"
@@ -2354,6 +2354,13 @@ msgid "No lyrics available."
 msgstr ""
 
 msgid "No lyrics"
+msgstr ""
+
+msgid "No matching track in this release"
+msgstr ""
+
+#, rust-format
+msgid "No matching track in this release: {tracks}"
 msgstr ""
 
 msgid "No matching tracks found"
@@ -2564,6 +2571,10 @@ msgid "Original release date"
 msgstr ""
 
 msgid "Original"
+msgstr ""
+
+#, rust-format
+msgid "Original: {value}"
 msgstr ""
 
 msgid "Other releases"
@@ -3298,6 +3309,9 @@ msgstr ""
 msgid "Search Lyrics"
 msgstr ""
 
+msgid "Search MusicBrainz"
+msgstr ""
+
 msgid "Search artwork"
 msgstr ""
 
@@ -3904,9 +3918,6 @@ msgstr ""
 msgid "Unavailable"
 msgstr ""
 
-msgid "Undo identified value"
-msgstr ""
-
 msgid "Undo"
 msgstr ""
 
@@ -4276,6 +4287,12 @@ msgstr ""
 #, rust-format
 msgid "{current} MiB"
 msgstr ""
+
+#, rust-format
+msgid "{field} \302\267 Different across {count} track"
+msgid_plural "{field} \302\267 Different across {count} tracks"
+msgstr[0] ""
+msgstr[1] ""
 
 #, rust-format
 msgid "{stage}: {completed} / {total}"

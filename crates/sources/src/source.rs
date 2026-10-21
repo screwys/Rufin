@@ -423,7 +423,7 @@ pub struct LiveFolderPage {
     pub tracks: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SourceEntityKind {
     Track,
     Album,

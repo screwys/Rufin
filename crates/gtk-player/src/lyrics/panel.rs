@@ -1,8 +1,4 @@
-use super::search::{
-    clear_list_box, lyrics_result_subtitle_markup, lyrics_result_title_markup,
-    lyrics_search_response_matches_query, lyrics_search_result_can_save,
-    lyrics_search_result_has_content, submit_lyrics_search,
-};
+use super::search::{clear_list_box, lyrics_search_response_matches_query, submit_lyrics_search};
 use super::{lyrics_popup_content_height, lyrics_popup_content_width};
 use crate::PlayerUi;
 use crate::lyrics::search::LyricsSearchDialog;
@@ -10,6 +6,10 @@ use crate::lyrics::view::LyricsPane;
 use crate::state::{current_playback_media_id, current_playback_track_id};
 use adw::prelude::*;
 use gtk::glib;
+use gtk_widgets::lyrics_editor::{
+    lyrics_result_subtitle_markup, lyrics_result_title_markup, lyrics_search_result_can_save,
+    lyrics_search_result_has_content,
+};
 use gtk_widgets::popup::present_light_dismiss_dialog;
 use localization::{result_count_text, tr};
 use lyrics::{LyricsSearchResult, release_japanese_reader};
@@ -24,41 +24,6 @@ const LYRICS_SEARCH_DEBOUNCE_MILLIS: u64 = 600;
 
 fn take_dirty_lyrics_pane(dirty: &std::cell::Cell<bool>, visible: bool) -> bool {
     visible && dirty.replace(false)
-}
-
-fn highlight_lrc_timestamps(buffer: &gtk::TextBuffer) {
-    let Some(line_time) = buffer.tag_table().lookup("line-time") else {
-        return;
-    };
-    let Some(word_time) = buffer.tag_table().lookup("word-time") else {
-        return;
-    };
-    let (start, end) = buffer.bounds();
-    buffer.remove_tag(&line_time, &start, &end);
-    buffer.remove_tag(&word_time, &start, &end);
-    let mut cursor = start;
-    while !cursor.is_end() {
-        let open = cursor.char();
-        if !matches!(open, '[' | '<') {
-            cursor.forward_char();
-            continue;
-        }
-        let tag_start = cursor;
-        cursor.forward_char();
-        let close = if open == '[' { ']' } else { '>' };
-        while !cursor.is_end() {
-            let character = cursor.char();
-            cursor.forward_char();
-            if matches!(character, '\n') || character == close {
-                break;
-            }
-        }
-        buffer.apply_tag(
-            if open == '[' { &line_time } else { &word_time },
-            &tag_start,
-            &cursor,
-        );
-    }
 }
 
 impl PlayerUi {
@@ -276,12 +241,7 @@ impl PlayerUi {
         let builder = gtk_widgets::ui_resource::builder(resource);
         gtk_widgets::objects!(builder, resource, {
             dialog: adw::Dialog,
-            editor: gtk::TextView,
-            offset_decrease_100: gtk::Button,
-            offset_decrease_50: gtk::Button,
-            offset_entry: gtk::Entry,
-            offset_increase_50: gtk::Button,
-            offset_increase_100: gtk::Button,
+            editor_host: gtk::Box,
             cancel: gtk::Button,
             save: gtk::Button,
         });
@@ -289,77 +249,18 @@ impl PlayerUi {
         dialog.set_content_height(lyrics_popup_content_height(
             self.window.upgrade().map_or(0, |window| window.height()),
         ));
-        let buffer = editor.buffer();
-        buffer.create_tag(Some("line-time"), &[("foreground", &"#e8962c")]);
-        buffer.create_tag(Some("word-time"), &[("foreground", &"#8ab4f8")]);
-        buffer.set_text(&content);
-        highlight_lrc_timestamps(&buffer);
-
-        let offset = Rc::new(Cell::new(offset_millis));
-        offset_entry.set_text(&format!("{offset_millis} ms"));
-
-        let apply_offset: Rc<dyn Fn(i64)> = Rc::new({
-            let offset = Rc::clone(&offset);
-            let entry = offset_entry.downgrade();
-            let buffer = buffer.clone();
-            let shell = Rc::downgrade(self);
-            move |value| {
-                let previous = offset.replace(value);
-                let delta = value.saturating_sub(previous);
-                if delta != 0 {
-                    let (start, end) = buffer.bounds();
-                    let text = buffer.text(&start, &end, false);
-                    buffer.set_text(&lyrics::shift_lrc_text_timestamps(&text, delta));
-                    if let Some(shell) = shell.upgrade() {
-                        shell.set_lyrics_offset_from_text(&value.to_string());
-                    }
+        let weak = Rc::downgrade(self);
+        let editor = Rc::new(gtk_widgets::lyrics_editor::LyricsEditor::new(
+            &content,
+            offset_millis,
+            Rc::new(move |value| {
+                if let Some(shell) = weak.upgrade() {
+                    shell.set_lyrics_offset_from_text(&value.to_string());
                 }
-                if let Some(entry) = entry.upgrade() {
-                    entry.set_text(&format!("{value} ms"));
-                }
-            }
-        });
-        let commit_offset: Rc<dyn Fn()> = Rc::new({
-            let offset = Rc::clone(&offset);
-            let entry = offset_entry.downgrade();
-            let apply_offset = Rc::clone(&apply_offset);
-            move || {
-                let Some(entry) = entry.upgrade() else {
-                    return;
-                };
-                match super::state::parse_lyrics_offset_millis(&entry.text()) {
-                    Some(value) => apply_offset(value),
-                    None => entry.set_text(&format!("{} ms", offset.get())),
-                }
-            }
-        });
-        for (button, delta) in [
-            (&offset_decrease_100, -100),
-            (&offset_decrease_50, -50),
-            (&offset_increase_50, 50),
-            (&offset_increase_100, 100),
-        ] {
-            gtk_widgets::interactions::connect_repeating_button(button, {
-                let offset = Rc::clone(&offset);
-                let apply_offset = Rc::clone(&apply_offset);
-                let commit_offset = Rc::clone(&commit_offset);
-                move || {
-                    commit_offset();
-                    apply_offset(offset.get().saturating_add(delta));
-                }
-            });
-        }
-        offset_entry.connect_activate({
-            let commit_offset = Rc::clone(&commit_offset);
-            move |_| commit_offset()
-        });
-        let offset_focus = gtk::EventControllerFocus::new();
-        offset_focus.connect_leave({
-            let commit_offset = Rc::clone(&commit_offset);
-            move |_| commit_offset()
-        });
-        offset_entry.add_controller(offset_focus);
-
+            }),
+        ));
+        editor_host.append(&editor.content);
+        let buffer = editor.view.buffer();
         let committed = Rc::new(Cell::new(false));
         let close = dialog.downgrade();
         cancel.connect_clicked(move |_| {
@@ -381,7 +282,6 @@ impl PlayerUi {
         });
         let save_for_text = save.downgrade();
         buffer.connect_changed(move |buffer| {
-            highlight_lrc_timestamps(buffer);
             let (start, end) = buffer.bounds();
             if let Some(save) = save_for_text.upgrade() {
                 save.set_sensitive(!buffer.text(&start, &end, false).trim().is_empty());
@@ -389,14 +289,8 @@ impl PlayerUi {
         });
         let shell = Rc::clone(self);
         let close = dialog.downgrade();
-        let buffer = buffer.downgrade();
         save.connect_clicked(move |_| {
-            let Some(buffer) = buffer.upgrade() else {
-                return;
-            };
-            commit_offset();
-            let (start, end) = buffer.bounds();
-            let text = buffer.text(&start, &end, false).to_string();
+            let text = editor.text();
             committed.set(true);
             shell
                 .lyrics_service

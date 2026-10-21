@@ -92,6 +92,7 @@ pub struct MediaMenus {
     pub half_stars_enabled: Rc<dyn Fn(&str, Option<&str>) -> bool>,
     pub set_favorite: Rc<dyn Fn(FavoriteTarget, bool)>,
     pub edit_metadata: Rc<dyn Fn(MetadataItemId)>,
+    pub edit_track_metadata: Rc<dyn Fn(library::MemberSelection)>,
     pub set_sidebar_pin: Rc<dyn Fn(SidebarPin, bool)>,
     pub source_download_available: Rc<dyn Fn(&sources::SourceId) -> bool>,
     pub export_playlist_dialog: Rc<dyn Fn(rufin_core::runtime::source::PlaylistExport, &str)>,
@@ -432,6 +433,36 @@ fn collection_selection_surface(
         targets: targets.clone(),
     };
     let surface = ContextMenuSurface::new(target, "collection-selection", position);
+    surface.append_configurable_action(
+        ContextMenuItem::EditMetadata,
+        msgid("Edit metadata"),
+        "edit-metadata",
+        EDIT_ICON,
+    );
+    let metadata_targets = targets.clone();
+    let metadata_menus = Rc::clone(menus);
+    surface.add_action("edit-metadata", move || {
+        let targets = metadata_targets.clone();
+        let menus = Rc::clone(&metadata_menus);
+        let database = menus.library.clone();
+        let task = menus.runtime.spawn(async move {
+            targets.resolve(&database).await.map(|targets| {
+                library::MemberSelection::Concat(
+                    targets
+                        .into_iter()
+                        .filter_map(|target| target.selection())
+                        .collect(),
+                )
+            })
+        });
+        glib::spawn_future_local(async move {
+            match task.await {
+                Ok(Ok(selection)) => (menus.edit_track_metadata)(selection),
+                Ok(Err(error)) => (menus.show_error)(error),
+                Err(error) => (menus.show_error)(error.to_string()),
+            }
+        });
+    });
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     (menus.picker_payload)(&surface, payload.clone());
     for (action, placement, shuffled) in PLAY_ACTIONS {
@@ -648,6 +679,7 @@ fn append_playlist_entry_selection_actions(
     }
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     append_context_menu_picker_entries(surface, menus, selection.clone());
+    append_metadata_selection_action(surface, menus, selection.input.clone());
     let download_menus = Rc::clone(menus);
     let download_selection = selection.clone();
     surface.append_configurable_action(
@@ -694,6 +726,7 @@ fn append_track_selection_actions(
     }
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     append_context_menu_picker_selection(&surface, menus, selection.clone());
+    append_metadata_selection_action(surface, menus, selection.input.clone());
     install_track_selection_download_actions(&surface, menus, selection.clone());
     for (action, placement, shuffled) in PLAY_ACTIONS {
         let menus = Rc::clone(menus);
@@ -702,6 +735,23 @@ fn append_track_selection_actions(
             selection.play(&menus.playback, placement, shuffled)
         });
     }
+}
+
+fn append_metadata_selection_action(
+    surface: &ContextMenuSurface,
+    menus: &Rc<MediaMenus>,
+    selection: library::MemberSelection,
+) {
+    surface.append_configurable_action(
+        ContextMenuItem::EditMetadata,
+        msgid("Edit metadata"),
+        "edit-metadata",
+        EDIT_ICON,
+    );
+    let menus = Rc::clone(menus);
+    surface.add_action("edit-metadata", move || {
+        (menus.edit_track_metadata)(selection.clone())
+    });
 }
 
 pub fn install_track_selection_download_actions(

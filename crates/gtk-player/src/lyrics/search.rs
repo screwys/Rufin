@@ -1,4 +1,5 @@
 use gtk::glib;
+use localization::tr;
 use std::{cell::RefCell, rc::Rc};
 #[derive(Clone)]
 pub struct LyricsSearchDialog {
@@ -12,13 +13,11 @@ pub struct LyricsSearchDialog {
 }
 
 use adw::prelude::*;
-use lyrics::{LyricsQuery, LyricsSearchContent, LyricsSearchResult};
+use lyrics::LyricsQuery;
 use tracing::debug;
 
 use crate::PlayerUi;
 use crate::state::{current_playback_media_id, current_playback_track_id};
-use gtk_widgets::format_duration;
-use localization::tr;
 
 pub fn connect_lyrics_search_controls(shell: &Rc<PlayerUi>) {
     let Some(lyrics) = shell.selected_lyrics() else {
@@ -138,72 +137,14 @@ pub fn clear_list_box(list: &gtk::ListBox) {
     }
 }
 
-pub fn lyrics_search_result_has_content(result: &LyricsSearchResult) -> bool {
-    result.content.can_preview()
-}
-
-pub fn lyrics_search_result_can_save(result: &LyricsSearchResult) -> bool {
-    result.content.can_save()
-}
-
-fn lyrics_result_title(result: &LyricsSearchResult) -> String {
-    format!("{} - {}", result.artist_name, result.track_name)
-}
-
-pub fn lyrics_result_title_markup(result: &LyricsSearchResult) -> glib::GString {
-    glib::markup_escape_text(&lyrics_result_title(result))
-}
-
-pub fn lyrics_result_subtitle(result: &LyricsSearchResult) -> String {
-    let mut subtitle = result.provider.title().to_string();
-    if !result.album_name.trim().is_empty() {
-        if !subtitle.is_empty() {
-            subtitle.push_str(" - ");
-        }
-        subtitle.push_str(&result.album_name);
-    }
-    if result.duration_seconds > 0 {
-        if !subtitle.is_empty() {
-            subtitle.push_str(" - ");
-        }
-        subtitle.push_str(&format_duration(result.duration_seconds));
-    }
-    if !subtitle.is_empty() {
-        subtitle.push_str(" - ");
-    }
-    if matches!(result.content, LyricsSearchContent::Instrumental) {
-        subtitle.push_str(&tr("Instrumental"));
-    } else if result
-        .content
-        .synced_lyrics()
-        .is_some_and(|lyrics| !lyrics.trim().is_empty())
-    {
-        subtitle.push_str(&tr("Synced lyrics"));
-    } else if result
-        .content
-        .plain_lyrics()
-        .is_some_and(|lyrics| !lyrics.trim().is_empty())
-    {
-        subtitle.push_str(&tr("Plain lyrics"));
-    } else if matches!(result.content, LyricsSearchContent::Deferred) {
-        subtitle.push_str(&tr("Remote lyrics"));
-    } else {
-        subtitle.push_str(&tr("No lyrics"));
-    }
-    subtitle
-}
-
-pub fn lyrics_result_subtitle_markup(result: &LyricsSearchResult) -> glib::GString {
-    glib::markup_escape_text(&lyrics_result_subtitle(result))
-}
-
 #[cfg(test)]
 mod tests {
     use lyrics::{ExternalLyricsProvider, LyricsSearchContent, LyricsSearchResult};
 
-    use super::{
+    use super::lyrics_search_response_matches_query;
+    use gtk_widgets::lyrics_editor::{
         lyrics_result_subtitle, lyrics_result_subtitle_markup, lyrics_result_title_markup,
-        lyrics_search_response_matches_query, lyrics_search_result_has_content,
+        lyrics_search_result_has_content,
     };
 
     #[test]

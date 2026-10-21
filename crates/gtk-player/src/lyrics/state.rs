@@ -1,6 +1,7 @@
 use super::{search::LyricsSearchDialog, view::LyricsPane};
 use adw::prelude::*;
 use gtk::glib;
+use gtk_widgets::lyrics_editor::parse_lyrics_offset_millis;
 use lyrics::{LyricsTiming, playback_position_for_lyrics_position};
 use std::cell::{Cell, RefCell};
 pub struct LyricsState {
@@ -345,16 +346,6 @@ impl PlayerUi {
         self.playback_owner.seek_millis(position_millis);
         self.update_lyrics_highlight_at(position_millis, std::time::Instant::now());
     }
-}
-
-pub fn parse_lyrics_offset_millis(value: &str) -> Option<i64> {
-    let value = value.trim();
-    let number = ["ms", "MS", "Ms", "mS"]
-        .into_iter()
-        .find_map(|suffix| value.strip_suffix(suffix))
-        .unwrap_or(value)
-        .trim();
-    number.parse().ok()
 }
 
 #[cfg(test)]

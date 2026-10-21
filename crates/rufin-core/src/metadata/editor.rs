@@ -14,6 +14,9 @@ use std::{
 pub struct MetadataFieldPresentation {
     pub field: MetadataField,
     pub identified: bool,
+    pub original_value: String,
+    pub original_mixed: bool,
+    pub mixed_label: String,
 }
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
@@ -21,10 +24,11 @@ pub struct MetadataEditorSnapshot {
     pub fields: Vec<MetadataFieldPresentation>,
     pub locked: Option<bool>,
     pub lock_writable: bool,
+    pub lock_mixed: bool,
     pub has_changes: bool,
-    pub can_identify: bool,
     pub committed: Option<bool>,
     pub track_count: u64,
+    pub selected_count: u64,
     pub scope_summary: String,
     pub artwork_revision: u64,
     pub max_artwork_bytes: u64,
@@ -40,10 +44,11 @@ pub struct MetadataEditorSnapshot {
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct MetadataEditor {
     pub draft: Arc<MetadataDraft>,
-    source: Arc<SourceOwner>,
-    session: Arc<super::EditSession>,
-    external_lookup_allowed: bool,
-    state: Mutex<Editing>,
+    pub(super) source: Arc<SourceOwner>,
+    pub(super) session: Option<Arc<super::EditSession>>,
+    pub(super) batch: Option<super::batch::BatchScope>,
+    pub(super) external_lookup_allowed: bool,
+    pub(super) state: Mutex<Editing>,
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
@@ -64,7 +69,8 @@ impl MetadataEditor {
         Ok(Arc::new(Self {
             draft: Arc::new(draft),
             source,
-            session,
+            session: Some(session),
+            batch: None,
             external_lookup_allowed,
             state,
         }))
@@ -72,7 +78,7 @@ impl MetadataEditor {
 }
 
 impl MetadataEditor {
-    fn state(&self) -> MutexGuard<'_, Editing> {
+    pub(super) fn state(&self) -> MutexGuard<'_, Editing> {
         self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -88,15 +94,19 @@ impl MetadataEditor {
             fields: state.fields(&self.draft),
             locked: state.locked(),
             lock_writable: state.writable(&self.draft, "locked"),
-            has_changes: state.has_changes() || state.artwork.is_some(),
-            can_identify: identification_available(
-                self.draft.source_search,
-                self.external_lookup_allowed,
-                self.draft.kind,
-                &state.values,
-            ),
+            lock_mixed: state.mixed.contains("locked"),
+            has_changes: state.has_changes()
+                || state.artwork.is_some()
+                || self
+                    .batch
+                    .as_ref()
+                    .is_some_and(|scope| scope.batch.has_changes()),
             committed: state.committed,
             track_count: self.draft.track_count as u64,
+            selected_count: self
+                .batch
+                .as_ref()
+                .map_or(1, |scope| scope.indices.len() as u64),
             scope_summary: trn_with(
                 "Changes apply to {count} track",
                 "Changes apply to {count} tracks",
@@ -110,7 +120,10 @@ impl MetadataEditor {
             can_remove_artwork: match &state.artwork {
                 Some(ArtworkChange::Replace(_)) => true,
                 Some(ArtworkChange::Remove) => false,
-                None => self.draft.artwork.binding.is_some(),
+                None => {
+                    self.draft.artwork.binding.is_some()
+                        || self.batch.as_ref().is_some_and(|scope| scope.has_artwork)
+                }
             },
             has_current_artwork: state.current.is_some(),
             external_lookup_allowed: self.external_lookup_allowed,
@@ -126,8 +139,45 @@ impl MetadataEditor {
                 "This source cannot edit this field",
             )));
         }
-        if state.text(&key) != value {
+        if state.text(&key) != value || state.mixed.contains(&key) {
             state.set_text(&key, value);
+        }
+        Ok(())
+    }
+
+    pub async fn stage_changes(&self) -> Result<(), SourceMetadataError> {
+        if let Some(scope) = &self.batch {
+            scope.batch.stage(self).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn reset_field(&self, key: String) -> Result<(), SourceMetadataError> {
+        if let Some(scope) = &self.batch {
+            let mut pending = self.state().clone();
+            pending.touched.remove(&key);
+            scope.batch.reset(&scope.indices, key).await?;
+            self.reload_batch().await?;
+            let mut state = self.state();
+            for key in &pending.touched {
+                if let Some(value) = pending.values.get(key) {
+                    state.set_text(key, value.clone());
+                }
+            }
+            state.lyrics = pending.lyrics;
+            state.artwork = pending.artwork;
+            state.storage = pending.storage;
+        } else {
+            let mut state = self.state();
+            if !state.undo_identified(&key) {
+                if let Some(field) = self.draft.fields.iter().find(|field| field.key == key) {
+                    state.values.insert(key.clone(), field.value.clone());
+                    state.touched.remove(&key);
+                    if field.mixed {
+                        state.mixed.insert(key);
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -136,49 +186,24 @@ impl MetadataEditor {
         self.set_field("locked".into(), value.to_string())
     }
 
-    pub fn undo_identified(&self, key: String) -> bool {
-        self.state().undo_identified(&key)
-    }
-
-    pub async fn identify(&self) -> Result<(), SourceMetadataError> {
-        let values = self.state().values();
-        if !identification_available(
-            self.draft.source_search,
-            self.external_lookup_allowed,
-            self.draft.kind,
-            &values,
-        ) {
-            return Ok(());
-        }
-        if let Some(identified) = super::identify_metadata(
-            &self.source,
-            self.session.source().cloned(),
-            self.session.object().map(str::to_owned),
-            self.draft.kind,
-            values,
-        )
-        .recv()
-        .await
-        .unwrap_or_else(|_| Err(tr("Metadata editing is no longer available")))
-        .map_err(SourceMetadataError::Write)?
-        {
-            self.state()
-                .apply_identified(&self.draft, identified.changes, identified.token);
-        }
-        Ok(())
-    }
-
     pub async fn save(&self) -> Result<(), SourceMetadataError> {
-        let (edit, token) = {
-            let state = self.state();
-            (
-                state
-                    .edit(&self.draft)
-                    .map_err(SourceMetadataError::InvalidInput)?,
-                state.token.clone(),
-            )
-        };
-        let result = self.session.save(&self.source, edit, token).await;
+        let edit = self
+            .state()
+            .edit(&self.draft)
+            .map_err(SourceMetadataError::InvalidInput)?;
+        if let Some(scope) = &self.batch {
+            scope.batch.stage(self).await?;
+            let result = scope.batch.clone().save().await;
+            self.reload_batch().await?;
+            return result;
+        }
+        let lyrics = self.state().lyrics.clone();
+        let result = self
+            .session
+            .as_ref()
+            .unwrap()
+            .save(&self.source, edit, lyrics)
+            .await;
         self.state().record_save_result(&result);
         result
     }
@@ -240,17 +265,20 @@ impl MetadataEditor {
 
     pub fn remove_artwork(&self) {
         let mut state = self.state();
-        state.artwork = self
-            .draft
-            .artwork
-            .binding
-            .is_some()
-            .then_some(ArtworkChange::Remove);
+        state.artwork = (self.draft.artwork.binding.is_some()
+            || self.batch.as_ref().is_some_and(|scope| scope.has_artwork))
+        .then_some(ArtworkChange::Remove);
         state.artwork_revision += 1;
     }
 
     pub fn set_artwork_storage(&self, storage: ArtworkStorage) {
-        self.state().storage = storage;
+        let mut state = self.state();
+        if state.storage != storage {
+            state.storage = storage;
+            if state.artwork.is_some() {
+                state.artwork_revision += 1;
+            }
+        }
     }
 
     pub async fn search_artwork(
@@ -278,30 +306,41 @@ impl MetadataEditor {
     }
 }
 
-struct IdentifiedField {
-    original: String,
-    touched: bool,
-    undone: bool,
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub(super) struct IdentifiedField {
+    pub(super) original: String,
+    pub(super) original_mixed: bool,
+    pub(super) touched: bool,
 }
 
-struct Editing {
-    values: MetadataChanges,
-    touched: HashSet<String>,
-    token: Option<String>,
-    identified: HashMap<String, IdentifiedField>,
-    committed: Option<bool>,
-    artwork: Option<ArtworkChange>,
-    current: Option<Arc<ImageBytes>>,
-    storage: ArtworkStorage,
-    artwork_revision: u64,
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub(super) struct Editing {
+    pub(super) mixed: HashSet<String>,
+    pub(super) values: MetadataChanges,
+    pub(super) touched: HashSet<String>,
+    pub(super) lyrics: Option<super::lyrics::LyricsEdit>,
+    pub(super) identified: HashMap<String, IdentifiedField>,
+    pub(super) committed: Option<bool>,
+    #[serde(skip)]
+    pub(super) artwork: Option<ArtworkChange>,
+    #[serde(skip)]
+    pub(super) current: Option<Arc<ImageBytes>>,
+    pub(super) storage: ArtworkStorage,
+    pub(super) artwork_revision: u64,
 }
 
 impl Editing {
-    fn new(draft: &MetadataDraft) -> Self {
+    pub(super) fn new(draft: &MetadataDraft) -> Self {
         let mut editor = Self {
+            mixed: draft
+                .fields
+                .iter()
+                .filter(|field| field.mixed)
+                .map(|field| field.key.clone())
+                .collect(),
             values: MetadataChanges::new(),
             touched: HashSet::new(),
-            token: None,
+            lyrics: None,
             identified: HashMap::new(),
             committed: None,
             artwork: None,
@@ -319,8 +358,8 @@ impl Editing {
                     field.key.clone(),
                     IdentifiedField {
                         original: field.value.clone(),
+                        original_mixed: field.mixed,
                         touched: false,
-                        undone: false,
                     },
                 );
                 editor.touched.insert(field.key.clone());
@@ -329,18 +368,24 @@ impl Editing {
         editor
     }
 
-    fn fields(&self, draft: &MetadataDraft) -> Vec<MetadataFieldPresentation> {
+    pub(super) fn fields(&self, draft: &MetadataDraft) -> Vec<MetadataFieldPresentation> {
         draft
             .fields
             .iter()
             .filter(|field| field.key != "locked")
             .map(|field| {
+                let original_value = field.value.clone();
+                let original_mixed = field.mixed;
                 let mut field = field.clone();
                 field.value = self.text(&field.key).to_string();
+                field.mixed = self.mixed.contains(&field.key);
                 field.label = tr(&field.label);
                 MetadataFieldPresentation {
-                    identified: self.is_identified(&field.key),
+                    identified: self.is_identified(&field.key) || self.touched.contains(&field.key),
+                    mixed_label: mixed_field_label(&field.label, draft.track_count as u64),
                     field,
+                    original_value,
+                    original_mixed,
                 }
             })
             .collect()
@@ -361,59 +406,58 @@ impl Editing {
             .any(|field| field.key == key && field.writable)
     }
 
-    fn set_text(&mut self, key: &str, value: String) {
+    pub(super) fn set_text(&mut self, key: &str, value: String) {
+        self.mixed.remove(key);
         self.values.insert(key.to_string(), value);
         self.touched.insert(key.to_string());
     }
 
     fn locked(&self) -> Option<bool> {
+        if self.mixed.contains("locked") {
+            return None;
+        }
         self.values
             .get("locked")
             .and_then(|value| value.parse().ok())
     }
 
-    fn is_identified(&self, key: &str) -> bool {
-        self.identified.get(key).is_some_and(|field| !field.undone)
+    pub(super) fn is_identified(&self, key: &str) -> bool {
+        self.identified.contains_key(key)
     }
 
-    fn undo_identified(&mut self, key: &str) -> bool {
-        let Some(field) = self.identified.get_mut(key).filter(|field| !field.undone) else {
+    pub(super) fn undo_identified(&mut self, key: &str) -> bool {
+        let Some(field) = self.identified.remove(key) else {
             return false;
         };
         self.values.insert(key.to_string(), field.original.clone());
+        if field.original_mixed {
+            self.mixed.insert(key.to_string());
+        } else {
+            self.mixed.remove(key);
+        }
         if field.touched {
             self.touched.insert(key.to_string());
         } else {
             self.touched.remove(key);
         }
-        field.undone = true;
-        if self.identified.values().all(|field| field.undone) {
-            self.token = None;
-            self.identified.clear();
-        }
         true
     }
 
-    fn has_changes(&self) -> bool {
-        !self.touched.is_empty() || self.token.is_some()
+    pub(super) fn has_changes(&self) -> bool {
+        !self.touched.is_empty() || self.lyrics.is_some()
     }
 
-    fn values(&self) -> MetadataChanges {
+    pub(super) fn values(&self) -> MetadataChanges {
         self.values
             .iter()
             .map(|(key, value)| (key.clone(), value.trim().to_string()))
             .collect()
     }
 
-    fn edit(&self, draft: &MetadataDraft) -> Result<MetadataEdit, String> {
+    pub(super) fn edit(&self, draft: &MetadataDraft) -> Result<MetadataEdit, String> {
         let mut changes = MetadataChanges::new();
         for field in &draft.fields {
-            let restore = self.token.is_some()
-                && self
-                    .identified
-                    .get(&field.key)
-                    .is_some_and(|field| field.undone);
-            if !field.writable || (!self.touched.contains(&field.key) && !restore) {
+            if !field.writable || !self.touched.contains(&field.key) {
                 continue;
             }
             let value = self.text(&field.key).trim();
@@ -445,11 +489,11 @@ impl Editing {
         })
     }
 
-    fn apply_identified(
+    pub(super) fn apply_identified(
         &mut self,
         draft: &MetadataDraft,
         changes: MetadataChanges,
-        token: Option<String>,
+        fill_missing: bool,
     ) {
         for (mut key, value) in changes {
             if key == "year" && self.has_field("recording_date") {
@@ -459,6 +503,9 @@ impl Editing {
                     continue;
                 }
             }
+            if fill_missing && !self.text(&key).trim().is_empty() {
+                continue;
+            }
             if !self.writable(draft, &key) || self.text(&key) == value {
                 continue;
             }
@@ -467,16 +514,12 @@ impl Editing {
                     key.clone(),
                     IdentifiedField {
                         original: self.text(&key).to_string(),
+                        original_mixed: self.mixed.contains(&key),
                         touched: self.touched.contains(&key),
-                        undone: false,
                     },
                 );
             }
             self.set_text(&key, value);
-        }
-        self.token = token;
-        if self.token.is_none() {
-            self.identified.retain(|_, field| !field.undone);
         }
     }
 
@@ -539,50 +582,11 @@ impl Editing {
     }
 }
 
-fn identification_available(
-    source_search: bool,
-    external_lookup_allowed: bool,
-    kind: SourceEntityKind,
-    values: &MetadataChanges,
-) -> bool {
-    source_search
-        && values
-            .get("title")
-            .is_some_and(|value| !value.trim().is_empty())
-        || external_lookup_allowed && exact_identity(kind, values)
-}
-
-pub(super) fn exact_identity(kind: SourceEntityKind, values: &MetadataChanges) -> bool {
-    let keys: &[&str] = match kind {
-        SourceEntityKind::Track => &["musicbrainz_recording_id", "musicbrainz_release_track_id"],
-        SourceEntityKind::Album => &["musicbrainz_album_id", "musicbrainz_release_group_id"],
-        SourceEntityKind::Artist => &["musicbrainz_artist_id"],
-    };
-    keys.iter().any(|key| {
-        values
-            .get(*key)
-            .is_some_and(|value| !value.trim().is_empty())
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn private_mode_keeps_provider_source_search_available() {
-        let values = [("title".into(), "Track".into())].into();
-        assert!(identification_available(
-            true,
-            false,
-            SourceEntityKind::Track,
-            &values
-        ));
-        assert!(!identification_available(
-            false,
-            false,
-            SourceEntityKind::Track,
-            &values
-        ));
-    }
+pub fn mixed_field_label(field: &str, count: u64) -> String {
+    trn_with(
+        "{field} · Different across {count} track",
+        "{field} · Different across {count} tracks",
+        count,
+        &[("field", field), ("count", &count.to_string())],
+    )
 }

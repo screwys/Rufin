@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -93,23 +95,42 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
 
 @Composable
 private fun MetadataFields(connection: MetadataConnection, state: MetadataEditorSnapshot, editable: Boolean) {
+    var lookupQuery by remember { mutableStateOf("") }
+    var fillMissing by remember { mutableStateOf(true) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             if (state.trackCount > 1UL) Text(state.scopeSummary,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            FilledTonalButton(connection::identify, enabled = editable && state.canIdentify) {
+            FilledTonalButton({ connection.lookup(lookupQuery) }, enabled = editable && state.externalLookupAllowed) {
                 RufinIcon("rufin-search-symbolic", null, Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp)); Text(translate("Identify"))
+                Spacer(Modifier.width(8.dp)); Text(translate("Lookup"))
+            }
+        }
+        connection.lookupResults?.let { candidates ->
+            item {
+                OutlinedTextField(lookupQuery, { lookupQuery = it }, Modifier.fillMaxWidth(),
+                    label = { Text(translate("Search MusicBrainz")) }, singleLine = true, enabled = editable,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { if (editable) connection.lookup(lookupQuery) }))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(fillMissing, { fillMissing = it }, enabled = editable)
+                    Text(translate("Fill missing"), Modifier.weight(1f))
+                }
+                if (candidates.isEmpty()) Text(translate("No results"))
+            }
+            items(candidates, key = { it.id }) { candidate ->
+                ListItem(headlineContent = { Text(candidate.title) }, supportingContent = { Text(candidate.detail) },
+                    modifier = Modifier.clickable(enabled = editable) { connection.applyLookup(candidate, fillMissing) })
             }
         }
         items(state.fields, key = { it.field.key }) { presented ->
             val field = presented.field
-            OutlinedTextField(value = field.value, onValueChange = { connection.setField(field.key, it) },
-                modifier = Modifier.fillMaxWidth(), label = { Text(field.label) }, enabled = editable,
+            OutlinedTextField(value = if (field.mixed) "" else field.value, onValueChange = { connection.setField(field.key, it) },
+                modifier = Modifier.fillMaxWidth(), label = { Text(if (field.mixed) presented.mixedLabel else field.label) }, enabled = editable,
                 readOnly = !field.writable,
-                supportingText = if (field.mixed || !field.writable) ({ Text(if (field.mixed) translate("Multiple values") else translate("This source cannot edit this field")) }) else null,
+                supportingText = if (presented.identified && (presented.originalMixed || presented.originalValue.isNotEmpty())) ({ Text(translate("Original: {value}").replace("{value}", if (presented.originalMixed) presented.mixedLabel else presented.originalValue)) }) else if (!field.writable) ({ Text(translate("This source cannot edit this field")) }) else null,
                 trailingIcon = if (presented.identified) ({ IconButton({ connection.undo(field.key) }, enabled = editable) {
-                    RufinIcon("rufin-edit-undo-symbolic", translate("Undo identified value")) } }) else null,
+                    RufinIcon("rufin-edit-undo-symbolic", translate("Reset")) } }) else null,
                 singleLine = field.kind == MetadataFieldKind.NUMBER || field.kind == MetadataFieldKind.DATE,
                 keyboardOptions = KeyboardOptions(keyboardType = if (field.kind == MetadataFieldKind.NUMBER) KeyboardType.Decimal else KeyboardType.Text),
                 colors = if (presented.identified) OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.primary)

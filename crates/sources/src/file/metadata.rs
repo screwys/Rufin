@@ -2241,8 +2241,3 @@ pub(crate) fn readonly_artist_metadata(
     metadata.track_count = artist.summary.track_count.max(0) as usize;
     metadata
 }
-
-pub(crate) fn merge_draft(current: &mut MetadataDraft, next: MetadataDraft) {
-    fields::merge(&mut current.fields, next.fields);
-    current.artwork.can_embed &= next.artwork.can_embed;
-}

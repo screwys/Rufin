@@ -1,4 +1,8 @@
 //! MusicBrainz identity lookup and metadata enrichment.
+mod search;
+pub use search::{
+    MetadataCandidate, MetadataLookup, MetadataMatchKind, lookup_metadata, search_metadata,
+};
 
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -27,126 +31,37 @@ pub fn lookup_album_release(
     }
 }
 
-pub fn identify_metadata(
+pub fn metadata_identity(
     kind: SourceEntityKind,
     values: &MetadataChanges,
-) -> Result<Option<MetadataChanges>, String> {
-    match kind {
-        SourceEntityKind::Track => identify_track(values),
-        SourceEntityKind::Album => identify_album(values),
-        SourceEntityKind::Artist => identify_artist(values),
-    }
-}
-
-fn identify_track(values: &MetadataChanges) -> Result<Option<MetadataChanges>, String> {
-    if let (Some(release_id), Some(track_id)) = (
-        usable(values.get("musicbrainz_album_id").map(String::as_str)),
-        usable(
-            values
-                .get("musicbrainz_release_track_id")
-                .map(String::as_str),
-        ),
-    ) {
-        let Some(release) = fetch_musicbrainz_entity(
-            MUSICBRAINZ_RELEASE_SEARCH_URL,
-            release_id,
-            "artist-credits+recordings+release-groups+genres+media",
-            "MusicBrainz release identification",
-        )?
-        else {
-            return Ok(None);
-        };
-        return Ok(track_from_release(
-            &release,
-            Some(track_id),
-            values.get("musicbrainz_recording_id").map(String::as_str),
-        ));
-    }
-    let recording_id = usable(values.get("musicbrainz_recording_id").map(String::as_str))
-        .ok_or_else(|| {
-            "Add a MusicBrainz recording ID before identifying this track.".to_string()
-        })?;
-    let Some(recording) = fetch_musicbrainz_entity(
-        MUSICBRAINZ_RECORDING_URL,
-        recording_id,
-        "artist-credits+genres",
-        "MusicBrainz recording identification",
-    )?
-    else {
-        return Ok(None);
+) -> Option<MetadataCandidate> {
+    let keys: &[(&str, MetadataMatchKind)] = match kind {
+        SourceEntityKind::Track => &[
+            ("musicbrainz_album_id", MetadataMatchKind::Release),
+            ("musicbrainz_recording_id", MetadataMatchKind::Recording),
+        ],
+        SourceEntityKind::Album => &[
+            ("musicbrainz_album_id", MetadataMatchKind::Release),
+            (
+                "musicbrainz_release_group_id",
+                MetadataMatchKind::ReleaseGroup,
+            ),
+        ],
+        SourceEntityKind::Artist => &[("musicbrainz_artist_id", MetadataMatchKind::Artist)],
     };
-    Ok(Some(observations([
-        ("title", text(&recording, "title")),
-        ("artist", artist_credit(&recording)),
-        ("genre", genres(&recording)),
-        ("musicbrainz_recording_id", Some(recording_id.to_string())),
-    ])))
-}
-
-fn identify_album(values: &MetadataChanges) -> Result<Option<MetadataChanges>, String> {
-    if let Some(release_id) = usable(values.get("musicbrainz_album_id").map(String::as_str)) {
-        let Some(release) = fetch_musicbrainz_entity(
-            MUSICBRAINZ_RELEASE_SEARCH_URL,
-            release_id,
-            "artist-credits+release-groups+genres",
-            "MusicBrainz release identification",
-        )?
-        else {
-            return Ok(None);
-        };
-        return Ok(Some(album_from_release(&release, release_id)));
-    }
-    let release_group_id = usable(
-        values
-            .get("musicbrainz_release_group_id")
-            .map(String::as_str),
-    )
-    .ok_or_else(|| {
-        "Add a MusicBrainz release or release group ID before identifying this album.".to_string()
-    })?;
-    let Some(group) = fetch_musicbrainz_entity(
-        MUSICBRAINZ_RELEASE_GROUP_SEARCH_URL,
-        release_group_id,
-        "artist-credits+genres",
-        "MusicBrainz release-group identification",
-    )?
-    else {
-        return Ok(None);
-    };
-    Ok(Some(observations([
-        ("title", text(&group, "title")),
-        ("artist", artist_credit(&group)),
-        ("album_artist", artist_credit(&group)),
-        (
-            "year",
-            year(&group, "first-release-date").map(|value| value.to_string()),
-        ),
-        ("genre", genres(&group)),
-        (
-            "musicbrainz_release_group_id",
-            Some(release_group_id.to_string()),
-        ),
-    ])))
-}
-
-fn identify_artist(values: &MetadataChanges) -> Result<Option<MetadataChanges>, String> {
-    let artist_id = usable(values.get("musicbrainz_artist_id").map(String::as_str))
-        .ok_or_else(|| "Add a MusicBrainz artist ID before identifying this artist.".to_string())?;
-    let Some(artist) = fetch_musicbrainz_entity(
-        MUSICBRAINZ_ARTIST_URL,
-        artist_id,
-        "genres",
-        "MusicBrainz artist identification",
-    )?
-    else {
-        return Ok(None);
-    };
-    Ok(Some(observations([
-        ("title", text(&artist, "name")),
-        ("sort_title", text(&artist, "sort-name")),
-        ("genre", genres(&artist)),
-        ("musicbrainz_artist_id", Some(artist_id.to_string())),
-    ])))
+    keys.iter().find_map(|(key, kind)| {
+        let id = usable(values.get(*key).map(String::as_str))?.to_string();
+        Some(MetadataCandidate {
+            title: values
+                .get("title")
+                .filter(|title| !title.trim().is_empty())
+                .cloned()
+                .unwrap_or_else(|| id.clone()),
+            detail: id.clone(),
+            id,
+            kind: *kind,
+        })
+    })
 }
 
 pub(crate) fn fetch_musicbrainz_entity(
@@ -160,11 +75,7 @@ pub(crate) fn fetch_musicbrainz_entity(
     fetch_optional_musicbrainz_json(client()?, url, context)
 }
 
-fn track_from_release(
-    release: &Value,
-    release_track_id: Option<&str>,
-    recording_id: Option<&str>,
-) -> Option<MetadataChanges> {
+fn track_from_release(release: &Value, release_track_id: &str) -> Option<MetadataChanges> {
     let media = release.get("media")?.as_array()?;
     for medium in media {
         let disc_number = positive_u16(medium.get("position"));
@@ -172,24 +83,19 @@ fn track_from_release(
             continue;
         };
         for track in tracks {
-            let track_matches = release_track_id
-                .is_some_and(|id| track.get("id").and_then(Value::as_str) == Some(id));
-            let recording_matches = recording_id.is_some_and(|id| {
-                track.pointer("/recording/id").and_then(Value::as_str) == Some(id)
-            });
-            if !track_matches && !recording_matches {
+            if track.get("id").and_then(Value::as_str) != Some(release_track_id) {
                 continue;
             }
             let recording = track.get("recording").unwrap_or(track);
             let release_id = text(release, "id");
-            return Some(observations([
+            let mut changes = observations([
                 (
                     "title",
-                    text(recording, "title").or_else(|| text(track, "title")),
+                    text(track, "title").or_else(|| text(recording, "title")),
                 ),
                 (
                     "artist",
-                    artist_credit(recording).or_else(|| artist_credit(track)),
+                    artist_credit(track).or_else(|| artist_credit(recording)),
                 ),
                 ("album", text(release, "title")),
                 ("album_artist", artist_credit(release)),
@@ -210,14 +116,22 @@ fn track_from_release(
                         .and_then(Value::as_str)
                         .and_then(clean),
                 ),
-            ]));
+            ]);
+            search::add_credit_ids(
+                &mut changes,
+                track.get("artist-credit").map_or(recording, |_| track),
+                "musicbrainz_artist_id",
+            );
+            search::add_credit_ids(&mut changes, release, "musicbrainz_album_artist_id");
+            add_release_dates(&mut changes, release);
+            return Some(changes);
         }
     }
     None
 }
 
 fn album_from_release(release: &Value, release_id: &str) -> MetadataChanges {
-    observations([
+    let mut changes = observations([
         ("title", text(release, "title")),
         ("artist", artist_credit(release)),
         ("album_artist", artist_credit(release)),
@@ -234,7 +148,33 @@ fn album_from_release(release: &Value, release_id: &str) -> MetadataChanges {
                 .and_then(Value::as_str)
                 .and_then(clean),
         ),
-    ])
+    ]);
+    search::add_credit_ids(&mut changes, release, "musicbrainz_album_artist_id");
+    add_release_dates(&mut changes, release);
+    changes
+}
+
+fn add_release_dates(changes: &mut MetadataChanges, release: &Value) {
+    if let Some(date) = text(release, "date") {
+        changes.insert("release_date".into(), date.clone());
+        changes.insert("recording_date".into(), date);
+    }
+    if let Some(date) = release
+        .get("release-group")
+        .and_then(|group| text(group, "first-release-date"))
+    {
+        changes.insert("original_release_date".into(), date);
+    }
+    let labels = release
+        .get("label-info")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|info| info.get("label").and_then(|label| text(label, "name")))
+        .collect::<Vec<_>>();
+    if !labels.is_empty() {
+        changes.insert("label".into(), labels.join("; "));
+    }
 }
 
 fn observations(
@@ -601,19 +541,20 @@ mod tests {
             "id": "release-id",
             "title": "Album",
             "date": "2025-03-01",
-            "artist-credit": [{ "name": "Album Artist" }],
-            "release-group": { "id": "group-id" },
+            "artist-credit": [{ "name": "Album Artist", "artist": {"id": "album-artist"} }],
+            "release-group": { "id": "group-id", "first-release-date": "2001-01-02" },
             "media": [{
                 "position": 2,
                 "tracks": [{
                     "id": "release-track-id",
                     "position": 4,
+                    "title": "Release track title",
                     "recording": {
                         "id": "recording-id",
                         "title": "Track",
                         "artist-credit": [
-                            { "name": "First" },
-                            { "name": "Second" }
+                            { "name": "First", "artist": {"id": "first-artist"} },
+                            { "name": "Second", "artist": {"id": "second-artist"} }
                         ],
                         "genres": [{ "name": "Rock" }]
                     }
@@ -622,9 +563,17 @@ mod tests {
         });
 
         let identified =
-            track_from_release(&release, Some("release-track-id"), None).expect("identified Track");
+            track_from_release(&release, "release-track-id").expect("identified Track");
 
-        assert_eq!(identified["title"], "Track");
+        assert_eq!(identified["title"], "Release track title");
+        assert_eq!(identified["recording_date"], "2025-03-01");
+        assert_eq!(identified["release_date"], "2025-03-01");
+        assert_eq!(identified["original_release_date"], "2001-01-02");
+        assert_eq!(
+            identified["musicbrainz_artist_id"],
+            "first-artist; second-artist"
+        );
+        assert_eq!(identified["musicbrainz_album_artist_id"], "album-artist");
         assert!(!identified.contains_key("comment"));
         assert!(!identified.contains_key("sort_title"));
         assert_eq!(

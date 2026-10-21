@@ -1,13 +1,21 @@
 //! Reviewed metadata operations and publication.
+mod batch;
 mod editor;
+mod lookup;
+mod lyrics;
 use crate::runtime::CatalogChange;
 use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
-pub use editor::{MetadataEditor, MetadataEditorSnapshot, MetadataFieldPresentation};
+pub use batch::{MetadataBatch, MetadataTrackSummary};
+pub use editor::{
+    MetadataEditor, MetadataEditorSnapshot, MetadataFieldPresentation, mixed_field_label,
+};
 use library::Database;
+pub use lyrics::MetadataLyricsSettings;
 pub use metadata_lookup::{ArtworkQuery, ArtworkResult};
+pub use metadata_lookup::{MetadataCandidate, MetadataMatchKind};
 pub use sources::MetadataDraft;
-use sources::{Implementation, MetadataChanges, Source, SourceEntityKind, SourceMetadataError};
+use sources::{Implementation, Source, SourceEntityKind, SourceMetadataError};
 use std::sync::Arc;
 pub const MAX_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 
@@ -15,6 +23,7 @@ pub(super) struct EditSession {
     source: Option<Arc<Source>>,
     destination: EditDestination,
     previous_artwork: Option<Vec<u8>>,
+    media_uri: String,
 }
 
 enum EditDestination {
@@ -23,16 +32,6 @@ enum EditDestination {
 }
 
 impl EditSession {
-    pub(super) fn source(&self) -> Option<&Arc<Source>> {
-        self.source.as_ref()
-    }
-    pub(super) fn object(&self) -> Option<&str> {
-        match &self.destination {
-            EditDestination::Server { object, .. } => Some(object),
-            _ => None,
-        }
-    }
-
     pub(super) async fn open(
         owner: &SourceOwner,
         item: &MetadataItemId,
@@ -144,6 +143,7 @@ impl EditSession {
         Ok((
             Arc::new(Self {
                 source,
+                media_uri: item.media_uri().to_string(),
                 destination,
                 previous_artwork: draft.artwork.binding.clone(),
             }),
@@ -151,15 +151,16 @@ impl EditSession {
         ))
     }
 
-    pub(super) async fn save(
+    async fn save(
         &self,
         owner: &SourceOwner,
         edit: sources::MetadataEdit,
-        token: Option<String>,
+        lyrics: Option<lyrics::LyricsEdit>,
     ) -> Result<(), SourceMetadataError> {
-        if edit.changes.is_empty() && edit.artwork.is_none() && token.is_none() {
+        if edit.changes.is_empty() && edit.artwork.is_none() && lyrics.is_none() {
             return Ok(());
         }
+        let metadata_changed = !edit.changes.is_empty() || edit.artwork.is_some();
         let artwork_changed = edit.artwork.is_some();
         let result = async {
             match &self.destination {
@@ -180,15 +181,13 @@ impl EditSession {
                             )
                         }
                         Implementation::JellyfinEmby(provider) => {
-                            let object = provider
-                                .write_metadata(object, revision, token.as_deref(), &edit)
-                                .await?;
+                            let object = provider.write_metadata(object, revision, &edit).await?;
                             let result = if let Some(artwork) = edit.artwork.as_ref() {
                                 provider.write_artwork(&object, artwork).await
                             } else {
                                 Ok(())
                             };
-                            (object, result, tags_saved || token.is_some())
+                            (object, result, tags_saved)
                         }
                         _ => unreachable!(),
                     };
@@ -244,76 +243,13 @@ impl EditSession {
                 .publish_current_catalog(None, CatalogChange::Broad)
                 .await;
         }
-        result
+        result?;
+        if let Some(lyrics) = lyrics {
+            let saved = self.save_lyrics(owner, &lyrics).await;
+            sources::finish_metadata_save(saved, Ok(()), metadata_changed)?;
+        }
+        Ok(())
     }
-}
-
-pub struct MetadataIdentification {
-    pub changes: MetadataChanges,
-    pub token: Option<String>,
-}
-
-pub fn identify_metadata(
-    owner: &SourceOwner,
-    source: Option<Arc<Source>>,
-    object: Option<String>,
-    kind: SourceEntityKind,
-    values: MetadataChanges,
-) -> Receiver<Result<Option<MetadataIdentification>, String>> {
-    let external = owner
-        .shared
-        .settings
-        .load()
-        .ui
-        .allows_external_metadata_lookup();
-    owner.reply(move |_owner, _database| async move {
-        let exact = editor::exact_identity(kind, &values);
-        if external && (exact || kind == SourceEntityKind::Track) {
-            let input = values.clone();
-            if let Some(changes) = tokio::task::spawn_blocking(move || {
-                metadata_lookup::identify_metadata(kind, &input)
-            })
-            .await
-            .map_err(string_error)??
-            {
-                return Ok(Some(MetadataIdentification {
-                    changes,
-                    token: None,
-                }));
-            }
-        }
-        if kind == SourceEntityKind::Track {
-            return Ok(None);
-        }
-        if let Some(source) = source
-            && let Implementation::JellyfinEmby(provider) = &source.implementation
-            && let Some(id) = object.as_deref()
-        {
-            let found = match kind {
-                SourceEntityKind::Album => provider.identify_album_metadata(id, &values).await?,
-                SourceEntityKind::Artist => provider.identify_artist_metadata(id, &values).await?,
-                SourceEntityKind::Track => unreachable!(),
-            };
-            if let Some((changes, token)) = found {
-                return Ok(Some(MetadataIdentification {
-                    changes,
-                    token: Some(token),
-                }));
-            }
-        }
-        if !external || exact {
-            return Ok(None);
-        }
-        tokio::task::spawn_blocking(move || metadata_lookup::identify_metadata(kind, &values))
-            .await
-            .map_err(string_error)?
-            .map(|found| {
-                found.map(|changes| MetadataIdentification {
-                    changes,
-                    token: None,
-                })
-            })
-    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

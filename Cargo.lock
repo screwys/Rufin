@@ -3323,8 +3323,10 @@ dependencies = [
  "libadwaita",
  "library",
  "localization",
+ "lyrics",
  "rufin-core",
  "sources",
+ "tokio",
 ]
 
 [[package]]
@@ -3461,6 +3463,7 @@ dependencies = [
  "libadwaita",
  "library",
  "localization",
+ "lyrics",
  "playback",
  "process-memory",
  "proptest",

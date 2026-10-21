@@ -1,10 +1,10 @@
-//! Jellyfin metadata reads, writes, and remote identification for exact provider objects.
+//! Jellyfin metadata reads and writes for exact provider objects.
 
 use serde_json::{Map, Value, json};
 
 use super::client::endpoint;
 use super::{JellyfinEmbySource, ServerKind, SourceError, SourceResult};
-use crate::{MetadataChanges, MetadataDraft, MetadataField, SourceEntityKind, SourceMetadataError};
+use crate::{MetadataDraft, MetadataField, SourceEntityKind, SourceMetadataError};
 
 const ITEM_FIELDS: &str = "Genres,ProviderIds,AlbumArtists,ArtistItems,Overview,ProductionYear,Settings,OriginalTitle,CustomRating,Tags,Studios,Etag";
 
@@ -169,7 +169,6 @@ impl JellyfinEmbySource {
         fields.extend(extra_fields(self.kind, &item, &editor, kind));
         let mut draft = MetadataDraft::new(kind, fields);
         draft.revision = Some(revision(&item)?);
-        draft.source_search = kind != SourceEntityKind::Track;
         draft.track_count = count;
         Ok(draft)
     }
@@ -195,158 +194,27 @@ impl JellyfinEmbySource {
         &self,
         object_id: &str,
         expected_revision: &str,
-        application: Option<&str>,
         edit: &crate::MetadataEdit,
-    ) -> Result<String, crate::SourceMetadataError> {
-        self.write_metadata_value(
-            object_id,
-            edit.kind.as_str(),
-            expected_revision,
-            application,
-            !edit.changes.is_empty(),
-            |item| apply_edit(self.kind, item, edit),
-        )
-        .await
-    }
-
-    pub async fn write_metadata_value(
-        &self,
-        object_id: &str,
-        kind: &str,
-        expected_revision: &str,
-        application: Option<&str>,
-        tags_changed: bool,
-        update: impl FnOnce(&mut Map<String, Value>),
     ) -> Result<String, SourceMetadataError> {
-        let raw = raw_id(self.kind, object_id, kind)?;
+        let raw = raw_id(self.kind, object_id, edit.kind.as_str())?;
         let mut item = self.read_metadata_item(raw).await.map_err(metadata_write)?;
         if revision(&item)? != expected_revision {
             return Err(SourceMetadataError::Conflict);
         }
-        if let Some(application) = application {
-            let candidate = serde_json::from_str::<Value>(application).map_err(|error| {
-                SourceMetadataError::Write(format!("invalid Jellyfin identification: {error}"))
-            })?;
-            let mut url = endpoint(&self.base_url, &format!("Items/RemoteSearch/Apply/{raw}"))
-                .map_err(metadata_write)?;
-            url.query_pairs_mut()
-                .append_pair("ReplaceAllImages", "false");
-            self.send_unit(self.client.post(url).json(&candidate))
-                .await
-                .map_err(metadata_write)?;
-            item = self
-                .read_metadata_item(raw)
-                .await
-                .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?;
-        }
-        if !tags_changed {
+        if edit.changes.is_empty() {
             return Ok(raw.to_string());
         }
         let object = item.as_object_mut().ok_or_else(|| {
             SourceMetadataError::Write("Jellyfin returned an invalid metadata item".to_string())
         })?;
         preserve_complete_artist_items(object);
-        update(object);
+        apply_edit(self.kind, object, edit);
         let url = endpoint(&self.base_url, &format!("Items/{raw}")).map_err(metadata_write)?;
         self.send_unit(self.client.post(url).json(&item))
             .await
             .map_err(metadata_write)?;
         Ok(raw.to_string())
     }
-
-    pub async fn identify_album_metadata(
-        &self,
-        object_id: &str,
-        values: &MetadataChanges,
-    ) -> Result<Option<(MetadataChanges, String)>, String> {
-        let raw = raw_id(self.kind, object_id, "album").map_err(|error| error.to_string())?;
-        let mut search_info = json!({
-            "Name": values.get("title"),
-            "Year": values.get("year").and_then(|value| value.parse::<u16>().ok()),
-            "ProviderIds": identification_provider_ids([
-                ("MusicBrainzAlbum", values.get("musicbrainz_album_id").map(String::as_str)),
-                (
-                    "MusicBrainzReleaseGroup",
-                    values.get("musicbrainz_release_group_id").map(String::as_str),
-                ),
-            ]),
-        });
-        let album_artists = split_values(
-            values
-                .get("album_artist")
-                .filter(|value| !value.trim().is_empty())
-                .or_else(|| values.get("artist"))
-                .map(String::as_str),
-        );
-        if !album_artists.is_empty() {
-            search_info
-                .as_object_mut()
-                .expect("Jellyfin search info object")
-                .insert("AlbumArtists".to_string(), json!(album_artists));
-        }
-        let results = self.remote_search(raw, "MusicAlbum", search_info).await?;
-        Ok(select_identification(
-            values,
-            &results,
-            SourceEntityKind::Album,
-        ))
-    }
-
-    pub async fn identify_artist_metadata(
-        &self,
-        object_id: &str,
-        values: &MetadataChanges,
-    ) -> Result<Option<(MetadataChanges, String)>, String> {
-        let raw = raw_id(self.kind, object_id, "artist").map_err(|error| error.to_string())?;
-        let search_info = json!({
-            "Name": values.get("title"),
-            "ProviderIds": identification_provider_ids([
-                ("MusicBrainzArtist", values.get("musicbrainz_artist_id").map(String::as_str)),
-            ]),
-        });
-        let results = self.remote_search(raw, "MusicArtist", search_info).await?;
-        Ok(select_identification(
-            values,
-            &results,
-            SourceEntityKind::Artist,
-        ))
-    }
-
-    async fn remote_search(
-        &self,
-        raw: &str,
-        item_type: &str,
-        search_info: Value,
-    ) -> Result<Vec<Value>, String> {
-        if search_info
-            .get("Name")
-            .and_then(Value::as_str)
-            .is_none_or(|name| name.trim().is_empty())
-            && search_info
-                .get("ProviderIds")
-                .and_then(Value::as_object)
-                .is_none_or(Map::is_empty)
-        {
-            return Ok(Vec::new());
-        }
-        let url = endpoint(&self.base_url, &format!("Items/RemoteSearch/{item_type}"))
-            .map_err(|error| error.to_string())?;
-        self.send_json(self.client.post(url).json(&json!({
-            "ItemId": raw,
-            "SearchInfo": search_info,
-        })))
-        .await
-        .map_err(|error| error.to_string())
-    }
-}
-
-fn identification_provider_ids<'a>(
-    values: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
-) -> Map<String, Value> {
-    values
-        .into_iter()
-        .filter_map(|(key, value)| Some((key.to_string(), Value::String(clean(value?)?))))
-        .collect()
 }
 
 fn split_values(value: Option<&str>) -> Vec<String> {
@@ -547,71 +415,6 @@ fn external(info: &Value, key: &str) -> bool {
                 .as_str()
                 .is_some_and(|value| value.eq_ignore_ascii_case(key))
         })
-}
-
-fn select_identification(
-    previous: &MetadataChanges,
-    results: &[Value],
-    kind: SourceEntityKind,
-) -> Option<(MetadataChanges, String)> {
-    let keys: &[&str] = if kind == SourceEntityKind::Album {
-        &[
-            "title",
-            "year",
-            "artist",
-            "album_artist",
-            "musicbrainz_album_id",
-            "musicbrainz_release_group_id",
-        ]
-    } else {
-        &["title", "musicbrainz_artist_id"]
-    };
-    let fields = FIELDS
-        .iter()
-        .filter(|(key, _, _)| keys.contains(key))
-        .collect::<Vec<_>>();
-    let exact = results
-        .iter()
-        .filter(|item| {
-            fields.iter().any(|(key, native, _)| {
-                key.starts_with("musicbrainz_")
-                    && previous
-                        .get(*key)
-                        .is_some_and(|id| provider(item, native).as_ref() == Some(id))
-            })
-        })
-        .collect::<Vec<_>>();
-    let selected = match exact.as_slice() {
-        [one] => *one,
-        [] => select_result(
-            previous.get("title").map_or("", String::as_str),
-            previous.get("year").and_then(|v| v.parse().ok()),
-            results,
-        )?,
-        _ => return None,
-    };
-    let changes = fields
-        .into_iter()
-        .filter_map(|(key, native, _)| {
-            field_value(ServerKind::Jellyfin, selected, key, native)
-                .map(|value| ((*key).into(), value))
-        })
-        .collect();
-    Some((changes, serde_json::to_string(selected).ok()?))
-}
-
-fn select_result<'a>(name: &str, year: Option<u16>, results: &'a [Value]) -> Option<&'a Value> {
-    let matches = results
-        .iter()
-        .filter(|value| {
-            string(value, "Name").is_some_and(|value| value.eq_ignore_ascii_case(name.trim()))
-                && year.is_none_or(|year| number(value, "ProductionYear") == Some(year))
-        })
-        .collect::<Vec<_>>();
-    match matches.as_slice() {
-        [one] => Some(*one),
-        _ => None,
-    }
 }
 
 fn raw_id<'a>(
@@ -901,7 +704,6 @@ mod tests {
         };
         assert!(field("title").writable);
         assert!(field("musicbrainz_recording_id").writable);
-        assert!(!metadata.source_search);
         assert_eq!(metadata.revision.as_deref(), Some("etag:revision"));
         assert_eq!(field("title").value, "Provider title");
         assert_eq!(field("musicbrainz_recording_id").value, "recording");
@@ -913,46 +715,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn jellyfin_album_identification_keeps_exact_ids_and_artist_credits() {
+    async fn jellyfin_album_metadata_save_preserves_unedited_fields() {
         let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/Items/album"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"Name":"Album", "Etag":"revision", "Overview":"Keep overview"}),
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
         Mock::given(method("POST"))
-            .and(path("/Items/RemoteSearch/MusicAlbum"))
-            .and(body_json(json!({
-                "ItemId": "album",
-                "SearchInfo": {
-                    "Name": "Album",
-                    "Year": 2024,
-                    "ProviderIds": {
-                        "MusicBrainzAlbum": "release",
-                        "MusicBrainzReleaseGroup": "release-group",
-                    },
-                    "AlbumArtists": ["Artist", "Guest"],
-                },
-            })))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .and(path("/Items/album"))
+            .and(body_json(
+                json!({"Name":"Updated", "Etag":"revision", "Overview":"Keep overview"}),
+            ))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
             .mount(&server)
             .await;
         let source = test_source(&server);
-
-        for artist_field in ["album_artist", "artist"] {
-            let mut values: MetadataChanges = [
-                ("title".into(), "Album".into()),
-                ("album_artist".into(), String::new()),
-                ("year".into(), "2024".into()),
-                ("musicbrainz_album_id".into(), "release".into()),
-                (
-                    "musicbrainz_release_group_id".into(),
-                    "release-group".into(),
-                ),
-            ]
-            .into();
-            values.insert(artist_field.into(), "Artist; Guest".into());
-            let result = source
-                .identify_album_metadata("jellyfin:album:album", &values)
-                .await
-                .expect("identify Jellyfin Album");
-            assert!(result.is_none());
-        }
+        let object = source
+            .write_metadata(
+                "jellyfin:album:album",
+                "etag:revision",
+                &crate::MetadataEdit {
+                    kind: SourceEntityKind::Album,
+                    changes: [("title".into(), "Updated".into())].into(),
+                    artwork: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(object, "album");
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
     }
 
     #[test]

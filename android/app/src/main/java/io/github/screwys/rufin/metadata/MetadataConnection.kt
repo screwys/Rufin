@@ -11,6 +11,7 @@ import io.github.screwys.rufin.shared.rufin_core.MetadataItemId
 import io.github.screwys.rufin.shared.rufin_core.MetadataEditorSnapshot
 import io.github.screwys.rufin.shared.sources.ArtworkStorage
 import io.github.screwys.rufin.shared.metadata_lookup.ArtworkResult
+import io.github.screwys.rufin.shared.metadata_lookup.MetadataCandidate
 import io.github.screwys.rufin.ui.PlayerArtwork
 import io.github.screwys.rufin.ui.decodePlayerArtwork
 import kotlinx.coroutines.*
@@ -39,6 +40,8 @@ internal class MetadataConnection(
     var results by mutableStateOf<List<ArtworkResult>?>(null)
         private set
     var searching by mutableStateOf(false)
+        private set
+    var lookupResults by mutableStateOf<List<MetadataCandidate>?>(null)
         private set
     private var artworkRevision: ULong? = null
     private var artworkTask: Job? = null
@@ -94,7 +97,7 @@ internal class MetadataConnection(
 
     fun setField(id: String, value: String) = change { it.setField(id, value) }
     fun setLocked(value: Boolean) = change { it.setLocked(value) }
-    fun undo(id: String) = change { it.undoIdentified(id) }
+    fun undo(id: String) = action { it.resetField(id) }
     fun setStorage(value: ArtworkStorage) = change { it.setArtworkStorage(value) }
 
     private fun action(block: suspend (MetadataEditor) -> Unit) {
@@ -109,7 +112,8 @@ internal class MetadataConnection(
         }
     }
 
-    fun identify() = action { it.identify() }
+    fun lookup(query: String) = action { lookupResults = it.lookup(query) }
+    fun applyLookup(candidate: MetadataCandidate, fillMissing: Boolean) = action { it.applyLookup(candidate, fillMissing) }
     fun save() = action { it.save(); onSaved() }
     fun removeArtwork() = action { it.removeArtwork() }
     fun useCurrentArtwork() = action { it.useCurrentArtwork() }

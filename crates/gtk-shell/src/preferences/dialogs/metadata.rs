@@ -58,6 +58,67 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
     });
     shell.selected_ui.metadata_load.replace(Some(load));
 }
+pub(crate) fn present_track_metadata_dialog(
+    shell: &Rc<Shell>,
+    selection: library::MemberSelection,
+) {
+    let source = shell.products.source.clone();
+    if let Some(load) = shell.selected_ui.metadata_load.borrow_mut().take() {
+        load.abort();
+    }
+    let weak = Rc::downgrade(shell);
+    let retry_selection = selection.clone();
+    let load = gtk::glib::spawn_future_local(async move {
+        let result = async {
+            let batch =
+                rufin_core::metadata::MetadataBatch::open(source, std::sync::Arc::new(selection))
+                    .await?;
+            let editor = batch.clone().editor(Vec::new()).await?;
+            Ok::<_, SourceMetadataError>((batch, editor))
+        }
+        .await;
+        let Some(shell) = weak.upgrade() else { return };
+        match result {
+            Ok((batch, editor)) => {
+                shell.present_selected_dialog(&gtk_editors::metadata::build_batch_dialog(
+                    batch,
+                    editor,
+                    shell.products.runtime.clone(),
+                ))
+            }
+            Err(SourceMetadataError::LocalAccessRequired {
+                source_id,
+                source_path,
+            }) => {
+                if let Some(selected) = shell
+                    .selected_library()
+                    .as_deref()
+                    .filter(|selected| selected.source_id == source_id)
+                    .cloned()
+                {
+                    let weak = Rc::downgrade(&shell);
+                    present_local_access_recovery(
+                        &shell,
+                        selected,
+                        &source_path,
+                        Rc::new(move || {
+                            if let Some(shell) = weak.upgrade() {
+                                present_track_metadata_dialog(&shell, retry_selection.clone());
+                            }
+                        }),
+                    );
+                } else {
+                    shell
+                        .control_feedback
+                        .show_feedback_toast(tr(msgid("Metadata editing requires Local access")));
+                }
+            }
+            Err(error) => shell.present_selected_dialog(&metadata_error_dialog(&error.to_string())),
+        }
+    });
+    shell.selected_ui.metadata_load.replace(Some(load));
+}
+
 fn present_local_access_recovery(
     shell: &Rc<Shell>,
     selected: rufin_core::runtime::SelectedLibrary,

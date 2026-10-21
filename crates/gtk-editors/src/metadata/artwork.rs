@@ -153,7 +153,7 @@ impl Drop for ArtworkEditor {
 
 pub(super) fn connect(editor: &Rc<Editor>) {
     seed_search(editor);
-    let fields: &[&str] = match editor.draft.kind {
+    let fields: &[&str] = match editor.model().draft.kind {
         sources::SourceEntityKind::Track => &["artist", "album_artist", "album"],
         sources::SourceEntityKind::Album => &["title", "artist", "album_artist"],
         sources::SourceEntityKind::Artist => &["title"],
@@ -179,7 +179,7 @@ pub(super) fn connect(editor: &Rc<Editor>) {
             if button.is_active()
                 && let Some(editor) = weak.upgrade()
             {
-                editor.model.set_artwork_storage(storage);
+                editor.model().set_artwork_storage(storage);
                 refresh_save_state(&editor);
             }
         });
@@ -192,7 +192,7 @@ pub(super) fn connect(editor: &Rc<Editor>) {
         let current = editor.artwork.current.borrow().clone();
         if let Some(texture) = current {
             editor.artwork.begin_selection();
-            editor.model.use_current_artwork();
+            editor.model().use_current_artwork();
             show_selected_image(&editor, &texture);
             editor.artwork.results.unselect_all();
         }
@@ -201,7 +201,7 @@ pub(super) fn connect(editor: &Rc<Editor>) {
     editor.artwork.remove.connect_clicked(move |_| {
         let Some(editor) = weak.upgrade() else { return };
         editor.artwork.begin_selection();
-        editor.model.remove_artwork();
+        editor.model().remove_artwork();
         editor.artwork.loading_selection.set(false);
         editor
             .artwork
@@ -250,7 +250,7 @@ pub(super) fn connect(editor: &Rc<Editor>) {
         }
         refresh_save_state(&editor);
     });
-    load_current(editor);
+    refresh(editor);
 }
 
 fn seed_search(editor: &Editor) {
@@ -264,12 +264,13 @@ fn seed_search(editor: &Editor) {
 }
 
 fn draft_search_fields(editor: &Editor) -> (String, Option<String>) {
-    let state = editor.model.snapshot();
+    let state = editor.model().snapshot();
     (state.search_artist, state.search_album)
 }
 
 fn load_current(editor: &Rc<Editor>) {
-    let editing = editor.draft.artwork.clone();
+    let editing = editor.model().draft.artwork.clone();
+    let storage = editor.model().snapshot().artwork_storage;
     let weak = Rc::downgrade(editor);
     let task = gtk::glib::spawn_future_local(async move {
         let Some(editor) = weak.upgrade() else { return };
@@ -277,23 +278,37 @@ fn load_current(editor: &Rc<Editor>) {
         editor
             .artwork
             .remove
-            .set_sensitive(editing.binding.is_some());
+            .set_sensitive(editor.model().snapshot().can_remove_artwork);
         editor
             .artwork
             .storage_options
-            .set_visible(editing.storage != ArtworkStorage::Server && editing.can_embed);
-        match editing.storage {
+            .set_visible(storage != ArtworkStorage::Server && editing.can_embed);
+        match storage {
             ArtworkStorage::Embedded => editor.artwork.embed.set_active(true),
             ArtworkStorage::Folder => editor.artwork.folder.set_active(true),
             ArtworkStorage::Server => {}
         }
         editor.artwork.set_busy(editor.busy.get());
+        let selected = editor
+            .model()
+            .artwork()
+            .filter(|_| editor.model().artwork_changed());
+        drop(editor);
+        let selected = if let Some(image) = selected {
+            texture(image, 512).await.ok()
+        } else {
+            None
+        };
+        let Some(editor) = weak.upgrade() else { return };
+        if let Some(texture) = selected {
+            show_selected_image(&editor, &texture);
+        }
         let Some(_) = editing.binding else {
             editor.artwork.message("", false);
             refresh_save_state(&editor);
             return;
         };
-        let model = editor.model.clone();
+        let model = editor.model().clone();
         let unavailable = editor.artwork.unavailable.clone();
         drop(editor);
         let result = match model.load_current_artwork().await {
@@ -306,7 +321,7 @@ fn load_current(editor: &Rc<Editor>) {
         };
         match result {
             Ok(Some(texture)) => {
-                if !editor.model.artwork_changed() && !editor.artwork.pending() {
+                if !editor.model().artwork_changed() && !editor.artwork.pending() {
                     editor.artwork.preview.set_paintable(Some(&texture));
                     if !editor.artwork.status.has_css_class("error") {
                         editor.artwork.message("", false);
@@ -316,14 +331,14 @@ fn load_current(editor: &Rc<Editor>) {
                 editor.artwork.use_current.set_sensitive(true);
             }
             Ok(None)
-                if !editor.model.artwork_changed()
+                if !editor.model().artwork_changed()
                     && !editor.artwork.pending()
                     && !editor.artwork.status.has_css_class("error") =>
             {
                 editor.artwork.message("", false)
             }
             Err(error)
-                if !editor.model.artwork_changed()
+                if !editor.model().artwork_changed()
                     && !editor.artwork.pending()
                     && !editor.artwork.status.has_css_class("error") =>
             {
@@ -344,7 +359,7 @@ fn connect_upload(editor: &Rc<Editor>) {
         let chosen = editor.artwork.chooser.open_future(parent.as_ref());
         let sequence = editor.artwork.begin_selection();
         editor.artwork.results.unselect_all();
-        let model = editor.model.clone();
+        let model = editor.model().clone();
         let unavailable = editor.artwork.unavailable.clone();
         let weak = Rc::downgrade(&editor);
         let task = gtk::glib::spawn_future_local(async move {
@@ -370,7 +385,7 @@ fn connect_upload(editor: &Rc<Editor>) {
                         editor.artwork.loading_selection.set(false);
                         editor
                             .artwork
-                            .restore_current_preview(editor.model.artwork_changed());
+                            .restore_current_preview(editor.model().artwork_changed());
                         editor.artwork.message("", false);
                         refresh_save_state(&editor);
                     }
@@ -407,7 +422,7 @@ fn schedule_search(editor: &Rc<Editor>, delay: Duration) {
         .search_message(&editor.artwork.searching, false);
     let artist = editor.artwork.search_artist.text().to_string();
     let album = editor.artwork.search_album.text().to_string();
-    let model = editor.model.clone();
+    let model = editor.model().clone();
     let weak = Rc::downgrade(editor);
     let task = gtk::glib::spawn_future_local(async move {
         gtk::glib::timeout_future(delay).await;
@@ -512,7 +527,7 @@ fn connect_results(editor: &Rc<Editor>) {
         let sequence = editor.artwork.begin_selection();
         editor.artwork.preview.set_paintable(thumbnail.as_ref());
         editor.artwork.search_dialog.close();
-        let model = editor.model.clone();
+        let model = editor.model().clone();
         let unavailable = editor.artwork.unavailable.clone();
         let weak = Rc::downgrade(&editor);
         let task = gtk::glib::spawn_future_local(async move {
@@ -560,13 +575,13 @@ fn finish_selection(
     editor.artwork.loading_selection.set(false);
     match result {
         Ok((image, texture)) => {
-            editor.model.select_artwork(image);
+            editor.model().select_artwork(image);
             show_selected_image(&editor, &texture);
         }
         Err(error) => {
             editor
                 .artwork
-                .restore_current_preview(editor.model.artwork_changed());
+                .restore_current_preview(editor.model().artwork_changed());
             editor.artwork.message(&error, true);
         }
     }
@@ -600,5 +615,47 @@ fn artwork_error(error: SourceMetadataError, unavailable: &str) -> String {
         SourceMetadataError::Write(message) => message,
         SourceMetadataError::Unavailable => unavailable.to_owned(),
         error => error.to_string(),
+    }
+}
+
+pub(super) fn cancel(editor: &Editor) {
+    for task in [
+        &editor.artwork.current_task,
+        &editor.artwork.search_task,
+        &editor.artwork.selection_task,
+    ] {
+        if let Some(task) = task.borrow_mut().take() {
+            task.abort();
+        }
+    }
+    editor
+        .artwork
+        .search_sequence
+        .set(editor.artwork.search_sequence.get().wrapping_add(1));
+    editor
+        .artwork
+        .selection_sequence
+        .set(editor.artwork.selection_sequence.get().wrapping_add(1));
+    if editor.artwork.search_dialog.is_mapped() {
+        editor.artwork.search_dialog.close();
+    }
+}
+
+pub(super) fn refresh(editor: &Rc<Editor>) {
+    editor.artwork.ready.set(false);
+    editor.artwork.set_busy(editor.busy.get());
+    editor.artwork.message("", false);
+    editor.artwork.current.borrow_mut().take();
+    editor
+        .artwork
+        .preview
+        .set_paintable(None::<&gtk::gdk::Texture>);
+    editor.artwork.candidates.borrow_mut().clear();
+    editor.artwork.results.remove_all();
+    editor.artwork.loading_selection.set(false);
+    editor.artwork.use_current.set_sensitive(false);
+    seed_search(editor);
+    if editor.model().snapshot().selected_count == 1 {
+        load_current(editor);
     }
 }

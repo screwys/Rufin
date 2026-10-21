@@ -2,6 +2,9 @@
 <gresources>
   <gresource prefix="/io/github/screwys/Rufin/ui">
     <file compressed="true">preferences/dialogs/metadata.ui</file>
+    <file compressed="true">preferences/dialogs/metadata_lyrics.ui</file>
+    <file compressed="true">preferences/dialogs/metadata_batch.ui</file>
+    <file compressed="true">preferences/dialogs/metadata_field.ui</file>
     <file compressed="true">preferences/dialogs/metadata_artwork.ui</file>
     <file compressed="true">preferences/dialogs/metadata_artwork_result.ui</file>
     <file compressed="true">preferences/dialogs/smart_playlist.ui</file>

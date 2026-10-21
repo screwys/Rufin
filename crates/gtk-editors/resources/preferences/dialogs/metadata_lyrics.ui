@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwBreakpointBin" id="lyrics_content">
+    <property name="width-request">280</property><property name="height-request">240</property>
+    <property name="child"><object class="AdwNavigationSplitView" id="split">
+      <property name="min-sidebar-width">180</property><property name="max-sidebar-width">300</property><property name="sidebar-width-fraction">0.4</property>
+      <property name="sidebar"><object class="AdwNavigationPage"><property name="title" translatable="yes">Search Lyrics</property>
+        <property name="child"><object class="GtkBox">
+          <property name="orientation">vertical</property><property name="spacing">8</property><property name="margin-end">12</property>
+          <child><object class="GtkEntry" id="artist"><property name="placeholder-text" translatable="yes">Artist</property><property name="width-chars">1</property><property name="hexpand">true</property></object></child>
+          <child><object class="GtkEntry" id="title"><property name="placeholder-text" translatable="yes">Song</property><property name="width-chars">1</property><property name="hexpand">true</property></object></child>
+          <child><object class="GtkButton" id="search"><property name="label" translatable="yes">Search</property></object></child>
+          <child><object class="GtkLabel" id="status"><property name="visible">false</property><property name="xalign">0</property><property name="wrap">true</property></object></child>
+          <child><object class="GtkScrolledWindow"><property name="vexpand">true</property><property name="hscrollbar-policy">never</property><property name="child"><object class="GtkListBox" id="results"><property name="selection-mode">single</property><style><class name="boxed-list"/></style></object></property></object></child>
+          <child><object class="GtkBox" id="storage"><property name="visible">false</property><property name="homogeneous">true</property><style><class name="linked"/></style>
+            <child><object class="GtkToggleButton" id="sidecar"><property name="label" translatable="yes">Save in folder</property></object></child>
+            <child><object class="GtkToggleButton" id="embed"><property name="label" translatable="yes">Embed in track</property><property name="group">sidecar</property></object></child>
+          </object></child>
+        </object></property>
+      </object></property>
+      <property name="content"><object class="AdwNavigationPage"><property name="title" translatable="yes">Edit Lyrics</property>
+        <property name="child"><object class="GtkBox"><property name="orientation">vertical</property><property name="spacing">8</property>
+          <child><object class="GtkButton" id="back"><property name="visible">false</property><property name="halign">start</property><property name="icon-name">rufin-go-previous-symbolic</property><property name="tooltip-text" translatable="yes">Back</property><style><class name="flat"/></style></object></child>
+          <child><object class="GtkRevealer" id="editor_revealer"><property name="transition-type">crossfade</property><property name="transition-duration">160</property><property name="vexpand">true</property><property name="child"><object class="GtkBox" id="editor_host"><property name="orientation">vertical</property><property name="vexpand">true</property></object></property></object></child>
+        </object></property>
+      </object></property>
+    </object></property>
+  </object>
+</interface>

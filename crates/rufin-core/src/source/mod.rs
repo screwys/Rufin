@@ -4525,52 +4525,6 @@ mod source_tests {
                     Ok(())
                 })
                 .unwrap();
-            tokio::time::timeout(Duration::from_secs(2), async {
-                assert!(
-                    crate::metadata::identify_metadata(
-                        &owner,
-                        None,
-                        None,
-                        sources::SourceEntityKind::Track,
-                        sources::MetadataChanges::new()
-                    )
-                    .recv()
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .is_none()
-                );
-                assert!(
-                    crate::metadata::identify_metadata(
-                        &owner,
-                        None,
-                        Some("album".into()),
-                        sources::SourceEntityKind::Album,
-                        sources::MetadataChanges::new()
-                    )
-                    .recv()
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .is_none()
-                );
-                assert!(
-                    crate::metadata::identify_metadata(
-                        &owner,
-                        None,
-                        Some("artist".into()),
-                        sources::SourceEntityKind::Artist,
-                        sources::MetadataChanges::new()
-                    )
-                    .recv()
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .is_none()
-                );
-            })
-            .await
-            .expect("non-native identification does not acquire a provider");
             let update = {
                 let mut catalog = database.catalog(source_id.as_str(), None).await.unwrap();
                 catalog

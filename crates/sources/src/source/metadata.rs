@@ -226,6 +226,72 @@ impl NativeFile {
         Ok(draft)
     }
 
+    fn lyrics_storage(&self) -> Vec<crate::LyricsStorage> {
+        if self.cue {
+            return Vec::new();
+        }
+        let sidecar = match &self.location {
+            FileLocation::Native(path) => path.parent().is_some_and(Path::is_dir),
+            _ => self.folder_identity(None).is_ok(),
+        };
+        let embedded = (|| match &self.location {
+            FileLocation::Native(path) => tags::embedded_lyrics_writable(path),
+            FileLocation::Document { uri, .. } => {
+                crate::stat_document(uri).is_ok_and(|entry| entry.writable)
+                    && self
+                        .format
+                        .as_deref()
+                        .is_some_and(tags::embedded_lyrics_format_writable)
+            }
+            FileLocation::Remote { source, path } => {
+                let Some(files) = source.file_source(Some(path)) else {
+                    return false;
+                };
+                if let Some(access) = files.document_access() {
+                    let Ok(relative) = files.relative(path) else {
+                        return false;
+                    };
+                    if !access.resolve(&relative).is_ok_and(|entry| entry.writable) {
+                        return false;
+                    }
+                }
+                self.format
+                    .as_deref()
+                    .is_some_and(tags::embedded_lyrics_format_writable)
+            }
+        })();
+        let mut options = Vec::new();
+        if embedded {
+            options.push(crate::LyricsStorage::Embedded);
+        }
+        if sidecar {
+            options.push(crate::LyricsStorage::Sidecar);
+        }
+        options
+    }
+
+    async fn save_lyrics(
+        &self,
+        text: &str,
+        sidecar: bool,
+        cancelled: impl Fn() -> bool + Send + Sync,
+    ) -> Result<Option<PreparedFile>, Error> {
+        if sidecar {
+            if cancelled() {
+                return Err(crate::SourceError::Cancelled.into());
+            }
+            self.write_sidecar(text).await?;
+            Ok(None)
+        } else {
+            let (prepared, _) = self
+                .prepare(None)
+                .await?
+                .mutate(TagUpdate::Lyrics(text.into()), String::new(), None)
+                .await?;
+            Ok(Some(prepared.commit(&cancelled).await?))
+        }
+    }
+
     pub(crate) async fn prepare(&self, expected: Option<&str>) -> Result<PreparedFile, Error> {
         if self.cue {
             return Err(Error::Unavailable);
@@ -477,6 +543,37 @@ pub struct FileEditSession {
 }
 
 impl FileEditSession {
+    pub fn lyrics_storage(&self) -> Vec<crate::LyricsStorage> {
+        self.single
+            .as_ref()
+            .map(NativeFile::lyrics_storage)
+            .unwrap_or_default()
+    }
+
+    pub async fn save_lyrics(
+        &self,
+        database: &Database,
+        text: &str,
+        sidecar: bool,
+    ) -> Result<(), Error> {
+        if let Some(source) = &self.source {
+            source
+                .write_lyrics(database, &self.media_uri, text, sidecar)
+                .await?;
+            return source.refresh_written_lyrics().await;
+        }
+        let file = self.single.as_ref().ok_or(Error::Unavailable)?;
+        file.save_lyrics(text, sidecar, || false).await?;
+        if !sidecar {
+            file.publish_direct(database).await?;
+        }
+        database
+            .remove_track_lyrics_by_authority(&self.media_uri, "source")
+            .await
+            .map_err(failure)?;
+        Ok(())
+    }
+
     pub fn media_uri(&self) -> &str {
         &self.media_uri
     }
@@ -652,7 +749,7 @@ impl FileEditSession {
                         }
                     }
                     if let Some(current) = &mut combined {
-                        tags::merge_draft(current, next);
+                        current.merge(next);
                     } else {
                         combined = Some(next);
                     }
@@ -1017,30 +1114,33 @@ impl Source {
         .await
     }
 
-    pub async fn lyrics_writable(
+    pub async fn lyrics_storage(
         self: &Arc<Self>,
         database: &Database,
         uri: &str,
-        sidecar: bool,
-    ) -> bool {
+    ) -> Vec<crate::LyricsStorage> {
         let Ok(Some(row)) = database.track(&(uri), &ReadCancellation::new()).await else {
-            return false;
+            return Vec::new();
         };
         if row.access.cue_path.is_some() {
-            return false;
+            return Vec::new();
         }
         if let Implementation::JellyfinEmby(provider) = &self.implementation
             && provider.kind == crate::ServerKind::Jellyfin
         {
-            return row.object_id.is_some();
+            return if row.object_id.is_some() {
+                vec![crate::LyricsStorage::Server]
+            } else {
+                Vec::new()
+            };
         }
         if matches!(self.implementation, Implementation::OpenSubsonic(_))
             && !self.mapped_metadata_ready().await
         {
-            return false;
+            return Vec::new();
         }
         let Ok(original) = database.original_file(uri).await else {
-            return false;
+            return Vec::new();
         };
         let Ok(file) = NativeFile::resolve(
             self,
@@ -1050,40 +1150,29 @@ impl Source {
             row.access.cue_path.is_some(),
             original,
         ) else {
-            return false;
+            return Vec::new();
         };
-        if sidecar {
-            return match &file.location {
-                FileLocation::Native(path) => path.parent().is_some_and(Path::is_dir),
-                _ => file.folder_identity(None).is_ok(),
-            };
-        }
-        match &file.location {
-            FileLocation::Native(path) => tags::embedded_lyrics_writable(path),
-            FileLocation::Document { uri, .. } => {
-                crate::stat_document(uri).is_ok_and(|entry| entry.writable)
-                    && file
-                        .format
-                        .as_deref()
-                        .is_some_and(tags::embedded_lyrics_format_writable)
-            }
-            FileLocation::Remote { source, path } => {
-                let Some(files) = source.file_source(Some(path)) else {
-                    return false;
-                };
-                if let Some(access) = files.document_access() {
-                    let Ok(relative) = files.relative(path) else {
-                        return false;
-                    };
-                    if !access.resolve(&relative).is_ok_and(|entry| entry.writable) {
-                        return false;
-                    }
-                }
-                file.format
-                    .as_deref()
-                    .is_some_and(tags::embedded_lyrics_format_writable)
-            }
-        }
+        file.lyrics_storage()
+    }
+
+    pub async fn lyrics_writable(
+        self: &Arc<Self>,
+        database: &Database,
+        uri: &str,
+        sidecar: bool,
+    ) -> bool {
+        self.lyrics_storage(database, uri)
+            .await
+            .into_iter()
+            .any(|storage| {
+                storage == crate::LyricsStorage::Server
+                    || storage
+                        == if sidecar {
+                            crate::LyricsStorage::Sidecar
+                        } else {
+                            crate::LyricsStorage::Embedded
+                        }
+            })
     }
 
     pub async fn write_lyrics(
@@ -1126,18 +1215,10 @@ impl Source {
                     row.access.cue_path.is_some(),
                     database.original_file(uri).await.map_err(failure)?,
                 )?;
-                if sidecar {
-                    if self.is_retired() {
-                        return Err(crate::SourceError::Cancelled.into());
-                    }
-                    file.write_sidecar(lyrics).await?;
-                } else {
-                    let (prepared, _) = file
-                        .prepare(None)
-                        .await?
-                        .mutate(TagUpdate::Lyrics(lyrics.into()), String::new(), None)
-                        .await?;
-                    let committed = prepared.commit(&|| self.is_retired()).await?;
+                if let Some(committed) = file
+                    .save_lyrics(lyrics, sidecar, || self.is_retired())
+                    .await?
+                {
                     if matches!(
                         self.implementation,
                         Implementation::Local(_) | Implementation::Files(_)

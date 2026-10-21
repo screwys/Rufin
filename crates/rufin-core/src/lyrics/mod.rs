@@ -1310,6 +1310,56 @@ impl LyricsService {
         });
     }
 
+    fn begin_edited(
+        &self,
+        media_id: &CurrentMediaId,
+    ) -> Option<(u64, LyricsPlan, LyricsContext, DocumentKey, bool)> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(current) = state
+            .current
+            .as_ref()
+            .filter(|current| &current.context.media.id == media_id)
+        else {
+            return None;
+        };
+        let key = current.key.clone();
+        let context = current.context.clone();
+        let plan = state
+            .settings
+            .configured_lyrics_plan(state.private_mode, &key.media_uri);
+        let sidecar = state.settings.preferences.save_lyrics_as_sidecar;
+        cancel_current_work(&mut state);
+        let request = self.next_request.fetch_add(1, Ordering::AcqRel);
+        if let Some(current) = state.current.as_mut() {
+            current.request = request;
+            current.loading = false;
+        }
+        Some((request, plan, context, key, sidecar))
+    }
+
+    pub(crate) async fn accept_edited(self: &Arc<Self>, uri: &str, text: &str) {
+        let media_id = self
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .current
+            .as_ref()
+            .filter(|current| current.key.media_uri == uri)
+            .map(|current| current.context.media.id.clone());
+        let Some(media_id) = media_id else { return };
+        let Some(bundle) = lyrics_from_edited_text(text) else {
+            return;
+        };
+        let Some((request, plan, context, key, _)) = self.begin_edited(&media_id) else {
+            return;
+        };
+        self.cache_and_accept(request, &key, &context.input_digest, &plan, bundle)
+            .await;
+    }
+
     fn update_lyrics_text(self: &Arc<Self>, media_id: CurrentMediaId, text: String) {
         let Some(bundle) = lyrics_from_edited_text(&text) else {
             return;
@@ -1317,31 +1367,8 @@ impl LyricsService {
         let Some(document) = bundle.documents().first() else {
             return;
         };
-        let prepared = {
-            let mut state = self
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let Some(current) = state
-                .current
-                .as_ref()
-                .filter(|current| current.context.media.id == media_id)
-            else {
-                return;
-            };
-            let key = current.key.clone();
-            let context = current.context.clone();
-            let plan = state
-                .settings
-                .configured_lyrics_plan(state.private_mode, &key.media_uri);
-            let sidecar = state.settings.preferences.save_lyrics_as_sidecar;
-            cancel_current_work(&mut state);
-            let request = self.next_request.fetch_add(1, Ordering::AcqRel);
-            if let Some(current) = state.current.as_mut() {
-                current.request = request;
-                current.loading = false;
-            }
-            (request, plan, context, key, sidecar)
+        let Some(prepared) = self.begin_edited(&media_id) else {
+            return;
         };
         let service = Arc::clone(self);
         let (request, plan, context, key, sidecar) = prepared;

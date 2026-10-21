@@ -4,7 +4,7 @@ use thiserror::Error;
 use crate::{SourceEntityKind, SourceId};
 use localization::msgid;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum MetadataFieldKind {
     Text,
@@ -14,7 +14,7 @@ pub enum MetadataFieldKind {
     List,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct MetadataField {
     pub key: String,
@@ -28,12 +28,11 @@ pub struct MetadataField {
 
 pub type MetadataChanges = std::collections::BTreeMap<String, String>;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MetadataDraft {
     pub kind: SourceEntityKind,
     pub fields: Vec<MetadataField>,
     pub artwork: ArtworkEditing,
-    pub source_search: bool,
     pub revision: Option<String>,
     pub track_count: usize,
 }
@@ -49,9 +48,31 @@ impl MetadataDraft {
             kind,
             fields,
             artwork: ArtworkEditing::default(),
-            source_search: false,
             revision: None,
             track_count: 0,
+        }
+    }
+
+    pub fn merge(&mut self, next: Self) {
+        for field in &mut self.fields {
+            if let Some(next) = next.fields.iter().find(|next| next.key == field.key) {
+                field.mixed |= field.value != next.value || next.mixed;
+                field.writable &= next.writable;
+            } else {
+                field.mixed |= !field.value.is_empty();
+                field.writable = false;
+            }
+        }
+        for mut field in next.fields {
+            if !self.fields.iter().any(|existing| existing.key == field.key) {
+                field.mixed = !field.value.is_empty();
+                field.writable = false;
+                self.fields.push(field);
+            }
+        }
+        self.artwork.can_embed &= next.artwork.can_embed;
+        if self.artwork.binding != next.artwork.binding {
+            self.artwork.binding = None;
         }
     }
 
@@ -153,13 +174,21 @@ impl ImageBytes {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum ArtworkStorage {
     Embedded,
     #[default]
     Folder,
     Server,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+pub enum LyricsStorage {
+    Server,
+    Embedded,
+    Sidecar,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -175,7 +204,7 @@ pub enum ArtworkChange {
     Remove,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ArtworkEditing {
     pub binding: Option<Vec<u8>>,
     pub storage: ArtworkStorage,

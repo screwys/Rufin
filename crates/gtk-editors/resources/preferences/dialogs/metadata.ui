@@ -69,7 +69,7 @@
     <property name="child">
       <object class="AdwToolbarView" id="editor_toolbar">
         <child type="top">
-          <object class="AdwHeaderBar">
+          <object class="AdwHeaderBar" id="editor_header">
             <property name="show-start-title-buttons">false</property>
             <property name="show-end-title-buttons">true</property>
             <property name="title-widget"><object class="AdwWindowTitle" id="editor_title"><property name="title" translatable="yes">Edit metadata</property></object></property>
@@ -93,8 +93,8 @@
                 <property name="vexpand">true</property>
                 <property name="child">
                   <object class="AdwClamp">
-                    <property name="maximum-size">650</property>
-                    <property name="tightening-threshold">520</property>
+                    <property name="maximum-size">850</property>
+                    <property name="tightening-threshold">700</property>
                     <property name="margin-top">1</property>
                     <property name="margin-start">24</property>
                     <property name="margin-end">24</property>
@@ -111,12 +111,12 @@
                                 <property name="spacing">14</property>
                                 <property name="hexpand">true</property>
                                 <child>
-                                  <object class="GtkBox" id="identify_actions">
+                                  <object class="GtkBox" id="lookup_actions">
                                     <property name="orientation">horizontal</property>
                                     <property name="spacing">8</property>
                                     <property name="hexpand">true</property>
                                     <child>
-                                      <object class="GtkLabel" id="identify_scope">
+                                      <object class="GtkLabel" id="scope_label">
                                         <property name="visible">false</property>
                                         <property name="halign">start</property>
                                         <property name="hexpand">true</property>
@@ -124,23 +124,40 @@
                                       </object>
                                     </child>
                                     <child>
-                                      <object class="GtkBox" id="identify_spacer">
+                                      <object class="GtkBox" id="scope_spacer">
                                         <property name="orientation">horizontal</property>
                                         <property name="hexpand">true</property>
                                       </object>
                                     </child>
                                     <child>
-                                      <object class="GtkButton" id="identify">
-                                        <property name="label" translatable="yes">Identify</property>
-                                        <style><class name="destructive-action"/></style>
+                                      <object class="GtkButton" id="lookup">
+                                        <property name="label" translatable="yes">Lookup</property>
                                       </object>
                                     </child>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkBox" id="lookup_panel">
+                                    <property name="visible">false</property>
+                                    <property name="orientation">vertical</property>
+                                    <property name="spacing">8</property>
+                                    <child><object class="GtkBox"><property name="spacing">8</property>
+                                      <child><object class="GtkSearchEntry" id="lookup_query"><property name="hexpand">true</property><property name="placeholder-text" translatable="yes">Search MusicBrainz</property></object></child>
+                                    </object></child>
+                                    <child><object class="GtkScrolledWindow"><property name="hscrollbar-policy">never</property><property name="min-content-height">120</property><property name="max-content-height">240</property><property name="propagate-natural-height">true</property>
+                                      <property name="child"><object class="GtkListBox" id="lookup_results"><property name="selection-mode">single</property><style><class name="boxed-list"/></style></object></property>
+                                    </object></child>
+                                    <child><object class="GtkBox"><property name="spacing">8</property>
+                                      <child><object class="GtkCheckButton" id="fill_missing"><property name="label" translatable="yes">Fill missing</property><property name="active">true</property><property name="hexpand">true</property></object></child>
+                                      <child><object class="GtkButton" id="apply_lookup"><property name="label" translatable="yes">Apply</property><property name="sensitive">false</property></object></child>
+                                    </object></child>
                                   </object>
                                 </child>
                               </object>
                             </property>
                           </object>
                         </child>
+                        <child><object class="GtkStackPage"><property name="name">lyrics</property><property name="title" translatable="yes">Lyrics</property><property name="child"><object class="GtkBox" id="lyrics_host"><property name="orientation">vertical</property><property name="vexpand">true</property></object></property></object></child>
                         <child>
                           <object class="GtkStackPage">
                             <property name="name">artwork</property>

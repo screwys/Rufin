@@ -156,25 +156,6 @@ pub(super) fn read(
         .collect()
 }
 
-pub(super) fn merge(current: &mut Vec<MetadataField>, next: Vec<MetadataField>) {
-    for field in current.iter_mut() {
-        if let Some(next) = next.iter().find(|next| next.key == field.key) {
-            field.writable &= next.writable;
-            field.mixed |= field.value != next.value;
-        } else {
-            field.writable = false;
-            field.mixed |= !field.value.is_empty();
-        }
-    }
-    for mut field in next {
-        if !current.iter().any(|existing| existing.key == field.key) {
-            field.mixed = !field.value.is_empty();
-            field.writable = false;
-            current.push(field);
-        }
-    }
-}
-
 pub(super) fn apply(
     tag: &mut Tag,
     writer: MetadataWriter,
