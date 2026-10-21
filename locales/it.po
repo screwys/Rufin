@@ -1736,11 +1736,6 @@ msgstr ""
 msgid "Folder path"
 msgstr ""
 
-#, fuzzy
-#| msgid "Backup Folder"
-msgid "Folder"
-msgstr "Cartella di Backup"
-
 msgid "Folders"
 msgstr ""
 
@@ -2597,6 +2592,11 @@ msgstr ""
 msgid "No playable entries were found"
 msgstr ""
 
+#, fuzzy
+#| msgid "All Playlists"
+msgid "No playlists yet"
+msgstr "Tutte le Playlist"
+
 msgid "No related tracks found"
 msgstr ""
 
@@ -3297,6 +3297,9 @@ msgstr ""
 msgid "Remove search"
 msgstr ""
 
+msgid "Remove the library database? Settings and saved logins will be kept."
+msgstr ""
+
 #, fuzzy
 #| msgid "Album unavailable"
 msgid "Remove unavailable tracks"
@@ -3352,6 +3355,16 @@ msgstr ""
 #, fuzzy
 #| msgid "Appearance"
 msgid "Reset appearance"
+msgstr "Aspetto"
+
+#, fuzzy
+#| msgid "Appearance"
+msgid "Reset database"
+msgstr "Aspetto"
+
+#, fuzzy
+#| msgid "Appearance"
+msgid "Reset database?"
 msgstr "Aspetto"
 
 msgid "Reset to defaults"
@@ -4603,6 +4616,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Backup Folder"
+#~ msgid "Folder"
+#~ msgstr "Cartella di Backup"
 
 #~ msgid "Adding source"
 #~ msgstr "Aggiungendo una sorgente"

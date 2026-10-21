@@ -1784,11 +1784,6 @@ msgstr ""
 msgid "Folder path"
 msgstr "Kansio"
 
-#, fuzzy
-#| msgid "Folders"
-msgid "Folder"
-msgstr "Kansiot"
-
 msgid "Folders"
 msgstr "Kansiot"
 
@@ -2682,6 +2677,11 @@ msgid "No playable entries were found"
 msgstr "Palvelimia ei löytynyt"
 
 #, fuzzy
+#| msgid "No smart playlists yet"
+msgid "No playlists yet"
+msgstr "Ei älykkäitä soittolistoja vielä"
+
+#, fuzzy
 #| msgid "Nothing in this folder"
 msgid "No related tracks found"
 msgstr "Tässä kansiossa ei ole mitään"
@@ -3446,6 +3446,9 @@ msgstr "Poista sääntö"
 msgid "Remove search"
 msgstr "Poista sääntö"
 
+msgid "Remove the library database? Settings and saved logins will be kept."
+msgstr ""
+
 #, fuzzy
 #| msgid "Search is unavailable"
 msgid "Remove unavailable tracks"
@@ -3506,6 +3509,16 @@ msgstr "Vaadi SMB-salaus"
 #| msgid "Appearance"
 msgid "Reset appearance"
 msgstr "Ulkoasu"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database"
+msgstr "Julkaisupäivä"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database?"
+msgstr "Julkaisupäivä"
 
 msgid "Reset to defaults"
 msgstr "Palauta oletusarvot"
@@ -4870,6 +4883,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#, fuzzy
+#~| msgid "Folders"
+#~ msgid "Folder"
+#~ msgstr "Kansiot"
 
 #~ msgid "Keep album transitions gapless when possible"
 #~ msgstr "Pidä albumisiirtymät tauottomina jos mahdollista"
