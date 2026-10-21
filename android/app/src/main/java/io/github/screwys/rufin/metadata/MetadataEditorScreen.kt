@@ -74,7 +74,7 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
                             Tab(page == 1, { page = 1 }, text = { Text(translate("Artwork")) })
                         }
                         when (page) {
-                            0 -> MetadataFields(connection, state, editable)
+                            0 -> MetadataFields(connection, state, editable, kind)
                             1 -> MetadataArtwork(connection, state, editable) { import.launch(arrayOf("image/*")) }
                         }
                     } else if (connection.failure == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -102,14 +102,14 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
 }
 
 @Composable
-private fun MetadataFields(connection: MetadataConnection, state: MetadataEditorSnapshot, editable: Boolean) {
+private fun MetadataFields(connection: MetadataConnection, state: MetadataEditorSnapshot, editable: Boolean, kind: String) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             if (state.trackCount > 1UL) Text(state.scopeSummary,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             FilledTonalButton(connection::openLookup, enabled = editable && state.externalLookupAllowed) {
                 DetailLinkIcon("io.github.screwys.Rufin.external.musicbrainz", Modifier.size(24.dp))
-                Spacer(Modifier.width(8.dp)); Text(translate("Search by AcoustID"))
+                Spacer(Modifier.width(8.dp)); Text(if (kind == "track") translate("Search by AcoustID") else translate("Search MusicBrainz"))
             }
         }
         items(state.fields, key = { it.field.key }) { presented ->

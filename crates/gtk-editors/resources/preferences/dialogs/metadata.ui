@@ -2,6 +2,9 @@
 <interface domain="rufin">
   <requires lib="gtk" version="4.20"/>
   <requires lib="libadwaita" version="1.9"/>
+  <object class="GtkLabel" id="musicbrainz_lookup_label">
+    <property name="label" translatable="yes">Search MusicBrainz</property>
+  </object>
   <object class="AdwAlertDialog" id="save_confirmation">
     <property name="default-response">cancel</property>
     <property name="close-response">cancel</property>

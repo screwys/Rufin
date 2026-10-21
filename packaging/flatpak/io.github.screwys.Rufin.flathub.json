@@ -95,14 +95,34 @@
       ]
     },
     {
+      "name": "chromaprint",
+      "buildsystem": "cmake-ninja",
+      "config-opts": [
+        "-DBUILD_TESTS=OFF",
+        "-DBUILD_TOOLS=OFF",
+        "-DFFT_LIB=avtx"
+      ],
+      "post-install": [
+        "install -Dm644 LICENSE.md /app/share/licenses/chromaprint/LICENSE.md"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://github.com/acoustid/chromaprint/archive/refs/tags/v1.6.0.tar.gz",
+          "sha256": "65bfce4a35b2e673dbcda917b6aa577e2f145cf805243d19e6a50fea2a520c2a"
+        }
+      ]
+    },
+    {
       "name": "gstreamer-openmpt-gme",
       "buildsystem": "simple",
       "build-commands": [
-        "meson setup build -Dauto_features=disabled -Dgme=enabled -Dopenmpt=enabled -Dbs2b=enabled --buildtype=release",
-        "meson compile -C build gstgme gstopenmpt gstbs2b",
+        "meson setup build -Dauto_features=disabled -Dgme=enabled -Dopenmpt=enabled -Dbs2b=enabled -Dchromaprint=enabled --buildtype=release",
+        "meson compile -C build gstgme gstopenmpt gstbs2b gstchromaprint",
         "install -Dm755 build/ext/gme/libgstgme.so /app/lib/gstreamer-1.0/libgstgme.so",
         "install -Dm755 build/ext/openmpt/libgstopenmpt.so /app/lib/gstreamer-1.0/libgstopenmpt.so",
-        "install -Dm755 build/ext/bs2b/libgstbs2b.so /app/lib/gstreamer-1.0/libgstbs2b.so"
+        "install -Dm755 build/ext/bs2b/libgstbs2b.so /app/lib/gstreamer-1.0/libgstbs2b.so",
+        "install -Dm755 build/ext/chromaprint/libgstchromaprint.so /app/lib/gstreamer-1.0/libgstchromaprint.so"
       ],
       "sources": [
         {

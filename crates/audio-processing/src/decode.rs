@@ -6,7 +6,7 @@ use gstreamer_app::AppSink;
 pub(crate) const SAMPLE_POLL: gst::ClockTime = gst::ClockTime::from_mseconds(100);
 
 pub(crate) struct DecodePipeline {
-    pipeline: gst::Element,
+    pub pipeline: gst::Element,
     pub bus: gst::Bus,
     pub sink: gst::Element,
     window: Option<crate::StreamWindow>,

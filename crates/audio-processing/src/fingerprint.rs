@@ -20,13 +20,19 @@ pub fn fingerprint_audio(
 ) -> Result<AudioFingerprint, String> {
     let pipeline = DecodePipeline::new(
         stream,
-        "audio/x-raw,format=S16LE,layout=interleaved ! appsink name=sink sync=false max-buffers=8 drop=false",
+        "chromaprint name=printer duration=120 ! appsink name=sink sync=false max-buffers=8 drop=false",
     )?;
     let sink = pipeline
         .sink
         .clone()
         .downcast::<AppSink>()
         .expect("fingerprint sink");
+    let printer = pipeline
+        .pipeline
+        .downcast_ref::<gst::Bin>()
+        .expect("fingerprint pipeline")
+        .by_name("printer")
+        .expect("fingerprint element");
     let mut progress = Instant::now();
     let check = |progress: Instant| {
         if cancelled() {
@@ -38,52 +44,30 @@ pub fn fingerprint_audio(
         }
     };
     pipeline.start(|| check(progress))?;
-    let mut printer = chromaprint::Fingerprinter::new(chromaprint::Algorithm::default());
-    let mut samples = Vec::new();
-    let mut format = None;
-    let mut consumed = 0;
-    let mut limit = 0;
+    let mut frames = 0;
+    let mut rate = 0;
     while let Some(sample) = pipeline.sample(&sink, || check(progress))? {
         let info = AudioInfo::from_caps(sample.caps().ok_or("audio sample has no format")?)
             .map_err(|error| error.to_string())?;
-        if format.is_none() {
-            printer
-                .start(info.rate(), info.channels() as u16)
-                .map_err(|error| error.to_string())?;
-            limit = u64::from(info.rate()) * u64::from(info.channels()) * 120;
-            format = Some(info);
-        }
-        let map = sample
-            .buffer()
-            .ok_or("audio sample has no buffer")?
-            .map_readable()
-            .map_err(|error| error.to_string())?;
-        samples.clear();
-        samples.extend(
-            map.as_slice()
-                .chunks_exact(2)
-                .take((limit - consumed) as usize)
-                .map(|bytes| i16::from_le_bytes([bytes[0], bytes[1]])),
-        );
-        printer.feed(&samples).map_err(|error| error.to_string())?;
-        consumed += samples.len() as u64;
+        let buffer = sample.buffer().ok_or("audio sample has no buffer")?;
+        rate = u64::from(info.rate());
+        frames += buffer.size() as u64 / u64::from(info.bpf());
         progress = Instant::now();
-        if consumed >= limit {
+        if frames >= rate * 120 {
             break;
         }
     }
-    let info = format.ok_or("audio stream produced no samples")?;
-    printer.finish().map_err(|error| error.to_string())?;
-    if printer.fingerprint().is_empty() {
-        return Err("audio is too short to fingerprint".into());
-    }
+    let encoded = printer
+        .property::<Option<String>>("fingerprint")
+        .filter(|value| !value.is_empty())
+        .ok_or("audio is too short to fingerprint")?;
     let duration = pipeline
         .duration_millis()
         .filter(|duration| *duration > 0)
         .unwrap_or(if duration_millis > 0 {
             duration_millis
-        } else if consumed < limit {
-            consumed * 1000 / u64::from(info.rate()) / u64::from(info.channels())
+        } else if sink.is_eos() {
+            frames * 1000 / rate
         } else {
             0
         });
@@ -91,7 +75,7 @@ pub fn fingerprint_audio(
         return Err("audio duration is unavailable".into());
     }
     Ok(AudioFingerprint {
-        encoded: printer.encode(),
+        encoded,
         duration_seconds: (duration / 1000).max(1),
     })
 }

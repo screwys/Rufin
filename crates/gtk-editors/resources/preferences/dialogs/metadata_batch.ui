@@ -5,7 +5,7 @@
   <object class="AdwDialog" id="batch_dialog">
     <property name="title" translatable="yes">Edit metadata</property>
     <property name="content-width">1040</property>
-    <property name="content-height">800</property>
+    <property name="content-height">1140</property>
     <style>
       <class name="preferences" />
     </style>

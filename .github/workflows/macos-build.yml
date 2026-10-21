@@ -87,6 +87,7 @@ jobs:
           brew install \
             adwaita-icon-theme \
             cmake \
+            chromaprint \
             gettext \
             game-music-emu \
             gstreamer \

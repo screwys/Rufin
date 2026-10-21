@@ -567,7 +567,6 @@ name = "audio-processing"
 version = "0.16.6"
 dependencies = [
  "base64 0.23.1",
- "chromaprint-next",
  "ebur128",
  "gio",
  "gstreamer",
@@ -1129,15 +1128,6 @@ dependencies = [
  "cipher 0.4.4",
  "poly1305",
  "zeroize",
-]
-
-[[package]]
-name = "chromaprint-next"
-version = "0.1.0"
-source = "git+https://github.com/attilagyorffy/chromaprint-next?rev=7a384eee09caf17b4f6241f481dd784c2e937d9a#7a384eee09caf17b4f6241f481dd784c2e937d9a"
-dependencies = [
- "rustfft",
- "thiserror 2.0.21",
 ]
 
 [[package]]

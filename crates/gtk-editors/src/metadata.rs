@@ -103,10 +103,15 @@ fn build_editor_view(
         scope_label: gtk::Label,
         scope_spacer: gtk::Box,
         lookup: gtk::Button,
+        lookup_content: adw::ButtonContent,
+        musicbrainz_lookup_label: gtk::Label,
         status: gtk::Label,
         cancel: gtk::Button,
         save: gtk::Button,
     });
+    if model.draft.kind != sources::SourceEntityKind::Track {
+        lookup_content.set_label(&musicbrainz_lookup_label.label());
+    }
     editor_header.set_visible(outer.is_none());
     gtk_widgets::controls::configure_dialog_header(&editor_header);
     let width = large_popup_content_width(EDITOR_WIDTH);

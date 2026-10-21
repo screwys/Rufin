@@ -5,7 +5,7 @@
   <object class="AdwDialog" id="dialog">
     <property name="title" translatable="yes">Lookup</property>
     <property name="content-width">1040</property>
-    <property name="content-height">760</property>
+    <property name="content-height">1140</property>
     <style>
       <class name="preferences" />
     </style>
