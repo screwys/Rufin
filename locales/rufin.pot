@@ -624,6 +624,9 @@ msgstr ""
 msgid "Caching local library..."
 msgstr ""
 
+msgid "Calculating fingerprint..."
+msgstr ""
+
 msgid "Cancel download and clear downloaded items"
 msgstr ""
 
@@ -1512,6 +1515,9 @@ msgstr ""
 msgid "Fetching lyrics"
 msgstr ""
 
+msgid "Fetching metadata..."
+msgstr ""
+
 msgid "Fetching playlists"
 msgstr ""
 
@@ -2034,9 +2040,6 @@ msgid "Lock metadata"
 msgstr ""
 
 msgid "Logs are copied"
-msgstr ""
-
-msgid "Looking up..."
 msgstr ""
 
 msgid "Lookup"
@@ -2941,6 +2944,9 @@ msgstr ""
 msgid "Rating"
 msgstr ""
 
+msgid "Reading tags..."
+msgstr ""
+
 msgid "Ready"
 msgstr ""
 
@@ -2966,6 +2972,9 @@ msgid "Reconnect"
 msgstr ""
 
 msgid "Record label"
+msgstr ""
+
+msgid "Recording"
 msgstr ""
 
 msgid "Red"
@@ -3011,6 +3020,9 @@ msgid "Relay"
 msgstr ""
 
 msgid "Release date"
+msgstr ""
+
+msgid "Release group"
 msgstr ""
 
 msgid "Release notifications"
@@ -3371,7 +3383,13 @@ msgstr ""
 msgid "Search..."
 msgstr ""
 
+msgid "Searching AcoustID..."
+msgstr ""
+
 msgid "Searching Local Network"
+msgstr ""
+
+msgid "Searching MusicBrainz..."
 msgstr ""
 
 msgid "Searching for devices..."
@@ -4317,6 +4335,10 @@ msgid "{field} \302\267 Different across {count} track"
 msgid_plural "{field} \302\267 Different across {count} tracks"
 msgstr[0] ""
 msgstr[1] ""
+
+#, rust-format
+msgid "{stage} ({completed} of {total})"
+msgstr ""
 
 #, rust-format
 msgid "{stage}: {completed} / {total}"

@@ -1,3 +1,4 @@
+use super::review::LookupProgress;
 use super::{EditDestination, EditSession, MetadataCandidate, MetadataEditor};
 use audio_processing::{AudioFingerprint, FINGERPRINT_VERSION, fingerprint_audio};
 use library::ReadCancellation;
@@ -16,7 +17,10 @@ impl Drop for ScanCancellation {
 }
 
 impl MetadataEditor {
-    pub(super) async fn scan(self: Arc<Self>) -> Result<Vec<MetadataCandidate>, Error> {
+    pub(super) async fn scan(
+        self: Arc<Self>,
+        report: LookupProgress,
+    ) -> Result<Vec<MetadataCandidate>, Error> {
         if !self
             .source
             .shared
@@ -33,9 +37,13 @@ impl MetadataEditor {
         runtime
             .spawn(async move {
                 let fingerprint = self
-                    .fingerprint_track(self.session.clone().ok_or(Error::Unavailable)?, cancelled)
+                    .fingerprint_track(
+                        self.session.clone().ok_or(Error::Unavailable)?,
+                        cancelled,
+                        &report,
+                    )
                     .await?;
-                self.scan_matches(fingerprint)
+                self.scan_matches(fingerprint, &report)
                     .await
                     .map(|matches| matches.candidates)
             })
@@ -47,6 +55,7 @@ impl MetadataEditor {
         &self,
         session: Arc<EditSession>,
         cancelled: Arc<AtomicBool>,
+        report: &LookupProgress,
     ) -> Result<AudioFingerprint, Error> {
         let database = &self.source.shared.database;
         let uri = &session.media_uri;
@@ -71,6 +80,7 @@ impl MetadataEditor {
         let (fingerprint, duration) = if let Some(cached) = cached {
             cached
         } else {
+            report(&localization::tr("Calculating fingerprint..."));
             let local = self.source.shared.settings.local_configuration();
             let owner = self.source.clone();
             let stream = crate::playback::prepare_stream(
@@ -120,6 +130,7 @@ impl MetadataEditor {
     async fn scan_matches(
         &self,
         fingerprint: AudioFingerprint,
+        report: &LookupProgress,
     ) -> Result<metadata_lookup::FingerprintMatches, Error> {
         let AudioFingerprint {
             encoded: fingerprint,
@@ -131,6 +142,7 @@ impl MetadataEditor {
         {
             return Ok(matches);
         }
+        report(&localization::tr("Searching AcoustID..."));
         let matches = self
             .source
             .shared

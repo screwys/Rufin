@@ -122,7 +122,7 @@
                                     </child>
                                     <child>
                                       <object class="GtkButton" id="lookup">
-                                        <property name="label" translatable="yes">Search by AcoustID</property>
+                                        <property name="child"><object class="AdwButtonContent" id="lookup_content"><property name="icon-name">io.github.screwys.Rufin.external.musicbrainz</property><property name="label" translatable="yes">Search by AcoustID</property></object></property>
                                       </object>
                                     </child>
                                   </object>

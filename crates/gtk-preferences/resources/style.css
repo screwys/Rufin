@@ -1290,8 +1290,8 @@ entry.metadata-identified-change:dir(rtl) {
   margin-top: -4px;
 }
 
-.preferences-header,
-.preferences-header:backdrop,
+headerbar.preferences-header,
+headerbar.preferences-header:backdrop,
 .preferences-sidebar,
 .preferences-sidebar:backdrop,
 .preferences-split > .sidebar-pane,

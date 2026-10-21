@@ -18,6 +18,7 @@ pub(super) fn connect(
                 && tracks.is_sensitive()
                 && let Some(position) = adjacent(&model, forward)
             {
+                model.select_item(position, true);
                 tracks.scroll_to(
                     position,
                     gtk::ListScrollFlags::FOCUS | gtk::ListScrollFlags::SELECT,

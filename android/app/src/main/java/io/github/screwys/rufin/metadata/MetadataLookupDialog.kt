@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.screwys.rufin.core.translate
+import io.github.screwys.rufin.shared.metadata_lookup.MetadataMatchKind
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -22,6 +23,13 @@ internal fun MetadataLookupDialog(connection: MetadataConnection) {
     var query by remember { mutableStateOf("") }
     val item = connection.lookupItem
     val progress = connection.lookupProgress
+    val stage = progress?.stage.orEmpty()
+    val progressText = if (stage.isEmpty()) {
+        translate("{completed} of {total}")
+    } else {
+        translate("{stage} ({completed} of {total})").replace("{stage}", stage)
+    }.replace("{completed}", (progress?.completed ?: 0UL).toString())
+        .replace("{total}", (progress?.total ?: 1UL).toString())
     val editable = !connection.lookupBusy
     Dialog(onDismissRequest = { if (!connection.lookupAccepting) connection.cancelLookup() },
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false,
@@ -29,8 +37,10 @@ internal fun MetadataLookupDialog(connection: MetadataConnection) {
         Surface(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(translate("Lookup"), style = MaterialTheme.typography.titleLarge)
+                Text(progressText, style = MaterialTheme.typography.labelMedium)
                 item?.let { Text(it.title, style = MaterialTheme.typography.titleMedium) }
-                if (progress?.finished == false) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (progress?.finished == false) LinearProgressIndicator(
+                    progress = { progress.completed.toFloat() / progress.total.toFloat() }, modifier = Modifier.fillMaxWidth())
                 val failure = connection.lookupFailure?.message ?: progress?.failure ?: item?.failure
                 failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
@@ -46,6 +56,12 @@ internal fun MetadataLookupDialog(connection: MetadataConnection) {
                     }
                     items(item?.candidates.orEmpty(), key = { it.id }) { candidate ->
                         ListItem(headlineContent = { Text(candidate.title) }, supportingContent = { Text(candidate.detail) },
+                            trailingContent = { Text(when (candidate.kind) {
+                                MetadataMatchKind.RECORDING -> translate("Recording")
+                                MetadataMatchKind.RELEASE -> translate("Release")
+                                MetadataMatchKind.RELEASE_GROUP -> translate("Release group")
+                                MetadataMatchKind.ARTIST -> translate("Artist")
+                            }, style = MaterialTheme.typography.labelSmall) },
                             colors = ListItemDefaults.colors(containerColor = if (item?.selected == candidate.id)
                                 MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface),
                             modifier = Modifier.clickable(enabled = editable) { connection.chooseLookup(candidate) })
@@ -72,8 +88,7 @@ internal fun MetadataLookupDialog(connection: MetadataConnection) {
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(translate("{completed} of {total}").replace("{completed}", (progress?.completed ?: 0UL).toString())
-                        .replace("{total}", (progress?.total ?: 1UL).toString()), Modifier.weight(1f))
+                    Spacer(Modifier.weight(1f))
                     if (progress?.finished == false) TextButton(connection::stopLookup) { Text(translate("Stop")) }
                     TextButton(connection::cancelLookup, enabled = !connection.lookupAccepting) { Text(translate("Cancel")) }
                     Button(connection::acceptLookup, enabled = editable) { Text(translate("Done")) }

@@ -1,7 +1,8 @@
 use adw::prelude::*;
 use gtk_widgets::sparse_model::{SparseLoad, SparseRouteModel, SparseSource};
 use rufin_core::metadata::{
-    MetadataLookupField, MetadataLookupItem, MetadataLookupReview, MetadataTrackSummary,
+    MetadataLookupField, MetadataLookupItem, MetadataLookupReview, MetadataMatchKind,
+    MetadataTrackSummary,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -22,7 +23,9 @@ struct ReviewView {
     original: adw::ActionRow,
     fields: gtk::gio::ListStore,
     fill_missing: gtk::CheckButton,
-    progress: gtk::Label,
+    progress: adw::WindowTitle,
+    progress_bar: gtk::ProgressBar,
+    kind_labels: [gtk::glib::GString; 4],
     stop: gtk::Button,
     done: gtk::Button,
     cancel: gtk::Button,
@@ -70,7 +73,9 @@ pub(super) fn present(
         title: gtk::Label, query: gtk::SearchEntry, status: gtk::Label, matches: gtk::ListBox,
         original: adw::ActionRow, comparison: gtk::ColumnView,
         field_column: gtk::ColumnViewColumn, original_column: gtk::ColumnViewColumn, suggested_column: gtk::ColumnViewColumn,
-        fill_missing: gtk::CheckButton, progress: gtk::Label, stop: gtk::Button, cancel: gtk::Button, done: gtk::Button,
+        fill_missing: gtk::CheckButton, progress: adw::WindowTitle, progress_bar: gtk::ProgressBar,
+        recording_label: gtk::Label, release_label: gtk::Label, release_group_label: gtk::Label, artist_label: gtk::Label,
+        stop: gtk::Button, cancel: gtk::Button, done: gtk::Button,
         review_content: gtk::Box,
     });
     gtk_widgets::controls::configure_dialog_header(&header);
@@ -141,6 +146,13 @@ pub(super) fn present(
         fields,
         fill_missing,
         progress,
+        progress_bar,
+        kind_labels: [
+            recording_label.label(),
+            release_label.label(),
+            release_group_label.label(),
+            artist_label.label(),
+        ],
         stop,
         done,
         cancel: cancel.clone(),
@@ -197,7 +209,12 @@ pub(super) fn present(
         });
         let index = view.current.get() as u64;
         let review = view.review.clone();
-        view.start_action(async move { review.choose(index, candidate).await });
+        let stage = if candidate.is_some() {
+            localization::tr("Fetching metadata...")
+        } else {
+            localization::tr("Reading tags...")
+        };
+        view.start_action(&stage, async move { review.choose(index, candidate).await });
     });
     let weak = Rc::downgrade(&view);
     view.fill_missing.connect_toggled(move |_| {
@@ -213,7 +230,9 @@ pub(super) fn present(
             let review = view.review.clone();
             let index = view.current.get() as u64;
             let query = query.text().to_string();
-            view.start_action(async move { review.search(index, query).await });
+            view.start_action(&localization::tr("Searching MusicBrainz..."), async move {
+                review.search(index, query).await
+            });
         }
     });
     let weak = Rc::downgrade(&view);
@@ -275,13 +294,33 @@ pub(super) fn present(
     let weak = Rc::downgrade(&view);
     view.updates
         .replace(Some(gtk::glib::spawn_future_local(async move {
+            let mut completed = 0;
+            let mut previous_active = None;
             while let Some(progress) = review.next_update().await {
                 let Some(view) = weak.upgrade() else { return };
-                view.show_progress(&progress);
-                view.refresh_rows();
-                if !view.busy.get() {
-                    view.load_item();
+                if view.rows.first_live_position().is_some_and(|first| {
+                    let first = first as u64;
+                    let end = first + 192;
+                    let visible = |index: Option<u64>| {
+                        index.is_some_and(|index| index >= first && index < end)
+                    };
+                    visible(progress.active_track)
+                        || visible(previous_active)
+                        || (completed < end
+                            && progress.completed > first
+                            && completed != progress.completed)
+                }) {
+                    view.refresh_rows();
                 }
+                if !view.busy.get() {
+                    view.show_progress(&progress);
+                    let current = u64::from(view.current.get());
+                    if progress.finished || (current >= completed && current < progress.completed) {
+                        view.load_item();
+                    }
+                }
+                completed = progress.completed;
+                previous_active = progress.active_track;
                 if progress.finished {
                     return;
                 }
@@ -315,16 +354,23 @@ pub(super) fn present(
 impl ReviewView {
     fn show_progress(&self, progress: &rufin_core::metadata::MetadataLookupProgress) {
         let label = progress.failure.clone().unwrap_or_else(|| {
-            localization::tr_with(
-                "{completed} of {total}",
-                &[
-                    ("completed", &progress.completed.to_string()),
-                    ("total", &progress.total.to_string()),
-                ],
-            )
+            let values = [
+                ("stage", progress.stage.as_str()),
+                ("completed", &progress.completed.to_string()),
+                ("total", &progress.total.to_string()),
+            ];
+            if progress.stage.is_empty() {
+                localization::tr_with("{completed} of {total}", &values)
+            } else {
+                localization::tr_with("{stage} ({completed} of {total})", &values)
+            }
         });
-        self.progress.set_label(&label);
+        self.progress.set_subtitle(&label);
         self.progress.set_tooltip_text(Some(&label));
+        self.progress_bar
+            .set_fraction(progress.completed as f64 / progress.total as f64);
+        self.progress_bar
+            .set_opacity(if progress.finished { 0.0 } else { 1.0 });
         self.stop.set_visible(!progress.finished);
         if progress.failure.is_some() {
             self.progress.add_css_class("error");
@@ -346,6 +392,7 @@ impl ReviewView {
 
     fn start_action(
         self: &Rc<Self>,
+        stage: &str,
         operation: impl std::future::Future<Output = Result<(), sources::SourceMetadataError>> + 'static,
     ) {
         if self.busy.get() {
@@ -355,11 +402,15 @@ impl ReviewView {
             task.abort();
         }
         self.set_busy(true);
+        self.progress.set_subtitle(stage);
+        self.progress_bar.set_opacity(1.0);
+        self.progress_bar.pulse();
         let weak = Rc::downgrade(self);
         let task = gtk::glib::spawn_future_local(async move {
             let result = operation.await;
             if let Some(view) = weak.upgrade() {
                 view.set_busy(false);
+                view.show_progress(&view.review.progress());
                 if result.is_err() {
                     view.last.borrow_mut().take();
                 }
@@ -405,12 +456,8 @@ impl ReviewView {
         self.title.set_label(&item.title);
         self.message(item.failure.as_deref().unwrap_or(""));
         let finished = self.review.progress().finished;
-        if item.failure.is_none() {
-            if !item.ready && !finished {
-                self.message(&localization::tr("Looking up..."));
-            } else if item.ready && item.candidates.is_empty() {
-                self.message(&localization::tr("No results"));
-            }
+        if item.failure.is_none() && item.ready && item.candidates.is_empty() {
+            self.message(&localization::tr("No results"));
         }
         self.query.set_sensitive(item.ready || finished);
         self.matches.set_sensitive(item.ready);
@@ -427,14 +474,25 @@ impl ReviewView {
             self.matches.remove_all();
             self.matches.append(&self.original);
             for candidate in &item.candidates {
-                self.matches.append(
-                    &adw::ActionRow::builder()
-                        .title(&candidate.title)
-                        .subtitle(&candidate.detail)
-                        .use_markup(false)
-                        .activatable(true)
+                let row = adw::ActionRow::builder()
+                    .title(&candidate.title)
+                    .subtitle(&candidate.detail)
+                    .use_markup(false)
+                    .activatable(true)
+                    .build();
+                let kind = match candidate.kind {
+                    MetadataMatchKind::Recording => 0,
+                    MetadataMatchKind::Release => 1,
+                    MetadataMatchKind::ReleaseGroup => 2,
+                    MetadataMatchKind::Artist => 3,
+                };
+                row.add_suffix(
+                    &gtk::Label::builder()
+                        .label(self.kind_labels[kind].as_str())
+                        .css_classes(["caption", "dim-label"])
                         .build(),
                 );
+                self.matches.append(&row);
             }
         }
         let selected = item

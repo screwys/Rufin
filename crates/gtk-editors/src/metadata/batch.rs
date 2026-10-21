@@ -1,5 +1,6 @@
 use super::{MetadataView, build_editor_view};
 use adw::prelude::*;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk_widgets::sparse_model::{
     SparseLoad, SparseObjectItem, SparseRouteModel, SparseSource, connect_sparse_bind,
 };
@@ -12,6 +13,11 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
+
+gtk_widgets::composite_box!(pub(crate) MetadataTrackRow, track_row, "RufinMetadataTrackRow",
+"/io/github/screwys/Rufin/ui/preferences/dialogs/metadata_track.ui", {
+    title: gtk::Label, status: gtk::Label,
+});
 
 struct BatchView {
     batch: Arc<MetadataBatch>,
@@ -392,26 +398,27 @@ pub(super) fn track_factory() -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, object| {
         let item = object.downcast_ref::<gtk::ListItem>().unwrap();
-        let resource = crate::ui_resource::METADATA_TRACK_RESOURCE;
-        let builder = crate::ui_resource::builder(resource);
-        let track: adw::ActionRow = crate::ui_resource::object(&builder, resource, "track");
+        let track = MetadataTrackRow::new();
         item.set_child(Some(&track));
     });
     connect_sparse_bind(&factory, |object| {
         let item = object.downcast_ref::<gtk::ListItem>().unwrap();
-        let track = item.child().and_downcast::<adw::ActionRow>().unwrap();
+        let track = item.child().and_downcast::<MetadataTrackRow>().unwrap();
         let row = item
             .item()
             .and_downcast::<SparseObjectItem>()
             .and_then(|item| item.value::<Arc<MetadataTrackSummary>>());
         if let Some(row) = row {
-            track.set_title(&row.title);
-            track.set_subtitle(row.error.as_deref().unwrap_or(&row.scan_status));
+            track.imp().title.set_label(&row.title);
+            track
+                .imp()
+                .status
+                .set_label(row.error.as_deref().unwrap_or(&row.scan_status));
             track.set_tooltip_text(row.error.as_deref().or(Some(&row.title)));
             if row.modified {
-                track.add_css_class("heading");
+                track.imp().title.add_css_class("heading");
             } else {
-                track.remove_css_class("heading");
+                track.imp().title.remove_css_class("heading");
             }
             if row.error.is_some() {
                 track.add_css_class("error");
@@ -419,10 +426,10 @@ pub(super) fn track_factory() -> gtk::SignalListItemFactory {
                 track.remove_css_class("error");
             }
         } else {
-            track.set_title("");
-            track.set_subtitle("");
+            track.imp().title.set_label("");
+            track.imp().status.set_label("");
             track.set_tooltip_text(None);
-            track.remove_css_class("heading");
+            track.imp().title.remove_css_class("heading");
             track.remove_css_class("error");
         }
     });

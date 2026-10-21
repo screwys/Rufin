@@ -13,7 +13,11 @@ pub struct MetadataLookupProgress {
     pub total: u64,
     pub finished: bool,
     pub failure: Option<String>,
+    pub active_track: Option<u64>,
+    pub stage: String,
 }
+
+pub(super) type LookupProgress = Arc<dyn Fn(&str) + Send + Sync>;
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 #[derive(Clone, PartialEq, Eq)]
@@ -156,9 +160,15 @@ impl MetadataLookupReview {
                     .failure = Some(Error::Unavailable.to_string());
                 break;
             }
+            let owner = Arc::downgrade(&self);
+            let report: LookupProgress = Arc::new(move |stage| {
+                if let Some(owner) = owner.upgrade() {
+                    owner.report(index, stage);
+                }
+            });
             let outcome = tokio::select! {
                 _ = self.cancelled.cancelled() => break,
-                result = self.discover(index, String::new()) => result,
+                result = self.discover(index, String::new(), report) => result,
             };
             let mut progress = self.progress.lock().unwrap_or_else(|e| e.into_inner());
             progress.completed = index + 1;
@@ -169,10 +179,12 @@ impl MetadataLookupReview {
             drop(progress);
             let _ = self.updates.0.try_send(());
         }
-        self.progress
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .finished = true;
+        {
+            let mut progress = self.progress.lock().unwrap_or_else(|e| e.into_inner());
+            progress.finished = true;
+            progress.active_track = None;
+            progress.stage.clear();
+        }
         let _ = self.updates.0.try_send(());
     }
 
@@ -181,7 +193,7 @@ impl MetadataLookupReview {
         offset: u64,
         limit: u64,
     ) -> Result<Vec<MetadataTrackSummary>, Error> {
-        match &self.items {
+        let mut tracks = match &self.items {
             Items::Batch(batch) => batch.clone().tracks(offset, limit).await,
             Items::Single { working, .. } if offset == 0 && limit > 0 => {
                 let snapshot = working.snapshot();
@@ -195,7 +207,15 @@ impl MetadataLookupReview {
                 }])
             }
             _ => Ok(Vec::new()),
+        }?;
+        let progress = self.progress();
+        if let Some(row) = tracks
+            .iter_mut()
+            .find(|row| Some(row.index) == progress.active_track)
+        {
+            row.scan_status = progress.stage;
         }
+        Ok(tracks)
     }
 
     pub async fn item(&self, index: u64, fill_missing: bool) -> Result<MetadataLookupItem, Error> {
@@ -263,7 +283,7 @@ impl MetadataLookupReview {
     }
 
     pub async fn search(&self, index: u64, query: String) -> Result<(), Error> {
-        let result = self.discover(index, query).await;
+        let result = self.discover(index, query, Arc::new(|_| {})).await;
         if let Err(error) = &result {
             let editor = self.editor(index, false).await?;
             editor.state().scan_error = Some(error.to_string());
@@ -299,11 +319,28 @@ impl MetadataLookupReview {
                 total,
                 finished: false,
                 failure: None,
+                active_track: None,
+                stage: String::new(),
             }),
             updates: async_channel::bounded(1),
             cancelled: CancellationToken::new(),
             run_lock: tokio::sync::Mutex::new(()),
         })
+    }
+
+    fn report(&self, index: u64, stage: &str) {
+        if self.cancelled.is_cancelled() {
+            return;
+        }
+        {
+            let mut progress = self.progress.lock().unwrap_or_else(|e| e.into_inner());
+            if progress.finished {
+                return;
+            }
+            progress.active_track = Some(index);
+            progress.stage = stage.to_string();
+        }
+        let _ = self.updates.0.try_send(());
     }
 
     async fn editor(&self, index: u64, scan: bool) -> Result<Arc<MetadataEditor>, Error> {
@@ -325,7 +362,13 @@ impl MetadataLookupReview {
         Ok(())
     }
 
-    async fn discover(&self, index: u64, query: String) -> Result<(), Error> {
+    async fn discover(
+        &self,
+        index: u64,
+        query: String,
+        report: LookupProgress,
+    ) -> Result<(), Error> {
+        report(&tr(msgid("Reading tags...")));
         let mut editor = self.editor(index, false).await?;
         if query.is_empty() && editor.state().lookup_candidates.is_some() {
             return Ok(());
@@ -336,7 +379,7 @@ impl MetadataLookupReview {
             match self.editor(index, true).await {
                 Ok(scanning) => {
                     editor = scanning;
-                    match editor.clone().scan().await {
+                    match editor.clone().scan(report.clone()).await {
                         Ok(found) => candidates = found,
                         Err(error) => failure = Some(error.to_string()),
                     }
@@ -345,6 +388,7 @@ impl MetadataLookupReview {
             }
         }
         if candidates.is_empty() {
+            report(&tr(msgid("Searching MusicBrainz...")));
             candidates = self.search_candidates(&editor, query).await?;
         }
         if !candidates.is_empty() {
@@ -376,6 +420,7 @@ impl MetadataLookupReview {
                 })
         };
         let resolved = if let Some(chosen) = chosen {
+            report(&tr(msgid("Fetching metadata...")));
             match self.resolve_candidate(&editor, chosen.clone()).await {
                 Ok(changes) => Some((chosen, changes)),
                 Err(Error::InvalidInput(error)) => {

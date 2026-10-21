@@ -49,18 +49,24 @@ pub fn metadata_identity(
         ],
         SourceEntityKind::Artist => &[("musicbrainz_artist_id", MetadataMatchKind::Artist)],
     };
-    keys.iter().find_map(|(key, kind)| {
+    keys.iter().find_map(|(key, match_kind)| {
         let id = usable(values.get(*key).map(String::as_str))?.to_string();
+        let title_key =
+            if kind == SourceEntityKind::Track && *match_kind == MetadataMatchKind::Release {
+                "album"
+            } else {
+                "title"
+            };
         Some(MetadataCandidate {
             from_fingerprint: false,
             title: values
-                .get("title")
+                .get(title_key)
                 .filter(|title| !title.trim().is_empty())
                 .cloned()
                 .unwrap_or_else(|| id.clone()),
             detail: id.clone(),
             id,
-            kind: *kind,
+            kind: *match_kind,
         })
     })
 }
