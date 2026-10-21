@@ -1,3 +1,5 @@
+use std::cell::Cell;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use playback::{
@@ -8,7 +10,7 @@ use playback::{
 use crate::relay::{
     PublishRequest, PublishedResource, RelayRepresentation, RelayServer, source_content_type,
 };
-use crate::upnp_transport::UpnpDevice;
+use crate::upnp_transport::{UpnpDevice, diagnostic_value};
 
 const AV_TRANSPORT: &str = "AVTransport";
 const CONNECTION_MANAGER: &str = "ConnectionManager";
@@ -17,6 +19,7 @@ const END_POSITION_TOLERANCE_MILLIS: u64 = 2_000;
 const SEEK_POSITION_SAMPLES: u8 = 4;
 const PLAY_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const PLAY_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+static NEXT_DIAGNOSTIC_SESSION: AtomicU64 = AtomicU64::new(1);
 
 struct PendingSeek {
     origin_millis: u64,
@@ -170,6 +173,8 @@ impl QueuedMedia {
 
 pub(crate) struct UpnpController {
     device: UpnpDevice,
+    diagnostic_session: u64,
+    action_sequence: Cell<u64>,
     sink_protocols: SinkProtocols,
     current: Option<QueuedMedia>,
     next_media: Option<QueuedMedia>,
@@ -199,6 +204,8 @@ impl UpnpController {
         }
         Ok(Self {
             device,
+            diagnostic_session: NEXT_DIAGNOSTIC_SESSION.fetch_add(1, Ordering::Relaxed),
+            action_sequence: Cell::new(0),
             sink_protocols: SinkProtocols(None),
             current: None,
             next_media: None,
@@ -232,6 +239,7 @@ impl UpnpController {
     }
 
     pub(crate) fn verify_connection(&mut self) -> Result<(), String> {
+        let _span = tracing::debug_span!("upnp_connect").entered();
         let result = self.action(
             AV_TRANSPORT,
             "GetTransportInfo",
@@ -247,6 +255,26 @@ impl UpnpController {
         command: BackendCommand,
         relay: &RelayServer,
     ) -> Result<Vec<BackendEvent>, String> {
+        let command_name = match &command {
+            BackendCommand::Start { .. } => "Start",
+            BackendCommand::Play { .. } => "Play",
+            BackendCommand::Pause { .. } => "Pause",
+            BackendCommand::Stop { .. } => "Stop",
+            BackendCommand::Seek { .. } => "Seek",
+            BackendCommand::PrepareNext { .. } => "PrepareNext",
+            BackendCommand::SetOutputVolume { .. } => "SetOutputVolume",
+            BackendCommand::SetVisualizerEnabled(_) => "SetVisualizerEnabled",
+            BackendCommand::ConfigureAudio(_) => "ConfigureAudio",
+            BackendCommand::UpdateLoudness { .. } => "UpdateLoudness",
+            BackendCommand::SetPlaybackRate(_) => "SetPlaybackRate",
+        };
+        let _span = tracing::debug_span!(
+            "upnp_command",
+            command = command_name,
+            run = ?command.run(),
+        )
+        .entered();
+        tracing::debug!(session = self.diagnostic_session, "handling UPnP command");
         match command {
             BackendCommand::Start {
                 run,
@@ -449,6 +477,7 @@ impl UpnpController {
         processing: ProcessingRequest,
         relay: &RelayServer,
     ) -> Result<Vec<BackendEvent>, String> {
+        let _span = tracing::debug_span!("upnp_processing").entered();
         let changed = self.processing.config != processing.config
             || self.processing.cast_encoding != processing.cast_encoding;
         self.processing = processing;
@@ -463,6 +492,7 @@ impl UpnpController {
     }
 
     fn reload(&mut self, position: u64, relay: &RelayServer) -> Result<Vec<BackendEvent>, String> {
+        let _span = tracing::debug_span!("upnp_reload", run = ?self.current_run()).entered();
         let current = self
             .current
             .as_ref()
@@ -518,6 +548,7 @@ impl UpnpController {
     }
 
     pub(crate) fn poll(&mut self, relay: &RelayServer) -> Result<Vec<BackendEvent>, String> {
+        let _span = tracing::debug_span!("upnp_poll", run = ?self.current_run()).entered();
         let Some(run) = self.current_run() else {
             return Ok(Vec::new());
         };
@@ -727,6 +758,7 @@ impl UpnpController {
     }
 
     pub(crate) fn shutdown(&mut self) {
+        let _span = tracing::debug_span!("upnp_shutdown").entered();
         let _ = self.stop();
         let _ = self.restore_startup_output();
         self.current = None;
@@ -756,6 +788,7 @@ impl UpnpController {
         position_millis: u64,
         relay: &RelayServer,
     ) -> Result<Vec<BackendEvent>, String> {
+        let _span = tracing::debug_span!("upnp_start", %run).entered();
         let previous_uri = self
             .current
             .as_ref()
@@ -1169,13 +1202,20 @@ impl UpnpController {
     }
 
     fn transport_action_allowed(&self, action: &str) -> bool {
-        match self.transport_actions() {
+        let allowed = match self.transport_actions() {
             Ok(actions) => actions.allows(action),
             Err(error) => {
                 tracing::debug!(%error, action, "UPnP transport action availability could not be observed");
                 true
             }
-        }
+        };
+        tracing::debug!(
+            session = self.diagnostic_session,
+            action,
+            allowed,
+            "checked UPnP action availability"
+        );
+        allowed
     }
 
     fn is_playing(&self) -> bool {
@@ -1242,8 +1282,14 @@ impl UpnpController {
     }
 
     fn stop_transport(&self) -> Result<(), String> {
-        self.action(AV_TRANSPORT, "Stop", "<InstanceID>0</InstanceID>")?;
-        Ok(())
+        let result = self
+            .action(AV_TRANSPORT, "Stop", "<InstanceID>0</InstanceID>")
+            .map(|_| ());
+        if result.is_err() && tracing::enabled!(tracing::Level::DEBUG) {
+            let _span = tracing::debug_span!("upnp_status_after_failed_stop").entered();
+            let _ = self.transport_state();
+        }
+        result
     }
 
     fn volume(&self) -> Result<(f64, bool), String> {
@@ -1316,19 +1362,39 @@ impl UpnpController {
         action: &str,
         payload: &str,
     ) -> Result<std::collections::HashMap<String, String>, String> {
+        let request = self.action_sequence.get() + 1;
+        self.action_sequence.set(request);
+        let _span = tracing::debug_span!(
+            "upnp_action",
+            session = self.diagnostic_session,
+            request,
+            service = service_type,
+            action,
+        )
+        .entered();
+        tracing::debug!("sending UPnP action");
         let started = Instant::now();
         let result = self
             .device
             .action(service_type, action, payload)
             .map_err(|error| format!("UPnP {action} failed: {error}"));
-        let elapsed = started.elapsed();
-        if result.is_err() || elapsed.as_millis() >= 250 {
-            tracing::debug!(
-                action,
-                elapsed_ms = elapsed.as_millis(),
-                "completed UPnP action"
-            );
-        }
+        let values = result.as_ref().ok();
+        let state = values
+            .and_then(|values| values.get("CurrentTransportState"))
+            .map(|value| diagnostic_value(value))
+            .or_else(|| (action == "GetTransportInfo").then_some("[not returned]"));
+        let actions = values
+            .and_then(|values| values.get("Actions"))
+            .map(|value| diagnostic_value(value))
+            .or_else(|| (action == "GetCurrentTransportActions").then_some("[not returned]"));
+        tracing::debug!(
+            success = result.is_ok(),
+            elapsed_ms = started.elapsed().as_millis(),
+            transport_state = state,
+            advertised_actions = actions,
+            error = result.as_ref().err().map(String::as_str),
+            "completed UPnP action"
+        );
         result
     }
 }
@@ -1646,18 +1712,31 @@ mod tests {
 
     #[test]
     fn connection_probe_rejects_an_unusable_control_service() {
-        let (address, _received, renderer) = test_renderer(TEST_DEVICE_DESCRIPTION, 1, |_, _| {
-            Err("renderer unavailable".to_string())
-        });
-        let device = test_device(address);
-        let mut controller = UpnpController::new(device).expect("controller");
+        for (body, expected) in [
+            (
+                "renderer unavailable",
+                "The renderer responded with status code 500 Internal Server Error",
+            ),
+            (
+                r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0"><errorCode>701</errorCode><errorDescription>https://example.test/private?token=secret</errorDescription></UPnPError></detail></s:Fault></s:Body></s:Envelope>"#,
+                "The renderer responded with status code 500 Internal Server Error (UPnP error 701)",
+            ),
+        ] {
+            let (address, _received, renderer) = test_renderer(
+                TEST_DEVICE_DESCRIPTION,
+                1,
+                move |_, _| Err(body.to_string()),
+            );
+            let device = test_device(address);
+            let mut controller = UpnpController::new(device).expect("controller");
 
-        let error = controller
-            .verify_connection()
-            .expect_err("unusable control service");
+            let error = controller
+                .verify_connection()
+                .expect_err("unusable control service");
 
-        assert!(error.contains("GetTransportInfo"), "error={error}");
-        drop(renderer);
+            assert_eq!(error, format!("UPnP GetTransportInfo failed: {expected}"));
+            drop(renderer);
+        }
     }
 
     #[test]
@@ -1757,44 +1836,144 @@ mod tests {
     }
 
     #[test]
-    fn play_failure_stops_the_uri_owned_by_the_controller() {
-        let (address, received, renderer) =
-            test_renderer(TEST_DEVICE_DESCRIPTION, 9, |action, _| {
-                if action.contains("#Play") {
-                    return Err("play failed".to_string());
-                }
-                Ok(if action.contains("GetTransportInfo") {
-                    "<CurrentTransportState>STOPPED</CurrentTransportState>"
-                } else if action.contains("GetCurrentTransportActions") {
-                    "<Actions>Play,Stop,Seek</Actions>"
-                } else {
-                    ""
-                }
-                .to_string())
-            });
-        let device = test_device(address);
-        let (_directory, stream) = test_stream();
-        let relay =
-            RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
-        let mut controller = UpnpController::new(device).expect("controller");
+    fn transport_failures_record_exchange_and_preserve_cleanup() {
+        use tracing_subscriber::layer::SubscriberExt;
 
-        let error = controller
-            .start(RunId::new(1), stream, None, 0, &relay)
-            .expect_err("failed Play");
+        // Other test threads can register these callsites without the scoped subscriber.
+        let _unscoped = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+        for failed_action in ["Play", "Stop"] {
+            let log = tempfile::NamedTempFile::new().expect("diagnostic log");
+            let subscriber = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::DEBUG)
+                .with_ansi(false)
+                .without_time()
+                .with_writer(log.reopen().expect("diagnostic writer"))
+                .finish()
+                .with(
+                    tracing_subscriber::filter::Targets::new()
+                        .with_target("playback", tracing::Level::DEBUG),
+                );
+            let (address, received, renderer) = test_renderer(
+                TEST_DEVICE_DESCRIPTION,
+                if failed_action == "Play" { 9 } else { 3 },
+                move |action, _| {
+                    if action.contains(&format!("#{failed_action}\"")) {
+                        let description = if failed_action == "Play" {
+                            "Transition not available"
+                        } else {
+                            "https://example.test/private?token=secret"
+                        };
+                        return Err(format!(
+                            r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0"><errorCode>701</errorCode><errorDescription>{description}</errorDescription></UPnPError></detail></s:Fault></s:Body></s:Envelope>"#
+                        ));
+                    }
+                    Ok(if action.contains("GetTransportInfo") {
+                        "<CurrentTransportState>STOPPED</CurrentTransportState>"
+                    } else if action.contains("GetCurrentTransportActions") {
+                        "<Actions>Play,Stop,Seek</Actions>"
+                    } else {
+                        ""
+                    }
+                    .to_string())
+                },
+            );
+            let device = test_device(address);
+            let (_directory, stream) = test_stream();
+            let relay =
+                RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
+            let mut controller = UpnpController::new(device).expect("controller");
 
-        assert!(error.contains("UPnP Play failed"));
-        assert!(controller.current.is_none());
-        let actions = received.try_iter().collect::<Vec<_>>();
-        assert!(actions[0].0.contains("GetCurrentTransportActions"));
-        assert!(actions[1].0.contains("#Stop"));
-        assert!(actions[2].0.contains("SetAVTransportURI"));
-        assert!(actions[3].0.contains("GetTransportInfo"));
-        assert!(actions[4].0.contains("GetCurrentTransportActions"));
-        assert!(actions[5].0.contains("GetTransportInfo"));
-        assert!(actions[6].0.contains("#Play"));
-        assert!(actions[7].0.contains("GetCurrentTransportActions"));
-        assert!(actions[8].0.contains("#Stop"));
-        drop(renderer);
+            let error = tracing::subscriber::with_default(subscriber, || {
+                controller.handle(
+                    BackendCommand::Start {
+                        run: RunId::new(1),
+                        current: stream,
+                        next: None,
+                        start_position_millis: 0,
+                        playback_rate: 1.0,
+                    },
+                    &relay,
+                )
+            })
+            .expect_err("rejected transport command");
+
+            assert!(
+                error.contains(&format!("UPnP {failed_action} failed")),
+                "{error}"
+            );
+            assert!(error.contains("UPnP error 701"), "{error}");
+            assert!(controller.current.is_none());
+            let actions = received.try_iter().collect::<Vec<_>>();
+            if failed_action == "Play" {
+                assert!(actions[0].0.contains("GetCurrentTransportActions"));
+                assert!(actions[1].0.contains("#Stop"));
+                assert!(actions[2].0.contains("SetAVTransportURI"));
+                assert!(actions[3].0.contains("GetTransportInfo"));
+                assert!(actions[4].0.contains("GetCurrentTransportActions"));
+                assert!(actions[5].0.contains("GetTransportInfo"));
+                assert!(actions[6].0.contains("#Play"));
+                assert!(actions[7].0.contains("GetCurrentTransportActions"));
+                assert!(actions[8].0.contains("#Stop"));
+            } else {
+                assert_eq!(actions.len(), 3);
+                assert!(actions[0].0.contains("GetCurrentTransportActions"));
+                assert!(actions[1].0.contains("#Stop"));
+                assert!(actions[2].0.contains("GetTransportInfo"));
+            }
+            let output = std::fs::read_to_string(log.path()).expect("recorded diagnostics");
+            let completed = output
+                .lines()
+                .filter(|line| line.contains("completed UPnP action"))
+                .collect::<Vec<_>>();
+            assert_eq!(completed.len(), actions.len(), "{output}");
+            for (index, line) in completed.iter().enumerate() {
+                assert!(line.contains(&format!("request={} ", index + 1)), "{line}");
+                assert!(
+                    line.contains(&format!("session={} ", controller.diagnostic_session)),
+                    "{line}"
+                );
+            }
+            for expected in [
+                "upnp_command",
+                "command=\"Start\"",
+                "upnp_start",
+                "transport_state=\"STOPPED\"",
+                "Play,Stop,Seek",
+                "http_status=500",
+                "soap_fault=true",
+                "soap_fault_type=\"Client\"",
+                "soap_fault_reason=\"UPnPError\"",
+                "soap_fault_code=701",
+                "success=false",
+            ] {
+                assert!(output.contains(expected), "missing {expected}: {output}");
+            }
+            if failed_action == "Stop" {
+                assert!(output.contains("upnp_status_after_failed_stop"), "{output}");
+                assert!(
+                    output.contains("soap_fault_description=\"[redacted]\""),
+                    "{output}"
+                );
+            } else {
+                assert!(
+                    output.contains("soap_fault_description=\"Transition not available\""),
+                    "{output}"
+                );
+            }
+            for private in [
+                "example.test",
+                "secret",
+                "Track & Title",
+                "file://",
+                &address.to_string(),
+            ] {
+                assert!(
+                    !output.contains(private),
+                    "private value in diagnostics: {output}"
+                );
+            }
+            drop(renderer);
+        }
     }
 
     #[test]

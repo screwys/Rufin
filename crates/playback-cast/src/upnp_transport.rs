@@ -139,12 +139,9 @@ impl UpnpDevice {
         action: &str,
         payload: &str,
     ) -> Result<HashMap<String, String>, String> {
-        let service = self.service(service_name).ok_or_else(|| {
-            format!(
-                "{} does not provide UPnP {service_name}",
-                self.friendly_name
-            )
-        })?;
+        let service = self
+            .service(service_name)
+            .ok_or_else(|| format!("UPnP {service_name} service is unavailable"))?;
         let envelope = format!(
             concat!(
                 "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" ",
@@ -167,13 +164,9 @@ impl UpnpDevice {
             .body(envelope)
             .send()
             .map_err(crate::private_http_error)?;
-        if !response.status().is_success() {
-            return Err(format!(
-                "The control point responded with status code {}",
-                response.status()
-            ));
-        }
-        parse_action_response(&response.text().map_err(crate::private_http_error)?)
+        let status = response.status();
+        tracing::debug!(http_status = status.as_u16(), "received UPnP response");
+        parse_action_response(&response.text().map_err(crate::private_http_error)?, status)
     }
 
     fn service(&self, name: &str) -> Option<&UpnpService> {
@@ -197,21 +190,83 @@ fn child_text<'a>(node: Node<'a, '_>, name: &str) -> Option<&'a str> {
         .text()
 }
 
-fn parse_action_response(body: &str) -> Result<HashMap<String, String>, String> {
-    let document = Document::parse(body).map_err(|error| error.to_string())?;
-    let response = document
-        .descendants()
-        .find(|node| node.has_tag_name("Body"))
-        .and_then(|body| body.children().find(Node::is_element))
-        .ok_or_else(|| "UPnP response does not contain a SOAP body".to_string())?;
-    if response.has_tag_name("Fault") {
-        let description = response
-            .descendants()
-            .find(|node| node.has_tag_name("errorDescription"))
-            .and_then(|node| node.text())
-            .unwrap_or("UPnP action failed");
-        return Err(description.to_string());
+pub(super) fn diagnostic_value(value: &str) -> &str {
+    if value.len() <= 256
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b',' | b' '))
+    {
+        value
+    } else {
+        "[redacted]"
     }
+}
+
+fn parse_action_response(
+    body: &str,
+    status: reqwest::StatusCode,
+) -> Result<HashMap<String, String>, String> {
+    let document = Document::parse(body);
+    let response = document
+        .as_ref()
+        .ok()
+        .and_then(|document| {
+            document
+                .descendants()
+                .find(|node| node.has_tag_name("Body"))
+        })
+        .and_then(|body| body.children().find(Node::is_element));
+    let fault = response.filter(|response| response.has_tag_name("Fault"));
+    if !status.is_success() || fault.is_some() {
+        let fault_type = fault
+            .and_then(|fault| child_text(fault, "faultcode"))
+            .map(|value| diagnostic_value(value.rsplit(':').next().unwrap_or(value)));
+        let reason = fault
+            .and_then(|fault| child_text(fault, "faultstring"))
+            .map(diagnostic_value);
+        let code = fault.and_then(|fault| {
+            fault
+                .descendants()
+                .find(|node| node.has_tag_name("errorCode"))?
+                .text()?
+                .trim()
+                .parse::<u16>()
+                .ok()
+        });
+        let description = fault
+            .and_then(|fault| {
+                fault
+                    .descendants()
+                    .find(|node| node.has_tag_name("errorDescription"))
+            })
+            .and_then(|node| node.text())
+            .map(diagnostic_value);
+        tracing::debug!(
+            soap_fault = fault.is_some(),
+            soap_fault_type = fault_type,
+            soap_fault_reason = reason,
+            soap_fault_code = code,
+            soap_fault_description = description,
+            "UPnP action rejected"
+        );
+        let detail = code
+            .map(|code| format!(" (UPnP error {code})"))
+            .unwrap_or_else(|| {
+                if fault.is_some() {
+                    " (SOAP fault without an error code)".to_string()
+                } else {
+                    String::new()
+                }
+            });
+        return Err(format!(
+            "The renderer responded with status code {status}{detail}"
+        ));
+    }
+    document
+        .as_ref()
+        .map_err(|error| format!("Invalid UPnP response XML at {}", error.pos()))?;
+    let response =
+        response.ok_or_else(|| "UPnP response does not contain a SOAP body".to_string())?;
     Ok(response
         .children()
         .filter(Node::is_element)
@@ -247,6 +302,34 @@ mod tests {
         assert_eq!(message, "connection failed");
         assert!(!message.contains(&address.to_string()));
         assert!(!message.contains("secret"));
+
+        for value in ["LG_TRANSITIONING", "Play, Stop, Seek", ""] {
+            assert_eq!(diagnostic_value(value), value);
+        }
+        for value in [
+            "https://example.test/private?token=secret",
+            "192.0.2.1",
+            "STOPPED\nsecret",
+        ] {
+            assert_eq!(diagnostic_value(value), "[redacted]");
+        }
+
+        let fault = r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0"><errorCode>701</errorCode><errorDescription>https://example.test/private?token=secret</errorDescription></UPnPError></detail></s:Fault></s:Body></s:Envelope>"#;
+        for status in [
+            reqwest::StatusCode::OK,
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            let error = parse_action_response(fault, status).expect_err("SOAP fault");
+            assert_eq!(
+                error,
+                format!("The renderer responded with status code {status} (UPnP error 701)")
+            );
+        }
+        assert!(
+            parse_action_response("not XML", reqwest::StatusCode::INTERNAL_SERVER_ERROR)
+                .expect_err("non-SOAP error")
+                .contains("500 Internal Server Error")
+        );
     }
 
     #[test]

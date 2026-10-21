@@ -33,6 +33,7 @@ url.workspace = true
 
 [dev-dependencies]
 library.workspace = true
+tracing-subscriber.workspace = true
 wiremock.workspace = true
 
 [lints]
