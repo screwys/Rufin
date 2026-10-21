@@ -1716,9 +1716,6 @@ msgstr "Плоский"
 msgid "Folder path"
 msgstr "Путь к папке"
 
-msgid "Folder"
-msgstr "Папка"
-
 msgid "Folders"
 msgstr "Папки"
 
@@ -2565,6 +2562,11 @@ msgstr "Устройства в сети не найдены"
 msgid "No playable entries were found"
 msgstr "Воспроизводимые записи не найдены"
 
+#, fuzzy
+#| msgid "No smart playlists yet"
+msgid "No playlists yet"
+msgstr "Пока нет умных плейлистов"
+
 msgid "No related tracks found"
 msgstr "Не найдено похожих треков"
 
@@ -3267,6 +3269,9 @@ msgstr "Удалить правило"
 msgid "Remove search"
 msgstr "Удалить из поиска"
 
+msgid "Remove the library database? Settings and saved logins will be kept."
+msgstr ""
+
 msgid "Remove unavailable tracks"
 msgstr "Удалить недоступные треки"
 
@@ -3319,6 +3324,16 @@ msgstr "Требовать шифрование SMB"
 
 msgid "Reset appearance"
 msgstr "Сбросить настройки внешнего вида"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database"
+msgstr "Дата выпуска"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database?"
+msgstr "Дата выпуска"
 
 msgid "Reset to defaults"
 msgstr "Восстановить настройки по умолчанию"
@@ -4600,6 +4615,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Folder"
+#~ msgstr "Папка"
 
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "Создать и сохранить в кэше визуализацию текущего трека"

@@ -1806,11 +1806,6 @@ msgstr "Plakans"
 msgid "Folder path"
 msgstr "Mape"
 
-#, fuzzy
-#| msgid "Folders"
-msgid "Folder"
-msgstr "Mapes"
-
 msgid "Folders"
 msgstr "Mapes"
 
@@ -2715,6 +2710,11 @@ msgstr "Tīkla ierīces nav atrastas"
 msgid "No playable entries were found"
 msgstr "Nav atrasts neviens saistīts serveris"
 
+#, fuzzy
+#| msgid "No smart playlists yet"
+msgid "No playlists yet"
+msgstr "Vēl nav izveidoti viedie atskaņošanas saraksti"
+
 msgid "No related tracks found"
 msgstr "Nav atrasts neviens saistīts celiņš"
 
@@ -3451,6 +3451,9 @@ msgstr "Noņemt noteikumu"
 msgid "Remove search"
 msgstr "Dzēst mapi"
 
+msgid "Remove the library database? Settings and saved logins will be kept."
+msgstr ""
+
 #, fuzzy
 #| msgid "Album unavailable"
 msgid "Remove unavailable tracks"
@@ -3507,6 +3510,16 @@ msgstr "Prasīt SMB šifrēšanu"
 
 msgid "Reset appearance"
 msgstr "Atiestatīt izskatu"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database"
+msgstr "Izdošanas datums"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database?"
+msgstr "Izdošanas datums"
 
 msgid "Reset to defaults"
 msgstr "Atiestatīt uz noklusējuma iestatījumiem"
@@ -4857,6 +4870,11 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#, fuzzy
+#~| msgid "Folders"
+#~ msgid "Folder"
+#~ msgstr "Mapes"
 
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "Ģenerēt un kešot viļņa formas pašreizējai dziesmai"

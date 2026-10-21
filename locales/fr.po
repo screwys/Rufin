@@ -1703,9 +1703,6 @@ msgstr "Plat"
 msgid "Folder path"
 msgstr "Chemin du dossier"
 
-msgid "Folder"
-msgstr "Dossier"
-
 msgid "Folders"
 msgstr "Dossiers"
 
@@ -2549,6 +2546,11 @@ msgstr "Aucun périphérique réseau trouvé"
 msgid "No playable entries were found"
 msgstr "Aucune entrée lisible n’a été trouvée"
 
+#, fuzzy
+#| msgid "No smart playlists yet"
+msgid "No playlists yet"
+msgstr "Aucune playlist intelligente pour le moment"
+
 msgid "No related tracks found"
 msgstr "Aucun morceau associé trouvé"
 
@@ -3251,6 +3253,9 @@ msgstr "Supprimer la règle"
 msgid "Remove search"
 msgstr "Supprimer la recherche"
 
+msgid "Remove the library database? Settings and saved logins will be kept."
+msgstr ""
+
 msgid "Remove unavailable tracks"
 msgstr "Supprimer les morceaux non disponibles"
 
@@ -3305,6 +3310,16 @@ msgstr "Requière le chiffrement SMB"
 
 msgid "Reset appearance"
 msgstr "Réinitialiser l'apparence"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database"
+msgstr "Date de sortie"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database?"
+msgstr "Date de sortie"
 
 msgid "Reset to defaults"
 msgstr "Rétablir les valeurs par défaut"
@@ -4570,6 +4585,9 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue sur l'installateur de Rufin"
+
+#~ msgid "Folder"
+#~ msgstr "Dossier"
 
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "Générer et mettre en cache les formes d’onde de la piste actuelle"
