@@ -81,6 +81,11 @@ impl LyricsEditor {
         }
         let commit = commit_offset.clone();
         offset_entry.connect_activate(move |_| commit());
+        offset_entry.connect_icon_release(move |_, position| {
+            if position == gtk::EntryIconPosition::Secondary {
+                apply_offset(0);
+            }
+        });
         let focus = gtk::EventControllerFocus::new();
         let commit = commit_offset.clone();
         focus.connect_leave(move |_| commit());

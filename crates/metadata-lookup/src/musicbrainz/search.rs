@@ -9,7 +9,7 @@ pub enum MetadataMatchKind {
     Artist,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct MetadataCandidate {
     pub id: String,

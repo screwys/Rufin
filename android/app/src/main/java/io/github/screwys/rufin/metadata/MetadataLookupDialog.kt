@@ -1,0 +1,84 @@
+package io.github.screwys.rufin.metadata
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import io.github.screwys.rufin.core.translate
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun MetadataLookupDialog(connection: MetadataConnection) {
+    var query by remember { mutableStateOf("") }
+    val item = connection.lookupItem
+    val progress = connection.lookupProgress
+    val editable = !connection.lookupBusy
+    Dialog(onDismissRequest = { if (!connection.lookupAccepting) connection.cancelLookup() },
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false,
+            dismissOnBackPress = !connection.lookupAccepting)) {
+        Surface(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(translate("Lookup"), style = MaterialTheme.typography.titleLarge)
+                item?.let { Text(it.title, style = MaterialTheme.typography.titleMedium) }
+                if (progress?.finished == false) LinearProgressIndicator(Modifier.fillMaxWidth())
+                val failure = connection.lookupFailure?.message ?: progress?.failure ?: item?.failure
+                failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text(translate("Search MusicBrainz")) }, enabled = editable && (item?.ready == true || progress?.finished == true),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { connection.searchLookup(query) }))
+                LazyColumn(Modifier.weight(1f)) {
+                    item {
+                        ListItem(headlineContent = { Text(translate("Original")) },
+                            colors = ListItemDefaults.colors(containerColor = if (item?.selected == null)
+                                MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface),
+                            modifier = Modifier.clickable(enabled = editable && item?.ready == true) { connection.chooseLookup(null) })
+                    }
+                    items(item?.candidates.orEmpty(), key = { it.id }) { candidate ->
+                        ListItem(headlineContent = { Text(candidate.title) }, supportingContent = { Text(candidate.detail) },
+                            colors = ListItemDefaults.colors(containerColor = if (item?.selected == candidate.id)
+                                MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface),
+                            modifier = Modifier.clickable(enabled = editable) { connection.chooseLookup(candidate) })
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(connection.lookupFillMissing, connection::updateLookupFillMissing, enabled = editable)
+                    Text(translate("Fill missing"))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(translate("Original"), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                    Text(translate("Suggested"), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                }
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(item?.fields.orEmpty().filter { it.original.isNotEmpty() || it.suggested.isNotEmpty() }, key = { it.label }) { field ->
+                        Column {
+                            Text(field.label, style = MaterialTheme.typography.labelMedium)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text(field.original, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(field.suggested, Modifier.weight(1f), color = if (field.changed)
+                                    MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(translate("{completed} of {total}").replace("{completed}", (progress?.completed ?: 0UL).toString())
+                        .replace("{total}", (progress?.total ?: 1UL).toString()), Modifier.weight(1f))
+                    if (progress?.finished == false) TextButton(connection::stopLookup) { Text(translate("Stop")) }
+                    TextButton(connection::cancelLookup, enabled = !connection.lookupAccepting) { Text(translate("Cancel")) }
+                    Button(connection::acceptLookup, enabled = editable) { Text(translate("Done")) }
+                }
+            }
+        }
+    }
+}

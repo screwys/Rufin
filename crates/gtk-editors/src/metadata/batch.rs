@@ -3,7 +3,10 @@ use adw::prelude::*;
 use gtk_widgets::sparse_model::{
     SparseLoad, SparseObjectItem, SparseRouteModel, SparseSource, connect_sparse_bind,
 };
-use rufin_core::metadata::{MetadataBatch, MetadataEditor, MetadataTrackSummary};
+use rufin_core::metadata::{
+    MetadataBatch, MetadataEditor, MetadataLookupReview, MetadataTrackSummary,
+};
+use sources::SourceMetadataError;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -14,13 +17,18 @@ struct BatchView {
     batch: Arc<MetadataBatch>,
     dialog: gtk::glib::WeakRef<adw::Dialog>,
     host: gtk::Box,
+    content: gtk::Stack,
+    lookup: gtk::Button,
     sidebar: gtk::Box,
     selection: gtk::MultiSelection,
     current: RefCell<Option<MetadataView>>,
-    loading: Cell<bool>,
     active_selection: RefCell<gtk::Bitset>,
     task: RefCell<Option<gtk::glib::JoinHandle<()>>>,
     rows: Rc<SparseRouteModel<u64, MetadataTrackSummary>>,
+    runtime: tokio::runtime::Handle,
+    on_error: Rc<dyn Fn(SourceMetadataError, Rc<dyn Fn()>)>,
+    opening_lookup: Cell<bool>,
+    restoring_selection: Cell<bool>,
 }
 
 impl Drop for BatchView {
@@ -33,14 +41,14 @@ impl Drop for BatchView {
 
 pub fn build_batch_dialog(
     batch: Arc<MetadataBatch>,
-    model: Arc<MetadataEditor>,
     runtime: tokio::runtime::Handle,
+    on_error: Rc<dyn Fn(SourceMetadataError, Rc<dyn Fn()>)>,
 ) -> adw::Dialog {
     let resource = crate::ui_resource::METADATA_BATCH_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
         batch_dialog: adw::Dialog, responsive: adw::BreakpointBin, split: adw::NavigationSplitView,
-        sidebar: gtk::Box, editor_host: gtk::Box, tracks: gtk::ListView,
+        sidebar: gtk::Box, editor_host: gtk::Box, tracks: gtk::ListView, content: gtk::Stack, lookup: gtk::Button,
         select_all: gtk::ToggleButton, edit_selected: gtk::Button, show_tracks: gtk::Button,
     });
     let breakpoint = adw::Breakpoint::new(
@@ -52,26 +60,21 @@ pub fn build_batch_dialog(
         .bind_property("collapsed", &edit_selected, "visible")
         .sync_create()
         .build();
-    select_all.set_active(true);
     split
         .bind_property("collapsed", &show_tracks, "visible")
         .sync_create()
         .build();
-    let weak_split = split.downgrade();
-    show_tracks.connect_clicked(move |_| {
-        if let Some(split) = weak_split.upgrade() {
-            split.set_show_content(false);
-        }
-    });
-    let weak_split = split.downgrade();
-    edit_selected.connect_clicked(move |_| {
-        if let Some(split) = weak_split.upgrade() {
-            split.set_show_content(true);
-        }
-    });
-    let weak_split = split.downgrade();
+    for (button, show) in [(show_tracks, false), (edit_selected, true)] {
+        let weak = split.downgrade();
+        button.connect_clicked(move |_| {
+            if let Some(split) = weak.upgrade() {
+                split.set_show_content(show);
+            }
+        });
+    }
+    let weak = split.downgrade();
     tracks.connect_activate(move |_, _| {
-        if let Some(split) = weak_split.upgrade() {
+        if let Some(split) = weak.upgrade() {
             split.set_show_content(true);
         }
     });
@@ -82,7 +85,7 @@ pub fn build_batch_dialog(
             batch
                 .tracks(range.start as u64, range.len() as u64)
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|e| e.to_string())
         })
     });
     let rows = SparseRouteModel::new(
@@ -90,12 +93,300 @@ pub fn build_batch_dialog(
             count: batch.track_count() as usize,
         },
         64,
-        runtime,
+        runtime.clone(),
         load,
     );
     let selection = gtk::MultiSelection::new(Some(rows.list_model()));
     selection.select_all();
+    select_all.set_active(true);
     tracks.set_model(Some(&selection));
+    tracks.set_factory(Some(&track_factory()));
+    super::navigation::connect(&sidebar, &tracks, &selection);
+    lookup.set_sensitive(batch.external_lookup_allowed());
+    let active_selection = RefCell::new(selection.selection());
+    let view = Rc::new(BatchView {
+        batch,
+        dialog: batch_dialog.downgrade(),
+        host: editor_host,
+        content,
+        lookup,
+        sidebar,
+        selection,
+        current: RefCell::new(None),
+        active_selection,
+        task: RefCell::new(None),
+        rows,
+        runtime,
+        on_error,
+        opening_lookup: Cell::new(false),
+        restoring_selection: Cell::new(false),
+    });
+    let weak = Rc::downgrade(&view);
+    let all_button = select_all.downgrade();
+    view.selection
+        .connect_selection_changed(move |selection, _, _| {
+            if let Some(button) = all_button.upgrade() {
+                button.set_active(selection.selection().size() == selection.n_items() as u64);
+            }
+            if let Some(view) = weak.upgrade() {
+                view.change_scope();
+            }
+        });
+    let weak = Rc::downgrade(&view);
+    select_all.connect_clicked(move |button| {
+        if let Some(view) = weak.upgrade() {
+            view.selection.select_all();
+            button.set_active(true);
+        }
+    });
+    let weak = Rc::downgrade(&view);
+    view.lookup.connect_clicked(move |_| {
+        if let Some(view) = weak.upgrade() {
+            view.open_lookup();
+        }
+    });
+    view.change_scope();
+    let owner = RefCell::new(Some(view));
+    batch_dialog.connect_closed(move |_| {
+        owner.borrow_mut().take();
+    });
+    batch_dialog
+}
+
+impl BatchView {
+    fn indices(&self) -> Vec<u64> {
+        let selected = self.selection.selection();
+        if selected.size() == self.batch.track_count() {
+            Vec::new()
+        } else {
+            (0..selected.size())
+                .map(|index| selected.nth(index as u32) as u64)
+                .collect()
+        }
+    }
+
+    fn current(&self) -> Option<Rc<super::Editor>> {
+        self.current
+            .borrow()
+            .as_ref()
+            .map(|view| view.editor.clone())
+    }
+
+    fn mount(self: &Rc<Self>, model: Arc<MetadataEditor>) {
+        if let Some(editor) = self.current() {
+            editor.rebind(model);
+            return;
+        }
+        let Some(dialog) = self.dialog.upgrade() else {
+            return;
+        };
+        let weak = Rc::downgrade(self);
+        let changed = Rc::new(move || {
+            if let Some(view) = weak.upgrade() {
+                view.refresh_rows();
+            }
+        });
+        let (_, view) = build_editor_view(
+            model,
+            Some(&dialog),
+            Some(self.sidebar.upcast_ref()),
+            Some(changed),
+            self.runtime.clone(),
+        );
+        view.editor
+            .lookup
+            .bind_property("sensitive", &self.lookup, "sensitive")
+            .sync_create()
+            .build();
+        let header = self.lookup.downgrade();
+        view.editor
+            .pages
+            .connect_visible_child_name_notify(move |pages| {
+                if let Some(header) = header.upgrade() {
+                    header.set_visible(pages.visible_child_name().as_deref() == Some("tags"));
+                }
+            });
+        self.host.append(&view.content);
+        self.current.replace(Some(view));
+    }
+
+    fn change_scope(self: &Rc<Self>) {
+        if self.opening_lookup.get() || self.restoring_selection.get() {
+            return;
+        }
+        let selected = self.selection.selection();
+        if selected.is_empty() {
+            let previous = self.active_selection.borrow().clone();
+            self.restore_selection(&previous);
+            return;
+        }
+        if let Some(task) = self.task.borrow_mut().take() {
+            task.abort();
+        }
+        let indices = self.indices();
+        self.host.set_sensitive(false);
+        let previous = self.current().map(|editor| {
+            super::lyrics::commit(&editor);
+            super::artwork::cancel(&editor);
+            editor.lyrics.cancel();
+            editor.model()
+        });
+        let batch = self.batch.clone();
+        let weak = Rc::downgrade(self);
+        let task = gtk::glib::spawn_future_local(async move {
+            let result = async {
+                if let Some(previous) = previous {
+                    previous.stage_changes().await?;
+                }
+                batch.editor(indices).await
+            }
+            .await;
+            if let Some(view) = weak.upgrade() {
+                match result {
+                    Ok(model) => {
+                        view.mount(model);
+                        view.active_selection.replace(selected.clone());
+                        view.content.set_visible_child_name("editor");
+                    }
+                    Err(error) => {
+                        let current = view.current();
+                        if current.is_some() {
+                            let active = view.active_selection.borrow().clone();
+                            view.restore_selection(&active);
+                        }
+                        if matches!(&error, SourceMetadataError::LocalAccessRequired { .. })
+                            || current.is_none()
+                        {
+                            let weak = Rc::downgrade(&view);
+                            let retry = Rc::new(move || {
+                                if let Some(view) = weak.upgrade() {
+                                    view.restore_selection(&selected);
+                                    view.change_scope();
+                                }
+                            });
+                            (view.on_error)(error, retry);
+                        } else if let Some(current) = current {
+                            current.show_error(&error.to_string());
+                        }
+                    }
+                }
+                view.host.set_sensitive(true);
+                view.refresh_rows();
+            }
+        });
+        self.task.replace(Some(task));
+    }
+
+    fn restore_selection(&self, selected: &gtk::Bitset) {
+        self.restoring_selection.set(true);
+        self.selection.set_selection(
+            selected,
+            &gtk::Bitset::new_range(0, self.batch.track_count() as u32),
+        );
+        self.restoring_selection.set(false);
+    }
+
+    fn open_lookup(self: &Rc<Self>) {
+        if self.opening_lookup.replace(true) {
+            return;
+        }
+        if let Some(task) = self.task.borrow_mut().take() {
+            task.abort();
+        }
+        self.sidebar.set_sensitive(false);
+        self.host.set_sensitive(false);
+        self.lookup.set_sensitive(false);
+        let previous = self.current().map(|editor| {
+            super::lyrics::commit(&editor);
+            super::artwork::cancel(&editor);
+            editor.lyrics.cancel();
+            editor.model()
+        });
+        let batch = self.batch.clone();
+        let indices = self.indices();
+        let weak = Rc::downgrade(self);
+        let task = gtk::glib::spawn_future_local(async move {
+            let result = async {
+                if let Some(previous) = previous {
+                    previous.stage_changes().await?;
+                }
+                MetadataLookupReview::open_batch(batch, indices).await
+            }
+            .await;
+            if let Some(view) = weak.upgrade() {
+                view.opening_lookup.set(false);
+                view.sidebar.set_sensitive(true);
+                view.host.set_sensitive(true);
+                view.lookup
+                    .set_sensitive(view.batch.external_lookup_allowed());
+                match result {
+                    Ok(review) => {
+                        if let Some(dialog) = view.dialog.upgrade() {
+                            let weak = Rc::downgrade(&view);
+                            super::lookup::present(
+                                &dialog,
+                                review,
+                                view.runtime.clone(),
+                                Rc::new(move |accepted| {
+                                    if let Some(view) = weak.upgrade() {
+                                        if accepted
+                                            || view.current().is_none()
+                                            || view.selection.selection()
+                                                != *view.active_selection.borrow()
+                                        {
+                                            view.change_scope();
+                                        }
+                                    }
+                                }),
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(current) = view.current() {
+                            let active = view.active_selection.borrow().clone();
+                            view.restore_selection(&active);
+                            view.host.set_sensitive(true);
+                            current.show_error(&error.to_string());
+                        } else {
+                            let weak = Rc::downgrade(&view);
+                            (view.on_error)(
+                                error,
+                                Rc::new(move || {
+                                    if let Some(view) = weak.upgrade() {
+                                        view.change_scope();
+                                    }
+                                }),
+                            );
+                        }
+                    }
+                }
+            }
+        });
+        self.task.replace(Some(task));
+    }
+
+    fn refresh_rows(&self) {
+        if let Some(first) = self.rows.first_live_position() {
+            let batch = self.batch.clone();
+            let rows = self.rows.clone();
+            gtk::glib::spawn_future_local(async move {
+                if let Ok(updated) = batch.tracks(first as u64, 192).await {
+                    for row in updated {
+                        if rows
+                            .peek_ready(row.index as usize)
+                            .is_some_and(|current| current.as_ref() == &row)
+                        {
+                            continue;
+                        }
+                        rows.update_ready(row.index as usize, |current| *current = row.clone());
+                    }
+                }
+            });
+        }
+    }
+}
+
+pub(super) fn track_factory() -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, object| {
         let item = object.downcast_ref::<gtk::ListItem>().unwrap();
@@ -133,158 +424,5 @@ pub fn build_batch_dialog(
             track.remove_css_class("error");
         }
     });
-    tracks.set_factory(Some(&factory));
-    let active_selection = RefCell::new(selection.selection());
-    let view = Rc::new(BatchView {
-        batch,
-        dialog: batch_dialog.downgrade(),
-        host: editor_host,
-        sidebar,
-        selection,
-        current: RefCell::new(None),
-        loading: Cell::new(false),
-        active_selection,
-        task: RefCell::new(None),
-        rows,
-    });
-    view.mount(model);
-    let weak = Rc::downgrade(&view);
-    let all_button = select_all.downgrade();
-    view.selection
-        .connect_selection_changed(move |selection, _, _| {
-            if let Some(button) = all_button.upgrade() {
-                button.set_active(selection.selection().size() == selection.n_items() as u64);
-            }
-            if let Some(view) = weak.upgrade() {
-                view.change_scope();
-            }
-        });
-    let weak = Rc::downgrade(&view);
-    select_all.connect_clicked(move |button| {
-        if let Some(view) = weak.upgrade() {
-            view.selection.select_all();
-            button.set_active(true);
-        }
-    });
-    let anchor = RefCell::new(Some(view));
-    batch_dialog.connect_closed(move |_| {
-        anchor.borrow_mut().take();
-    });
-    batch_dialog
-}
-
-impl BatchView {
-    fn mount(self: &Rc<Self>, model: Arc<MetadataEditor>) {
-        let Some(dialog) = self.dialog.upgrade() else {
-            return;
-        };
-        let current = self
-            .current
-            .borrow()
-            .as_ref()
-            .map(|view| view.editor.clone());
-        if let Some(editor) = current {
-            editor.rebind(model);
-            return;
-        }
-        let weak = Rc::downgrade(self);
-        let changed = Rc::new(move || {
-            if let Some(view) = weak.upgrade() {
-                view.refresh_rows();
-            }
-        });
-        let (_, view) = build_editor_view(
-            model,
-            Some(&dialog),
-            Some(self.sidebar.upcast_ref()),
-            Some(changed),
-        );
-        self.host.append(&view.content);
-        self.current.replace(Some(view));
-    }
-
-    fn change_scope(self: &Rc<Self>) {
-        if self.loading.get() {
-            return;
-        }
-        let selected = self.selection.selection();
-        if selected.is_empty() {
-            self.loading.set(true);
-            self.selection.set_selection(
-                &self.active_selection.borrow(),
-                &gtk::Bitset::new_range(0, self.batch.track_count() as u32),
-            );
-            self.loading.set(false);
-            return;
-        }
-        let indices = if selected.size() == self.batch.track_count() {
-            Vec::new()
-        } else {
-            (0..selected.size())
-                .map(|index| selected.nth(index as u32) as u64)
-                .collect()
-        };
-        self.loading.set(true);
-        self.sidebar.set_sensitive(false);
-        self.host.set_sensitive(false);
-        let current = self
-            .current
-            .borrow()
-            .as_ref()
-            .expect("metadata view mounted")
-            .editor
-            .clone();
-        super::lyrics::commit(&current);
-        let previous = current.model();
-        let batch = self.batch.clone();
-        let weak = Rc::downgrade(self);
-        let task = gtk::glib::spawn_future_local(async move {
-            let result = async {
-                previous.stage_changes().await?;
-                batch.editor(indices).await
-            }
-            .await;
-            if let Some(view) = weak.upgrade() {
-                match result {
-                    Ok(model) => {
-                        view.mount(model);
-                        view.active_selection.replace(selected);
-                    }
-                    Err(error) => {
-                        view.selection.set_selection(
-                            &view.active_selection.borrow(),
-                            &gtk::Bitset::new_range(0, view.batch.track_count() as u32),
-                        );
-                        if let Some(dialog) = view.dialog.upgrade() {
-                            super::metadata_error_dialog(&error.to_string()).present(Some(&dialog));
-                        }
-                    }
-                }
-                view.sidebar.set_sensitive(true);
-                view.host.set_sensitive(true);
-                view.loading.set(false);
-                view.refresh_rows();
-            }
-        });
-        self.task.replace(Some(task));
-    }
-    fn refresh_rows(&self) {
-        if let Some(first) = self.rows.first_live_position() {
-            let batch = self.batch.clone();
-            let rows = self.rows.clone();
-            gtk::glib::spawn_future_local(async move {
-                if let Ok(updated) = batch.tracks(first as u64, 192).await {
-                    for row in updated {
-                        if rows
-                            .peek_ready(row.index as usize)
-                            .is_some_and(|current| current.as_ref() == &row)
-                        {
-                            continue;
-                        }
-                        rows.update_ready(row.index as usize, |current| *current = row.clone());
-                    }
-                }
-            });
-        }
-    }
+    factory
 }

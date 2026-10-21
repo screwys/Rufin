@@ -40,6 +40,7 @@ fn parse_matches(value: Value) -> Result<FingerprintMatches, String> {
         candidates: Vec::new(),
         recordings: Vec::new(),
     };
+    let mut releases = Vec::new();
     for recording in value["results"]
         .as_array()
         .into_iter()
@@ -59,6 +60,15 @@ fn parse_matches(value: Value) -> Result<FingerprintMatches, String> {
             .filter_map(|artist| artist["name"].as_str())
             .collect::<Vec<_>>()
             .join("; ");
+        add_candidate(
+            &mut matches.candidates,
+            recording,
+            MetadataMatchKind::Recording,
+            &artist,
+        );
+        releases.push((recording, artist));
+    }
+    for (recording, artist) in releases {
         for release in recording["releases"].as_array().into_iter().flatten() {
             add_candidate(
                 &mut matches.candidates,
@@ -67,12 +77,6 @@ fn parse_matches(value: Value) -> Result<FingerprintMatches, String> {
                 &artist,
             );
         }
-        add_candidate(
-            &mut matches.candidates,
-            recording,
-            MetadataMatchKind::Recording,
-            &artist,
-        );
     }
     Ok(matches)
 }

@@ -998,12 +998,6 @@ msgid "Could not save diagnostic log"
 msgstr ""
 
 #, rust-format
-msgid "Could not scan {count} track: {reason}"
-msgid_plural "Could not scan {count} tracks: {reason}"
-msgstr[0] ""
-msgstr[1] ""
-
-#, rust-format
 msgid "Could not update Rufin to {version}"
 msgstr ""
 
@@ -1228,6 +1222,9 @@ msgid "Don't duplicate"
 msgstr ""
 
 msgid "Donate"
+msgstr ""
+
+msgid "Done"
 msgstr ""
 
 msgid "Download Folder"
@@ -1516,6 +1513,9 @@ msgid "Fetching lyrics"
 msgstr ""
 
 msgid "Fetching playlists"
+msgstr ""
+
+msgid "Field"
 msgstr ""
 
 msgid "File connection"
@@ -2082,6 +2082,9 @@ msgstr ""
 msgid "March {year}"
 msgstr ""
 
+msgid "Matched"
+msgstr ""
+
 msgid "Maximum year"
 msgstr ""
 
@@ -2269,6 +2272,9 @@ msgstr ""
 msgid "Needs attention"
 msgstr ""
 
+msgid "Needs review"
+msgstr ""
+
 msgid "NetEase"
 msgstr ""
 
@@ -2369,10 +2375,6 @@ msgid "No lyrics"
 msgstr ""
 
 msgid "No matching track in this release"
-msgstr ""
-
-#, rust-format
-msgid "No matching track in this release: {tracks}"
 msgstr ""
 
 msgid "No matching tracks found"
@@ -3300,13 +3302,7 @@ msgstr ""
 msgid "Saving..."
 msgstr ""
 
-msgid "Scan"
-msgstr ""
-
 msgid "Scanning tracks"
-msgstr ""
-
-msgid "Scanning..."
 msgstr ""
 
 msgid "Schedule"
@@ -3740,6 +3736,9 @@ msgid "Studios"
 msgstr ""
 
 msgid "Style"
+msgstr ""
+
+msgid "Suggested"
 msgstr ""
 
 msgid "Sunday"
@@ -4236,6 +4235,10 @@ msgstr ""
 
 #, rust-format
 msgid "{action} (Shuffle)"
+msgstr ""
+
+#, rust-format
+msgid "{completed} of {total}"
 msgstr ""
 
 #, rust-format

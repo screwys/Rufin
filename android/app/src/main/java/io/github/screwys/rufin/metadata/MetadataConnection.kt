@@ -9,6 +9,9 @@ import io.github.screwys.rufin.core.*
 import io.github.screwys.rufin.shared.rufin_core.MetadataEditor
 import io.github.screwys.rufin.shared.rufin_core.MetadataItemId
 import io.github.screwys.rufin.shared.rufin_core.MetadataEditorSnapshot
+import io.github.screwys.rufin.shared.rufin_core.MetadataLookupReview
+import io.github.screwys.rufin.shared.rufin_core.MetadataLookupItem
+import io.github.screwys.rufin.shared.rufin_core.MetadataLookupProgress
 import io.github.screwys.rufin.shared.sources.ArtworkStorage
 import io.github.screwys.rufin.shared.metadata_lookup.ArtworkResult
 import io.github.screwys.rufin.shared.metadata_lookup.MetadataCandidate
@@ -41,8 +44,23 @@ internal class MetadataConnection(
         private set
     var searching by mutableStateOf(false)
         private set
-    var lookupResults by mutableStateOf<List<MetadataCandidate>?>(null)
+    var lookupReview by mutableStateOf<MetadataLookupReview?>(null)
         private set
+    var lookupItem by mutableStateOf<MetadataLookupItem?>(null)
+        private set
+    var lookupProgress by mutableStateOf<MetadataLookupProgress?>(null)
+        private set
+    var lookupFailure by mutableStateOf<Throwable?>(null)
+        private set
+    var lookupBusy by mutableStateOf(false)
+        private set
+    var lookupAccepting by mutableStateOf(false)
+        private set
+    var lookupFillMissing by mutableStateOf(true)
+        private set
+    private var lookupRun: Job? = null
+    private var lookupUpdates: Job? = null
+    private var lookupAction: Job? = null
     private var artworkRevision: ULong? = null
     private var artworkTask: Job? = null
     private var searchTask: Job? = null
@@ -112,13 +130,63 @@ internal class MetadataConnection(
         }
     }
 
-    fun scan() = action { editor ->
-        val result = editor.scan()
-        lookupResults = result.candidates
-        result.failure?.let { failure = IllegalStateException(it) }
+    fun openLookup() = action { editor ->
+        artworkTask?.cancelAndJoin()
+        val review = MetadataLookupReview.open(editor)
+        lookupReview = review
+        lookupFillMissing = true
+        lookupFailure = null
+        lookupProgress = review.progress()
+        lookupItem = review.item(0UL, lookupFillMissing)
+        lookupRun = scope.launch { review.run() }
+        lookupUpdates = scope.launch {
+            while (true) {
+                val progress = review.nextUpdate() ?: break
+                lookupProgress = progress
+                if (!lookupBusy) lookupItem = review.item(0UL, lookupFillMissing)
+                if (progress.finished) break
+            }
+        }
     }
-    fun lookup(query: String) = action { lookupResults = it.lookup(query) }
-    fun previewLookup(candidate: MetadataCandidate?, fillMissing: Boolean) = action { it.previewLookup(candidate, fillMissing) }
+
+    private fun lookupAction(block: suspend (MetadataLookupReview) -> Unit) {
+        val review = lookupReview ?: return
+        lookupAction = scope.launch {
+            lookupBusy = true
+            lookupFailure = null
+            try { block(review); lookupItem = review.item(0UL, lookupFillMissing) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { lookupFailure = error }
+            finally { lookupBusy = false }
+        }
+    }
+
+    fun chooseLookup(candidate: MetadataCandidate?) = lookupAction { it.choose(0UL, candidate) }
+    fun searchLookup(query: String) = lookupAction { it.search(0UL, query) }
+    fun updateLookupFillMissing(value: Boolean) {
+        lookupFillMissing = value
+        lookupAction { }
+    }
+    fun stopLookup() { lookupReview?.cancel() }
+    fun cancelLookup() {
+        lookupReview?.cancel()
+        lookupRun?.cancel(); lookupUpdates?.cancel(); lookupAction?.cancel()
+        lookupReview?.destroy(); lookupReview = null; lookupItem = null; lookupProgress = null
+        lookupBusy = false; lookupAccepting = false
+    }
+    fun acceptLookup() {
+        val review = lookupReview ?: return
+        lookupAction = scope.launch {
+            lookupBusy = true; lookupAccepting = true
+            try {
+                review.accept(lookupFillMissing)
+                bridge?.let { refresh(it) }
+                cancelLookup()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { lookupFailure = error }
+            finally { lookupBusy = false; lookupAccepting = false }
+        }
+    }
     fun save() = action { it.save(); onSaved() }
     fun removeArtwork() = action { it.removeArtwork() }
     fun useCurrentArtwork() = action { it.useCurrentArtwork() }
@@ -155,5 +223,5 @@ internal class MetadataConnection(
     }
 
     fun reload() { scope.launch { open() } }
-    fun close() { artworkTask?.cancel(); searchTask?.cancel(); bridge?.destroy(); bridge = null }
+    fun close() { cancelLookup(); artworkTask?.cancel(); searchTask?.cancel(); bridge?.destroy(); bridge = null }
 }

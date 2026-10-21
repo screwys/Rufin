@@ -1,8 +1,8 @@
 //! Reviewed metadata operations and publication.
 mod batch;
 mod editor;
-mod lookup;
 mod lyrics;
+mod review;
 mod scan;
 use crate::runtime::CatalogChange;
 use crate::source::{SourceOwner, string_error};
@@ -15,7 +15,9 @@ use library::Database;
 pub use lyrics::MetadataLyricsSettings;
 pub use metadata_lookup::{ArtworkQuery, ArtworkResult};
 pub use metadata_lookup::{MetadataCandidate, MetadataMatchKind};
-pub use scan::MetadataScanResult;
+pub use review::{
+    MetadataLookupField, MetadataLookupItem, MetadataLookupProgress, MetadataLookupReview,
+};
 pub use sources::MetadataDraft;
 use sources::{Implementation, Source, SourceEntityKind, SourceMetadataError};
 use std::sync::Arc;

@@ -1,4 +1,4 @@
-use super::{EditDestination, EditSession, MetadataCandidate, MetadataEditor, MetadataMatchKind};
+use super::{EditDestination, EditSession, MetadataCandidate, MetadataEditor};
 use audio_processing::{AudioFingerprint, FINGERPRINT_VERSION, fingerprint_audio};
 use library::ReadCancellation;
 use playback::{StreamQuality, StreamRequest};
@@ -15,21 +15,16 @@ impl Drop for ScanCancellation {
     }
 }
 
-#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-pub struct MetadataScanResult {
-    pub candidates: Vec<MetadataCandidate>,
-    pub failure: Option<String>,
-}
-
-#[cfg_attr(feature = "bindings", uniffi::export)]
 impl MetadataEditor {
-    pub async fn scan(self: Arc<Self>) -> Result<MetadataScanResult, Error> {
-        if self.draft.kind != sources::SourceEntityKind::Track {
-            return Err(Error::Unavailable);
-        }
-        self.stage_changes().await?;
-        let settings = self.source.shared.settings.load().ui;
-        if !settings.allows_external_metadata_lookup() {
+    pub(super) async fn scan(self: Arc<Self>) -> Result<Vec<MetadataCandidate>, Error> {
+        if !self
+            .source
+            .shared
+            .settings
+            .load()
+            .ui
+            .allows_external_metadata_lookup()
+        {
             return Err(Error::Unavailable);
         }
         let cancel = ScanCancellation(Arc::new(AtomicBool::new(false)));
@@ -37,88 +32,15 @@ impl MetadataEditor {
         let runtime = self.source.shared.runtime.clone();
         runtime
             .spawn(async move {
-                let mut result = MetadataScanResult {
-                    candidates: Vec::new(),
-                    failure: None,
-                };
-                let mut failures = 0_u64;
-                let count = self.batch.as_ref().map_or(1, |scope| scope.indices.len());
-                for offset in 0..count {
-                    if cancelled.load(Ordering::Acquire)
-                        || !self
-                            .source
-                            .shared
-                            .settings
-                            .load()
-                            .ui
-                            .allows_external_metadata_lookup()
-                    {
-                        return Err(Error::Unavailable);
-                    }
-                    let session = if let Some(scope) = &self.batch {
-                        scope.batch.session(scope.indices[offset]).await
-                    } else {
-                        self.session.clone().ok_or(Error::Unavailable)
-                    };
-                    let outcome = match session {
-                        Ok(session) => self.fingerprint_track(session, cancelled.clone()).await,
-                        Err(error) => Err(error),
-                    };
-                    match outcome {
-                        Ok(fingerprint) => {
-                            let matches = match self.scan_matches(offset, fingerprint).await {
-                                Ok(matches) => matches,
-                                Err(error) => {
-                                    self.record_scan_error(offset, Some(error.to_string()))
-                                        .await?;
-                                    self.reload_batch().await?;
-                                    return Err(error);
-                                }
-                            };
-                            merge_candidates(&mut result.candidates, matches.candidates, count);
-                        }
-                        Err(error) => {
-                            self.record_scan_error(offset, Some(error.to_string()))
-                                .await?;
-                            failures += 1;
-                            result.failure.get_or_insert_with(|| error.to_string());
-                        }
-                    }
-                }
-                if let Some(reason) = result.failure.take() {
-                    result.failure = Some(localization::trn_with(
-                        "Could not scan {count} track: {reason}",
-                        "Could not scan {count} tracks: {reason}",
-                        failures,
-                        &[("count", &failures.to_string()), ("reason", &reason)],
-                    ));
-                }
-                if self.batch.is_some() {
-                    self.reload_batch().await?;
-                }
-                Ok(result)
+                let fingerprint = self
+                    .fingerprint_track(self.session.clone().ok_or(Error::Unavailable)?, cancelled)
+                    .await?;
+                self.scan_matches(fingerprint)
+                    .await
+                    .map(|matches| matches.candidates)
             })
             .await
-            .map_err(|error| Error::Write(error.to_string()))?
-    }
-}
-
-impl MetadataEditor {
-    async fn record_scan_error(&self, offset: usize, error: Option<String>) -> Result<(), Error> {
-        if let Some(scope) = &self.batch {
-            let index = scope.indices[offset];
-            scope
-                .batch
-                .work(move |records| {
-                    let mut record = records.read(index)?;
-                    record.state.scan_error = error;
-                    records.write(index, &record)
-                })
-                .await
-        } else {
-            self.state().scan_error = error;
-            Ok(())
-        }
+            .map_err(scan_error)?
     }
 
     async fn fingerprint_track(
@@ -197,7 +119,6 @@ impl MetadataEditor {
 
     async fn scan_matches(
         &self,
-        offset: usize,
         fingerprint: AudioFingerprint,
     ) -> Result<metadata_lookup::FingerprintMatches, Error> {
         let AudioFingerprint {
@@ -205,19 +126,9 @@ impl MetadataEditor {
             duration_seconds: duration,
         } = fingerprint;
         let identity = format!("{duration}:{fingerprint}");
-        let (cached, had_error) = if let Some(scope) = &self.batch {
-            let state = scope.batch.read(scope.indices[offset]).await?.state;
-            (state.scan, state.scan_error.is_some())
-        } else {
-            let state = self.state();
-            (state.scan.clone(), state.scan_error.is_some())
-        };
-        if let Some((previous, matches)) = cached
+        if let Some((previous, matches)) = self.state().scan.clone()
             && previous == identity
         {
-            if had_error {
-                self.record_scan_error(offset, None).await?;
-            }
             return Ok(matches);
         }
         let matches = self
@@ -228,39 +139,8 @@ impl MetadataEditor {
             .await
             .map_err(scan_error)?
             .map_err(scan_error)?;
-        if let Some(scope) = &self.batch {
-            let index = scope.indices[offset];
-            let matches = matches.clone();
-            scope
-                .batch
-                .work(move |records| {
-                    let mut record = records.read(index)?;
-                    record.state.scan = Some((identity, matches));
-                    record.state.scan_error = None;
-                    records.write(index, &record)
-                })
-                .await?;
-        } else {
-            let mut state = self.state();
-            state.scan = Some((identity, matches.clone()));
-            state.scan_error = None;
-        }
+        self.state().scan = Some((identity, matches.clone()));
         Ok(matches)
-    }
-}
-
-pub(super) fn merge_candidates(
-    candidates: &mut Vec<MetadataCandidate>,
-    matches: Vec<MetadataCandidate>,
-    selected: usize,
-) {
-    for candidate in matches {
-        if (selected == 1 || candidate.kind == MetadataMatchKind::Release)
-            && candidates.len() < 20
-            && !candidates.iter().any(|known| known.id == candidate.id)
-        {
-            candidates.push(candidate);
-        }
     }
 }
 

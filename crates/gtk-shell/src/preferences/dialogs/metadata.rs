@@ -20,7 +20,7 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
         };
         match editor {
             Ok(editor) => {
-                let dialog = build_dialog(editor);
+                let dialog = build_dialog(editor, shell.products.runtime.clone());
                 shell.present_selected_dialog(&dialog);
             }
             Err(SourceMetadataError::LocalAccessRequired {
@@ -69,54 +69,61 @@ pub(crate) fn present_track_metadata_dialog(
     let weak = Rc::downgrade(shell);
     let retry_selection = selection.clone();
     let load = gtk::glib::spawn_future_local(async move {
-        let result = async {
-            let batch =
-                rufin_core::metadata::MetadataBatch::open(source, std::sync::Arc::new(selection))
-                    .await?;
-            let editor = batch.clone().editor(Vec::new()).await?;
-            Ok::<_, SourceMetadataError>((batch, editor))
-        }
-        .await;
+        let result =
+            rufin_core::metadata::MetadataBatch::open(source, std::sync::Arc::new(selection)).await;
         let Some(shell) = weak.upgrade() else { return };
         match result {
-            Ok((batch, editor)) => {
+            Ok(batch) => {
+                let weak = Rc::downgrade(&shell);
+                let on_error = Rc::new(move |error, retry| {
+                    if let Some(shell) = weak.upgrade() {
+                        track_metadata_error(&shell, retry, error);
+                    }
+                });
                 shell.present_selected_dialog(&gtk_editors::metadata::build_batch_dialog(
                     batch,
-                    editor,
                     shell.products.runtime.clone(),
-                ))
+                    on_error,
+                ));
             }
-            Err(SourceMetadataError::LocalAccessRequired {
-                source_id,
-                source_path,
-            }) => {
-                if let Some(selected) = shell
-                    .selected_library()
-                    .as_deref()
-                    .filter(|selected| selected.source_id == source_id)
-                    .cloned()
-                {
-                    let weak = Rc::downgrade(&shell);
-                    present_local_access_recovery(
-                        &shell,
-                        selected,
-                        &source_path,
-                        Rc::new(move || {
-                            if let Some(shell) = weak.upgrade() {
-                                present_track_metadata_dialog(&shell, retry_selection.clone());
-                            }
-                        }),
-                    );
-                } else {
-                    shell
-                        .control_feedback
-                        .show_feedback_toast(tr(msgid("Metadata editing requires Local access")));
-                }
+            Err(error) => {
+                let weak = Rc::downgrade(&shell);
+                track_metadata_error(
+                    &shell,
+                    Rc::new(move || {
+                        if let Some(shell) = weak.upgrade() {
+                            present_track_metadata_dialog(&shell, retry_selection.clone());
+                        }
+                    }),
+                    error,
+                );
             }
-            Err(error) => shell.present_selected_dialog(&metadata_error_dialog(&error.to_string())),
         }
     });
     shell.selected_ui.metadata_load.replace(Some(load));
+}
+
+fn track_metadata_error(shell: &Rc<Shell>, retry: Rc<dyn Fn()>, error: SourceMetadataError) {
+    match error {
+        SourceMetadataError::LocalAccessRequired {
+            source_id,
+            source_path,
+        } => {
+            if let Some(selected) = shell
+                .selected_library()
+                .as_deref()
+                .filter(|selected| selected.source_id == source_id)
+                .cloned()
+            {
+                present_local_access_recovery(shell, selected, &source_path, retry);
+            } else {
+                shell
+                    .control_feedback
+                    .show_feedback_toast(tr(msgid("Metadata editing requires Local access")));
+            }
+        }
+        error => shell.present_selected_dialog(&metadata_error_dialog(&error.to_string())),
+    }
 }
 
 fn present_local_access_recovery(

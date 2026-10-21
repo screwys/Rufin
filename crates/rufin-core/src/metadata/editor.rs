@@ -37,9 +37,6 @@ pub struct MetadataEditorSnapshot {
     pub can_remove_artwork: bool,
     pub has_current_artwork: bool,
     pub external_lookup_allowed: bool,
-    pub can_scan: bool,
-    pub scan_candidates: Vec<super::MetadataCandidate>,
-    pub lookup_preview: Option<super::MetadataCandidate>,
     pub search_artist: String,
     pub search_album: Option<String>,
 }
@@ -52,7 +49,6 @@ pub struct MetadataEditor {
     pub(super) batch: Option<super::batch::BatchScope>,
     pub(super) external_lookup_allowed: bool,
     pub(super) state: Mutex<Editing>,
-    pub(super) lookup: Mutex<Option<super::lookup::CachedLookup>>,
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
@@ -77,7 +73,6 @@ impl MetadataEditor {
             batch: None,
             external_lookup_allowed,
             state,
-            lookup: Mutex::new(None),
         }))
     }
 }
@@ -132,9 +127,6 @@ impl MetadataEditor {
             },
             has_current_artwork: state.current.is_some(),
             external_lookup_allowed: self.external_lookup_allowed,
-            can_scan: self.draft.kind == SourceEntityKind::Track,
-            scan_candidates: state.scan_candidates(),
-            lookup_preview: state.lookup_preview.clone(),
             search_artist,
             search_album,
         }
@@ -322,12 +314,6 @@ pub(super) struct IdentifiedField {
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct PreviewField {
-    before: IdentifiedField,
-    identified: Option<IdentifiedField>,
-}
-
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct Editing {
     pub(super) mixed: HashSet<String>,
     pub(super) values: MetadataChanges,
@@ -335,10 +321,9 @@ pub(super) struct Editing {
     pub(super) lyrics: Option<super::lyrics::LyricsEdit>,
     pub(super) scan: Option<(String, metadata_lookup::FingerprintMatches)>,
     pub(super) scan_error: Option<String>,
-    #[serde(skip)]
-    pub(super) batch_candidates: Vec<super::MetadataCandidate>,
+    pub(super) lookup_candidates: Option<Vec<super::MetadataCandidate>>,
+    pub(super) lookup_result: Option<(super::MetadataCandidate, MetadataChanges)>,
     pub(super) lookup_preview: Option<super::MetadataCandidate>,
-    preview: HashMap<String, PreviewField>,
     pub(super) identified: HashMap<String, IdentifiedField>,
     pub(super) committed: Option<bool>,
     #[serde(skip)]
@@ -363,9 +348,9 @@ impl Editing {
             lyrics: None,
             scan: None,
             scan_error: None,
-            batch_candidates: Vec::new(),
+            lookup_candidates: None,
+            lookup_result: None,
             lookup_preview: None,
-            preview: HashMap::new(),
             identified: HashMap::new(),
             committed: None,
             artwork: None,
@@ -432,8 +417,6 @@ impl Editing {
     }
 
     pub(super) fn set_text(&mut self, key: &str, value: String) {
-        // Manual edits survive when another result is previewed.
-        self.preview.remove(key);
         self.mixed.remove(key);
         self.values.insert(key.to_string(), value);
         self.touched.insert(key.to_string());
@@ -453,7 +436,6 @@ impl Editing {
     }
 
     pub(super) fn undo_identified(&mut self, key: &str) -> bool {
-        self.preview.remove(key);
         let Some(field) = self.identified.remove(key) else {
             return false;
         };
@@ -517,7 +499,7 @@ impl Editing {
         })
     }
 
-    pub(super) fn preview_identified(
+    pub(super) fn apply_identified(
         &mut self,
         draft: &MetadataDraft,
         changes: MetadataChanges,
@@ -537,14 +519,6 @@ impl Editing {
             if !self.writable(draft, &key) || self.text(&key) == value {
                 continue;
             }
-            let before = PreviewField {
-                before: IdentifiedField {
-                    original: self.text(&key).to_string(),
-                    original_mixed: self.mixed.contains(&key),
-                    touched: self.touched.contains(&key),
-                },
-                identified: self.identified.get(&key).cloned(),
-            };
             if !self.is_identified(&key) {
                 self.identified.insert(
                     key.clone(),
@@ -556,37 +530,22 @@ impl Editing {
                 );
             }
             self.set_text(&key, value);
-            self.preview.insert(key, before);
         }
     }
 
-    pub(super) fn clear_preview(&mut self) {
-        for (key, field) in std::mem::take(&mut self.preview) {
-            self.values.insert(key.clone(), field.before.original);
-            if field.before.original_mixed {
-                self.mixed.insert(key.clone());
-            } else {
-                self.mixed.remove(&key);
-            }
-            if field.before.touched {
-                self.touched.insert(key.clone());
-            } else {
-                self.touched.remove(&key);
-            }
-            if let Some(identified) = field.identified {
-                self.identified.insert(key, identified);
-            } else {
-                self.identified.remove(&key);
-            }
-        }
+    pub(super) fn begin_lookup(&mut self) {
         self.lookup_preview = None;
+        self.lookup_result = None;
+        self.lookup_candidates = None;
+        self.scan_error = None;
     }
 
-    pub(super) fn scan_candidates(&self) -> Vec<super::MetadataCandidate> {
-        self.scan.as_ref().map_or_else(
-            || self.batch_candidates.clone(),
-            |(_, matches)| matches.candidates.clone(),
-        )
+    pub(super) fn apply_lookup_choice(&mut self, draft: &MetadataDraft, fill_missing: bool) {
+        if let Some((candidate, changes)) = self.lookup_result.clone()
+            && self.lookup_preview.as_ref() == Some(&candidate)
+        {
+            self.apply_identified(draft, changes, fill_missing);
+        }
     }
 
     fn artwork_search_fields(&self, draft: &MetadataDraft) -> (String, Option<String>) {

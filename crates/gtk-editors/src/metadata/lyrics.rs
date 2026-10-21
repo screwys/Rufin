@@ -11,7 +11,6 @@ pub(super) struct LyricsPane {
     content: gtk::Paned,
     artist: gtk::Entry,
     title: gtk::Entry,
-    search: gtk::Button,
     status: gtk::Label,
     results: gtk::ListBox,
     storage: gtk::Box,
@@ -41,7 +40,7 @@ impl LyricsPane {
         let builder = crate::ui_resource::builder(resource);
         gtk_widgets::objects!(builder, resource, {
             lyrics_content: gtk::Paned,
-            artist: gtk::Entry, title: gtk::Entry, search: gtk::Button, status: gtk::Label,
+            artist: gtk::Entry, title: gtk::Entry, status: gtk::Label,
             results: gtk::ListBox, storage: gtk::Box, embed: gtk::ToggleButton, sidecar: gtk::ToggleButton,
             editor_revealer: gtk::Revealer, editor_host: gtk::Box,
         });
@@ -52,7 +51,6 @@ impl LyricsPane {
             content: lyrics_content,
             artist,
             title,
-            search,
             status,
             results,
             storage,
@@ -124,17 +122,24 @@ pub(super) fn connect(editor: &Rc<Editor>) {
                 activate(&editor);
             }
         });
-    let weak = Rc::downgrade(editor);
-    editor.lyrics.search.connect_clicked(move |_| {
-        if let Some(editor) = weak.upgrade() {
-            search(&editor);
-        }
-    });
     for entry in [&editor.lyrics.artist, &editor.lyrics.title] {
         let weak = Rc::downgrade(editor);
         entry.connect_activate(move |_| {
             if let Some(editor) = weak.upgrade() {
-                search(&editor);
+                search(&editor, false);
+            }
+        });
+        let weak = Rc::downgrade(editor);
+        entry.connect_changed(move |_| {
+            if let Some(editor) = weak.upgrade()
+                && !editor.lyrics.updating.get()
+            {
+                search(&editor, true);
+            }
+        });
+        entry.connect_icon_release(|entry, position| {
+            if position == gtk::EntryIconPosition::Secondary {
+                entry.set_text("");
             }
         });
     }
@@ -254,7 +259,8 @@ pub(super) fn activate(editor: &Rc<Editor>) {
                     .lyrics
                     .embed
                     .set_active(settings.storage == LyricsStorage::Embedded);
-                editor.lyrics.search.set_sensitive(settings.can_search);
+                editor.lyrics.artist.set_sensitive(settings.can_search);
+                editor.lyrics.title.set_sensitive(settings.can_search);
                 editor
                     .lyrics
                     .editor
@@ -267,7 +273,7 @@ pub(super) fn activate(editor: &Rc<Editor>) {
                 editor.lyrics.settings.replace(Some(settings));
                 editor.lyrics.updating.set(false);
                 if can_search {
-                    search(&editor);
+                    search(&editor, false);
                 }
             }
             Err(error) => editor.lyrics.message(&error.to_string()),
@@ -276,15 +282,33 @@ pub(super) fn activate(editor: &Rc<Editor>) {
     editor.lyrics.task.replace(Some(task));
 }
 
-fn search(editor: &Rc<Editor>) {
+fn search(editor: &Rc<Editor>, delayed: bool) {
     editor.lyrics.cancel();
-    editor.lyrics.message(&localization::tr("Searching..."));
+    if !editor
+        .lyrics
+        .settings
+        .borrow()
+        .as_ref()
+        .is_some_and(|settings| settings.can_search)
+    {
+        return;
+    }
     let sequence = editor.lyrics.sequence.get();
-    let artist = editor.lyrics.artist.text().to_string();
-    let title = editor.lyrics.title.text().to_string();
+    let artist = editor.lyrics.artist.text().trim().to_string();
+    let title = editor.lyrics.title.text().trim().to_string();
+    editor.lyrics.results.remove_all();
+    editor.lyrics.candidates.borrow_mut().clear();
+    if artist.is_empty() && title.is_empty() {
+        editor.lyrics.message(&localization::tr("Type to search"));
+        return;
+    }
+    editor.lyrics.message(&localization::tr("Searching..."));
     let model = editor.model();
     let weak = Rc::downgrade(editor);
     let task = gtk::glib::spawn_future_local(async move {
+        if delayed {
+            gtk::glib::timeout_future(std::time::Duration::from_millis(600)).await;
+        }
         let result = model.search_lyrics(artist, title).await;
         let Some(editor) = weak.upgrade() else { return };
         if sequence != editor.lyrics.sequence.get() {

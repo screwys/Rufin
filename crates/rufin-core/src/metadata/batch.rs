@@ -18,21 +18,21 @@ fn error(error: impl std::fmt::Display) -> Error {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(super) struct Record {
-    draft: MetadataDraft,
+    pub(super) draft: MetadataDraft,
     pub(super) state: Editing,
     failure: Option<String>,
 }
 
 pub(super) struct Records {
     file: File,
-    offsets: Vec<(u64, u64)>,
+    offsets: HashMap<usize, (u64, u64)>,
     artwork: HashMap<usize, ArtworkChange>,
     changed: HashSet<usize>,
 }
 
 impl Records {
     pub(super) fn read(&mut self, index: usize) -> Result<Record, Error> {
-        let (offset, length) = self.offsets[index];
+        let (offset, length) = *self.offsets.get(&index).ok_or(Error::Unavailable)?;
         self.file.seek(SeekFrom::Start(offset)).map_err(error)?;
         let mut bytes = vec![0; length as usize];
         self.file.read_exact(&mut bytes).map_err(error)?;
@@ -50,11 +50,7 @@ impl Records {
         let bytes = serde_json::to_vec(record).map_err(error)?;
         let offset = self.file.seek(SeekFrom::End(0)).map_err(error)?;
         self.file.write_all(&bytes).map_err(error)?;
-        if index == self.offsets.len() {
-            self.offsets.push((offset, bytes.len() as u64));
-        } else {
-            self.offsets[index] = (offset, bytes.len() as u64);
-        }
+        self.offsets.insert(index, (offset, bytes.len() as u64));
         if let Some(artwork) = &record.state.artwork {
             self.artwork.insert(index, artwork.clone());
         } else {
@@ -84,8 +80,9 @@ pub(super) struct BatchScope {
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct MetadataBatch {
-    source: Arc<SourceOwner>,
-    uris: Vec<String>,
+    pub(super) source: Arc<SourceOwner>,
+    parent: Option<(Arc<Self>, Vec<usize>)>,
+    uris: Vec<Arc<str>>,
     // Original tags and pending drafts stay off the UI heap for large selections.
     records: Mutex<Records>,
     changed: AtomicBool,
@@ -106,6 +103,7 @@ impl MetadataBatch {
             .await
             .map_err(error)?
             .into_iter()
+            .map(Arc::<str>::from)
             .filter(|uri| seen.insert(uri.clone()))
             .collect::<Vec<_>>();
         drop(seen);
@@ -114,44 +112,30 @@ impl MetadataBatch {
         }
         let batch = Arc::new(Self {
             source,
+            parent: None,
             uris,
             records: Mutex::new(Records {
                 file: tempfile::tempfile().map_err(error)?,
-                offsets: Vec::new(),
+                offsets: HashMap::new(),
                 artwork: HashMap::new(),
                 changed: HashSet::new(),
             }),
             changed: AtomicBool::new(false),
         });
-        for (index, uri) in batch.uris.iter().enumerate() {
-            let (draft, failure) =
-                match super::EditSession::open(&batch.source, &MetadataItemId::Track(uri.clone()))
-                    .await
-                {
-                    Ok((_, draft)) => (draft, None),
-                    Err(error @ Error::LocalAccessRequired { .. }) => return Err(error),
-                    Err(error) => (
-                        MetadataDraft::new(SourceEntityKind::Track, Vec::new()),
-                        Some(error.to_string()),
-                    ),
-                };
-            let record = Record {
-                state: Editing::new(&draft),
-                draft,
-                failure,
-            };
-            if record.state.has_changes() {
-                batch.changed.store(true, Ordering::Relaxed);
-            }
-            batch
-                .work(move |records| records.write(index, &record))
-                .await?;
-        }
         Ok(batch)
     }
 
+    pub fn external_lookup_allowed(&self) -> bool {
+        self.source
+            .shared
+            .settings
+            .load()
+            .ui
+            .allows_external_metadata_lookup()
+    }
+
     pub fn track_count(&self) -> u64 {
-        self.uris.len() as u64
+        self.len() as u64
     }
     pub fn has_changes(&self) -> bool {
         self.changed.load(Ordering::Relaxed)
@@ -162,12 +146,25 @@ impl MetadataBatch {
         offset: u64,
         limit: u64,
     ) -> Result<Vec<MetadataTrackSummary>, Error> {
-        let end = self.uris.len().min(offset.saturating_add(limit) as usize);
+        let end = self.len().min(offset.saturating_add(limit) as usize);
         let mut summaries: Vec<MetadataTrackSummary> = self
             .work(move |records| {
                 (offset as usize..end)
                     .map(|index| {
-                        let record = records.read(index)?;
+                        let record = if records.offsets.contains_key(&index) {
+                            Some(records.read(index)?)
+                        } else {
+                            None
+                        };
+                        let Some(record) = record else {
+                            return Ok(MetadataTrackSummary {
+                                index: index as u64,
+                                title: String::new(),
+                                modified: false,
+                                error: None,
+                                scan_status: String::new(),
+                            });
+                        };
                         Ok(MetadataTrackSummary {
                             index: index as u64,
                             title: record
@@ -178,21 +175,7 @@ impl MetadataBatch {
                                 .cloned()
                                 .unwrap_or_default(),
                             modified: record.state.has_changes() || record.state.artwork.is_some(),
-                            scan_status: record.state.scan.as_ref().map_or_else(
-                                String::new,
-                                |(_, matches)| {
-                                    if matches.candidates.is_empty() {
-                                        localization::tr("No results")
-                                    } else {
-                                        localization::trn_with(
-                                            "{count} result",
-                                            "{count} results",
-                                            matches.candidates.len() as u64,
-                                            &[("count", &matches.candidates.len().to_string())],
-                                        )
-                                    }
-                                },
-                            ),
+                            scan_status: super::review::lookup_status(&record.state),
                             error: record.failure.or(record.state.scan_error),
                         })
                     })
@@ -202,7 +185,7 @@ impl MetadataBatch {
         let missing = summaries
             .iter()
             .filter(|row: &&MetadataTrackSummary| row.title.is_empty())
-            .map(|row| self.uris[row.index as usize].clone())
+            .map(|row| self.uri(row.index as usize).to_string())
             .collect::<Vec<_>>();
         if !missing.is_empty() {
             let titles = self
@@ -217,8 +200,8 @@ impl MetadataBatch {
                 .collect::<HashMap<_, _>>();
             for row in &mut summaries {
                 if row.title.is_empty() {
-                    let uri = &self.uris[row.index as usize];
-                    row.title = titles.get(uri).cloned().unwrap_or_else(|| uri.clone());
+                    let uri = self.uri(row.index as usize);
+                    row.title = titles.get(uri).cloned().unwrap_or_else(|| uri.to_string());
                 }
             }
         }
@@ -227,49 +210,37 @@ impl MetadataBatch {
 
     pub async fn editor(self: Arc<Self>, indices: Vec<u64>) -> Result<Arc<MetadataEditor>, Error> {
         let indices = if indices.is_empty() {
-            (0..self.uris.len()).collect::<Vec<_>>()
+            (0..self.len()).collect::<Vec<_>>()
         } else {
-            indices.into_iter().map(|index| index as usize).collect()
+            indices
+                .into_iter()
+                .map(|index| usize::try_from(index).map_err(|_| Error::Unavailable))
+                .collect::<Result<Vec<_>, _>>()?
         };
-        if indices.iter().any(|index| *index >= self.uris.len()) {
+        if indices.iter().any(|index| *index >= self.len()) {
             return Err(Error::Unavailable);
         }
+        for &index in &indices {
+            self.read(index).await?;
+        }
+        let cancelled = tokio_util::sync::CancellationToken::new();
+        let _cancel = cancelled.clone().drop_guard();
         let selected = indices.clone();
         let selected_len = selected.len();
-        let (draft, current, identified, artwork, has_artwork, lyrics, scan, candidates, preview) =
-            self.work(move |records| {
+        let (draft, current, identified, artwork, has_artwork, lyrics, scan) = self
+            .work(move |records| {
                 let mut identified = HashSet::new();
                 let mut has_artwork = false;
                 let mut lyrics = None;
                 let mut scan = None;
-                let mut candidates = Vec::new();
-                let mut preview = None;
                 let mut artwork: Option<Option<ArtworkChange>> = None;
                 let mut combined: Option<MetadataDraft> = None;
                 let mut originals: Option<MetadataDraft> = None;
                 for index in selected {
-                    let record = records.read(index)?;
-                    super::scan::merge_candidates(
-                        &mut candidates,
-                        record.state.scan_candidates(),
-                        selected_len,
-                    );
-                    match &mut preview {
-                        None => preview = Some(record.state.lookup_preview.clone()),
-                        Some(current)
-                            if current
-                                .as_ref()
-                                .map(|candidate: &super::MetadataCandidate| &candidate.id)
-                                != record
-                                    .state
-                                    .lookup_preview
-                                    .as_ref()
-                                    .map(|candidate| &candidate.id) =>
-                        {
-                            *current = None
-                        }
-                        _ => {}
+                    if cancelled.is_cancelled() {
+                        return Err(Error::Unavailable);
                     }
+                    let record = records.read(index)?;
                     if selected_len == 1 {
                         lyrics = record.state.lyrics.clone();
                         scan = record.state.scan.clone();
@@ -321,8 +292,6 @@ impl MetadataBatch {
                     has_artwork,
                     lyrics,
                     scan,
-                    candidates,
-                    preview.flatten(),
                 ))
             })
             .await?;
@@ -332,8 +301,6 @@ impl MetadataBatch {
         state.artwork = artwork.clone();
         state.lyrics = lyrics;
         state.scan = scan;
-        state.batch_candidates = candidates;
-        state.lookup_preview = preview;
         let storage = state.storage;
         for key in identified {
             state.identified.insert(
@@ -365,7 +332,6 @@ impl MetadataBatch {
                 .ui
                 .allows_external_metadata_lookup(),
             state: Mutex::new(state),
-            lookup: Mutex::new(None),
             batch: Some(BatchScope {
                 batch: self.clone(),
                 indices,
@@ -378,7 +344,10 @@ impl MetadataBatch {
 
     pub async fn save(self: Arc<Self>) -> Result<(), Error> {
         let mut failures = Vec::new();
-        for index in 0..self.uris.len() {
+        let changed_indices = self
+            .work(|records| Ok(records.changed.iter().copied().collect::<Vec<_>>()))
+            .await?;
+        for index in changed_indices {
             let mut record = self.read(index).await?;
             if !record.state.has_changes() && record.state.artwork.is_none() {
                 continue;
@@ -390,7 +359,7 @@ impl MetadataBatch {
                     .map_err(Error::InvalidInput)?;
                 let (session, current) = super::EditSession::open(
                     &self.source,
-                    &MetadataItemId::Track(self.uris[index].clone()),
+                    &MetadataItemId::Track(self.uri(index).to_string()),
                 )
                 .await?;
                 if current.revision != record.draft.revision {
@@ -405,7 +374,7 @@ impl MetadataBatch {
             if saved {
                 match super::EditSession::open(
                     &self.source,
-                    &MetadataItemId::Track(self.uris[index].clone()),
+                    &MetadataItemId::Track(self.uri(index).to_string()),
                 )
                 .await
                 {
@@ -423,7 +392,7 @@ impl MetadataBatch {
             if matches!(result, Err(Error::PartiallySaved { .. })) {
                 if let Ok((_, current)) = super::EditSession::open(
                     &self.source,
-                    &MetadataItemId::Track(self.uris[index].clone()),
+                    &MetadataItemId::Track(self.uri(index).to_string()),
                 )
                 .await
                 {
@@ -471,61 +440,6 @@ impl MetadataBatch {
             .map_err(error)?
     }
 
-    pub(super) async fn preview_lookup(
-        self: &Arc<Self>,
-        indices: &[usize],
-        lookup: Option<Arc<metadata_lookup::MetadataLookup>>,
-        candidate: Option<super::MetadataCandidate>,
-        fill_missing: bool,
-    ) -> Result<(), Error> {
-        let indices = indices.to_vec();
-        let (unmatched, changed) = self
-            .work(move |records| {
-                let mut unmatched = Vec::new();
-                for index in indices {
-                    let mut record = records.read(index)?;
-                    record.state.clear_preview();
-                    if let Some(lookup) = &lookup {
-                        if let Some(changes) = lookup.changes(
-                            SourceEntityKind::Track,
-                            &record.state.values(),
-                            record
-                                .state
-                                .scan
-                                .as_ref()
-                                .map_or(&[], |(_, matches)| matches.recordings.as_slice()),
-                        ) {
-                            record
-                                .state
-                                .preview_identified(&record.draft, changes, fill_missing);
-                            record.state.lookup_preview = candidate.clone();
-                        } else {
-                            unmatched.push(
-                                record
-                                    .state
-                                    .values
-                                    .get("title")
-                                    .cloned()
-                                    .unwrap_or_else(|| (index + 1).to_string()),
-                            );
-                        }
-                    }
-                    records.write(index, &record)?;
-                }
-                Ok((unmatched, !records.changed.is_empty()))
-            })
-            .await?;
-        self.changed.store(changed, Ordering::Relaxed);
-        if unmatched.is_empty() {
-            Ok(())
-        } else {
-            Err(Error::Write(localization::tr_with(
-                "No matching track in this release: {tracks}",
-                &[("tracks", unmatched.join("; ").as_str())],
-            )))
-        }
-    }
-
     pub(super) async fn reset(
         self: &Arc<Self>,
         indices: &[usize],
@@ -556,14 +470,171 @@ impl MetadataBatch {
     pub(super) async fn session(&self, index: usize) -> Result<Arc<super::EditSession>, Error> {
         super::EditSession::open(
             &self.source,
-            &MetadataItemId::Track(self.uris[index].clone()),
+            &MetadataItemId::Track(self.uri(index).to_string()),
         )
         .await
         .map(|(session, _)| session)
     }
 
+    fn len(&self) -> usize {
+        self.parent
+            .as_ref()
+            .map_or(self.uris.len(), |(_, indices)| indices.len())
+    }
+
+    fn uri(&self, index: usize) -> &str {
+        match &self.parent {
+            Some((parent, indices)) => parent.uri(indices[index]),
+            None => &self.uris[index],
+        }
+    }
+
+    pub(super) fn fork(self: &Arc<Self>, indices: Vec<usize>) -> Result<Arc<Self>, Error> {
+        Ok(Arc::new(Self {
+            source: self.source.clone(),
+            parent: Some((self.clone(), indices)),
+            uris: Vec::new(),
+            records: Mutex::new(Records {
+                file: tempfile::tempfile().map_err(error)?,
+                offsets: HashMap::new(),
+                artwork: HashMap::new(),
+                changed: HashSet::new(),
+            }),
+            changed: AtomicBool::new(false),
+        }))
+    }
+
     pub(super) async fn read(self: &Arc<Self>, index: usize) -> Result<Record, Error> {
+        if index >= self.len() {
+            return Err(Error::Unavailable);
+        }
+        if self
+            .work(move |records| Ok(records.offsets.contains_key(&index)))
+            .await?
+        {
+            return self.work(move |records| records.read(index)).await;
+        }
+        let record = if let Some((parent, indices)) = &self.parent {
+            let mut record = Box::pin(parent.read(indices[index])).await?;
+            for field in &mut record.draft.fields {
+                if let Some(value) = record.state.values.get(&field.key) {
+                    field.value = value.clone();
+                }
+                field.mixed = record.state.mixed.contains(&field.key);
+                field.suggestion = None;
+            }
+            record.state.begin_lookup();
+            record
+        } else {
+            let (draft, failure) = match super::EditSession::open(
+                &self.source,
+                &MetadataItemId::Track(self.uri(index).to_string()),
+            )
+            .await
+            {
+                Ok((_, draft)) => (draft, None),
+                Err(error @ Error::LocalAccessRequired { .. }) => return Err(error),
+                Err(error) => (
+                    MetadataDraft::new(SourceEntityKind::Track, Vec::new()),
+                    Some(error.to_string()),
+                ),
+            };
+            Record {
+                state: Editing::new(&draft),
+                draft,
+                failure,
+            }
+        };
+        let changed = self
+            .work(move |records| {
+                if !records.offsets.contains_key(&index) {
+                    records.write(index, &record)?;
+                }
+                Ok(!records.changed.is_empty())
+            })
+            .await?;
+        self.changed.store(changed, Ordering::Relaxed);
         self.work(move |records| records.read(index)).await
+    }
+
+    pub(super) async fn detached_editor(
+        self: &Arc<Self>,
+        index: usize,
+        scan: bool,
+    ) -> Result<Arc<MetadataEditor>, Error> {
+        let record = self.read(index).await?;
+        Ok(Arc::new(MetadataEditor {
+            draft: Arc::new(record.draft),
+            source: self.source.clone(),
+            session: if scan {
+                Some(self.session(index).await?)
+            } else {
+                None
+            },
+            batch: None,
+            external_lookup_allowed: self
+                .source
+                .shared
+                .settings
+                .load()
+                .ui
+                .allows_external_metadata_lookup(),
+            state: Mutex::new(record.state),
+        }))
+    }
+
+    pub(super) async fn store_editor(
+        self: &Arc<Self>,
+        index: usize,
+        editor: &MetadataEditor,
+    ) -> Result<(), Error> {
+        let state = editor.state().clone();
+        self.work(move |records| {
+            let mut record = records.read(index)?;
+            record.state = state;
+            records.write(index, &record)
+        })
+        .await
+    }
+
+    pub(super) async fn accept_lookup(self: &Arc<Self>, fill_missing: bool) -> Result<(), Error> {
+        let Some((parent, indices)) = &self.parent else {
+            return Ok(());
+        };
+        let loaded = self
+            .work(|records| Ok(records.offsets.keys().copied().collect::<Vec<_>>()))
+            .await?;
+        for index in loaded {
+            let mut reviewed = self.read(index).await?;
+            let chosen = reviewed.state.lookup_preview.is_some();
+            if !chosen && reviewed.state.lookup_candidates.is_none() {
+                continue;
+            }
+            if chosen {
+                reviewed
+                    .state
+                    .apply_lookup_choice(&reviewed.draft, fill_missing);
+            }
+            let target = indices[index];
+            parent
+                .work(move |records| {
+                    let mut original = records.read(target)?;
+                    if chosen {
+                        original.state = reviewed.state;
+                    } else {
+                        original.state.scan = reviewed.state.scan;
+                        original.state.lookup_candidates = reviewed.state.lookup_candidates;
+                        original.state.scan_error = reviewed.state.scan_error;
+                    }
+                    records.write(target, &original)
+                })
+                .await?;
+        }
+        let changed = parent
+            .work(|records| Ok(!records.changed.is_empty()))
+            .await?;
+        parent.changed.store(changed, Ordering::Relaxed);
+        Ok(())
     }
 
     pub(super) async fn stage(self: &Arc<Self>, editor: &MetadataEditor) -> Result<(), Error> {
@@ -582,35 +653,60 @@ impl MetadataBatch {
             return Ok(());
         }
         let indices = scope.indices.clone();
+        let cancelled = tokio_util::sync::CancellationToken::new();
+        let _cancel = cancelled.clone().drop_guard();
         let changed = self
             .work(move |records| {
                 for index in indices {
+                    if cancelled.is_cancelled() {
+                        return Err(Error::Unavailable);
+                    }
                     let mut record = records.read(index)?;
+                    let mut changed = lyrics.is_some();
                     for (key, value) in &edit.changes {
                         if record.state.values.get(key) != Some(value) {
+                            changed = true;
                             record.state.set_text(key, value.clone());
                         }
                     }
                     if let Some(artwork) = &edit.artwork {
-                        record.state.artwork = Some(artwork.change.clone());
-                        record.state.storage =
+                        let storage =
                             if record.draft.artwork.storage == sources::ArtworkStorage::Server {
                                 sources::ArtworkStorage::Server
                             } else {
                                 artwork.storage
                             };
+                        if record.state.artwork.as_ref() != Some(&artwork.change)
+                            || record.state.storage != storage
+                        {
+                            record.state.artwork = Some(artwork.change.clone());
+                            record.state.storage = storage;
+                            changed = true;
+                        }
                     }
                     if lyrics.is_some() {
                         record.state.lyrics = lyrics.clone();
                     }
-                    records.write(index, &record)?;
+                    if changed {
+                        records.write(index, &record)?;
+                    }
                 }
                 Ok(!records.changed.is_empty())
             })
             .await?;
         let mut state = editor.state();
-        state.touched.clear();
-        state.artwork = None;
+        for key in std::mem::take(&mut state.touched) {
+            if let Some(field) = editor.draft.fields.iter().find(|field| field.key == key) {
+                state
+                    .identified
+                    .entry(key)
+                    .or_insert_with(|| super::editor::IdentifiedField {
+                        original: field.value.clone(),
+                        original_mixed: field.mixed,
+                        touched: false,
+                    });
+            }
+        }
         self.changed.store(changed, Ordering::Relaxed);
         Ok(())
     }

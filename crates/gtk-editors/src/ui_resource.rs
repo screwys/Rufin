@@ -1,3 +1,5 @@
+pub const METADATA_LOOKUP_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/dialogs/metadata_lookup.ui";
 pub const METADATA_LYRICS_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/metadata_lyrics.ui";
 pub const METADATA_FIELD_RESOURCE: &str =
@@ -21,6 +23,7 @@ pub const PLAYLIST_ARTWORK_RESOURCE: &str =
 
 pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     METADATA_LYRICS_RESOURCE,
+    METADATA_LOOKUP_RESOURCE,
     METADATA_DIALOG_RESOURCE,
     METADATA_BATCH_RESOURCE,
     METADATA_TRACK_RESOURCE,

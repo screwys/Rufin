@@ -1,41 +1,177 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <interface domain="rufin">
-  <requires lib="gtk" version="4.20"/>
-  <requires lib="libadwaita" version="1.9"/>
+  <requires lib="gtk" version="4.20" />
+  <requires lib="libadwaita" version="1.9" />
   <object class="AdwDialog" id="batch_dialog">
     <property name="title" translatable="yes">Edit metadata</property>
     <property name="content-width">1040</property>
     <property name="content-height">800</property>
-    <style><class name="preferences"/></style>
-    <property name="child"><object class="AdwBreakpointBin" id="responsive">
-      <property name="width-request">320</property><property name="height-request">240</property>
-      <property name="child"><object class="AdwToolbarView">
-        <child type="top"><object class="AdwHeaderBar">
-          <property name="title-widget"><object class="AdwWindowTitle"><property name="title" translatable="yes">Edit metadata</property></object></property>
-          <child type="start"><object class="GtkButton" id="show_tracks"><property name="label" translatable="yes">Tracks</property></object></child>
-        </object></child>
-        <property name="content"><object class="AdwNavigationSplitView" id="split"><style><class name="preferences-split"/></style>
-          <property name="min-sidebar-width">190</property><property name="max-sidebar-width">210</property>
-          <property name="sidebar-width-fraction">0.22</property><property name="show-content">true</property>
-          <property name="sidebar"><object class="AdwNavigationPage">
-            <property name="title" translatable="yes">Tracks</property>
-            <property name="child"><object class="GtkBox" id="sidebar">
-              <property name="orientation">vertical</property><property name="spacing">8</property>
-              <child><object class="GtkBox"><property name="spacing">8</property><property name="margin-start">8</property><property name="margin-end">8</property>
-                <child><object class="GtkToggleButton" id="select_all"><style><class name="flat"/><class name="preferences-category-content"/></style><property name="label" translatable="yes">All tracks</property><property name="hexpand">true</property></object></child>
-                <child><object class="GtkButton" id="edit_selected"><property name="label" translatable="yes">Edit</property></object></child>
-              </object></child>
-              <child><object class="GtkScrolledWindow"><property name="vexpand">true</property><property name="hscrollbar-policy">never</property>
-                <property name="child"><object class="GtkListView" id="tracks"><property name="single-click-activate">false</property><style><class name="navigation-sidebar"/><class name="preferences-categories"/></style></object></property>
-              </object></child>
-            </object></property>
-          </object></property>
-          <property name="content"><object class="AdwNavigationPage">
-            <property name="title" translatable="yes">Metadata</property>
-            <property name="child"><object class="GtkBox" id="editor_host"><property name="orientation">vertical</property><property name="hexpand">true</property><property name="vexpand">true</property></object></property>
-          </object></property>
-        </object></property>
-      </object></property>
-    </object></property>
+    <style>
+      <class name="preferences" />
+    </style>
+    <property name="child">
+      <object class="AdwBreakpointBin" id="responsive">
+        <property name="width-request">320</property>
+        <property name="height-request">240</property>
+        <property name="child">
+          <object class="AdwToolbarView">
+            <child type="top">
+              <object class="AdwHeaderBar">
+                <property name="title-widget">
+                  <object class="AdwWindowTitle">
+                    <property name="title" translatable="yes">Edit metadata</property>
+                  </object>
+                </property>
+                <child type="start">
+                  <object class="GtkButton" id="show_tracks">
+                    <property name="label" translatable="yes">Tracks</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <property name="content">
+              <object class="AdwNavigationSplitView" id="split">
+                <style>
+                  <class name="preferences-split" />
+                </style>
+                <property name="min-sidebar-width">190</property>
+                <property name="max-sidebar-width">210</property>
+                <property name="sidebar-width-fraction">0.22</property>
+                <property name="show-content">true</property>
+                <property name="sidebar">
+                  <object class="AdwNavigationPage">
+                    <property name="title" translatable="yes">Tracks</property>
+                    <property name="child">
+                      <object class="GtkBox" id="sidebar">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">8</property>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="spacing">8</property>
+                            <property name="margin-start">8</property>
+                            <property name="margin-end">8</property>
+                            <child>
+                              <object class="GtkToggleButton" id="select_all">
+                                <style>
+                                  <class name="flat" />
+                                  <class name="preferences-category-content" />
+                                </style>
+                                <property name="label" translatable="yes">All tracks</property>
+                                <property name="hexpand">true</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkButton" id="edit_selected">
+                                <property name="label" translatable="yes">Edit</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkScrolledWindow">
+                            <property name="vexpand">true</property>
+                            <property name="hscrollbar-policy">never</property>
+                            <property name="child">
+                              <object class="GtkListView" id="tracks">
+                                <property name="single-click-activate">false</property>
+                                <style>
+                                  <class name="navigation-sidebar" />
+                                  <class name="preferences-categories" />
+                                </style>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="spacing">8</property>
+                            <property name="halign">start</property>
+                            <property name="margin-start">8</property>
+                            <property name="margin-end">8</property>
+                            <property name="margin-bottom">14</property>
+                            <child>
+                              <object class="GtkButton">
+                                <property name="action-name">tracks.previous</property>
+                                <property name="icon-name">rufin-go-previous-symbolic</property>
+                                <property name="tooltip-text" translatable="yes">Previous</property>
+                                <accessibility>
+                                  <property name="label" translatable="yes">Previous</property>
+                                </accessibility>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkButton">
+                                <property name="action-name">tracks.next</property>
+                                <property name="icon-name">rufin-go-next-symbolic</property>
+                                <property name="tooltip-text" translatable="yes">Next</property>
+                                <accessibility>
+                                  <property name="label" translatable="yes">Next</property>
+                                </accessibility>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </property>
+                <property name="content">
+                  <object class="AdwNavigationPage">
+                    <property name="title" translatable="yes">Metadata</property>
+                    <property name="child">
+                      <object class="GtkBox">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">8</property>
+                        <child>
+                          <object class="GtkButton" id="lookup">
+                            <property name="halign">end</property>
+                            <property name="margin-end">24</property>
+                            <property name="icon-name">io.github.screwys.Rufin.external.musicbrainz</property>
+                            <property name="tooltip-text" translatable="yes">Lookup</property>
+                            <accessibility>
+                              <property name="label" translatable="yes">Lookup</property>
+                            </accessibility>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkStack" id="content">
+                            <property name="vhomogeneous">false</property>
+                            <property name="vexpand">true</property>
+                            <child>
+                              <object class="GtkStackPage">
+                                <property name="name">loading</property>
+                                <property name="child">
+                                  <object class="GtkSpinner">
+                                    <property name="spinning">true</property>
+                                    <property name="halign">center</property>
+                                    <property name="valign">center</property>
+                                  </object>
+                                </property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkStackPage">
+                                <property name="name">editor</property>
+                                <property name="child">
+                                  <object class="GtkBox" id="editor_host">
+                                    <property name="orientation">vertical</property>
+                                    <property name="hexpand">true</property>
+                                    <property name="vexpand">true</property>
+                                  </object>
+                                </property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </property>
+              </object>
+            </property>
+          </object>
+        </property>
+      </object>
+    </property>
   </object>
 </interface>

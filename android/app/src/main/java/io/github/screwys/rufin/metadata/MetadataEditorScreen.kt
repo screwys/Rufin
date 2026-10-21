@@ -32,6 +32,7 @@ import io.github.screwys.rufin.shared.sources.MetadataFieldKind
 import io.github.screwys.rufin.shared.sources.SourceMetadataException
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.RufinIcon
+import io.github.screwys.rufin.ui.DetailLinkIcon
 import io.github.screwys.rufin.ui.decodePlayerArtwork
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsRow
@@ -85,6 +86,7 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
         io.github.screwys.rufin.sources.LocalAccessDialog(model, failure.sourceId, failure.sourcePath,
             onDismiss = onDismiss, onSaved = { connection.reload() })
     }
+    if (connection.lookupReview != null) MetadataLookupDialog(connection)
     if (confirmReload) AlertDialog(onDismissRequest = { confirmReload = false },
         title = { Text(translate("Discard changes?")) },
         text = { Text(translate("Reload metadata to review the current values.")) },
@@ -95,40 +97,13 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
 
 @Composable
 private fun MetadataFields(connection: MetadataConnection, state: MetadataEditorSnapshot, editable: Boolean) {
-    var lookupQuery by remember { mutableStateOf("") }
-    var fillMissing by remember { mutableStateOf(true) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             if (state.trackCount > 1UL) Text(state.scopeSummary,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (state.canScan) FilledTonalButton(connection::scan, enabled = editable && state.externalLookupAllowed) { Text(translate("Scan")) }
-            FilledTonalButton({ connection.lookup(lookupQuery) }, enabled = editable && state.externalLookupAllowed) {
-                RufinIcon("rufin-search-symbolic", null, Modifier.size(20.dp))
+            FilledTonalButton(connection::openLookup, enabled = editable && state.externalLookupAllowed) {
+                DetailLinkIcon("io.github.screwys.Rufin.external.musicbrainz", Modifier.size(24.dp))
                 Spacer(Modifier.width(8.dp)); Text(translate("Lookup"))
-            }
-            }
-        }
-        connection.lookupResults?.let { candidates ->
-            item {
-                OutlinedTextField(lookupQuery, { lookupQuery = it }, Modifier.fillMaxWidth(),
-                    label = { Text(translate("Search MusicBrainz")) }, singleLine = true, enabled = editable,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { if (editable) connection.lookup(lookupQuery) }))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(fillMissing, { value ->
-                        fillMissing = value
-                        state.lookupPreview?.let { connection.previewLookup(it, value) }
-                    }, enabled = editable)
-                    Text(translate("Fill missing"), Modifier.weight(1f))
-                }
-                if (candidates.isEmpty()) Text(translate("No results"))
-            }
-            items(candidates, key = { it.id }) { candidate ->
-                ListItem(headlineContent = { Text(candidate.title) }, supportingContent = { Text(candidate.detail) },
-                    colors = ListItemDefaults.colors(containerColor = if (state.lookupPreview?.id == candidate.id)
-                        MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.clickable(enabled = editable) { connection.previewLookup(candidate, fillMissing) })
             }
         }
         items(state.fields, key = { it.field.key }) { presented ->
