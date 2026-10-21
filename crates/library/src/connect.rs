@@ -1174,13 +1174,18 @@ async fn apply_link_page(
         .fetch_all(&mut *connection)
         .await?;
         // Older peers sent credits separately. Fold them into the accepted snapshot.
-        sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {left}s owner SET metadata=jsonb(json_set(metadata,'$.{array}',json((SELECT json_group_array(json_patch(target.metadata,json_object('object_id',target.object_id)) ORDER BY credit.position) FROM {table} credit JOIN {right}s target USING({right}_key) WHERE credit.{left}_key=owner.{left}_key)))) WHERE {left}_key IN(SELECT value FROM json_each(?1))"))).bind(serde_json::to_string(&owner_keys)?).execute(&mut *connection).await?;
+        let input = if left == "album" {
+            "input_metadata"
+        } else {
+            "metadata"
+        };
+        sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {left}s owner SET {input}=jsonb(json_set(coalesce({input},jsonb('{{}}')),'$.{array}',json((SELECT json_group_array(json_patch(target.metadata,json_object('object_id',target.object_id)) ORDER BY credit.position) FROM {table} credit JOIN {right}s target USING({right}_key) WHERE credit.{left}_key=owner.{left}_key)))) WHERE {left}_key IN(SELECT value FROM json_each(?1))"))).bind(serde_json::to_string(&owner_keys)?).execute(&mut *connection).await?;
         if left == "track" {
             crate::catalog::artwork::refresh_choices(connection, &owner_keys, &[], &[], false)
                 .await?;
         }
         if left == "album" {
-            let owners=sqlx::query_as::<_,(i64,String,String,String,Option<Vec<u8>>)>("SELECT source_key,object_id,media_uri,json(metadata),native_artwork FROM albums WHERE album_key IN(SELECT value FROM json_each(?1))").bind(serde_json::to_string(&owner_keys)?).fetch_all(&mut *connection).await?;
+            let owners=sqlx::query_as::<_,(i64,String,String,String,Option<Vec<u8>>)>("SELECT source_key,object_id,media_uri,json(input_metadata),native_artwork FROM albums WHERE album_key IN(SELECT value FROM json_each(?1))").bind(serde_json::to_string(&owner_keys)?).fetch_all(&mut *connection).await?;
             for (source, id, uri, payload, artwork) in owners {
                 crate::catalog::remember_collection(
                     connection,
@@ -1643,11 +1648,7 @@ mod tests {
             .create_playlist(
                 None,
                 "Saved",
-                &crate::CatalogQuery::uris(
-                    crate::CatalogKind::Track,
-                    (std::slice::from_ref(&uri)).to_vec(),
-                )
-                .selection(),
+                &crate::MemberSelection::Uris(((std::slice::from_ref(&uri)).to_vec()).into()),
             )
             .await
             .unwrap()
@@ -1931,18 +1932,18 @@ mod tests {
         let database = Database::open(directory.path().join("profile.sqlite"))
             .await
             .unwrap();
-        let recovered = crate::CatalogQuery::uris(
-            crate::CatalogKind::Track,
-            vec![("https://example.org/retained").to_string()],
-        )
-        .rows(&database, 0, 1, &crate::ReadCancellation::new())
-        .await
-        .map(|rows| match rows {
-            crate::CatalogRows::Tracks(mut rows) => rows.pop(),
-            _ => unreachable!("typed catalog projection"),
-        })
-        .unwrap()
-        .unwrap();
+        let recovered = database
+            .tracks_by_uris(
+                &([("https://example.org/retained").to_string()]),
+                &crate::ReadCancellation::new(),
+            )
+            .await
+            .map(|rows| {
+                let mut rows = rows;
+                rows.pop()
+            })
+            .unwrap()
+            .unwrap();
         assert_eq!(recovered.metadata.title, "Retained song");
         assert_eq!(recovered.metadata.artist, "Retained artist");
         assert_eq!(recovered.metadata.album, "Retained album");
@@ -1952,7 +1953,7 @@ mod tests {
                 crate::schema::pragma(&mut reader, "user_version")
                     .await
                     .unwrap(),
-                50
+                54
             );
             assert_eq!(
                 sqlx::query_scalar::<_, i64>(
@@ -1965,7 +1966,7 @@ mod tests {
                 2
             );
         }
-        let selection = crate::CatalogQuery::tracks(crate::TrackScope::History {
+        let selection = crate::MemberRead::new(crate::Collection::History {
             source: Some(crate::SourceId::new("removed")),
         })
         .selection();
@@ -1988,12 +1989,13 @@ mod tests {
             .await
             .unwrap();
         assert!(!database.connect_apply(&[record]).await.unwrap());
-        let history = (&crate::CatalogQuery::tracks(crate::TrackScope::History { source: None }))
+        let history = (&crate::MemberRead::new(crate::Collection::History { source: None }))
             .rows(&database, 0, 100, &crate::ReadCancellation::new())
             .await
-            .map(|rows| match rows {
-                crate::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!("typed song projection"),
+            .map(|rows| {
+                rows.into_iter()
+                    .map(crate::MemberRow::into_track)
+                    .collect::<Vec<_>>()
             })
             .unwrap();
         assert_eq!(history.len(), 2);
@@ -2053,11 +2055,7 @@ mod tests {
             .create_playlist(
                 None,
                 "Shared",
-                &crate::CatalogQuery::uris(
-                    crate::CatalogKind::Track,
-                    (&[media.clone(), media.clone()]).to_vec(),
-                )
-                .selection(),
+                &crate::MemberSelection::Uris(((&[media.clone(), media.clone()]).to_vec()).into()),
             )
             .await
             .unwrap()
@@ -2066,11 +2064,7 @@ mod tests {
             .create_playlist(
                 None,
                 "Old local playlist",
-                &crate::CatalogQuery::uris(
-                    crate::CatalogKind::Track,
-                    (std::slice::from_ref(&media)).to_vec(),
-                )
-                .selection(),
+                &crate::MemberSelection::Uris(((std::slice::from_ref(&media)).to_vec()).into()),
             )
             .await
             .unwrap()
@@ -2111,11 +2105,7 @@ mod tests {
             .add_playlist_tracks(
                 None,
                 playlist,
-                &crate::CatalogQuery::uris(
-                    crate::CatalogKind::Track,
-                    (std::slice::from_ref(&media)).to_vec(),
-                )
-                .selection(),
+                &crate::MemberSelection::Uris(((std::slice::from_ref(&media)).to_vec()).into()),
                 false,
             )
             .await

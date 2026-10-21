@@ -250,7 +250,7 @@ impl PositionSelectionModel {
 
 #[derive(Clone)]
 pub struct TrackSelectionSnapshot {
-    pub input: library::TrackSelection,
+    pub input: library::MemberSelection,
     pub count: usize,
 }
 impl TrackSelectionSnapshot {
@@ -278,7 +278,7 @@ pub struct PlaylistEntrySelectionSnapshot {
     pub writable: bool,
     pub playlist: PlaylistKey,
     pub playlist_name: Arc<str>,
-    pub input: library::TrackSelection,
+    pub input: library::MemberSelection,
     pub count: usize,
 }
 impl PlaylistEntrySelectionSnapshot {
@@ -354,12 +354,12 @@ mod tests {
     }
 }
 
-pub fn collection_play_request(scope: library::TrackScope) -> rufin_core::playback::PlayRequest {
+pub fn collection_play_request(scope: library::Collection) -> rufin_core::playback::PlayRequest {
     let context = match &scope {
-        library::TrackScope::Tracks(key) => format!("tracks:{key}"),
-        library::TrackScope::Objects { source, .. } => format!("objects:{source}"),
-        library::TrackScope::Album(key) => format!("album:{key}"),
-        library::TrackScope::Artist { key, album_artist } => format!(
+        library::Collection::Source(key) => format!("tracks:{key}"),
+        library::Collection::Objects { source, .. } => format!("objects:{source}"),
+        library::Collection::Album(key) => format!("album:{key}"),
+        library::Collection::Artist { key, album_artist } => format!(
             "{}:{key}",
             if *album_artist {
                 "album-artist"
@@ -367,14 +367,14 @@ pub fn collection_play_request(scope: library::TrackScope) -> rufin_core::playba
                 "artist"
             }
         ),
-        library::TrackScope::Genre(key) => format!("genre:{key}"),
-        library::TrackScope::Mood(key) => format!("mood:{key}"),
-        library::TrackScope::Playlist(key) => format!("playlist:{key}"),
-        library::TrackScope::Smart { key, .. } => format!("smart-playlist:{key}"),
-        library::TrackScope::History { source } => format!("history:{source:?}"),
+        library::Collection::Genre(key) => format!("genre:{key}"),
+        library::Collection::Mood(key) => format!("mood:{key}"),
+        library::Collection::Playlist(key) => format!("playlist:{key}"),
+        library::Collection::Smart { key, .. } => format!("smart-playlist:{key}"),
+        library::Collection::History { source } => format!("history:{source:?}"),
     };
     rufin_core::playback::PlayRequest::ordered(
-        library::CatalogQuery::tracks(scope).selection(),
+        library::MemberRead::new(scope).selection(),
         0,
         QueuePlacement::Now,
         true,
@@ -384,7 +384,14 @@ pub fn collection_play_request(scope: library::TrackScope) -> rufin_core::playba
 
 pub fn track_play_request(key: library::TrackKey) -> rufin_core::playback::PlayRequest {
     rufin_core::playback::PlayRequest::ordered(
-        library::CatalogQuery::keys(library::CatalogKind::Track, None, vec![key.raw()]).selection(),
+        library::MemberSelection::Keys {
+            source: None,
+            keys: (vec![key.raw()])
+                .into_iter()
+                .map(library::TrackKey::from_raw)
+                .collect::<Vec<_>>()
+                .into(),
+        },
         0,
         QueuePlacement::Now,
         false,
@@ -398,9 +405,9 @@ pub fn smart_play_request(
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |value| value.as_secs() as i64);
-    let query = library::CatalogQuery {
+    let query = library::MemberRead {
         folder: selected.and_then(|selected| selected.music_folder_key),
-        ..library::CatalogQuery::tracks(library::TrackScope::Smart {
+        ..library::MemberRead::new(library::Collection::Smart {
             key,
             source: selected.map(|selected| selected.source_key),
             now,
@@ -412,7 +419,7 @@ pub fn smart_play_request(
 
 pub fn album_play_request(row: &library::AlbumView) -> rufin_core::playback::PlayRequest {
     rufin_core::playback::PlayRequest::ordered(
-        library::CatalogQuery::tracks(library::TrackScope::Album(row.album_key)).selection(),
+        library::MemberRead::new(library::Collection::Album(row.album_key)).selection(),
         0,
         QueuePlacement::Now,
         true,
@@ -425,7 +432,7 @@ pub fn artist_play_request(
     album_artist: bool,
 ) -> rufin_core::playback::PlayRequest {
     rufin_core::playback::PlayRequest::ordered(
-        library::CatalogQuery::tracks(library::TrackScope::Artist {
+        library::MemberRead::new(library::Collection::Artist {
             key: row.artist_key,
             album_artist,
         })

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <object class="GtkBox" id="root">
+    <property name="orientation">vertical</property>
+    <property name="hexpand">true</property>
+    <property name="vexpand">true</property>
+    <property name="overflow">hidden</property>
+    <child>
+      <object class="GtkBox" id="header_host">
+        <property name="visible">false</property>
+        <property name="hexpand">true</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="content_host">
+        <property name="hexpand">true</property>
+        <property name="vexpand">true</property>
+      </object>
+    </child>
+  </object>
+</interface>

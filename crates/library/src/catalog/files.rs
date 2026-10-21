@@ -2,70 +2,6 @@ use super::*;
 use crate::{LocalFileState, LocalFileWrite, LocalLocatorWrite, TrackKey, TrackObservation};
 use sqlx::{QueryBuilder, Sqlite};
 
-pub(crate) async fn album_order(
-    connection: &mut SqliteConnection,
-    keys: &[i64],
-) -> LibraryResult<Vec<i64>> {
-    if keys.is_empty() {
-        return Ok(Vec::new());
-    }
-    let input = serde_json::to_string(keys)?;
-    // Retire only the migrated local header, after every admitted member has raw tags.
-    let retired:Vec<i64>=sqlx::query_scalar("UPDATE albums SET metadata=NULL,indexed=0,cached_local=0,accepted_audio=NULL WHERE cached_local=1 AND album_key IN(SELECT value FROM json_each(?1)) AND NOT EXISTS(SELECT 1 FROM tracks INDEXED BY tracks_album_order_idx WHERE tracks.album_key=albums.album_key AND indexed=1 AND json_type(metadata,'$.album_tags') IS NOT 'object') RETURNING album_key")
-        .bind(&input).fetch_all(&mut *connection).await?;
-    if !retired.is_empty() {
-        for table in ["album_artists", "album_genres", "album_release_types"] {
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "DELETE FROM {table} WHERE album_key IN(SELECT value FROM json_each(?1))"
-            )))
-            .bind(serde_json::to_string(&retired)?)
-            .execute(&mut *connection)
-            .await?;
-        }
-    }
-    let identity = crate::collections::album_release_identity("album");
-    sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE albums AS album SET release_lookup_identity=NULL WHERE album_key IN(SELECT value FROM json_each(?1)) AND release_lookup_identity IS NOT NULL AND release_lookup_identity IS NOT({identity})")))
-        .bind(&input).execute(&mut *connection).await?;
-    let member = "FROM tracks member INDEXED BY tracks_album_order_idx WHERE member.album_key=album.album_key AND member.indexed=1";
-    let order = "ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1";
-    let title = format!(
-        "coalesce(album.sort_text,(SELECT coalesce(json_extract(member.metadata,'$.album_tags.sort_text'),member.display_album,'') {member} {order}),'')"
-    );
-    let artist = "CASE WHEN album.metadata IS NOT NULL THEN(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key ORDER BY credit.position LIMIT 1) ELSE(SELECT artist.sort_text FROM tracks member INDEXED BY tracks_album_order_idx JOIN track_album_artists credit USING(track_key) JOIN artists artist USING(artist_key) WHERE member.album_key=album.album_key AND member.indexed=1 ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id,credit.position LIMIT 1) END";
-    let year = format!(
-        "CASE WHEN album.metadata IS NOT NULL THEN album.year ELSE(SELECT member.year {member} AND member.year IS NOT NULL {order}) END"
-    );
-    let release = format!(
-        "CASE WHEN album.metadata IS NOT NULL THEN album.release_date ELSE(SELECT member.release_date {member} AND member.release_date IS NOT NULL {order}) END"
-    );
-    let added = format!(
-        "coalesce(unixepoch(album.date_added),album.first_seen_at,(SELECT coalesce(unixepoch(member.date_added),member.first_seen_at) {member} {order}))"
-    );
-    let mut changed:Vec<i64>=sqlx::query_scalar(sqlx::AssertSqlSafe(format!("INSERT INTO album_order(album_key,source_key,title_sort,album_artist_sort,year_sort,release_sort,added_sort) SELECT album.album_key,album.source_key,{title},{artist},{year},{release},{added} FROM albums album WHERE album.album_key IN(SELECT value FROM json_each(?1)) ON CONFLICT(album_key) DO UPDATE SET title_sort=excluded.title_sort,album_artist_sort=excluded.album_artist_sort,year_sort=excluded.year_sort,release_sort=excluded.release_sort,added_sort=excluded.added_sort WHERE(title_sort,album_artist_sort,year_sort,release_sort,added_sort) IS NOT(excluded.title_sort,excluded.album_artist_sort,excluded.year_sort,excluded.release_sort,excluded.added_sort) RETURNING album_key")))
-        .bind(&input).fetch_all(&mut *connection).await?;
-    let captions:Vec<(i64,String,String,String,String)>=sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT album.album_key,ordering.title_search,ordering.artist_search,coalesce(album.title,(SELECT member.display_album {member} AND member.display_album<>'' {order}),'') ,CASE WHEN album.metadata IS NOT NULL THEN coalesce(json_extract(album.metadata,'$.artist'),'') ELSE coalesce((SELECT coalesce(nullif(json_extract(member.metadata,'$.album_display_artist'),''),member.display_artist) {member} {order}),'') END FROM albums album JOIN album_order ordering USING(album_key) WHERE album.album_key IN(SELECT value FROM json_each(?1))"))).bind(&input).fetch_all(&mut *connection).await?;
-    let searches = captions
-        .into_iter()
-        .filter_map(|(key, previous, previous_artist, caption, artist)| {
-            let normalized = caption.to_lowercase();
-            let artist = artist.to_lowercase();
-            (previous != normalized || previous_artist != artist)
-                .then_some((key, normalized, artist))
-        })
-        .collect::<Vec<_>>();
-    if !searches.is_empty() {
-        let mut query =
-            QueryBuilder::<Sqlite>::new("WITH input(album_key,title_search,artist_search) AS(");
-        query.push_values(&searches, |mut row, (key, search, artist)| {
-            row.push_bind(key).push_bind(search).push_bind(artist);
-        });
-        query.push(") UPDATE album_order SET title_search=input.title_search,artist_search=input.artist_search FROM input WHERE album_order.album_key=input.album_key");
-        query.build().execute(&mut *connection).await?;
-        changed.extend(searches.into_iter().map(|(key, _, _)| key));
-    }
-    Ok(changed)
-}
-
 pub(crate) fn directory_locator(path: &str) -> String {
     path.trim_end_matches(['/', std::path::MAIN_SEPARATOR])
         .to_owned()
@@ -554,7 +490,7 @@ async fn write_track_membership(
     )
     .await?;
     if changed {
-        album_order(connection, &albums).await?;
+        super::index::albums(connection, &albums).await?;
         super::artwork::refresh_choices(connection, tracks, &albums, &[], false).await?;
     }
     Ok(changed)
@@ -1217,7 +1153,7 @@ async fn merge_local_file_uris_on(
             .bind(serde_json::to_string(aliases)?).execute(&mut *connection).await?.rows_affected()>0;
     }
     if !rekeys.is_empty() {
-        album_order(connection, &albums).await?;
+        super::index::albums(connection, &albums).await?;
         super::artwork::refresh_choices(
             connection,
             &candidates.iter().map(|(key, _)| *key).collect::<Vec<_>>(),

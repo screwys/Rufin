@@ -1,3 +1,5 @@
+pub mod catalog;
+
 use std::path::PathBuf;
 
 use library::{

@@ -97,6 +97,23 @@ pub fn seek_preview_matches_position(target_millis: u64, position_millis: u64) -
     rufin_core::playback::seek_preview_matches_position(target_millis, position_millis)
 }
 
+fn android_paths(files_dir: String, cache_dir: String) -> Paths {
+    let files = std::path::PathBuf::from(files_dir);
+    Paths {
+        config: files.join("config"),
+        data: files.join("data"),
+        state: files.join("state"),
+        cache: cache_dir.into(),
+    }
+}
+
+#[uniffi::export]
+pub fn reset_database(files_dir: String, cache_dir: String) -> Result<(), AndroidError> {
+    rufin_core::settings::StorageResetRequest::Database
+        .apply(&android_paths(files_dir, cache_dir))
+        .map_err(error)
+}
+
 /// The Android service retains this object independently of screen navigation.
 #[derive(uniffi::Object)]
 pub struct AndroidRuntime {
@@ -116,13 +133,7 @@ pub struct AndroidRuntime {
 impl AndroidRuntime {
     #[uniffi::constructor]
     pub fn new(files_dir: String, cache_dir: String) -> Result<Arc<Self>, AndroidError> {
-        let files = std::path::PathBuf::from(files_dir);
-        let paths = Paths {
-            config: files.join("config"),
-            data: files.join("data"),
-            state: files.join("state"),
-            cache: cache_dir.into(),
-        };
+        let paths = android_paths(files_dir, cache_dir);
         let settings = app::startup_settings(&paths);
         let theme_directory = paths.config_dir().join("themes");
         let (diagnostics, _) = DIAGNOSTICS.get_or_init(|| {

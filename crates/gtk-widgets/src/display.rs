@@ -168,7 +168,7 @@ pub fn apply(widget: &impl IsA<gtk::Widget>, settings: &DisplaySettings) {
         table.set_show_column_separators(settings.column_borders);
         // GtkColumnView exposes its header as its first child, without a visibility property.
         if let Some(header) = table.first_child() {
-            header.set_visible(settings.show_header);
+            header.set_visible(settings.show_header && !table.has_css_class("external-header"));
         }
     }
 }

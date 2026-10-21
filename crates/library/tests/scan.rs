@@ -1192,20 +1192,21 @@ async fn artwork_publication_keeps_one_effective_binding_per_entity() {
     let database = Database::open(&path).await.expect("open Library Store");
 
     write_small_catalog(&database, "shared", "Track One", false, br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/242a249a37e1642edb20688243d50616","image":{"kind":"native","source_id":"source","item_id":"genre-art","tag":null},"blur_hash":null}]"#).await;
-    let artist = match library::CatalogQuery::uris(
-        library::CatalogKind::Artist,
-        vec![library::source_entity_uri(
-            &library::SourceId::new("source-one"),
-            "artist",
-            "artist-one",
-        )],
-    )
-    .rows(&database, 0, 1, &ReadCancellation::new())
-    .await
-    .unwrap()
-    {
-        library::CatalogRows::Artists(mut rows) => rows.pop().unwrap().artwork_binding.unwrap(),
-        _ => unreachable!(),
+    let artist = {
+        let rows = database
+            .artist(
+                &(library::source_entity_uri(
+                    &library::SourceId::new("source-one"),
+                    "artist",
+                    "artist-one",
+                )),
+                false,
+                false,
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap();
+        rows.unwrap().artwork_binding.unwrap()
     };
     let artist: Vec<library::ArtworkCandidate> = serde_json::from_slice(&artist).unwrap();
     assert_eq!(serde_json::to_vec(&artist[..1]).unwrap(), br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/8799b34127e8fddd3fdcdff25c21b7dd","image":{"kind":"native","source_id":"source","item_id":"artist-art","tag":null},"blur_hash":null}]"#);
@@ -1215,34 +1216,43 @@ async fn artwork_publication_keeps_one_effective_binding_per_entity() {
         library::ArtworkImage::Artist { .. }
     ));
     let shared = {
-        let album = match library::CatalogQuery::uris(
-            library::CatalogKind::Album,
-            vec![library::source_entity_uri(
-                &library::SourceId::new("source-one"),
-                "album",
-                "album-one",
-            )],
-        )
-        .rows(&database, 0, 1, &ReadCancellation::new())
-        .await
-        .unwrap()
-        {
-            library::CatalogRows::Albums(mut rows) => rows.pop().unwrap(),
-            _ => unreachable!(),
+        let album = {
+            let rows = database
+                .album(
+                    &(library::source_entity_uri(
+                        &library::SourceId::new("source-one"),
+                        "album",
+                        "album-one",
+                    )),
+                    false,
+                    &ReadCancellation::new(),
+                )
+                .await
+                .unwrap();
+            rows.unwrap()
         };
-        let tracks = match library::CatalogQuery::uris(
-            library::CatalogKind::Track,
-            vec![
-                library::cue_media_uri("track-one", "file:///music/track-one.flac", 1000, 181000),
-                library::cue_media_uri("track-two", "file:///music/track-two.flac", 1000, 181000),
-            ],
-        )
-        .rows(&database, 0, 2, &ReadCancellation::new())
-        .await
-        .unwrap()
-        {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!(),
+        let tracks = {
+            let rows = database
+                .tracks_by_uris(
+                    &([
+                        library::cue_media_uri(
+                            "track-one",
+                            "file:///music/track-one.flac",
+                            1000,
+                            181000,
+                        ),
+                        library::cue_media_uri(
+                            "track-two",
+                            "file:///music/track-two.flac",
+                            1000,
+                            181000,
+                        ),
+                    ]),
+                    &ReadCancellation::new(),
+                )
+                .await
+                .unwrap();
+            rows
         };
         (
             album.artwork_binding.unwrap(),
@@ -1273,34 +1283,43 @@ async fn artwork_publication_keeps_one_effective_binding_per_entity() {
     );
     write_small_catalog(&database, "distinct", "Track One", false, br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/242a249a37e1642edb20688243d50616","image":{"kind":"native","source_id":"source","item_id":"genre-art","tag":null},"blur_hash":null}]"#).await;
     let distinct = {
-        let album = match library::CatalogQuery::uris(
-            library::CatalogKind::Album,
-            vec![library::source_entity_uri(
-                &library::SourceId::new("source-one"),
-                "album",
-                "album-one",
-            )],
-        )
-        .rows(&database, 0, 1, &ReadCancellation::new())
-        .await
-        .unwrap()
-        {
-            library::CatalogRows::Albums(mut rows) => rows.pop().unwrap(),
-            _ => unreachable!(),
+        let album = {
+            let rows = database
+                .album(
+                    &(library::source_entity_uri(
+                        &library::SourceId::new("source-one"),
+                        "album",
+                        "album-one",
+                    )),
+                    false,
+                    &ReadCancellation::new(),
+                )
+                .await
+                .unwrap();
+            rows.unwrap()
         };
-        let tracks = match library::CatalogQuery::uris(
-            library::CatalogKind::Track,
-            vec![
-                library::cue_media_uri("track-one", "file:///music/track-one.flac", 1000, 181000),
-                library::cue_media_uri("track-two", "file:///music/track-two.flac", 1000, 181000),
-            ],
-        )
-        .rows(&database, 0, 2, &ReadCancellation::new())
-        .await
-        .unwrap()
-        {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!(),
+        let tracks = {
+            let rows = database
+                .tracks_by_uris(
+                    &([
+                        library::cue_media_uri(
+                            "track-one",
+                            "file:///music/track-one.flac",
+                            1000,
+                            181000,
+                        ),
+                        library::cue_media_uri(
+                            "track-two",
+                            "file:///music/track-two.flac",
+                            1000,
+                            181000,
+                        ),
+                    ]),
+                    &ReadCancellation::new(),
+                )
+                .await
+                .unwrap();
+            rows
         };
         (
             album.artwork_binding.unwrap(),
@@ -2131,7 +2150,7 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
         .unwrap();
     assert_eq!(
         sqlx::query_as::<_, (bool, bool)>(
-            "SELECT indexed,metadata IS NULL FROM albums WHERE object_id='file-album'"
+            "SELECT indexed,input_metadata IS NULL FROM albums WHERE object_id='file-album'"
         )
         .fetch_one(&mut outside)
         .await
@@ -2141,20 +2160,20 @@ async fn completed_batches_survive_later_failure_and_interleaved_changes() {
     drop(outside);
     database.close().await.unwrap();
     let reopened = Database::open(&path).await.unwrap();
-    let album = match library::CatalogQuery::uris(
-        library::CatalogKind::Album,
-        vec![library::source_entity_uri(
-            &library::SourceId::new("file-restart"),
-            "album",
-            "file-album",
-        )],
-    )
-    .rows(&reopened, 0, 1, &ReadCancellation::new())
-    .await
-    .unwrap()
-    {
-        library::CatalogRows::Albums(mut rows) => rows.pop().unwrap(),
-        _ => unreachable!(),
+    let album = {
+        let rows = reopened
+            .album(
+                &(library::source_entity_uri(
+                    &library::SourceId::new("file-restart"),
+                    "album",
+                    "file-album",
+                )),
+                false,
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap();
+        rows.unwrap()
     };
     assert_eq!(
         (
@@ -2586,16 +2605,11 @@ async fn artist_credits_preserve_favorites_and_explicit_false_clears_them() {
                 .publish_catalog_update("source-one", update)
                 .await;
         };
-        let row =
-            library::CatalogQuery::uris(library::CatalogKind::Artist, vec![(&uri).to_string()])
-                .rows(&database, 0, 1, &cancel)
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Artists(mut rows) => rows.pop(),
-                    _ => unreachable!("typed catalog projection"),
-                })
-                .unwrap()
-                .unwrap();
+        let row = database
+            .artist(&(&uri), false, false, &cancel)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(row.state.favorite, index < 2);
     }
 }

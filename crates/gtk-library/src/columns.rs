@@ -2,7 +2,7 @@ use gtk_widgets::media_drag::{MediaDragSource, install_media_drag_source};
 use gtk_widgets::sparse_model::{item_at_from_item, object_item};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use ::library::{AlbumView, ArtistView, PlaylistRow, SmartPlaylistRow};
+use ::library::{AlbumView, ArtistView};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::glib;
@@ -19,23 +19,19 @@ use gtk_widgets::favorites::{
 use gtk_widgets::interactions::install_context_menu_openers;
 use gtk_widgets::localization::localized_column;
 
-use super::collections::{install_playlist_reorder, install_smart_playlist_reorder};
-use gtk_widgets::selection::collection_play_request;
 use rufin_core::playback::PlayRequest;
 
 use super::table_links::mapped_track_link_column;
 use gtk_widgets::detail_links::{DetailLinks, album_artist_links};
 use gtk_widgets::library_fields::{
     add_field_skeleton_class, album_field, artist_field, column_width, opaque_artwork,
-    play_count_column_width, playlist_artwork, playlist_field, smart_playlist_display_name,
-    smart_playlist_field,
+    play_count_column_width,
 };
 use gtk_widgets::recycled_cells::{
     RecycledArtworkCell, RecycledBadgedTextCell, RecycledMergedCell, RecycledTextCell, list_cell,
 };
 use gtk_widgets::sparse_model::connect_sparse_bind;
 
-pub const ROW_INDEX_COLUMN_TITLE: &str = "\u{2003}#";
 const DETAIL_TRACK_UTILITY_COLUMN_WIDTH: i32 = 48;
 
 pub fn bind_collection_title<T: Clone + 'static>(
@@ -222,9 +218,7 @@ pub fn album_column(
     if field == LibraryField::Tools {
         return gtk_widgets::recycled_cells::row_actions_column(&factory);
     }
-    let title = if field == LibraryField::RowIndex {
-        ROW_INDEX_COLUMN_TITLE
-    } else if field == LibraryField::TitleMerged {
+    let title = if field == LibraryField::TitleMerged {
         "Title"
     } else {
         gtk_widgets::settings::library_field_title(field)
@@ -524,283 +518,6 @@ pub fn artist_column(
         ),
     }
 }
-pub fn playlist_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnViewColumn {
-    let selected = shell.selected.clone();
-    let column = match field {
-        LibraryField::Tools => super::named_collections::named_actions_column::<PlaylistRow>(shell),
-        LibraryField::RowIndex => {
-            mapped_row_index_column::<PlaylistRow>(shell, column_width(field), move |row| {
-                super::named_collections::NamedCollectionRow::playback(row, selected.as_ref())
-            })
-        }
-        LibraryField::Image => artwork_column::<PlaylistRow, _>(
-            shell,
-            "Image",
-            column_width(LibraryField::Image),
-            move |playlist| {
-                playlist_artwork(playlist)
-                    .into_iter()
-                    .next()
-                    .unwrap_or_default()
-            },
-            Some(Rc::new(|playlist| {
-                (
-                    collection_play_request(library::TrackScope::Playlist(playlist.playlist_key)),
-                    playlist.name,
-                )
-            })),
-        ),
-        LibraryField::Title | LibraryField::TitleMerged => {
-            playlist_title_column(shell, "Title", 220, |playlist| playlist.name.clone())
-        }
-        _ => text_column::<PlaylistRow, _>(field, column_width(field), move |playlist| {
-            playlist_field(playlist, field)
-        }),
-    };
-    if field != LibraryField::Tools {
-        install_named_column_context_menu::<PlaylistRow>(&column, shell);
-    }
-    column
-}
-
-fn install_named_column_context_menu<T: super::named_collections::NamedCollectionRow>(
-    column: &gtk::ColumnViewColumn,
-    shell: &Rc<CatalogUi>,
-) {
-    let factory = column
-        .factory()
-        .and_downcast::<gtk::SignalListItemFactory>()
-        .expect("collection column factory");
-    let shell = Rc::downgrade(shell);
-    factory.connect_setup(move |_, item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let child = item.child().expect("collection column child");
-        let item = item.downgrade();
-        let shell = shell.clone();
-        install_context_menu_openers(
-            &child,
-            Rc::new(move |target, position| {
-                if let (Some(shell), Some(item)) = (shell.upgrade(), item.upgrade())
-                    && let Some(row) = item_at_from_item::<T>(&item)
-                {
-                    row.present_context(target, &shell, position);
-                }
-            }),
-        );
-    });
-}
-
-fn playlist_title_column<F>(
-    shell: &Rc<CatalogUi>,
-    title: &str,
-    width: i32,
-    value: F,
-) -> gtk::ColumnViewColumn
-where
-    F: Fn(&PlaylistRow) -> String + 'static,
-{
-    let selected = shell.selected.clone();
-    let factory = gtk::SignalListItemFactory::new();
-    bind_collection_title::<PlaylistRow>(&factory, shell, move |row| {
-        super::named_collections::NamedCollectionRow::playback(row, selected.as_ref())
-    });
-    let value = Rc::new(value);
-    let setup_shell = Rc::clone(shell);
-    factory.connect_setup(move |_, item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let cell = RecycledBadgedTextCell::with_downloads(&setup_shell.downloads);
-        item.set_child(Some(&cell));
-        let weak_item = item.downgrade();
-        install_playlist_reorder(
-            &cell,
-            &setup_shell,
-            Rc::new(move || {
-                weak_item
-                    .upgrade()
-                    .and_then(|item| item_at_from_item::<PlaylistRow>(&item))
-            }),
-        );
-        install_collection_cell_drag(
-            &cell,
-            &setup_shell,
-            item,
-            Rc::new(|playlist: PlaylistRow| {
-                (
-                    collection_play_request(library::TrackScope::Playlist(playlist.playlist_key)),
-                    playlist.name,
-                )
-            }),
-        );
-    });
-    let bind_shell = Rc::clone(shell);
-    connect_sparse_bind(&factory, move |item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let Some(cell) = list_cell::<RecycledBadgedTextCell>(item) else {
-            return;
-        };
-        let Some((text, downloaded)) = item.item().and_then(|object| {
-            object_item::<PlaylistRow, _>(object, |row| {
-                (
-                    value(row),
-                    collection_is_downloaded(row.track_count, row.downloaded_count),
-                )
-            })
-        }) else {
-            cell.clear();
-            return;
-        };
-        cell.label().set_text(&text);
-        bind_shell.bind_download_badge(&cell.downloaded(), downloaded);
-    });
-    factory.connect_unbind(|_, item| {
-        if let Some(item) = item.downcast_ref::<gtk::ListItem>()
-            && let Some(cell) = list_cell::<RecycledBadgedTextCell>(item)
-        {
-            cell.clear();
-        }
-    });
-    let column = localized_column(title, &factory);
-    column.set_fixed_width(width);
-    column
-}
-
-pub fn smart_playlist_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnViewColumn {
-    let selected = shell.selected.clone();
-    let column = match field {
-        LibraryField::Tools => {
-            super::named_collections::named_actions_column::<SmartPlaylistRow>(shell)
-        }
-        LibraryField::RowIndex => {
-            mapped_row_index_column::<SmartPlaylistRow>(shell, column_width(field), move |row| {
-                super::named_collections::NamedCollectionRow::playback(row, selected.as_ref())
-            })
-        }
-        LibraryField::Image => artwork_column::<SmartPlaylistRow, _>(
-            shell,
-            "Image",
-            column_width(LibraryField::Image),
-            |playlist| {
-                playlist
-                    .artwork_binding
-                    .as_ref()
-                    .map(|binding| ArtworkBinding::opaque(binding))
-                    .unwrap_or_default()
-            },
-            Some(Rc::new(move |playlist| {
-                let name = smart_playlist_display_name(&playlist);
-                (
-                    gtk_widgets::selection::smart_play_request(
-                        playlist.smart_playlist_key,
-                        selected.as_ref(),
-                    ),
-                    name,
-                )
-            })),
-        ),
-        LibraryField::Title | LibraryField::TitleMerged => {
-            smart_playlist_title_column(shell, "Title", 220, |playlist| {
-                smart_playlist_display_name(&playlist)
-            })
-        }
-        _ => text_column::<SmartPlaylistRow, _>(field, column_width(field), move |playlist| {
-            smart_playlist_field(playlist, field)
-        }),
-    };
-    if field != LibraryField::Tools {
-        install_named_column_context_menu::<SmartPlaylistRow>(&column, shell);
-    }
-    column
-}
-
-fn smart_playlist_title_column<F>(
-    shell: &Rc<CatalogUi>,
-    title: &str,
-    width: i32,
-    value: F,
-) -> gtk::ColumnViewColumn
-where
-    F: Fn(&SmartPlaylistRow) -> String + 'static,
-{
-    let selected = shell.selected.clone();
-    let factory = gtk::SignalListItemFactory::new();
-    bind_collection_title::<SmartPlaylistRow>(&factory, shell, move |row| {
-        super::named_collections::NamedCollectionRow::playback(row, selected.as_ref())
-    });
-    let value = Rc::new(value);
-    let setup_shell = Rc::clone(shell);
-    factory.connect_setup(move |_, item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let cell = RecycledBadgedTextCell::with_downloads(&setup_shell.downloads);
-        item.set_child(Some(&cell));
-        let weak_item = item.downgrade();
-        install_smart_playlist_reorder(
-            &cell,
-            &setup_shell,
-            Rc::new(move || {
-                weak_item
-                    .upgrade()
-                    .and_then(|item| item_at_from_item::<SmartPlaylistRow>(&item))
-            }),
-        );
-        let selected = setup_shell.selected.clone();
-        install_collection_cell_drag(
-            &cell,
-            &setup_shell,
-            item,
-            Rc::new(move |playlist: SmartPlaylistRow| {
-                let name = smart_playlist_display_name(&playlist);
-                (
-                    gtk_widgets::selection::smart_play_request(
-                        playlist.smart_playlist_key,
-                        selected.as_ref(),
-                    ),
-                    name,
-                )
-            }),
-        );
-    });
-    let bind_shell = Rc::clone(shell);
-    connect_sparse_bind(&factory, move |item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let Some(cell) = list_cell::<RecycledBadgedTextCell>(item) else {
-            return;
-        };
-        let Some((text, downloaded)) = item.item().and_then(|object| {
-            object_item::<SmartPlaylistRow, _>(object, |row| {
-                (
-                    value(row),
-                    collection_is_downloaded(row.track_count, row.downloaded_count),
-                )
-            })
-        }) else {
-            cell.clear();
-            return;
-        };
-        cell.label().set_text(&text);
-        bind_shell.bind_download_badge(&cell.downloaded(), downloaded);
-    });
-    factory.connect_unbind(|_, item| {
-        if let Some(item) = item.downcast_ref::<gtk::ListItem>()
-            && let Some(cell) = list_cell::<RecycledBadgedTextCell>(item)
-        {
-            cell.clear();
-        }
-    });
-    let column = localized_column(title, &factory);
-    column.set_fixed_width(width);
-    column
-}
-
 pub fn track_column_for_key<T: gtk_widgets::library_fields::TrackPresentation>(
     shell: &Rc<CatalogUi>,
     key: LibraryListKey,
@@ -1096,7 +813,7 @@ pub fn row_index_column_with_width(width: i32) -> gtk::ColumnViewColumn {
         };
         label.set_text(&(item.position() + 1).to_string());
     });
-    let column = gtk::ColumnViewColumn::new(Some(ROW_INDEX_COLUMN_TITLE), Some(factory));
+    let column = gtk::ColumnViewColumn::new(Some("#"), Some(factory));
     column.set_fixed_width(width);
     column
 }
@@ -1133,7 +850,7 @@ pub fn mapped_row_index_column<T: Clone + 'static>(
             cell.bind(0, None);
         }
     });
-    let column = gtk::ColumnViewColumn::new(Some(ROW_INDEX_COLUMN_TITLE), Some(factory));
+    let column = gtk::ColumnViewColumn::new(Some("#"), Some(factory));
     column.set_fixed_width(width);
     column
 }
@@ -1197,7 +914,7 @@ where
         playing.unbind(cell.upcast_ref());
         set_track_row_index_text(&cell, "");
     });
-    let column = gtk::ColumnViewColumn::new(Some(ROW_INDEX_COLUMN_TITLE), Some(factory));
+    let column = gtk::ColumnViewColumn::new(Some("#"), Some(factory));
     column.set_fixed_width(width);
     column
 }

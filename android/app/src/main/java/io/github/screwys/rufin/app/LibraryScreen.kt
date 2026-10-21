@@ -27,6 +27,7 @@ import io.github.screwys.rufin.browse.BrowsePage
 import io.github.screwys.rufin.browse.DetailContent
 import io.github.screwys.rufin.browse.DetailTrackRow
 import io.github.screwys.rufin.ui.ErrorRow
+import io.github.screwys.rufin.ui.ErrorNotice
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.player.PlayerIconButton
 import io.github.screwys.rufin.player.MiniPlayer
@@ -123,6 +124,8 @@ import androidx.paging.PagingData
 import io.github.screwys.rufin.core.translate
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import io.github.screwys.rufin.ui.pageMotion
 
 private data class BrowseDestination(val root: String, val depth: Int, val location: BrowseLocation?)
@@ -146,13 +149,16 @@ internal fun FeedbackToast(model: RufinConnection, player: PlayerConnection) {
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, androidx.compose.animation.ExperimentalAnimationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, androidx.compose.animation.ExperimentalAnimationApi::class)
 @Composable
 internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConnection,
     onOpen: () -> Unit, onAddFolder: () -> Unit, onSaveLog: () -> Unit) {
     val translation = LocalTranslationRevision.current
     val reduceMotion = LocalReduceMotion.current
-    val label: (String) -> String = { if (model.ready) translate(it) else it }
+    val label: (String) -> String = ::translate
+    val resetScope = rememberCoroutineScope()
+    var confirmDatabaseReset by remember { mutableStateOf(false) }
+    var resettingDatabase by remember { mutableStateOf(false) }
     val browse = model.browse
     SideEffect {
         browse.homeBlocksFingerprint = preferences.applicationSettings?.homeBlocks?.toString()
@@ -401,7 +407,15 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                         TextButton(model.connect::showOperation) { Text(label("Open Rufin Connect")) }
                     }
                 }
-                model.startupError?.let { ErrorRow(it, label("Retry"), model::retryStartup) }
+                model.startupError?.let { failure ->
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        ErrorNotice(failure)
+                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton(model::retryStartup, enabled = !resettingDatabase) { Text(label("Retry")) }
+                            TextButton({ confirmDatabaseReset = true }, enabled = !resettingDatabase) { Text(label("Reset database")) }
+                        }
+                    }
+                }
                 model.sourceStatus?.let {
                     val download = model.sourceOperation as? SourceOperation.Downloading
                     val progress = model.sourceProgress
@@ -504,6 +518,22 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
             player.currentItem?.let { song -> browse.library?.trackItem(song)?.let { menu = BrowseItem(it, 0UL, null) } }
         }) { fullPlayer = false }
     }
+    if (confirmDatabaseReset) AlertDialog(onDismissRequest = { confirmDatabaseReset = false },
+        title = { Text(label("Reset database?")) },
+        text = { Text(label("Remove the library database? Settings and saved logins will be kept.")) },
+        confirmButton = { TextButton({
+            confirmDatabaseReset = false
+            resettingDatabase = true
+            resetScope.launch {
+                try { model.resetDatabase() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) { model.showFeedback(failure); resettingDatabase = false }
+            }
+        }) { Text(label("Reset database")) } },
+        dismissButton = { TextButton({ confirmDatabaseReset = false }) { Text(label("Cancel")) } })
+    if (resettingDatabase) Dialog(onDismissRequest = {}, properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)) {
+        Surface(shape = MaterialTheme.shapes.large) { CircularProgressIndicator(Modifier.padding(32.dp)) }
+    }
     if (outputs) PlayerOutputSheet(player) { outputs = false }
     if (sort) BrowseSortSheet(browse, { sort = false }, sortPage)
     if (random) RandomPlaySheet(model, browse) { random = false }
@@ -512,7 +542,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     playlist?.let { item -> PlaylistPickerSheet(model, browse, item, player) { playlist = null } }
     if (createPlaylist) PlaylistCreateSheet(model, { createPlaylist = false },
         initialCurrentSource = preferences.applicationSettings?.newPlaylistCurrent != false) { name, sourceId, public ->
-        io.github.screwys.rufin.shared.library.TrackSelection.fromUris(emptyList()).use { selection ->
+        io.github.screwys.rufin.shared.library.MemberSelection.fromUris(emptyList()).use { selection ->
             val source = model.sourceOwner ?: return@PlaylistCreateSheet
             io.github.screwys.rufin.shared.rufin_core.createPlaylist(source, sourceId, name, selection, public, null)
                 ?.settingsError?.let { error(it) }

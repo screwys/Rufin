@@ -8,51 +8,77 @@ use artwork::ArtworkBinding;
 use downloads::DownloadSubject;
 use gtk::glib;
 use rufin_core::playback::PlayRequest;
+use std::ops::Range;
 use std::{cell::RefCell, rc::Rc};
-use std::{future::Future, ops::Range, pin::Pin, sync::Arc};
-
-pub type CollectionPageLoad = Arc<
-    dyn Fn(Range<usize>) -> Pin<Box<dyn Future<Output = Result<Vec<PlayRequest>, String>> + Send>>
-        + Send
-        + Sync,
->;
-
-pub type CollectionRowsLoad<Q, R> = Arc<
-    dyn Fn(
-            Q,
-            Range<usize>,
-            library::ReadCancellation,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<R>, String>> + Send>>
-        + Send
-        + Sync,
->;
 
 #[derive(Clone)]
 pub enum CollectionTargets {
     Ready(Vec<PlayRequest>),
-    Query {
-        ranges: Vec<Range<usize>>,
-        load: CollectionPageLoad,
-    },
+    Parents(Vec<(library::ListRead, Vec<Range<usize>>)>),
 }
 
 impl CollectionTargets {
     pub fn count(&self) -> usize {
         match self {
             Self::Ready(targets) => targets.len(),
-            Self::Query { ranges, .. } => ranges.iter().map(|range| range.len()).sum(),
+            Self::Parents(reads) => reads
+                .iter()
+                .flat_map(|(_, ranges)| ranges)
+                .map(|range| range.len())
+                .sum(),
         }
     }
-
-    pub async fn resolve(&self) -> Result<Vec<PlayRequest>, String> {
+    pub async fn collections(
+        &self,
+        database: &library::Database,
+    ) -> Result<Vec<library::Collection>, String> {
+        match self {
+            Self::Ready(targets) => targets
+                .iter()
+                .map(|target| match target.selection() {
+                    Some(library::MemberSelection::Members { read, .. }) => Ok(read.collection),
+                    _ => Err("Selection does not contain collections".into()),
+                })
+                .collect(),
+            Self::Parents(reads) => {
+                let mut collections = Vec::new();
+                for (read, ranges) in reads {
+                    collections.extend(
+                        database
+                            .selected_collections(read, ranges, &library::ReadCancellation::new())
+                            .await
+                            .map_err(|error| error.to_string())?,
+                    );
+                }
+                Ok(collections)
+            }
+        }
+    }
+    pub async fn resolve(&self, database: &library::Database) -> Result<Vec<PlayRequest>, String> {
         match self {
             Self::Ready(targets) => Ok(targets.clone()),
-            Self::Query { ranges, load } => {
+            Self::Parents(reads) => {
                 let mut targets = Vec::new();
-                for range in ranges {
-                    for start in (range.start..range.end).step_by(64) {
-                        targets.extend(load(start..range.end.min(start + 64)).await?);
-                    }
+                for (read, ranges) in reads {
+                    let collections = database
+                        .selected_collections(read, ranges, &library::ReadCancellation::new())
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    targets.extend(collections.into_iter().map(|collection| {
+                        if let library::Collection::Smart { key, .. } = collection {
+                            let mut members = library::MemberRead::new(collection);
+                            members.folder = read.folder;
+                            PlayRequest::ordered(
+                                members.selection(),
+                                0,
+                                rufin_core::playback::QueuePlacement::Now,
+                                true,
+                            )
+                            .with_context(format!("smart-playlist:{key}").into())
+                        } else {
+                            collection_play_request(collection)
+                        }
+                    }));
                 }
                 Ok(targets)
             }
@@ -60,18 +86,15 @@ impl CollectionTargets {
     }
 }
 
-pub fn install_collection_selection<K, R, Q>(
+pub fn install_parent_selection<K, R>(
     sparse: &Rc<crate::sparse_model::SparseRouteModel<K, R>>,
-    request: Rc<RefCell<Q>>,
-    load: CollectionRowsLoad<Q, R>,
+    read: Rc<RefCell<library::ListRead>>,
     target: impl Fn(&R) -> PlayRequest + Send + Sync + 'static,
 ) where
     K: Clone + Eq + Send + Sync + 'static,
     R: Clone + Send + Sync + 'static,
-    Q: Clone + Send + Sync + 'static,
 {
     let weak = Rc::downgrade(sparse);
-    let target = Arc::new(target);
     sparse
         .list_model()
         .set_collection_selection(Box::new(move |dragged, positions| {
@@ -79,26 +102,18 @@ pub fn install_collection_selection<K, R, Q>(
             let position = sparse.ready_position(|row| {
                 match (target(row).selection(), dragged.selection()) {
                     (
-                        Some(library::TrackSelection::Query { query: left, .. }),
-                        Some(library::TrackSelection::Query { query: right, .. }),
-                    ) => match (&left.subject, &right.subject) {
+                        Some(library::MemberSelection::Members { read: left, .. }),
+                        Some(library::MemberSelection::Members { read: right, .. }),
+                    ) => match (&left.collection, &right.collection) {
                         (
-                            library::CatalogSubject::Tracks {
-                                scope:
-                                    library::TrackScope::Smart {
-                                        key: left,
-                                        source: left_source,
-                                        ..
-                                    },
+                            library::Collection::Smart {
+                                key: left,
+                                source: left_source,
                                 ..
                             },
-                            library::CatalogSubject::Tracks {
-                                scope:
-                                    library::TrackScope::Smart {
-                                        key: right,
-                                        source: right_source,
-                                        ..
-                                    },
+                            library::Collection::Smart {
+                                key: right,
+                                source: right_source,
                                 ..
                             },
                         ) => left == right && left_source == right_source,
@@ -108,19 +123,10 @@ pub fn install_collection_selection<K, R, Q>(
                 }
             })?;
             positions.contains(position).then(|| {
-                let request = request.borrow().clone();
-                let load = Arc::clone(&load);
-                let target = Arc::clone(&target);
-                CollectionTargets::Query {
-                    ranges: crate::selection::selected_ranges(positions),
-                    load: Arc::new(move |range| {
-                        let rows = load(request.clone(), range, library::ReadCancellation::new());
-                        let target = Arc::clone(&target);
-                        Box::pin(
-                            async move { Ok(rows.await?.iter().map(|row| target(row)).collect()) },
-                        )
-                    }),
-                }
+                CollectionTargets::Parents(vec![(
+                    read.borrow().clone(),
+                    crate::selection::selected_ranges(positions),
+                )])
             })
         }));
 }
@@ -531,14 +537,12 @@ impl MediaDragSource {
     pub async fn track_selection(
         &self,
         database: &library::Database,
-    ) -> Result<library::TrackSelection, String> {
+    ) -> Result<library::MemberSelection, String> {
         match self {
             Self::MediaUris(uris)
             | Self::Queue {
                 media_uris: uris, ..
-            } => Ok(
-                library::CatalogQuery::uris(library::CatalogKind::Track, uris.to_vec()).selection(),
-            ),
+            } => Ok(library::MemberSelection::Uris((uris.to_vec()).into())),
             _ => Ok(self
                 .play_request(database)
                 .await?
@@ -550,7 +554,7 @@ impl MediaDragSource {
     pub async fn playlist_input(
         &self,
         database: &library::Database,
-    ) -> Result<(library::TrackSelection, String, Vec<String>), String> {
+    ) -> Result<(library::MemberSelection, String, Vec<String>), String> {
         let selection = self.track_selection(database).await?;
         let title = match self {
             Self::Target { .. } | Self::LiveCollection { .. } => selection_title(Some(&selection)),
@@ -572,7 +576,9 @@ impl MediaDragSource {
                 operations,
             } => prepare_live_collection(database, operations, media_uri).await?,
             Self::Target { target } => target.clone(),
-            Self::Targets { targets } => PlayRequest::group(targets.resolve().await?, placement),
+            Self::Targets { targets } => {
+                PlayRequest::group(targets.resolve(database).await?, placement)
+            }
             Self::Selection(selection) => {
                 PlayRequest::ordered(selection.input.clone(), 0, placement, false)
             }
@@ -630,39 +636,19 @@ impl MediaDragSource {
     }
 }
 
-fn selection_title(selection: Option<&library::TrackSelection>) -> String {
+fn selection_title(selection: Option<&library::MemberSelection>) -> String {
+    use library::{Collection, MemberSelection};
     match selection {
-        Some(library::TrackSelection::Query { query, .. }) => match &query.subject {
-            library::CatalogSubject::Keys {
-                kind: library::CatalogKind::Track,
-                ..
-            } => localization::tr("Track"),
-            library::CatalogSubject::Tracks {
-                scope: library::TrackScope::Album(_),
-                ..
-            } => localization::tr("Album"),
-            library::CatalogSubject::Tracks {
-                scope: library::TrackScope::Artist { .. },
-                ..
-            } => localization::tr("Artist"),
-            library::CatalogSubject::Tracks {
-                scope: library::TrackScope::Genre(_),
-                ..
-            } => localization::tr("Genre"),
-            library::CatalogSubject::Tracks {
-                scope: library::TrackScope::Mood(_),
-                ..
-            } => localization::tr("Mood"),
-            library::CatalogSubject::Tracks {
-                scope: library::TrackScope::Playlist(_),
-                ..
-            } => localization::tr("Playlist"),
-            library::CatalogSubject::Tracks {
-                scope: library::TrackScope::Smart { .. },
-                ..
-            } => localization::tr("Smart Playlist"),
-            _ => localization::tr("Folder"),
-        },
+        Some(MemberSelection::Members { read, .. }) => localization::tr(match read.collection {
+            Collection::Album(_) => "Album",
+            Collection::Artist { .. } => "Artist",
+            Collection::Genre(_) => "Genre",
+            Collection::Mood(_) => "Mood",
+            Collection::Playlist(_) => "Playlist",
+            Collection::Smart { .. } => "Smart Playlist",
+            _ => "Folder",
+        }),
+        Some(MemberSelection::Keys { .. } | MemberSelection::Uris(_)) => localization::tr("Track"),
         _ => localization::tr("Selection"),
     }
 }
@@ -682,22 +668,16 @@ async fn prepare_live_collection(
         .map(|(_, kind, _)| kind)
         .as_deref()
     {
-        Some("album") => {
-            library::CatalogQuery::uris(library::CatalogKind::Album, vec![(media_uri).to_string()])
-                .rows(&database, 0, 1, &cancellation)
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Albums(mut rows) => rows.pop(),
-                    _ => unreachable!("typed catalog projection"),
-                })
-                .map_err(|error| error.to_string())?
-                .map(|row| library::TrackScope::Album(row.album_key))
-        }
+        Some("album") => database
+            .album(media_uri, false, &cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(|row| library::Collection::Album(row.album_key)),
         Some("artist") => database
             .catalog_identity(library::CatalogKind::Artist, media_uri, &cancellation)
             .await
             .map_err(|error| error.to_string())?
-            .map(|identity| library::TrackScope::Artist {
+            .map(|identity| library::Collection::Artist {
                 key: library::ArtistKey::from_raw(identity.key),
                 album_artist: false,
             }),
@@ -705,7 +685,7 @@ async fn prepare_live_collection(
     }
     .ok_or_else(|| "Collection is no longer available".to_string())?;
     let kind = match &scope {
-        library::TrackScope::Album(_) => "album",
+        library::Collection::Album(_) => "album",
         _ => "artist",
     };
     Ok(collection_play_request(scope).with_context(format!("{kind}:{media_uri}").into()))

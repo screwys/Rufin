@@ -562,16 +562,11 @@ mod tests {
         for album in albums {
             let object = format!("emby:album:{}", album["Id"].as_str().unwrap());
             let uri = library::source_entity_uri(&crate::SourceId::new("emby"), "album", &object);
-            let row =
-                library::CatalogQuery::uris(library::CatalogKind::Album, vec![(&uri).to_owned()])
-                    .rows(&database, 0, 256, &library::ReadCancellation::new())
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Albums(rows) => rows.into_iter().next(),
-                        _ => unreachable!(),
-                    })
-                    .unwrap()
-                    .unwrap();
+            let row = database
+                .album(&(&uri), false, &library::ReadCancellation::new())
+                .await
+                .unwrap()
+                .unwrap();
             assert_eq!(row.metadata.title, album["Name"].as_str().unwrap());
             let binding: Vec<library::ArtworkCandidate> =
                 serde_json::from_slice(row.artwork_binding.as_deref().unwrap()).unwrap();

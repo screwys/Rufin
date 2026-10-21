@@ -13,13 +13,13 @@ pub enum FolderProjection {
 }
 
 impl FolderProjection {
-    pub fn track_query(&self, source: library::SourceKey) -> library::CatalogQuery {
-        let mut query = library::CatalogQuery::tracks(match self {
-            Self::Live { objects, .. } => library::TrackScope::Objects {
+    pub fn members(&self, source: library::SourceKey) -> library::MemberRead {
+        let mut query = library::MemberRead::new(match self {
+            Self::Live { objects, .. } => library::Collection::Objects {
                 source,
                 ids: Arc::clone(objects),
             },
-            Self::Cached(_) => library::TrackScope::Tracks(source),
+            Self::Cached(_) => library::Collection::Source(source),
         });
         if let Self::Cached(folder) = self {
             query.folder = *folder;
@@ -74,7 +74,7 @@ pub async fn resolve_folder(
     };
     match live {
         Ok(page) => {
-            let known = library::CatalogQuery::tracks(library::TrackScope::Objects {
+            let known = library::MemberRead::new(library::Collection::Objects {
                 source: selected.source_key,
                 ids: page.tracks.clone().into(),
             })

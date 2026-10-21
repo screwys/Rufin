@@ -120,7 +120,9 @@ impl Database {
     ) {
         let changed = update.metadata || update.artwork || update.playlists;
         if (changed || update.activity)
-            && let Err(error) = self.mark_playlist_artwork_pending(None, !changed).await
+            && let Err(error) = self
+                .refresh_incomplete_playlist_artwork(None, !changed)
+                .await
         {
             tracing::warn!(%error, "could not update incomplete playlist artwork");
         }
@@ -241,10 +243,26 @@ impl Database {
         configured: &[crate::SourceId],
         selected: Option<&crate::SourceId>,
     ) -> LibraryResult<Self> {
-        if !path.exists() && legacy.exists() {
-            Self::migrate_released(legacy, path, catalog, configured, selected).await?;
+        let input = if !path.exists() && legacy.exists() {
+            legacy
+        } else {
+            path
+        };
+        let opened = async {
+            if input.exists() {
+                Self::migrate_released(input, path, catalog, configured, selected).await?;
+            }
+            Self::open_final(path).await
         }
-        Self::open_with_legacy_catalog(path, catalog, configured, selected).await
+        .await;
+        match opened {
+            Err(error) if input.exists() && !error.is_store_unavailable() => {
+                tracing::warn!(%error, "could not open the Store; trying compatible columns");
+                crate::migration::current::recover_columns(input, path).await?;
+                Self::open_final(path).await
+            }
+            opened => opened,
+        }
     }
 
     async fn migrate_released(
@@ -264,7 +282,7 @@ impl Database {
                     .await?
             }
             44..=46 => crate::migration::import_current(input, destination, catalog).await?,
-            0 | 47 | 48 | 49 | 50 => {
+            0 | 47 | 48 | 49 | 50 | 51 | 53 | 54 => {
                 if input != destination {
                     Self::relocate(input, destination).await?;
                 }

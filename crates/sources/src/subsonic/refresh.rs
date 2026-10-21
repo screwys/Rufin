@@ -732,18 +732,17 @@ mod tests {
             }
             .unwrap();
             assert_eq!(reads.load(Ordering::Relaxed), expected_reads);
-            let rows = library::CatalogQuery {
-                subject: library::CatalogSubject::Playlists {
-                    source: (Some(
-                        database
-                            .source_identity_key(&crate::SourceId::new("source"))
-                            .await
-                            .unwrap()
-                            .unwrap(),
-                    ))
-                    .into(),
-                    sort: library::CatalogSort::Position,
-                },
+            let rows = library::ListRead {
+                kind: library::ListKind::Playlists,
+                source: (Some(
+                    database
+                        .source_identity_key(&crate::SourceId::new("source"))
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                ))
+                .into(),
+                sort: library::CatalogSort::Position,
                 folder: None,
                 filter: ("").to_string(),
                 descending: false,
@@ -751,12 +750,8 @@ mod tests {
                 downloaded_only: false,
                 activity: false,
             }
-            .rows(&database, 0, 2, &cancellation)
+            .playlists(&database, 0, 2, &cancellation)
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Playlists(rows) => rows,
-                _ => unreachable!(),
-            })
             .unwrap();
             if next == 5 {
                 assert!(rows.is_empty());
@@ -779,7 +774,7 @@ mod tests {
             assert_eq!(
                 database
                     .selected_track_uris(
-                        &library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist))
+                        &library::MemberRead::new(library::Collection::Playlist(playlist))
                             .selection(),
                         None,
                         &cancellation
@@ -978,16 +973,11 @@ mod tests {
                 "track",
                 "subsonic:track:track",
             );
-            let row =
-                library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                    .rows(&database, 0, 256, &cancellation)
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                        _ => unreachable!(),
-                    })
-                    .unwrap()
-                    .unwrap();
+            let row = database
+                .track(&(&uri), &cancellation)
+                .await
+                .unwrap()
+                .unwrap();
             assert_eq!(row.metadata.comment.as_deref(), Some("Keep"));
             assert!(
                 database
@@ -996,24 +986,23 @@ mod tests {
                     .unwrap()
             );
             assert_eq!(
-                library::CatalogQuery {
-                    subject: library::CatalogSubject::Playlists {
-                        source: (Some(
-                            database
-                                .source_identity_key(&library::SourceId::new(&catalog_source_id))
-                                .await
-                                .unwrap()
-                                .unwrap()
-                        ))
-                        .into(),
-                        sort: library::CatalogSort::Title
-                    },
+                library::ListRead {
+                    kind: library::ListKind::Playlists,
+                    source: (Some(
+                        database
+                            .source_identity_key(&library::SourceId::new(&catalog_source_id))
+                            .await
+                            .unwrap()
+                            .unwrap()
+                    ))
+                    .into(),
+                    sort: library::CatalogSort::Title,
                     folder: None,
                     filter: ("").to_string(),
                     descending: false,
                     favorites_only: false,
                     downloaded_only: false,
-                    activity: false,
+                    activity: false
                 }
                 .count(&database, &cancellation)
                 .await
@@ -1257,18 +1246,11 @@ mod tests {
                     "track",
                     &format!("subsonic:track:{id}"),
                 );
-                let track = library::CatalogQuery::uris(
-                    library::CatalogKind::Track,
-                    vec![(&uri).to_owned()],
-                )
-                .rows(&database, 0, 256, &cancellation)
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-                .unwrap()
-                .expect("usable track is published");
+                let track = database
+                    .track(&(&uri), &cancellation)
+                    .await
+                    .unwrap()
+                    .expect("usable track is published");
                 assert_eq!(track.metadata.title, title);
             }
             assert_eq!(
@@ -1287,7 +1269,7 @@ mod tests {
                 assert!(
                     !database
                         .selected_track_uris(
-                            &library::CatalogQuery::tracks(library::TrackScope::Tracks(
+                            &library::MemberRead::new(library::Collection::Source(
                                 database
                                     .source_identity_key(&library::SourceId::new(
                                         &catalog_source_id
@@ -1341,7 +1323,7 @@ mod tests {
                 assert_eq!(
                     database
                         .selected_track_uris(
-                            &library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist))
+                            &library::MemberRead::new(library::Collection::Playlist(playlist))
                                 .selection(),
                             None,
                             &cancellation,

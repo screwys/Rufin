@@ -138,7 +138,7 @@ pub(crate) async fn separate_file_access(connection: &mut SqliteConnection) -> L
         .await?;
     }
     sqlx::raw_sql("ALTER TABLE local_file_access_roots RENAME TO old_file_roots;
-        CREATE TABLE local_file_access_roots(source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,root TEXT NOT NULL,root_id TEXT NOT NULL,PRIMARY KEY(source_key,root_id,root)) STRICT,WITHOUT ROWID;
+        CREATE TABLE local_file_access_roots(source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,root TEXT NOT NULL,root_id TEXT NOT NULL DEFAULT '',PRIMARY KEY(source_key,root_id,root)) STRICT,WITHOUT ROWID;
         INSERT OR IGNORE INTO local_file_access_roots SELECT file.source_key,observation.root,file.root_id FROM local_files file JOIN local_file_observations observation USING(local_file_key) JOIN old_file_roots access ON access.source_key=file.source_key AND access.root=observation.root;
         DROP TABLE old_file_roots;
         UPDATE local_files SET device_id=NULL,inode=NULL,native_id=NULL,observed_stamp=0;")
@@ -258,6 +258,56 @@ async fn copy_table(
     Ok(())
 }
 
+pub(crate) async fn recover_columns(input: &Path, destination: &Path) -> LibraryResult<()> {
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let stage = tempfile::Builder::new()
+        .prefix("rufin-migration-")
+        .tempdir_in(parent)?;
+    let pending = stage.path().join("library.sqlite");
+    let mut connection = crate::db::open_writer(&pending).await?;
+    let copied = async {
+        crate::schema::initialize_durable(&mut connection).await?;
+        crate::connect::initialize(&mut connection).await?;
+        attach(&mut connection, input, "old_store").await?;
+        sqlx::query("PRAGMA foreign_keys=OFF").execute(&mut connection).await?;
+        let mut transaction = connection.begin().await?;
+        let triggers: Vec<String> = sqlx::query_scalar("SELECT name FROM main.sqlite_schema WHERE type='trigger'")
+            .fetch_all(&mut *transaction).await?;
+        for trigger in triggers {
+            sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP TRIGGER \"{trigger}\"")))
+                .execute(&mut *transaction).await?;
+        }
+        let tables: Vec<String> = sqlx::query_scalar("SELECT name FROM main.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('folder_children','collection_album_index','collection_totals','playlist_genres')")
+            .fetch_all(&mut *transaction).await?;
+        let mut copied = 0;
+        for table in tables {
+            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM main.\"{table}\"")))
+                .execute(&mut *transaction).await?;
+            if !has_table(&mut transaction, "old_store", &table).await? {
+                continue;
+            }
+            copy_table(&mut transaction, "old_store", &table, &table, &[]).await?;
+            copied += 1;
+        }
+        if copied == 0 {
+            return Err(LibraryError::Migration("no compatible Store tables were found".into()));
+        }
+        sqlx::raw_sql(crate::schema::STORE_SCHEMA).execute(&mut *transaction).await?;
+        crate::connect::initialize(&mut transaction).await?;
+        crate::catalog::index::initialize(&mut transaction).await?;
+        if sqlx::query("PRAGMA foreign_key_check").fetch_optional(&mut *transaction).await?.is_some() {
+            return Err(LibraryError::Migration("the recovered Store has incomplete references".into()));
+        }
+        transaction.commit().await?;
+        LibraryResult::Ok(())
+    }.await;
+    connection.close().await?;
+    copied?;
+    super::install(&pending, input, destination)?;
+    Ok(())
+}
+
 pub(super) async fn copy_catalog(
     connection: &mut SqliteConnection,
     schema: &str,
@@ -335,12 +385,16 @@ pub(super) async fn copy_catalog(
             ("media_uri", uri.as_str()),
             ("local_play_count", "0"),
         ];
-        if !columns(connection, schema, table)
-            .await?
-            .iter()
-            .any(|column| column == "indexed")
-        {
+        let old_columns = columns(connection, schema, table).await?;
+        if !old_columns.iter().any(|column| column == "indexed") {
             overrides.push(("indexed", "1"));
+        }
+        if table == "albums"
+            && old_columns.iter().any(|column| column == "metadata")
+            && !old_columns.iter().any(|column| column == "input_metadata")
+        {
+            overrides.push(("input_metadata", "old.metadata"));
+            overrides.push(("metadata", "coalesce(old.metadata,jsonb('{}'))"));
         }
         copy_table(connection, schema, table, table, &overrides).await?;
         sqlx::query("DELETE FROM migration_uris")

@@ -67,18 +67,11 @@ impl EditSession {
                 |error: library::LibraryError| SourceMetadataError::Write(error.to_string());
             let (object, mut draft, binding) = match item.kind() {
                 SourceEntityKind::Track => {
-                    let row = library::CatalogQuery::uris(
-                        library::CatalogKind::Track,
-                        vec![(item.media_uri()).to_owned()],
-                    )
-                    .rows(&database, 0, 256, &cancel)
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                        _ => unreachable!(),
-                    })
-                    .map_err(error)?
-                    .ok_or(SourceMetadataError::Unavailable)?;
+                    let row = database
+                        .track(item.media_uri(), &cancel)
+                        .await
+                        .map_err(error)?
+                        .ok_or(SourceMetadataError::Unavailable)?;
                     let binding = track_artwork_binding(database, &row).await?;
                     let object = row
                         .object_id
@@ -94,18 +87,11 @@ impl EditSession {
                     (object, draft, binding)
                 }
                 SourceEntityKind::Album => {
-                    let row = library::CatalogQuery::uris(
-                        library::CatalogKind::Album,
-                        vec![(item.media_uri()).to_owned()],
-                    )
-                    .rows(&database, 0, 256, &cancel)
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Albums(rows) => rows.into_iter().next(),
-                        _ => unreachable!(),
-                    })
-                    .map_err(error)?
-                    .ok_or(SourceMetadataError::Unavailable)?;
+                    let row = database
+                        .album(item.media_uri(), false, &cancel)
+                        .await
+                        .map_err(error)?
+                        .ok_or(SourceMetadataError::Unavailable)?;
                     let binding = row.artwork_binding.clone();
                     let object = row.object_id.clone();
                     let draft = match &source.implementation {
@@ -118,18 +104,11 @@ impl EditSession {
                     (object, draft, binding)
                 }
                 SourceEntityKind::Artist => {
-                    let row = library::CatalogQuery::uris(
-                        library::CatalogKind::Artist,
-                        vec![(item.media_uri()).to_owned()],
-                    )
-                    .rows(&database, 0, 256, &cancel)
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Artists(rows) => rows.into_iter().next(),
-                        _ => unreachable!(),
-                    })
-                    .map_err(error)?
-                    .ok_or(SourceMetadataError::Unavailable)?;
+                    let row = database
+                        .artist(item.media_uri(), false, false, &cancel)
+                        .await
+                        .map_err(error)?
+                        .ok_or(SourceMetadataError::Unavailable)?;
                     let binding = row.artwork_binding.clone();
                     let object = row.object_id.clone();
                     let draft = match &source.implementation {
@@ -457,15 +436,9 @@ async fn track_artwork_binding(
     let Some(uri) = &track.links.album_media_uri else {
         return Ok(None);
     };
-    Ok(
-        library::CatalogQuery::uris(library::CatalogKind::Album, vec![(uri).to_owned()])
-            .rows(&database, 0, 256, &library::ReadCancellation::new())
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Albums(rows) => rows.into_iter().next(),
-                _ => unreachable!(),
-            })
-            .map_err(|error| SourceMetadataError::Write(error.to_string()))?
-            .and_then(|album| album.artwork_binding),
-    )
+    Ok(database
+        .album(uri, false, &library::ReadCancellation::new())
+        .await
+        .map_err(|error| SourceMetadataError::Write(error.to_string()))?
+        .and_then(|album| album.artwork_binding))
 }

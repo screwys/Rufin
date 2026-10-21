@@ -285,28 +285,25 @@ impl ArtworkTile {
             .is_some_and(|previous| {
                 previous.key == key && previous.request.binding == request.binding
             });
-        if same_request && self.request_complete.get() {
+        if same_request {
+            self.start_artwork_request();
             return;
         }
         if !same_artwork {
             self.image_is_preview.set(false);
         }
-        if !same_request {
-            self.finish_transition();
-            self.transition_pending.set(!same_artwork && playback);
-            self.advance_generation();
-            self.request_complete.set(false);
-        }
-        if !same_request || !self.has_artwork_request() {
-            self.cancel_artwork_request();
-            self.bound_request.replace(Some(BoundRequest {
-                owner,
-                key,
-                request,
-                playback,
-                display_size,
-            }));
-        }
+        self.finish_transition();
+        self.transition_pending.set(!same_artwork && playback);
+        self.advance_generation();
+        self.request_complete.set(false);
+        self.cancel_artwork_request();
+        self.bound_request.replace(Some(BoundRequest {
+            owner,
+            key,
+            request,
+            playback,
+            display_size,
+        }));
         if !same_artwork && !playback {
             self.image.set_paintable(Option::<&gtk::gdk::Texture>::None);
         }
@@ -425,6 +422,12 @@ impl ArtworkTile {
     }
 
     pub fn bind_missing(&self) -> u64 {
+        if self.request_complete.get()
+            && self.bound_request.borrow().is_none()
+            && self.image.paintable().is_none()
+        {
+            return self.generation.get();
+        }
         self.bind_image_state(None, true)
     }
 

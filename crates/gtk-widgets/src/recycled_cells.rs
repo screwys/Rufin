@@ -431,6 +431,19 @@ pub fn track_row_index_cell(text: &str, activate: impl Fn(&gtk::Button) + 'stati
     let resource = crate::ui_resource::TRACK_ROW_INDEX_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
     crate::objects!(builder, resource, { cell: gtk::Overlay, number: gtk::Label, play: gtk::Button });
+    let focus_cell = cell.downgrade();
+    play.connect_state_flags_changed(move |play, _| {
+        if let Some(cell) = focus_cell.upgrade() {
+            if play
+                .state_flags()
+                .contains(gtk::StateFlags::FOCUSED | gtk::StateFlags::FOCUS_VISIBLE)
+            {
+                cell.add_css_class("track-row-keyboard-focus");
+            } else {
+                cell.remove_css_class("track-row-keyboard-focus");
+            }
+        }
+    });
     let click_cell = cell.downgrade();
     install_index_playing_indicator(&cell);
     play.connect_clicked(move |button| {

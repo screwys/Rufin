@@ -179,15 +179,10 @@ impl FileSource {
         {
             return Err(SourceError::NotFound);
         }
-        let track =
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(media_uri).to_owned()])
-                .rows(&database, 0, 256, &library::ReadCancellation::new())
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })?
-                .ok_or(SourceError::NotFound)?;
+        let track = database
+            .track(&(media_uri), &library::ReadCancellation::new())
+            .await?
+            .ok_or(SourceError::NotFound)?;
         let file = database
             .observed_media_file(media_uri)
             .await?

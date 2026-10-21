@@ -1,58 +1,37 @@
-//! One ordered relation for catalog counts, windows, sections and actions.
-use std::sync::Arc;
+//! Typed collection windows and the ordered relations used by member actions.
+use crate::*;
+use sqlx::{Arguments, Connection, SqliteConnection, sqlite::SqliteArguments};
+use std::{ops::Range, sync::Arc};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum CatalogSubject {
-    PlaylistEntries {
-        keys: Arc<[PlaylistEntryKey]>,
+pub enum Collection {
+    Source(SourceKey),
+    Objects {
+        source: SourceKey,
+        ids: Arc<[String]>,
     },
-    Uris {
-        kind: CatalogKind,
-        uris: Arc<[String]>,
+    Album(AlbumKey),
+    Artist {
+        key: ArtistKey,
         album_artist: bool,
     },
-    Keys {
-        kind: CatalogKind,
+    Genre(GenreKey),
+    Mood(MoodKey),
+    Playlist(PlaylistKey),
+    Smart {
+        key: SmartPlaylistKey,
         source: Option<SourceKey>,
-        keys: Arc<[i64]>,
-        album_artist: bool,
-    },
-    Tracks {
-        scope: TrackScope,
-        sort: Option<CatalogSort>,
-    },
-    Albums {
-        source: SourceKey,
-        sort: CatalogSort,
-        inline_tracks: Option<usize>,
-    },
-    Artists {
-        source: SourceKey,
-        sort: CatalogSort,
-        album_artist: bool,
-    },
-    Genres {
-        source: SourceKey,
-        sort: CatalogSort,
-    },
-    Moods {
-        source: SourceKey,
-        sort: CatalogSort,
-    },
-    Playlists {
-        source: Option<SourceKey>,
-        sort: CatalogSort,
-    },
-    SmartPlaylists {
-        source: Option<SourceKey>,
-        sort: CatalogSort,
         now: i64,
+    },
+    History {
+        source: Option<SourceId>,
     },
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct CatalogQuery {
-    pub subject: CatalogSubject,
+pub struct MemberRead {
+    pub collection: Collection,
+    pub sort: Option<CatalogSort>,
     pub folder: Option<FolderKey>,
     pub filter: String,
     pub descending: bool,
@@ -61,18 +40,71 @@ pub struct CatalogQuery {
     pub activity: bool,
 }
 
-#[derive(Clone)]
-pub enum CatalogRows {
-    Folders(Vec<FolderView>),
-    Tracks(Vec<TrackView>),
-    PlaylistEntries(Vec<PlaylistEntryView>),
-    Albums(Vec<AlbumView>),
-    AlbumDetails(Vec<AlbumDetailRow>),
-    Artists(Vec<ArtistView>),
-    Genres(Vec<GenreView>),
-    Moods(Vec<MoodView>),
-    Playlists(Vec<PlaylistRow>),
-    SmartPlaylists(Vec<SmartPlaylistRow>),
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum ListKind {
+    Albums,
+    ArtistAlbums {
+        artist: ArtistKey,
+        album_artist: bool,
+        release_class: Option<AlbumReleaseClass>,
+        filters: Option<Arc<[String; 5]>>,
+    },
+    Artists {
+        album_artist: bool,
+    },
+    Genres,
+    Moods,
+    Playlists,
+    SmartPlaylists {
+        now: i64,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ListRead {
+    pub kind: ListKind,
+    pub source: Option<SourceKey>,
+    pub folder: Option<FolderKey>,
+    pub filter: String,
+    pub sort: CatalogSort,
+    pub descending: bool,
+    pub favorites_only: bool,
+    pub downloaded_only: bool,
+    pub activity: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct Page<T> {
+    pub count: usize,
+    pub first_row_position: usize,
+    pub rows: Vec<T>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum MemberRow {
+    Track(TrackView),
+    Entry(PlaylistEntryView),
+}
+
+impl MemberRow {
+    pub fn track(&self) -> &TrackView {
+        match self {
+            Self::Track(track) => track,
+            Self::Entry(entry) => &entry.track,
+        }
+    }
+    pub fn into_track(self) -> TrackView {
+        match self {
+            Self::Track(track) => track,
+            Self::Entry(entry) => entry.track,
+        }
+    }
+    pub fn into_entry(self) -> Option<PlaylistEntryView> {
+        match self {
+            Self::Entry(entry) => Some(entry),
+            Self::Track(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -84,7 +116,6 @@ pub enum CatalogKind {
     Mood,
     Folder,
     Playlist,
-    SmartPlaylist,
 }
 
 impl CatalogKind {
@@ -97,7 +128,6 @@ impl CatalogKind {
             Self::Mood => ("moods", "mood"),
             Self::Folder => ("folders", "folder"),
             Self::Playlist => ("playlists", "playlist"),
-            Self::SmartPlaylist => ("smart_playlists", "smart_playlist"),
         }
     }
 }
@@ -139,47 +169,11 @@ impl Database {
     }
 }
 
-#[derive(Clone)]
-pub struct CatalogPage {
-    pub query: CatalogQuery,
-    pub count: usize,
-    pub first_row_position: usize,
-    pub rows: CatalogRows,
-    pub disc_sections: Vec<(u32, i64)>,
-}
-
-impl CatalogQuery {
-    pub fn activity_sensitive(&self) -> bool {
-        self.activity
-            || match &self.subject {
-                CatalogSubject::SmartPlaylists { .. }
-                | CatalogSubject::Keys {
-                    kind: CatalogKind::SmartPlaylist,
-                    ..
-                }
-                | CatalogSubject::Uris {
-                    kind: CatalogKind::SmartPlaylist,
-                    ..
-                }
-                | CatalogSubject::Tracks {
-                    scope: TrackScope::Smart { .. } | TrackScope::History { .. },
-                    ..
-                } => true,
-                CatalogSubject::Tracks { sort, .. } => {
-                    sort.is_some_and(CatalogSort::activity_sensitive)
-                }
-                CatalogSubject::Albums { sort, .. }
-                | CatalogSubject::Artists { sort, .. }
-                | CatalogSubject::Genres { sort, .. }
-                | CatalogSubject::Moods { sort, .. }
-                | CatalogSubject::Playlists { sort, .. } => sort.activity_sensitive(),
-                _ => false,
-            }
-    }
-
-    pub fn playlist_entries(keys: Vec<PlaylistEntryKey>) -> Self {
+impl MemberRead {
+    pub fn new(collection: Collection) -> Self {
         Self {
-            subject: CatalogSubject::PlaylistEntries { keys: keys.into() },
+            collection,
+            sort: None,
             folder: None,
             filter: String::new(),
             descending: false,
@@ -188,72 +182,27 @@ impl CatalogQuery {
             activity: false,
         }
     }
-
-    pub fn uris(kind: CatalogKind, uris: Vec<String>) -> Self {
-        Self {
-            subject: CatalogSubject::Uris {
-                kind,
-                uris: uris.into(),
-                album_artist: false,
-            },
-            folder: None,
-            filter: String::new(),
-            descending: false,
-            favorites_only: false,
-            downloaded_only: false,
-            activity: false,
-        }
-    }
-    pub fn keys(kind: CatalogKind, source: Option<SourceKey>, keys: Vec<i64>) -> Self {
-        Self {
-            subject: CatalogSubject::Keys {
-                kind,
-                source,
-                keys: keys.into(),
-                album_artist: false,
-            },
-            folder: None,
-            filter: String::new(),
-            descending: false,
-            favorites_only: false,
-            downloaded_only: false,
-            activity: false,
-        }
-    }
-
-    pub fn tracks(scope: TrackScope) -> Self {
-        Self {
-            subject: CatalogSubject::Tracks { scope, sort: None },
-            folder: None,
-            filter: String::new(),
-            descending: false,
-            favorites_only: false,
-            downloaded_only: false,
-            activity: false,
-        }
-    }
-    pub fn selection(self) -> TrackSelection {
-        TrackSelection::Query {
-            query: self,
-            ranges: None,
-        }
-    }
-    pub fn track_sort_option(&self) -> Option<CatalogSort> {
-        match self.subject {
-            CatalogSubject::Tracks { sort, .. } => sort,
-            _ => None,
-        }
-    }
-    pub fn track_sort(&self) -> CatalogSort {
-        let CatalogSubject::Tracks { scope, sort } = &self.subject else {
-            return CatalogSort::Title;
-        };
-        sort.unwrap_or(match scope {
-            TrackScope::Album(_) => CatalogSort::TrackNumber,
-            TrackScope::Playlist(_) => CatalogSort::Position,
-            TrackScope::History { .. } => CatalogSort::LastPlayed,
+    pub fn effective_sort(&self) -> CatalogSort {
+        self.sort.unwrap_or(match self.collection {
+            Collection::Album(_) => CatalogSort::TrackNumber,
+            Collection::Playlist(_) => CatalogSort::Position,
+            Collection::History { .. } => CatalogSort::LastPlayed,
             _ => CatalogSort::Title,
         })
+    }
+    pub fn activity_sensitive(&self) -> bool {
+        self.activity
+            || self.effective_sort().activity_sensitive()
+            || matches!(
+                self.collection,
+                Collection::Smart { .. } | Collection::History { .. }
+            )
+    }
+    pub fn selection(self) -> MemberSelection {
+        MemberSelection::Members {
+            read: self,
+            ranges: None,
+        }
     }
     pub async fn count(
         &self,
@@ -261,7 +210,8 @@ impl CatalogQuery {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<usize> {
         let (_permit, mut connection) = database.acquire_general(cancellation).await?;
-        Ok(count_on(&mut connection, self).await?.max(0) as usize)
+        let query = member_query_on(&mut connection, self).await?;
+        member_count(&mut connection, self, &query).await
     }
     pub async fn rows(
         &self,
@@ -269,49 +219,34 @@ impl CatalogQuery {
         offset: usize,
         limit: usize,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<CatalogRows> {
+    ) -> LibraryResult<Vec<MemberRow>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
         let (_permit, mut connection) = database.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let result = rows_on(&mut transaction, self, offset, limit.min(256)).await?;
+        let query = member_query_on(&mut transaction, self).await?;
+        let rows = member_rows(&mut transaction, self, &query, offset, limit.min(256)).await?;
         transaction.commit().await?;
-        Ok(result)
+        Ok(rows)
     }
     pub async fn page(
         &self,
         database: &Database,
         window: RouteSeedWindow,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<CatalogPage> {
+    ) -> LibraryResult<Page<MemberRow>> {
         let (_permit, mut connection) = database.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let count = count_on(&mut transaction, self).await?.max(0) as usize;
+        let query = member_query_on(&mut transaction, self).await?;
+        let count = member_count(&mut transaction, self, &query).await?;
         let range = window.range(count);
-        let rows = rows_on(&mut transaction, self, range.start, range.len()).await?;
-        let disc_sections = if matches!(
-            self.subject,
-            CatalogSubject::Tracks {
-                scope: TrackScope::Album(_),
-                ..
-            }
-        ) {
-            let query = compile_on(&mut transaction, self).await?;
-            crate::collections::album_disc_sections(
-                &query,
-                self.track_sort(),
-                self.descending,
-                &mut transaction,
-            )
-            .await?
-        } else {
-            Vec::new()
-        };
+        let rows = member_rows(&mut transaction, self, &query, range.start, range.len()).await?;
         transaction.commit().await?;
-        Ok(CatalogPage {
-            query: self.clone(),
+        Ok(Page {
             count,
             first_row_position: range.start,
             rows,
-            disc_sections,
         })
     }
     pub async fn sections(
@@ -320,16 +255,10 @@ impl CatalogQuery {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<ScrollSection>> {
         let (_permit, mut connection) = database.acquire_general(cancellation).await?;
-        let query = compile_on(&mut connection, self).await?;
-        let Some(text) = &query.text else {
-            return Ok(Vec::new());
-        };
-        let sql = query.section_sql(text);
-        crate::scroll_sections::decode_sections(
-            sqlx::query_scalar_with(sqlx::AssertSqlSafe(sql), query.arguments)
-                .fetch_all(&mut *connection)
-                .await?,
-        )
+        member_query_on(&mut connection, self)
+            .await?
+            .sections(&mut connection)
+            .await
     }
     pub async fn disc_sections(
         &self,
@@ -337,10 +266,10 @@ impl CatalogQuery {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<(u32, i64)>> {
         let (_permit, mut connection) = database.acquire_general(cancellation).await?;
-        let query = compile_on(&mut connection, self).await?;
+        let query = member_query_on(&mut connection, self).await?;
         crate::collections::album_disc_sections(
             &query,
-            self.track_sort(),
+            self.effective_sort(),
             self.descending,
             &mut connection,
         )
@@ -348,405 +277,512 @@ impl CatalogQuery {
     }
 }
 
-pub(crate) async fn compile_on(
-    connection: &mut SqliteConnection,
-    query: &CatalogQuery,
-) -> LibraryResult<OrderedQuery> {
-    match query.subject {
-        CatalogSubject::PlaylistEntries { ref keys } => {
-            let mut arguments = SqliteArguments::default();
-            arguments
-                .add(serde_json::to_string(keys)?)
-                .map_err(sqlx::Error::Encode)?;
-            Ok(OrderedQuery {albumless:false,key:"entry.playlist_entry_key".into(),text:None,from:"json_each(?1) requested JOIN playlist_entries entry ON entry.playlist_entry_key=requested.value JOIN tracks track USING(track_key)".into(),predicate:"1".into(),order:vec!["CAST(requested.key AS INTEGER)".into()],uri:"track.media_uri".into(),entry_key:"entry.playlist_entry_key".into(),arguments})
-        }
-
-        CatalogSubject::Uris { kind, ref uris, .. } => {
-            let (table, name) = kind.sql();
-            let alias = if kind == CatalogKind::Track {
-                "track"
-            } else {
-                "entity"
-            };
-            let mut arguments = SqliteArguments::default();
-            arguments
-                .add(serde_json::to_string(uris)?)
-                .map_err(sqlx::Error::Encode)?;
-            Ok(OrderedQuery {
-                albumless: false,
-                key: format!("{alias}.{name}_key"),
-                text: None,
-                from: format!(
-                    "json_each(?1) requested JOIN {table} {alias} ON {alias}.media_uri=requested.value"
-                ),
-                predicate: "1".into(),
-                order: vec!["CAST(requested.key AS INTEGER)".into()],
-                uri: format!("{alias}.media_uri"),
-                entry_key: "NULL".into(),
-                arguments,
-            })
-        }
-        CatalogSubject::Keys {
+impl ListRead {
+    pub fn new(kind: ListKind, source: Option<SourceKey>, sort: CatalogSort) -> Self {
+        Self {
             kind,
             source,
-            ref keys,
-            ..
-        } => {
-            let (table, name) = kind.sql();
-            let alias = if kind == CatalogKind::Track {
-                "track"
-            } else {
-                "entity"
-            };
-            let mut arguments = SqliteArguments::default();
-            arguments
-                .add(serde_json::to_string(keys)?)
-                .map_err(sqlx::Error::Encode)?;
-            Ok(OrderedQuery {
-                albumless: false,
-                key: format!("{alias}.{name}_key"),
-                text: None,
-                from: format!(
-                    "json_each(?1) requested JOIN {table} {alias} ON {alias}.{name}_key=requested.value"
-                ),
-                predicate: source.map_or_else(
-                    || "1".into(),
-                    |key| format!("{alias}.source_key={}", key.raw()),
-                ),
-                order: vec!["CAST(requested.key AS INTEGER)".into()],
-                uri: format!("{alias}.media_uri"),
-                entry_key: "NULL".into(),
-                arguments,
-            })
+            sort,
+            folder: None,
+            filter: String::new(),
+            descending: false,
+            favorites_only: false,
+            downloaded_only: false,
+            activity: false,
         }
-        CatalogSubject::Tracks { .. } => track_query_on(connection, query).await,
-        CatalogSubject::SmartPlaylists { source, sort, now } => {
+    }
+    fn window_limit(&self, limit: usize) -> usize {
+        limit.min(if matches!(self.kind, ListKind::ArtistAlbums { .. }) {
+            128
+        } else {
+            256
+        })
+    }
+    pub fn activity_sensitive(&self) -> bool {
+        self.activity
+            || self.sort.activity_sensitive()
+            || matches!(self.kind, ListKind::SmartPlaylists { .. })
+    }
+    pub fn selection(self) -> MemberSelection {
+        MemberSelection::Parents {
+            read: self,
+            ranges: None,
+        }
+    }
+    pub async fn artist_release_counts(
+        &self,
+        database: &Database,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<[usize; 6]> {
+        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let query = list_query_on(&mut connection, self).await?;
+        let rows = sqlx::query_as_with::<_, (i64, i64), _>(
+            sqlx::AssertSqlSafe(format!(
+                "SELECT album.release_class,count(*) FROM {} WHERE {} GROUP BY album.release_class",
+                query.from, query.predicate
+            )),
+            query.arguments,
+        )
+        .fetch_all(&mut *connection)
+        .await?;
+        let mut counts = [0; 6];
+        for (class, count) in rows {
+            counts[class as usize] = count as usize;
+        }
+        Ok(counts)
+    }
+    pub async fn count(
+        &self,
+        database: &Database,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<usize> {
+        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let query = list_query_on(&mut connection, self).await?;
+        list_count(&mut connection, self, &query).await
+    }
+    pub async fn sections(
+        &self,
+        database: &Database,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<ScrollSection>> {
+        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        list_query_on(&mut connection, self)
+            .await?
+            .sections(&mut connection)
+            .await
+    }
+}
+
+// Every typed window projects the bounded requested relation in the same statement.
+macro_rules! list_windows {
+    ($rows:ident, $page:ident, $row:ty, $connection:ident, $read:ident, $requested:ident => $projection:expr) => {
+        impl ListRead {
+            pub async fn $rows(
+                &self,
+                database: &Database,
+                offset: usize,
+                limit: usize,
+                cancellation: &ReadCancellation,
+            ) -> LibraryResult<Vec<$row>> {
+                let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+                let mut transaction = connection.begin().await?;
+                let query = list_query_on(&mut transaction, self).await?;
+                let rows = {
+                    let $connection = &mut *transaction;
+                    let $read = self;
+                    let $requested = query.requested_keys(offset, self.window_limit(limit));
+                    ($projection).await?
+                };
+                transaction.commit().await?;
+                Ok(rows)
+            }
+            pub async fn $page(
+                &self,
+                database: &Database,
+                window: RouteSeedWindow,
+                cancellation: &ReadCancellation,
+            ) -> LibraryResult<Page<$row>> {
+                let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+                let mut transaction = connection.begin().await?;
+                let query = list_query_on(&mut transaction, self).await?;
+                let count = list_count(&mut transaction, self, &query).await?;
+                let range = window.range(count);
+                let rows = {
+                    let $connection = &mut *transaction;
+                    let $read = self;
+                    let $requested = query.requested_keys(range.start, range.len());
+                    ($projection).await?
+                };
+                transaction.commit().await?;
+                Ok(Page {
+                    count,
+                    first_row_position: range.start,
+                    rows,
+                })
+            }
+        }
+    };
+}
+
+list_windows!(albums, page_albums, AlbumView, connection, read, requested => {
+    crate::collections::load_album_requested(connection, requested, read.activity)
+});
+list_windows!(artists, page_artists, ArtistView, connection, read, requested => {
+    let ListKind::Artists { album_artist } = read.kind else {
+        unreachable!()
+    };
+    crate::collections::load_artist_requested(connection, requested, album_artist, read.activity)
+});
+list_windows!(genres, page_genres, GenreView, connection, read, requested => {
+    crate::collections::load_genre_requested(connection, requested, read.folder)
+});
+list_windows!(moods, page_moods, MoodView, connection, read, requested => {
+    crate::collections::load_mood_requested(connection, requested, read.folder)
+});
+list_windows!(playlists, page_playlists, PlaylistRow, connection, _read, requested => {
+    Database::load_playlist_requested(connection, requested)
+});
+list_windows!(smart_playlists, page_smart_playlists, SmartPlaylistRow, connection, read, requested => {
+    let ListKind::SmartPlaylists { now } = read.kind else {
+        unreachable!()
+    };
+    crate::smart_playlists::load_smart_playlist_requested(
+        connection, read.source, requested, read.folder, now,
+    )
+});
+
+async fn member_count(
+    connection: &mut SqliteConnection,
+    read: &MemberRead,
+    query: &OrderedQuery,
+) -> LibraryResult<usize> {
+    if read.filter.trim().is_empty() && !read.favorites_only && !read.downloaded_only {
+        let stored = match read.collection {
+            Collection::Source(source) => Some(if let Some(folder) = read.folder {
+                format!(
+                    "SELECT COALESCE(totals.track_count,0) FROM folders folder {} WHERE folder.source_key={} AND folder.folder_key={}",
+                    crate::collections::global_totals_join("folder", false),
+                    source.raw(),
+                    folder.raw()
+                )
+            } else {
+                format!(
+                    "SELECT track_count FROM sources WHERE source_key={}",
+                    source.raw()
+                )
+            }),
+            Collection::Album(key) => Some(if let Some(folder) = read.folder {
+                format!(
+                    "SELECT track_count FROM collection_album_index WHERE kind='folder' AND entity_key={} AND role=0 AND album_key={} AND coalesce(folder_key,'')=''",
+                    folder.raw(),
+                    key.raw()
+                )
+            } else {
+                format!(
+                    "SELECT track_count FROM albums WHERE album_key={}",
+                    key.raw()
+                )
+            }),
+            Collection::Artist { key, album_artist } => Some(stored_member_count(
+                "artist",
+                key.raw(),
+                album_artist,
+                read.folder,
+            )),
+            Collection::Genre(key) => {
+                Some(stored_member_count("genre", key.raw(), false, read.folder))
+            }
+            Collection::Mood(key) => {
+                Some(stored_member_count("mood", key.raw(), false, read.folder))
+            }
+            Collection::Playlist(key) => Some(if let Some(folder) = read.folder {
+                format!(
+                    "SELECT COALESCE(totals.track_count,0) FROM playlists playlist LEFT JOIN collection_totals totals ON totals.kind='playlist' AND totals.entity_key=playlist.playlist_key AND totals.role=0 AND coalesce(totals.folder_key,'')=CASE WHEN playlist.source_key IS NULL THEN '' ELSE {} END WHERE playlist.playlist_key={}",
+                    folder.raw(),
+                    key.raw()
+                )
+            } else {
+                stored_member_count("playlist", key.raw(), false, None)
+            }),
+            _ => None,
+        };
+        if let Some(sql) = stored {
+            return Ok(sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql))
+                .fetch_optional(connection)
+                .await?
+                .unwrap_or(0)
+                .max(0) as usize);
+        }
+    }
+    Ok(query.count(connection).await?.max(0) as usize)
+}
+fn stored_member_count(kind: &str, key: i64, role: bool, folder: Option<FolderKey>) -> String {
+    let folder = folder.map_or("''".into(), |folder| folder.raw().to_string());
+    format!(
+        "SELECT track_count FROM collection_totals WHERE kind='{kind}' AND entity_key={key} AND role={} AND coalesce(folder_key,'')={folder}",
+        i32::from(role)
+    )
+}
+
+async fn list_count(
+    connection: &mut SqliteConnection,
+    read: &ListRead,
+    query: &OrderedQuery,
+) -> LibraryResult<usize> {
+    if read.kind == ListKind::Albums
+        && read.folder.is_none()
+        && read.filter.trim().is_empty()
+        && !read.favorites_only
+        && !read.downloaded_only
+        && let Some(source) = read.source
+    {
+        return Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT album_count FROM sources WHERE source_key=?1",
+        )
+        .bind(source)
+        .fetch_optional(connection)
+        .await?
+        .unwrap_or(0)
+        .max(0) as usize);
+    }
+    Ok(query.count(connection).await?.max(0) as usize)
+}
+async fn member_rows(
+    connection: &mut SqliteConnection,
+    read: &MemberRead,
+    query: &OrderedQuery,
+    offset: usize,
+    limit: usize,
+) -> LibraryResult<Vec<MemberRow>> {
+    if matches!(read.collection, Collection::History { .. }) {
+        return Ok(
+            crate::activity::load_history_page(connection, query, offset, limit)
+                .await?
+                .into_iter()
+                .map(MemberRow::Track)
+                .collect(),
+        );
+    }
+    let requested = query.requested_keys(offset, limit);
+    if matches!(read.collection, Collection::Playlist(_)) {
+        Ok(
+            crate::playlists::load_playlist_entry_requested(connection, requested)
+                .await?
+                .into_iter()
+                .map(MemberRow::Entry)
+                .collect(),
+        )
+    } else {
+        Ok(crate::tracks::load_track_requested(connection, requested)
+            .await?
+            .into_iter()
+            .map(MemberRow::Track)
+            .collect())
+    }
+}
+
+pub(crate) async fn list_query_on(
+    connection: &mut SqliteConnection,
+    read: &ListRead,
+) -> LibraryResult<OrderedQuery> {
+    match read.kind {
+        ListKind::SmartPlaylists { now } => {
             crate::smart_playlists::smart_list_query(
                 connection,
-                source,
-                query.folder,
-                sort,
-                query.descending,
-                &query.filter,
+                read.source,
+                read.folder,
+                read.sort,
+                read.descending,
+                &read.filter,
                 now,
             )
             .await
         }
-        _ => Ok(crate::collections::collection_query(query)),
+        ListKind::Playlists => Ok(crate::playlists::playlist_list_query(
+            read.source,
+            read.folder,
+            read.sort,
+            read.descending,
+            &read.filter,
+        )),
+        _ => Ok(crate::collections::collection_query(read)),
     }
 }
 
-async fn count_on(connection: &mut SqliteConnection, query: &CatalogQuery) -> LibraryResult<i64> {
-    let relation = compile_on(connection, query).await?;
-    if let CatalogSubject::Albums {
-        inline_tracks: Some(inline),
-        ..
-    } = query.subject
-    {
-        return Ok(sqlx::query_scalar_with(
-            sqlx::AssertSqlSafe(format!(
-                "SELECT COALESCE(sum(1+max({}-{},0)),0) FROM {} WHERE {}",
-                crate::collections::album_detail_track_count(query.folder),
-                inline,
-                relation.from,
-                relation.predicate
-            )),
-            relation.arguments,
-        )
-        .fetch_one(connection)
-        .await?);
-    }
-    relation.count(connection).await
-}
-
-async fn rows_on(
+pub(crate) async fn member_query_on(
     connection: &mut SqliteConnection,
-    input: &CatalogQuery,
-    offset: usize,
-    limit: usize,
-) -> LibraryResult<CatalogRows> {
-    let query = compile_on(connection, input).await?;
-    if matches!(
-        input.subject,
-        CatalogSubject::Tracks {
-            scope: TrackScope::History { .. },
-            ..
-        }
-    ) {
-        return Ok(CatalogRows::Tracks(
-            crate::activity::load_history_page(connection, &query, offset, limit).await?,
-        ));
-    }
-    if let CatalogSubject::Albums {
-        source,
-        sort,
-        inline_tracks: Some(inline),
-    } = input.subject
-    {
-        return Ok(CatalogRows::AlbumDetails(
-            crate::collections::load_album_details(
-                connection, input, source, sort, inline, offset, limit,
+    read: &MemberRead,
+) -> LibraryResult<OrderedQuery> {
+    let sort = read.effective_sort();
+    let mut query = match &read.collection {
+        Collection::Smart { key, source, now } => {
+            crate::smart_playlists::smart_query(
+                connection,
+                *source,
+                *key,
+                read.folder,
+                &read.filter,
+                read.sort,
+                read.descending,
+                *now,
             )
-            .await?,
-        ));
-    }
-    let range = offset..offset.saturating_add(limit);
-    let keys: Vec<i64> =
-        selected_values_on(connection, &query, &query.key, std::slice::from_ref(&range)).await?;
-    load_keys_on(connection, input, keys).await
-}
-
-pub(crate) async fn load_keys_on(
-    connection: &mut SqliteConnection,
-    input: &CatalogQuery,
-    keys: Vec<i64>,
-) -> LibraryResult<CatalogRows> {
-    use CatalogSubject as S;
-    let (kind, role, source, now) = match input.subject {
-        S::Keys {
-            kind,
-            source,
-            album_artist,
-            ..
-        } => (kind, album_artist, source, 0),
-        S::Uris {
-            kind, album_artist, ..
-        } => (kind, album_artist, None, 0),
-        S::PlaylistEntries { .. }
-        | S::Tracks {
-            scope: TrackScope::Playlist(_),
-            ..
-        } => {
-            return Ok(CatalogRows::PlaylistEntries(
-                crate::playlists::load_playlist_entry_rows(
-                    connection,
-                    &keys
-                        .into_iter()
-                        .map(PlaylistEntryKey::from_raw)
-                        .collect::<Vec<_>>(),
-                )
-                .await?,
-            ));
+            .await?
         }
-        S::Tracks { .. } => (CatalogKind::Track, false, None, 0),
-        S::Albums { .. } => (CatalogKind::Album, false, None, 0),
-        S::Artists { album_artist, .. } => (CatalogKind::Artist, album_artist, None, 0),
-        S::Genres { .. } => (CatalogKind::Genre, false, None, 0),
-        S::Moods { .. } => (CatalogKind::Mood, false, None, 0),
-        S::Playlists { .. } => (CatalogKind::Playlist, false, None, 0),
-        S::SmartPlaylists { source, now, .. } => (CatalogKind::SmartPlaylist, false, source, now),
+        Collection::History { source } => {
+            crate::activity::history_query(source.as_ref(), &read.filter, read.descending)
+        }
+        Collection::Playlist(key) => {
+            crate::playlists::playlist_query(*key, read.folder, sort, read.descending, &read.filter)
+        }
+        collection => {
+            let mut arguments = SqliteArguments::default();
+            // Bounded collections drive their key relation before track ordering.
+            let (from, predicate) = match collection {
+                Collection::Source(source) => {
+                    let from = if let Some(folder) = read.folder {
+                        format!("track_folders membership CROSS JOIN tracks track ON track.track_key=membership.track_key AND membership.folder_key={}", folder.raw())
+                    } else { "tracks track".into() };
+                    (from, format!("track.source_key={}", source.raw()))
+                }
+                Collection::Objects { source, ids } => {
+                    arguments.add(serde_json::to_string(ids)?).map_err(sqlx::Error::Encode)?;
+                    (format!("(SELECT DISTINCT value FROM json_each(?1)) requested CROSS JOIN tracks track ON track.source_key={} AND track.object_id=requested.value",source.raw()), "1".into())
+                }
+                Collection::Album(key) => ("tracks track INDEXED BY tracks_album_order_idx".into(), format!("track.album_key={}",key.raw())),
+                Collection::Artist { key, album_artist: false } => ("track_artists membership CROSS JOIN tracks track ON track.track_key=membership.track_key".into(),format!("membership.artist_key={}",key.raw())),
+                Collection::Artist { key, album_artist: true } => (format!("({}) membership CROSS JOIN tracks track ON track.track_key=membership.track_key",crate::collections::album_artist_keys(&key.raw().to_string())),"1".into()),
+                Collection::Genre(key) => (format!("({}) membership CROSS JOIN tracks track ON track.track_key=membership.track_key",crate::collections::genre_keys(&key.raw().to_string())),"1".into()),
+                Collection::Mood(key) => ("track_moods membership CROSS JOIN tracks track ON track.track_key=membership.track_key".into(),format!("membership.mood_key={}",key.raw())),
+                _ => unreachable!(),
+            };
+            let mut query = OrderedQuery {
+                key: "track.track_key".into(),
+                text: sort.section_text(false),
+                from,
+                predicate: format!("track.indexed=1 AND ({predicate})"),
+                order: sort.order_terms(read.descending, false),
+                entry_key: "NULL".into(),
+                arguments,
+            };
+            crate::tracks::track_filter(&mut query, read.folder, &read.filter, false);
+            query
+        }
     };
-    Ok(match kind {
-        CatalogKind::Track => {
-            let rows = crate::tracks::load_track_rows(
-                connection,
-                &keys.into_iter().map(TrackKey::from_raw).collect::<Vec<_>>(),
-            )
-            .await?;
-            CatalogRows::Tracks(rows)
-        }
-        CatalogKind::Album => CatalogRows::Albums(
-            crate::collections::load_album_rows(
-                connection,
-                &keys.into_iter().map(AlbumKey::from_raw).collect::<Vec<_>>(),
-                input.activity,
-            )
-            .await?,
-        ),
-        CatalogKind::Artist => CatalogRows::Artists(
-            crate::collections::load_artist_rows(
-                connection,
-                &keys
-                    .into_iter()
-                    .map(ArtistKey::from_raw)
-                    .collect::<Vec<_>>(),
-                role,
-                input.activity,
-            )
-            .await?,
-        ),
-        CatalogKind::Genre => CatalogRows::Genres(
-            crate::collections::load_genre_rows(
-                connection,
-                &keys.into_iter().map(GenreKey::from_raw).collect::<Vec<_>>(),
-                input.folder,
-            )
-            .await?,
-        ),
-        CatalogKind::Mood => CatalogRows::Moods(
-            crate::collections::load_mood_rows(
-                connection,
-                &keys.into_iter().map(MoodKey::from_raw).collect::<Vec<_>>(),
-                input.folder,
-            )
-            .await?,
-        ),
-        CatalogKind::Folder => CatalogRows::Folders(
-            crate::collections::load_folder_rows(
-                connection,
-                &keys
-                    .into_iter()
-                    .map(FolderKey::from_raw)
-                    .collect::<Vec<_>>(),
-            )
-            .await?,
-        ),
-        CatalogKind::Playlist => CatalogRows::Playlists(
-            Database::load_playlist_rows(
-                connection,
-                &keys
-                    .into_iter()
-                    .map(PlaylistKey::from_raw)
-                    .collect::<Vec<_>>(),
-            )
-            .await?,
-        ),
-        CatalogKind::SmartPlaylist => CatalogRows::SmartPlaylists(
-            crate::smart_playlists::load_smart_playlist_rows(
-                connection,
-                source,
-                &keys
-                    .into_iter()
-                    .map(SmartPlaylistKey::from_raw)
-                    .collect::<Vec<_>>(),
-                input.folder,
-                now,
-            )
-            .await?,
-        ),
-    })
+    if read.favorites_only {
+        crate::tracks::track_filter(&mut query, None, "", true);
+    }
+    if read.downloaded_only {
+        crate::tracks::downloaded_filter(&mut query);
+    }
+    Ok(query)
 }
 
-// Shared ordering and bounded reads.
-use crate::*;
-use sqlx::Connection;
-use sqlx::{Arguments, SqliteConnection, sqlite::SqliteArguments};
 pub(crate) fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
+}
+
+pub(crate) struct RequestedKeys {
+    pub sql: String,
+    pub arguments: SqliteArguments,
+}
+impl RequestedKeys {
+    pub fn batch(keys: &[impl serde::Serialize]) -> LibraryResult<Self> {
+        let mut arguments = SqliteArguments::default();
+        arguments
+            .add(serde_json::to_string(keys)?)
+            .map_err(sqlx::Error::Encode)?;
+        Ok(Self {
+            sql: "SELECT value,CAST(key AS INTEGER) ordinal FROM json_each(?1)".into(),
+            arguments,
+        })
+    }
+    pub fn keys(kind: CatalogKind, keys: &[impl serde::Serialize]) -> LibraryResult<Self> {
+        let (table, name) = kind.sql();
+        let batch = Self::batch(keys)?;
+        Ok(Self {
+            sql: format!(
+                "SELECT entity.{name}_key value,requested.ordinal FROM ({}) requested CROSS JOIN {table} entity ON entity.{name}_key=requested.value ORDER BY requested.ordinal LIMIT 256",
+                batch.sql
+            ),
+            arguments: batch.arguments,
+        })
+    }
+    pub fn uris(kind: CatalogKind, uris: &[impl serde::Serialize]) -> LibraryResult<Self> {
+        let (table, name) = kind.sql();
+        let batch = Self::batch(uris)?;
+        Ok(Self {
+            sql: format!(
+                "SELECT entity.{name}_key value,requested.ordinal FROM ({}) requested CROSS JOIN {table} entity ON entity.media_uri=requested.value ORDER BY requested.ordinal LIMIT 256",
+                batch.sql
+            ),
+            arguments: batch.arguments,
+        })
+    }
 }
 
 pub(crate) struct OrderedQuery {
     pub key: String,
     pub text: Option<String>,
-    pub albumless: bool,
     pub from: String,
     pub predicate: String,
     pub order: Vec<String>,
-    pub uri: String,
     pub entry_key: String,
     pub arguments: SqliteArguments,
 }
-
 impl OrderedQuery {
     pub async fn count(&self, connection: &mut SqliteConnection) -> LibraryResult<i64> {
-        let base = format!(
-            "SELECT count(*) FROM {} WHERE {}",
-            self.from, self.predicate
-        );
-        let sql = if self.albumless {
-            format!(
-                "SELECT ({base})+(SELECT count(*) FROM tracks track WHERE track.album_key IS NULL AND {})",
-                self.predicate
-            )
-        } else {
-            base
-        };
-        Ok(
-            sqlx::query_scalar_with(sqlx::AssertSqlSafe(sql), self.arguments.clone())
-                .fetch_one(connection)
-                .await?,
+        Ok(sqlx::query_scalar_with(
+            sqlx::AssertSqlSafe(format!(
+                "SELECT count(*) FROM {} WHERE {}",
+                self.from, self.predicate
+            )),
+            self.arguments.clone(),
         )
-    }
-    fn order_aliases(&self) -> Vec<String> {
-        self.order
-            .iter()
-            .enumerate()
-            .map(|(index, term)| {
-                let expression = order_expression(term);
-                format!(
-                    "__order{index}{}",
-                    term.strip_prefix(expression)
-                        .expect("order expression prefix")
-                )
-            })
-            .collect()
+        .fetch_one(connection)
+        .await?)
     }
     pub fn select(&self, columns: &str) -> String {
-        if !self.albumless {
-            return format!(
-                "SELECT {columns} FROM {} WHERE {} ORDER BY {}",
-                self.from,
-                self.predicate,
-                self.order.join(",")
-            );
-        }
-        let expressions = self
-            .order
-            .iter()
-            .map(|term| order_expression(term))
-            .collect::<Vec<_>>();
-        let extra = expressions
-            .iter()
-            .enumerate()
-            .map(|(index, term)| format!("{term} __order{index}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let missing = expressions
-            .iter()
-            .map(|term| {
-                term.replace("ordering.album_artist_sort", "NULL")
-                    .replace("ordering.title_sort", "NULL")
-                    .replace("ordering.year_sort", "NULL")
-            })
-            .collect::<Vec<_>>()
-            .join(",");
         format!(
-            "SELECT {columns},{extra} FROM {} WHERE {} UNION ALL SELECT {columns},{missing} FROM tracks track WHERE track.album_key IS NULL AND {} ORDER BY {}",
+            "SELECT {columns} FROM {} WHERE {} ORDER BY {}",
             self.from,
             self.predicate,
-            self.predicate,
-            self.order_aliases().join(",")
+            self.order.join(",")
         )
     }
-    fn section_sql(&self, text: &str) -> String {
-        if self.albumless {
-            let input = self.select(&format!("{text} section_text"));
-            crate::scroll_sections::section_sql(
-                &format!(
-                    "SELECT section_text FROM ({input}) ordered ORDER BY {}",
-                    self.order_aliases().join(",")
-                ),
-                "section_text",
-            )
-        } else {
-            crate::scroll_sections::section_sql(&self.select(&self.key), text)
+    pub fn requested_keys(&self, offset: usize, limit: usize) -> RequestedKeys {
+        RequestedKeys {
+            sql: format!(
+                "SELECT value,row_number() OVER ()-1 ordinal FROM ({} LIMIT {} OFFSET {})",
+                self.select(&format!("{} value", self.key)),
+                limit.min(i64::MAX as usize),
+                offset.min(i64::MAX as usize)
+            ),
+            arguments: self.arguments.clone(),
         }
     }
-}
-
-fn order_expression(term: &str) -> &str {
-    let term = term.strip_suffix(" NULLS LAST").unwrap_or(term);
-    term.strip_suffix(" ASC")
-        .or_else(|| term.strip_suffix(" DESC"))
-        .unwrap_or(term)
-}
-
-pub(crate) async fn selected_values_on<T>(
-    connection: &mut SqliteConnection,
-    query: &OrderedQuery,
-    column: &str,
-    ranges: &[std::ops::Range<usize>],
-) -> LibraryResult<Vec<T>>
-where
-    T: for<'r> sqlx::Decode<'r, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Unpin,
-{
-    Ok(
-        selected_rows_on::<(T,)>(connection, query, column, Some(ranges), None)
-            .await?
+    pub fn requested_ranges(&self, ranges: Option<&[Range<usize>]>) -> RequestedKeys {
+        let sql = selection_ranges(ranges)
             .into_iter()
-            .map(|(value,)| value)
-            .collect(),
-    )
+            .map(|range| {
+                let selected = self.requested_keys(range.start, range.len());
+                format!(
+                    "SELECT value,ordinal+{} ordinal FROM ({})",
+                    range.start, selected.sql
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ");
+        RequestedKeys {
+            sql: if sql.is_empty() {
+                self.requested_keys(0, 0).sql
+            } else {
+                sql
+            },
+            arguments: self.arguments.clone(),
+        }
+    }
+    pub async fn sections(
+        &self,
+        connection: &mut SqliteConnection,
+    ) -> LibraryResult<Vec<ScrollSection>> {
+        let Some(text) = &self.text else {
+            return Ok(Vec::new());
+        };
+        let input = format!(
+            "SELECT {text} section_text,row_number() OVER(ORDER BY {})-1 section_position FROM {} WHERE {}",
+            self.order.join(","),
+            self.from,
+            self.predicate
+        );
+        crate::scroll_sections::decode_sections(
+            sqlx::query_scalar_with(
+                sqlx::AssertSqlSafe(crate::scroll_sections::section_sql(&input)),
+                self.arguments.clone(),
+            )
+            .fetch_all(connection)
+            .await?,
+        )
+    }
 }
 
 pub(crate) async fn selected_rows_on<T>(
@@ -760,23 +796,7 @@ where
     T: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin,
 {
     let first_parameter = query.arguments.len() + 1;
-    let mut ranges = ranges
-        .map(<[_]>::to_vec)
-        .unwrap_or_else(|| std::iter::once(0..usize::MAX).collect());
-    ranges.sort_by_key(|range| range.start);
-    let mut merged: Vec<std::ops::Range<usize>> = Vec::new();
-    for range in ranges {
-        if range.is_empty() {
-            continue;
-        }
-        if let Some(previous) = merged.last_mut()
-            && range.start <= previous.end
-        {
-            previous.end = previous.end.max(range.end);
-        } else {
-            merged.push(range);
-        }
-    }
+    let merged = selection_ranges(ranges);
     let mut rows = Vec::new();
     for range in merged {
         let remaining = limit.unwrap_or(usize::MAX).saturating_sub(rows.len());
@@ -800,129 +820,133 @@ where
     Ok(rows)
 }
 
-pub(crate) async fn track_query_on(
-    connection: &mut SqliteConnection,
-    input: &CatalogQuery,
-) -> LibraryResult<OrderedQuery> {
-    let sort = input.track_sort();
-    let crate::CatalogSubject::Tracks { scope, .. } = &input.subject else {
-        unreachable!()
-    };
-    let mut query = match scope {
-        TrackScope::Smart { key, source, now } => {
-            crate::smart_playlists::smart_query(
-                connection,
-                *source,
-                *key,
-                input.folder,
-                &input.filter,
-                input.track_sort_option(),
-                input.descending,
-                *now,
-            )
-            .await?
-        }
-        TrackScope::History { source } => {
-            crate::activity::history_query(source.as_ref(), &input.filter, input.descending)
-        }
-        TrackScope::Playlist(key) => crate::playlists::playlist_query(
-            *key,
-            input.folder,
-            sort,
-            input.descending,
-            &input.filter,
-        ),
-        scope => {
-            let predicate = match scope {
-                TrackScope::Tracks(key) => format!("track.source_key={}", key.raw()),
-                TrackScope::Objects { source, .. } => format!(
-                    "track.source_key={} AND track.object_id IN (SELECT value FROM json_each(?1))",
-                    source.raw(),
-                ),
-                TrackScope::Album(key) => format!("track.album_key={}", key.raw()),
-                TrackScope::Artist { key, album_artist } => {
-                    if *album_artist {
-                        crate::collections::album_artist_member("track", &key.raw().to_string())
-                    } else {
-                        format!(
-                            "track.track_key IN (SELECT track_key FROM track_artists WHERE artist_key={})",
-                            key.raw()
-                        )
-                    }
-                }
-                TrackScope::Genre(key) => {
-                    crate::collections::genre_member("track", &key.raw().to_string())
-                }
-                TrackScope::Mood(key) => format!(
-                    "track.track_key IN (SELECT track_key FROM track_moods WHERE mood_key={})",
-                    key.raw()
-                ),
-                _ => unreachable!(),
-            };
-            let mut arguments = sqlx::sqlite::SqliteArguments::default();
-            if let TrackScope::Objects { ids, .. } = scope {
-                arguments
-                    .add(serde_json::to_string(ids)?)
-                    .map_err(sqlx::Error::Encode)?;
-            }
-            let mut query = OrderedQuery {
-                albumless: false,
-                from: "tracks track".into(),
-                predicate: format!("track.indexed=1 AND ({predicate})"),
-                order: sort.order_terms(input.descending, false),
-                key: "track.track_key".into(),
-                text: crate::scroll_sections::text_sort(sort).then(|| {
-                    if sort == CatalogSort::Title {
-                        "track.title".into()
-                    } else {
-                        crate::scroll_sections::order_text(
-                            &sort.order_terms(input.descending, false)[0],
-                        )
-                        .into()
-                    }
-                }),
-                uri: "track.media_uri".into(),
-                entry_key: "NULL".into(),
-                arguments,
-            };
-            crate::tracks::track_filter(&mut query, input.folder, &input.filter, false);
-            query
-        }
-    };
-    if matches!(sort, CatalogSort::Album | CatalogSort::AlbumArtist)
-        && matches!(
-            scope,
-            TrackScope::Tracks(_)
-                | TrackScope::Objects { .. }
-                | TrackScope::Album(_)
-                | TrackScope::Artist { .. }
-                | TrackScope::Genre(_)
-                | TrackScope::Mood(_)
+impl Database {
+    pub async fn track(
+        &self,
+        uri: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<TrackView>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        Ok(crate::tracks::load_track_requested(
+            &mut connection,
+            RequestedKeys::uris(CatalogKind::Track, &[uri])?,
         )
-    {
-        query.from="album_order ordering CROSS JOIN tracks track ON track.album_key=ordering.album_key AND track.source_key=ordering.source_key".into();
-        query.albumless = true;
-        for term in &mut query.order {
-            *term = term
-                .replace(
-                    "(SELECT album_artist_sort FROM album_order WHERE album_key=track.album_key)",
-                    "ordering.album_artist_sort",
-                )
-                .replace(
-                    "(SELECT title_sort FROM album_order WHERE album_key=track.album_key)",
-                    "ordering.title_sort",
-                )
-                .replace(
-                    "(SELECT year_sort FROM album_order WHERE album_key=track.album_key)",
-                    "ordering.year_sort",
-                );
+        .await?
+        .pop())
+    }
+    pub async fn tracks(
+        &self,
+        keys: &[TrackKey],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<TrackView>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        crate::tracks::load_track_requested(
+            &mut connection,
+            RequestedKeys::keys(CatalogKind::Track, keys)?,
+        )
+        .await
+    }
+    pub async fn tracks_by_uris(
+        &self,
+        uris: &[String],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<TrackView>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        crate::tracks::load_track_requested(
+            &mut connection,
+            RequestedKeys::uris(CatalogKind::Track, uris)?,
+        )
+        .await
+    }
+    pub async fn playlists(
+        &self,
+        keys: &[PlaylistKey],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<PlaylistRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        Self::load_playlist_requested(
+            &mut connection,
+            RequestedKeys::keys(CatalogKind::Playlist, keys)?,
+        )
+        .await
+    }
+    pub async fn playlist(
+        &self,
+        uri: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<PlaylistRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        Ok(Self::load_playlist_requested(
+            &mut connection,
+            RequestedKeys::uris(CatalogKind::Playlist, &[uri])?,
+        )
+        .await?
+        .pop())
+    }
+    pub async fn playlist_entries(
+        &self,
+        keys: &[PlaylistEntryKey],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<PlaylistEntryView>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let batch = RequestedKeys::batch(keys)?;
+        let requested = RequestedKeys {
+            sql: format!(
+                "SELECT entry.playlist_entry_key value,requested.ordinal FROM ({}) requested CROSS JOIN playlist_entries entry ON entry.playlist_entry_key=requested.value ORDER BY requested.ordinal LIMIT 256",
+                batch.sql
+            ),
+            arguments: batch.arguments,
+        };
+        crate::playlists::load_playlist_entry_requested(&mut connection, requested).await
+    }
+}
+
+macro_rules! collection_points {
+    ($point:ident,$batch:ident,$kind:ident,$key:ty,$row:ty,$load:ident, $( $argument:ident : $argument_type:ty ),*) => {
+        impl Database {
+            pub async fn $point(&self, uri: &str, $( $argument:$argument_type, )* cancellation: &ReadCancellation) -> LibraryResult<Option<$row>> {
+                let (_permit,mut connection)=self.acquire_general(cancellation).await?;
+                Ok(crate::collections::$load(&mut connection,RequestedKeys::uris(CatalogKind::$kind,&[uri])?, $( $argument, )*).await?.pop())
+            }
+            pub async fn $batch(&self, keys: &[$key], $( $argument:$argument_type, )* cancellation: &ReadCancellation) -> LibraryResult<Vec<$row>> {
+                let (_permit,mut connection)=self.acquire_general(cancellation).await?;
+                crate::collections::$load(&mut connection,RequestedKeys::keys(CatalogKind::$kind,keys)?, $( $argument, )*).await
+            }
+        }
+    };
+}
+collection_points!(album,albums,Album,AlbumKey,AlbumView,load_album_requested,activity:bool);
+collection_points!(artist,artists,Artist,ArtistKey,ArtistView,load_artist_requested,album_artist:bool,activity:bool);
+collection_points!(genre,genres,Genre,GenreKey,GenreView,load_genre_requested,folder:Option<FolderKey>);
+collection_points!(mood,moods,Mood,MoodKey,MoodView,load_mood_requested,folder:Option<FolderKey>);
+collection_points!(
+    folder,
+    folders,
+    Folder,
+    FolderKey,
+    FolderView,
+    load_folder_requested,
+);
+
+pub(crate) fn selection_ranges(
+    ranges: Option<&[std::ops::Range<usize>]>,
+) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = ranges
+        .map(<[_]>::to_vec)
+        .unwrap_or_else(|| std::iter::once(0..usize::MAX).collect());
+    ranges.sort_by_key(|range| range.start);
+    let mut merged: Vec<std::ops::Range<usize>> = Vec::new();
+    for range in ranges {
+        if range.is_empty() {
+            continue;
+        }
+        if let Some(previous) = merged.last_mut()
+            && range.start <= previous.end
+        {
+            previous.end = previous.end.max(range.end);
+        } else {
+            merged.push(range);
         }
     }
-    if input.favorites_only {
-        crate::tracks::track_filter(&mut query, None, "", true);
-    }
-    if input.downloaded_only {
-        crate::tracks::downloaded_filter(&mut query);
-    }
-    Ok(query)
+    merged
 }

@@ -75,19 +75,21 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
     assert_eq!(
         receiver
             .selected_track_uris(
-                &library::CatalogQuery::keys(
-                    library::CatalogKind::Track,
-                    None,
-                    (&prepared
+                &library::MemberSelection::Keys {
+                    source: None,
+                    keys: ((&prepared
                         .entries
                         .iter()
                         .map(|entry| entry.track_key)
                         .collect::<Vec<_>>())
                         .iter()
                         .map(|key| key.raw())
-                        .collect()
-                )
-                .selection(),
+                        .collect::<Vec<i64>>())
+                    .into_iter()
+                    .map(library::TrackKey::from_raw)
+                    .collect::<Vec<_>>()
+                    .into()
+                },
                 None,
                 &ReadCancellation::new()
             )
@@ -95,19 +97,21 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
             .unwrap(),
         database
             .selected_track_uris(
-                &library::CatalogQuery::keys(
-                    library::CatalogKind::Track,
-                    None,
-                    (&queue
+                &library::MemberSelection::Keys {
+                    source: None,
+                    keys: ((&queue
                         .entries
                         .iter()
                         .map(|entry| entry.track_key)
                         .collect::<Vec<_>>())
                         .iter()
                         .map(|key| key.raw())
-                        .collect()
-                )
-                .selection(),
+                        .collect::<Vec<i64>>())
+                    .into_iter()
+                    .map(library::TrackKey::from_raw)
+                    .collect::<Vec<_>>()
+                    .into()
+                },
                 None,
                 &ReadCancellation::new()
             )
@@ -414,20 +418,20 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
 async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
-    let album = (match (&library::CatalogQuery {
-        subject: library::CatalogSubject::Tracks {
-            scope: library::TrackScope::Album(fixture.albums[0]),
+    let album = ({
+        let rows = ((&library::MemberRead {
+            collection: library::Collection::Album(fixture.albums[0]),
             sort: Some(CatalogSort::TrackNumber),
-        },
-        ..library::CatalogQuery::tracks(library::TrackScope::Album(fixture.albums[0]))
-    })
-        .page(&fixture.database, library::RouteSeedWindow::top(), &cancel)
-        .await
-        .expect("Album Track order")
-        .rows
-    {
-        library::CatalogRows::Tracks(rows) => rows,
-        _ => unreachable!(),
+            ..library::MemberRead::new(library::Collection::Album(fixture.albums[0]))
+        })
+            .page(&fixture.database, library::RouteSeedWindow::top(), &cancel)
+            .await
+            .expect("Album Track order")
+            .rows)
+            .into_iter()
+            .map(library::MemberRow::into_track)
+            .collect::<Vec<_>>();
+        rows
     })
     .into_iter()
     .map(|row| row.media_uri)
@@ -437,11 +441,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
         .create_playlist(
             Some(fixture.source),
             "Collection",
-            &library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                (&fixture.track_uris[..3]).to_vec(),
-            )
-            .selection(),
+            &library::MemberSelection::Uris(((&fixture.track_uris[..3]).to_vec()).into()),
         )
         .await
         .expect("create Playlist")
@@ -450,7 +450,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
     let playlist = fixture
         .database
         .selected_track_uris(
-            &library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist_key)).selection(),
+            &library::MemberRead::new(library::Collection::Playlist(playlist_key)).selection(),
             None,
             &cancel,
         )
@@ -464,7 +464,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
     let smart = fixture
         .database
         .selected_track_uris(
-            &library::CatalogQuery::tracks(library::TrackScope::Smart {
+            &library::MemberRead::new(library::Collection::Smart {
                 key: smart_key,
                 source: Some(fixture.source),
                 now: 0,
@@ -542,14 +542,12 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
     ] {
         for descending in [false, true] {
             for filter in ["", "a"] {
-                let view = (&library::CatalogQuery {
-                    subject: library::CatalogSubject::Tracks {
-                        scope: library::TrackScope::Tracks(fixture.source),
-                        sort: Some(sort),
-                    },
+                let view = (&library::MemberRead {
+                    collection: library::Collection::Source(fixture.source),
+                    sort: Some(sort),
                     filter: (filter).into(),
                     descending: descending,
-                    ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
+                    ..library::MemberRead::new(library::Collection::Source(fixture.source))
                 })
                     .page(
                         &fixture.database,
@@ -559,14 +557,12 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
                     .await
                     .unwrap();
                 let input = library::QueueLoad::Tracks(vec![(
-                    library::CatalogQuery {
+                    library::MemberRead {
+                        collection: library::Collection::Source(fixture.source),
+                        sort: Some(sort),
                         filter: filter.into(),
                         descending: descending,
-                        subject: library::CatalogSubject::Tracks {
-                            scope: library::TrackScope::Tracks(fixture.source),
-                            sort: Some(sort),
-                        },
-                        ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
+                        ..library::MemberRead::new(library::Collection::Source(fixture.source))
                     }
                     .selection(),
                     library::QueueProvenance::Context {
@@ -578,9 +574,13 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
                 let items = source_items(&fixture.database, input, None).await;
                 assert_eq!(
                     items.iter().map(|row| &row.media_uri).collect::<Vec<_>>(),
-                    (match &view.rows {
-                        library::CatalogRows::Tracks(rows) => rows,
-                        _ => unreachable!(),
+                    ({
+                        let rows = view
+                            .rows
+                            .iter()
+                            .map(library::MemberRow::track)
+                            .collect::<Vec<_>>();
+                        rows
                     })
                     .iter()
                     .map(|row| &row.media_uri)
@@ -608,8 +608,7 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
     let mut raw = connection(&fixture.path).await;
     for seed in [None, Some(71)] {
         let input = library::QueueLoad::Tracks(vec![(
-            library::CatalogQuery::tracks(library::TrackScope::Playlist(imported.playlist))
-                .selection(),
+            library::MemberRead::new(library::Collection::Playlist(imported.playlist)).selection(),
             library::QueueProvenance::Context {
                 context_id: "duplicates".into(),
                 context_title: None,
@@ -1025,19 +1024,21 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
         fixture
             .database
             .selected_track_uris(
-                &library::CatalogQuery::keys(
-                    library::CatalogKind::Track,
-                    None,
-                    (&restored
+                &library::MemberSelection::Keys {
+                    source: None,
+                    keys: ((&restored
                         .entries
                         .iter()
                         .map(|entry| entry.track_key)
                         .collect::<Vec<_>>())
                         .iter()
                         .map(|key| key.raw())
-                        .collect()
-                )
-                .selection(),
+                        .collect::<Vec<i64>>())
+                    .into_iter()
+                    .map(library::TrackKey::from_raw)
+                    .collect::<Vec<_>>()
+                    .into()
+                },
                 None,
                 &ReadCancellation::new()
             )
@@ -1085,19 +1086,21 @@ async fn installed_cursor_queue_retains_displaced_entries_and_play_last() {
         fixture
             .database
             .selected_track_uris(
-                &library::CatalogQuery::keys(
-                    library::CatalogKind::Track,
-                    None,
-                    (&restored
+                &library::MemberSelection::Keys {
+                    source: None,
+                    keys: ((&restored
                         .order
                         .iter()
                         .map(|index| restored.entries[*index as usize].track_key)
                         .collect::<Vec<_>>())
                         .iter()
                         .map(|key| key.raw())
-                        .collect()
-                )
-                .selection(),
+                        .collect::<Vec<i64>>())
+                    .into_iter()
+                    .map(library::TrackKey::from_raw)
+                    .collect::<Vec<_>>()
+                    .into()
+                },
                 None,
                 &ReadCancellation::new()
             )
@@ -1242,19 +1245,21 @@ async fn installed_shuffled_source_keeps_its_exact_pending_order() {
         fixture
             .database
             .selected_track_uris(
-                &library::CatalogQuery::keys(
-                    library::CatalogKind::Track,
-                    None,
-                    (&restored
+                &library::MemberSelection::Keys {
+                    source: None,
+                    keys: ((&restored
                         .order
                         .iter()
                         .map(|index| restored.entries[*index as usize].track_key)
                         .collect::<Vec<_>>())
                         .iter()
                         .map(|key| key.raw())
-                        .collect()
-                )
-                .selection(),
+                        .collect::<Vec<i64>>())
+                    .into_iter()
+                    .map(library::TrackKey::from_raw)
+                    .collect::<Vec<_>>()
+                    .into()
+                },
                 None,
                 &ReadCancellation::new()
             )
@@ -1286,13 +1291,11 @@ async fn large_source_membership_keeps_metadata_reads_bounded() {
             .database
             .queue_entries(
                 library::QueueLoad::Tracks(vec![(
-                    library::CatalogQuery {
+                    library::MemberRead {
+                        collection: library::Collection::Source(fixture.source),
+                        sort: Some(CatalogSort::Title),
                         filter: "bulk".into(),
-                        subject: library::CatalogSubject::Tracks {
-                            scope: library::TrackScope::Tracks(fixture.source),
-                            sort: Some(CatalogSort::Title),
-                        },
-                        ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
+                        ..library::MemberRead::new(library::Collection::Source(fixture.source))
                     }
                     .selection(),
                     library::QueueProvenance::Context {

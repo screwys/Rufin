@@ -1,119 +1,6 @@
 use super::*;
 
 impl AndroidBrowseQuery {
-    pub(super) async fn folder_sections(&self) -> Result<Vec<AndroidScrollSection>, AndroidError> {
-        let query = self
-            .track_query()
-            .await
-            .map_err(error)?
-            .expect("Folder query");
-        Ok(self
-            .folder_projection()
-            .await
-            .map_err(error)?
-            .sections(
-                &self.database,
-                self.selected().source_key,
-                query,
-                &ReadCancellation::new(),
-            )
-            .await
-            .map_err(error)?
-            .into_iter()
-            .map(|section| AndroidScrollSection {
-                title: section.title,
-                index: section.index,
-            })
-            .collect())
-    }
-    pub(super) async fn folder_play(
-        &self,
-        index: u64,
-        media_uri: String,
-        track_key: Option<i64>,
-        placement: rufin_core::playback::QueuePlacement,
-        shuffled: bool,
-        context_title: Option<Arc<library::QueueContextTitle>>,
-    ) -> Result<(), AndroidError> {
-        let (folders, _) = self.folder_counts().await.map_err(error)?;
-        let rank = usize::try_from(index)
-            .map_err(error)?
-            .saturating_sub(folders);
-        let selection = self.folder_selection().await?;
-        let mut request =
-            rufin_core::playback::PlayRequest::captured(selection, rank, placement, false)
-                .with_context(self.context_id().into())
-                .with_context_title(context_title)
-                .shuffled(shuffled);
-        let key = match track_key {
-            Some(key) => Some(library::TrackKey::from_raw(key)),
-            None => self
-                .database
-                .catalog_identity(
-                    library::CatalogKind::Track,
-                    &media_uri,
-                    &ReadCancellation::new(),
-                )
-                .await
-                .map(|identity| identity.map(|identity| library::TrackKey::from_raw(identity.key)))
-                .map_err(error)?,
-        };
-        if let Some(key) = key {
-            request = request.with_anchor(key, None);
-        }
-        self.playback.play_selection(request);
-        Ok(())
-    }
-
-    pub(super) async fn folder_selection(&self) -> Result<TrackSelection, AndroidError> {
-        Ok(self
-            .track_query()
-            .await
-            .map_err(error)?
-            .expect("Folder query")
-            .clone()
-            .selection())
-    }
-
-    pub(super) async fn folder_projection(&self) -> library::LibraryResult<&FolderProjection> {
-        self.folder_projection
-            .get_or_try_init(|| async {
-                let Route::Folders { path } = &self.route else {
-                    unreachable!("Folder route")
-                };
-                rufin_core::source::folders::resolve_folder(
-                    &self.source,
-                    &self.database,
-                    self.selected(),
-                    path.last().map(|item| item.id.as_str()),
-                    &ReadCancellation::new(),
-                )
-                .await
-            })
-            .await
-    }
-
-    pub(super) async fn folder_counts(&self) -> library::LibraryResult<(usize, usize)> {
-        let cancel = ReadCancellation::new();
-        let projection = self.folder_projection().await?;
-        let folders = projection
-            .child_page(
-                &self.database,
-                self.selected().source_key,
-                self.track_query().await?.expect("Folder query"),
-                0..0,
-                &cancel,
-            )
-            .await?
-            .0;
-        Ok((
-            folders,
-            (self.track_query().await?.expect("Folder query"))
-                .count(&self.database, &cancel)
-                .await?,
-        ))
-    }
-
     fn folder_row(
         &self,
         id: String,
@@ -141,40 +28,64 @@ impl AndroidBrowseQuery {
 
     pub(super) async fn folder_rows(
         &self,
+        page: &rufin_core::browse::FolderPage,
         offset: usize,
         limit: usize,
+        cancel: &ReadCancellation,
     ) -> library::LibraryResult<Vec<AndroidBrowseRow>> {
-        let source = self.selected().source_key;
-        let cancel = ReadCancellation::new();
-        let projection = self.folder_projection().await?;
-        let (folder_count, folders) = projection
-            .child_page(
-                &self.database,
-                source,
-                self.track_query().await?.expect("Folder query"),
-                offset..offset.saturating_add(limit),
-                &cancel,
-            )
-            .await?;
+        let folders = if offset < page.folder_count {
+            page.projection
+                .child_page(
+                    &self.database,
+                    self.selected().source_key,
+                    &page.read,
+                    offset..offset.saturating_add(limit),
+                    &cancel,
+                )
+                .await?
+                .1
+        } else {
+            Vec::new()
+        };
         let mut rows = folders
             .into_iter()
             .map(|folder| self.folder_row(folder.object_id, folder.name, folder.artwork_binding))
             .collect::<Vec<_>>();
-        let tracks = (self.track_query().await?.expect("Folder query"))
-            .rows(
-                &self.database,
-                offset.saturating_sub(folder_count),
-                limit.saturating_sub(rows.len()),
-                &cancel,
-            )
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!("typed song projection"),
-            })?;
-        rows.extend(tracks.into_iter().enumerate().map(|(index, track)| {
-            self.track_row(track, offset.saturating_sub(folder_count) + index)
-        }));
+        rows.extend(
+            self.member_rows(
+                page.read
+                    .rows(
+                        &self.database,
+                        offset.saturating_sub(page.folder_count),
+                        limit.saturating_sub(rows.len()),
+                        &cancel,
+                    )
+                    .await?,
+                offset.saturating_sub(page.folder_count),
+            ),
+        );
         Ok(rows)
+    }
+
+    pub(super) fn folder_seed(
+        &self,
+        page: &rufin_core::browse::FolderPage,
+    ) -> Vec<AndroidBrowseRow> {
+        let mut rows = page
+            .folders
+            .iter()
+            .map(|folder| {
+                self.folder_row(
+                    folder.object_id.clone(),
+                    folder.name.clone(),
+                    folder.artwork_binding.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        rows.extend(self.member_rows(
+            page.tracks.clone(),
+            page.first_row_position.saturating_sub(page.folder_count),
+        ));
+        rows
     }
 }

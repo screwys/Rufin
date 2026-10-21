@@ -10,7 +10,7 @@ async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
         .create_playlist(
             Some(fixture.source),
             "Z saved",
-            &library::CatalogQuery::uris(library::CatalogKind::Track, (&[]).to_vec()).selection(),
+            &library::MemberSelection::Uris(((&[]).to_vec()).into()),
         )
         .await
         .unwrap()
@@ -19,7 +19,7 @@ async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
         .create_playlist(
             None,
             "Global",
-            &library::CatalogQuery::uris(library::CatalogKind::Track, (&[]).to_vec()).selection(),
+            &library::MemberSelection::Uris(((&[]).to_vec()).into()),
         )
         .await
         .unwrap();
@@ -69,8 +69,7 @@ async fn playlist_destinations_keep_global_rank_without_a_current_source() {
                 .create_playlist(
                     owner,
                     name,
-                    &library::CatalogQuery::uris(library::CatalogKind::Track, (&[]).to_vec())
-                        .selection(),
+                    &library::MemberSelection::Uris(((&[]).to_vec()).into()),
                 )
                 .await
                 .expect("create destination")
@@ -121,11 +120,9 @@ async fn playlist_destinations_keep_global_rank_without_a_current_source() {
         .add_playlist_tracks(
             None,
             keys[0],
-            &library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                (&["https://example.test/unavailable.flac".into()]).to_vec(),
-            )
-            .selection(),
+            &library::MemberSelection::Uris(
+                ((&["https://example.test/unavailable.flac".into()]).to_vec()).into(),
+            ),
             false,
         )
         .await
@@ -152,11 +149,7 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
         .create_playlist(
             Some(fixture.source),
             "Zulu",
-            &library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                (&[fixture.track_uris[0].clone()]).to_vec(),
-            )
-            .selection(),
+            &library::MemberSelection::Uris(((&[fixture.track_uris[0].clone()]).to_vec()).into()),
         )
         .await
         .expect("create Zulu Playlist")
@@ -167,11 +160,7 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
         .create_playlist(
             Some(fixture.source),
             "Alpha",
-            &library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                (&[fixture.track_uris[1].clone()]).to_vec(),
-            )
-            .selection(),
+            &library::MemberSelection::Uris(((&[fixture.track_uris[1].clone()]).to_vec()).into()),
         )
         .await
         .expect("create Alpha Playlist")
@@ -192,11 +181,10 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
     drop(raw);
 
     let cancellation = ReadCancellation::new();
-    let all = library::CatalogQuery {
-        subject: library::CatalogSubject::Playlists {
-            source: Some(fixture.source),
-            sort: CatalogSort::Title,
-        },
+    let all = library::ListRead {
+        kind: library::ListKind::Playlists,
+        source: Some(fixture.source),
+        sort: CatalogSort::Title,
         folder: None,
         filter: ("").into(),
         descending: false,
@@ -204,22 +192,19 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
         downloaded_only: false,
         activity: true,
     }
-    .rows(&fixture.database, 0, 256, &cancellation)
+    .playlists(&fixture.database, 0, 256, &cancellation)
     .await
-    .map(|rows| match rows {
-        library::CatalogRows::Playlists(rows) => rows
-            .into_iter()
+    .map(|rows| {
+        rows.into_iter()
             .map(|row| row.playlist_key)
-            .collect::<Vec<_>>(),
-        _ => unreachable!(),
+            .collect::<Vec<_>>()
     })
     .expect("all Playlists");
     assert_eq!(all, [alpha, zulu]);
-    let scoped = library::CatalogQuery {
-        subject: library::CatalogSubject::Playlists {
-            source: Some(fixture.source),
-            sort: CatalogSort::Title,
-        },
+    let scoped = library::ListRead {
+        kind: library::ListKind::Playlists,
+        source: Some(fixture.source),
+        sort: CatalogSort::Title,
         folder: Some(folder),
         filter: ("").into(),
         descending: false,
@@ -227,14 +212,12 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
         downloaded_only: false,
         activity: true,
     }
-    .rows(&fixture.database, 0, 256, &cancellation)
+    .playlists(&fixture.database, 0, 256, &cancellation)
     .await
-    .map(|rows| match rows {
-        library::CatalogRows::Playlists(rows) => rows
-            .into_iter()
+    .map(|rows| {
+        rows.into_iter()
             .map(|row| row.playlist_key)
-            .collect::<Vec<_>>(),
-        _ => unreachable!(),
+            .collect::<Vec<_>>()
     })
     .expect("folder-scoped Playlists");
     assert_eq!(scoped, [zulu]);
@@ -255,9 +238,10 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
     assert_eq!(
         fixture
             .database
-            .playlist_genres(zulu, &cancellation)
+            .playlists(&[zulu], &cancellation)
             .await
             .unwrap()[0]
+            .genres[0]
             .name,
         "Rock"
     );
@@ -274,8 +258,7 @@ async fn playlist_reordering_keeps_one_rank_sequence() {
                 .create_playlist(
                     Some(fixture.source),
                     name,
-                    &library::CatalogQuery::uris(library::CatalogKind::Track, (&[]).to_vec())
-                        .selection(),
+                    &library::MemberSelection::Uris(((&[]).to_vec()).into()),
                 )
                 .await
                 .expect("create Playlist")
@@ -298,11 +281,10 @@ async fn playlist_reordering_keeps_one_rank_sequence() {
             .expect("move 4 to 3")
     );
     assert_eq!(
-        library::CatalogQuery {
-            subject: library::CatalogSubject::Playlists {
-                source: Some(fixture.source),
-                sort: CatalogSort::Position
-            },
+        library::ListRead {
+            kind: library::ListKind::Playlists,
+            source: Some(fixture.source),
+            sort: CatalogSort::Position,
             folder: None,
             filter: ("").into(),
             descending: false,
@@ -310,15 +292,12 @@ async fn playlist_reordering_keeps_one_rank_sequence() {
             downloaded_only: false,
             activity: true
         }
-        .rows(&fixture.database, 0, 256, &ReadCancellation::new())
+        .playlists(&fixture.database, 0, 256, &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Playlists(rows) => rows
-                .into_iter()
-                .map(|row| row.playlist_key)
-                .collect::<Vec<_>>(),
-            _ => unreachable!(),
-        })
+        .map(|rows| rows
+            .into_iter()
+            .map(|row| row.playlist_key)
+            .collect::<Vec<_>>())
         .expect("Playlist order"),
         [playlists[1], playlists[0], playlists[3], playlists[2]]
     );
@@ -332,16 +311,15 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         .create_playlist(
             Some(fixture.source),
             "Duplicates",
-            &library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                (&[
+            &library::MemberSelection::Uris(
+                ((&[
                     fixture.track_uris[0].clone(),
                     fixture.track_uris[0].clone(),
                     fixture.track_uris[1].clone(),
                 ])
-                    .to_vec(),
-            )
-            .selection(),
+                    .to_vec())
+                .into(),
+            ),
         )
         .await
         .expect("create Playlist")
@@ -352,12 +330,10 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         .database
         .playlist_edit_entries(
             playlist,
-            &library::CatalogQuery {
-                subject: library::CatalogSubject::Tracks {
-                    scope: library::TrackScope::Playlist(playlist),
-                    sort: Some(CatalogSort::Position),
-                },
-                ..library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist))
+            &library::MemberRead {
+                collection: library::Collection::Playlist(playlist),
+                sort: Some(CatalogSort::Position),
+                ..library::MemberRead::new(library::Collection::Playlist(playlist))
             }
             .selection(),
             &cancel,
@@ -370,13 +346,10 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
                 .collect::<Vec<_>>()
         })
         .expect("initial Playlist order");
-    let rows = library::CatalogQuery::playlist_entries((&initial).to_vec())
-        .rows(&fixture.database, 0, (&initial).len(), &cancel)
+    let rows = fixture
+        .database
+        .playlist_entries(&((&initial).to_vec()), &cancel)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::PlaylistEntries(rows) => rows,
-            _ => unreachable!(),
-        })
         .expect("Playlist entry rows");
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[0].track.media_uri, rows[1].track.media_uri);
@@ -385,10 +358,9 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         .database
         .playlist_edit_entries(
             playlist,
-            &library::CatalogQuery::playlist_entries(
-                initial.iter().rev().copied().collect::<Vec<_>>(),
-            )
-            .selection(),
+            &library::MemberSelection::Entries(
+                (initial.iter().rev().copied().collect::<Vec<_>>()).into(),
+            ),
             &cancel,
         )
         .await
@@ -413,12 +385,14 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
             .database
             .playlist_edit_entries(
                 playlist,
-                &library::CatalogQuery::keys(
-                    library::CatalogKind::Track,
-                    None,
-                    vec![edit_entries[0].track_key.raw()]
-                )
-                .selection(),
+                &library::MemberSelection::Keys {
+                    source: None,
+                    keys: (vec![edit_entries[0].track_key.raw()])
+                        .into_iter()
+                        .map(library::TrackKey::from_raw)
+                        .collect::<Vec<_>>()
+                        .into()
+                },
                 &cancel,
             )
             .await
@@ -428,10 +402,10 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         .database
         .playlist_edit_entries(
             playlist,
-            &library::TrackSelection::Query {
-                query: library::CatalogQuery {
+            &library::MemberSelection::Members {
+                read: library::MemberRead {
                     descending: true,
-                    ..library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist))
+                    ..library::MemberRead::new(library::Collection::Playlist(playlist))
                 },
                 ranges: Some(vec![0..1, 2..3]),
             },
@@ -463,16 +437,15 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
             .add_playlist_tracks(
                 Some(fixture.source),
                 playlist,
-                &library::CatalogQuery::uris(
-                    library::CatalogKind::Track,
-                    (&[
+                &library::MemberSelection::Uris(
+                    ((&[
                         fixture.track_uris[0].clone(),
                         fixture.track_uris[2].clone(),
                         fixture.track_uris[2].clone(),
                     ])
-                        .to_vec()
-                )
-                .selection(),
+                        .to_vec())
+                    .into()
+                ),
                 true
             )
             .await
@@ -483,12 +456,10 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         .database
         .playlist_edit_entries(
             playlist,
-            &library::CatalogQuery {
-                subject: library::CatalogSubject::Tracks {
-                    scope: library::TrackScope::Playlist(playlist),
-                    sort: Some(CatalogSort::Position),
-                },
-                ..library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist))
+            &library::MemberRead {
+                collection: library::Collection::Playlist(playlist),
+                sort: Some(CatalogSort::Position),
+                ..library::MemberRead::new(library::Collection::Playlist(playlist))
             }
             .selection(),
             &cancel,
@@ -512,12 +483,10 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         .database
         .playlist_edit_entries(
             playlist,
-            &library::CatalogQuery {
-                subject: library::CatalogSubject::Tracks {
-                    scope: library::TrackScope::Playlist(playlist),
-                    sort: Some(CatalogSort::Position),
-                },
-                ..library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist))
+            &library::MemberRead {
+                collection: library::Collection::Playlist(playlist),
+                sort: Some(CatalogSort::Position),
+                ..library::MemberRead::new(library::Collection::Playlist(playlist))
             }
             .selection(),
             &cancel,
@@ -547,8 +516,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
             .add_playlist_tracks(
                 Some(fixture.source),
                 playlist,
-                &library::CatalogQuery::uris(library::CatalogKind::Track, (&selection).to_vec())
-                    .selection(),
+                &library::MemberSelection::Uris(((&selection).to_vec()).into()),
                 false
             )
             .await
@@ -560,12 +528,10 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
             .database
             .playlist_edit_entries(
                 playlist,
-                &library::CatalogQuery {
-                    subject: library::CatalogSubject::Tracks {
-                        scope: library::TrackScope::Playlist(playlist),
-                        sort: Some(CatalogSort::Position)
-                    },
-                    ..library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist))
+                &library::MemberRead {
+                    collection: library::Collection::Playlist(playlist),
+                    sort: Some(CatalogSort::Position),
+                    ..library::MemberRead::new(library::Collection::Playlist(playlist))
                 }
                 .selection(),
                 &cancel
@@ -583,12 +549,10 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         .database
         .playlist_edit_entries(
             playlist,
-            &library::CatalogQuery {
-                subject: library::CatalogSubject::Tracks {
-                    scope: library::TrackScope::Playlist(playlist),
-                    sort: Some(CatalogSort::Position),
-                },
-                ..library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist))
+            &library::MemberRead {
+                collection: library::Collection::Playlist(playlist),
+                sort: Some(CatalogSort::Position),
+                ..library::MemberRead::new(library::Collection::Playlist(playlist))
             }
             .selection(),
             &cancel,
@@ -604,7 +568,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     let state = super::support::resolve_queue(
         &fixture.database,
         library::QueueLoad::Tracks(vec![(
-            library::CatalogQuery::playlist_entries(entries).selection(),
+            library::MemberSelection::Entries((entries).into()),
             library::QueueProvenance::Context {
                 context_id: "playlist".into(),
                 context_title: None,
@@ -629,11 +593,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
         .create_playlist(
             None,
             "Global",
-            &library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                (&[fixture.track_uris[0].clone()]).to_vec(),
-            )
-            .selection(),
+            &library::MemberSelection::Uris(((&[fixture.track_uris[0].clone()]).to_vec()).into()),
         )
         .await
         .expect("create global Playlist")
@@ -644,16 +604,15 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
             .add_playlist_tracks(
                 None,
                 playlist,
-                &library::CatalogQuery::uris(
-                    library::CatalogKind::Track,
-                    (&[
+                &library::MemberSelection::Uris(
+                    ((&[
                         fixture.track_uris[1].clone(),
                         fixture.track_uris[1].clone(),
                         fixture.track_uris[2].clone(),
                     ])
-                        .to_vec()
-                )
-                .selection(),
+                        .to_vec())
+                    .into()
+                ),
                 false
             )
             .await
@@ -663,7 +622,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
     let order = fixture
         .database
         .selected_track_uris(
-            &library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist)).selection(),
+            &library::MemberRead::new(library::Collection::Playlist(playlist)).selection(),
             None,
             &ReadCancellation::new(),
         )
@@ -690,12 +649,10 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
         .database
         .playlist_edit_entries(
             playlist,
-            &library::CatalogQuery {
-                subject: library::CatalogSubject::Tracks {
-                    scope: library::TrackScope::Playlist(playlist),
-                    sort: Some(CatalogSort::Position),
-                },
-                ..library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist))
+            &library::MemberRead {
+                collection: library::Collection::Playlist(playlist),
+                sort: Some(CatalogSort::Position),
+                ..library::MemberRead::new(library::Collection::Playlist(playlist))
             }
             .selection(),
             &ReadCancellation::new(),
@@ -708,25 +665,17 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
                 .collect::<Vec<_>>()
         })
         .expect("unavailable entries");
-    let rows = library::CatalogQuery::playlist_entries((&entries).to_vec())
-        .rows(
-            &fixture.database,
-            0,
-            (&entries).len(),
-            &ReadCancellation::new(),
-        )
+    let rows = fixture
+        .database
+        .playlist_entries(&((&entries).to_vec()), &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::PlaylistEntries(rows) => rows,
-            _ => unreachable!(),
-        })
         .expect("unavailable Playlist rows");
     assert_eq!(rows[1].track.metadata.title, "Beta");
     assert_eq!(rows[1].track.media_uri, fixture.track_uris[1]);
     let playback = super::support::resolve_queue(
         &fixture.database,
         library::QueueLoad::Tracks(vec![(
-            library::CatalogQuery::playlist_entries(entries).selection(),
+            library::MemberSelection::Entries((entries).into()),
             library::QueueProvenance::Context {
                 context_id: "unavailable".into(),
                 context_title: None,
@@ -805,42 +754,29 @@ async fn playlist_automatic_covers_keep_distinct_saved_choices() {
         .create_playlist(
             Some(fixture.source),
             "Positional covers",
-            &library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                (&[
+            &library::MemberSelection::Uris(
+                ((&[
                     fixture.track_uris[0].clone(),
                     fixture.track_uris[0].clone(),
                     fixture.track_uris[2].clone(),
                     fixture.track_uris[1].clone(),
                     fixture.track_uris[3].clone(),
                 ])
-                    .to_vec(),
-            )
-            .selection(),
+                    .to_vec())
+                .into(),
+            ),
         )
         .await
         .expect("create Playlist")
         .expect("all Tracks exist")
         .0;
-    let row = library::CatalogQuery::keys(
-        library::CatalogKind::Playlist,
-        None,
-        (&[playlist]).iter().map(|key| key.raw()).collect(),
-    )
-    .rows(
-        &fixture.database,
-        0,
-        (&[playlist]).len(),
-        &ReadCancellation::new(),
-    )
-    .await
-    .map(|rows| match rows {
-        library::CatalogRows::Playlists(rows) => rows,
-        _ => unreachable!(),
-    })
-    .expect("Playlist cover samples")
-    .pop()
-    .expect("Playlist row");
+    let row = fixture
+        .database
+        .playlists(&[playlist], &ReadCancellation::new())
+        .await
+        .expect("Playlist cover samples")
+        .pop()
+        .expect("Playlist row");
     let candidate =
         serde_json::from_slice::<Vec<library::ArtworkCandidate>>(&row.artwork_binding.unwrap())
             .unwrap()
@@ -919,11 +855,7 @@ async fn provider_playlist_payload_resolves_uri_only_at_the_protocol_boundary() 
         .create_playlist(
             Some(fixture.source),
             "Provider list",
-            &library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                (&[fixture.track_uris[0].clone()]).to_vec(),
-            )
-            .selection(),
+            &library::MemberSelection::Uris(((&[fixture.track_uris[0].clone()]).to_vec()).into()),
         )
         .await
         .expect("seed Playlist")
@@ -942,16 +874,15 @@ async fn provider_playlist_payload_resolves_uri_only_at_the_protocol_boundary() 
             .source_playlist_track_ids(
                 fixture.source,
                 Some(playlist),
-                &library::CatalogQuery::uris(
-                    library::CatalogKind::Track,
-                    (&[
+                &library::MemberSelection::Uris(
+                    ((&[
                         fixture.track_uris[0].clone(),
                         fixture.track_uris[1].clone(),
                         fixture.track_uris[1].clone(),
                     ])
-                        .to_vec()
-                )
-                .selection(),
+                        .to_vec())
+                    .into()
+                ),
                 true
             )
             .await
@@ -977,7 +908,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         .create_playlist(
             Some(destination),
             "Destination",
-            &library::CatalogQuery::uris(library::CatalogKind::Track, (&[]).to_vec()).selection(),
+            &library::MemberSelection::Uris(((&[]).to_vec()).into()),
         )
         .await
         .unwrap()
@@ -988,11 +919,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
             .source_playlist_track_ids(
                 destination,
                 Some(playlist),
-                &library::CatalogQuery::uris(
-                    library::CatalogKind::Track,
-                    (std::slice::from_ref(&own_uri)).to_vec()
-                )
-                .selection(),
+                &library::MemberSelection::Uris(((std::slice::from_ref(&own_uri)).to_vec()).into()),
                 false
             )
             .await
@@ -1004,11 +931,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
             .add_playlist_tracks(
                 Some(destination),
                 playlist,
-                &library::CatalogQuery::uris(
-                    library::CatalogKind::Track,
-                    (std::slice::from_ref(&own_uri)).to_vec()
-                )
-                .selection(),
+                &library::MemberSelection::Uris(((std::slice::from_ref(&own_uri)).to_vec()).into()),
                 false
             )
             .await
@@ -1023,8 +946,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
             .source_playlist_track_ids(
                 destination,
                 Some(playlist),
-                &library::CatalogQuery::uris(library::CatalogKind::Track, (&selection).to_vec())
-                    .selection(),
+                &library::MemberSelection::Uris(((&selection).to_vec()).into()),
                 true,
             )
             .await
@@ -1033,8 +955,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
             .add_playlist_tracks(
                 Some(destination),
                 playlist,
-                &library::CatalogQuery::uris(library::CatalogKind::Track, (&selection).to_vec())
-                    .selection(),
+                &library::MemberSelection::Uris(((&selection).to_vec()).into()),
                 false,
             )
             .await
@@ -1049,7 +970,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
     let missing = vec![own_uri.clone(), "test:missing-track".to_string()];
     assert!(matches!(
         database
-            .source_playlist_track_ids(destination,Some(playlist),&library::CatalogQuery::uris(library::CatalogKind::Track,(&missing).to_vec()).selection(),false)
+            .source_playlist_track_ids(destination,Some(playlist),&library::MemberSelection::Uris(missing.clone().into()),false)
             .await
             .unwrap_err(),
         library::LibraryError::InvalidRequest(message) if message == "Playlist Track is no longer current"
@@ -1059,8 +980,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
             .add_playlist_tracks(
                 Some(destination),
                 playlist,
-                &library::CatalogQuery::uris(library::CatalogKind::Track, (&missing).to_vec())
-                    .selection(),
+                &library::MemberSelection::Uris(((&missing).to_vec()).into()),
                 false
             )
             .await
@@ -1070,7 +990,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
     assert_eq!(
         database
             .selected_track_uris(
-                &library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist)).selection(),
+                &library::MemberRead::new(library::Collection::Playlist(playlist)).selection(),
                 None,
                 &cancel
             )
@@ -1082,7 +1002,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         .create_playlist(
             None,
             "Global",
-            &library::CatalogQuery::uris(library::CatalogKind::Track, (&[]).to_vec()).selection(),
+            &library::MemberSelection::Uris(((&[]).to_vec()).into()),
         )
         .await
         .unwrap()
@@ -1094,8 +1014,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
             .add_playlist_tracks(
                 None,
                 global,
-                &library::CatalogQuery::uris(library::CatalogKind::Track, (&mixed).to_vec())
-                    .selection(),
+                &library::MemberSelection::Uris(((&mixed).to_vec()).into()),
                 false
             )
             .await
@@ -1105,7 +1024,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
     assert_eq!(
         database
             .selected_track_uris(
-                &library::CatalogQuery::tracks(library::TrackScope::Playlist(global)).selection(),
+                &library::MemberRead::new(library::Collection::Playlist(global)).selection(),
                 None,
                 &cancel
             )
@@ -1142,24 +1061,12 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
             .await
             .expect("set Favorite")
     );
-    let row = library::CatalogQuery::keys(
-        library::CatalogKind::Track,
-        None,
-        (&[fixture.tracks[0]]).iter().map(|key| key.raw()).collect(),
-    )
-    .rows(
-        &fixture.database,
-        0,
-        (&[fixture.tracks[0]]).len(),
-        &ReadCancellation::new(),
-    )
-    .await
-    .map(|rows| match rows {
-        library::CatalogRows::Tracks(rows) => rows,
-        _ => unreachable!("typed catalog projection"),
-    })
-    .expect("read Track")
-    .remove(0);
+    let row = fixture
+        .database
+        .tracks(&[fixture.tracks[0]], &ReadCancellation::new())
+        .await
+        .expect("read Track")
+        .remove(0);
     assert_eq!(row.state.rating, Some(8));
     assert!(row.state.favorite);
     assert_eq!(
@@ -1303,23 +1210,11 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
             .is_empty()
     );
     assert!(
-        library::CatalogQuery::keys(
-            library::CatalogKind::Track,
-            None,
-            (&[fixture.tracks[0]]).iter().map(|key| key.raw()).collect()
-        )
-        .rows(
-            &fixture.database,
-            0,
-            (&[fixture.tracks[0]]).len(),
-            &ReadCancellation::new()
-        )
-        .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!(),
-        })
-        .expect("restored Track")[0]
+        fixture
+            .database
+            .tracks(&[fixture.tracks[0]], &ReadCancellation::new())
+            .await
+            .expect("restored Track")[0]
             .state
             .favorite
     );

@@ -34,15 +34,10 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 source_id,
             } => {
                 let uri = library::source_entity_uri(source_id, "album", album_id);
-                let query = library::CatalogQuery::uris(library::CatalogKind::Album, vec![uri]);
-                let library::CatalogRows::Albums(mut rows) = query
-                    .rows(database, 0, 1, &cancellation)
+                let row = database
+                    .album(&uri, false, &cancellation)
                     .await
-                    .map_err(internal)?
-                else {
-                    unreachable!("pin projection")
-                };
-                let row = rows.pop();
+                    .map_err(internal)?;
                 row.map(|row| json!({"kind":"album","id":row.album_key,"object_id":row.object_id,"source":source_id,"title":row.metadata.title,"uri":row.media_uri,"favorite":row.state.favorite,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter()),"artwork_previews":artwork_previews(&products, row.artwork_binding.iter())}))
             }
             SidebarPin::Artist {
@@ -51,22 +46,10 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 album_artist,
             } => {
                 let uri = library::source_entity_uri(source_id, "artist", artist_id);
-                let mut query =
-                    library::CatalogQuery::uris(library::CatalogKind::Artist, vec![uri]);
-                if let library::CatalogSubject::Uris {
-                    album_artist: role, ..
-                } = &mut query.subject
-                {
-                    *role = *album_artist;
-                }
-                let library::CatalogRows::Artists(mut rows) = query
-                    .rows(database, 0, 1, &cancellation)
+                let row = database
+                    .artist(&uri, *album_artist, false, &cancellation)
                     .await
-                    .map_err(internal)?
-                else {
-                    unreachable!("pin projection")
-                };
-                let row = rows.pop();
+                    .map_err(internal)?;
                 row.map(|row| json!({"kind":"artist","id":row.artist_key,"object_id":row.object_id,"source":source_id,"name":row.metadata.name,"uri":row.media_uri,"favorite":row.state.favorite,"album_artists":album_artist,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_revision":artwork_revision(row.artwork_binding.iter()),"artwork_previews":artwork_previews(&products, row.artwork_binding.iter())}))
             }
             SidebarPin::Genre {
@@ -74,15 +57,10 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 source_id,
             } => {
                 let uri = library::source_entity_uri(source_id, "genre", genre_id);
-                let query = library::CatalogQuery::uris(library::CatalogKind::Genre, vec![uri]);
-                let library::CatalogRows::Genres(mut rows) = query
-                    .rows(database, 0, 1, &cancellation)
+                let row = database
+                    .genre(&uri, None, &cancellation)
                     .await
-                    .map_err(internal)?
-                else {
-                    unreachable!("pin projection")
-                };
-                let row = rows.pop();
+                    .map_err(internal)?;
                 row.map(|row| json!({"kind":"genre","id":row.genre_key,"object_id":row.object_id,"source":source_id,"name":row.metadata.name,"track_count":row.summary.track_count,"duration_ms":row.summary.duration_millis,"artwork_count":row.artwork_binding.as_ref().map_or(row.representative_artwork.len(), |_| 1),"artwork_revision":artwork_revision(row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork)),"artwork_previews":artwork_previews(&products, row.artwork_binding.as_ref().map(std::slice::from_ref).unwrap_or(&row.representative_artwork))}))
             }
             SidebarPin::Playlist {
@@ -96,19 +74,11 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 else {
                     continue;
                 };
-                let row = library::CatalogQuery::keys(
-                    library::CatalogKind::Playlist,
-                    None,
-                    (&[key]).iter().map(|key| key.raw()).collect(),
-                )
-                .rows(&database, 0, (&[key]).len(), &cancellation)
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Playlists(rows) => rows,
-                    _ => unreachable!("typed catalog projection"),
-                })
-                .map_err(internal)?
-                .pop();
+                let row = database
+                    .playlists(&[key], &cancellation)
+                    .await
+                    .map_err(internal)?
+                    .pop();
                 row.map(|row| {
                         let artwork = row.artwork_binding.as_slice();
                         json!({"kind":"playlist","id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"metadata_writable":row.metadata_writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":artwork.len(),"artwork_revision":artwork_revision(artwork),"artwork_previews":artwork_previews(&products, artwork)})

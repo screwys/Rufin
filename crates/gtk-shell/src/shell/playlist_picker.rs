@@ -182,7 +182,7 @@ fn present_playlist_picker(
     shell: &Rc<Shell>,
     source_key: Option<library::SourceKey>,
     playlists: Vec<library::PlaylistRow>,
-    selection: library::TrackSelection,
+    selection: library::MemberSelection,
     title: String,
     preview_uris: Vec<String>,
 ) {

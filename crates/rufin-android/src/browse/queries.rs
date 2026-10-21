@@ -5,23 +5,17 @@ impl AndroidBrowseQuery {
     pub fn activity_sensitive(&self) -> bool {
         let settings = self.settings.load();
         let display = settings.library_list(library_list_key(&self.route, self.category));
-        let mut request = BrowseRequest::new(&self.route, self.category, None, None, &display, 0);
-        request.sort = self.sort;
-        request.activity_sensitive()
+        rufin_core::browse::uses_activity(&self.route, &display)
+            || self.sort.catalog_sort().activity_sensitive()
             || (self.release_section.is_none()
                 && matches!(
                     self.route,
                     Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
                 )
-                && BrowseRequest::new(
+                && rufin_core::browse::uses_activity(
                     &self.route,
-                    CollectionCategory::Tracks,
-                    None,
-                    None,
                     &settings.library_list(LibraryListKey::ArtistTracks),
-                    0,
-                )
-                .activity_sensitive())
+                ))
     }
 
     pub fn context_id(&self) -> String {
@@ -68,34 +62,11 @@ impl AndroidBrowseQuery {
         ))
     }
     pub fn supports_downloaded_filter(&self) -> bool {
-        match self.route {
-            Route::Tracks
-            | Route::AlbumDetail(_)
-            | Route::ArtistTracks(_)
-            | Route::AlbumArtistTracks(_)
-            | Route::ArtistFavoriteTracks(_)
-            | Route::AlbumArtistFavoriteTracks(_) => true,
-            Route::Favorites | Route::GenreDetail(_) | Route::MoodDetail(_) => {
-                self.category == CollectionCategory::Tracks
-            }
-            _ => false,
-        }
+        rufin_core::browse::supports_downloaded_filter(&self.route, self.category)
     }
 
     pub fn supports_favorite_filter(&self) -> bool {
-        match self.route {
-            Route::Tracks
-            | Route::Albums
-            | Route::Artists
-            | Route::AlbumArtists
-            | Route::AlbumDetail(_)
-            | Route::ArtistTracks(_)
-            | Route::AlbumArtistTracks(_) => true,
-            Route::GenreDetail(_) | Route::MoodDetail(_) => {
-                self.category == CollectionCategory::Tracks
-            }
-            _ => false,
-        }
+        rufin_core::browse::supports_favorite_filter(&self.route, self.category)
     }
 
     pub fn breadcrumbs(&self) -> Vec<AndroidBreadcrumb> {
@@ -126,50 +97,38 @@ impl AndroidBrowseQuery {
             return Ok(Vec::new());
         }
         let runtime = self.runtime.clone();
-        runtime
-            .spawn(async move {
-                if matches!(self.route, Route::Folders { .. }) {
-                    return self.folder_sections().await;
+        run_read(&runtime, move |cancel| async move {
+            let sections = if let OpenedCollection::Folders(page) =
+                self.opened(&cancel).await.map_err(error)?
+            {
+                page.projection
+                    .sections(
+                        &self.database,
+                        self.selected().source_key,
+                        &page.read,
+                        &cancel,
+                    )
+                    .await
+            } else if let Some(read) = self.members(&cancel).await.map_err(error)? {
+                read.sections(&self.database, &cancel).await
+            } else if let Some(read) = self.list(&cancel).await.map_err(error)? {
+                if self.artist_release_identity().is_some() && self.release_section.is_none() {
+                    return Ok(Vec::new());
                 }
-                if let Some(query) = self.track_query().await.map_err(error)? {
-                    return Ok((query)
-                        .sections(&self.database, &ReadCancellation::new())
-                        .await
-                        .map_err(error)?
-                        .into_iter()
-                        .map(|section| AndroidScrollSection {
-                            title: section.title,
-                            index: section.index,
-                        })
-                        .collect());
-                }
-                let sections = match self.query().await.map_err(error)? {
-                    BrowseQuery::Collection(query) => {
-                        query
-                            .sections(&self.database, &ReadCancellation::new())
-                            .await
-                    }
-                    BrowseQuery::Releases(query) => match self.release_section {
-                        Some(ArtistReleaseSection::Class(class)) => {
-                            query
-                                .sections(&self.database, class, &ReadCancellation::new())
-                                .await
-                        }
-                        _ => Ok(Vec::new()),
-                    },
-                    _ => Ok(Vec::new()),
-                }
-                .map_err(error)?;
-                Ok(sections
-                    .into_iter()
-                    .map(|section| AndroidScrollSection {
-                        title: section.title,
-                        index: section.index,
-                    })
-                    .collect())
-            })
-            .await
-            .map_err(error)?
+                read.sections(&self.database, &cancel).await
+            } else {
+                Ok(Vec::new())
+            }
+            .map_err(error)?;
+            Ok(sections
+                .into_iter()
+                .map(|section| AndroidScrollSection {
+                    title: section.title,
+                    index: section.index,
+                })
+                .collect())
+        })
+        .await
     }
 
     pub async fn play_section(
@@ -187,8 +146,9 @@ impl AndroidBrowseQuery {
         let runtime = self.runtime.clone();
         runtime
             .spawn(async move {
+                let cancel = ReadCancellation::new();
                 let selections = self
-                    .home_rows()
+                    .home_rows(&cancel)
                     .await
                     .map_err(error)?
                     .iter()
@@ -197,7 +157,7 @@ impl AndroidBrowseQuery {
                     .collect();
                 self.playback.play_selection(
                     rufin_core::playback::PlayRequest::captured(
-                        TrackSelection::Concat(selections),
+                        MemberSelection::Concat(selections),
                         0,
                         placement,
                         false,
@@ -214,47 +174,16 @@ impl AndroidBrowseQuery {
 
     pub async fn count(self: Arc<Self>) -> Result<u64, AndroidError> {
         let runtime = self.runtime.clone();
-        runtime
-            .spawn(async move {
-                if matches!(self.route, Route::Folders { .. }) {
-                    let (folders, tracks) = self.folder_counts().await.map_err(error)?;
-                    return Ok(folders as u64 + tracks.max(0) as u64);
-                }
-                if let Some(query) = self.track_query().await.map_err(error)? {
-                    return Ok((query)
-                        .count(&self.database, &ReadCancellation::new())
-                        .await
-                        .map_err(error)?
-                        .max(0) as u64);
-                }
-                let count = match self.query().await.map_err(error)? {
-                    BrowseQuery::Collection(query) => query
-                        .count(&self.database, &ReadCancellation::new())
-                        .await
-                        .map_err(error)?,
-                    BrowseQuery::Releases(_) => {
-                        let counts = self.release_counts().await?;
-                        match self.release_section {
-                            Some(ArtistReleaseSection::Class(class)) => {
-                                counts[release_index(class)]
-                            }
-                            Some(ArtistReleaseSection::AppearsOn) => 0,
-                            None => counts.iter().sum(),
-                        }
-                        .max(0) as usize
-                    }
-                    _ if matches!(self.route, Route::Home) => {
-                        self.home_rows().await.map_err(error)?.len()
-                    }
-                    _ if matches!(self.route, Route::Search) => {
-                        self.rows(0, usize::MAX).await.map_err(error)?.len()
-                    }
-                    _ => 0,
-                };
-                Ok(count as u64)
-            })
-            .await
-            .map_err(error)?
+        run_read(&runtime, move |cancel| async move {
+            let opened = self.opened(&cancel).await.map_err(error)?;
+            let count = if matches!(opened, OpenedCollection::Home(_)) {
+                self.home_rows(&cancel).await.map_err(error)?.len()
+            } else {
+                self.opened_count(opened)
+            };
+            Ok(count as u64)
+        })
+        .await
     }
 
     pub fn sort_fields(&self) -> Vec<AndroidSortField> {
@@ -283,17 +212,16 @@ impl AndroidBrowseQuery {
         limit: u32,
     ) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
         let runtime = self.runtime.clone();
-        runtime
-            .spawn(async move {
-                self.rows(
-                    usize::try_from(offset).map_err(error)?,
-                    limit.min(256) as usize,
-                )
-                .await
-                .map_err(error)
-            })
+        run_read(&runtime, move |cancel| async move {
+            self.rows(
+                usize::try_from(offset).map_err(error)?,
+                limit.min(256) as usize,
+                &cancel,
+            )
             .await
-            .map_err(error)?
+            .map_err(error)
+        })
+        .await
     }
 
     pub async fn play(
@@ -314,41 +242,24 @@ impl AndroidBrowseQuery {
         let runtime = self.runtime.clone();
         runtime
             .spawn(async move {
-                if matches!(self.route, Route::Folders { .. }) {
-                    return self
-                        .folder_play(
-                            index,
-                            media_uri,
-                            track_key,
-                            placement,
-                            shuffled,
-                            context_title,
-                        )
-                        .await;
-                }
                 let index = usize::try_from(index).map_err(error)?;
                 let cancel = ReadCancellation::new();
                 let track_key = match track_key {
                     Some(key) => library::TrackKey::from_raw(key),
                     None => self
                         .database
-                        .catalog_identity(library::CatalogKind::Track, &media_uri, &cancel)
+                        .track(&media_uri, &cancel)
                         .await
-                        .map(|identity| {
-                            identity.map(|identity| library::TrackKey::from_raw(identity.key))
-                        })
                         .map_err(error)?
+                        .map(|row| row.track_key)
                         .ok_or_else(|| error("Track is no longer available"))?,
                 };
                 let (selection, anchor, entry, title, context) = if self.album_detail_layout() {
                     let album = album_key
                         .map(library::AlbumKey::from_raw)
                         .ok_or_else(|| error("Album is no longer available"))?;
-                    let mut query = CatalogQuery::tracks(TrackScope::Album(album));
-                    query.subject = library::CatalogSubject::Tracks {
-                        scope: TrackScope::Album(album),
-                        sort: Some(self.album_tracks.sort_key.catalog_sort()),
-                    };
+                    let mut query = MemberRead::new(Collection::Album(album));
+                    query.sort = Some(self.album_tracks.sort_key.catalog_sort());
                     query.descending = self.album_tracks.descending;
                     let title = Some(Arc::new(library::QueueContextTitle {
                         kind: Some("Album".into()),
@@ -366,27 +277,27 @@ impl AndroidBrowseQuery {
                             self.album_tracks.descending
                         ),
                     )
-                } else if let Some(query) = self.track_query().await.map_err(error)? {
-                    let entry = if matches!(
-                        query.subject,
-                        library::CatalogSubject::Tracks {
-                            scope: library::TrackScope::Playlist(_),
-                            ..
-                        }
-                    ) {
+                } else if let Some(query) = self.members(&cancel).await.map_err(error)? {
+                    let entry = if matches!(query.collection, Collection::Playlist(_)) {
                         Some(serde_json::from_str(&row_key).map_err(error)?)
                     } else {
                         None
                     };
                     (
                         query.clone().selection(),
-                        index,
+                        if let OpenedCollection::Folders(page) =
+                            self.opened(&cancel).await.map_err(error)?
+                        {
+                            index.saturating_sub(page.folder_count)
+                        } else {
+                            index
+                        },
                         entry,
                         context_title,
                         self.context_id(),
                     )
                 } else {
-                    let rows = self.rows(0, usize::MAX).await.map_err(error)?;
+                    let rows = self.rows(0, usize::MAX, &cancel).await.map_err(error)?;
                     let keys = rows
                         .into_iter()
                         .filter_map(|row| row.track_key())
@@ -396,12 +307,10 @@ impl AndroidBrowseQuery {
                         .position(|key| *key == track_key)
                         .ok_or_else(|| error("Track is no longer in this route"))?;
                     (
-                        library::CatalogQuery::keys(
-                            library::CatalogKind::Track,
-                            None,
-                            (keys).iter().map(|key| key.raw()).collect(),
-                        )
-                        .selection(),
+                        MemberSelection::Keys {
+                            source: None,
+                            keys: keys.into(),
+                        },
                         anchor,
                         None,
                         context_title,

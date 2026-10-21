@@ -230,13 +230,12 @@ mod tests {
             receipt.path
         );
         assert_eq!(
-            match crate::CatalogQuery::uris(crate::CatalogKind::Track, vec![uri.clone()])
-                .rows(&database, 0, 1, &crate::ReadCancellation::new())
-                .await
-                .unwrap()
             {
-                crate::CatalogRows::Tracks(rows) => rows[0].metadata.title.clone(),
-                _ => unreachable!("song query"),
+                let rows = database
+                    .tracks_by_uris(std::slice::from_ref(&uri), &crate::ReadCancellation::new())
+                    .await
+                    .unwrap();
+                rows[0].metadata.title.clone()
             },
             "Track"
         );
@@ -280,13 +279,12 @@ mod tests {
         database.connect_forget_media_file(&receipt).await.unwrap();
         assert!(database.playback_access(&uri).await.unwrap().is_none());
         assert_eq!(
-            match crate::CatalogQuery::uris(crate::CatalogKind::Track, vec![uri.clone()])
-                .rows(&database, 0, 1, &crate::ReadCancellation::new())
-                .await
-                .unwrap()
             {
-                crate::CatalogRows::Tracks(rows) => rows[0].metadata.title.clone(),
-                _ => unreachable!("song query"),
+                let rows = database
+                    .tracks_by_uris(std::slice::from_ref(&uri), &crate::ReadCancellation::new())
+                    .await
+                    .unwrap();
+                rows[0].metadata.title.clone()
             },
             "Track"
         );

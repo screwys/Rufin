@@ -138,6 +138,11 @@ async fn write_metadata(
     rows: &[MetadataInput],
 ) -> LibraryResult<()> {
     let key = format!("{kind}_key");
+    let field = if kind == "album" {
+        "input_metadata"
+    } else {
+        "metadata"
+    };
     let mut query = sqlx::QueryBuilder::new("WITH input(entity_key,payload,artwork,native) AS(");
     query.push_values(rows, |mut value, (key, payload, artwork, native, _)| {
         value
@@ -146,7 +151,7 @@ async fn write_metadata(
             .push_bind(artwork)
             .push_bind(native);
     });
-    query.push(format!(") UPDATE {kind}s SET metadata=jsonb(input.payload),native_artwork=input.artwork,native_metadata=input.native FROM input WHERE {kind}s.{key}=input.entity_key"));
+    query.push(format!(") UPDATE {kind}s SET {field}=jsonb(input.payload),native_artwork=input.artwork,native_metadata=input.native FROM input WHERE {kind}s.{key}=input.entity_key"));
     query.build().execute(&mut *connection).await?;
     let states = rows
         .iter()
@@ -247,7 +252,6 @@ pub(super) async fn populate(connection: &mut SqliteConnection, prefix: &str) ->
             };
             let mut inputs = Vec::with_capacity(rows.len());
             let mut searches = Vec::new();
-            let mut album_orders = Vec::new();
             let mut album_audio = Vec::new();
             for row in rows {
                 after = row.try_get(format!("{kind}_key").as_str())?;
@@ -357,11 +361,6 @@ pub(super) async fn populate(connection: &mut SqliteConnection, prefix: &str) ->
                         .map(|(token, gain)| serde_json::to_vec(&serde_json::json!({"token":token.iter().map(|byte|format!("{byte:02X}")).collect::<String>(),"gain":gain})))
                         .transpose()?;
                         album_audio.push((after, audio));
-                        album_orders.push((
-                            after,
-                            metadata.title.to_lowercase(),
-                            metadata.artist.to_lowercase(),
-                        ));
                         serde_json::to_string(&metadata)?
                     }
                     _ => serde_json::to_string(&TagMetadata {
@@ -396,13 +395,11 @@ pub(super) async fn populate(connection: &mut SqliteConnection, prefix: &str) ->
                 });
                 query.push(") UPDATE albums SET cached_local=coalesce((SELECT kind IN('local','file','files','documents','webdav','smb','remote_file','remote-file') FROM sources WHERE sources.source_key=albums.source_key),0),accepted_audio=input.accepted_audio FROM input WHERE albums.album_key=input.album_key");
                 query.build().execute(&mut *connection).await?;
-                let mut query =
-                    sqlx::QueryBuilder::new("WITH input(album_key,title_search,artist_search) AS(");
-                query.push_values(&album_orders, |mut value, (key, title, artist)| {
-                    value.push_bind(key).push_bind(title).push_bind(artist);
-                });
-                query.push(") INSERT INTO album_order(album_key,source_key,title_sort,album_artist_sort,year_sort,release_sort,added_sort,title_search,artist_search) SELECT album.album_key,album.source_key,coalesce(album.sort_text,''),(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key ORDER BY credit.position LIMIT 1),album.year,album.release_date,coalesce(unixepoch(album.date_added),album.first_seen_at,(SELECT coalesce(unixepoch(member.date_added),member.first_seen_at) FROM tracks member INDEXED BY tracks_album_order_idx WHERE member.album_key=album.album_key AND member.indexed=1 ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1)),input.title_search,input.artist_search FROM input JOIN albums album USING(album_key)");
-                query.build().execute(&mut *connection).await?;
+                crate::catalog::index::albums(
+                    connection,
+                    &inputs.iter().map(|row| row.0).collect::<Vec<_>>(),
+                )
+                .await?;
             }
         }
     }

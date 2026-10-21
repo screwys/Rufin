@@ -889,7 +889,7 @@ impl PlaybackOwner {
             }
         });
     }
-    pub fn insert(&self, input: library::TrackSelection, target: QueueReorderTarget) {
+    pub fn insert(&self, input: library::MemberSelection, target: QueueReorderTarget) {
         self.insert_load(library::QueueLoad::tracks(input), target);
     }
 }
@@ -1593,24 +1593,22 @@ pub struct PreparedQueuePage {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl PlaybackOwner {
-    pub async fn selection(self: Arc<Self>) -> Result<Arc<library::TrackSelection>, PlaybackError> {
+    pub async fn selection(
+        self: Arc<Self>,
+    ) -> Result<Arc<library::MemberSelection>, PlaybackError> {
         let runtime = self.runtime.clone();
         runtime
             .spawn_blocking(move || {
                 let queue = self.snapshot().map_err(PlaybackError::Message)?;
-                Ok(Arc::new(
-                    library::CatalogQuery::keys(
-                        library::CatalogKind::Track,
-                        None,
-                        queue
-                            .order
-                            .iter()
-                            .map(|index| queue.entries[*index as usize].track_key)
-                            .map(|key| key.raw())
-                            .collect(),
-                    )
-                    .selection(),
-                ))
+                Ok(Arc::new(library::MemberSelection::Keys {
+                    source: None,
+                    keys: queue
+                        .order
+                        .iter()
+                        .map(|index| queue.entries[*index as usize].track_key)
+                        .collect::<Vec<_>>()
+                        .into(),
+                }))
             })
             .await
             .map_err(|error| PlaybackError::Message(error.to_string()))?

@@ -264,11 +264,9 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 .create_playlist(
                     None,
                     "Outside sources",
-                    &library::CatalogQuery::uris(
-                        library::CatalogKind::Track,
+                    &library::MemberSelection::Uris(
                         shared.iter().map(|(uri, _)| uri.clone()).collect(),
-                    )
-                    .selection(),
+                    ),
                 )
                 .await
                 .unwrap()
@@ -281,11 +279,9 @@ fn cue_direct_continuation_streams_without_enrollment() {
             let shared_keys = a
                 .database
                 .selected_track_keys(
-                    &library::CatalogQuery::uris(
-                        library::CatalogKind::Track,
+                    &library::MemberSelection::Uris(
                         shared.iter().map(|(uri, _)| uri.clone()).collect(),
-                    )
-                    .selection(),
+                    ),
                     &library::ReadCancellation::new(),
                 )
                 .await
@@ -317,7 +313,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 .database
                 .queue_entries(
                     library::QueueLoad::tracks(
-                        library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist))
+                        library::MemberRead::new(library::Collection::Playlist(playlist))
                             .selection(),
                     ),
                     None,
@@ -376,8 +372,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 .add_playlist_tracks(
                     None,
                     host_playlist,
-                    &library::CatalogQuery::uris(library::CatalogKind::Track, vec![uri.clone()])
-                        .selection(),
+                    &library::MemberSelection::Uris((vec![uri.clone()]).into()),
                     false,
                 )
                 .await
@@ -801,15 +796,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
             assert_eq!(b.status().settings.profile, paired.profile);
             assert!(b.status().settings.pending_import.is_none());
             assert!(b.database.favorite(&favorite).await.unwrap());
-            let library::CatalogRows::Tracks(rows) = library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                vec![favorite.media_uri().to_owned()],
-            )
-            .rows(&b.database, 0, 1, &library::ReadCancellation::new())
-            .await
-            .unwrap() else {
-                panic!("track query");
-            };
+            let rows = b.database.tracks_by_uris(&[favorite.media_uri().to_owned()], &library::ReadCancellation::new()).await.unwrap();
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].metadata.title, "Cached track");
             execute(b, Action::Retry).await.unwrap();
@@ -1139,7 +1126,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
                         _ => StatusCode::METHOD_NOT_ALLOWED.into_response(),
                     }
                 }
-            )).with_state(file.clone());
+            )).layer(axum::extract::DefaultBodyLimit::disable()).with_state(file.clone());
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
@@ -1259,7 +1246,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
             catalog.complete_source_observation(observed, &[], Some(&freshness)).await.unwrap();
             drop(catalog);
             let shared_uris = vec![library::source_entity_uri(&music, "track", "track-0"), library::source_entity_uri(&music, "track", "track-1")];
-            let (shared_playlist, shared_id) = owner.database.create_playlist(None, "Shared edit", &library::CatalogQuery::uris(library::CatalogKind::Track, shared_uris.clone()).selection()).await.unwrap().unwrap();
+            let (shared_playlist, shared_id) = owner.database.create_playlist(None, "Shared edit", &library::MemberSelection::Uris((shared_uris.clone()).into())).await.unwrap().unwrap();
             execute(owner, Action::Create).await.unwrap();
             // A released device link has no canonical file association yet.
             owner.database.save_playlist_file_link(&library::PlaylistFileLink {
@@ -1283,8 +1270,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
                 .write_file_observations(&[(track_file, Vec::new())], vec![tracks[0].clone()], true).await.unwrap();
             let uri = library::source_entity_uri(&music, "track", "track-0");
             let cancellation = library::ReadCancellation::new();
-            let library::CatalogRows::Tracks(rows) = library::CatalogQuery::uris(library::CatalogKind::Track, vec![uri.clone()])
-                .rows(&owner.database, 0, 1, &cancellation).await.unwrap() else { panic!("track query"); };
+            let rows = owner.database.tracks_by_uris(std::slice::from_ref(&uri), &cancellation).await.unwrap();
             let expected_metadata = rows[0].metadata.clone();
             assert_eq!(expected_metadata.title, "Edited track");
             let exported = owner.export().await.unwrap();
@@ -1313,8 +1299,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
                 assert!(source.catalog_complete, "the native catalog is ready before provider refresh");
                 assert!(received.accept_freshness(music.as_str(), &freshness, &cancellation).await.unwrap());
                 assert_eq!(received.source_counts(source.source, &cancellation).await.unwrap(), (1, 130));
-                let library::CatalogRows::Tracks(rows) = library::CatalogQuery::uris(library::CatalogKind::Track, vec![uri.clone()])
-                    .rows(received, 0, 1, &cancellation).await.unwrap() else { panic!("track query"); };
+                let rows = received.tracks_by_uris(std::slice::from_ref(&uri), &cancellation).await.unwrap();
                 assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0].media_uri, uri);
                 assert_eq!(rows[0].metadata, expected_metadata);

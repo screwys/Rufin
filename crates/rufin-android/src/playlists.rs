@@ -46,26 +46,13 @@ impl AndroidLibrary {
         let database = self.database.clone();
         self.runtime
             .spawn(async move {
-                library::CatalogQuery::keys(
-                    library::CatalogKind::Playlist,
-                    None,
-                    (&[playlist]).iter().map(|key| key.raw()).collect(),
-                )
-                .rows(
-                    &database,
-                    0,
-                    (&[playlist]).len(),
-                    &library::ReadCancellation::new(),
-                )
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Playlists(rows) => rows,
-                    _ => unreachable!("typed catalog projection"),
-                })
-                .map_err(error)?
-                .pop()
-                .map(|row| row.name)
-                .ok_or_else(|| error("Playlist no longer exists"))
+                database
+                    .playlists(&[playlist], &library::ReadCancellation::new())
+                    .await
+                    .map_err(error)?
+                    .pop()
+                    .map(|row| row.name)
+                    .ok_or_else(|| error("Playlist no longer exists"))
             })
             .await
             .map_err(error)?

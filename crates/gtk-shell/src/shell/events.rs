@@ -373,16 +373,11 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
                     },
                 )
                 .any(|category| {
-                    rufin_core::browse::BrowseRequest::new(
+                    rufin_core::browse::uses_activity(
                         &current,
-                        category,
-                        None,
-                        None,
                         &settings
                             .library_list(rufin_core::browse::library_list_key(&current, category)),
-                        0,
                     )
-                    .activity_sensitive()
                 });
             drop(settings);
             if sensitive {

@@ -12,10 +12,39 @@ use gtk_widgets::sparse_model::{SparseObjectModel, SparseRouteModel, SparseSourc
 
 const TRACK_OVERSCAN: usize = 64;
 
+#[derive(Clone, PartialEq)]
+enum TrackRead {
+    Members(library::MemberRead),
+    Keys(Arc<[TrackKey]>),
+}
+
+impl TrackRead {
+    fn selection(&self, ranges: Option<Vec<std::ops::Range<usize>>>) -> library::MemberSelection {
+        match self {
+            Self::Members(read) => library::MemberSelection::Members {
+                read: read.clone(),
+                ranges,
+            },
+            Self::Keys(keys) => library::MemberSelection::Keys {
+                source: None,
+                keys: ranges.map_or_else(
+                    || keys.clone(),
+                    |ranges| {
+                        ranges
+                            .into_iter()
+                            .flat_map(|range| keys[range].iter().copied())
+                            .collect()
+                    },
+                ),
+            },
+        }
+    }
+}
+
 struct TrackModelState {
     sparse: Rc<SparseRouteModel<TrackKey, TrackView>>,
-    query: RefCell<library::CatalogQuery>,
-    applied: Rc<RefCell<library::CatalogQuery>>,
+    query: RefCell<TrackRead>,
+    applied: Rc<RefCell<TrackRead>>,
 }
 
 #[derive(Clone)]
@@ -25,38 +54,76 @@ impl TrackCollectionModel {
     pub fn new(
         database: Arc<Database>,
         runtime: tokio::runtime::Handle,
-        page: library::CatalogPage,
+        page: rufin_core::browse::MemberPage,
     ) -> Self {
-        let library::CatalogRows::Tracks(rows) = page.rows else {
-            unreachable!("song page")
-        };
-        let query = page.query;
+        let rows = page
+            .page
+            .rows
+            .into_iter()
+            .map(library::MemberRow::into_track)
+            .collect();
+        let query = TrackRead::Members(page.read);
         let applied = Rc::new(RefCell::new(query.clone()));
         let load_request = applied.clone();
         let sparse = SparseRouteModel::new(
-            SparseSource::Query { count: page.count },
+            SparseSource::Query {
+                count: page.page.count,
+            },
             TRACK_OVERSCAN,
             runtime,
             Rc::new(move |_, range, cancellation| {
                 let database = database.clone();
                 let request = load_request.borrow().clone();
                 Box::pin(async move {
+                    let TrackRead::Members(request) = request else {
+                        unreachable!()
+                    };
                     request
                         .rows(&database, range.start, range.len(), &cancellation)
                         .await
-                        .map(|rows| match rows {
-                            library::CatalogRows::Tracks(rows) => rows,
-                            _ => unreachable!("song projection"),
+                        .map(|rows| {
+                            rows.into_iter()
+                                .map(library::MemberRow::into_track)
+                                .collect()
                         })
                         .map_err(|error| error.to_string())
                 })
             }),
         );
-        sparse.seed_matching_at(page.first_row_position, rows, |row| row.track_key);
+        sparse.seed_matching_at(page.page.first_row_position, rows, |row| row.track_key);
         sparse.list_model().set_sections(page.disc_sections);
         Self(Rc::new(TrackModelState {
             sparse,
             applied,
+            query: RefCell::new(query),
+        }))
+    }
+
+    pub fn related(
+        database: Arc<Database>,
+        runtime: tokio::runtime::Handle,
+        rows: Vec<TrackView>,
+    ) -> Self {
+        let keys: Arc<[TrackKey]> = rows.iter().map(|row| row.track_key).collect();
+        let sparse = SparseRouteModel::new(
+            SparseSource::Keys(keys.clone()),
+            TRACK_OVERSCAN,
+            runtime,
+            Rc::new(move |keys, _, cancel| {
+                let database = database.clone();
+                Box::pin(async move {
+                    database
+                        .tracks(&keys, &cancel)
+                        .await
+                        .map_err(|error| error.to_string())
+                })
+            }),
+        );
+        sparse.seed_matching_at(0, rows, |row| row.track_key);
+        let query = TrackRead::Keys(keys);
+        Self(Rc::new(TrackModelState {
+            sparse,
+            applied: Rc::new(RefCell::new(query.clone())),
             query: RefCell::new(query),
         }))
     }
@@ -75,11 +142,11 @@ impl TrackCollectionModel {
             .ready_position(|row| row.media_uri() == media_uri)
     }
 
-    pub fn selection_input(&self, positions: &gtk::Bitset) -> library::TrackSelection {
-        library::TrackSelection::Query {
-            query: self.0.applied.borrow().clone(),
-            ranges: Some(gtk_widgets::selection::selected_ranges(positions)),
-        }
+    pub fn selection_input(&self, positions: &gtk::Bitset) -> library::MemberSelection {
+        self.0
+            .applied
+            .borrow()
+            .selection(Some(gtk_widgets::selection::selected_ranges(positions)))
     }
 
     pub fn source_is_empty(&self) -> bool {
@@ -90,13 +157,12 @@ impl TrackCollectionModel {
         self.0.sparse.len()
     }
 
-    pub fn query(&self) -> library::CatalogQuery {
-        let mut query = self.0.query.borrow_mut();
-        if let library::CatalogSubject::Tracks {
-            scope: library::TrackScope::Smart { now, .. },
-            ..
-        } = &mut query.subject
-        {
+    pub fn query(&self) -> library::MemberRead {
+        let mut current = self.0.query.borrow_mut();
+        let TrackRead::Members(query) = &mut *current else {
+            unreachable!("Related rows have no collection read")
+        };
+        if let library::Collection::Smart { now, .. } = &mut query.collection {
             *now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |duration| duration.as_secs() as i64);
@@ -106,7 +172,10 @@ impl TrackCollectionModel {
 
     pub fn set_query(&self, query: &str) -> bool {
         let query = query.trim();
-        let mut current = self.0.query.borrow_mut();
+        let mut read = self.0.query.borrow_mut();
+        let TrackRead::Members(current) = &mut *read else {
+            return false;
+        };
         if current.filter == query {
             return false;
         }
@@ -114,33 +183,37 @@ impl TrackCollectionModel {
         true
     }
 
-    pub fn set_scope(&self, scope: library::TrackScope) {
-        if let library::CatalogSubject::Tracks { scope: current, .. } =
-            &mut self.0.query.borrow_mut().subject
-        {
-            *current = scope;
+    pub fn set_scope(&self, scope: library::Collection) {
+        if let TrackRead::Members(read) = &mut *self.0.query.borrow_mut() {
+            read.collection = scope;
         }
     }
 
     pub fn apply_settings(&self, settings: &LibraryListSettings) {
-        let mut query = self.0.query.borrow_mut();
-        if let library::CatalogSubject::Tracks { sort, .. } = &mut query.subject {
-            *sort = Some(settings.sort_key.catalog_sort());
-        }
+        let mut current = self.0.query.borrow_mut();
+        let TrackRead::Members(query) = &mut *current else {
+            return;
+        };
+        query.sort = Some(settings.sort_key.catalog_sort());
         query.descending = settings.descending;
     }
 
-    pub fn replace_page(&self, page: library::CatalogPage) -> bool {
-        if *self.0.query.borrow() != page.query {
+    pub fn replace_page(&self, page: rufin_core::browse::MemberPage) -> bool {
+        if *self.0.query.borrow() != TrackRead::Members(page.read.clone()) {
             return false;
         }
-        let library::CatalogRows::Tracks(rows) = page.rows else {
-            unreachable!("song page")
-        };
-        self.0.applied.replace(page.query);
+        let rows = page
+            .page
+            .rows
+            .into_iter()
+            .map(library::MemberRow::into_track)
+            .collect();
+        self.0.applied.replace(TrackRead::Members(page.read));
         self.0.sparse.replace_prepared_at(
-            SparseSource::Query { count: page.count },
-            page.first_row_position,
+            SparseSource::Query {
+                count: page.page.count,
+            },
+            page.page.first_row_position,
             rows,
             page.disc_sections,
             |row| row.track_key,
@@ -184,7 +257,7 @@ impl TrackCollectionModel {
         if anchor_index >= order.len() {
             return;
         }
-        let selection = self.0.applied.borrow().clone().selection();
+        let selection = self.0.applied.borrow().selection(None);
         let constructor = if collection_start {
             PlayRequest::ordered
         } else {
@@ -210,14 +283,16 @@ impl TrackCollectionModel {
     }
 
     pub fn visible_context_id(&self, context_base: &str) -> String {
-        let query = self.0.applied.borrow();
-        format!(
-            "{context_base}|query={}|sort={:?}|descending={}|result={}",
-            query.filter,
-            query.track_sort_option(),
-            query.descending,
-            self.0.sparse.order_id()
-        )
+        match &*self.0.applied.borrow() {
+            TrackRead::Members(query) => format!(
+                "{context_base}|query={}|sort={:?}|descending={}|result={}",
+                query.filter,
+                query.sort,
+                query.descending,
+                self.0.sparse.order_id()
+            ),
+            TrackRead::Keys(_) => format!("{context_base}|result={}", self.0.sparse.order_id()),
+        }
     }
 
     pub fn position_for_current_uri(
@@ -276,13 +351,10 @@ mod tests {
             links: Default::default(),
         };
         let settings = LibraryListSettings::for_key(rufin_core::settings::LibraryListKey::History);
-        let query = library::CatalogQuery {
-            subject: library::CatalogSubject::Tracks {
-                scope: library::TrackScope::History { source: None },
-                sort: Some(settings.sort_key.catalog_sort()),
-            },
+        let query = library::MemberRead {
+            sort: Some(settings.sort_key.catalog_sort()),
             descending: settings.descending,
-            ..library::CatalogQuery::tracks(library::TrackScope::History { source: None })
+            ..library::MemberRead::new(library::Collection::History { source: None })
         };
         let directory = tempfile::tempdir().unwrap();
         let database = runtime
@@ -291,11 +363,13 @@ mod tests {
         let model = TrackCollectionModel::new(
             Arc::new(database),
             runtime.handle().clone(),
-            library::CatalogPage {
-                query,
-                count: 1,
-                first_row_position: 0,
-                rows: library::CatalogRows::Tracks(vec![row.clone()]),
+            rufin_core::browse::MemberPage {
+                read: query,
+                page: library::Page {
+                    count: 1,
+                    first_row_position: 0,
+                    rows: vec![library::MemberRow::Track(row.clone())],
+                },
                 disc_sections: Vec::new(),
             },
         );
@@ -318,15 +392,17 @@ mod tests {
         model.apply_settings(&presentation);
         let mut updated = row;
         updated.metadata.title = "After".into();
-        let prepared = library::CatalogPage {
+        let prepared = rufin_core::browse::MemberPage {
             disc_sections: Vec::new(),
-            count: 1,
-            first_row_position: 0,
-            rows: library::CatalogRows::Tracks(vec![updated.clone()]),
-            query: pending,
+            page: library::Page {
+                count: 1,
+                first_row_position: 0,
+                rows: vec![library::MemberRow::Track(updated.clone())],
+            },
+            read: pending,
         };
         assert!(model.replace_page(prepared.clone()));
-        assert_eq!(model.query(), prepared.query);
+        assert_eq!(model.query(), prepared.read);
         assert_eq!(
             model.sparse_model().ready(0).unwrap().metadata.title,
             "After"
@@ -334,9 +410,12 @@ mod tests {
 
         // A later catalog publication has the same query but new row data.
         updated.metadata.title = "Catalog update".into();
-        assert!(model.replace_page(library::CatalogPage {
+        assert!(model.replace_page(rufin_core::browse::MemberPage {
             disc_sections: Vec::new(),
-            rows: library::CatalogRows::Tracks(vec![updated]),
+            page: library::Page {
+                rows: vec![library::MemberRow::Track(updated)],
+                ..prepared.page.clone()
+            },
             ..prepared.clone()
         }));
         assert_eq!(

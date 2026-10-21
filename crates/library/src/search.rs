@@ -3,9 +3,10 @@
 
 use sqlx::Connection;
 
+use crate::query::{OrderedQuery, RequestedKeys};
 use crate::{
-    AlbumView, ArtistView, CatalogQuery, CatalogRows, CatalogSort, CatalogSubject, Database,
-    FolderKey, LibraryResult, ReadCancellation, SourceKey, TrackScope, TrackView,
+    AlbumView, ArtistView, CatalogSort, Collection, Database, FolderKey, LibraryResult, ListKind,
+    ListRead, MemberRead, ReadCancellation, SourceKey, TrackView,
 };
 
 const SEARCH_LIMIT: usize = 100;
@@ -56,7 +57,7 @@ impl Database {
     pub async fn search_rows_by_objects(
         &self,
         source: SourceKey,
-        folder: Option<FolderKey>,
+        _folder: Option<FolderKey>,
         album_artists: bool,
         track_objects: &[String],
         album_objects: &[String],
@@ -77,24 +78,40 @@ impl Database {
         }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let mut result = SearchResults::default();
-        for (kind, objects) in [
-            (crate::CatalogKind::Track, track_objects),
-            (crate::CatalogKind::Album, album_objects),
-            (crate::CatalogKind::Artist, artist_objects),
-        ] {
+        let request = |kind: crate::CatalogKind,
+                       objects: &[String]|
+         -> LibraryResult<RequestedKeys> {
             let (table, name) = kind.sql();
-            let keys=sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT entity.{name}_key FROM json_each(?1) requested JOIN {table} entity ON entity.object_id=requested.value WHERE entity.source_key=?2 ORDER BY CAST(requested.key AS INTEGER)"))).bind(serde_json::to_string(objects)?).bind(source).fetch_all(&mut *transaction).await?;
-            let mut query = CatalogQuery::keys(kind, Some(source), Vec::new());
-            query.folder = folder;
-            if let CatalogSubject::Keys { album_artist, .. } = &mut query.subject {
-                *album_artist = album_artists;
-            }
-            add_rows(
-                &mut result,
-                crate::query::load_keys_on(&mut transaction, &query, keys).await?,
-            );
-        }
+            let batch = RequestedKeys::batch(objects)?;
+            Ok(RequestedKeys {
+                sql: format!(
+                    "SELECT entity.{name}_key value,request.ordinal FROM ({}) request JOIN {table} entity ON entity.source_key={} AND entity.object_id=request.value",
+                    batch.sql,
+                    source.raw()
+                ),
+                arguments: batch.arguments,
+            })
+        };
+        let result = SearchResults {
+            tracks: crate::tracks::load_track_requested(
+                &mut transaction,
+                request(crate::CatalogKind::Track, track_objects)?,
+            )
+            .await?,
+            albums: crate::collections::load_album_requested(
+                &mut transaction,
+                request(crate::CatalogKind::Album, album_objects)?,
+                false,
+            )
+            .await?,
+            artists: crate::collections::load_artist_requested(
+                &mut transaction,
+                request(crate::CatalogKind::Artist, artist_objects)?,
+                album_artists,
+                false,
+            )
+            .await?,
+        };
         transaction.commit().await?;
         Ok(result)
     }
@@ -118,61 +135,51 @@ impl Database {
         let terms = crate::query::quote(&serde_json::to_string(&terms)?);
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let mut result = SearchResults::default();
-        for subject in [
-            CatalogSubject::Tracks {
-                scope: TrackScope::Tracks(source),
-                sort: Some(CatalogSort::Title),
-            },
-            CatalogSubject::Albums {
-                source,
-                sort: CatalogSort::Title,
-                inline_tracks: None,
-            },
-            CatalogSubject::Artists {
-                source,
-                sort: CatalogSort::Title,
+        let mut tracks = MemberRead::new(Collection::Source(source));
+        tracks.folder = folder;
+        let tracks = crate::query::member_query_on(&mut transaction, &tracks).await?;
+        let mut albums = ListRead::new(ListKind::Albums, Some(source), CatalogSort::Title);
+        albums.folder = folder;
+        let albums = crate::collections::collection_query(&albums);
+        let mut artists = ListRead::new(
+            ListKind::Artists {
                 album_artist: album_artists,
             },
-        ] {
-            let query = CatalogQuery {
-                subject,
-                folder,
-                filter: String::new(),
-                descending: false,
-                favorites_only: false,
-                downloaded_only: false,
-                activity: false,
-            };
-            let mut relation = crate::query::compile_on(&mut transaction, &query).await?;
-            let text = match query.subject {
-                CatalogSubject::Tracks { .. } => "track.normalized_search",
-                CatalogSubject::Albums { .. } => {
-                    "ordering.title_search||' '||COALESCE(ordering.artist_search,'')"
-                }
-                _ => "artist.normalized_name",
-            };
-            let mut condition = term_match(text);
-            if matches!(query.subject, CatalogSubject::Albums { .. }) {
-                condition = format!(
-                    "({condition} OR CAST(ordering.year_sort AS TEXT)=term.value OR EXISTS(SELECT 1 FROM effective_album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND {}) OR EXISTS(SELECT 1 FROM effective_album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key AND {}))",
-                    term_match("artist.normalized_name"),
-                    term_match("genre.normalized_name")
-                );
-            }
+            Some(source),
+            CatalogSort::Title,
+        );
+        artists.folder = folder;
+        let artists = crate::collections::collection_query(&artists);
+        let album_condition = format!(
+            "({} OR CAST(album.year_sort AS TEXT)=term.value OR EXISTS(SELECT 1 FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND {}) OR EXISTS(SELECT 1 FROM album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key AND {}))",
+            term_match("album.title_search||' '||COALESCE(album.artist_search,'')"),
+            term_match("artist.normalized_name"),
+            term_match("genre.normalized_name")
+        );
+        let request = |mut relation: OrderedQuery, condition: String| {
             relation.predicate.push_str(&format!(" AND NOT EXISTS(SELECT 1 FROM json_each({terms}) term WHERE NOT COALESCE({condition},0))"));
-            let keys = crate::query::selected_values_on(
+            relation.requested_keys(0, request.limit)
+        };
+        let result = SearchResults {
+            tracks: crate::tracks::load_track_requested(
                 &mut transaction,
-                &relation,
-                &relation.key,
-                std::slice::from_ref(&(0..request.limit)),
+                request(tracks, term_match("track.normalized_search")),
             )
-            .await?;
-            add_rows(
-                &mut result,
-                crate::query::load_keys_on(&mut transaction, &query, keys).await?,
-            );
-        }
+            .await?,
+            albums: crate::collections::load_album_requested(
+                &mut transaction,
+                request(albums, album_condition),
+                false,
+            )
+            .await?,
+            artists: crate::collections::load_artist_requested(
+                &mut transaction,
+                request(artists, term_match("artist.normalized_name")),
+                album_artists,
+                false,
+            )
+            .await?,
+        };
         transaction.commit().await?;
         Ok(result)
     }
@@ -182,13 +189,4 @@ fn term_match(text: &str) -> String {
     format!(
         "CASE WHEN length(term.value)=1 THEN instr(' '||{text}||' ',' '||term.value||' ') ELSE instr({text},term.value) END>0"
     )
-}
-
-fn add_rows(result: &mut SearchResults, rows: CatalogRows) {
-    match rows {
-        CatalogRows::Tracks(rows) => result.tracks = rows,
-        CatalogRows::Albums(rows) => result.albums = rows,
-        CatalogRows::Artists(rows) => result.artists = rows,
-        _ => unreachable!(),
-    }
 }

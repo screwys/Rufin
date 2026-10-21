@@ -40,6 +40,8 @@ import io.github.screwys.rufin.platform.AndroidKeyring
 import io.github.screwys.rufin.platform.AndroidDocuments
 import io.github.screwys.rufin.core.AndroidRuntime
 import io.github.screwys.rufin.core.installCatalogs
+import io.github.screwys.rufin.core.installTranslations
+import io.github.screwys.rufin.core.resetDatabase as resetDatabaseFiles
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -130,7 +132,7 @@ class RufinService : MediaSessionService() {
                     val locale = languages[index]
                     listOf(locale.toLanguageTag().replace('-', '_'), locale.language)
                 }.distinct().map { "$it.po" }.filter { it in packaged }
-                installCatalogs(catalogs.map { assets.open(it).bufferedReader().use { reader -> reader.readText() } })
+                installTranslations(installCatalogs(catalogs.map { assets.open(it).bufferedReader().use { reader -> reader.readText() } }))
                 core = AndroidRuntime(filesDir.absolutePath, cacheDir.absolutePath)
             }
             val started = checkNotNull(core)
@@ -226,16 +228,10 @@ class RufinService : MediaSessionService() {
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (error: LinkageError) {
+            runtimeFailed(Exception(error.message, error))
         } catch (error: Exception) {
-            Log.e("Rufin", "Could not run the shared runtime", error)
-            mutableRuntime.value = Result.failure(error)
-            nativePlayer.update(null)
-            mutablePlayback.value = null
-            nativePlayer.failed(error)
-            audioFocus.abandon()
-            if (wakeLock.isHeld) wakeLock.release()
-            ServiceCompat.stopForeground(this@RufinService, ServiceCompat.STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            runtimeFailed(error)
         } finally {
             multicastLock?.let { if (it.isHeld) it.release() }
             withContext(NonCancellable + Dispatchers.IO) { core?.destroy() }
@@ -243,7 +239,19 @@ class RufinService : MediaSessionService() {
 
     }
 
-    internal suspend fun resetStorage(storage: AndroidStorage, kind: StorageReset) {
+    private fun runtimeFailed(error: Exception) {
+        Log.e("Rufin", "Could not run the shared runtime", error)
+        mutableRuntime.value = Result.failure(error)
+        nativePlayer.update(null)
+        mutablePlayback.value = null
+        nativePlayer.failed(error)
+        audioFocus.abandon()
+        if (wakeLock.isHeld) wakeLock.release()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private suspend fun stopRuntimeForReset() {
         mutableRuntime.value = null
         runtimeJob?.cancelAndJoin()
         AndroidPermissions.cancel()
@@ -254,6 +262,15 @@ class RufinService : MediaSessionService() {
         if (wakeLock.isHeld) wakeLock.release()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    internal suspend fun resetDatabase() {
+        stopRuntimeForReset()
+        withContext(Dispatchers.IO) { resetDatabaseFiles(filesDir.absolutePath, cacheDir.absolutePath) }
+    }
+
+    internal suspend fun resetStorage(storage: AndroidStorage, kind: StorageReset) {
+        stopRuntimeForReset()
         withContext(Dispatchers.IO) {
             storage.reset(kind)
             check(deleteSharedPreferences("appearance")) { "Could not clear appearance settings" }

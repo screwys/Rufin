@@ -490,33 +490,19 @@ impl FileEditSession {
         let cancel = ReadCancellation::new();
         let (base, mut binding, previous_artist, single) = match kind {
             SourceEntityKind::Track => {
-                let row = library::CatalogQuery::uris(
-                    library::CatalogKind::Track,
-                    vec![(&media_uri).to_owned()],
-                )
-                .rows(&database, 0, 256, &cancel)
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-                .map_err(failure)?;
+                let row = database
+                    .track(&(&media_uri), &cancel)
+                    .await
+                    .map_err(failure)?;
                 let (file, base, binding) = if let Some(row) = row {
                     let binding = if row.artwork_binding.is_some() {
                         row.artwork_binding.clone()
                     } else if let Some(album) = &row.links.album_media_uri {
-                        library::CatalogQuery::uris(
-                            library::CatalogKind::Album,
-                            vec![(album).to_owned()],
-                        )
-                        .rows(&database, 0, 256, &cancel)
-                        .await
-                        .map(|rows| match rows {
-                            library::CatalogRows::Albums(rows) => rows.into_iter().next(),
-                            _ => unreachable!(),
-                        })
-                        .map_err(failure)?
-                        .and_then(|album| album.artwork_binding)
+                        database
+                            .album(&(album), false, &cancel)
+                            .await
+                            .map_err(failure)?
+                            .and_then(|album| album.artwork_binding)
                     } else {
                         None
                     };
@@ -543,18 +529,11 @@ impl FileEditSession {
                 (base, binding, String::new(), Some(file))
             }
             SourceEntityKind::Album => {
-                let row = library::CatalogQuery::uris(
-                    library::CatalogKind::Album,
-                    vec![(&media_uri).to_owned()],
-                )
-                .rows(&database, 0, 256, &cancel)
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Albums(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-                .map_err(failure)?
-                .ok_or(Error::Unavailable)?;
+                let row = database
+                    .album(&(&media_uri), false, &cancel)
+                    .await
+                    .map_err(failure)?
+                    .ok_or(Error::Unavailable)?;
                 (
                     tags::readonly_album_metadata(&row, None),
                     row.artwork_binding,
@@ -563,18 +542,11 @@ impl FileEditSession {
                 )
             }
             SourceEntityKind::Artist => {
-                let row = library::CatalogQuery::uris(
-                    library::CatalogKind::Artist,
-                    vec![(&media_uri).to_owned()],
-                )
-                .rows(&database, 0, 256, &cancel)
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Artists(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-                .map_err(failure)?
-                .ok_or(Error::Unavailable)?;
+                let row = database
+                    .artist(&(&media_uri), false, false, &cancel)
+                    .await
+                    .map_err(failure)?
+                    .ok_or(Error::Unavailable)?;
                 (
                     tags::readonly_artist_metadata(&row, None),
                     row.artwork_binding,
@@ -975,13 +947,9 @@ impl Source {
         database: &Database,
         uri: &str,
     ) -> Result<(NativeFile, library::TrackView), Error> {
-        let row = library::CatalogQuery::uris(library::CatalogKind::Track, vec![(uri).to_owned()])
-            .rows(&database, 0, 256, &ReadCancellation::new())
+        let row = database
+            .track(&(uri), &ReadCancellation::new())
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                _ => unreachable!(),
-            })
             .map_err(failure)?
             .ok_or(Error::Unavailable)?;
         let file = NativeFile::resolve(
@@ -1055,15 +1023,7 @@ impl Source {
         uri: &str,
         sidecar: bool,
     ) -> bool {
-        let Ok(Some(row)) =
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(uri).to_owned()])
-                .rows(&database, 0, 256, &ReadCancellation::new())
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-        else {
+        let Ok(Some(row)) = database.track(&(uri), &ReadCancellation::new()).await else {
             return false;
         };
         if row.access.cue_path.is_some() {
@@ -1134,16 +1094,11 @@ impl Source {
         sidecar: bool,
     ) -> Result<(), Error> {
         self.catalog_operation(database, async |catalog| {
-            let row =
-                library::CatalogQuery::uris(library::CatalogKind::Track, vec![(uri).to_owned()])
-                    .rows(&database, 0, 256, &ReadCancellation::new())
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                        _ => unreachable!(),
-                    })
-                    .map_err(failure)?
-                    .ok_or(Error::Unavailable)?;
+            let row = database
+                .track(&(uri), &ReadCancellation::new())
+                .await
+                .map_err(failure)?
+                .ok_or(Error::Unavailable)?;
             if row.access.cue_path.is_some() {
                 return Err(Error::Unavailable);
             }
@@ -1231,21 +1186,13 @@ impl Source {
             return Err(Error::Unavailable);
         }
         for page in measurements.chunks(64) {
-            let rows = library::CatalogQuery::keys(
-                library::CatalogKind::Track,
-                None,
-                (&page.iter().map(|row| row.0).collect::<Vec<_>>())
-                    .iter()
-                    .map(|key| key.raw())
-                    .collect(),
-            )
-            .rows(&database, 0, 256, &ReadCancellation::new())
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!(),
-            })
-            .map_err(failure)?;
+            let rows = database
+                .tracks(
+                    &page.iter().map(|row| row.0).collect::<Vec<_>>(),
+                    &ReadCancellation::new(),
+                )
+                .await
+                .map_err(failure)?;
             let mut originals = database
                 .original_files(
                     &rows

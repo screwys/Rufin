@@ -4,6 +4,8 @@ pub(crate) const ACTIVITY_GENRE_RESOURCE: &str =
 #[cfg(test)]
 pub(crate) const SHOWCASE_CSS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/showcase.css";
 pub(crate) const ABOUT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/application/about.ui";
+pub(crate) const STARTUP_ERROR_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/application/startup_error.ui";
 pub(crate) const RANDOM_PLAY_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/random_play.ui";
 
 pub(crate) const DIAGNOSTICS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/diagnostics.ui";
@@ -25,6 +27,7 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     ACTIVITY_GENRE_RESOURCE,
     SHOWCASE_CSS_RESOURCE,
     ABOUT_RESOURCE,
+    STARTUP_ERROR_RESOURCE,
     CONTENT_CHROME_RESOURCE,
     ROUTE_ERROR_RESOURCE,
     DIAGNOSTICS_RESOURCE,

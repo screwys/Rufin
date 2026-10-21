@@ -359,7 +359,11 @@ impl Database {
         media_uri: &str,
     ) -> LibraryResult<Option<(String, Option<String>, Option<LocalFileWrite>)>> {
         let mut connection = self.acquire_reader().await?;
-        let row:Option<(String,Option<String>,Option<String>)>=sqlx::query_as("SELECT track.object_id,track.source_path,CASE WHEN file.local_file_key IS NOT NULL THEN json_object('path',file.path,'root',file.root,'relative_path',file.relative_path,'kind',file.kind,'size_bytes',file.size_bytes,'mtime_ns',file.mtime_ns,'device_id',file.device_id,'inode',file.inode,'native_id',file.native_id,'revision',file.revision,'picture_index',file.picture_index,'artist_pictures',file.artist_pictures,'parse_version',file.parse_version,'state',file.state) END FROM tracks track LEFT JOIN local_track_access location USING(track_key) LEFT JOIN observed_local_files file ON file.source_key=track.source_key AND file.path=location.source_path WHERE track.source_key=?1 AND track.media_uri=?2")
+        let row:Option<(String,Option<String>,Option<String>)>=sqlx::query_as("SELECT track.object_id,track.source_path,CASE WHEN file.local_file_key IS NOT NULL THEN json_object('path',file.path,'root',file.root,'relative_path',file.relative_path,'kind',canonical.kind,'size_bytes',file.size_bytes,'mtime_ns',file.mtime_ns,'device_id',file.device_id,'inode',file.inode,'native_id',file.native_id,'revision',file.revision,'picture_index',canonical.picture_index,'artist_pictures',canonical.artist_pictures,'parse_version',canonical.parse_version,'state',CASE WHEN file.state IN('accepted','rejected') AND file.accepted_facts IS NOT canonical.parsed_stamp THEN 'observed' ELSE file.state END) END
+            FROM tracks track
+            LEFT JOIN local_files canonical ON canonical.source_key=track.source_key AND canonical.path=track.source_path
+            LEFT JOIN local_file_observations file ON file.local_file_key=canonical.local_file_key
+            WHERE track.source_key=?1 AND track.media_uri=?2")
             .bind(source).bind(media_uri).fetch_optional(&mut *connection).await?;
         row.map(|(id, path, file)| {
             Ok((
@@ -576,14 +580,13 @@ impl Database {
         let mut connection = self.acquire_reader().await?;
         let whole_file = whole_file_cue_sql("track");
         Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT coalesce(location.source_path,canonical.path) path,
-                    CASE WHEN location.source_path IS NOT NULL THEN file.revision ELSE canonical.revision END revision,track.cue_start_millis,
+            "SELECT coalesce(file.path,canonical.path) path,
+                    CASE WHEN file.path IS NOT NULL THEN file.revision ELSE canonical.revision END revision,track.cue_start_millis,
                     CASE WHEN {whole_file} THEN NULL ELSE track.cue_end_millis END cue_end_millis
              FROM tracks track JOIN sources source USING(source_key)
-             LEFT JOIN local_track_access location USING(track_key)
-             LEFT JOIN observed_local_files file ON file.source_key=track.source_key AND file.path=location.source_path
              LEFT JOIN local_files canonical ON canonical.source_key=track.source_key AND canonical.path=track.source_path
-             WHERE track.media_uri=?1 AND(location.source_path IS NOT NULL OR(source.kind IN('webdav','smb') AND canonical.path IS NOT NULL))"
+             LEFT JOIN local_file_observations file ON file.local_file_key=canonical.local_file_key
+             WHERE track.media_uri=?1 AND(file.path IS NOT NULL OR(source.kind IN('webdav','smb') AND canonical.path IS NOT NULL))"
         )))
         .bind(media_uri)
         .fetch_optional(&mut *connection)

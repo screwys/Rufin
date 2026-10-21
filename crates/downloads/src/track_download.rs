@@ -986,19 +986,12 @@ async fn migrate_released_download_records(
             && released.source_id == *source_id
         {
             let Some(media_uri) = database
-                .selected_track_uris(
-                    &library::CatalogQuery::keys(
-                        library::CatalogKind::Track,
-                        Some(source_key),
-                        (&[released.track_id]).iter().map(|key| key.raw()).collect(),
-                    )
-                    .selection(),
-                    None,
-                    &cancellation,
-                )
+                .tracks(&[released.track_id], &cancellation)
                 .await
                 .map_err(|error| error.to_string())?
-                .pop()
+                .into_iter()
+                .find(|track| track.source_key == Some(source_key))
+                .map(|track| track.media_uri)
             else {
                 continue;
             };

@@ -179,17 +179,28 @@ rule:
           }
         stopBy: end
 ---
-id: scrolled-box-is-behind-viewport
+id: scrolled-content-is-behind-viewport
 language: Rust
 severity: error
-message: A GtkBox inside GtkScrolledWindow is under GtkViewport, not the direct child; retrieve the named box or unwrap the viewport first.
+message: GtkScrolledWindow wraps non-scrollable content in GtkViewport; keep the typed content from construction or retrieve it by ID.
 rule:
   any:
-    - pattern: $SCROLLER.child().and_then(|$CHILD| $CHILD.downcast::<gtk::Box>().ok())
-    - pattern: $SCROLLER.child().and_downcast::<gtk::Box>()
+    - pattern: $SCROLLER.child().and_then(|$CHILD| $CHILD.downcast::<$CONTENT>().ok())
+    - pattern: $SCROLLER.child().and_downcast::<$CONTENT>()
 constraints:
   SCROLLER:
-    regex: scroller
+    any:
+      - regex: scroll|clip
+      - inside:
+          kind: function_item
+          has:
+            pattern:
+              context: 'fn example($SCROLLER: &gtk::ScrolledWindow) {}'
+              selector: parameter
+            stopBy: end
+          stopBy: end
+  CONTENT:
+    regex: ^(gtk::)?(Box|Label)$
 ---
 id: track-search-callback-must-not-own-track-projection
 language: Rust

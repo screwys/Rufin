@@ -5,7 +5,6 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use library::ReadCancellation;
 use localization::{msgid, tr};
 use rufin_core::playback::QueuePlacement;
-use rufin_core::source::folders::FolderProjection;
 
 use crate::{CatalogUi, LibraryField, LibraryListKey};
 use gtk_widgets::interactions::install_context_menu_openers;
@@ -14,25 +13,7 @@ use gtk_widgets::mounted_route::{LatestMountedRouteRead, MountedRoute};
 use gtk_widgets::route::{FolderPathItem, Route};
 use gtk_widgets::sparse_model::{SparseSource, connect_sparse_bind};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FolderLink {
-    pub object_id: String,
-    pub name: String,
-}
-
-pub struct PreparedFolderRoute {
-    source: FolderProjection,
-    page: FolderPageData,
-}
-
-struct FolderPageData {
-    query: library::CatalogQuery,
-    folder_count: usize,
-    track_count: usize,
-    first_position: usize,
-    first_folders: Vec<FolderLink>,
-    first_tracks: Vec<library::TrackView>,
-}
+type FolderLink = rufin_core::browse::FolderEntry;
 
 type FolderResume = Rc<dyn Fn()>;
 
@@ -58,7 +39,7 @@ impl CatalogUi {
         self: &Rc<Self>,
         path: Vec<FolderPathItem>,
         selected: &rufin_core::runtime::SelectedLibrary,
-        prepared: Result<PreparedFolderRoute, String>,
+        prepared: Result<rufin_core::browse::FolderPage, String>,
     ) -> MountedRoute {
         let wrapper = FoldersRouteView::new();
         let search = gtk::SearchEntry::new();
@@ -115,125 +96,6 @@ impl CatalogUi {
     }
 }
 
-pub async fn prepare_folder_route(
-    owner: &rufin_core::source::SourceOwner,
-    database: &library::Database,
-    selected: &rufin_core::runtime::SelectedLibrary,
-    path: &[FolderPathItem],
-    settings: &crate::LibraryListSettings,
-    window: library::RouteSeedWindow,
-    cancellation: &ReadCancellation,
-) -> Result<PreparedFolderRoute, String> {
-    let source = rufin_core::source::folders::resolve_folder(
-        owner,
-        database,
-        selected,
-        path.last().map(|item| item.id.as_str()),
-        cancellation,
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    let route = Route::Folders {
-        path: path.to_vec(),
-    };
-    let query = rufin_core::browse::BrowseRequest::new(
-        &route,
-        rufin_core::route::CollectionCategory::Tracks,
-        Some(selected.source_key),
-        selected.music_folder_key,
-        settings,
-        8,
-    )
-    .resolve(database, Some(&source), cancellation)
-    .await
-    .map_err(|error| error.to_string())?
-    .tracks()
-    .expect("folder song route")
-    .clone();
-    let page = load_folder_page(
-        database,
-        selected.source_key,
-        &source,
-        query,
-        window,
-        cancellation,
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    Ok(PreparedFolderRoute { source, page })
-}
-
-async fn load_child_folders(
-    database: &library::Database,
-    source_key: library::SourceKey,
-    source: &FolderProjection,
-    query: &library::CatalogQuery,
-    range: std::ops::Range<usize>,
-    cancellation: &ReadCancellation,
-) -> library::LibraryResult<(usize, Vec<FolderLink>)> {
-    let (count, rows) = source
-        .child_page(database, source_key, query, range, cancellation)
-        .await?;
-    Ok((
-        count,
-        rows.into_iter()
-            .map(|row| FolderLink {
-                object_id: row.object_id,
-                name: row.name,
-            })
-            .collect(),
-    ))
-}
-
-async fn load_folder_page(
-    database: &library::Database,
-    source_key: library::SourceKey,
-    source: &FolderProjection,
-    query: library::CatalogQuery,
-    window: library::RouteSeedWindow,
-    cancellation: &ReadCancellation,
-) -> library::LibraryResult<FolderPageData> {
-    let folder_count = load_child_folders(database, source_key, source, &query, 0..0, cancellation)
-        .await?
-        .0;
-    let track_count = (&query).count(&database, cancellation).await? as usize;
-    let range = window.range(folder_count + track_count);
-    let first_folders = if range.start < folder_count {
-        load_child_folders(
-            database,
-            source_key,
-            source,
-            &query,
-            range.clone(),
-            cancellation,
-        )
-        .await?
-        .1
-    } else {
-        Vec::new()
-    };
-    let first_tracks = (&query)
-        .rows(
-            &database,
-            range.start.saturating_sub(folder_count),
-            range.len().saturating_sub(first_folders.len()),
-            cancellation,
-        )
-        .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
-        })?;
-    Ok(FolderPageData {
-        query,
-        folder_count,
-        track_count,
-        first_position: range.start,
-        first_folders,
-        first_tracks,
-    })
-}
-
 #[derive(Clone, PartialEq)]
 #[expect(
     clippy::large_enum_variant,
@@ -249,7 +111,7 @@ fn folder_page(
     selected: &rufin_core::runtime::SelectedLibrary,
     path: Vec<FolderPathItem>,
     search: gtk::SearchEntry,
-    prepared: PreparedFolderRoute,
+    prepared: rufin_core::browse::FolderPage,
 ) -> (
     gtk::Widget,
     FolderResume,
@@ -260,15 +122,19 @@ fn folder_page(
     search.set_visible(true);
     let route_width = (shell.route_width)();
 
-    let PreparedFolderRoute { source, page } = prepared;
-    let FolderPageData {
-        query,
+    let rufin_core::browse::FolderPage {
+        projection: source,
+        read: query,
         folder_count,
         track_count,
-        first_position,
-        first_folders,
-        first_tracks,
-    } = page;
+        first_row_position: first_position,
+        folders: first_folders,
+        tracks: first_tracks,
+    } = prepared;
+    let first_tracks = first_tracks
+        .into_iter()
+        .map(library::MemberRow::into_track)
+        .collect::<Vec<_>>();
     let applied_query = Rc::new(RefCell::new(query.clone()));
     let database = Arc::clone(&shell.library);
     let source_key = selected.source_key;
@@ -280,22 +146,14 @@ fn folder_page(
             let source = folder_source.clone();
             let query = folder_query.borrow().clone();
             Box::pin(async move {
-                Ok(
-                    load_child_folders(
-                        &database,
-                        source_key,
-                        &source,
-                        &query,
-                        range,
-                        &cancellation,
-                    )
+                Ok(source
+                    .child_page(&database, source_key, &query, range, &cancellation)
                     .await
                     .map_err(|error| error.to_string())?
                     .1
                     .into_iter()
                     .map(FolderTableRow::Folder)
-                    .collect::<Vec<_>>(),
-                )
+                    .collect::<Vec<_>>())
             }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
         },
     );
@@ -332,12 +190,13 @@ fn folder_page(
             let database = Arc::clone(&row_database);
             let query = load_input.borrow().clone();
             Box::pin(async move {
-                Ok((&query)
+                Ok(query
                     .rows(&database, range.start, range.len(), &cancellation)
                     .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Tracks(rows) => rows,
-                        _ => unreachable!("typed song projection"),
+                    .map(|rows| {
+                        rows.into_iter()
+                            .map(library::MemberRow::into_track)
+                            .collect::<Vec<_>>()
                     })
                     .map_err(|error| error.to_string())?
                     .into_iter()
@@ -404,21 +263,21 @@ fn folder_page(
         let track_sparse = Rc::clone(&track_sparse);
         let stack = table_stack.clone();
         Rc::new(
-            move |_: (library::CatalogQuery, library::RouteSeedWindow),
-                  result: library::LibraryResult<FolderPageData>| {
+            move |_: (library::MemberRead, library::RouteSeedWindow),
+                  result: library::LibraryResult<rufin_core::browse::FolderPage>| {
                 let Ok(page) = result else { return };
                 stack.set_visible_child_name(if page.folder_count + page.track_count == 0 {
                     "empty"
                 } else {
                     "content"
                 });
-                applied_query.replace(page.query);
+                applied_query.replace(page.read);
                 folder_sparse.replace_prepared_at(
                     SparseSource::Query {
                         count: page.folder_count,
                     },
-                    page.first_position.min(page.folder_count),
-                    page.first_folders
+                    page.first_row_position.min(page.folder_count),
+                    page.folders
                         .into_iter()
                         .map(FolderTableRow::Folder)
                         .collect(),
@@ -432,9 +291,10 @@ fn folder_page(
                     SparseSource::Query {
                         count: page.track_count,
                     },
-                    page.first_position.saturating_sub(page.folder_count),
-                    page.first_tracks
+                    page.first_row_position.saturating_sub(page.folder_count),
+                    page.tracks
                         .into_iter()
+                        .map(library::MemberRow::into_track)
                         .map(FolderTableRow::Track)
                         .collect(),
                     Vec::new(),
@@ -448,12 +308,20 @@ fn folder_page(
     };
     let database = Arc::clone(&shell.library);
     let load = Arc::new(
-        move |(query, window): (library::CatalogQuery, library::RouteSeedWindow),
+        move |(query, window): (library::MemberRead, library::RouteSeedWindow),
               cancellation: ReadCancellation| {
             let database = Arc::clone(&database);
             let source = source.clone();
             Box::pin(async move {
-                load_folder_page(&database, source_key, &source, query, window, &cancellation).await
+                rufin_core::browse::FolderPage::load(
+                    &database,
+                    source_key,
+                    source,
+                    query,
+                    window,
+                    &cancellation,
+                )
+                .await
             }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
         },
     );
@@ -479,9 +347,7 @@ fn folder_page(
             let mut request = previous.borrow().clone();
             request.filter = query;
             request.descending = settings.descending;
-            if let library::CatalogSubject::Tracks { sort, .. } = &mut request.subject {
-                *sort = Some(settings.sort_key.catalog_sort());
-            }
+            request.sort = Some(settings.sort_key.catalog_sort());
             let name_changed = folder_name_field(&previous_fields.borrow())
                 != folder_name_field(&settings.row_fields);
             table.apply_fields(&settings.row_fields);
@@ -569,7 +435,7 @@ fn folder_table(
     tracks: Rc<gtk_widgets::sparse_model::SparseRouteModel<library::TrackKey, FolderTableRow>>,
     path: Vec<FolderPathItem>,
     initial_width: i32,
-    applied_query: Rc<RefCell<library::CatalogQuery>>,
+    applied_query: Rc<RefCell<library::MemberRead>>,
     fields: &[LibraryField],
 ) -> crate::collections::CollectionTableProjection {
     let selection = gtk::SingleSelection::new(Some(rows.clone()));
@@ -702,8 +568,7 @@ fn folder_index_column(
             playing.unbind(cell.upcast_ref());
         }
     });
-    let column =
-        gtk::ColumnViewColumn::new(Some(super::columns::ROW_INDEX_COLUMN_TITLE), Some(factory));
+    let column = gtk::ColumnViewColumn::new(Some("#"), Some(factory));
     configure_folder_column(
         &column,
         super::columns::track_column_width(LibraryListKey::Folders, LibraryField::RowIndex),
@@ -1156,6 +1021,7 @@ mod tests {
             vec![super::FolderLink {
                 object_id: "folder:music".into(),
                 name: "Music".into(),
+                artwork_binding: None,
             }],
             64,
         );

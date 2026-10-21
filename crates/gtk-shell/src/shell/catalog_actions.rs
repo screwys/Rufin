@@ -55,7 +55,7 @@ pub(super) fn add_current_to_playlist(
     gtk_widgets::playlists::add_media_to_playlist(
         &shell.products.source,
         playlist,
-        library::CatalogQuery::uris(library::CatalogKind::Track, vec![media.media_uri]).selection(),
+        library::MemberSelection::Uris((vec![media.media_uri]).into()),
         false,
         Rc::new(move |accepted| {
             if accepted > 0

@@ -36,6 +36,11 @@ pub(super) async fn write_headers<T: serde::Serialize + Default + Sync>(
     observed: Option<i64>,
 ) -> LibraryResult<(Vec<String>, bool)> {
     let (table, _) = table(kind);
+    let column = if kind == "album" {
+        "input_metadata"
+    } else {
+        "metadata"
+    };
     let normalized = if kind == "album" {
         "normalized_title"
     } else {
@@ -72,27 +77,27 @@ pub(super) async fn write_headers<T: serde::Serialize + Default + Sync>(
         );
         let metadata = if !native {
             format!(
-                "jsonb_patch(coalesce({table}.metadata,jsonb('{{}}')),(SELECT jsonb(metadata) FROM input WHERE object_id=excluded.object_id LIMIT 1))"
+                "jsonb_patch(coalesce({table}.{column},jsonb('{{}}')),(SELECT jsonb(metadata) FROM input WHERE object_id=excluded.object_id LIMIT 1))"
             )
         } else if kind == "folder" {
             format!(
-                "CASE WHEN json_extract(excluded.metadata,'$.name') IS NULL THEN {table}.metadata ELSE excluded.metadata END"
+                "CASE WHEN json_extract(excluded.{column},'$.name') IS NULL THEN {table}.{column} ELSE excluded.{column} END"
             )
         } else {
-            "excluded.metadata".to_owned()
+            format!("excluded.{column}")
         };
         let caption = if !native {
             format!(
-                "CASE WHEN excluded.{normalized}='' OR('{kind}'='folder' AND json_extract(excluded.metadata,'$.name') IS NULL) THEN {table}.{normalized} ELSE excluded.{normalized} END"
+                "CASE WHEN excluded.{normalized}='' OR('{kind}'='folder' AND json_extract(excluded.{column},'$.name') IS NULL) THEN {table}.{normalized} ELSE excluded.{normalized} END"
             )
         } else if kind == "folder" {
             format!(
-                "CASE WHEN json_extract(excluded.metadata,'$.name') IS NULL THEN {table}.{normalized} ELSE excluded.{normalized} END"
+                "CASE WHEN json_extract(excluded.{column},'$.name') IS NULL THEN {table}.{normalized} ELSE excluded.{normalized} END"
             )
         } else {
             format!("excluded.{normalized}")
         };
-        query.push(format!(") INSERT INTO {table}(source_key,object_id,media_uri,metadata,{normalized},indexed,native_metadata) SELECT "))
+        query.push(format!(") INSERT INTO {table}(source_key,object_id,media_uri,{column},{normalized},indexed,native_metadata) SELECT "))
             .push_bind(source).push(",object_id,media_uri,");
         if native {
             query.push("jsonb(metadata)");
@@ -104,10 +109,10 @@ pub(super) async fn write_headers<T: serde::Serialize + Default + Sync>(
         }
         query.push(",normalized,").push_bind(admit)
             .push(",").push_bind(native)
-            .push(format!(" FROM input WHERE true ON CONFLICT(source_key,object_id) DO UPDATE SET metadata={metadata},{normalized}={caption},indexed=max({table}.indexed,excluded.indexed),native_metadata=max({table}.native_metadata,excluded.native_metadata) WHERE "))
+            .push(format!(" FROM input WHERE true ON CONFLICT(source_key,object_id) DO UPDATE SET {column}={metadata},{normalized}={caption},indexed=max({table}.indexed,excluded.indexed),native_metadata=max({table}.native_metadata,excluded.native_metadata) WHERE "))
             .push(if native { "1" } else { "native_metadata=0" })
             .push(format!(" AND {table}.observed_stamp<=")).push_bind(observed.unwrap_or(i64::MAX))
-            .push(format!(" AND ({table}.metadata,{table}.indexed,{table}.native_metadata) IS NOT({metadata},max({table}.indexed,excluded.indexed),max({table}.native_metadata,excluded.native_metadata)) RETURNING object_id"));
+            .push(format!(" AND ({table}.{column},{table}.indexed,{table}.native_metadata) IS NOT({metadata},max({table}.indexed,excluded.indexed),max({table}.native_metadata,excluded.native_metadata)) RETURNING object_id"));
         changed.0.extend(
             query
                 .build_query_scalar::<String>()
@@ -888,7 +893,7 @@ pub(crate) async fn remember_collection(
         };
         super::collections::headers(connection, source.raw(), &source_id, &[&album], &[], None)
             .await?;
-        super::files::album_order(connection, &[key]).await?;
+        super::index::albums(connection, &[key]).await?;
     }
     super::artwork::refresh_choices(
         connection,
@@ -1145,7 +1150,7 @@ impl super::Catalog<'_> {
                     )
                     .await?;
                 }
-                super::files::album_order(&mut tx, &albums).await?;
+                super::index::albums(&mut tx, &albums).await?;
                 super::artwork::refresh_choices(
                     &mut tx,
                     if *kind == "track" { &keys } else { &[] },

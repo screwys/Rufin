@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use library::{CatalogQuery, Database, ReadCancellation, TrackScope};
+use library::{Collection, Database, MemberRead, ReadCancellation};
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::prelude::{Accessor, ItemKey};
@@ -191,7 +191,7 @@ async fn one_local_path_republishes_only_its_component() {
     let first_publication = updates.try_recv().expect("catalog update");
     let before = database
         .selected_track_uris(
-            &CatalogQuery::tracks(TrackScope::Tracks(first_publication.0)).selection(),
+            &MemberRead::new(Collection::Source(first_publication.0)).selection(),
             None,
             &ReadCancellation::new(),
         )
@@ -215,7 +215,7 @@ async fn one_local_path_republishes_only_its_component() {
     assert!(changed.1.metadata);
     let after = database
         .selected_track_uris(
-            &CatalogQuery::tracks(TrackScope::Tracks(changed.0)).selection(),
+            &MemberRead::new(Collection::Source(changed.0)).selection(),
             None,
             &ReadCancellation::new(),
         )
@@ -269,12 +269,10 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
         .await
         .expect("scan");
     let initial = updates.try_recv().expect("catalog update");
-    let album = library::CatalogQuery {
-        subject: library::CatalogSubject::Albums {
-            source: initial.0,
-            sort: library::CatalogSort::Title,
-            inline_tracks: None,
-        },
+    let album = library::ListRead {
+        kind: library::ListKind::Albums,
+        source: Some(initial.0),
+        sort: library::CatalogSort::Title,
         folder: None,
         filter: ("").to_string(),
         descending: false,
@@ -282,35 +280,19 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
         downloaded_only: false,
         activity: false,
     }
-    .page(
+    .page_albums(
         &database,
         library::RouteSeedWindow::top(),
         &ReadCancellation::new(),
     )
     .await
-    .map(|page| match page.rows {
-        library::CatalogRows::Albums(rows) => (page.count, page.first_row_position, rows),
-        _ => unreachable!(),
-    })
-    .expect("Album order")
-    .2[0]
+    .map(|page| page.rows)
+    .expect("Album order")[0]
         .album_key;
-    let before = {
-        let mut query = library::CatalogQuery::keys(
-            library::CatalogKind::Album,
-            Some(initial.0),
-            (&[album]).iter().map(|key| key.raw()).collect(),
-        );
-        query.folder = None;
-        query
-            .rows(&database, 0, (&[album]).len(), &ReadCancellation::new())
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Albums(rows) => rows,
-                _ => unreachable!("typed catalog projection"),
-            })
-    }
-    .expect("initial Album artwork")[0]
+    let before = database
+        .albums(&[album], false, &ReadCancellation::new())
+        .await
+        .expect("initial Album artwork")[0]
         .artwork_binding
         .clone();
     assert!(before.is_some());
@@ -330,18 +312,10 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
         .await;
     assert!(matches!(interrupted, Err(sources::SourceError::Cancelled)));
     assert_eq!(
-        library::CatalogQuery::keys(
-            library::CatalogKind::Album,
-            Some(initial.0),
-            (&[album]).iter().map(|v| v.raw()).collect()
-        )
-        .rows(&database, 0, 256, &ReadCancellation::new())
-        .await
-        .map(|rows| match rows {
-            library::CatalogRows::Albums(rows) => rows,
-            _ => unreachable!(),
-        })
-        .expect("Album cover after cancelled discovery")[0]
+        database
+            .albums(&[album], false, &ReadCancellation::new())
+            .await
+            .expect("Album cover after cancelled discovery")[0]
             .artwork_binding,
         before
     );
@@ -365,18 +339,10 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
     assert!(publication.1.artwork);
     assert!(!publication.1.metadata && !publication.1.playlists && !publication.1.home);
     assert_ne!(
-        library::CatalogQuery::keys(
-            library::CatalogKind::Album,
-            Some(initial.0),
-            (&[album]).iter().map(|v| v.raw()).collect()
-        )
-        .rows(&database, 0, 256, &ReadCancellation::new())
-        .await
-        .map(|rows| match rows {
-            library::CatalogRows::Albums(rows) => rows,
-            _ => unreachable!(),
-        })
-        .expect("Album row")[0]
+        database
+            .albums(&[album], false, &ReadCancellation::new())
+            .await
+            .expect("Album row")[0]
             .artwork_binding,
         before
     );
@@ -426,20 +392,16 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     let initial = updates.try_recv().expect("catalog update");
     let order = database
         .selected_track_uris(
-            &CatalogQuery::tracks(TrackScope::Tracks(initial.0)).selection(),
+            &MemberRead::new(Collection::Source(initial.0)).selection(),
             None,
             &ReadCancellation::new(),
         )
         .await
         .expect("Track order");
     assert_eq!(
-        library::CatalogQuery::uris(library::CatalogKind::Track, (&order).to_vec())
-            .rows(&database, 0, 256, &ReadCancellation::new())
+        database
+            .tracks_by_uris(&((&order).to_vec()), &ReadCancellation::new())
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!(),
-            })
             .expect("initial Track row")[0]
             .metadata
             .duration_millis,
@@ -574,13 +536,9 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     let changed = updates.try_recv().expect("catalog update");
     assert!(changed.1.metadata);
     assert_eq!(
-        library::CatalogQuery::uris(library::CatalogKind::Track, (&order).to_vec())
-            .rows(&database, 0, 256, &ReadCancellation::new())
+        database
+            .tracks_by_uris(&((&order).to_vec()), &ReadCancellation::new())
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!(),
-            })
             .expect("changed Track row")[0]
             .metadata
             .duration_millis,
@@ -897,12 +855,10 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
         .await
         .expect("scan");
     let initial = updates.try_recv().expect("catalog update");
-    let albums = library::CatalogQuery {
-        subject: library::CatalogSubject::Albums {
-            source: initial.0,
-            sort: library::CatalogSort::Title,
-            inline_tracks: None,
-        },
+    let albums = library::ListRead {
+        kind: library::ListKind::Albums,
+        source: Some(initial.0),
+        sort: library::CatalogSort::Title,
         folder: None,
         filter: ("").to_string(),
         descending: false,
@@ -910,18 +866,14 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
         downloaded_only: false,
         activity: false,
     }
-    .page(
+    .page_albums(
         &database,
         library::RouteSeedWindow::top(),
         &ReadCancellation::new(),
     )
     .await
-    .map(|page| match page.rows {
-        library::CatalogRows::Albums(rows) => (page.count, page.first_row_position, rows),
-        _ => unreachable!(),
-    })
-    .expect("Album order")
-    .2;
+    .map(|page| page.rows)
+    .expect("Album order");
     assert_eq!(albums.len(), 2);
     let mut stored = sqlx::SqliteConnection::connect_with(
         &sqlx::sqlite::SqliteConnectOptions::new().filename(&database_path),
@@ -1027,12 +979,12 @@ async fn encoded_local_paths_publish_folder_art_and_watcher_replacements() {
     )
     .unwrap();
     assert!(uri.contains("%25"));
-    let row = library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_string()])
-        .rows(&database, 0, 1, &ReadCancellation::new())
+    let row = database
+        .tracks_by_uris(&([(&uri).to_string()]), &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(mut rows) => rows.pop(),
-            _ => unreachable!("typed catalog projection"),
+        .map(|rows| {
+            let mut rows = rows;
+            rows.pop()
         })
         .unwrap()
         .unwrap();
@@ -1069,16 +1021,15 @@ async fn encoded_local_paths_publish_folder_art_and_watcher_replacements() {
         .unwrap();
     let update = updates.try_recv().expect("catalog update");
     assert!(update.1.artwork && !update.1.metadata && !update.1.playlists && !update.1.home);
-    let changed =
-        library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_string()])
-            .rows(&database, 0, 1, &ReadCancellation::new())
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(mut rows) => rows.pop(),
-                _ => unreachable!("typed catalog projection"),
-            })
-            .unwrap()
-            .unwrap();
+    let changed = database
+        .tracks_by_uris(&([(&uri).to_string()]), &ReadCancellation::new())
+        .await
+        .map(|rows| {
+            let mut rows = rows;
+            rows.pop()
+        })
+        .unwrap()
+        .unwrap();
     assert_ne!(row.artwork_binding, changed.artwork_binding);
     assert_eq!(row.track_key, changed.track_key);
 }
@@ -1158,16 +1109,15 @@ async fn local_default_cover_reaches_later_track_and_distinct_rescan_preserves_g
             .unwrap();
         for (index, path) in paths.iter().enumerate() {
             let uri = url::Url::from_file_path(path).unwrap().to_string();
-            let row =
-                library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_string()])
-                    .rows(&database, 0, 1, &ReadCancellation::new())
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Tracks(mut rows) => rows.pop(),
-                        _ => unreachable!("typed catalog projection"),
-                    })
-                    .unwrap()
-                    .unwrap();
+            let row = database
+                .tracks_by_uris(&([(&uri).to_string()]), &ReadCancellation::new())
+                .await
+                .map(|rows| {
+                    let mut rows = rows;
+                    rows.pop()
+                })
+                .unwrap()
+                .unwrap();
             let bytes = row
                 .artwork_binding
                 .unwrap_or_else(|| panic!("missing cover distinct={distinct} track={index}"));
@@ -1271,12 +1221,12 @@ async fn local_artist_cover_keeps_album_order_across_point_updates() {
         .await
         .unwrap();
     let initial = updates.try_recv().expect("catalog update");
-    let artist = library::CatalogQuery {
-        subject: library::CatalogSubject::Artists {
-            source: initial.0,
-            sort: library::CatalogSort::Title,
+    let artist = library::ListRead {
+        kind: library::ListKind::Artists {
             album_artist: false,
         },
+        source: Some(initial.0),
+        sort: library::CatalogSort::Title,
         folder: None,
         filter: ("").to_string(),
         descending: false,
@@ -1284,18 +1234,14 @@ async fn local_artist_cover_keeps_album_order_across_point_updates() {
         downloaded_only: false,
         activity: false,
     }
-    .page(
+    .page_artists(
         &database,
         library::RouteSeedWindow::top(),
         &ReadCancellation::new(),
     )
     .await
-    .map(|page| match page.rows {
-        library::CatalogRows::Artists(rows) => (page.count, page.first_row_position, rows),
-        _ => unreachable!(),
-    })
+    .map(|page| page.rows)
     .unwrap()
-    .2
     .remove(0);
     for changed in [&covers[1], &covers[0]] {
         fs::write(changed, b"replacement artwork").unwrap();
@@ -1312,18 +1258,11 @@ async fn local_artist_cover_keeps_album_order_across_point_updates() {
             .unwrap();
         let update = updates.try_recv().expect("catalog update");
         assert!(update.1.artwork && !update.1.metadata && !update.1.playlists && !update.1.home);
-        let current = library::CatalogQuery::uris(
-            library::CatalogKind::Artist,
-            vec![(&artist.media_uri).to_string()],
-        )
-        .rows(&database, 0, 1, &ReadCancellation::new())
-        .await
-        .map(|rows| match rows {
-            library::CatalogRows::Artists(mut rows) => rows.pop(),
-            _ => unreachable!("typed catalog projection"),
-        })
-        .unwrap()
-        .unwrap();
+        let current = database
+            .artist(&artist.media_uri, false, false, &ReadCancellation::new())
+            .await
+            .unwrap()
+            .unwrap();
         let artwork: Vec<library::ArtworkCandidate> =
             serde_json::from_slice(current.artwork_binding.as_ref().unwrap()).unwrap();
         let binding = &artwork;
@@ -1391,18 +1330,15 @@ async fn local_borrowed_album_cover_follows_replacement_and_removal() {
         .unwrap();
     let initial = updates.try_recv().expect("catalog update");
     let borrower_uri = url::Url::from_file_path(&paths[1]).unwrap().to_string();
-    let before = library::CatalogQuery::uris(
-        library::CatalogKind::Track,
-        vec![(&borrower_uri).to_string()],
-    )
-    .rows(&database, 0, 1, &ReadCancellation::new())
-    .await
-    .map(|rows| match rows {
-        library::CatalogRows::Tracks(mut rows) => rows.pop(),
-        _ => unreachable!("typed catalog projection"),
-    })
-    .unwrap()
-    .unwrap();
+    let before = database
+        .tracks_by_uris(&([(&borrower_uri).to_string()]), &ReadCancellation::new())
+        .await
+        .map(|rows| {
+            let mut rows = rows;
+            rows.pop()
+        })
+        .unwrap()
+        .unwrap();
     assert!(before.artwork_binding.is_some());
     for remove in [false, true] {
         if remove {
@@ -1423,18 +1359,15 @@ async fn local_borrowed_album_cover_follows_replacement_and_removal() {
             .unwrap();
         let update = updates.try_recv().expect("catalog update");
         assert!(update.1.artwork && !update.1.metadata && !update.1.playlists && !update.1.home);
-        let borrower = library::CatalogQuery::uris(
-            library::CatalogKind::Track,
-            vec![(&borrower_uri).to_string()],
-        )
-        .rows(&database, 0, 1, &ReadCancellation::new())
-        .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(mut rows) => rows.pop(),
-            _ => unreachable!("typed catalog projection"),
-        })
-        .unwrap()
-        .unwrap();
+        let borrower = database
+            .tracks_by_uris(&([(&borrower_uri).to_string()]), &ReadCancellation::new())
+            .await
+            .map(|rows| {
+                let mut rows = rows;
+                rows.pop()
+            })
+            .unwrap()
+            .unwrap();
         assert_eq!(borrower.track_key, before.track_key);
         assert_ne!(borrower.artwork_binding, before.artwork_binding);
         let borrowed: Vec<library::ArtworkCandidate> = borrower
@@ -1450,17 +1383,12 @@ async fn local_borrowed_album_cover_follows_replacement_and_removal() {
         );
         for path in &paths {
             let uri = url::Url::from_file_path(path).unwrap().to_string();
-            let binding =
-                library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                    .rows(&database, 0, 256, &ReadCancellation::new())
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                        _ => unreachable!(),
-                    })
-                    .unwrap()
-                    .unwrap()
-                    .artwork_binding;
+            let binding = database
+                .track(&(&uri), &ReadCancellation::new())
+                .await
+                .unwrap()
+                .unwrap()
+                .artwork_binding;
             let candidates = binding.as_deref().map(|bytes| {
                 serde_json::from_slice::<Vec<library::ArtworkCandidate>>(bytes).unwrap()
             });
@@ -1541,40 +1469,24 @@ async fn local_metadata_save_publishes_album_identity_changes() {
         .unwrap();
     let initial = updates.try_recv().expect("catalog update");
     let uri = url::Url::from_file_path(&path).unwrap().to_string();
-    let track = library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_string()])
-        .rows(&database, 0, 1, &ReadCancellation::new())
+    let track = database
+        .tracks_by_uris(&([(&uri).to_string()]), &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(mut rows) => rows.pop(),
-            _ => unreachable!("typed catalog projection"),
+        .map(|rows| {
+            let mut rows = rows;
+            rows.pop()
         })
         .unwrap()
         .unwrap();
-    let album = {
-        let mut query = library::CatalogQuery::keys(
-            library::CatalogKind::Album,
-            Some(initial.0),
-            (&[track.links.album_key.unwrap()])
-                .iter()
-                .map(|key| key.raw())
-                .collect(),
-        );
-        query.folder = None;
-        query
-            .rows(
-                &database,
-                0,
-                (&[track.links.album_key.unwrap()]).len(),
-                &ReadCancellation::new(),
-            )
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Albums(rows) => rows,
-                _ => unreachable!("typed catalog projection"),
-            })
-    }
-    .unwrap()
-    .remove(0);
+    let album = database
+        .albums(
+            &[track.links.album_key.unwrap()],
+            false,
+            &ReadCancellation::new(),
+        )
+        .await
+        .unwrap()
+        .remove(0);
     let source = Arc::new(source);
     let (editor, _metadata) = sources::FileEditSession::open(
         Some(Arc::clone(&source)),
@@ -1599,16 +1511,15 @@ async fn local_metadata_save_publishes_album_identity_changes() {
             .unwrap();
     }
     assert!(updates.try_recv().expect("catalog update").1.metadata);
-    let current =
-        library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_string()])
-            .rows(&database, 0, 1, &ReadCancellation::new())
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(mut rows) => rows.pop(),
-                _ => unreachable!("typed catalog projection"),
-            })
-            .unwrap()
-            .unwrap();
+    let current = database
+        .tracks_by_uris(&([(&uri).to_string()]), &ReadCancellation::new())
+        .await
+        .map(|rows| {
+            let mut rows = rows;
+            rows.pop()
+        })
+        .unwrap()
+        .unwrap();
     assert_eq!(current.track_key, track.track_key);
     assert_eq!(current.metadata.album, "After");
     let (editor, _metadata) = sources::FileEditSession::open(
@@ -1658,31 +1569,15 @@ async fn local_metadata_save_publishes_album_identity_changes() {
         ("", "", "1995-07-08", Some("1995-07-08"), Some(1995)),
         ("", "", "", None, None),
     ] {
-        let album = {
-            let mut query = library::CatalogQuery::keys(
-                library::CatalogKind::Album,
-                Some(initial.0),
-                (&[current.links.album_key.unwrap()])
-                    .iter()
-                    .map(|key| key.raw())
-                    .collect(),
-            );
-            query.folder = None;
-            query
-                .rows(
-                    &database,
-                    0,
-                    (&[current.links.album_key.unwrap()]).len(),
-                    &ReadCancellation::new(),
-                )
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Albums(rows) => rows,
-                    _ => unreachable!("typed catalog projection"),
-                })
-        }
-        .unwrap()
-        .remove(0);
+        let album = database
+            .albums(
+                &[current.links.album_key.unwrap()],
+                false,
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap()
+            .remove(0);
         let (editor, _metadata) = sources::FileEditSession::open(
             Some(Arc::clone(&source)),
             &database,
@@ -1710,31 +1605,15 @@ async fn local_metadata_save_publishes_album_identity_changes() {
                 .await
                 .unwrap();
         }
-        let album = {
-            let mut query = library::CatalogQuery::keys(
-                library::CatalogKind::Album,
-                Some(initial.0),
-                (&[current.links.album_key.unwrap()])
-                    .iter()
-                    .map(|key| key.raw())
-                    .collect(),
-            );
-            query.folder = None;
-            query
-                .rows(
-                    &database,
-                    0,
-                    (&[current.links.album_key.unwrap()]).len(),
-                    &ReadCancellation::new(),
-                )
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Albums(rows) => rows,
-                    _ => unreachable!("typed catalog projection"),
-                })
-        }
-        .unwrap()
-        .remove(0);
+        let album = database
+            .albums(
+                &[current.links.album_key.unwrap()],
+                false,
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap()
+            .remove(0);
         for path in [&path, &second_path] {
             let uri = url::Url::from_file_path(path).unwrap().to_string();
             let (_editor, metadata) = sources::FileEditSession::open(
@@ -1760,28 +1639,25 @@ async fn local_metadata_save_publishes_album_identity_changes() {
                     value
                 );
             }
-            let track =
-                library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_string()])
-                    .rows(&database, 0, 1, &ReadCancellation::new())
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Tracks(mut rows) => rows.pop(),
-                        _ => unreachable!("typed catalog projection"),
-                    })
-                    .unwrap()
-                    .unwrap();
+            let track = database
+                .tracks_by_uris(&([(&uri).to_string()]), &ReadCancellation::new())
+                .await
+                .map(|rows| {
+                    let mut rows = rows;
+                    rows.pop()
+                })
+                .unwrap()
+                .unwrap();
             assert_eq!(track.metadata.release_date.as_deref(), expected);
             assert_eq!(track.metadata.year, year);
         }
         assert_eq!(album.metadata.release_date.as_deref(), expected);
         assert_eq!(album.metadata.year, year);
         for descending in [false, true] {
-            let albums = library::CatalogQuery {
-                subject: library::CatalogSubject::Albums {
-                    source: initial.0,
-                    sort: library::CatalogSort::ReleaseDate,
-                    inline_tracks: None,
-                },
+            let albums = library::ListRead {
+                kind: library::ListKind::Albums,
+                source: Some(initial.0),
+                sort: library::CatalogSort::ReleaseDate,
                 folder: None,
                 filter: ("").to_string(),
                 descending: descending,
@@ -1789,12 +1665,8 @@ async fn local_metadata_save_publishes_album_identity_changes() {
                 downloaded_only: false,
                 activity: false,
             }
-            .rows(&database, 0, 10, &ReadCancellation::new())
+            .albums(&database, 0, 10, &ReadCancellation::new())
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Albums(rows) => rows,
-                _ => unreachable!(),
-            })
             .unwrap();
             let titles = albums
                 .iter()
@@ -1944,12 +1816,10 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
         .await
         .expect("scan");
     let initial = updates.try_recv().expect("catalog update");
-    let albums = library::CatalogQuery {
-        subject: library::CatalogSubject::Albums {
-            source: initial.0,
-            sort: library::CatalogSort::Title,
-            inline_tracks: None,
-        },
+    let albums = library::ListRead {
+        kind: library::ListKind::Albums,
+        source: Some(initial.0),
+        sort: library::CatalogSort::Title,
         folder: None,
         filter: ("").to_string(),
         descending: false,
@@ -1957,26 +1827,19 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
         downloaded_only: false,
         activity: false,
     }
-    .page(
+    .page_albums(
         &database,
         library::RouteSeedWindow::top(),
         &ReadCancellation::new(),
     )
     .await
-    .map(|page| match page.rows {
-        library::CatalogRows::Albums(rows) => (page.count, page.first_row_position, rows),
-        _ => unreachable!(),
-    })
+    .map(|page| page.rows)
     .expect("Album order")
-    .2
     .into_iter()
     .map(|row| row.album_key)
     .collect::<Vec<_>>();
     assert_eq!(albums.len(), 1);
-    assert_eq!(
-        album_genres(&database, &initial, albums[0]).await,
-        ["Rock", "Jazz"]
-    );
+    assert_eq!(album_genres(&database, albums[0]).await, ["Rock", "Jazz"]);
 
     let mut stored = sqlx::SqliteConnection::connect_with(
         &sqlx::sqlite::SqliteConnectOptions::new().filename(&database_path),
@@ -2002,11 +1865,8 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
         )
         .await
         .expect("refresh the changed album and its old cached sibling");
-    let changed = updates.try_recv().expect("catalog update");
-    assert_eq!(
-        album_genres(&database, &changed, albums[0]).await,
-        ["Folk", "Jazz"]
-    );
+    updates.try_recv().expect("catalog update");
+    assert_eq!(album_genres(&database, albums[0]).await, ["Folk", "Jazz"]);
 
     set_genre(&first, "Electronic").expect("change one Track genre");
     source
@@ -2020,9 +1880,9 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
         )
         .await
         .expect("exact Track change");
-    let changed = updates.try_recv().expect("catalog update");
+    updates.try_recv().expect("catalog update");
     assert_eq!(
-        album_genres(&database, &changed, albums[0]).await,
+        album_genres(&database, albums[0]).await,
         ["Electronic", "Jazz"]
     );
 }
@@ -2072,19 +1932,15 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
     let initial = updates.try_recv().expect("catalog update");
     let order = database
         .selected_track_uris(
-            &CatalogQuery::tracks(TrackScope::Tracks(initial.0)).selection(),
+            &MemberRead::new(Collection::Source(initial.0)).selection(),
             None,
             &ReadCancellation::new(),
         )
         .await
         .expect("Track order");
-    let object_id = library::CatalogQuery::uris(library::CatalogKind::Track, (&order).to_vec())
-        .rows(&database, 0, (&order).len(), &ReadCancellation::new())
+    let object_id = database
+        .tracks_by_uris(&((&order).to_vec()), &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed catalog projection"),
-        })
         .expect("Track row")[0]
         .object_id
         .clone();
@@ -2141,7 +1997,7 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
     let changed = updates.try_recv().expect("catalog update");
     let changed_order = database
         .selected_track_uris(
-            &CatalogQuery::tracks(TrackScope::Tracks(changed.0)).selection(),
+            &MemberRead::new(Collection::Source(changed.0)).selection(),
             None,
             &ReadCancellation::new(),
         )
@@ -2172,13 +2028,10 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
             .unwrap();
     }
     assert_eq!(
-        library::CatalogQuery::uris(library::CatalogKind::Track, vec![(uri).to_owned()])
-            .rows(&database, 0, 256, &ReadCancellation::new())
+        database
+            .tracks_by_uris(&([(uri).to_owned()]), &ReadCancellation::new())
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                _ => unreachable!(),
-            })
+            .map(|rows| { rows.into_iter().next() })
             .unwrap()
             .unwrap()
             .object_id,
@@ -2268,7 +2121,7 @@ async fn initial_local_walk_reports_real_total_free_file_progress() {
             );
             assert_eq!(progress.last().unwrap().completed, 5);
             assert_eq!(
-                CatalogQuery::tracks(TrackScope::Tracks(source_key))
+                MemberRead::new(Collection::Source(source_key))
                     .count(&database, &ReadCancellation::new())
                     .await
                     .unwrap(),
@@ -2314,33 +2167,17 @@ async fn track_count(
     database: &Database,
     publication: &(library::SourceKey, library::CatalogUpdate),
 ) -> usize {
-    (&CatalogQuery::tracks(TrackScope::Tracks(publication.0)))
+    (&MemberRead::new(Collection::Source(publication.0)))
         .count(&database, &ReadCancellation::new())
         .await
         .expect("Track count") as usize
 }
 
-async fn album_genres(
-    database: &Database,
-    publication: &(library::SourceKey, library::CatalogUpdate),
-    album: library::AlbumKey,
-) -> Vec<String> {
-    {
-        let mut query = library::CatalogQuery::keys(
-            library::CatalogKind::Album,
-            Some(publication.0),
-            (&[album]).iter().map(|key| key.raw()).collect(),
-        );
-        query.folder = None;
-        query
-            .rows(&database, 0, (&[album]).len(), &ReadCancellation::new())
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Albums(rows) => rows,
-                _ => unreachable!("typed catalog projection"),
-            })
-    }
-    .expect("Album row")[0]
+async fn album_genres(database: &Database, album: library::AlbumKey) -> Vec<String> {
+    database
+        .albums(&[album], false, &ReadCancellation::new())
+        .await
+        .expect("Album row")[0]
         .links
         .genres
         .iter()

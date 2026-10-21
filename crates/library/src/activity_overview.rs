@@ -157,8 +157,13 @@ impl Database {
             row.state.play_count = count;
         }
         let keys = artists.iter().map(|(key, _)| *key).collect::<Vec<_>>();
-        let mut artist_rows =
-            crate::collections::load_artist_rows(&mut connection, &keys, false, false).await?;
+        let mut artist_rows = crate::collections::load_artist_requested(
+            &mut connection,
+            crate::query::RequestedKeys::batch(&keys)?,
+            false,
+            false,
+        )
+        .await?;
         for (row, (_, count)) in artist_rows.iter_mut().zip(artists) {
             row.state.play_count = count;
         }

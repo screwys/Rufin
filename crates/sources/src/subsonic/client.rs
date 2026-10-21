@@ -1866,27 +1866,18 @@ mod tests {
             row.media_uri,
             library::source_entity_uri(&source_id, "track", "subsonic:track:track-one")
         );
-        let stored = library::CatalogQuery::uris(
-            library::CatalogKind::Track,
-            vec![(&row.media_uri).to_owned()],
-        )
-        .rows(&database, 0, 256, &library::ReadCancellation::new())
-        .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-            _ => unreachable!(),
-        })
-        .unwrap()
-        .unwrap();
+        let stored = database
+            .track(&(&row.media_uri), &library::ReadCancellation::new())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(row, &stored);
         assert_eq!(row.artwork_binding, results.albums[0].artwork_binding);
         assert!(row.artwork_binding.is_some());
         let album = database
             .selected_track_uris(
-                &library::CatalogQuery::tracks(library::TrackScope::Album(
-                    results.albums[0].album_key,
-                ))
-                .selection(),
+                &library::MemberRead::new(library::Collection::Album(results.albums[0].album_key))
+                    .selection(),
                 None,
                 &library::ReadCancellation::new(),
             )
@@ -1925,10 +1916,8 @@ mod tests {
         .unwrap();
         let album = database
             .selected_track_uris(
-                &library::CatalogQuery::tracks(library::TrackScope::Album(
-                    results.albums[0].album_key,
-                ))
-                .selection(),
+                &library::MemberRead::new(library::Collection::Album(results.albums[0].album_key))
+                    .selection(),
                 None,
                 &library::ReadCancellation::new(),
             )

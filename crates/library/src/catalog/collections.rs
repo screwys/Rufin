@@ -27,35 +27,9 @@ pub(super) async fn headers(
         albums.iter().flat_map(|album| &album.metadata.genres),
     )
     .await?;
-    let input = serde_json::to_string(
-        &albums
-            .iter()
-            .map(|album| [&album.object_id])
-            .collect::<Vec<_>>(),
-    )?;
-    for (relation, kind, array) in [
-        ("album_artists", "artist", "album_artists"),
-        ("album_genres", "genre", "genres"),
-    ] {
-        let (table, key) = super::cache::table(kind);
-        let expected = format!(
-            "SELECT album.album_key,item.{key},CAST(edge.key AS INTEGER) position FROM json_each(?2) input CROSS JOIN albums album ON album.source_key=?1 AND album.object_id=json_extract(input.value,'$[0]') CROSS JOIN json_each(album.metadata,'$.{array}') edge CROSS JOIN {table} item ON item.source_key=?1 AND item.object_id=json_extract(edge.value,'$.object_id')"
-        );
-        changed |= super::cache::replace_edges(
-            connection,
-            source,
-            relation,
-            "album_key",
-            key,
-            &expected,
-            &input,
-            None,
-        )
-        .await?;
-    }
-    let expected = "WITH expected AS(SELECT album.album_key,edge.value release_type,CAST(edge.key AS INTEGER) position FROM json_each(?2) input CROSS JOIN albums album ON album.source_key=?1 AND album.object_id=json_extract(input.value,'$[0]') CROSS JOIN json_each(album.metadata,'$.release_types') edge) ";
-    sqlx::query(sqlx::AssertSqlSafe(format!("{expected} DELETE FROM album_release_types WHERE album_key IN(SELECT album_key FROM albums WHERE source_key=?1 AND object_id IN(SELECT json_extract(value,'$[0]') FROM json_each(?2))) AND NOT EXISTS(SELECT 1 FROM expected WHERE expected.album_key=album_release_types.album_key AND expected.release_type=album_release_types.release_type AND expected.position=album_release_types.position)"))).bind(source).bind(&input).execute(&mut *connection).await?;
-    sqlx::query(sqlx::AssertSqlSafe(format!("{expected} INSERT OR IGNORE INTO album_release_types SELECT album_key,release_type,position FROM expected"))).bind(source).bind(input).execute(&mut *connection).await?;
+    let keys:Vec<i64>=sqlx::query_scalar("SELECT album_key FROM albums WHERE source_key=?1 AND object_id IN(SELECT value FROM json_each(?2))")
+        .bind(source).bind(serde_json::to_string(&albums.iter().map(|album|&album.object_id).collect::<Vec<_>>())?).fetch_all(&mut *connection).await?;
+    changed |= !super::index::albums(connection, &keys).await?.is_empty();
     for folder in folders {
         let rows = serde_json::to_string(&folder.tracks)?;
         changed|=sqlx::query("INSERT OR IGNORE INTO track_folders(track_key,folder_key,position,observed_stamp) SELECT track.track_key,folder.folder_key,coalesce((SELECT max(position)+1 FROM track_folders WHERE track_key=track.track_key),0),coalesce(?4,0) FROM json_each(?3) item CROSS JOIN tracks track ON track.source_key=?1 AND track.object_id=item.value CROSS JOIN folders folder ON folder.source_key=?1 AND folder.object_id=?2 WHERE folder.observed_stamp<=coalesce(?4,9223372036854775807)").bind(source).bind(&folder.object_id).bind(&rows).bind(observed).execute(&mut *connection).await?.rows_affected()>0;
@@ -132,8 +106,7 @@ pub(crate) async fn remove_items_on(
             .map(crate::AlbumKey::from_raw)
             .collect::<Vec<_>>();
         crate::loudness::invalidate_album_audio(connection, &album_keys, !incoming).await?;
-        super::files::album_order(connection, if kind == "album" { &keys } else { &albums })
-            .await?;
+        super::index::albums(connection, if kind == "album" { &keys } else { &albums }).await?;
         super::artwork::refresh_choices(
             connection,
             if kind == "track" { &keys } else { &[] },
@@ -413,7 +386,7 @@ impl super::Catalog<'_> {
                 .map(crate::AlbumKey::from_raw)
                 .collect::<Vec<_>>();
             crate::loudness::invalidate_album_audio(&mut tx, &album_keys, true).await?;
-            super::files::album_order(&mut tx, &albums).await?;
+            super::index::albums(&mut tx, &albums).await?;
             super::artwork::refresh_choices(&mut tx, &keys, &albums, &[], false).await?;
             result.metadata = true;
             tx.commit().await?;

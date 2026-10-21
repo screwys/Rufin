@@ -846,14 +846,13 @@ mod tests {
             .save(&database, track_edit(&[("title", "Direct original")]))
             .await
             .unwrap();
-        let library::CatalogRows::Tracks(rows) =
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![uri.clone()])
-                .rows(&database, 0, 1, &library::ReadCancellation::new())
-                .await
-                .unwrap()
-        else {
-            unreachable!()
-        };
+        let rows = database
+            .tracks_by_uris(
+                std::slice::from_ref(&uri),
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .unwrap();
         assert_eq!(rows[0].track_key, key);
         assert_eq!(rows[0].metadata.title, "Direct original");
         assert!(rows[0].source_key.is_none());
@@ -991,18 +990,14 @@ mod tests {
             )
             .await
             .unwrap();
-        let track = library::CatalogQuery::uris(
-            library::CatalogKind::Track,
-            vec![(url::Url::from_file_path(&paths[0]).unwrap().as_str()).to_owned()],
-        )
-        .rows(&database, 0, 256, &library::ReadCancellation::new())
-        .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-            _ => unreachable!(),
-        })
-        .unwrap()
-        .unwrap();
+        let track = database
+            .track(
+                &(url::Url::from_file_path(&paths[0]).unwrap().as_str()),
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
         let artist = crate::file::media::artist_credit("Album Artist".into(), None);
         let artist_uri =
             library::source_entity_uri(&configuration.source_id, "artist", &artist.object_id);
@@ -1175,16 +1170,11 @@ mod tests {
             .await
             .unwrap();
         let uri = url::Url::from_file_path(&audio).unwrap().to_string();
-        let before =
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                .rows(&database, 0, 256, &library::ReadCancellation::new())
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-                .unwrap()
-                .unwrap();
+        let before = database
+            .track(&(&uri), &library::ReadCancellation::new())
+            .await
+            .unwrap()
+            .unwrap();
         for path in [
             root.join(".").join("café %.wav"),
             library::file_media_path(&uri).unwrap(),
@@ -1211,16 +1201,11 @@ mod tests {
             database
                 .publish_catalog_update(source.source_id().as_str(), catalog.into_changes())
                 .await;
-            let after =
-                library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                    .rows(&database, 0, 256, &library::ReadCancellation::new())
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                        _ => unreachable!(),
-                    })
-                    .unwrap()
-                    .unwrap();
+            let after = database
+                .track(&(&uri), &library::ReadCancellation::new())
+                .await
+                .unwrap()
+                .unwrap();
             assert_eq!(after.track_key, before.track_key);
             assert_eq!(after.object_id, before.object_id);
         }
@@ -1324,7 +1309,7 @@ mod tests {
             "accepted released metadata does not need a new read"
         );
         assert_eq!(
-            library::CatalogQuery::tracks(library::TrackScope::Tracks(key))
+            library::MemberRead::new(library::Collection::Source(key))
                 .count(&database, &library::ReadCancellation::new())
                 .await
                 .unwrap(),
@@ -1333,13 +1318,10 @@ mod tests {
         );
         let uri = url::Url::from_file_path(&audio).unwrap().to_string();
         assert!(
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                .rows(&database, 0, 256, &library::ReadCancellation::new())
+            database
+                .tracks_by_uris(&([(&uri).to_owned()]), &library::ReadCancellation::new())
                 .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
+                .map(|rows| { rows.into_iter().next() })
                 .unwrap()
                 .is_some()
         );
@@ -1439,12 +1421,13 @@ mod tests {
             .catch_up_local(&database, &|_| {}, Arc::new(AtomicBool::new(false)))
             .await
             .expect("catch up the edited roots after an interrupted refresh");
-        let tracks = (&library::CatalogQuery::tracks(library::TrackScope::Tracks(key)))
+        let tracks = (&library::MemberRead::new(library::Collection::Source(key)))
             .rows(&database, 0, 10, &library::ReadCancellation::new())
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!("typed song projection"),
+            .map(|rows| {
+                rows.into_iter()
+                    .map(library::MemberRow::into_track)
+                    .collect::<Vec<_>>()
             })
             .unwrap();
         assert_eq!(tracks.len(), 2);
@@ -1512,12 +1495,13 @@ mod tests {
             .await
             .unwrap();
         let file_uri = url::Url::from_file_path(&file_root).unwrap().to_string();
-        let tracks = (&library::CatalogQuery::tracks(library::TrackScope::Tracks(key)))
+        let tracks = (&library::MemberRead::new(library::Collection::Source(key)))
             .rows(&database, 0, 10, &library::ReadCancellation::new())
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!("typed song projection"),
+            .map(|rows| {
+                rows.into_iter()
+                    .map(library::MemberRow::into_track)
+                    .collect::<Vec<_>>()
             })
             .unwrap();
         assert_eq!(tracks.len(), 3);
@@ -1571,21 +1555,19 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            (&library::CatalogQuery::tracks(library::TrackScope::Tracks(key)))
+            (&library::MemberRead::new(library::Collection::Source(key)))
                 .count(&database, &library::ReadCancellation::new())
                 .await
                 .unwrap(),
             1
         );
-        let audio_query =
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![uri.clone()]);
-        let library::CatalogRows::Tracks(cached) = audio_query
-            .rows(&database, 0, 1, &library::ReadCancellation::new())
+        let cached = database
+            .tracks_by_uris(
+                std::slice::from_ref(&uri),
+                &library::ReadCancellation::new(),
+            )
             .await
-            .unwrap()
-        else {
-            panic!("track rows")
-        };
+            .unwrap();
         assert_eq!(cached.len(), 1);
         let physical = database
             .local_file_page(key, None, 128, &library::ReadCancellation::new())
@@ -1620,32 +1602,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            library::CatalogQuery::tracks(library::TrackScope::Tracks(key))
+            library::MemberRead::new(library::Collection::Source(key))
                 .count(&database, &library::ReadCancellation::new())
                 .await
                 .unwrap(),
             1,
             "the excluded descendant must not be re-admitted with its parent root"
         );
-        let library::CatalogRows::Tracks(members) =
-            library::CatalogQuery::tracks(library::TrackScope::Tracks(key))
-                .rows(&database, 0, 10, &library::ReadCancellation::new())
-                .await
-                .unwrap()
-        else {
-            panic!("track rows")
-        };
+        let members = library::MemberRead::new(library::Collection::Source(key))
+            .rows(&database, 0, 10, &library::ReadCancellation::new())
+            .await
+            .unwrap();
         assert_eq!(
-            members[0].media_uri, imported_uri,
+            members[0].track().media_uri,
+            imported_uri,
             "the explicit import overrides the excluded folder"
         );
-        let library::CatalogRows::Tracks(after_edit) = audio_query
-            .rows(&database, 0, 1, &library::ReadCancellation::new())
+        let after_edit = database
+            .tracks_by_uris(
+                std::slice::from_ref(&uri),
+                &library::ReadCancellation::new(),
+            )
             .await
-            .unwrap()
-        else {
-            panic!("track rows")
-        };
+            .unwrap();
         assert_eq!(after_edit[0].track_key, cached[0].track_key);
         assert_eq!(after_edit[0].object_id, cached[0].object_id);
         for (path, original) in paths.into_iter().zip(original_files) {
@@ -1739,13 +1718,10 @@ mod tests {
                 .unwrap();
         }
         assert!(
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                .rows(&database, 0, 256, &library::ReadCancellation::new())
+            database
+                .tracks_by_uris(&([(&uri).to_owned()]), &library::ReadCancellation::new())
                 .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
+                .map(|rows| { rows.into_iter().next() })
                 .unwrap()
                 .is_some()
         );
@@ -1759,13 +1735,10 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                .rows(&database, 0, 256, &library::ReadCancellation::new())
+            database
+                .tracks_by_uris(&([(&uri).to_owned()]), &library::ReadCancellation::new())
                 .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
+                .map(|rows| { rows.into_iter().next() })
                 .unwrap()
                 .is_some()
         );
@@ -1779,7 +1752,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            library::CatalogQuery::tracks(library::TrackScope::Tracks(source_key))
+            library::MemberRead::new(library::Collection::Source(source_key))
                 .count(&database, &library::ReadCancellation::new())
                 .await
                 .unwrap(),
@@ -1795,13 +1768,10 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                .rows(&database, 0, 256, &library::ReadCancellation::new())
+            database
+                .tracks_by_uris(&([(&uri).to_owned()]), &library::ReadCancellation::new())
                 .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
+                .map(|rows| { rows.into_iter().next() })
                 .unwrap()
                 .is_some()
         );
@@ -1812,20 +1782,17 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            (&library::CatalogQuery::tracks(library::TrackScope::Tracks(key)))
+            (&library::MemberRead::new(library::Collection::Source(key)))
                 .count(&database, &library::ReadCancellation::new())
                 .await
                 .unwrap(),
             1
         );
         assert!(
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                .rows(&database, 0, 256, &library::ReadCancellation::new())
+            database
+                .tracks_by_uris(&([(&uri).to_owned()]), &library::ReadCancellation::new())
                 .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
+                .map(|rows| { rows.into_iter().next() })
                 .unwrap()
                 .is_some()
         );
@@ -1843,7 +1810,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            library::CatalogQuery::tracks(library::TrackScope::Tracks(key))
+            library::MemberRead::new(library::Collection::Source(key))
                 .count(&database, &library::ReadCancellation::new())
                 .await
                 .unwrap(),
@@ -1859,7 +1826,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            library::CatalogQuery::tracks(library::TrackScope::Tracks(key))
+            library::MemberRead::new(library::Collection::Source(key))
                 .count(&database, &library::ReadCancellation::new())
                 .await
                 .unwrap(),
@@ -1875,7 +1842,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            library::CatalogQuery::tracks(library::TrackScope::Tracks(key))
+            library::MemberRead::new(library::Collection::Source(key))
                 .count(&database, &library::ReadCancellation::new())
                 .await
                 .unwrap(),

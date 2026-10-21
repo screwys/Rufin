@@ -30,7 +30,7 @@ pub fn delete_playlists_dialog(count: usize, delete: impl Fn() + 'static) -> adw
 pub fn add_media_to_playlist(
     source: &rufin_core::source::SourceOwner,
     playlist: PlaylistKey,
-    selection: library::TrackSelection,
+    selection: library::MemberSelection,
     skip_existing: bool,
     settled: Rc<dyn Fn(usize)>,
 ) {

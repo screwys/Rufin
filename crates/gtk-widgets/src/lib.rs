@@ -49,6 +49,7 @@ pub mod local_access;
 
 mod duration;
 pub mod library_fields;
+pub mod table_header;
 pub mod table_sizing;
 pub use duration::{format_duration, format_duration_units};
 

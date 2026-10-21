@@ -222,7 +222,7 @@ impl SourceOwner {
 impl SourceOwner {
     pub fn download_selection(
         &self,
-        selection: library::TrackSelection,
+        selection: library::MemberSelection,
         context: String,
         title: Option<String>,
     ) -> Receiver<Result<(), String>> {
@@ -240,7 +240,7 @@ impl SourceOwner {
 
     pub fn remove_download_selection(
         &self,
-        selection: library::TrackSelection,
+        selection: library::MemberSelection,
     ) -> Receiver<Result<(), String>> {
         self.reply(move |owner, database| async move {
             let uris = database

@@ -122,7 +122,7 @@ where
                 settings,
                 bootstrap(),
                 quitting,
-                storage_reset,
+                Rc::clone(&storage_reset),
                 force_initial_presentation,
                 presented,
                 window_bar_preview,
@@ -131,7 +131,7 @@ where
             .await
             {
                 error!(%error, "failed to start Rufin");
-                present_startup_error(&app, &error, window_bar_preview);
+                present_startup_error(&app, &error, window_bar_preview, storage_reset);
             }
         });
     });
@@ -146,18 +146,32 @@ where
     }
 }
 
-pub fn run_startup_error_application(error: String) -> ExitCode {
+pub fn run_startup_error_application(error: String) -> ApplicationExit {
     let (app, options) = application();
+    let storage_reset = StorageResetResult::default();
+    let reset_result = Rc::clone(&storage_reset);
     connect_startup_configuration(&app, Rc::clone(&options));
     app.connect_open(|app, _, _| app.activate());
     app.connect_activate(move |app| {
         if let Some(window) = app.active_window() {
             present_window(&window);
         } else {
-            present_startup_error(app, &error, options.borrow().window_bar_preview);
+            present_startup_error(
+                app,
+                &error,
+                options.borrow().window_bar_preview,
+                Rc::clone(&storage_reset),
+            );
         }
     });
-    app.run().into()
+    let code = app.run().into();
+    for window in app.windows() {
+        window.destroy();
+    }
+    ApplicationExit {
+        code,
+        storage_reset: reset_result.take(),
+    }
 }
 
 fn application() -> (adw::Application, Rc<RefCell<ApplicationOptions>>) {
@@ -321,17 +335,47 @@ fn gtk_application_window(
     window
 }
 
-fn present_startup_error(app: &adw::Application, error: &str, preview: Option<WindowBarPreview>) {
-    let status = adw::StatusPage::builder()
-        .icon_name(STABLE_APP_ID)
-        .title(DISPLAY_NAME)
-        .description(error)
-        .build();
-    let header = gtk::HeaderBar::new();
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    content.append(&header);
-    content.append(&status);
+fn present_startup_error(
+    app: &adw::Application,
+    error: &str,
+    preview: Option<WindowBarPreview>,
+    storage_reset: StorageResetResult,
+) {
+    let resource = crate::ui_resource::STARTUP_ERROR_RESOURCE;
+    let builder = gtk_widgets::ui_resource::builder(resource);
+    gtk_widgets::objects!(builder, resource, {
+        content: gtk::Box,
+        header: gtk::HeaderBar,
+        status: adw::StatusPage,
+        reset_database: gtk::Button,
+    });
+    status.set_icon_name(Some(STABLE_APP_ID));
+    status.set_title(DISPLAY_NAME);
+    status.set_description(Some(error));
     let window = application_window(app, DISPLAY_NAME, 480, 320, &content, &header, preview);
+    let resetting_window = window.downgrade();
+    let app = app.downgrade();
+    reset_database.connect_clicked(move |_| {
+        let Some(window) = resetting_window.upgrade() else {
+            return;
+        };
+        let Some(app) = app.upgrade() else {
+            return;
+        };
+        let storage_reset = Rc::clone(&storage_reset);
+        gtk::glib::spawn_future_local(async move {
+            let builder = gtk_widgets::ui_resource::builder(resource);
+            let dialog: adw::AlertDialog =
+                gtk_widgets::ui_resource::object(&builder, resource, "reset_confirmation");
+            if dialog.choose_future(Some(&window)).await != "reset" {
+                return;
+            }
+            storage_reset.replace(Some(Ok(
+                rufin_core::settings::StorageResetRequest::Database,
+            )));
+            app.quit();
+        });
+    });
     present_window(&window);
 }
 

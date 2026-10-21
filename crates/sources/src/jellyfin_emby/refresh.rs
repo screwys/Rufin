@@ -899,16 +899,11 @@ mod tests {
                 "track",
                 &format!("jellyfin:track:{object}"),
             );
-            let track =
-                library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                    .rows(&database, 0, 256, &cancellation)
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                        _ => unreachable!(),
-                    })
-                    .unwrap()
-                    .unwrap();
+            let track = database
+                .track(&(&uri), &cancellation)
+                .await
+                .unwrap()
+                .unwrap();
             if object == "kept" {
                 assert!(track.state.favorite);
                 assert_eq!(track.state.play_count, 7);
@@ -933,16 +928,11 @@ mod tests {
                 "artist",
                 &format!("jellyfin:artist:{id}"),
             );
-            let artist =
-                library::CatalogQuery::uris(library::CatalogKind::Artist, vec![(&uri).to_owned()])
-                    .rows(&database, 0, 256, &cancellation)
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Artists(rows) => rows.into_iter().next(),
-                        _ => unreachable!(),
-                    })
-                    .unwrap()
-                    .unwrap();
+            let artist = database
+                .artist(&(&uri), false, false, &cancellation)
+                .await
+                .unwrap()
+                .unwrap();
             assert_eq!(artist.state.favorite, favorite);
         }
         let removed = library::source_entity_uri(
@@ -951,17 +941,14 @@ mod tests {
             "jellyfin:track:removed",
         );
         assert!(
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&removed).to_owned()])
-                .rows(&database, 0, 256, &cancellation)
+            database
+                .tracks_by_uris(&([(&removed).to_owned()]), &cancellation)
                 .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
+                .map(|rows| { rows.into_iter().next() })
                 .unwrap()
                 .is_some()
         );
-        let catalog = (library::CatalogQuery::tracks(library::TrackScope::Tracks(
+        let catalog = (library::MemberRead::new(library::Collection::Source(
             database
                 .source_identity_key(&library::SourceId::new(&catalog_source_id))
                 .await
@@ -970,13 +957,15 @@ mod tests {
         )))
         .page(&database, library::RouteSeedWindow::top(), &cancellation)
         .await
-        .map(|page| match page.rows {
-            library::CatalogRows::Tracks(rows) => (page.count, page.first_row_position, rows),
-            _ => unreachable!(),
+        .map(|page| {
+            page.rows
+                .into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .unwrap();
-        assert_eq!(catalog.0, 2);
-        assert!(catalog.2.iter().all(|track| track.media_uri != removed));
+        assert_eq!(catalog.len(), 2);
+        assert!(catalog.iter().all(|track| track.media_uri != removed));
         assert!(
             database
                 .catalog_keys(

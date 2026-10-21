@@ -434,25 +434,20 @@ mod tests {
                 }
             }
             let cancellation = library::ReadCancellation::new();
-            let track = library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                vec![
-                    (&library::source_entity_uri(
+            let track = database
+                .tracks_by_uris(
+                    &([(&library::source_entity_uri(
                         &crate::SourceId::new("source"),
                         "track",
                         &kind.object_id("track", "track"),
                     ))
-                        .to_owned(),
-                ],
-            )
-            .rows(&database, 0, 256, &cancellation)
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                _ => unreachable!(),
-            })
-            .unwrap()
-            .unwrap();
+                        .to_owned()]),
+                    &cancellation,
+                )
+                .await
+                .map(|rows| rows.into_iter().next())
+                .unwrap()
+                .unwrap();
             assert_eq!((track.state.rating, track.state.play_count), (Some(8), 8));
             let source_key = track.source_key.unwrap();
             for (raw, favorite) in [("3272", true), ("other", false)] {
@@ -461,18 +456,11 @@ mod tests {
                     "album",
                     &kind.object_id("album", raw),
                 );
-                let album = library::CatalogQuery::uris(
-                    library::CatalogKind::Album,
-                    vec![(&uri).to_owned()],
-                )
-                .rows(&database, 0, 256, &cancellation)
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Albums(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-                .unwrap()
-                .unwrap();
+                let album = database
+                    .album(&(&uri), false, &cancellation)
+                    .await
+                    .unwrap()
+                    .unwrap();
                 assert_eq!(album.state.favorite, favorite);
                 assert_eq!(album.summary.track_count, i64::from(favorite));
             }
@@ -510,20 +498,14 @@ mod tests {
                 "one catalog notification after partial failure"
             );
             assert_eq!(
-                library::CatalogQuery::uris(
-                    library::CatalogKind::Track,
-                    vec![(&track.media_uri).to_owned()]
-                )
-                .rows(&database, 0, 256, &cancellation)
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-                .unwrap()
-                .unwrap()
-                .state
-                .play_count,
+                database
+                    .tracks_by_uris(&([(&track.media_uri).to_owned()]), &cancellation)
+                    .await
+                    .map(|rows| { rows.into_iter().next() })
+                    .unwrap()
+                    .unwrap()
+                    .state
+                    .play_count,
                 9
             );
             for (album_id, removed) in [("3272", false), ("other", true)] {
@@ -573,30 +555,19 @@ mod tests {
                     "track",
                     &kind.object_id("track", "track"),
                 );
-                let track = library::CatalogQuery::uris(
-                    library::CatalogKind::Track,
-                    vec![(&uri).to_owned()],
-                )
-                .rows(&database, 0, 256, &cancellation)
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-                .unwrap();
+                let track = database.track(&(&uri), &cancellation).await.unwrap();
                 if removed {
                     assert!(track.is_some());
                     assert!(
-                        (library::CatalogQuery::tracks(library::TrackScope::Tracks(source_key)))
+                        (library::MemberRead::new(library::Collection::Source(source_key)))
                             .page(&database, library::RouteSeedWindow::top(), &cancellation)
                             .await
-                            .map(|page| match page.rows {
-                                library::CatalogRows::Tracks(rows) =>
-                                    (page.count, page.first_row_position, rows),
-                                _ => unreachable!(),
-                            })
+                            .map(|page| page
+                                .rows
+                                .into_iter()
+                                .map(library::MemberRow::into_track)
+                                .collect::<Vec<_>>())
                             .unwrap()
-                            .2
                             .is_empty()
                     );
                 } else {
@@ -623,39 +594,29 @@ mod tests {
                 &kind.object_id("album", "3272"),
             );
             assert!(
-                library::CatalogQuery::uris(library::CatalogKind::Album, vec![(&uri).to_owned()])
-                    .rows(&database, 0, 256, &cancellation)
+                database
+                    .album(&(&uri), false, &cancellation)
                     .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Albums(rows) => rows.into_iter().next(),
-                        _ => unreachable!(),
-                    })
+                    .map(|rows| { rows.into_iter().next() })
                     .unwrap()
                     .is_some()
             );
             assert!(
-                library::CatalogQuery {
-                    subject: library::CatalogSubject::Albums {
-                        source: source_key,
-                        sort: library::CatalogSort::Title,
-                        inline_tracks: None,
-                    },
+                library::ListRead {
+                    kind: library::ListKind::Albums,
+                    source: Some(source_key),
+                    sort: library::CatalogSort::Title,
                     folder: None,
                     filter: ("").to_string(),
                     descending: false,
                     favorites_only: false,
                     downloaded_only: false,
-                    activity: false,
+                    activity: false
                 }
-                .page(&database, library::RouteSeedWindow::top(), &cancellation)
+                .page_albums(&database, library::RouteSeedWindow::top(), &cancellation)
                 .await
-                .map(|page| match page.rows {
-                    library::CatalogRows::Albums(rows) =>
-                        (page.count, page.first_row_position, rows),
-                    _ => unreachable!(),
-                })
+                .map(|page| page.rows)
                 .unwrap()
-                .2
                 .iter()
                 .all(|album| album.media_uri != uri)
             );

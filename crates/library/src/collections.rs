@@ -1,7 +1,7 @@
 //! Owns Album, Artist, Genre, Mood, and Folder orders, rows, and details.
 //! Collection membership, filtering, and sorting are resolved in one Store operation.
 
-use sqlx::{Connection, FromRow, SqliteConnection};
+use sqlx::{Arguments, Connection, FromRow, SqliteConnection};
 
 use crate::{
     AlbumKey, ArtistKey, CatalogSort, Database, FolderKey, GenreKey, LibraryError, LibraryResult,
@@ -18,7 +18,6 @@ pub(crate) const COLLECTION_ROW_LIMIT: usize = 128;
 pub enum AlbumDetailRow {
     Album {
         album: AlbumView,
-        tracks: Vec<TrackView>,
         last: bool,
     },
     Track {
@@ -171,37 +170,6 @@ fn release_class_code(class: AlbumReleaseClass) -> i64 {
     }
 }
 
-fn release_class_from_code(code: i64) -> AlbumReleaseClass {
-    match code {
-        0 => AlbumReleaseClass::Album,
-        1 => AlbumReleaseClass::Ep,
-        2 => AlbumReleaseClass::Single,
-        3 => AlbumReleaseClass::Collection,
-        4 => AlbumReleaseClass::Other,
-        _ => unreachable!("Release classification"),
-    }
-}
-
-fn album_release_cte(scope: &str) -> String {
-    // Release tags may contain legacy pipe separators and Unicode whitespace.
-    let token = "trim(item.value,char(9,10,11,12,13,32,133,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288))";
-    format!("candidates AS MATERIALIZED ({scope}), release_facts AS (
-        SELECT candidates.album_key,count(NULLIF({token},'')) types_count,
-          max({token}='album') has_album,
-          max({token} IN ('compilation','compilations','collection','collections')) has_collection,
-          max({token} IN ('ep','e.p.')) has_ep,max({token}='single') has_single
-        FROM candidates LEFT JOIN effective_album_release_types types USING(album_key)
-        LEFT JOIN json_each('['||replace(json_quote(lower(types.release_type)),'|','\",\"')||']') item
-        GROUP BY candidates.album_key
-      ), classified AS (
-        SELECT album.album_key,CASE WHEN coalesce(CASE WHEN album.metadata IS NOT NULL THEN album.is_compilation ELSE(SELECT json_extract(member.metadata,'$.album_tags.is_compilation') FROM tracks member INDEXED BY tracks_album_order_idx WHERE member.album_key=album.album_key AND member.indexed=1 AND json_extract(member.metadata,'$.album_tags.is_compilation') IS NOT NULL ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1) END,0)<>0 THEN 3
-          WHEN release_facts.types_count=0 OR release_facts.has_album THEN 0
-          WHEN release_facts.has_collection THEN 3 WHEN release_facts.has_ep THEN 1
-          WHEN release_facts.has_single THEN 2 ELSE 4 END class_code
-        FROM candidates JOIN albums album USING(album_key) JOIN release_facts USING(album_key)
-      )")
-}
-
 #[derive(Clone, Debug, Eq, FromRow, PartialEq)]
 pub struct AlbumReleaseCandidate {
     pub album_key: AlbumKey,
@@ -231,8 +199,7 @@ impl Database {
         encoded.push(']');
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let sql = crate::scroll_sections::section_sql(
-            "SELECT value FROM json_each(?1) item ORDER BY item.key",
-            "item.value",
+            "SELECT item.value section_text,CAST(item.key AS INTEGER) section_position FROM json_each(?1) item",
         );
         crate::scroll_sections::decode_sections(
             sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
@@ -251,12 +218,9 @@ impl Database {
     ) -> LibraryResult<Vec<crate::ScrollSection>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let direction = if descending { "DESC" } else { "ASC" };
-        let sql = crate::scroll_sections::section_sql(
-            &format!(
-                "SELECT folder_key FROM ({FILTERED_FOLDER_CHILDREN_SQL}) ORDER BY sort_text {direction},folder_key"
-            ),
-            "sort_text",
-        );
+        let sql = crate::scroll_sections::section_sql(&format!(
+            "SELECT sort_text section_text,row_number() OVER(ORDER BY sort_text {direction},folder_key)-1 section_position FROM ({FILTERED_FOLDER_CHILDREN_SQL})"
+        ));
         crate::scroll_sections::decode_sections(
             sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
                 .bind(source)
@@ -276,43 +240,9 @@ impl Database {
     ) -> LibraryResult<Vec<GenreChoice>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT genre.genre_key,genre.object_id,genre.name FROM genres genre WHERE {} ORDER BY genre.sort_text,genre.genre_key",
-            named_scope("genre",source,folder,"")
+            "SELECT genre.genre_key,genre.object_id,genre.name FROM {} WHERE {} ORDER BY genre.sort_text,genre.genre_key",
+            collection_from("genre",false,folder), named_scope("genre",source,folder,"")
         ))).fetch_all(&mut *connection).await?)
-    }
-
-    pub async fn collection_source(
-        &self,
-        scope: &crate::TrackScope,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<SourceKey>> {
-        use crate::TrackScope as C;
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let query = match scope {
-            C::Tracks(key) | C::Objects { source: key, .. } => return Ok(Some(*key)),
-            C::Smart { source, .. } => return Ok(*source),
-            C::History { source } => {
-                sqlx::query_scalar("SELECT source_key FROM sources WHERE object_id=?1")
-                    .bind(source.as_ref().map(crate::SourceId::as_str))
-            }
-            C::Album(key) => {
-                sqlx::query_scalar("SELECT source_key FROM albums WHERE album_key=?1").bind(key)
-            }
-            C::Artist { key, .. } => {
-                sqlx::query_scalar("SELECT source_key FROM artists WHERE artist_key=?1").bind(key)
-            }
-            C::Genre(key) => {
-                sqlx::query_scalar("SELECT source_key FROM genres WHERE genre_key=?1").bind(key)
-            }
-            C::Mood(key) => {
-                sqlx::query_scalar("SELECT source_key FROM moods WHERE mood_key=?1").bind(key)
-            }
-            C::Playlist(key) => sqlx::query_scalar(
-                "SELECT source_key FROM playlists WHERE playlist_key=?1 AND source_key IS NOT NULL",
-            )
-            .bind(key),
-        };
-        Ok(query.fetch_optional(&mut *connection).await?)
     }
 
     pub async fn latest_album_track_order(
@@ -326,10 +256,10 @@ impl Database {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         Ok(sqlx::query_scalar::<_, String>(
             concat!("WITH latest AS (
-               SELECT album.album_key FROM albums album JOIN album_order ordering USING(album_key)
-               WHERE (album.indexed=1 OR EXISTS(SELECT 1 FROM tracks admitted WHERE admitted.album_key=album.album_key AND admitted.indexed=1)) AND album.source_key=?1
-                 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.indexed=1 AND track.album_key=album.album_key AND scope.folder_key=?2))
-               ORDER BY ","ordering.added_sort"," DESC NULLS LAST,album.album_key LIMIT ?3
+               SELECT album.album_key FROM albums album
+               WHERE (album.indexed=1 OR album.track_count>0) AND album.source_key=?1
+                 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM collection_album_index scope WHERE scope.kind='folder' AND scope.entity_key=?2 AND scope.role=0 AND scope.album_key=album.album_key AND coalesce(scope.folder_key,'')='' AND scope.track_count>0))
+               ORDER BY ","album.added_sort"," DESC NULLS LAST,album.album_key LIMIT ?3
              )
              SELECT track.media_uri FROM latest JOIN tracks track USING(album_key)
              WHERE track.indexed=1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
@@ -353,8 +283,8 @@ impl Database {
         }
         let limit = limit.min(100) as i64;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let identity = album_release_identity("album");
-        Ok(sqlx::query_as::<_,AlbumReleaseCandidate>(sqlx::AssertSqlSafe(format!("SELECT album.album_key,album.media_uri,{identity} lookup_identity FROM albums album WHERE (album.indexed=1 OR EXISTS(SELECT 1 FROM tracks admitted WHERE admitted.album_key=album.album_key AND admitted.indexed=1)) AND source_key=?1 AND {identity} IS NOT NULL AND release_lookup_identity IS NOT {identity} ORDER BY album_key LIMIT ?2"))).bind(source).bind(limit).fetch_all(&mut *connection).await?)
+        let identity = "album.release_identity";
+        Ok(sqlx::query_as::<_,AlbumReleaseCandidate>(sqlx::AssertSqlSafe(format!("SELECT album.album_key,album.media_uri,{identity} lookup_identity FROM albums album WHERE (album.indexed=1 OR album.track_count>0) AND source_key=?1 AND {identity} IS NOT NULL AND release_lookup_identity IS NOT {identity} ORDER BY album_key LIMIT ?2"))).bind(source).bind(limit).fetch_all(&mut *connection).await?)
     }
 
     pub async fn accept_album_release_result(
@@ -374,7 +304,7 @@ impl Database {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
-        let identity=sqlx::query_as::<_,(Option<String>,Option<String>)>(sqlx::AssertSqlSafe(format!("SELECT {},release_lookup_identity FROM albums album WHERE source_key=?1 AND album_key=?2",album_release_identity("album")))).bind(source).bind(album).fetch_optional(&mut *transaction).await?;
+        let identity=sqlx::query_as::<_,(Option<String>,Option<String>)>(sqlx::AssertSqlSafe(format!("SELECT {},release_lookup_identity FROM albums album WHERE source_key=?1 AND album_key=?2","album.release_identity"))).bind(source).bind(album).fetch_optional(&mut *transaction).await?;
         let Some((current, attempted)) = identity else {
             transaction.rollback().await?;
             return Ok(None);
@@ -396,136 +326,9 @@ impl Database {
         .bind(lookup_identity)
         .execute(&mut *transaction)
         .await?;
+        crate::catalog::index::albums(&mut transaction, &[album.raw()]).await?;
         transaction.commit().await?;
         Ok(Some(album))
-    }
-
-    pub async fn artist_release_counts(
-        &self,
-        source: SourceKey,
-        artist: ArtistKey,
-        album_artist: bool,
-        folder: Option<FolderKey>,
-        filter: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<[i64; 6]> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-        let scope = ARTIST_ALBUM_SCOPE;
-        let sql = format!(
-            "WITH {} SELECT class_code,count(*) FROM classified GROUP BY class_code",
-            album_release_cte(scope)
-        );
-        let rows = sqlx::query_as::<_, (i64, i64)>(sqlx::AssertSqlSafe(sql))
-            .bind(source)
-            .bind(artist)
-            .bind(album_artist)
-            .bind(folder)
-            .bind(filter.is_empty())
-            .bind(filter)
-            .fetch_all(&mut *connection)
-            .await?;
-        let mut counts = [0; 6];
-        for (class, count) in rows {
-            counts[class as usize] = count;
-        }
-        Ok(counts)
-    }
-
-    pub async fn artist_release_page(
-        &self,
-        source: SourceKey,
-        artist: ArtistKey,
-        album_artist: bool,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: CatalogSort,
-        descending: bool,
-        section: Option<AlbumReleaseClass>,
-        offset: usize,
-        limit: usize,
-        activity: bool,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<(AlbumReleaseClass, AlbumView)>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-        let scope = ARTIST_ALBUM_SCOPE;
-        let order = sort.album_order_sql(descending, folder);
-        let sql = format!(
-            "WITH {} SELECT album.album_key,classified.class_code FROM classified JOIN albums album USING(album_key) JOIN album_order ordering USING(album_key) WHERE (?7 IS NULL OR classified.class_code=?7) ORDER BY classified.class_code,{order} LIMIT ?8 OFFSET ?9",
-            album_release_cte(scope)
-        );
-        let keys = sqlx::query_as::<_, (AlbumKey, i64)>(sqlx::AssertSqlSafe(sql))
-            .bind(source)
-            .bind(artist)
-            .bind(album_artist)
-            .bind(folder)
-            .bind(filter.is_empty())
-            .bind(filter)
-            .bind(section.map(release_class_code))
-            .bind(limit.min(COLLECTION_ROW_LIMIT) as i64)
-            .bind(offset.min(i64::MAX as usize) as i64)
-            .fetch_all(&mut *transaction)
-            .await?;
-        let albums = load_album_rows(
-            &mut transaction,
-            &keys.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
-            activity,
-        )
-        .await?;
-        let rows = albums
-            .into_iter()
-            .zip(keys)
-            .map(|(album, (_, class))| (release_class_from_code(class), album))
-            .collect();
-        transaction.commit().await?;
-        Ok(rows)
-    }
-
-    pub async fn artist_release_scroll_sections(
-        &self,
-        source: SourceKey,
-        artist: ArtistKey,
-        album_artist: bool,
-        folder: Option<FolderKey>,
-        filter: &str,
-        sort: CatalogSort,
-        descending: bool,
-        section: AlbumReleaseClass,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<crate::ScrollSection>> {
-        if !matches!(sort, CatalogSort::Title | CatalogSort::AlbumArtist) {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-        let scope = ARTIST_ALBUM_SCOPE;
-        let order = sort.album_order_sql(descending, folder);
-        let ordered = format!(
-            "WITH {} SELECT album.album_key FROM classified JOIN albums album USING(album_key) JOIN album_order ordering USING(album_key) WHERE classified.class_code=?7 ORDER BY {order}",
-            album_release_cte(scope)
-        );
-        let sql = crate::scroll_sections::section_sql(
-            &ordered,
-            if sort == CatalogSort::Title {
-                "ordering.title_sort"
-            } else {
-                "ordering.album_artist_sort"
-            },
-        );
-        crate::scroll_sections::decode_sections(
-            sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
-                .bind(source)
-                .bind(artist)
-                .bind(album_artist)
-                .bind(folder)
-                .bind(filter.is_empty())
-                .bind(filter)
-                .bind(release_class_code(section))
-                .fetch_all(&mut *connection)
-                .await?,
-        )
     }
 
     pub async fn music_folders(&self, source: SourceKey) -> LibraryResult<Vec<FolderChoice>> {
@@ -558,8 +361,11 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<FolderView>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let keys = load_folder_children(&mut connection, source, parent, offset, limit).await?;
-        load_folder_rows(&mut connection, &keys).await
+        load_folder_requested(
+            &mut connection,
+            folder_request(source, parent, "", false, offset, limit)?,
+        )
+        .await
     }
 
     pub async fn filtered_folder_page(
@@ -573,7 +379,6 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<(usize, Vec<FolderView>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let direction = if descending { "DESC" } else { "ASC" };
         let children = FILTERED_FOLDER_CHILDREN_SQL;
         let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM ({children})"
@@ -583,10 +388,10 @@ impl Database {
         .bind(filter.trim())
         .fetch_one(&mut *connection)
         .await?;
-        let keys = sqlx::query_scalar::<_, FolderKey>(sqlx::AssertSqlSafe(format!("SELECT folder_key FROM ({children}) ORDER BY sort_text {direction},folder_key LIMIT ?4 OFFSET ?5"))).bind(source).bind(parent).bind(filter.trim()).bind(limit.min(COLLECTION_ROW_LIMIT) as i64).bind(offset.min(i64::MAX as usize) as i64).fetch_all(&mut *connection).await?;
+        let requested = folder_request(source, parent, filter, descending, offset, limit)?;
         Ok((
             count.max(0) as usize,
-            load_folder_rows(&mut connection, &keys).await?,
+            load_folder_requested(&mut connection, requested).await?,
         ))
     }
 }
@@ -619,167 +424,98 @@ pub(crate) async fn album_disc_sections(
         .collect())
 }
 
-async fn load_folder_children(
-    connection: &mut SqliteConnection,
+fn folder_request(
     source: SourceKey,
     parent: Option<FolderKey>,
+    filter: &str,
+    descending: bool,
     offset: usize,
     limit: usize,
-) -> LibraryResult<Vec<FolderKey>> {
-    let suffix = format!(
-        " LIMIT {} OFFSET {}",
-        limit.min(COLLECTION_ROW_LIMIT),
-        offset.min(i64::MAX as usize)
-    );
-    let folder_keys = |sql: &str| {
-        sqlx::query_scalar::<_, FolderKey>(sqlx::AssertSqlSafe(format!("{sql}{suffix}")))
-    };
-    let result = if let Some(parent) = parent {
-        folder_keys(
-            "SELECT DISTINCT child.folder_key
-                 FROM track_folders parent_link
-                 JOIN tracks track ON track.track_key=parent_link.track_key
-                 JOIN track_folders child_link ON child_link.track_key=track.track_key
-                    AND child_link.position=parent_link.position+1
-                 JOIN folders child ON child.folder_key=child_link.folder_key
-                 WHERE track.indexed=1 AND child.indexed=1 AND track.source_key=?1 AND parent_link.folder_key=?2
-                 ORDER BY child.sort_text,child.folder_key",
-        )
-        .bind(source)
-        .bind(parent)
-        .fetch_all(&mut *connection)
-        .await
-    } else {
-        folder_keys(
-            "SELECT DISTINCT folder.folder_key
-                 FROM track_folders relation JOIN tracks track USING(track_key)
-                 JOIN folders folder USING(folder_key)
-                 WHERE track.indexed=1 AND folder.indexed=1 AND track.source_key=?1 AND relation.position=0
-                 ORDER BY folder.sort_text,folder.folder_key",
-        )
-        .bind(source)
-        .fetch_all(&mut *connection)
-        .await
-    };
-    Ok(result?)
+) -> LibraryResult<crate::query::RequestedKeys> {
+    let mut arguments = sqlx::sqlite::SqliteArguments::default();
+    arguments.add(source).map_err(sqlx::Error::Encode)?;
+    arguments.add(parent).map_err(sqlx::Error::Encode)?;
+    arguments
+        .add(filter.trim().to_owned())
+        .map_err(sqlx::Error::Encode)?;
+    let direction = if descending { "DESC" } else { "ASC" };
+    Ok(crate::query::RequestedKeys {
+        sql: format!(
+            "SELECT folder_key value,row_number() OVER()-1 ordinal FROM (SELECT folder_key FROM ({FILTERED_FOLDER_CHILDREN_SQL}) ORDER BY sort_text {direction},folder_key LIMIT {} OFFSET {})",
+            limit.min(COLLECTION_ROW_LIMIT),
+            offset.min(i64::MAX as usize)
+        ),
+        arguments,
+    })
 }
 
-const ARTIST_ALBUM_SCOPE: &str = "SELECT album.album_key FROM albums album JOIN album_order ordering USING(album_key)
-             WHERE (album.indexed=1 OR EXISTS(SELECT 1 FROM tracks admitted WHERE admitted.album_key=album.album_key AND admitted.indexed=1)) AND album.source_key=?1 AND album.album_key IN (
-               SELECT album_key FROM album_artists credit JOIN albums album USING(album_key) WHERE ?3=1 AND credit.artist_key=?2 AND album.metadata IS NOT NULL
-               UNION SELECT member.album_key FROM track_album_artists credit JOIN tracks member USING(track_key) JOIN albums album USING(album_key) WHERE ?3=1 AND credit.artist_key=?2 AND member.indexed=1 AND album.metadata IS NULL
-               UNION SELECT track.album_key FROM track_artists credit JOIN tracks track USING(track_key) WHERE track.indexed=1 AND ?3=0 AND credit.artist_key=?2)
-             AND (?4 IS NULL OR EXISTS(SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.indexed=1 AND track.album_key=album.album_key AND scope.folder_key=?4))
-             AND (?5 OR instr(ordering.title_search,?6)>0 OR instr(ordering.artist_search,?6)>0 OR CAST(ordering.year_sort AS TEXT)=?6)";
+const ARTIST_ALBUM_SCOPE: &str = "SELECT album.album_key FROM (
+    SELECT album_key FROM collection_album_index WHERE kind='artist' AND entity_key=?2 AND role=?3 AND coalesce(folder_key,'')=coalesce(?4,'') AND (track_count>0 OR (?3=1 AND ?4 IS NULL AND album_count>0)) AND album_key IS NOT NULL
+) candidate CROSS JOIN albums album USING(album_key)
+WHERE (album.indexed=1 OR album.track_count>0) AND album.source_key=?1";
 
-const FILTERED_FOLDER_CHILDREN_SQL: &str = "SELECT DISTINCT folder.folder_key,folder.sort_text FROM folders folder JOIN track_folders child USING(folder_key) JOIN tracks track USING(track_key) WHERE track.indexed=1 AND folder.indexed=1 AND track.source_key=?1 AND instr(lower(folder.name),lower(?3))>0 AND ((?2 IS NULL AND child.position=0) OR EXISTS(SELECT 1 FROM track_folders parent WHERE parent.track_key=child.track_key AND parent.folder_key=?2 AND child.position=parent.position+1))";
+const FILTERED_FOLDER_CHILDREN_SQL: &str = "SELECT folder.folder_key,folder.sort_text FROM folder_children relation CROSS JOIN folders folder ON folder.folder_key=relation.child_folder_key WHERE relation.source_key=?1 AND coalesce(relation.parent_folder_key,'')=coalesce(?2,'') AND relation.admitted_track_count>0 AND folder.indexed=1 AND instr(lower(folder.name),lower(?3))>0";
 
+pub(crate) fn album_artist_keys(artist: &str) -> String {
+    format!("SELECT member.track_key FROM album_artists credit CROSS JOIN tracks member INDEXED BY tracks_album_order_idx ON member.album_key=credit.album_key WHERE credit.artist_key={artist}
+        UNION SELECT credit.track_key FROM track_album_artists credit CROSS JOIN tracks member ON member.track_key=credit.track_key WHERE credit.artist_key={artist} AND member.album_key IS NULL")
+}
+pub(crate) fn genre_keys(genre: &str) -> String {
+    format!("SELECT track_key FROM track_genres WHERE genre_key={genre}
+        UNION SELECT member.track_key FROM album_genres credit CROSS JOIN tracks member INDEXED BY tracks_album_order_idx ON member.album_key=credit.album_key WHERE credit.genre_key={genre}")
+}
 pub(crate) fn album_artist_member(song: &str, artist: &str) -> String {
-    format!(
-        "{song}.track_key IN (
-            SELECT member.track_key
-            FROM album_artists credit
-            CROSS JOIN albums album ON album.album_key=credit.album_key
-            CROSS JOIN tracks member INDEXED BY tracks_album_order_idx ON member.album_key=album.album_key
-            WHERE credit.artist_key={artist} AND album.metadata IS NOT NULL
-            UNION
-            SELECT member.track_key
-            FROM (
-                SELECT DISTINCT credited.album_key
-                FROM track_album_artists credit
-                CROSS JOIN tracks credited ON credited.track_key=credit.track_key
-                CROSS JOIN albums album ON album.album_key=credited.album_key
-                WHERE credit.artist_key={artist} AND credited.indexed=1 AND album.metadata IS NULL
-            ) selected
-            CROSS JOIN tracks member INDEXED BY tracks_album_order_idx ON member.album_key=selected.album_key
-            UNION
-            SELECT credit.track_key FROM track_album_artists credit
-            CROSS JOIN tracks member ON member.track_key=credit.track_key
-            WHERE credit.artist_key={artist} AND member.album_key IS NULL
-        )"
-    )
+    format!("{song}.track_key IN ({})", album_artist_keys(artist))
 }
-
-pub(crate) fn genre_member(song: &str, genre: &str) -> String {
-    format!(
-        "{song}.track_key IN (
-            SELECT track_key FROM track_genres WHERE genre_key={genre}
-            UNION
-            SELECT member.track_key FROM album_genres credit
-            CROSS JOIN albums album ON album.album_key=credit.album_key
-            CROSS JOIN tracks member INDEXED BY tracks_album_order_idx ON member.album_key=album.album_key
-            WHERE credit.genre_key={genre} AND album.metadata IS NOT NULL
-            UNION
-            SELECT member.track_key FROM (
-                SELECT DISTINCT credited.album_key FROM track_genres credit
-                CROSS JOIN tracks credited ON credited.track_key=credit.track_key
-                CROSS JOIN albums album ON album.album_key=credited.album_key
-                WHERE credit.genre_key={genre} AND credited.indexed=1 AND album.metadata IS NULL
-            ) selected
-            CROSS JOIN tracks member INDEXED BY tracks_album_order_idx ON member.album_key=selected.album_key
-        )"
-    )
-}
-
-fn member_scope(kind: &str, key: &str, album_artist: bool, folder: Option<FolderKey>) -> String {
-    let membership = match kind {
-        "album" => format!("track.album_key={key}"),
-        "artist" if album_artist => album_artist_member("track", key),
-        "artist" => format!(
-            "track.track_key IN (SELECT track_key FROM track_artists WHERE artist_key={key})"
-        ),
-        "genre" => genre_member("track", key),
-        "mood" => {
-            format!("track.track_key IN (SELECT track_key FROM track_moods WHERE mood_key={key})")
-        }
-        _ => unreachable!(),
-    };
-    // Look up members through their relationships before checking the boolean flag.
-    let mut scope = format!("track.indexed AND {membership}");
+fn album_summary_field(field: &str, folder: Option<FolderKey>) -> String {
     if let Some(folder) = folder {
-        scope.push_str(&format!(" AND EXISTS(SELECT 1 FROM track_folders WHERE track_key=track.track_key AND folder_key={})",folder.raw()));
+        let selected = if field == "album_count" {
+            "(track_count>0)"
+        } else {
+            field
+        };
+        let value = format!(
+            "SELECT {selected} FROM collection_album_index WHERE kind='folder' AND entity_key={} AND role=0 AND album_key=album.album_key AND coalesce(folder_key,'')=''",
+            folder.raw()
+        );
+        return if field == "last_played" {
+            format!("({value})")
+        } else {
+            format!("COALESCE(({value}),0)")
+        };
     }
-    scope
+    if field == "album_count" {
+        "(album.track_count>0)".into()
+    } else {
+        format!("album.{field}")
+    }
 }
 
-fn summary_field(
-    kind: &str,
-    alias: &str,
-    field: &str,
-    role: bool,
-    folder: Option<FolderKey>,
-) -> String {
-    let scope = member_scope(kind, &format!("{alias}.{kind}_key"), role, folder);
-    if field == "album_count" && folder.is_none() {
-        let native = if kind == "artist" && role {
-            Some(format!(
-                "SELECT album.album_key FROM album_artists credit JOIN albums album USING(album_key) WHERE credit.artist_key={alias}.artist_key AND album.indexed=1"
-            ))
-        } else if kind == "genre" {
-            Some(format!(
-                "SELECT album.album_key FROM album_genres credit JOIN albums album USING(album_key) WHERE credit.genre_key={alias}.genre_key AND album.indexed=1"
-            ))
-        } else {
-            None
-        };
-        if let Some(native) = native {
-            return format!(
-                "(SELECT count(*) FROM(SELECT track.album_key FROM tracks track WHERE {scope} AND track.album_key IS NOT NULL UNION {native}))"
-            );
-        }
+pub(crate) fn global_totals_join(kind: &str, role: bool) -> String {
+    format!(
+        "LEFT JOIN collection_totals totals ON totals.kind='{kind}' AND totals.entity_key={kind}.{kind}_key AND totals.role={} AND coalesce(totals.folder_key,'')=''",
+        i32::from(role)
+    )
+}
+
+fn collection_from(kind: &str, role: bool, folder: Option<FolderKey>) -> String {
+    if let Some(folder) = folder {
+        format!(
+            "collection_totals totals CROSS JOIN {kind}s {kind} ON {kind}.{kind}_key=totals.entity_key AND totals.kind='{kind}' AND totals.role={} AND coalesce(totals.folder_key,'')={}",
+            i32::from(role),
+            folder.raw()
+        )
+    } else {
+        format!("{kind}s {kind} {}", global_totals_join(kind, role))
     }
-    let expression = match field {
-        "album_count" => "count(DISTINCT track.album_key)".into(),
-        "track_count" => "count(*)".into(),
-        "duration_millis" => "COALESCE(sum(track.duration_millis),0)".into(),
-        "last_played" => format!("max({})", crate::tracks::displayed_stat("last_played")),
-        "play_count" => format!(
-            "COALESCE(sum({}),0)",
-            crate::tracks::displayed_stat("play_count")
-        ),
-        _ => unreachable!(),
-    };
-    format!("(SELECT {expression} FROM tracks track WHERE {scope})")
+}
+
+fn total_field(field: &str) -> String {
+    if field == "last_played" {
+        "totals.last_played".into()
+    } else {
+        format!("COALESCE(totals.{field},0)")
+    }
 }
 
 fn favorite(alias: &str, field: &str) -> String {
@@ -792,32 +528,28 @@ fn favorite(alias: &str, field: &str) -> String {
 impl CatalogSort {
     pub(crate) fn album_order_sql(self, descending: bool, folder: Option<FolderKey>) -> String {
         let field = match self {
-            Self::Title => "ordering.title_sort".into(),
-            Self::Artist | Self::AlbumArtist => "ordering.album_artist_sort".into(),
-            Self::Year => "ordering.year_sort".into(),
-            Self::ReleaseDate => "ordering.release_sort".into(),
-            Self::DateAdded => "ordering.added_sort".into(),
-            Self::LastPlayed => summary_field("album", "album", "last_played", false, folder),
-            Self::PlayCount => summary_field("album", "album", "play_count", false, folder),
+            Self::Title => "album.title_sort".into(),
+            Self::Artist | Self::AlbumArtist => "album.album_artist_sort".into(),
+            Self::Year => "album.year_sort".into(),
+            Self::ReleaseDate => "album.release_sort".into(),
+            Self::DateAdded => "album.added_sort".into(),
+            Self::LastPlayed => album_summary_field("last_played", folder),
+            Self::PlayCount => album_summary_field("play_count", folder),
             Self::UserRating => favorite("album", "rating"),
             Self::Favorite => favorite("album", "favorite"),
-            Self::TrackCount => summary_field("album", "album", "track_count", false, folder),
-            Self::Duration => summary_field("album", "album", "duration_millis", false, folder),
+            Self::TrackCount => album_summary_field("track_count", folder),
+            Self::Duration => album_summary_field("duration_millis", folder),
             _ => unreachable!("album sort field"),
         };
         let direction = if descending { "DESC" } else { "ASC" };
         match self {
             Self::Title => format!("{field} {direction},album.album_key"),
             Self::Artist | Self::AlbumArtist => format!(
-                "({field} IS NULL),{field} {direction},(ordering.year_sort IS NULL),ordering.year_sort,ordering.title_sort,album.album_key"
+                "({field} IS NULL),{field} {direction},(album.year_sort IS NULL),album.year_sort,album.title_sort,album.album_key"
             ),
-            _ => format!("{field} {direction} NULLS LAST,ordering.title_sort,album.album_key"),
+            _ => format!("{field} {direction} NULLS LAST,album.title_sort,album.album_key"),
         }
     }
-}
-
-pub(crate) fn album_track_scope(folder: Option<FolderKey>) -> String {
-    member_scope("album", "album.album_key", false, folder).replace("track.", "item.")
 }
 
 pub(crate) fn album_scope(
@@ -827,13 +559,13 @@ pub(crate) fn album_scope(
     filter: &str,
 ) -> String {
     let mut scope = format!(
-        "(album.indexed=1 OR EXISTS(SELECT 1 FROM tracks admitted WHERE admitted.album_key=album.album_key AND admitted.indexed=1)) AND album.source_key={}",
+        "(album.indexed=1 OR album.track_count>0) AND album.source_key={}",
         source.raw()
     );
     if folder.is_some() {
         scope.push_str(&format!(
-            " AND EXISTS(SELECT 1 FROM tracks track WHERE {})",
-            member_scope("album", "album.album_key", false, folder)
+            " AND {}>0",
+            album_summary_field("track_count", folder)
         ));
     }
     if favorites_only {
@@ -845,38 +577,30 @@ pub(crate) fn album_scope(
     let filter = filter.trim().to_lowercase();
     if !filter.is_empty() {
         let filter = crate::query::quote(&filter);
-        scope.push_str(&format!(" AND (instr(ordering.title_search||' '||COALESCE(ordering.artist_search,''),{filter})>0 OR CAST(ordering.year_sort AS TEXT)={filter} OR EXISTS(SELECT 1 FROM effective_album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND instr(artist.normalized_name,{filter})>0) OR EXISTS(SELECT 1 FROM effective_album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key AND instr(genre.normalized_name,{filter})>0))"));
+        scope.push_str(&format!(" AND (instr(album.title_search||' '||COALESCE(album.artist_search,''),{filter})>0 OR CAST(album.year_sort AS TEXT)={filter} OR EXISTS(SELECT 1 FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND instr(artist.normalized_name,{filter})>0) OR EXISTS(SELECT 1 FROM album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key AND instr(genre.normalized_name,{filter})>0))"));
     }
     scope
 }
-
 pub(crate) fn named_scope(
     kind: &str,
     source: SourceKey,
     folder: Option<FolderKey>,
     filter: &str,
 ) -> String {
-    let mut scope = format!(
-        "{kind}.source_key={} AND ({kind}.indexed=1 OR EXISTS(SELECT 1 FROM tracks track WHERE {}))",
-        source.raw(),
-        member_scope(kind, &format!("{kind}.{kind}_key"), false, None)
-    );
-    if folder.is_some() {
-        scope.push_str(&format!(
-            " AND EXISTS(SELECT 1 FROM tracks track WHERE {})",
-            member_scope(kind, &format!("{kind}.{kind}_key"), false, folder)
-        ));
-    }
-    let filter = filter.trim().to_lowercase();
-    if !filter.is_empty() {
+    let visible = if folder.is_some() {
+        "totals.track_count>0".into()
+    } else {
+        format!("({kind}.indexed=1 OR totals.track_count>0)")
+    };
+    let mut scope = format!("{kind}.source_key={} AND {visible}", source.raw());
+    if !filter.trim().is_empty() {
         scope.push_str(&format!(
             " AND instr({kind}.normalized_name,{})>0",
-            crate::query::quote(&filter)
+            crate::query::quote(&filter.trim().to_lowercase())
         ));
     }
     scope
 }
-
 pub(crate) fn artist_scope(
     source: SourceKey,
     folder: Option<FolderKey>,
@@ -884,19 +608,19 @@ pub(crate) fn artist_scope(
     favorites_only: bool,
     filter: &str,
 ) -> String {
-    let mut scope = format!("artist.source_key={}", source.raw());
+    let empty = if album_artist && folder.is_none() {
+        " OR totals.album_count>0"
+    } else {
+        ""
+    };
+    let mut scope = format!(
+        "artist.source_key={} AND (totals.track_count>0{empty})",
+        source.raw()
+    );
     if !filter.trim().is_empty() {
         scope.push_str(&format!(
             " AND instr(artist.normalized_name,{})>0",
             crate::query::quote(&filter.trim().to_lowercase())
-        ));
-    }
-    let members = member_scope("artist", "artist.artist_key", album_artist, folder);
-    if album_artist && folder.is_none() {
-        scope.push_str(&format!(" AND (EXISTS(SELECT 1 FROM tracks track WHERE {members}) OR EXISTS(SELECT 1 FROM album_artists credit JOIN albums album USING(album_key) WHERE credit.artist_key=artist.artist_key AND (album.indexed=1 OR EXISTS(SELECT 1 FROM tracks admitted WHERE admitted.album_key=album.album_key AND admitted.indexed=1))))"));
-    } else {
-        scope.push_str(&format!(
-            " AND EXISTS(SELECT 1 FROM tracks track WHERE {members})"
         ));
     }
     if favorites_only {
@@ -908,63 +632,137 @@ pub(crate) fn artist_scope(
     scope
 }
 
-pub(crate) fn collection_query(input: &crate::CatalogQuery) -> crate::query::OrderedQuery {
-    use crate::CatalogSubject as S;
-    let (kind, source, role, sort) = match input.subject {
-        S::Albums { source, sort, .. } => {
-            return crate::query::OrderedQuery {
-                albumless: false,
-                key: "album.album_key".into(),
-                text: matches!(
-                    sort,
-                    CatalogSort::Title | CatalogSort::Artist | CatalogSort::AlbumArtist
+fn release_text_filter(filter: &str) -> String {
+    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+    if filter.is_empty() {
+        return "1".into();
+    }
+    let filter = crate::query::quote(&filter);
+    format!(
+        "instr(album.title_search,{filter})>0 OR instr(album.artist_search,{filter})>0 OR CAST(album.year_sort AS TEXT)={filter}"
+    )
+}
+
+pub(crate) fn collection_query(input: &crate::ListRead) -> crate::query::OrderedQuery {
+    use crate::ListKind as K;
+    let source = input.source.expect("source collection list");
+    let sort = input.sort;
+    if let K::ArtistAlbums {
+        artist,
+        album_artist,
+        release_class,
+        ref filters,
+    } = input.kind
+    {
+        let mut arguments = sqlx::sqlite::SqliteArguments::default();
+        arguments.add(source).expect("source argument");
+        arguments.add(artist).expect("artist argument");
+        arguments.add(album_artist).expect("role argument");
+        arguments.add(input.folder).expect("folder argument");
+        let text = if let Some(filters) = filters {
+            filters
+                .iter()
+                .enumerate()
+                .map(|(class, filter)| {
+                    format!(
+                        "(album.release_class={class} AND ({}))",
+                        release_text_filter(filter)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" OR ")
+        } else {
+            release_text_filter(&input.filter)
+        };
+        let mut predicate = format!("({text})");
+        if let Some(class) = release_class {
+            predicate.push_str(&format!(
+                " AND album.release_class={}",
+                release_class_code(class)
+            ));
+        }
+        if input.favorites_only {
+            predicate.push_str(&format!(
+                " AND album.media_uri IN({})",
+                crate::favorites::FAVORITE_URIS
+            ));
+        }
+        if input.downloaded_only {
+            predicate.push_str(&format!(
+                " AND {}>0",
+                album_summary_field("downloaded_count", input.folder)
+            ));
+        }
+        return crate::query::OrderedQuery {
+            key: "album.album_key".into(),
+            text: match sort {
+                CatalogSort::Title => Some("album.title_sort".into()),
+                CatalogSort::Artist | CatalogSort::AlbumArtist => {
+                    Some("album.album_artist_sort".into())
+                }
+                _ => None,
+            },
+            from: format!(
+                "({ARTIST_ALBUM_SCOPE}) candidate CROSS JOIN albums album USING(album_key)"
+            ),
+            predicate,
+            order: vec![format!(
+                "album.release_class,{}",
+                sort.album_order_sql(input.descending, input.folder)
+            )],
+            entry_key: "NULL".into(),
+            arguments,
+        };
+    }
+    if input.kind == K::Albums {
+        let mut predicate = album_scope(source, None, input.favorites_only, &input.filter);
+        if input.downloaded_only {
+            predicate.push_str(&format!(
+                " AND {}>0",
+                album_summary_field("downloaded_count", input.folder)
+            ));
+        }
+        return crate::query::OrderedQuery {
+            key: "album.album_key".into(),
+            text: match sort {
+                CatalogSort::Title => Some("album.title_sort".into()),
+                CatalogSort::Artist | CatalogSort::AlbumArtist => {
+                    Some("album.album_artist_sort".into())
+                }
+                _ => None,
+            },
+            from: if let Some(folder) = input.folder {
+                format!(
+                    "(SELECT album_key FROM collection_album_index WHERE kind='folder' AND entity_key={} AND role=0 AND coalesce(folder_key,'')='' AND album_key IS NOT NULL AND track_count>0) candidate CROSS JOIN albums album USING(album_key)",
+                    folder.raw()
                 )
-                .then(|| {
-                    if sort == CatalogSort::Title {
-                        "ordering.title_sort".into()
-                    } else {
-                        "ordering.album_artist_sort".into()
-                    }
-                }),
-                from: "albums album JOIN album_order ordering USING(album_key)".into(),
-                predicate: album_scope(source, input.folder, input.favorites_only, &input.filter),
-                order: vec![sort.album_order_sql(input.descending, input.folder)],
-                uri: "album.media_uri".into(),
-                entry_key: "NULL".into(),
-                arguments: Default::default(),
-            };
-        }
-        S::Artists {
-            source,
-            sort,
-            album_artist,
-        } => ("artist", source, album_artist, sort),
-        S::Genres { source, sort } => ("genre", source, false, sort),
-        S::Moods { source, sort } => ("mood", source, false, sort),
-        S::Playlists { source, sort } => {
-            return crate::playlists::playlist_list_query(
-                source,
-                input.folder,
-                sort,
-                input.descending,
-                &input.filter,
-            );
-        }
+            } else {
+                "albums album".into()
+            },
+            predicate,
+            order: vec![sort.album_order_sql(input.descending, input.folder)],
+            entry_key: "NULL".into(),
+            arguments: Default::default(),
+        };
+    }
+    let (kind, role) = match input.kind {
+        K::Artists { album_artist } => ("artist", album_artist),
+        K::Genres => ("genre", false),
+        K::Moods => ("mood", false),
         _ => unreachable!(),
     };
     let field = match sort {
         CatalogSort::Title | CatalogSort::Artist => format!("{kind}.sort_text"),
-        CatalogSort::AlbumCount => summary_field(kind, kind, "album_count", role, input.folder),
-        CatalogSort::TrackCount => summary_field(kind, kind, "track_count", role, input.folder),
-        CatalogSort::Duration => summary_field(kind, kind, "duration_millis", role, input.folder),
-        CatalogSort::PlayCount => summary_field(kind, kind, "play_count", role, input.folder),
-        CatalogSort::LastPlayed => summary_field(kind, kind, "last_played", role, input.folder),
+        CatalogSort::AlbumCount => total_field("album_count"),
+        CatalogSort::TrackCount => total_field("track_count"),
+        CatalogSort::Duration => total_field("duration_millis"),
+        CatalogSort::PlayCount => total_field("play_count"),
+        CatalogSort::LastPlayed => total_field("last_played"),
         CatalogSort::UserRating => favorite(kind, "rating"),
         CatalogSort::Favorite => favorite(kind, "favorite"),
         _ => unreachable!("collection sort field"),
     };
-    let direction = if input.descending { "DESC" } else { "ASC" };
-    let predicate = if kind == "artist" {
+    let mut predicate = if kind == "artist" {
         artist_scope(
             source,
             input.folder,
@@ -975,53 +773,31 @@ pub(crate) fn collection_query(input: &crate::CatalogQuery) -> crate::query::Ord
     } else {
         named_scope(kind, source, input.folder, &input.filter)
     };
+    if input.downloaded_only {
+        predicate.push_str(&format!(" AND {}>0", total_field("downloaded_count")));
+    }
+    let direction = if input.descending { "DESC" } else { "ASC" };
     crate::query::OrderedQuery {
-        albumless: false,
         key: format!("{kind}.{kind}_key"),
         text: matches!(sort, CatalogSort::Title | CatalogSort::Artist).then(|| field.clone()),
-        from: format!("{kind}s {kind}"),
+        from: collection_from(kind, role, input.folder),
         predicate,
-        order: vec![format!(
-            "{field} {direction} NULLS LAST,{kind}.sort_text,{kind}.{kind}_key"
-        )],
-        uri: format!("{kind}.media_uri"),
+        order: vec![
+            if matches!(sort, CatalogSort::Title | CatalogSort::Artist) {
+                format!("{field} {direction},{kind}.{kind}_key")
+            } else {
+                format!("{field} {direction} NULLS LAST,{kind}.sort_text,{kind}.{kind}_key")
+            },
+        ],
         entry_key: "NULL".into(),
         arguments: Default::default(),
     }
 }
 
-pub(crate) fn local_album_metadata(alias: &str) -> String {
-    let first = |field: &str| {
-        format!(
-            "(SELECT json_extract(member.metadata,'$.{field}') FROM tracks member INDEXED BY tracks_album_order_idx WHERE member.album_key={alias}.album_key AND member.indexed=1 AND json_extract(member.metadata,'$.{field}') IS NOT NULL AND json_extract(member.metadata,'$.{field}')<>'' ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1)"
-        )
-    };
-    let artists = format!(
-        "(SELECT json_group_array(json_object('object_id',artist.object_id,'name',artist.name,'sort_text',artist.sort_text,'musicbrainz_artist_id',artist.musicbrainz_artist_id) ORDER BY credit.position) FROM effective_album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key={alias}.album_key)"
-    );
-    let genres = format!(
-        "(SELECT json_group_array(json_object('object_id',genre.object_id,'name',genre.name,'sort_text',genre.sort_text) ORDER BY credit.position) FROM effective_album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key={alias}.album_key)"
-    );
-    let releases = format!(
-        "(SELECT json_group_array(release_type ORDER BY position) FROM effective_album_release_types WHERE album_key={alias}.album_key)"
-    );
-    format!(
-        "json_patch(COALESCE(json({alias}.metadata),json_object('title',COALESCE({},''),'artist',COALESCE((SELECT group_concat(name,', ') FROM (SELECT artist.name FROM effective_album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key={alias}.album_key ORDER BY credit.position)),''),'sort_text',COALESCE({},''),'year',{},'release_date',{},'date_added',{},'musicbrainz_release_id',{},'musicbrainz_release_group_id',{},'is_compilation',json(CASE {} WHEN 1 THEN 'true' WHEN 0 THEN 'false' ELSE 'null' END),'album_artists',json({artists}),'genres',json({genres}),'release_types',json({releases}))),json_object('date_added',(SELECT date(added_sort,'unixepoch') FROM album_order WHERE album_key={alias}.album_key),'release_types',json({releases})))",
-        first("album"),
-        first("album_tags.sort_text"),
-        first("year"),
-        first("release_date"),
-        first("date_added"),
-        first("musicbrainz_album_id"),
-        first("musicbrainz_release_group_id"),
-        first("album_tags.is_compilation")
-    )
-}
-
 async fn load_collection<T>(
     connection: &mut SqliteConnection,
     kind: &str,
-    keys: &[impl serde::Serialize],
+    requested: crate::query::RequestedKeys,
     role: bool,
     activity: bool,
     columns: &str,
@@ -1029,41 +805,38 @@ async fn load_collection<T>(
 where
     T: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin,
 {
-    let scope = member_scope(kind, "owner.value", role, None);
-    let activity_columns = if activity {
-        format!(
-            ",sum({}) play_count,max({}) last_played",
-            crate::tracks::displayed_stat("play_count"),
-            crate::tracks::displayed_stat("last_played")
-        )
+    let join = if kind == "album" {
+        String::new()
     } else {
-        ",0 play_count,NULL last_played".into()
+        global_totals_join(kind, role)
     };
-    let album_count = if kind == "genre" || kind == "artist" && role {
-        summary_field(kind, kind, "album_count", role, None)
+    let metric = |field| {
+        if kind == "album" {
+            album_summary_field(field, None)
+        } else {
+            total_field(field)
+        }
+    };
+    let play = if activity {
+        metric("play_count")
     } else {
-        "COALESCE(summary.album_count,0)".into()
+        "0".into()
     };
-    let index = if kind == "album" {
-        "INDEXED BY tracks_album_order_idx"
+    let last = if activity {
+        metric("last_played")
     } else {
-        ""
+        "NULL".into()
     };
-    let sql = format!("WITH requested AS (SELECT value,key ordinal FROM json_each(?1)), summaries AS (
-        SELECT owner.value,count(DISTINCT track.album_key) album_count,count(*) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,
-        sum(EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download')) downloaded_count {activity_columns}
-        FROM (SELECT DISTINCT value FROM requested) owner CROSS JOIN tracks track {index} ON {scope} GROUP BY owner.value)
-        SELECT {columns},{album_count} album_count,COALESCE(summary.track_count,0) track_count,COALESCE(summary.duration_millis,0) duration_millis,COALESCE(summary.downloaded_count,0) downloaded_count,
-        COALESCE(state.favorite,native.favorite,0) favorite,COALESCE(state.rating,native.rating)/10 rating,COALESCE(native.play_count,summary.play_count,0) play_count,COALESCE(native.last_played,summary.last_played) last_played,COALESCE(native.skip_count,0) skip_count
-        FROM requested JOIN {kind}s {kind} ON {kind}.{kind}_key=requested.value
-        LEFT JOIN summaries summary ON summary.value=requested.value
+    let sql = format!("WITH requested AS ({}) SELECT {columns},{} album_count,{} track_count,{} duration_millis,{} downloaded_count,
+        COALESCE(state.favorite,native.favorite,0) favorite,COALESCE(state.rating,native.rating)/10 rating,COALESCE(native.play_count,{play},0) play_count,COALESCE(native.last_played,{last}) last_played,COALESCE(native.skip_count,0) skip_count
+        FROM requested CROSS JOIN {kind}s {kind} ON {kind}.{kind}_key=requested.value {join}
         LEFT JOIN user_media_state state ON state.media_uri={kind}.media_uri
-        LEFT JOIN native_media_state native ON native.media_uri={kind}.media_uri
-        ORDER BY requested.ordinal");
-    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
-        .bind(serde_json::to_string(keys)?)
-        .fetch_all(connection)
-        .await?)
+        LEFT JOIN native_media_state native ON native.media_uri={kind}.media_uri ORDER BY requested.ordinal",requested.sql,metric("album_count"),metric("track_count"),metric("duration_millis"),metric("downloaded_count"));
+    Ok(
+        sqlx::query_as_with(sqlx::AssertSqlSafe(sql), requested.arguments)
+            .fetch_all(connection)
+            .await?,
+    )
 }
 
 pub(crate) async fn load_album_rows(
@@ -1071,173 +844,294 @@ pub(crate) async fn load_album_rows(
     keys: &[AlbumKey],
     activity: bool,
 ) -> LibraryResult<Vec<AlbumView>> {
-    let columns = format!("album.album_key,album.source_key,album.object_id,album.media_uri,{} metadata,album.release_lookup_identity,{} artwork_binding,
-        (SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position) FROM effective_album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key) album_artists,
-        (SELECT json_group_array(json_object('genre_key',genre.genre_key,'name',genre.name) ORDER BY credit.position) FROM effective_album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key) genres",local_album_metadata("album"),crate::artwork::entity_artwork_sql("album","album"));
-    load_collection(connection, "album", keys, false, activity, &columns).await
+    load_album_requested(
+        connection,
+        crate::query::RequestedKeys::batch(keys)?,
+        activity,
+    )
+    .await
 }
-
-pub(crate) async fn load_artist_rows(
+pub(crate) async fn load_album_requested(
     connection: &mut SqliteConnection,
-    keys: &[ArtistKey],
+    requested: crate::query::RequestedKeys,
+    activity: bool,
+) -> LibraryResult<Vec<AlbumView>> {
+    let columns = format!("album.album_key,album.source_key,album.object_id,album.media_uri,json(album.metadata) metadata,album.release_lookup_identity,{} artwork_binding,
+        (SELECT json_group_array(json_object('artist_key',artist.artist_key,'media_uri',artist.media_uri,'name',artist.name) ORDER BY credit.position) FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key) album_artists,
+        (SELECT json_group_array(json_object('genre_key',genre.genre_key,'name',genre.name) ORDER BY credit.position) FROM album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key) genres",crate::artwork::entity_artwork_sql("album","album"));
+    load_collection(connection, "album", requested, false, activity, &columns).await
+}
+pub(crate) async fn load_artist_requested(
+    connection: &mut SqliteConnection,
+    requested: crate::query::RequestedKeys,
     role: bool,
     activity: bool,
 ) -> LibraryResult<Vec<ArtistView>> {
-    load_collection(connection,"artist",keys,role,activity,&format!("artist.artist_key,artist.source_key,artist.object_id,artist.media_uri,json(artist.metadata) metadata,{} artwork_binding",crate::artwork::entity_artwork_sql("artist","artist"))).await
+    load_collection(connection,"artist",requested,role,activity,&format!("artist.artist_key,artist.source_key,artist.object_id,artist.media_uri,json(artist.metadata) metadata,{} artwork_binding",crate::artwork::entity_artwork_sql("artist","artist"))).await
+}
+#[derive(FromRow)]
+struct WithGallery<T> {
+    #[sqlx(flatten)]
+    row: T,
+    #[sqlx(json)]
+    gallery: Vec<String>,
 }
 
-pub(crate) async fn load_genre_rows(
+pub(crate) async fn load_genre_requested(
     connection: &mut SqliteConnection,
-    keys: &[GenreKey],
+    requested: crate::query::RequestedKeys,
     folder: Option<FolderKey>,
 ) -> LibraryResult<Vec<GenreView>> {
     let columns = format!(
-        "genre.genre_key,genre.source_key,(SELECT object_id FROM sources WHERE source_key=genre.source_key) source_id,genre.object_id,json(genre.metadata) metadata,{} artwork_binding",
-        crate::artwork::preview_sql("genre.native_artwork")
+        "genre.genre_key,genre.source_key,(SELECT object_id FROM sources WHERE source_key=genre.source_key) source_id,genre.object_id,json(genre.metadata) metadata,{} artwork_binding,CASE WHEN genre.native_artwork IS NULL THEN {} ELSE '[]' END gallery",
+        crate::artwork::preview_sql("genre.native_artwork"),
+        gallery_sql("genre", folder)
     );
-    let mut rows: Vec<GenreView> =
-        load_collection(connection, "genre", keys, false, false, &columns).await?;
-    for row in &mut rows {
-        if row.artwork_binding.is_none() {
-            row.representative_artwork =
-                representative_artwork(connection, "genre", row.genre_key.raw(), folder).await?;
-        }
-    }
-    Ok(rows)
+    let rows: Vec<WithGallery<GenreView>> =
+        load_collection(connection, "genre", requested, false, false, &columns).await?;
+    Ok(rows
+        .into_iter()
+        .map(|mut row| {
+            row.row.representative_artwork =
+                row.gallery.into_iter().map(String::into_bytes).collect();
+            row.row
+        })
+        .collect())
 }
-
-pub(crate) async fn load_mood_rows(
+pub(crate) async fn load_mood_requested(
     connection: &mut SqliteConnection,
-    keys: &[MoodKey],
+    requested: crate::query::RequestedKeys,
     folder: Option<FolderKey>,
 ) -> LibraryResult<Vec<MoodView>> {
-    let mut rows: Vec<MoodView> = load_collection(
-        connection,
-        "mood",
-        keys,
-        false,
-        false,
-        "mood.mood_key,mood.source_key,json(mood.metadata) metadata",
-    )
-    .await?;
-    for row in &mut rows {
-        row.representative_artwork =
-            representative_artwork(connection, "mood", row.mood_key.raw(), folder).await?;
-    }
-    Ok(rows)
-}
-
-async fn representative_artwork(
-    connection: &mut SqliteConnection,
-    kind: &str,
-    key: i64,
-    folder: Option<FolderKey>,
-) -> LibraryResult<Vec<Vec<u8>>> {
-    let mut scope = member_scope(kind, "owner.key", false, None);
-    if folder.is_some() {
-        let visible = member_scope(kind, "owner.key", false, folder).replace("track.", "present.");
-        scope.push_str(&format!(
-            " AND EXISTS(SELECT 1 FROM tracks present WHERE {visible})"
-        ));
-    }
-    // An input row keeps SQLite from recompiling cover selection for each owner key.
-    let selection = crate::artwork::collection_artwork_sql(
-        "(SELECT ?1 key) owner CROSS JOIN tracks track",
-        &scope,
+    let columns = format!(
+        "mood.mood_key,mood.source_key,json(mood.metadata) metadata,{} gallery",
+        gallery_sql("mood", folder)
     );
-    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT {} FROM ({selection}) selected JOIN tracks track USING(track_key) LEFT JOIN albums album USING(album_key)",crate::artwork::track_artwork_sql("track")))).bind(key).fetch_all(connection).await?)
+    let rows: Vec<WithGallery<MoodView>> =
+        load_collection(connection, "mood", requested, false, false, &columns).await?;
+    Ok(rows
+        .into_iter()
+        .map(|mut row| {
+            row.row.representative_artwork =
+                row.gallery.into_iter().map(String::into_bytes).collect();
+            row.row
+        })
+        .collect())
 }
 
-pub(crate) async fn load_folder_rows(
+fn gallery_sql(kind: &str, folder: Option<FolderKey>) -> String {
+    let binding = crate::artwork::track_artwork_sql("gallery_track");
+    let gallery=format!("(SELECT json_group_array(CAST(binding AS TEXT)) FROM (
+        SELECT {binding} binding FROM (
+            SELECT artwork_track_key,artwork_group_uri,artwork_member_uri FROM collection_album_index
+            WHERE kind='{kind}' AND entity_key={kind}.{kind}_key AND role=0 AND folder_key IS NULL AND artwork_track_key IS NOT NULL
+            ORDER BY artwork_group_uri,artwork_member_uri LIMIT 4
+        ) chosen CROSS JOIN tracks gallery_track ON gallery_track.track_key=chosen.artwork_track_key
+        ORDER BY chosen.artwork_group_uri,chosen.artwork_member_uri
+    ))");
+    if let Some(folder) = folder {
+        format!(
+            "CASE WHEN EXISTS(SELECT 1 FROM collection_totals scope WHERE scope.kind='{kind}' AND scope.entity_key={kind}.{kind}_key AND scope.role=0 AND coalesce(scope.folder_key,'')={} AND scope.track_count>0) THEN {gallery} ELSE '[]' END",
+            folder.raw()
+        )
+    } else {
+        gallery
+    }
+}
+
+pub(crate) async fn load_folder_requested(
     connection: &mut SqliteConnection,
-    keys: &[FolderKey],
+    requested: crate::query::RequestedKeys,
 ) -> LibraryResult<Vec<FolderView>> {
-    Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT folder.folder_key,folder.source_key,folder.object_id,json_patch(folder.metadata,json_object('name',folder.name,'sort_text',folder.sort_text)) metadata,{} artwork_binding,(SELECT count(*) FROM track_folders JOIN tracks USING(track_key) WHERE folder_key=folder.folder_key AND tracks.indexed=1) track_count FROM json_each(?1) requested JOIN folders folder ON folder_key=requested.value ORDER BY CAST(requested.key AS INTEGER)",crate::artwork::preview_sql("folder.native_artwork")))).bind(serde_json::to_string(keys)?).fetch_all(connection).await?)
+    Ok(sqlx::query_as_with(sqlx::AssertSqlSafe(format!("WITH requested AS ({}) SELECT folder.folder_key,folder.source_key,folder.object_id,json_patch(folder.metadata,json_object('name',folder.name,'sort_text',folder.sort_text)) metadata,{} artwork_binding,COALESCE(totals.track_count,0) track_count FROM requested CROSS JOIN folders folder ON folder.folder_key=requested.value {} ORDER BY requested.ordinal",requested.sql,crate::artwork::preview_sql("folder.native_artwork"),global_totals_join("folder", false))),requested.arguments).fetch_all(connection).await?)
 }
 
-pub(crate) fn album_detail_track_count(folder: Option<FolderKey>) -> String {
-    summary_field("album", "album", "track_count", false, folder)
-}
-
-pub(crate) async fn load_album_details(
+async fn load_album_detail_spans(
     connection: &mut SqliteConnection,
-    input: &crate::CatalogQuery,
-    _source: SourceKey,
-    sort: CatalogSort,
-    inline: usize,
+    input: &crate::ListRead,
     offset: usize,
     limit: usize,
+    spans: Vec<(AlbumKey, i64, i64)>,
 ) -> LibraryResult<Vec<AlbumDetailRow>> {
     let end = offset.saturating_add(limit);
-    let relation = collection_query(input);
-    let count = album_detail_track_count(input.folder);
-    let sql = format!(
-        "WITH ordered AS (SELECT album.album_key,{count} track_count,row_number() OVER (ORDER BY {}) album_rank FROM {} WHERE {} ORDER BY {} LIMIT {end}),spans AS (SELECT album_key,track_count,COALESCE(sum(1+max(track_count-{inline},0)) OVER (ORDER BY album_rank ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) first_position FROM ordered) SELECT album_key,track_count,first_position FROM spans WHERE first_position<?1 AND first_position+max(track_count-{inline},0)>=?2 ORDER BY first_position",
-        sort.album_order_sql(input.descending, input.folder),
-        relation.from,
-        relation.predicate,
-        sort.album_order_sql(input.descending, input.folder)
-    );
-    let spans = sqlx::query_as::<_, (AlbumKey, i64, i64)>(sqlx::AssertSqlSafe(sql))
-        .bind(end as i64)
-        .bind(offset as i64)
-        .fetch_all(&mut *connection)
-        .await?;
+    let headers = spans
+        .iter()
+        .filter(|(_, _, first)| *first as usize >= offset)
+        .map(|(key, _, _)| *key)
+        .collect::<Vec<_>>();
     let mut rows = Vec::new();
-    for (album, count, first) in spans {
-        let first = first as usize;
-        let count = count as usize;
-        let header = first >= offset;
-        let first_track = first.saturating_add(1);
-        let start = if header {
-            0
-        } else {
-            inline.saturating_add(offset.saturating_sub(first_track))
-        };
-        let length = inline
-            .saturating_add(end.saturating_sub(first_track))
-            .min(count)
-            .saturating_sub(start);
-        let scope = album_track_scope(input.folder).replace("album.album_key", "?1");
-        let keys = sqlx::query_scalar::<_,crate::TrackKey>(sqlx::AssertSqlSafe(format!("SELECT item.track_key FROM tracks item WHERE {scope} ORDER BY item.disc_number,item.track_number,item.sort_text,item.track_key LIMIT ?2 OFFSET ?3"))).bind(album).bind(length as i64).bind(start as i64).fetch_all(&mut *connection).await?;
-        let mut songs = crate::tracks::load_track_rows(connection, &keys)
-            .await?
-            .into_iter();
-        if header
-            && let Some(album) = load_album_rows(connection, &[album], input.activity)
-                .await?
-                .pop()
-        {
-            rows.push(AlbumDetailRow::Album {
-                album,
-                tracks: songs.by_ref().take(inline).collect(),
-                last: count <= inline,
-            });
-        }
-        for (position, track) in songs.enumerate() {
-            let index = position + start.max(inline);
-            rows.push(AlbumDetailRow::Track {
-                track,
-                index,
-                last: index + 1 == count,
-            });
+    if !headers.is_empty() {
+        for album in load_album_rows(connection, &headers, input.activity).await? {
+            let (_, count, first) = spans
+                .iter()
+                .find(|(key, _, _)| *key == album.album_key)
+                .expect("requested album span");
+            rows.push((
+                *first as usize,
+                AlbumDetailRow::Album {
+                    album,
+                    last: *count == 0,
+                },
+            ));
         }
     }
-    Ok(rows)
+    let mut selected = Vec::new();
+    for (album, count, first) in &spans {
+        let first_track = *first as usize + 1;
+        let start = offset.saturating_sub(first_track);
+        let length = end
+            .saturating_sub(first_track)
+            .min(*count as usize)
+            .saturating_sub(start);
+        if length == 0 {
+            continue;
+        }
+        let mut scope = format!("item.indexed=1 AND item.album_key={}", album.raw());
+        if let Some(folder) = input.folder {
+            scope.push_str(&format!(
+                " AND item.track_key IN(SELECT track_key FROM track_folders WHERE folder_key={})",
+                folder.raw()
+            ));
+        }
+        selected.push(format!("SELECT value,row_number() OVER()-1+{} ordinal FROM (SELECT item.track_key value FROM tracks item INDEXED BY tracks_album_order_idx WHERE {scope} ORDER BY item.disc_number,item.track_number,item.sort_text,item.track_key LIMIT {length} OFFSET {start})",first_track+start));
+    }
+    if !selected.is_empty() {
+        #[derive(FromRow)]
+        struct TrackRow {
+            #[sqlx(rename = "__ordinal", try_from = "i64")]
+            position: usize,
+            #[sqlx(flatten)]
+            track: TrackView,
+        }
+        let requested = crate::query::RequestedKeys {
+            sql: selected.join(" UNION ALL "),
+            arguments: Default::default(),
+        };
+        let songs = sqlx::query_as_with::<_, TrackRow, _>(
+            sqlx::AssertSqlSafe(crate::tracks::track_requested_sql(&requested)),
+            requested.arguments,
+        )
+        .fetch_all(&mut *connection)
+        .await?;
+        for row in songs {
+            let span = spans
+                .partition_point(|(_, _, first)| *first as usize <= row.position)
+                .saturating_sub(1);
+            let (_, count, first) = spans[span];
+            let index = row.position - first as usize - 1;
+            rows.push((
+                row.position,
+                AlbumDetailRow::Track {
+                    track: row.track,
+                    index,
+                    last: index + 1 == count as usize,
+                },
+            ));
+        }
+    }
+    rows.sort_unstable_by_key(|(position, _)| *position);
+    Ok(rows.into_iter().map(|(_, row)| row).collect())
 }
 
-pub(crate) fn album_release_identity(alias: &str) -> String {
-    let field = |native: &str, song: &str| {
-        format!(
-            "CASE WHEN {alias}.metadata IS NOT NULL THEN {alias}.{native} ELSE(SELECT json_extract(member.metadata,'$.{song}') FROM tracks member INDEXED BY tracks_album_order_idx WHERE member.album_key={alias}.album_key AND member.indexed=1 AND json_extract(member.metadata,'$.{song}') IS NOT NULL ORDER BY coalesce(member.cue_path,member.source_path),member.disc_number,member.track_number,member.object_id LIMIT 1) END"
-        )
-    };
-    let group = field(
-        "musicbrainz_release_group_id",
-        "musicbrainz_release_group_id",
-    );
-    let release = field("musicbrainz_release_id", "musicbrainz_album_id");
-    format!(
-        "CASE WHEN ({group}) IS NOT NULL THEN 'release-group:'||({group}) WHEN({release}) IS NOT NULL THEN 'release:'||({release}) END"
-    )
+struct AlbumSpan {
+    key: AlbumKey,
+    count: usize,
+    first: usize,
+    genres: bool,
+}
+// Compact keys and counts describe layout; metadata is read only for the window.
+pub struct AlbumDetailIndex {
+    read: crate::ListRead,
+    count: usize,
+    albums: Vec<AlbumSpan>,
+}
+
+impl crate::ListRead {
+    pub async fn album_detail_index(
+        &self,
+        database: &Database,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<std::sync::Arc<AlbumDetailIndex>> {
+        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let relation = collection_query(self);
+        let count = album_summary_field("track_count", self.folder);
+        let facts=sqlx::query_as_with::<_,(AlbumKey,i64,bool),_>(sqlx::AssertSqlSafe(relation.select(&format!("album.album_key,{count},EXISTS(SELECT 1 FROM album_genres WHERE album_key=album.album_key)"))),relation.arguments).fetch_all(&mut *connection).await?;
+        let mut albums = Vec::with_capacity(facts.len());
+        let mut first = 0;
+        for (key, count, genres) in facts {
+            let count = count.max(0) as usize;
+            albums.push(AlbumSpan {
+                key,
+                count,
+                first,
+                genres,
+            });
+            first += 1 + count;
+        }
+        Ok(std::sync::Arc::new(AlbumDetailIndex {
+            read: self.clone(),
+            count: first,
+            albums,
+        }))
+    }
+}
+
+impl AlbumDetailIndex {
+    pub fn spans(&self) -> impl Iterator<Item = (AlbumKey, usize, bool, usize)> + '_ {
+        self.albums
+            .iter()
+            .map(|album| (album.key, album.count, album.genres, album.first))
+    }
+    pub fn matches(&self, read: &crate::ListRead) -> bool {
+        &self.read == read
+    }
+    pub fn len(&self) -> usize {
+        self.count
+    }
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+    pub async fn page(
+        &self,
+        database: &Database,
+        window: crate::RouteSeedWindow,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<crate::Page<AlbumDetailRow>> {
+        let range = window.range(self.count);
+        Ok(crate::Page {
+            count: self.count,
+            first_row_position: range.start,
+            rows: self
+                .rows(database, range.start, range.len(), cancellation)
+                .await?,
+        })
+    }
+    pub async fn rows(
+        &self,
+        database: &Database,
+        offset: usize,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<AlbumDetailRow>> {
+        if limit == 0 || offset >= self.count {
+            return Ok(Vec::new());
+        }
+        let start = self
+            .albums
+            .partition_point(|album| album.first <= offset)
+            .saturating_sub(1);
+        let end = offset.saturating_add(limit.min(256));
+        let spans = self.albums[start..]
+            .iter()
+            .take_while(|album| album.first < end)
+            .map(|album| (album.key, album.count as i64, album.first as i64))
+            .collect();
+        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let rows =
+            load_album_detail_spans(&mut transaction, &self.read, offset, limit.min(256), spans)
+                .await?;
+        transaction.commit().await?;
+        Ok(rows)
+    }
 }

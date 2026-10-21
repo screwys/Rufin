@@ -5,8 +5,8 @@ pub(super) async fn track_query(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
     kind: &str,
-) -> Result<library::CatalogQuery, Error> {
-    use library::{CatalogQuery, TrackScope};
+) -> Result<library::MemberRead, Error> {
+    use library::{Collection, MemberRead};
     if parameters.contains_key("folder") && !parameters.contains_key("source") {
         return Err(bad_request("source is required with folder"));
     }
@@ -28,41 +28,39 @@ pub(super) async fn track_query(
     };
     let scope = match kind {
         "source" | "tracks" => {
-            TrackScope::Tracks(source.ok_or_else(|| bad_request("Source not found"))?)
+            Collection::Source(source.ok_or_else(|| bad_request("Source not found"))?)
         }
-        "album" | "album-tracks" => TrackScope::Album(key(parameters, "id")?),
-        "artist" | "artist-tracks" => TrackScope::Artist {
+        "album" | "album-tracks" => Collection::Album(key(parameters, "id")?),
+        "artist" | "artist-tracks" => Collection::Artist {
             key: key(parameters, "id")?,
             album_artist: boolean(parameters, "album_artists")?,
         },
-        "genre" | "genre-tracks" => TrackScope::Genre(key(parameters, "id")?),
-        "playlist" | "entries" => TrackScope::Playlist(key(parameters, "id")?),
-        "smart-playlist" | "smart-tracks" => TrackScope::Smart {
+        "genre" | "genre-tracks" => Collection::Genre(key(parameters, "id")?),
+        "playlist" | "entries" => Collection::Playlist(key(parameters, "id")?),
+        "smart-playlist" | "smart-tracks" => Collection::Smart {
             key: key(parameters, "id")?,
             source,
             now: now(),
         },
         _ => return Err(bad_request("Unknown media kind")),
     };
-    let mut query = CatalogQuery::tracks(scope);
+    let mut query = MemberRead::new(scope);
     query.folder = folder;
     query.filter = parameters.get("q").cloned().unwrap_or_default();
-    if let library::CatalogSubject::Tracks { scope, sort } = &mut query.subject {
-        *sort = if matches!(scope, TrackScope::Smart { .. }) {
-            smart_track_sort(parameters.get("sort").map(String::as_str))?
-        } else {
-            Some(track_sort(
-                parameters
-                    .get("sort")
-                    .map(String::as_str)
-                    .unwrap_or(match scope {
-                        TrackScope::Playlist(_) => "position",
-                        TrackScope::Album(_) => "track_number",
-                        _ => "title",
-                    }),
-            )?)
-        };
-    }
+    query.sort = if matches!(query.collection, Collection::Smart { .. }) {
+        smart_track_sort(parameters.get("sort").map(String::as_str))?
+    } else {
+        Some(track_sort(
+            parameters
+                .get("sort")
+                .map(String::as_str)
+                .unwrap_or(match query.collection {
+                    Collection::Playlist(_) => "position",
+                    Collection::Album(_) => "track_number",
+                    _ => "title",
+                }),
+        )?)
+    };
     query.descending = boolean(parameters, "descending")?;
     query.favorites_only = boolean(parameters, "favorites")?;
     Ok(query)
@@ -71,7 +69,7 @@ pub(super) async fn track_query(
 pub(super) async fn track_total(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
-    query: &library::CatalogQuery,
+    query: &library::MemberRead,
 ) -> Result<Option<i64>, Error> {
     if !boolean(parameters, "total")? {
         return Ok(None);
@@ -86,21 +84,10 @@ pub(super) async fn track_total(
 pub(super) async fn page_total(
     products: &ProductHandles,
     parameters: &HashMap<String, String>,
-    query: &library::CatalogQuery,
+    query: &library::ListRead,
 ) -> Result<Option<i64>, Error> {
     if !boolean(parameters, "total")? {
         return Ok(None);
-    }
-    if matches!(query.subject, library::CatalogSubject::Albums { .. })
-        && query.folder.is_none()
-        && query.filter.trim().is_empty()
-        && !query.favorites_only
-        && let Some(source) = parameters.get("source")
-        && let Some((albums, _)) = products
-            .source
-            .cached_source_counts(&sources::SourceId::new(source))
-    {
-        return Ok(Some(albums as i64));
     }
     query
         .count(&products.library, &ReadCancellation::new())
@@ -317,9 +304,10 @@ pub(super) async fn genre_tracks_data(
     let rows = (&query)
         .rows(&products.library, offset, limit, &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .map_err(internal)?;
     let total = track_total(products, parameters, &query).await?;
@@ -366,12 +354,12 @@ pub(super) async fn artists_data(
     };
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(128);
-    let query = library::CatalogQuery {
-        subject: library::CatalogSubject::Artists {
-            source: source,
-            sort: sort,
+    let query = library::ListRead {
+        kind: library::ListKind::Artists {
             album_artist: boolean(parameters, "album_artists")?,
         },
+        source: Some(source),
+        sort: sort,
         folder: folder,
         filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
         descending: boolean(parameters, "descending")?,
@@ -380,12 +368,8 @@ pub(super) async fn artists_data(
         activity: false,
     };
     let rows = query
-        .rows(&products.library, offset, limit, &ReadCancellation::new())
+        .artists(&products.library, offset, limit, &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Artists(rows) => rows,
-            _ => unreachable!("catalog page projection"),
-        })
         .map_err(internal)?;
     let total = page_total(products, parameters, &query).await?;
     Ok(
@@ -415,9 +399,10 @@ pub(super) async fn artist_tracks_data(
     let rows = (&query)
         .rows(&products.library, offset, limit, &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .map_err(internal)?;
     let total = track_total(products, parameters, &query).await?;
@@ -472,12 +457,10 @@ pub(super) async fn smart_playlists_data(
     };
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(64);
-    let query = library::CatalogQuery {
-        subject: library::CatalogSubject::SmartPlaylists {
-            source: (source).into(),
-            sort: sort,
-            now: now(),
-        },
+    let query = library::ListRead {
+        kind: library::ListKind::SmartPlaylists { now: now() },
+        source: (source).into(),
+        sort: sort,
         folder: folder,
         filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
         descending: boolean(parameters, "descending")?,
@@ -486,12 +469,8 @@ pub(super) async fn smart_playlists_data(
         activity: false,
     };
     let rows = query
-        .rows(&products.library, offset, limit, &ReadCancellation::new())
+        .smart_playlists(&products.library, offset, limit, &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::SmartPlaylists(rows) => rows,
-            _ => unreachable!("catalog page projection"),
-        })
         .map_err(internal)?;
     let total = page_total(products, parameters, &query).await?;
     Ok(
@@ -521,9 +500,10 @@ pub(super) async fn smart_tracks_data(
     let rows = (&query)
         .rows(&products.library, offset, limit, &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .map_err(internal)?;
     let total = track_total(products, parameters, &query).await?;
@@ -578,12 +558,10 @@ pub(super) async fn albums_data(
         "favorite" => CatalogSort::Favorite,
         _ => return Err(bad_request("Unknown album sort")),
     };
-    let query = library::CatalogQuery {
-        subject: library::CatalogSubject::Albums {
-            source: source,
-            sort: sort,
-            inline_tracks: None,
-        },
+    let query = library::ListRead {
+        kind: library::ListKind::Albums,
+        source: Some(source),
+        sort: sort,
         folder: folder,
         filter: (filter).to_string(),
         descending: descending,
@@ -592,12 +570,8 @@ pub(super) async fn albums_data(
         activity: false,
     };
     let rows = query
-        .rows(&products.library, offset, limit, &cancellation)
+        .albums(&products.library, offset, limit, &cancellation)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Albums(rows) => rows,
-            _ => unreachable!("catalog page projection"),
-        })
         .map_err(internal)?;
     let total = page_total(products, parameters, &query).await?;
     Ok(
@@ -630,9 +604,10 @@ pub(super) async fn album_tracks_data(
     let rows = (&query)
         .rows(&products.library, offset, limit, &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .map_err(internal)?;
     let disc_sections = (&query)

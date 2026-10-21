@@ -24,7 +24,7 @@ mod query;
 pub use metadata::*;
 mod collections;
 pub use query::{
-    CatalogIdentity, CatalogKind, CatalogPage, CatalogQuery, CatalogRows, CatalogSubject,
+    CatalogIdentity, CatalogKind, Collection, ListKind, ListRead, MemberRead, MemberRow, Page,
 };
 pub mod connect;
 pub mod profile;
@@ -53,7 +53,7 @@ pub use scroll_sections::ScrollSection;
 mod schema;
 mod search;
 mod selection;
-pub use selection::{TrackScope, TrackSelection};
+pub use selection::MemberSelection;
 mod smart_playlists;
 mod storage;
 pub use storage::CacheUsage;
@@ -76,9 +76,9 @@ pub use catalog::{
     PlaylistEntryObservation, PlaylistObservation, TrackObservation,
 };
 pub use collections::{
-    AlbumArtistLink, AlbumDetailRow, AlbumGenreLink, AlbumLinks, AlbumReleaseCandidate,
-    AlbumReleaseClass, AlbumReleaseResult, AlbumView, ArtistView, CollectionSummary, FolderChoice,
-    FolderView, GenreChoice, GenreView, MoodView,
+    AlbumArtistLink, AlbumDetailIndex, AlbumDetailRow, AlbumGenreLink, AlbumLinks,
+    AlbumReleaseCandidate, AlbumReleaseClass, AlbumReleaseResult, AlbumView, ArtistView,
+    CollectionSummary, FolderChoice, FolderView, GenreChoice, GenreView, MoodView,
 };
 pub use connect::{CONNECT_PAGE_SIZE, ConnectRecord, ConnectRoot, RecordStamp, StampedRecord};
 pub use db::{Database, ReadCancellation};

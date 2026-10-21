@@ -106,7 +106,16 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     RECYCLED_FOLDER_CELL_RESOURCE,
     RECYCLED_MERGED_CELL_RESOURCE,
     RECYCLED_TEXT_CELL_RESOURCE,
+    COLUMN_VIEW_HEADER_RESOURCE,
+    COLUMN_VIEW_HEADER_CELL_RESOURCE,
+    TABLE_FRAME_RESOURCE,
 ];
+
+pub const COLUMN_VIEW_HEADER_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/routes/column_view_header.ui";
+pub const COLUMN_VIEW_HEADER_CELL_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/routes/column_view_header_cell.ui";
+pub const TABLE_FRAME_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/table_frame.ui";
 
 pub const DISPLAY_SETTINGS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/preferences/display.ui";
 pub const TEXT_SLIDE_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/text_slide.ui";

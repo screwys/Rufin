@@ -239,6 +239,18 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
     internal suspend fun resetStorage(kind: StorageReset) {
         val connected = connectedService()
         val storage = connected.runtime.value!!.getOrThrow().storage()
+        restartAfterStorageReset {
+            try { connected.resetStorage(storage, kind) }
+            finally { storage.destroy() }
+        }
+    }
+
+    internal suspend fun resetDatabase() {
+        val connected = snapshotFlow { service }.filterNotNull().first()
+        restartAfterStorageReset { connected.resetDatabase() }
+    }
+
+    private suspend fun restartAfterStorageReset(reset: suspend () -> Unit) {
         // A confirmed reset must finish even when dropping the runtime unmounts this screen.
         withContext(NonCancellable) {
             val jobs = viewModelScope.coroutineContext[Job]!!.children.toList()
@@ -246,11 +258,12 @@ class RufinConnection(application: Application) : AndroidViewModel(application) 
             jobs.joinAll()
             var failure: String? = null
             try {
-                connected.resetStorage(storage, kind)
+                reset()
+            } catch (error: LinkageError) {
+                failure = error.userMessage()
             } catch (error: Exception) {
                 failure = error.userMessage()
             } finally {
-                storage.destroy()
                 StorageRestartActivity.restart(getApplication(), failure)
             }
         }

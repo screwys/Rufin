@@ -31,12 +31,12 @@ impl AndroidLibrary {
                 let cancel = ReadCancellation::new();
                 let (total, downloaded) = if let Some(query) = query {
                     let selection = query.selection().await?.as_ref().clone();
-                    if let TrackSelection::Query { mut query, .. } = selection {
-                        let total = (&query).count(&database, &cancel).await.map_err(error)? as i64;
-                        query.downloaded_only = true;
+                    if let MemberSelection::Members { mut read, .. } = selection {
+                        let total = read.count(&database, &cancel).await.map_err(error)? as i64;
+                        read.downloaded_only = true;
                         (
                             total,
-                            (&query).count(&database, &cancel).await.map_err(error)? as i64,
+                            read.count(&database, &cancel).await.map_err(error)? as i64,
                         )
                     } else {
                         let uris = database
@@ -84,10 +84,7 @@ impl AndroidLibrary {
             .spawn(async move {
                 let selection = match query {
                     Some(query) => query.selection().await?.as_ref().clone(),
-                    None => {
-                        library::CatalogQuery::uris(library::CatalogKind::Track, vec![media_uri])
-                            .selection()
-                    }
+                    None => MemberSelection::Uris(vec![media_uri].into()),
                 };
                 let result = if remove {
                     source.remove_download_selection(selection)
@@ -119,7 +116,6 @@ impl AndroidLibrary {
         descending: bool,
         favorites_only: bool,
         downloaded_only: bool,
-        release_section: Option<ArtistReleaseSection>,
     ) -> Result<Arc<AndroidBrowseQuery>, AndroidError> {
         let history_current_only = category == "current";
         let category = CollectionCategory::from_name(&category);
@@ -141,7 +137,6 @@ impl AndroidLibrary {
             runtime: self.runtime.clone(),
             playback: self.playback.clone(),
             route,
-            home_variations: self.source.home_variations(),
             home_snapshot: tokio::sync::OnceCell::new(),
             history_current_only,
             favorites_only,
@@ -152,17 +147,11 @@ impl AndroidLibrary {
             artist_tracks: settings.library_list(LibraryListKey::ArtistTracks),
             source: self.source.clone(),
             settings: self.settings.clone(),
-            release_section,
-            release_counts: tokio::sync::OnceCell::new(),
-            folder_projection: tokio::sync::OnceCell::new(),
-            query: tokio::sync::OnceCell::new(),
+            release_section: None,
+            opened: tokio::sync::OnceCell::new(),
             filter,
             sort,
             descending,
-            now: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(error)?
-                .as_secs() as i64,
             blocks: settings.application.home_blocks,
         }))
     }
@@ -206,40 +195,6 @@ impl AndroidLibrary {
             .map_err(error)
     }
 
-    pub fn artist_release_query(
-        &self,
-        route: Route,
-        section_id: String,
-        filter: String,
-        sort: Option<LibraryField>,
-        descending: bool,
-    ) -> Result<Arc<AndroidBrowseQuery>, AndroidError> {
-        if !matches!(
-            route,
-            Route::ArtistDetail(_)
-                | Route::ArtistDiscography(_)
-                | Route::AlbumArtistDetail(_)
-                | Route::AlbumArtistDiscography(_)
-        ) {
-            return Err(error("Choose an artist"));
-        }
-        let section = release_section(&section_id)?;
-        let route = match route {
-            Route::ArtistDetail(uri) => Route::ArtistDiscography(uri),
-            Route::AlbumArtistDetail(uri) => Route::AlbumArtistDiscography(uri),
-            route => route,
-        };
-        self.browse_query(
-            route,
-            "albums".into(),
-            filter,
-            sort,
-            descending,
-            false,
-            false,
-            Some(section),
-        )
-    }
     pub fn set_browse_display(
         &self,
         route: Route,
@@ -318,36 +273,21 @@ impl AndroidLibrary {
                 .spawn(async move {
                     let cancel = ReadCancellation::new();
                     match route {
-                        Route::AlbumDetail(uri) => library::CatalogQuery::uris(
-                            library::CatalogKind::Album,
-                            vec![(&uri).to_string()],
-                        )
-                        .rows(&database, 0, 1, &cancel)
-                        .await
-                        .map(|rows| match rows {
-                            library::CatalogRows::Albums(mut rows) => rows.pop(),
-                            _ => unreachable!("typed catalog projection"),
-                        })
-                        .map_err(error)?
-                        .map(|row| library::RadioSeed::Album(row.album_key)),
+                        Route::AlbumDetail(uri) => database
+                            .album(&uri, false, &cancel)
+                            .await
+                            .map_err(error)?
+                            .map(|row| library::RadioSeed::Album(row.album_key)),
                         Route::ArtistDetail(uri) => database
-                            .catalog_identity(library::CatalogKind::Artist, &uri, &cancel)
+                            .artist(&uri, false, false, &cancel)
                             .await
                             .map_err(error)?
-                            .map(|identity| {
-                                library::RadioSeed::Artist(library::ArtistKey::from_raw(
-                                    identity.key,
-                                ))
-                            }),
+                            .map(|row| library::RadioSeed::Artist(row.artist_key)),
                         Route::AlbumArtistDetail(uri) => database
-                            .catalog_identity(library::CatalogKind::Artist, &uri, &cancel)
+                            .artist(&uri, true, false, &cancel)
                             .await
                             .map_err(error)?
-                            .map(|identity| {
-                                library::RadioSeed::AlbumArtist(library::ArtistKey::from_raw(
-                                    identity.key,
-                                ))
-                            }),
+                            .map(|row| library::RadioSeed::AlbumArtist(row.artist_key)),
                         Route::GenreDetail(key) => Some(library::RadioSeed::Genre(key)),
                         Route::PlaylistDetail(key) => Some(library::RadioSeed::Playlist(key)),
                         _ => None,
@@ -502,24 +442,12 @@ impl AndroidLibrary {
         let database = self.database.clone();
         self.runtime
             .spawn(async move {
-                let genre = {
-                    let mut query = library::CatalogQuery::keys(
-                        library::CatalogKind::Genre,
-                        Some(selected.source_key),
-                        (&[key]).iter().map(|key| key.raw()).collect(),
-                    );
-                    query.folder = selected.music_folder_key;
-                    query
-                        .rows(&database, 0, (&[key]).len(), &ReadCancellation::new())
-                        .await
-                        .map(|rows| match rows {
-                            library::CatalogRows::Genres(rows) => rows,
-                            _ => unreachable!("typed catalog projection"),
-                        })
-                }
-                .map_err(error)?
-                .pop()
-                .ok_or_else(|| error("Genre is no longer available"))?;
+                let genre = database
+                    .genres(&[key], selected.music_folder_key, &ReadCancellation::new())
+                    .await
+                    .map_err(error)?
+                    .pop()
+                    .ok_or_else(|| error("Genre is no longer available"))?;
                 Ok(Some(rufin_core::settings::RandomPlayGenreSelection {
                     source_id: selected.source_id,
                     music_folder_id: selected.music_folder_object_id,
@@ -559,27 +487,15 @@ impl AndroidLibrary {
                 else {
                     return Ok(localization::tr("Any genre"));
                 };
-                Ok({
-                    let mut query = library::CatalogQuery::keys(
-                        library::CatalogKind::Genre,
-                        Some(selected.source_key),
-                        (&[key]).iter().map(|key| key.raw()).collect(),
-                    );
-                    query.folder = selected.music_folder_key;
-                    query
-                        .rows(&database, 0, (&[key]).len(), &ReadCancellation::new())
-                        .await
-                        .map(|rows| match rows {
-                            library::CatalogRows::Genres(rows) => rows,
-                            _ => unreachable!("typed catalog projection"),
-                        })
-                }
-                .map_err(error)?
-                .pop()
-                .map_or_else(
-                    || localization::tr("Any genre"),
-                    |genre| genre.metadata.name,
-                ))
+                Ok(database
+                    .genres(&[key], selected.music_folder_key, &ReadCancellation::new())
+                    .await
+                    .map_err(error)?
+                    .pop()
+                    .map_or_else(
+                        || localization::tr("Any genre"),
+                        |genre| genre.metadata.name,
+                    ))
             })
             .await
             .map_err(error)?
@@ -662,7 +578,6 @@ impl AndroidLibrary {
             descending,
             favorites_only,
             downloaded_only,
-            None,
         )
     }
 
@@ -717,42 +632,21 @@ impl AndroidLibrary {
                     user_rating
                 } else {
                     let rating = match &target {
-                        library::FavoriteTarget::Track(uri) => library::CatalogQuery::uris(
-                            library::CatalogKind::Track,
-                            vec![(uri).to_string()],
-                        )
-                        .rows(&database, 0, 1, &cancellation)
-                        .await
-                        .map(|rows| match rows {
-                            library::CatalogRows::Tracks(mut rows) => rows.pop(),
-                            _ => unreachable!("typed catalog projection"),
-                        })
-                        .map_err(error)?
-                        .and_then(|row| row.state.rating),
-                        library::FavoriteTarget::Album(uri) => library::CatalogQuery::uris(
-                            library::CatalogKind::Album,
-                            vec![(uri).to_string()],
-                        )
-                        .rows(&database, 0, 1, &cancellation)
-                        .await
-                        .map(|rows| match rows {
-                            library::CatalogRows::Albums(mut rows) => rows.pop(),
-                            _ => unreachable!("typed catalog projection"),
-                        })
-                        .map_err(error)?
-                        .and_then(|row| row.state.rating),
-                        library::FavoriteTarget::Artist(uri) => library::CatalogQuery::uris(
-                            library::CatalogKind::Artist,
-                            vec![(uri).to_string()],
-                        )
-                        .rows(&database, 0, 1, &cancellation)
-                        .await
-                        .map(|rows| match rows {
-                            library::CatalogRows::Artists(mut rows) => rows.pop(),
-                            _ => unreachable!("typed catalog projection"),
-                        })
-                        .map_err(error)?
-                        .and_then(|row| row.state.rating),
+                        library::FavoriteTarget::Track(uri) => database
+                            .track(uri, &cancellation)
+                            .await
+                            .map_err(error)?
+                            .and_then(|row| row.state.rating),
+                        library::FavoriteTarget::Album(uri) => database
+                            .album(uri, false, &cancellation)
+                            .await
+                            .map_err(error)?
+                            .and_then(|row| row.state.rating),
+                        library::FavoriteTarget::Artist(uri) => database
+                            .artist(uri, false, false, &cancellation)
+                            .await
+                            .map_err(error)?
+                            .and_then(|row| row.state.rating),
                     };
                     rating.and_then(|value| u8::try_from(value).ok())
                 };
@@ -776,25 +670,13 @@ impl AndroidLibrary {
             .await
             .map_err(error)?
             .map_err(error)?;
-        let row = library::CatalogQuery::keys(
-            library::CatalogKind::Playlist,
-            None,
-            (&[imported.playlist]).iter().map(|key| key.raw()).collect(),
-        )
-        .rows(
-            &self.database,
-            0,
-            (&[imported.playlist]).len(),
-            &ReadCancellation::new(),
-        )
-        .await
-        .map(|rows| match rows {
-            library::CatalogRows::Playlists(rows) => rows,
-            _ => unreachable!("typed catalog projection"),
-        })
-        .map_err(error)?
-        .pop()
-        .ok_or_else(|| error("Playlist no longer exists"))?;
+        let row = self
+            .database
+            .playlists(&[imported.playlist], &ReadCancellation::new())
+            .await
+            .map_err(error)?
+            .pop()
+            .ok_or_else(|| error("Playlist no longer exists"))?;
         Ok(AndroidPlaylistImport {
             row: row.into(),
             skipped: imported.skipped,
@@ -850,15 +732,10 @@ impl AndroidLibrary {
                             album_id,
                         } => {
                             let uri = library::source_entity_uri(source_id, "album", album_id);
-                            let library::CatalogRows::Albums(mut rows) =
-                                library::CatalogQuery::uris(library::CatalogKind::Album, vec![uri])
-                                    .rows(&db, 0, 1, &cancel)
-                                    .await
-                                    .map_err(error)?
-                            else {
-                                unreachable!("album pin")
-                            };
-                            rows.pop().map(Into::into)
+                            db.album(&uri, false, &cancel)
+                                .await
+                                .map_err(error)?
+                                .map(Into::into)
                         }
                         SidebarPin::Artist {
                             source_id,
@@ -866,37 +743,20 @@ impl AndroidLibrary {
                             album_artist,
                         } => {
                             let uri = library::source_entity_uri(source_id, "artist", artist_id);
-                            let mut query = library::CatalogQuery::uris(
-                                library::CatalogKind::Artist,
-                                vec![uri],
-                            );
-                            if let library::CatalogSubject::Uris {
-                                album_artist: role, ..
-                            } = &mut query.subject
-                            {
-                                *role = *album_artist;
-                            }
-                            let library::CatalogRows::Artists(mut rows) =
-                                query.rows(&db, 0, 1, &cancel).await.map_err(error)?
-                            else {
-                                unreachable!("artist pin")
-                            };
-                            rows.pop().map(|row| artist_row(row, *album_artist))
+                            db.artist(&uri, *album_artist, false, &cancel)
+                                .await
+                                .map_err(error)?
+                                .map(|row| artist_row(row, *album_artist))
                         }
                         SidebarPin::Genre {
                             source_id,
                             genre_id,
                         } => {
                             let uri = library::source_entity_uri(source_id, "genre", genre_id);
-                            let library::CatalogRows::Genres(mut rows) =
-                                library::CatalogQuery::uris(library::CatalogKind::Genre, vec![uri])
-                                    .rows(&db, 0, 1, &cancel)
-                                    .await
-                                    .map_err(error)?
-                            else {
-                                unreachable!("genre pin")
-                            };
-                            rows.pop().map(Into::into)
+                            db.genre(&uri, None, &cancel)
+                                .await
+                                .map_err(error)?
+                                .map(Into::into)
                         }
                         SidebarPin::Playlist {
                             source_id,
@@ -907,20 +767,11 @@ impl AndroidLibrary {
                                 .await
                                 .map_err(error)?
                             {
-                                library::CatalogQuery::keys(
-                                    library::CatalogKind::Playlist,
-                                    None,
-                                    (&[key]).iter().map(|key| key.raw()).collect(),
-                                )
-                                .rows(&db, 0, (&[key]).len(), &cancel)
-                                .await
-                                .map(|rows| match rows {
-                                    library::CatalogRows::Playlists(rows) => rows,
-                                    _ => unreachable!("typed catalog projection"),
-                                })
-                                .map_err(error)?
-                                .pop()
-                                .map(Into::into)
+                                db.playlists(&[key], &cancel)
+                                    .await
+                                    .map_err(error)?
+                                    .pop()
+                                    .map(Into::into)
                             } else {
                                 None
                             }
@@ -982,14 +833,21 @@ impl AndroidLibrary {
 impl AndroidLibrary {
     pub fn target_query(&self, route: Route) -> Result<Arc<AndroidBrowseQuery>, AndroidError> {
         self.browse_query(
-            route.clone(),
+            match route {
+                Route::ArtistDetail(uri) | Route::ArtistDiscography(uri) => {
+                    Route::ArtistTracks(uri)
+                }
+                Route::AlbumArtistDetail(uri) | Route::AlbumArtistDiscography(uri) => {
+                    Route::AlbumArtistTracks(uri)
+                }
+                route => route,
+            },
             "tracks".into(),
             String::new(),
             None,
             false,
             false,
             false,
-            None,
         )
     }
 }

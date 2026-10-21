@@ -82,9 +82,10 @@ impl CatalogUi {
                 msgid("No music from this artist yet"),
             ));
         };
+        let artist_uri = summary.media_uri.clone();
         let artist = summary.artist_key;
         let header = artist_detail_header_restored(self, &summary, artist, album_artist);
-        let favorite_count = favorite_tracks.count;
+        let favorite_count = favorite_tracks.page.count;
         let favorite = self.searchable_track_collection(
             favorite_tracks,
             LibraryListKey::ArtistTracks,
@@ -169,7 +170,7 @@ impl CatalogUi {
                         else {
                             unreachable!("artist overview")
                         };
-                        header.replace(&shell, summary);
+                        header.replace(&shell, *summary);
                         favorite.replace_page(favorite_tracks);
                         let present = !favorite.source_is_empty();
                         releases.set_favorite_present(present);
@@ -190,18 +191,32 @@ impl CatalogUi {
                     .borrow()
                     .library_list(LibraryListKey::ArtistAlbums);
                 let (generation, cancellation) = refresh_lane.begin();
-                let database = Arc::clone(&shell.library);
-                let query = releases.query(&album_settings);
+                let owner = shell.source.clone();
+                let filters = releases.filters();
                 let favorite_query = favorite.query();
+                let route = artist_detail_route(artist_uri.clone(), album_artist);
                 let task = shell.runtime.spawn(async move {
-                    query
-                        .detail_page(
-                            &database,
-                            Some(favorite_query),
+                    let options = rufin_core::browse::OpenOptions {
+                        category: rufin_core::route::CollectionCategory::Albums,
+                        filter: favorite_query.filter,
+                        release_filters: Some(filters),
+                        ..Default::default()
+                    };
+                    match owner
+                        .open_collection(
+                            &route,
+                            None,
+                            &options,
                             library::RouteSeedWindow::top(),
                             &cancellation,
                         )
-                        .await
+                        .await?
+                    {
+                        rufin_core::browse::OpenedCollection::Detail(detail) => {
+                            Ok::<_, library::LibraryError>(detail)
+                        }
+                        _ => unreachable!("artist overview"),
+                    }
                 });
                 let apply = Rc::downgrade(&apply);
                 gtk::glib::spawn_future_local(async move {
@@ -320,7 +335,13 @@ impl CatalogUi {
                 msgid("This isn't available"),
             ));
         };
-        self.artist_track_surface_restored(summary.artist_key, summary, tracks, album_artist, false)
+        self.artist_track_surface_restored(
+            summary.artist_key,
+            *summary,
+            tracks,
+            album_artist,
+            false,
+        )
     }
 
     pub fn artist_favorite_tracks_view(
@@ -338,7 +359,7 @@ impl CatalogUi {
                 msgid("No favorites yet"),
             ));
         };
-        self.artist_track_surface_restored(summary.artist_key, summary, tracks, album_artist, true)
+        self.artist_track_surface_restored(summary.artist_key, *summary, tracks, album_artist, true)
     }
 
     pub fn artist_discography_view(self: &Rc<Self>, detail: Option<DetailPage>) -> MountedRoute {
@@ -444,7 +465,7 @@ impl CatalogUi {
         self: &Rc<Self>,
         artist: ArtistKey,
         summary: ArtistView,
-        page: library::CatalogPage,
+        page: rufin_core::browse::MemberPage,
         album_artist: bool,
         favorites_only: bool,
     ) -> MountedRoute {
@@ -551,9 +572,13 @@ fn request_artist_releases(
     let (generation, cancellation) = lane.begin();
     let database = Arc::clone(&owner.library);
     let task = owner.runtime.spawn(async move {
-        query
-            .page(&database, library::RouteSeedWindow::top(), &cancellation)
-            .await
+        rufin_core::browse::ArtistReleasePage::load(
+            &database,
+            query,
+            library::RouteSeedWindow::top(),
+            &cancellation,
+        )
+        .await
     });
     let lane = Rc::downgrade(&lane);
     let releases = Rc::downgrade(&releases);
@@ -847,12 +872,12 @@ mod tests {
         let key = library::ArtistKey::from_raw(7);
         for album_artist in [false, true] {
             let request =
-                gtk_widgets::selection::collection_play_request(library::TrackScope::Artist {
+                gtk_widgets::selection::collection_play_request(library::Collection::Artist {
                     key,
                     album_artist,
                 });
             assert!(
-                matches!(request.selection(), Some(library::TrackSelection::Query { query: library::CatalogQuery { subject: library::CatalogSubject::Tracks { scope: library::TrackScope::Artist { key: value, album_artist: role }, .. }, .. }, .. }) if value == key && role == album_artist)
+                matches!(request.selection(), Some(library::MemberSelection::Members { read: library::MemberRead { collection: library::Collection::Artist { key: value, album_artist: role }, .. }, .. }) if value == key && role == album_artist)
             );
         }
     }

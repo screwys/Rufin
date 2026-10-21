@@ -201,9 +201,10 @@ async fn tracks_data(
             &library::ReadCancellation::new(),
         )
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .map_err(internal)?;
     let total = catalog::track_total(products, parameters, &query).await?;
@@ -366,7 +367,7 @@ async fn queue_play(
             anchor_key = products
                 .library
                 .selected_track_keys(
-                    &library::CatalogQuery::playlist_entries(vec![entry]).selection(),
+                    &library::MemberSelection::Entries((vec![entry]).into()),
                     &library::ReadCancellation::new(),
                 )
                 .await
@@ -378,19 +379,21 @@ async fn queue_play(
     let selection = if kind == "track" {
         let uris: Vec<String> =
             serde_json::from_value(input.selection["uris"].clone()).map_err(bad_request)?;
-        library::CatalogQuery::keys(
-            library::CatalogKind::Track,
-            None,
-            (products
+        library::MemberSelection::Keys {
+            source: None,
+            keys: ((products
                 .library
                 .remember_media_uris(&uris)
                 .await
                 .map_err(internal)?)
             .iter()
             .map(|key| key.raw())
-            .collect(),
-        )
-        .selection()
+            .collect::<Vec<i64>>())
+            .into_iter()
+            .map(library::TrackKey::from_raw)
+            .collect::<Vec<_>>()
+            .into(),
+        }
     } else {
         let parameters = input
             .selection

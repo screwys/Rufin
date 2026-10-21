@@ -238,8 +238,8 @@ impl Database {
                    SELECT track.album_key FROM track_folders scope CROSS JOIN tracks track USING(track_key)
                    WHERE track.indexed=1 AND scope.folder_key=?2))
                  ORDER BY ",
-                    "(SELECT added_sort FROM album_order WHERE album_key=albums.album_key)",
-                    " DESC NULLS LAST,(SELECT title_sort FROM album_order WHERE album_key=albums.album_key),album_key LIMIT 24"
+                    "albums.added_sort",
+                    " DESC NULLS LAST,albums.title_sort,album_key LIMIT 24"
                 ))
                 .bind(source)
                 .bind(folder)
@@ -277,11 +277,11 @@ impl Database {
             if recently_released.tracks.is_empty() && recently_released.albums.is_empty() {
                 let keys = sqlx::query_as::<_, (AlbumKey, String)>(
                 "SELECT album_key,COALESCE(title,'') title FROM albums
-                 WHERE (indexed=1 OR EXISTS(SELECT 1 FROM tracks admitted WHERE admitted.album_key=albums.album_key AND admitted.indexed=1)) AND source_key=?1 AND ((SELECT release_sort FROM album_order WHERE album_key=albums.album_key) IS NOT NULL OR COALESCE((SELECT year_sort FROM album_order WHERE album_key=albums.album_key),0)<>0)
+                 WHERE (indexed=1 OR EXISTS(SELECT 1 FROM tracks admitted WHERE admitted.album_key=albums.album_key AND admitted.indexed=1)) AND source_key=?1 AND (albums.release_sort IS NOT NULL OR COALESCE(albums.year_sort,0)<>0)
                    AND (?2 IS NULL OR album_key IN (
                      SELECT track.album_key FROM track_folders scope CROSS JOIN tracks track USING(track_key)
                      WHERE track.indexed=1 AND scope.folder_key=?2))
-                 ORDER BY (SELECT release_sort FROM album_order WHERE album_key=albums.album_key) DESC NULLS LAST,(SELECT year_sort FROM album_order WHERE album_key=albums.album_key) DESC NULLS LAST,(SELECT title_sort FROM album_order WHERE album_key=albums.album_key),album_key LIMIT 24",
+                 ORDER BY albums.release_sort DESC NULLS LAST,albums.year_sort DESC NULLS LAST,albums.title_sort,album_key LIMIT 24",
             )
             .bind(source)
             .bind(folder)
@@ -296,27 +296,20 @@ impl Database {
         };
 
         let genres = if blocks.contains(&HomeBlockKind::Genres) {
-            let input = crate::CatalogQuery {
-                subject: crate::CatalogSubject::Genres {
-                    source,
-                    sort: crate::CatalogSort::TrackCount,
-                },
-                folder,
-                filter: String::new(),
-                descending: true,
-                favorites_only: false,
-                downloaded_only: false,
-                activity: false,
-            };
+            let mut input = crate::ListRead::new(
+                crate::ListKind::Genres,
+                Some(source),
+                crate::CatalogSort::TrackCount,
+            );
+            input.folder = folder;
+            input.descending = true;
             let query = crate::collections::collection_query(&input);
-            let keys = crate::query::selected_values_on::<crate::GenreKey>(
+            crate::collections::load_genre_requested(
                 &mut transaction,
-                &query,
-                &query.key,
-                std::slice::from_ref(&(0..12)),
+                query.requested_keys(0, 12),
+                folder,
             )
-            .await?;
-            crate::collections::load_genre_rows(&mut transaction, &keys, folder).await?
+            .await?
         } else {
             Vec::new()
         };

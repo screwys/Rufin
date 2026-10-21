@@ -8,7 +8,7 @@ import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.createPlaylist
 import io.github.screwys.rufin.shared.rufin_core.addPlaylistTracks
 import io.github.screwys.rufin.shared.rufin_core.deletePlaylist
-import io.github.screwys.rufin.shared.library.TrackSelection
+import io.github.screwys.rufin.shared.library.MemberSelection
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.SourceIcon
@@ -516,8 +516,8 @@ internal fun PlaylistPickerSheet(model: RufinConnection, browse: BrowseConnectio
     }
 }
 
-private suspend fun playlistSelection(library: io.github.screwys.rufin.core.AndroidLibrary, item: BrowseItem): TrackSelection =
-    if (item.row.kind == "track") TrackSelection.fromUris(listOf(item.row.mediaUri))
+private suspend fun playlistSelection(library: io.github.screwys.rufin.core.AndroidLibrary, item: BrowseItem): MemberSelection =
+    if (item.row.kind == "track") MemberSelection.fromUris(listOf(item.row.mediaUri))
     else library.targetQuery(item.row.detailRoute!!).use { it.selection() }
 
 @Composable
@@ -567,7 +567,14 @@ internal class BrowseChoiceSource(
             val offset = params.key ?: 0
             if (library == null || route == null) LoadResult.Page(emptyList(), null, null)
             else {
-                val query = library.browse(route, "tracks", filter, LibraryField.TITLE, false, false, false)
+                val tracks = when (route) {
+                    is Route.ArtistDetail -> Route.ArtistTracks(route.v1)
+                    is Route.AlbumArtistDetail -> Route.AlbumArtistTracks(route.v1)
+                    is Route.ArtistDiscography -> Route.ArtistTracks(route.v1)
+                    is Route.AlbumArtistDiscography -> Route.AlbumArtistTracks(route.v1)
+                    else -> route
+                }
+                val query = library.browse(tracks, "tracks", filter, LibraryField.TITLE, false, false, false)
                 try {
                     val count = query.count().toInt()
                     val rows = query.page(offset.toULong(), params.loadSize.toUInt())

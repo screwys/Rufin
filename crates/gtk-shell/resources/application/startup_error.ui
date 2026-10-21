@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <object class="GtkBox" id="content">
+    <property name="orientation">vertical</property>
+    <child>
+      <object class="GtkHeaderBar" id="header"/>
+    </child>
+    <child>
+      <object class="AdwStatusPage" id="status">
+        <property name="vexpand">true</property>
+        <property name="child">
+          <object class="GtkButton" id="reset_database">
+            <property name="label" translatable="yes">Reset database</property>
+            <property name="halign">center</property>
+            <style><class name="destructive-action"/></style>
+          </object>
+        </property>
+      </object>
+    </child>
+  </object>
+  <object class="AdwAlertDialog" id="reset_confirmation">
+    <property name="heading" translatable="yes">Reset database?</property>
+    <property name="body" translatable="yes">Remove the library database? Settings and saved logins will be kept.</property>
+    <property name="default-response">cancel</property>
+    <property name="close-response">cancel</property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="reset" appearance="destructive" translatable="yes">Reset database</response>
+    </responses>
+  </object>
+</interface>

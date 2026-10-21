@@ -85,26 +85,20 @@ pub async fn read_local_lyrics(
     let cue_track = library::cue_media_parts(media_uri).is_some();
     let title = match title {
         Some(title) => title.to_string(),
-        None => {
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(media_uri).to_owned()])
-                .rows(&database, 0, 256, &library::ReadCancellation::new())
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })?
-                .map(|row| row.metadata.title)
-                .unwrap_or_else(|| {
-                    if cue_track {
-                        String::new()
-                    } else {
-                        path.file_stem()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .into_owned()
-                    }
-                })
-        }
+        None => database
+            .track(&(media_uri), &library::ReadCancellation::new())
+            .await?
+            .map(|row| row.metadata.title)
+            .unwrap_or_else(|| {
+                if cue_track {
+                    String::new()
+                } else {
+                    path.file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                }
+            }),
     };
     let input = lyrics::LocalLyricsInput {
         audio_path: path,

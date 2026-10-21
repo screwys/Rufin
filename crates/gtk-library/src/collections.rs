@@ -17,14 +17,14 @@ use gtk::{gio, glib};
 
 use crate::CatalogUi;
 use crate::{LibraryField, LibraryLayout, LibraryListKey};
-use gtk_widgets::layout::{AllocationOwner, allocation_owner};
+use gtk_widgets::layout::{AllocationOwner, width_allocation_owner};
 use gtk_widgets::mounted_route::{MountedRouteItemNavigation, item_navigation_entry_position};
 use rufin_core::playlists::SmartPlaylistChange;
 
 use super::album_detail::{AlbumCollectionModels, AlbumDetailVirtualList, album_detail_list};
 use super::columns::{
-    TrackRowPlayingIndicator, album_column, artist_column, column_fit_width, playlist_column,
-    smart_playlist_column, track_column_fit_width, track_column_for_key,
+    TrackRowPlayingIndicator, album_column, artist_column, column_fit_width,
+    track_column_fit_width, track_column_for_key,
 };
 use super::grid_cells::{
     AlbumGridCell, ArtistGridCell, CollectionGridProjection, TrackGridCell,
@@ -40,6 +40,7 @@ use gtk_widgets::library_fields::{
     column_width, compact_header_column_width, grid_label_with_label,
 };
 use gtk_widgets::route::Route;
+use gtk_widgets::table_header::{ColumnViewHeader, TableFrame};
 use gtk_widgets::table_sizing::{ColumnViewWidthFit, install_column_view_width_fit};
 
 struct TrackTablePlayingStateInner {
@@ -59,6 +60,7 @@ pub struct TrackTablePlayingState {
 #[derive(Clone)]
 pub struct CollectionTableProjection {
     table: gtk::ColumnView,
+    header: ColumnViewHeader,
     navigation: MountedRouteItemNavigation,
     fixed_columns: Rc<Vec<(gtk::ColumnViewColumn, i32)>>,
     column_for_field: Rc<dyn Fn(LibraryField) -> gtk::ColumnViewColumn>,
@@ -70,6 +72,15 @@ pub struct CollectionTableProjection {
 impl CollectionTableProjection {
     pub fn widget(&self) -> gtk::Widget {
         self.table.clone().upcast()
+    }
+
+    pub fn frame(&self, scroller: &gtk::ScrolledWindow) -> gtk::Widget {
+        TableFrame::new(scroller, Some(&self.header.widget())).widget()
+    }
+
+    pub fn apply_display(&self, settings: &rufin_core::settings::layout::DisplaySettings) {
+        gtk_widgets::display::apply(&self.table, settings);
+        self.header.set_visible(settings.show_header);
     }
 
     pub fn apply_fields(&self, fields: &[LibraryField]) {
@@ -112,6 +123,7 @@ impl CollectionTableProjection {
         }
         self.field_columns.replace(field_columns);
         self.width_fit.replace(active);
+        self.update_header();
         self.table.set_header_factory(header_factory.as_ref());
     }
 
@@ -129,6 +141,21 @@ impl CollectionTableProjection {
             .map(|(_, width)| *width)
             .chain(fields.iter().map(|field| (self.width_for_field)(*field)))
             .collect()
+    }
+
+    fn update_header(&self) {
+        let columns = self
+            .fixed_columns
+            .iter()
+            .map(|(column, _)| (column.clone(), None))
+            .chain(
+                self.field_columns
+                    .borrow()
+                    .iter()
+                    .map(|(field, column)| (column.clone(), Some(*field))),
+            )
+            .collect::<Vec<_>>();
+        self.header.replace(&columns);
     }
 }
 
@@ -149,7 +176,11 @@ impl LibraryPresentationProjection {
     }
 
     fn apply_fields(&self, settings: &crate::LibraryListSettings) {
-        gtk_widgets::display::apply(&self.widget(), &settings.display);
+        if let Self::Row(table) = self {
+            table.apply_display(&settings.display);
+        } else {
+            gtk_widgets::display::apply(&self.widget(), &settings.display);
+        }
         if let Self::Grid(grid) = self {
             grid.apply_display(&settings.display);
         }
@@ -165,6 +196,13 @@ impl LibraryPresentationProjection {
             Self::Row(table) => table.navigate(direction),
             Self::Grid(grid) => grid.navigate(direction),
             Self::AlbumDetail(detail) => detail.navigate(direction),
+        }
+    }
+
+    fn header_widget(&self) -> Option<gtk::Widget> {
+        match self {
+            Self::Row(table) => Some(table.header.widget()),
+            Self::Grid(_) | Self::AlbumDetail(_) => None,
         }
     }
 
@@ -190,6 +228,8 @@ enum LibraryCollectionHost {
     Embedded(gtk::Box),
     Scrolled {
         scroller: gtk::ScrolledWindow,
+        frame: TableFrame,
+        overlay: gtk::Overlay,
         margin_start: i32,
         margin_end: i32,
         width_owner: AllocationOwner,
@@ -264,7 +304,7 @@ impl LibraryCollectionProjection {
     ) -> gtk::Widget {
         let presentation = self.presentation.borrow();
         let active = presentation.widget();
-        let row = matches!(&*presentation, LibraryPresentationProjection::Row(_));
+        let inset = matches!(&*presentation, LibraryPresentationProjection::Grid(_));
         drop(presentation);
         let previous_host = self.host.borrow().clone();
         match previous_host {
@@ -277,24 +317,33 @@ impl LibraryCollectionProjection {
                 scroller: previous, ..
             } => previous.set_child(None::<&gtk::Widget>),
         }
-        active.set_margin_start(if row { 0 } else { margin_start });
-        active.set_margin_end(if row { 0 } else { margin_end });
+        active.set_margin_start(if inset { margin_start } else { 0 });
+        active.set_margin_end(if inset { margin_end } else { 0 });
         scroller.set_child(Some(&active));
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(scroller));
+        let frame = TableFrame::new(
+            &overlay,
+            self.presentation.borrow().header_widget().as_ref(),
+        );
         let presentation = Rc::clone(&self.presentation);
         let resize_scroller = scroller.clone();
-        let width_owner = allocation_owner(scroller, move |width, _| {
-            if matches!(
-                &*presentation.borrow(),
-                LibraryPresentationProjection::AlbumDetail(_)
-            ) {
-                presentation
-                    .borrow()
-                    .fit_scroller_allocation(&resize_scroller, width);
+        let width_owner = width_allocation_owner(&frame.widget(), move |width| {
+            presentation
+                .borrow()
+                .fit_scroller_allocation(&resize_scroller, width)
+        });
+        let presentation = Rc::clone(&self.presentation);
+        width_owner.set_after_allocate_callback(move || {
+            if let LibraryPresentationProjection::AlbumDetail(detail) = &*presentation.borrow() {
+                detail.after_allocate();
             }
         });
-        self.configure_width_owner(&width_owner, scroller);
+        self.configure_width_owner(&width_owner, scroller, &overlay);
         self.host.replace(LibraryCollectionHost::Scrolled {
             scroller: scroller.clone(),
+            frame,
+            overlay,
             margin_start,
             margin_end,
             width_owner: width_owner.clone(),
@@ -302,25 +351,33 @@ impl LibraryCollectionProjection {
         width_owner.upcast()
     }
 
-    fn configure_width_owner(&self, owner: &AllocationOwner, scroller: &gtk::ScrolledWindow) {
-        if matches!(
-            &*self.presentation.borrow(),
-            LibraryPresentationProjection::AlbumDetail(_)
-        ) {
-            owner.set_width_callback(None);
-        } else {
-            let presentation = Rc::clone(&self.presentation);
-            let scroller = scroller.clone();
-            owner.set_width_callback(Some(Rc::new(move |width| {
-                presentation
-                    .borrow()
-                    .fit_scroller_allocation(&scroller, width);
-            })));
+    fn configure_width_owner(
+        &self,
+        owner: &AllocationOwner,
+        scroller: &gtk::ScrolledWindow,
+        overlay: &gtk::Overlay,
+    ) {
+        if let LibraryPresentationProjection::AlbumDetail(detail) = &*self.presentation.borrow() {
+            detail.attach_scroller(scroller, overlay);
         }
+        let presentation = Rc::clone(&self.presentation);
+        let scroller = scroller.clone();
+        owner.set_width_callback(Some(Rc::new(move |width| {
+            presentation
+                .borrow()
+                .fit_scroller_allocation(&scroller, width)
+        })));
     }
 
     pub fn apply_settings(&self, settings: &crate::LibraryListSettings) {
         let previous = self.settings.borrow().clone();
+        let saved = if let LibraryPresentationProjection::AlbumDetail(detail) =
+            &*self.presentation.borrow()
+        {
+            detail.item_scroll().capture()
+        } else {
+            None
+        };
         if collection_presentation_needs_rebuild(&previous, settings) {
             let presentation = (self.build)(settings.layout);
             presentation.apply_fields(settings);
@@ -333,8 +390,11 @@ impl LibraryCollectionProjection {
                             root.remove(&child);
                         }
                     }
-                    LibraryCollectionHost::Scrolled { scroller, .. } => {
+                    LibraryCollectionHost::Scrolled {
+                        scroller, frame, ..
+                    } => {
                         scroller.set_child(None::<&gtk::Widget>);
+                        frame.set_header(None);
                         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
                         root.set_hexpand(true);
                         root.set_vexpand(true);
@@ -353,26 +413,34 @@ impl LibraryCollectionProjection {
                     }
                     LibraryCollectionHost::Scrolled {
                         scroller,
+                        frame,
                         margin_start,
                         margin_end,
                         ..
                     } => {
-                        let row = matches!(&presentation, LibraryPresentationProjection::Row(_));
-                        widget.set_margin_start(if row { 0 } else { margin_start });
-                        widget.set_margin_end(if row { 0 } else { margin_end });
+                        let inset = matches!(&presentation, LibraryPresentationProjection::Grid(_));
+                        widget.set_margin_start(if inset { margin_start } else { 0 });
+                        widget.set_margin_end(if inset { margin_end } else { 0 });
                         scroller.set_child(Some(&widget));
+                        frame.set_header(presentation.header_widget().as_ref());
                     }
                 }
             }
             self.presentation.replace(presentation);
+            if let (Some(saved), LibraryPresentationProjection::AlbumDetail(detail)) =
+                (saved, &*self.presentation.borrow())
+            {
+                detail.restore(saved);
+            }
             let host = self.host.borrow().clone();
             if let LibraryCollectionHost::Scrolled {
                 scroller,
                 width_owner,
+                overlay,
                 ..
             } = host
             {
-                self.configure_width_owner(&width_owner, &scroller);
+                self.configure_width_owner(&width_owner, &scroller, &overlay);
             }
         } else {
             self.presentation.borrow().apply_fields(settings);
@@ -744,73 +812,6 @@ where
         route_column_view_initial_width(shell),
     )
 }
-pub fn playlist_table<M>(shell: &Rc<CatalogUi>, model: M) -> CollectionTableProjection
-where
-    M: IsA<gio::ListModel> + Clone + 'static,
-{
-    let fields = shell
-        .settings
-        .current
-        .borrow()
-        .library_list(LibraryListKey::Playlists)
-        .row_fields;
-    let activate_shell = Rc::clone(shell);
-    let column_shell = Rc::clone(shell);
-    dynamic_collection_table(
-        shell,
-        LibraryListKey::Playlists,
-        model,
-        &fields,
-        Vec::new(),
-        move |field| playlist_column(&column_shell, field),
-        |field| column_fit_width(field, playlist_column_width(field)),
-        true,
-        Some(Box::new(move |_, playlist: PlaylistRow| {
-            activate_shell.navigate(Route::PlaylistDetail(playlist.playlist_key.clone()));
-        })),
-        None,
-        route_column_view_initial_width(shell),
-    )
-}
-pub fn smart_playlist_table<M>(shell: &Rc<CatalogUi>, model: M) -> CollectionTableProjection
-where
-    M: IsA<gio::ListModel> + Clone + 'static,
-{
-    let fields = shell
-        .settings
-        .current
-        .borrow()
-        .library_list(LibraryListKey::SmartPlaylists)
-        .row_fields;
-    let activate_shell = Rc::clone(shell);
-    let column_shell = Rc::clone(shell);
-    dynamic_collection_table(
-        shell,
-        LibraryListKey::SmartPlaylists,
-        model,
-        &fields,
-        Vec::new(),
-        move |field| smart_playlist_column(&column_shell, field),
-        |field| column_fit_width(field, playlist_column_width(field)),
-        true,
-        Some(Box::new(move |_, playlist: SmartPlaylistRow| {
-            activate_shell.navigate(Route::SmartPlaylistDetail(
-                playlist.smart_playlist_key.clone(),
-            ));
-        })),
-        None,
-        route_column_view_initial_width(shell),
-    )
-}
-
-fn playlist_column_width(field: LibraryField) -> i32 {
-    if matches!(field, LibraryField::Title | LibraryField::TitleMerged) {
-        220
-    } else {
-        collection_column_width(field)
-    }
-}
-
 pub fn collection_column_width(field: LibraryField) -> i32 {
     match field {
         LibraryField::AlbumCount | LibraryField::SongCount => {
@@ -855,19 +856,26 @@ where
     );
     let (table, width_fit, navigation) =
         collection_table_with_width(model, active, initial_width, false, activate, selection);
-    gtk_widgets::display::apply(
-        &table,
-        &shell.settings.current.borrow().library_list(key).display,
-    );
-    CollectionTableProjection {
+    table.add_css_class("external-header");
+    let projection = CollectionTableProjection {
         table,
+        header: ColumnViewHeader::new(),
         navigation,
         fixed_columns: Rc::new(fixed_columns),
         column_for_field,
         width_for_field,
         field_columns: Rc::new(RefCell::new(field_columns)),
         width_fit,
-    }
+    };
+    projection.update_header();
+    projection
+        .table
+        .update_relation(&[gtk::accessible::Relation::Owns(&[projection
+            .header
+            .widget()
+            .upcast_ref()])]);
+    projection.apply_display(&shell.settings.current.borrow().library_list(key).display);
+    projection
 }
 
 fn collection_table_with_width<T, M>(
@@ -955,22 +963,7 @@ impl CatalogUi {
         rows: Vec<TrackView>,
     ) -> (gtk::Widget, Rc<dyn Fn()>) {
         let key = LibraryListKey::FullscreenTracks;
-        let query = library::CatalogQuery::keys(
-            library::CatalogKind::Track,
-            None,
-            rows.iter().map(|row| row.track_key.raw()).collect(),
-        );
-        let model = TrackCollectionModel::new(
-            self.library.clone(),
-            self.runtime.clone(),
-            library::CatalogPage {
-                query,
-                count: rows.len(),
-                first_row_position: 0,
-                rows: library::CatalogRows::Tracks(rows),
-                disc_sections: Vec::new(),
-            },
-        );
+        let model = TrackCollectionModel::related(self.library.clone(), self.runtime.clone(), rows);
         let selection = TrackSelection::new(model.clone());
         self.register_current_route_track_selection_owner(selection.clone());
         let table = track_table(
@@ -999,15 +992,16 @@ impl CatalogUi {
         let update_table = table.clone();
         let changed: Rc<dyn Fn()> = Rc::new(move || {
             let config = settings.current.borrow().library_list(key);
-            gtk_widgets::display::apply(&update_table.widget(), &config.display);
+            update_table.apply_display(&config.display);
             update_table.apply_fields(&config.row_fields);
         });
         let weak = scroller.downgrade();
-        let root = allocation_owner(&scroller, move |width, _| {
-            if let Some(scroller) = weak.upgrade() {
-                table.fit_scroller_allocation(&scroller, width);
-            }
-        });
+        let root =
+            gtk_widgets::layout::width_allocation_owner(&table.frame(&scroller), move |width| {
+                if let Some(scroller) = weak.upgrade() {
+                    table.fit_scroller_allocation(&scroller, width);
+                }
+            });
         model.resume_initial_demand();
         (root.upcast(), changed)
     }
@@ -1199,14 +1193,10 @@ pub fn install_smart_playlist_reorder(
         target,
         Rc::new(move || current().map(|playlist| playlist.smart_playlist_key.raw())),
         |target| match target.selection() {
-            Some(library::TrackSelection::Query {
-                query:
-                    library::CatalogQuery {
-                        subject:
-                            library::CatalogSubject::Tracks {
-                                scope: library::TrackScope::Smart { key, .. },
-                                ..
-                            },
+            Some(library::MemberSelection::Members {
+                read:
+                    library::MemberRead {
+                        collection: library::Collection::Smart { key, .. },
                         ..
                     },
                 ..
@@ -1244,14 +1234,10 @@ pub fn install_playlist_reorder(
         target,
         Rc::new(move || current().map(|playlist| playlist.playlist_key.raw())),
         |target| match target.selection() {
-            Some(library::TrackSelection::Query {
-                query:
-                    library::CatalogQuery {
-                        subject:
-                            library::CatalogSubject::Tracks {
-                                scope: library::TrackScope::Playlist(key),
-                                ..
-                            },
+            Some(library::MemberSelection::Members {
+                read:
+                    library::MemberRead {
+                        collection: library::Collection::Playlist(key),
                         ..
                     },
                 ..
@@ -1365,7 +1351,7 @@ mod layout_policy_tests {
     #[test]
     fn contextual_playback_target_uses_the_route_context() {
         let target =
-            collection_play_request(library::TrackScope::Album(library::AlbumKey::from_raw(1)))
+            collection_play_request(library::Collection::Album(library::AlbumKey::from_raw(1)))
                 .with_context("artist:1|releases".into());
 
         assert_eq!(target.context(), Some("artist:1|releases"));

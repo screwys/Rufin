@@ -24,7 +24,7 @@ use gtk_widgets::library_fields::COLLECTION_GRID_MIN_CARD_WIDTH;
 use gtk_widgets::sparse_model::{
     SparseObjectItem, SparseRouteModel, SparseSource, connect_sparse_bind,
 };
-use rufin_core::browse::{ArtistReleasePage, ArtistReleaseQuery};
+use rufin_core::browse::ArtistReleasePage;
 
 const ARTIST_RELEASE_SECTION_GAP: i32 = 18;
 const ARTIST_RELEASE_HEADER_GAP: i32 = 10;
@@ -38,7 +38,7 @@ pub struct ArtistReleaseRoutePreamble {
 
 pub struct ArtistReleaseProjections {
     sections: Rc<Vec<Rc<ArtistAlbumProjection>>>,
-    query: Rc<RefCell<ArtistReleaseQuery>>,
+    query: Rc<RefCell<library::ListRead>>,
     counts: Rc<Cell<[usize; 6]>>,
     selection: gtk::SelectionModel,
     pub sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumView>>,
@@ -375,16 +375,12 @@ impl ArtistRouteListCell {
         } else {
             "artist-album-table-row"
         });
-        for field in fields {
+        for (position, field) in fields.iter().enumerate() {
             let widget = if header {
-                let label = album_table_title(*field).map_or_else(
-                    || gtk::Label::new(None),
-                    gtk_widgets::localization::localized_label,
-                );
-                label.add_css_class("table-header");
-                label.set_xalign(0.0);
-                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                label.upcast::<gtk::Widget>()
+                let title = album_table_title(*field)
+                    .map(localization::tr)
+                    .unwrap_or_default();
+                gtk_widgets::table_header::HeaderCell::new(&title, Some(*field), position).upcast()
             } else {
                 AlbumTableCell::new(shell, *field, None).upcast()
             };
@@ -436,7 +432,6 @@ impl ArtistRouteListCell {
 fn album_table_title(field: LibraryField) -> Option<&'static str> {
     match field {
         LibraryField::Tools => None,
-        LibraryField::RowIndex => Some(super::columns::ROW_INDEX_COLUMN_TITLE),
         LibraryField::TitleMerged => Some("Title"),
         _ => Some(gtk_widgets::settings::library_field_title(field)),
     }
@@ -611,24 +606,26 @@ impl ArtistReleaseProjections {
             query,
             counts,
             source_counts,
-            first_row_position,
-            first_rows,
+            page:
+                library::Page {
+                    first_row_position,
+                    rows: first_rows,
+                    ..
+                },
         } = page;
         let query = Rc::new(RefCell::new(query));
         let counts = Rc::new(Cell::new(counts));
         let database = Arc::clone(&shell.library);
         let load_query = Rc::clone(&query);
-        let load_counts = Rc::clone(&counts);
         let load = Rc::new(
             move |_: Vec<library::AlbumKey>,
                   range: std::ops::Range<usize>,
                   cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&database);
                 let query = load_query.borrow().clone();
-                let counts = load_counts.get();
                 Box::pin(async move {
                     query
-                        .rows(&database, counts, range, &cancellation)
+                        .albums(&database, range.start, range.len(), &cancellation)
                         .await
                         .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
@@ -708,13 +705,8 @@ impl ArtistReleaseProjections {
         }
         let rows = gtk::FlattenListModel::new(Some(model_sections));
         let grid_fields = Rc::new(RefCell::new(settings.grid_fields.clone()));
-        let (list, apply_grid_fields, scroll) = artist_route_list(
-            shell,
-            rows,
-            Rc::clone(&grid_fields),
-            Rc::clone(&query),
-            Rc::clone(&counts),
-        );
+        let (list, apply_grid_fields, scroll) =
+            artist_route_list(shell, rows, Rc::clone(&grid_fields), Rc::clone(&query));
         let selection = list.model().expect("Artist selection");
         let weak_selection = selection.downgrade();
         sparse
@@ -801,10 +793,17 @@ impl ArtistReleaseProjections {
         self.sparse.resume_initial_demand();
     }
 
-    pub fn query(&self, settings: &LibraryListSettings) -> ArtistReleaseQuery {
+    pub fn filters(&self) -> [String; 6] {
+        std::array::from_fn(|index| self.sections[index].search.text().trim().to_string())
+    }
+
+    pub fn query(&self, settings: &LibraryListSettings) -> library::ListRead {
         let mut query = self.query.borrow().clone();
-        query.filters =
-            std::array::from_fn(|index| self.sections[index].search.text().trim().to_string());
+        if let library::ListKind::ArtistAlbums { filters, .. } = &mut query.kind {
+            *filters = Some(Arc::new(std::array::from_fn(|index| {
+                self.sections[index].search.text().trim().to_string()
+            })));
+        }
         query.sort = settings.sort_key.catalog_sort();
         query.descending = settings.descending;
         query
@@ -815,8 +814,12 @@ impl ArtistReleaseProjections {
             query,
             counts,
             source_counts,
-            first_row_position,
-            first_rows,
+            page:
+                library::Page {
+                    first_row_position,
+                    rows: first_rows,
+                    ..
+                },
         } = page;
         if *self.query.borrow() != query || self.counts.get() != counts {
             self.selection.unselect_all();
@@ -928,8 +931,7 @@ fn artist_route_list(
     shell: &Rc<CatalogUi>,
     model: gtk::FlattenListModel,
     fields: Rc<RefCell<Vec<LibraryField>>>,
-    query: Rc<RefCell<ArtistReleaseQuery>>,
-    counts: Rc<Cell<[usize; 6]>>,
+    query: Rc<RefCell<library::ListRead>>,
 ) -> (
     gtk::ListView,
     Rc<dyn Fn(&[LibraryField])>,
@@ -938,16 +940,11 @@ fn artist_route_list(
     let activate_model = model.clone();
     let selection_models = model.model().expect("Artist section models");
     let selection = gtk_widgets::selection::PositionSelectionModel::new(model);
-    let database = Arc::clone(&shell.library);
     selection.set_collection_selection(Box::new(move |target, positions| {
-        let Some(library::TrackSelection::Query {
-            query:
-                library::CatalogQuery {
-                    subject:
-                        library::CatalogSubject::Tracks {
-                            scope: library::TrackScope::Album(key),
-                            ..
-                        },
+        let Some(library::MemberSelection::Members {
+            read:
+                library::MemberRead {
+                    collection: library::Collection::Album(key),
                     ..
                 },
             ..
@@ -986,28 +983,10 @@ fn artist_route_list(
             return None;
         }
         let query = query.borrow().clone();
-        let counts = counts.get();
-        let database = Arc::clone(&database);
-        Some(gtk_widgets::media_drag::CollectionTargets::Query {
-            ranges: gtk_widgets::selection::selected_ranges(&selected),
-            load: Arc::new(move |range| {
-                let database = Arc::clone(&database);
-                let query = query.clone();
-                Box::pin(async move {
-                    Ok(query
-                        .rows(&database, counts, range, &library::ReadCancellation::new())
-                        .await
-                        .map_err(|error| error.to_string())?
-                        .into_iter()
-                        .map(|row| {
-                            gtk_widgets::selection::collection_play_request(
-                                library::TrackScope::Album(row.album_key),
-                            )
-                        })
-                        .collect())
-                })
-            }),
-        })
+        Some(gtk_widgets::media_drag::CollectionTargets::Parents(vec![(
+            query,
+            gtk_widgets::selection::selected_ranges(&selected),
+        )]))
     }));
     let factory = gtk::SignalListItemFactory::new();
     let cells = Rc::new(RefCell::new(

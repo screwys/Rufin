@@ -7,6 +7,7 @@
     <file compressed="true">shell/activity_genre.ui</file>
     <file alias="showcase.css" compressed="true">../../../resources/showcase.css</file>
     <file compressed="true">application/about.ui</file>
+    <file compressed="true">application/startup_error.ui</file>
     <file compressed="true">player/random_play.ui</file>
     <file compressed="true">shell/diagnostics.ui</file>
     <file compressed="true">shell/content_chrome.ui</file>

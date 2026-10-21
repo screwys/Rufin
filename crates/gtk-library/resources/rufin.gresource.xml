@@ -2,6 +2,8 @@
 <gresources>
   <gresource prefix="/io/github/screwys/Rufin/ui">
     <file compressed="true">routes/placeholder.ui</file>
+    <file compressed="true">routes/album_detail_row.ui</file>
+    <file compressed="true">routes/album_detail_panel.ui</file>
     <file compressed="true">routes/collection_grid_card.ui</file>
     <file compressed="true">routes/collection_grid_cover.ui</file>
     <file compressed="true">routes/detail_showcase.ui</file>

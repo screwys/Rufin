@@ -194,7 +194,7 @@ internal class BrowsePage(
                 if (pins) library.importPlaylistPins()
                 val query = when {
                     pins -> null
-                    releaseGroupId != null -> library.artistReleaseQuery(context.route, releaseGroupId, context.filter, context.sort, context.descending)
+                    releaseGroupId != null -> parent?.currentQuery?.releaseQuery(releaseGroupId, context.filter, context.sort, context.descending) ?: return@collectLatest
                     else -> library.browse(context.route, context.category, context.filter, context.sort, context.descending, context.favoritesOnly, context.downloadedOnly)
                 }
                 val favoriteFilter = query?.supportsFavoriteFilter() == true

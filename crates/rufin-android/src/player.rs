@@ -202,17 +202,11 @@ impl AndroidPlayer {
                 let entity = library::source_entity_parts(&media_uri);
                 let (artists, album, source_id) = match entity {
                     Some((source, kind, _)) if kind == "album" => {
-                        let library::CatalogRows::Albums(mut rows) = library::CatalogQuery::uris(
-                            library::CatalogKind::Album,
-                            vec![media_uri.clone()],
-                        )
-                        .rows(&database, 0, 1, &cancellation)
-                        .await
-                        .map_err(error)?
+                        let Some(album) = database
+                            .album(&media_uri, false, &cancellation)
+                            .await
+                            .map_err(error)?
                         else {
-                            unreachable!("album query")
-                        };
-                        let Some(album) = rows.pop() else {
                             return Ok(None);
                         };
                         (
@@ -225,17 +219,16 @@ impl AndroidPlayer {
                         )
                     }
                     Some((source, kind, _)) if kind == "artist" => {
-                        let library::CatalogRows::Artists(mut rows) = library::CatalogQuery::uris(
-                            library::CatalogKind::Artist,
-                            vec![media_uri.clone()],
-                        )
-                        .rows(&database, 0, 1, &cancellation)
-                        .await
-                        .map_err(error)?
+                        let Some(artist) = database
+                            .artist(
+                                &media_uri,
+                                matches!(origin_route, Some(Route::AlbumArtistDetail(_))),
+                                false,
+                                &cancellation,
+                            )
+                            .await
+                            .map_err(error)?
                         else {
-                            unreachable!("artist query")
-                        };
-                        let Some(artist) = rows.pop() else {
                             return Ok(None);
                         };
                         let name = artist.metadata.name;
@@ -252,17 +245,10 @@ impl AndroidPlayer {
                         )
                     }
                     _ => {
-                        let Some(track) = library::CatalogQuery::uris(
-                            library::CatalogKind::Track,
-                            vec![(&media_uri).to_string()],
-                        )
-                        .rows(&database, 0, 1, &cancellation)
-                        .await
-                        .map(|rows| match rows {
-                            library::CatalogRows::Tracks(mut rows) => rows.pop(),
-                            _ => unreachable!("typed catalog projection"),
-                        })
-                        .map_err(error)?
+                        let Some(track) = database
+                            .track(&media_uri, &cancellation)
+                            .await
+                            .map_err(error)?
                         else {
                             return Ok(None);
                         };

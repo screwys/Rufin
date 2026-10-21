@@ -145,6 +145,7 @@ impl CatalogUi {
         count: usize,
         first_row_position: usize,
         first_rows: Vec<PlaylistEntryView>,
+        read: library::MemberRead,
     ) -> PlaylistEntriesView {
         let settings = self
             .settings
@@ -159,6 +160,7 @@ impl CatalogUi {
             first_row_position,
             first_rows,
             settings,
+            read,
         );
         let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 8);
         wrapper.set_hexpand(true);
@@ -360,8 +362,7 @@ fn playlist_entry_number_column(
             set_track_row_index_text(&cell, "");
         }
     });
-    let column =
-        gtk::ColumnViewColumn::new(Some(super::columns::ROW_INDEX_COLUMN_TITLE), Some(factory));
+    let column = gtk::ColumnViewColumn::new(Some("#"), Some(factory));
     column.set_fixed_width(width);
     column
 }
@@ -744,15 +745,7 @@ fn install_playlist_entry_drag(
         if selection.playlist != playlist || !selection.writable || selection.count != 1 {
             return false;
         }
-        let library::TrackSelection::Query {
-            query:
-                library::CatalogQuery {
-                    subject: library::CatalogSubject::PlaylistEntries { keys: order },
-                    ..
-                },
-            ranges: None,
-        } = &selection.input
-        else {
+        let library::MemberSelection::Entries(order) = &selection.input else {
             return false;
         };
         let Some(entry) = order.first().copied() else {
@@ -780,18 +773,9 @@ fn install_playlist_entry_drag(
                 && settings.sort_key.catalog_sort() == library::CatalogSort::Position);
         let database = Arc::clone(&shell.library);
         let task = shell.runtime.spawn(async move {
-            library::CatalogQuery::playlist_entries((&[entry]).to_vec())
-                .rows(
-                    &database,
-                    0,
-                    (&[entry]).len(),
-                    &library::ReadCancellation::new(),
-                )
+            database
+                .playlist_entries(&[entry], &library::ReadCancellation::new())
                 .await
-                .map(|rows| match rows {
-                    library::CatalogRows::PlaylistEntries(rows) => rows,
-                    _ => unreachable!("typed catalog projection"),
-                })
         });
         let weak = Rc::downgrade(&shell);
         glib::spawn_future_local(async move {

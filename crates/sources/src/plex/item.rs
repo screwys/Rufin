@@ -430,16 +430,18 @@ mod tests {
                 }
                 .unwrap();
             }
-            let (_, _, rows) = library::CatalogQuery {
-                subject: library::CatalogSubject::Artists {
-                    source: database
+            let rows = library::ListRead {
+                kind: library::ListKind::Artists {
+                    album_artist: false,
+                },
+                source: Some(
+                    database
                         .source_identity_key(&library::SourceId::new(&catalog_source_id))
                         .await
                         .unwrap()
                         .unwrap(),
-                    sort: library::CatalogSort::Title,
-                    album_artist: false,
-                },
+                ),
+                sort: library::CatalogSort::Title,
                 folder: None,
                 filter: ("").to_string(),
                 descending: false,
@@ -447,16 +449,13 @@ mod tests {
                 downloaded_only: false,
                 activity: false,
             }
-            .page(
+            .page_artists(
                 &database,
                 library::RouteSeedWindow::top(),
                 &library::ReadCancellation::new(),
             )
             .await
-            .map(|page| match page.rows {
-                library::CatalogRows::Artists(rows) => (page.count, page.first_row_position, rows),
-                _ => unreachable!(),
-            })
+            .map(|page| page.rows)
             .unwrap();
             assert_eq!(
                 rows.iter()

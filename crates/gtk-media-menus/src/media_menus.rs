@@ -499,31 +499,21 @@ fn present_playlist_selection_menu(
         let dialog = gtk_widgets::playlists::delete_playlists_dialog(targets.count(), move || {
             let targets = targets.clone();
             let source = menus.source.clone();
+            let database = Arc::clone(&menus.library);
             let task = menus.runtime.spawn(async move {
-                let targets = targets.resolve().await?;
+                let targets = targets.collections(&database).await?;
                 let mut smart = Vec::new();
                 let mut failure = None;
-                for target in targets {
-                    let Some(library::TrackSelection::Query {
-                        query:
-                            library::CatalogQuery {
-                                subject: library::CatalogSubject::Tracks { scope, .. },
-                                ..
-                            },
-                        ..
-                    }) = target.selection()
-                    else {
-                        unreachable!("playlist selection contains playlist queries");
-                    };
-                    match scope {
-                        library::TrackScope::Playlist(key) => {
+                for collection in targets {
+                    match collection {
+                        library::Collection::Playlist(key) => {
                             if let Err(error) =
                                 rufin_core::playlists::delete_playlist(&source, key).await
                             {
                                 failure.get_or_insert_with(|| error.to_string());
                             }
                         }
-                        library::TrackScope::Smart { key, .. } => smart.push(key),
+                        library::Collection::Smart { key, .. } => smart.push(key),
                         _ => unreachable!("playlist selection contains playlists"),
                     }
                 }
@@ -600,12 +590,14 @@ pub fn remove_playlist_entry_selection(
             return;
         };
         let item_count = tracks.len();
-        let songs = library::CatalogQuery::keys(
-            library::CatalogKind::Track,
-            None,
-            (tracks).iter().map(|key| key.raw()).collect(),
-        )
-        .selection();
+        let songs = library::MemberSelection::Keys {
+            source: None,
+            keys: ((tracks).iter().map(|key| key.raw()).collect::<Vec<i64>>())
+                .into_iter()
+                .map(library::TrackKey::from_raw)
+                .collect::<Vec<_>>()
+                .into(),
+        };
         let database = menus.library.clone();
         let preview = songs.clone();
         let artwork = menus
@@ -1032,7 +1024,7 @@ pub fn present_genre_context_menu(
     if present_collection_selection_menu(
         target,
         menus,
-        collection_play_request(library::TrackScope::Genre(genre.genre_key)),
+        collection_play_request(library::Collection::Genre(genre.genre_key)),
         position,
     ) {
         return;
@@ -1053,7 +1045,7 @@ pub fn present_genre_context_menu(
             genre_id: genre.object_id.clone(),
         }),
     );
-    let playback = collection_play_request(library::TrackScope::Genre(genre.genre_key));
+    let playback = collection_play_request(library::Collection::Genre(genre.genre_key));
     install_download_actions(
         &surface,
         menus,
@@ -1078,14 +1070,14 @@ pub fn present_mood_context_menu(
     if present_collection_selection_menu(
         target,
         menus,
-        collection_play_request(library::TrackScope::Mood(mood.mood_key)),
+        collection_play_request(library::Collection::Mood(mood.mood_key)),
         position,
     ) {
         return;
     }
     let surface = ContextMenuSurface::new(target, "mood", position);
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
-    let playback = collection_play_request(library::TrackScope::Mood(mood.mood_key));
+    let playback = collection_play_request(library::Collection::Mood(mood.mood_key));
     install_download_actions(
         &surface,
         menus,
@@ -1110,7 +1102,7 @@ pub fn present_playlist_context_menu(
     if present_playlist_selection_menu(
         target,
         menus,
-        collection_play_request(library::TrackScope::Playlist(playlist.playlist_key)),
+        collection_play_request(library::Collection::Playlist(playlist.playlist_key)),
         position,
     ) {
         return;
@@ -1198,7 +1190,7 @@ pub fn present_playlist_context_menu(
     if playlist.metadata_writable {
         surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
     }
-    let playback = collection_play_request(library::TrackScope::Playlist(playlist.playlist_key));
+    let playback = collection_play_request(library::Collection::Playlist(playlist.playlist_key));
     install_download_actions(
         &surface,
         menus,
@@ -1221,8 +1213,7 @@ pub fn present_playlist_context_menu(
             gtk_widgets::playlists::add_media_to_playlist(
                 &add_menus.source,
                 playlist_key,
-                library::CatalogQuery::uris(library::CatalogKind::Track, vec![media_uri.clone()])
-                    .selection(),
+                library::MemberSelection::Uris((vec![media_uri.clone()]).into()),
                 false,
                 Rc::new(|_| {}),
             );

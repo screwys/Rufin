@@ -865,29 +865,23 @@ pub(super) mod tests {
             "track",
             "plex:track:track",
         );
-        let row = library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-            .rows(&database, 0, 256, &cancellation)
+        let row = database
+            .track(&(&uri), &cancellation)
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                _ => unreachable!(),
-            })
             .unwrap()
             .unwrap();
         assert_eq!(row.metadata.title, "Bad � title");
-        let library::CatalogRows::Tracks(later_page) = library::CatalogQuery::uris(
-            library::CatalogKind::Track,
-            vec![library::source_entity_uri(
-                &crate::SourceId::new("plex-test"),
-                "track",
-                "plex:track:unanalyzed",
-            )],
-        )
-        .rows(&database, 0, 1, &cancellation)
-        .await
-        .unwrap() else {
-            unreachable!()
-        };
+        let later_page = database
+            .tracks_by_uris(
+                &([library::source_entity_uri(
+                    &crate::SourceId::new("plex-test"),
+                    "track",
+                    "plex:track:unanalyzed",
+                )]),
+                &cancellation,
+            )
+            .await
+            .unwrap();
         assert_eq!(later_page[0].metadata.title, valid_title);
         assert_eq!(row.metadata.duration_millis, 123456);
         assert_eq!(row.metadata.year, Some(2010));
@@ -923,15 +917,16 @@ pub(super) mod tests {
         assert_eq!(folders.len(), 1);
         assert_eq!(folders[0].metadata.name.as_deref(), Some("Music"));
         assert_eq!(folders[0].track_count, 2);
-        let moods = library::CatalogQuery {
-            subject: library::CatalogSubject::Moods {
-                source: database
+        let moods = library::ListRead {
+            kind: library::ListKind::Moods,
+            source: Some(
+                database
                     .source_identity_key(&library::SourceId::new(&catalog_source_id))
                     .await
                     .unwrap()
                     .unwrap(),
-                sort: library::CatalogSort::Title,
-            },
+            ),
+            sort: library::CatalogSort::Title,
             folder: Some(folders[0].folder_key),
             filter: ("").to_string(),
             descending: false,
@@ -939,12 +934,8 @@ pub(super) mod tests {
             downloaded_only: false,
             activity: false,
         }
-        .rows(&database, 0, 10, &cancellation)
+        .moods(&database, 0, 10, &cancellation)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Moods(rows) => rows,
-            _ => unreachable!(),
-        })
         .unwrap();
         assert_eq!(moods.len(), 1);
         assert_eq!(moods[0].metadata.name, "Calm");
@@ -975,8 +966,7 @@ pub(super) mod tests {
         let entries = database
             .playlist_edit_entries(
                 playlist_key,
-                &library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist_key))
-                    .selection(),
+                &library::MemberRead::new(library::Collection::Playlist(playlist_key)).selection(),
                 &cancellation,
             )
             .await
@@ -989,18 +979,10 @@ pub(super) mod tests {
             vec!["entry-one", "entry-two"]
         );
         assert!(
-            !library::CatalogQuery::keys(
-                library::CatalogKind::Playlist,
-                None,
-                (&[playlist_key]).iter().map(|v| v.raw()).collect()
-            )
-            .rows(&database, 0, 256, &cancellation)
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Playlists(rows) => rows,
-                _ => unreachable!(),
-            })
-            .unwrap()[0]
+            !database
+                .playlists(&[playlist_key], &cancellation)
+                .await
+                .unwrap()[0]
                 .writable
         );
         let home = database
@@ -1153,13 +1135,9 @@ pub(super) mod tests {
             .apply_items(&database, vec!["invalid".into(), "track".into()], vec![])
             .await
             .unwrap();
-        let row = library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-            .rows(&database, 0, 256, &cancellation)
+        let row = database
+            .track(&(&uri), &cancellation)
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                _ => unreachable!(),
-            })
             .unwrap()
             .unwrap();
         assert_eq!(row.metadata.title, "Updated");

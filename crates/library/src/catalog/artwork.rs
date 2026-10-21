@@ -139,19 +139,18 @@ pub(crate) async fn refresh_choices(
         "SELECT value FROM json_each(?3)
          UNION SELECT artist_key FROM artists WHERE artwork_album_key IN(SELECT value FROM json_each(?2)) OR artwork_track_key IN(SELECT value FROM json_each(?1))
          UNION SELECT artist_key FROM track_artists WHERE track_key IN(SELECT value FROM json_each(?1))
-         UNION SELECT artist_key FROM effective_album_artists WHERE album_key IN(SELECT value FROM json_each(?2))
+         UNION SELECT artist_key FROM album_artists WHERE album_key IN(SELECT value FROM json_each(?2))
          UNION SELECT artist_key FROM track_artists JOIN tracks INDEXED BY tracks_album_order_idx USING(track_key) WHERE album_key IN(SELECT value FROM json_each(?2)) AND indexed=1",
     ).bind(&tracks_json).bind(&albums_json).bind(&artists_json).fetch_all(&mut *connection).await?;
     let artists_json = serde_json::to_string(&artists)?;
-    let related_albums = "SELECT credit.album_key FROM album_artists credit JOIN albums album USING(album_key) WHERE credit.artist_key=artist.artist_key AND album.metadata IS NOT NULL
-        UNION SELECT track.album_key FROM track_album_artists credit JOIN tracks track USING(track_key) JOIN albums album USING(album_key) WHERE credit.artist_key=artist.artist_key AND track.indexed=1 AND album.metadata IS NULL
+    let related_albums = "SELECT credit.album_key FROM album_artists credit WHERE credit.artist_key=artist.artist_key
         UNION SELECT track.album_key FROM track_artists credit JOIN tracks track USING(track_key) WHERE credit.artist_key=artist.artist_key AND track.indexed=1 AND track.album_key IS NOT NULL";
     sqlx::query(sqlx::AssertSqlSafe(format!(
         "WITH chosen AS(SELECT artist.artist_key,
-           (SELECT album.album_key FROM ({related_albums}) related JOIN albums album USING(album_key) JOIN album_order ordering USING(album_key)
+           (SELECT album.album_key FROM ({related_albums}) related JOIN albums album USING(album_key)
             WHERE (album.native_artwork IS NOT NULL AND json_array_length(album.native_artwork)>0 OR album.artwork_track_key IS NOT NULL)
               AND(album.indexed=1 OR EXISTS(SELECT 1 FROM tracks WHERE tracks.album_key=album.album_key AND indexed=1))
-            ORDER BY ordering.title_sort,album.album_key LIMIT 1) album_key,
+            ORDER BY album.title_sort,album.album_key LIMIT 1) album_key,
            (SELECT track.track_key FROM track_artists credit CROSS JOIN tracks track USING(track_key)
             WHERE credit.artist_key=artist.artist_key AND track.indexed=1 AND track.album_key IS NULL AND track.native_artwork IS NOT NULL AND json_array_length(track.native_artwork)>0
             ORDER BY track.sort_text,track.track_key LIMIT 1) track_key
@@ -174,7 +173,7 @@ pub(crate) async fn refresh_choices(
     let albums_json = serde_json::to_string(&albums)?;
     let changed_albums: Vec<i64> = sqlx::query_scalar(
         "WITH chosen AS(SELECT album.album_key,CASE WHEN (album.native_artwork IS NULL OR json_array_length(album.native_artwork)=0) AND album.artwork_track_key IS NULL
-           THEN(SELECT artist_key FROM effective_album_artists WHERE album_key=album.album_key ORDER BY position LIMIT 1) END artist_key FROM albums album WHERE album.album_key IN(SELECT value FROM json_each(?1))),
+           THEN(SELECT artist_key FROM album_artists WHERE album_key=album.album_key ORDER BY position LIMIT 1) END artist_key FROM albums album WHERE album.album_key IN(SELECT value FROM json_each(?1))),
          bindings AS(SELECT album.album_key,chosen.artist_key,coalesce(nullif(album.native_artwork,CAST('[]' AS BLOB)),track.native_artwork,artist.artwork_binding) binding
            FROM chosen JOIN albums album USING(album_key) LEFT JOIN tracks track ON track.track_key=album.artwork_track_key LEFT JOIN artists artist ON artist.artist_key=chosen.artist_key)
          UPDATE albums SET artwork_binding=bindings.binding,artwork_artist_key=bindings.artist_key FROM bindings
@@ -184,6 +183,7 @@ pub(crate) async fn refresh_choices(
         refresh_track_choices(connection, tracks, &changed_albums, &changed_artists).await?;
     if native_changed || changed_tracks || !changed_albums.is_empty() || !changed_artists.is_empty()
     {
+        super::index::artwork(connection, tracks, &changed_albums, &changed_artists).await?;
         crate::artwork::refresh_mosaics(
             connection,
             if native_changed || changed_tracks {
@@ -249,7 +249,7 @@ pub(crate) async fn refresh_batch(
     if update.metadata {
         keys[1] = sqlx::query_scalar("SELECT value FROM json_each(?2) UNION SELECT album_key FROM tracks WHERE track_key IN(SELECT value FROM json_each(?1)) AND album_key IS NOT NULL UNION SELECT album_key FROM album_artists WHERE artist_key IN(SELECT value FROM json_each(?3)) UNION SELECT album_key FROM track_album_artists JOIN tracks USING(track_key) WHERE artist_key IN(SELECT value FROM json_each(?3)) AND album_key IS NOT NULL")
             .bind(serde_json::to_string(&keys[0])?).bind(serde_json::to_string(&keys[1])?).bind(serde_json::to_string(&keys[2])?).fetch_all(&mut *connection).await?;
-        super::files::album_order(connection, &keys[1]).await?;
+        super::index::albums(connection, &keys[1]).await?;
     }
     refresh_choices(connection, &keys[0], &keys[1], &keys[2], update.artwork).await
 }

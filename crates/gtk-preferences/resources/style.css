@@ -49,13 +49,23 @@ columnview > header {
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
 }
 
+.collection-table-header {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  padding: 6px 0;
+}
+
+.collection-table-header > .table-header {
+  padding: 0;
+  border: 0;
+}
+
 .artist-album-table-header {
   padding: 6px 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
 }
 
 .artist-album-table-header > .table-header {
-  padding: 0 6px;
+  padding: 0;
   border-bottom: 0;
 }
 
@@ -474,13 +484,13 @@ columnview.display-large > listview > row > cell { padding-top: 12px; padding-bo
 .display-large.artist-album-table-row > * { padding-top: 12px; padding-bottom: 12px; }
 
 columnview.display-striped > listview > row:nth-child(even):not(:selected):not(:hover),
-.display-striped .album-detail-track-row.display-even:not(:hover),
+.display-striped .album-detail-track-row.display-even:not(.album-detail-track-hover),
 listview.artist-release-list row:not(:selected) .display-striped.artist-album-table-row.display-even:not(:hover) {
   background-color: color-mix(in srgb, currentColor 4%, transparent);
 }
 
 columnview.display-striped:not(.display-no-hover) > listview > row:hover:not(:selected),
-.display-striped:not(.display-no-hover) .album-detail-track-row:hover,
+.display-striped:not(.display-no-hover) .album-detail-track-row.album-detail-track-hover,
 listview.artist-release-list row:not(:selected) .display-striped:not(.display-no-hover).artist-album-table-row:hover {
   background-color: color-mix(in srgb, currentColor 8%, transparent);
 }
@@ -493,11 +503,11 @@ listview.artist-release-list row:not(:selected) .display-striped:not(.display-no
 }
 
 columnview.display-no-hover > listview > row:hover:not(:selected),
-.display-no-hover .album-detail-track-row:hover,
+.display-no-hover .album-detail-track-row.album-detail-track-hover,
 listview.artist-release-list row:not(:selected) .display-no-hover.artist-album-table-row:hover { background-color: transparent; }
 
 columnview.display-no-hover.display-striped > listview > row:nth-child(even):hover:not(:selected),
-.display-no-hover.display-striped .album-detail-track-row.display-even:hover,
+.display-no-hover.display-striped .album-detail-track-row.display-even.album-detail-track-hover,
 listview.artist-release-list row:not(:selected) .display-no-hover.display-striped.artist-album-table-row.display-even:hover {
   background-color: color-mix(in srgb, currentColor 4%, transparent);
 }
@@ -510,13 +520,6 @@ listview.artist-release-list row:not(:selected) .display-no-hover.display-stripe
 
 .track-toolbar button.library-toolbar-icon-button {
   border-radius: 999px;
-}
-
-listview.album-detail-list row,
-listview.album-detail-list row:hover,
-listview.album-detail-list row:selected {
-  background: transparent;
-  padding: 0;
 }
 
 listview.artist-release-list,
@@ -809,11 +812,15 @@ row.artist-search-result button.search-preview-play {
   border-radius: 8px;
 }
 
-.album-detail-separator {
-  opacity: 0.42;
+.album-detail-block-end {
+  box-shadow: inset 0 -1px color-mix(in srgb, var(--border-color) 78%, transparent);
 }
 
-.album-detail-track-row:hover {
+.album-detail-panel {
+  padding: 12px 0;
+}
+
+.album-detail-track-row.album-detail-track-hover {
   background: color-mix(in srgb, currentColor 8%, transparent);
 }
 
@@ -881,16 +888,16 @@ label.track-row-playing:not(.track-row-paused) {
 
 columnview > listview > row:hover .track-row-index-number,
 .artist-album-table-row:hover .track-row-index-number,
-.track-row-index-cell:focus-within .track-row-index-number,
+.track-row-index-cell.track-row-keyboard-focus .track-row-index-number,
 .track-row-index-cell.track-row-playing:not(.track-row-paused) .track-row-index-number,
-.album-detail-track-row:hover .track-row-index-number {
+.album-detail-track-row.album-detail-track-hover .track-row-index-number {
   opacity: 0;
 }
 
 columnview > listview > row:hover .track-row-play,
 .artist-album-table-row:hover .track-row-play,
-.track-row-index-cell:focus-within .track-row-play,
-.album-detail-track-row:hover .track-row-play {
+.track-row-index-cell.track-row-keyboard-focus .track-row-play,
+.album-detail-track-row.album-detail-track-hover .track-row-play {
   opacity: 1;
 }
 
@@ -899,7 +906,7 @@ columnview > listview > row:hover .track-row-play,
 }
 
 .track-row-index-cell.track-row-playing:not(.track-row-paused):hover .track-row-play,
-.track-row-index-cell.track-row-playing:not(.track-row-paused):focus-within .track-row-play {
+.track-row-index-cell.track-row-playing:not(.track-row-paused).track-row-keyboard-focus .track-row-play {
   opacity: 1;
 }
 
@@ -908,7 +915,7 @@ playing-indicator {
 }
 
 .track-row-index-cell:hover playing-indicator,
-.track-row-index-cell:focus-within playing-indicator {
+.track-row-index-cell.track-row-keyboard-focus playing-indicator {
   opacity: 0;
 }
 
@@ -919,7 +926,7 @@ playing-indicator {
 columnview > listview > row:hover .row-menu-button,
 row.search-result:hover .row-menu-button,
 .artist-album-table-row:hover .row-menu-button,
-.album-detail-track-row:hover .row-menu-button,
+.album-detail-track-row.album-detail-track-hover .row-menu-button,
 .row-menu-button:focus-visible { opacity: 1; }
 
 gridview.album-grid {
@@ -2339,7 +2346,7 @@ button.download-queue-pause image {
 columnview > listview > row:hover .row-favorite-button:not(.active-toggle),
 .artist-album-table-row:hover .row-favorite-button:not(.active-toggle),
 listview.queue-list row:hover .row-favorite-button:not(.active-toggle),
-.album-detail-track-row:hover .row-favorite-button:not(.active-toggle),
+.album-detail-track-row.album-detail-track-hover .row-favorite-button:not(.active-toggle),
 .row-favorite-button:not(.active-toggle):focus {
   opacity: 1;
 }
@@ -2354,8 +2361,10 @@ listview.queue-list row:hover .row-favorite-button:not(.active-toggle),
 }
 
 .album-detail-track-cells.table-header {
+  border-radius: 0;
   padding: 0;
   border-bottom: 0;
+  box-shadow: inset 0 -1px color-mix(in srgb, var(--border-color) 78%, transparent);
 }
 
 listview.queue-list row {
@@ -2740,6 +2749,9 @@ modelbutton.rufin-menu-selected:dir(rtl) {
   border-radius: 6px;
   color: transparent;
 }
+.album-detail-row.track-skeleton {
+  background-image: none;
+}
 .track-skeleton.row-favorite-button {
   background-image: none;
 }
@@ -2883,3 +2895,7 @@ button.connect-relay-link, button.connect-relay-link:visited { color: inherit; }
   padding: 24px;
   background: linear-gradient(120deg, color-mix(in srgb, var(--accent-bg-color) 12%, var(--card-bg-color)), var(--card-bg-color));
 }
+
+.album-detail-list { border-spacing: 0; }
+.album-detail-list > row { padding: 0; margin: 0; min-height: 0; border-width: 0; }
+.album-detail-list > row:hover { background-color: transparent; }

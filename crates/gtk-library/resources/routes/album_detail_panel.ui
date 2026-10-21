@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <object class="GtkBox" id="root">
+    <property name="orientation">vertical</property>
+    <property name="spacing">6</property>
+    <style><class name="album-detail-panel"/></style>
+    <child>
+      <object class="GtkStack" id="cover_host">
+        <property name="hhomogeneous">true</property>
+        <property name="vhomogeneous">true</property>
+        <property name="transition-type">none</property>
+        <child>
+          <object class="GtkStackPage">
+            <property name="name">pending</property>
+            <property name="child">
+              <object class="GtkBox" id="skeleton">
+                <style><class name="collection-grid-cover-skeleton"/></style>
+              </object>
+            </property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="title">
+        <property name="xalign">0.5</property>
+        <property name="ellipsize">end</property>
+        <property name="single-line-mode">true</property>
+        <style><class name="track-title"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="artist">
+        <property name="xalign">0.5</property>
+        <property name="ellipsize">end</property>
+        <property name="single-line-mode">true</property>
+        <style><class name="muted"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="release">
+        <property name="xalign">0.5</property>
+        <property name="ellipsize">end</property>
+        <property name="single-line-mode">true</property>
+        <style><class name="muted"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="facts">
+        <property name="xalign">0.5</property>
+        <property name="ellipsize">end</property>
+        <property name="single-line-mode">true</property>
+        <style><class name="muted"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="genres">
+        <property name="xalign">0.5</property>
+        <property name="ellipsize">end</property>
+        <property name="single-line-mode">true</property>
+        <style><class name="muted"/></style>
+      </object>
+    </child>
+  </object>
+</interface>

@@ -915,12 +915,10 @@ mod tests {
         let cancellation = ReadCancellation::new();
         let track_uri = database
             .selected_track_uris(
-                &library::CatalogQuery {
-                    subject: library::CatalogSubject::Tracks {
-                        scope: library::TrackScope::Tracks(source),
-                        sort: Some(CatalogSort::Title),
-                    },
-                    ..library::CatalogQuery::tracks(library::TrackScope::Tracks(source))
+                &library::MemberRead {
+                    collection: library::Collection::Source(source),
+                    sort: Some(CatalogSort::Title),
+                    ..library::MemberRead::new(library::Collection::Source(source))
                 }
                 .selection(),
                 None,
@@ -992,9 +990,9 @@ mod tests {
             .expect("record Activity idempotently");
 
         assert_eq!(
-            library::CatalogQuery {
+            library::MemberRead {
                 descending: true,
-                ..library::CatalogQuery::tracks(library::TrackScope::History {
+                ..library::MemberRead::new(library::Collection::History {
                     source: Some(SourceId::new("source"))
                 })
             }
@@ -1042,9 +1040,9 @@ mod tests {
             1
         );
         assert_eq!(
-            library::CatalogQuery {
+            library::MemberRead {
                 descending: true,
-                ..library::CatalogQuery::tracks(library::TrackScope::History {
+                ..library::MemberRead::new(library::Collection::History {
                     source: Some(SourceId::new("source"))
                 })
             }

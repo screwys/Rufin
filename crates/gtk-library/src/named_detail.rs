@@ -183,8 +183,8 @@ impl CatalogUi {
             ));
         };
         let summary = match summary {
-            DetailSummary::Genre(row) => NamedDetailSummary::Genre(row),
-            DetailSummary::Mood(row) => NamedDetailSummary::Mood(row),
+            DetailSummary::Genre(row) => NamedDetailSummary::Genre(*row),
+            DetailSummary::Mood(row) => NamedDetailSummary::Mood(*row),
             _ => unreachable!("named detail"),
         };
         let current = Rc::new(RefCell::new(summary));

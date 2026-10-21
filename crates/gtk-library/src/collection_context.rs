@@ -16,17 +16,14 @@ pub fn present_track_context_menu(
     }
     let database = shell.library.clone();
     let task = shell.runtime.spawn(async move {
-        library::CatalogQuery::uris(library::CatalogKind::Track, vec![media_uri])
-            .rows(&database, 0, 1, &library::ReadCancellation::new())
+        database
+            .track(&media_uri, &library::ReadCancellation::new())
             .await
     });
     let target = target.clone();
     let menus = Rc::downgrade(&shell.media_menus);
     gtk::glib::spawn_future_local(async move {
-        if let (Some(menus), Ok(Ok(library::CatalogRows::Tracks(mut rows)))) =
-            (menus.upgrade(), task.await)
-            && let Some(song) = rows.pop()
-        {
+        if let (Some(menus), Ok(Ok(Some(song)))) = (menus.upgrade(), task.await) {
             present_track_menu(&target, &menus, song, position, None, None);
         }
     });

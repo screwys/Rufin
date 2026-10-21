@@ -1554,9 +1554,6 @@ msgstr ""
 msgid "Folder path"
 msgstr ""
 
-msgid "Folder"
-msgstr ""
-
 msgid "Folders"
 msgstr ""
 
@@ -2377,6 +2374,9 @@ msgstr ""
 msgid "No playable entries were found"
 msgstr ""
 
+msgid "No playlists yet"
+msgstr ""
+
 msgid "No related tracks found"
 msgstr ""
 
@@ -3066,6 +3066,9 @@ msgstr ""
 msgid "Remove search"
 msgstr ""
 
+msgid "Remove the library database? Settings and saved logins will be kept."
+msgstr ""
+
 msgid "Remove unavailable tracks"
 msgstr ""
 
@@ -3116,6 +3119,12 @@ msgid "Require SMB encryption"
 msgstr ""
 
 msgid "Reset appearance"
+msgstr ""
+
+msgid "Reset database"
+msgstr ""
+
+msgid "Reset database?"
 msgstr ""
 
 msgid "Reset to defaults"

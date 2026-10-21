@@ -1,0 +1,39 @@
+<?xml version="1.0" ?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <template class="RufinColumnViewHeaderCell" parent="GtkWidget">
+    <property name="hexpand">false</property>
+    <property name="overflow">hidden</property>
+    <property name="accessible-role">column-header</property>
+    <style>
+      <class name="table-header"/>
+    </style>
+    <child>
+      <object class="GtkBox" id="content">
+        <child>
+          <object class="GtkLabel" id="label">
+            <property name="hexpand">true</property>
+            <property name="xalign">0</property>
+            <property name="ellipsize">end</property>
+            <property name="single-line-mode">true</property>
+            <property name="width-chars">1</property>
+            <property name="margin-start">6</property>
+            <property name="margin-end">6</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkImage" id="duration">
+            <property name="visible">false</property>
+            <property name="hexpand">true</property>
+            <property name="halign">start</property>
+            <property name="margin-start">6</property>
+            <property name="margin-end">6</property>
+            <property name="pixel-size">16</property>
+            <property name="icon-name">rufin-preferences-system-time-symbolic</property>
+            <property name="accessible-role">presentation</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

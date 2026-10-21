@@ -397,13 +397,9 @@ mod tests {
             "track",
             "navidrome:track:track",
         );
-        let row = library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-            .rows(&database, 0, 256, &cancellation)
+        let row = database
+            .track(&(&uri), &cancellation)
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                _ => unreachable!(),
-            })
             .unwrap()
             .unwrap();
         assert!(row.state.favorite);

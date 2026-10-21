@@ -266,17 +266,18 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     );
     assert!(observed.try_recv().is_err());
     let cancel = ReadCancellation::new();
-    let history = (&library::CatalogQuery {
+    let history = (&library::MemberRead {
         descending: true,
-        ..library::CatalogQuery::tracks(library::TrackScope::History {
+        ..library::MemberRead::new(library::Collection::History {
             source: (Some(&SourceId::new("source"))).cloned(),
         })
     })
         .rows(&fixture.database, 0, 100, &cancel)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .expect("Activity History");
     assert_eq!(history.len(), 1);
@@ -332,7 +333,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     let unplayed = fixture
         .database
         .selected_track_uris(
-            &library::CatalogQuery::tracks(library::TrackScope::Smart {
+            &library::MemberRead::new(library::Collection::Smart {
                 key: never,
                 source: Some(fixture.source),
                 now: 1800000000,
@@ -348,27 +349,26 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         "remote play totals do not count as Rufin listens"
     );
     assert!(!unplayed.contains(&listen.media_uri));
-    let catalog = library::CatalogQuery::uris(
-        library::CatalogKind::Track,
-        vec![(&listen.media_uri).to_string()],
-    )
-    .rows(&fixture.database, 0, 1, &cancel)
-    .await
-    .map(|rows| match rows {
-        library::CatalogRows::Tracks(mut rows) => rows.pop(),
-        _ => unreachable!("typed catalog projection"),
-    })
-    .unwrap()
-    .unwrap();
-    let history = (&library::CatalogQuery {
+    let catalog = fixture
+        .database
+        .tracks_by_uris(&([(&listen.media_uri).to_string()]), &cancel)
+        .await
+        .map(|rows| {
+            let mut rows = rows;
+            rows.pop()
+        })
+        .unwrap()
+        .unwrap();
+    let history = (&library::MemberRead {
         descending: true,
-        ..library::CatalogQuery::tracks(library::TrackScope::History { source: None })
+        ..library::MemberRead::new(library::Collection::History { source: None })
     })
         .rows(&fixture.database, 0, 100, &cancel)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .unwrap();
     let row = &history[0];
@@ -384,11 +384,9 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .create_playlist(
             None,
             "History track",
-            &library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                (std::slice::from_ref(&listen.media_uri)).to_vec(),
-            )
-            .selection(),
+            &library::MemberSelection::Uris(
+                ((std::slice::from_ref(&listen.media_uri)).to_vec()).into(),
+            ),
         )
         .await
         .unwrap()
@@ -397,12 +395,10 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .database
         .playlist_edit_entries(
             playlist,
-            &library::CatalogQuery {
-                subject: library::CatalogSubject::Tracks {
-                    scope: library::TrackScope::Playlist(playlist),
-                    sort: Some(library::CatalogSort::Position),
-                },
-                ..library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist))
+            &library::MemberRead {
+                collection: library::Collection::Playlist(playlist),
+                sort: Some(library::CatalogSort::Position),
+                ..library::MemberRead::new(library::Collection::Playlist(playlist))
             }
             .selection(),
             &cancel,
@@ -415,13 +411,10 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
                 .collect::<Vec<_>>()
         })
         .unwrap();
-    let entries = library::CatalogQuery::playlist_entries((&entries).to_vec())
-        .rows(&fixture.database, 0, (&entries).len(), &cancel)
+    let entries = fixture
+        .database
+        .playlist_entries(&((&entries).to_vec()), &cancel)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::PlaylistEntries(rows) => rows,
-            _ => unreachable!(),
-        })
         .unwrap();
     let entry = &entries[0];
     assert_eq!(
@@ -458,18 +451,18 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
             .expect("defer one delivery")
     );
     assert_eq!(
-        (&library::CatalogQuery {
+        (&library::MemberRead {
             descending: true,
-            ..library::CatalogQuery::tracks(library::TrackScope::History {
+            ..library::MemberRead::new(library::Collection::History {
                 source: (Some(&SourceId::new("source"))).cloned()
             })
         })
             .rows(&fixture.database, 0, 100, &cancel)
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!(),
-            })
+            .map(|rows| rows
+                .into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>())
             .expect("History survives delivery")
             .len(),
         1
@@ -631,17 +624,18 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
         .await
         .unwrap();
     let cancel = ReadCancellation::new();
-    let current = (&library::CatalogQuery {
+    let current = (&library::MemberRead {
         descending: true,
-        ..library::CatalogQuery::tracks(library::TrackScope::History {
+        ..library::MemberRead::new(library::Collection::History {
             source: (Some(&SourceId::new("source"))).cloned(),
         })
     })
         .rows(&fixture.database, 0, 100, &cancel)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .unwrap();
     assert_eq!(
@@ -651,18 +645,19 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
             .collect::<Vec<_>>(),
         [("Legacy CUE", 2), ("Recorded file", 3)]
     );
-    let matching = (&library::CatalogQuery {
+    let matching = (&library::MemberRead {
         filter: ("legacy").into(),
         descending: true,
-        ..library::CatalogQuery::tracks(library::TrackScope::History {
+        ..library::MemberRead::new(library::Collection::History {
             source: (Some(&SourceId::new("source"))).cloned(),
         })
     })
         .rows(&fixture.database, 0, 100, &cancel)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .unwrap();
     assert_eq!(
@@ -672,17 +667,18 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
             .collect::<Vec<_>>(),
         ["Legacy CUE", "Legacy file"]
     );
-    let remote = (&library::CatalogQuery {
+    let remote = (&library::MemberRead {
         descending: true,
-        ..library::CatalogQuery::tracks(library::TrackScope::History {
+        ..library::MemberRead::new(library::Collection::History {
             source: (Some(&SourceId::new("remote"))).cloned(),
         })
     })
         .rows(&fixture.database, 0, 100, &cancel)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .unwrap();
     assert_eq!(remote.len(), 1);
@@ -717,42 +713,46 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
         (library::CatalogSort::PlayCount, [&file, &cue]),
         (library::CatalogSort::LastPlayed, [&cue, &file]),
     ] {
-        let tracks = (&library::CatalogQuery {
-            subject: library::CatalogSubject::Tracks {
-                scope: library::TrackScope::Tracks(fixture.source),
-                sort: Some(sort),
-            },
+        let tracks = (&library::MemberRead {
+            collection: library::Collection::Source(fixture.source),
+            sort: Some(sort),
             descending: true,
-            ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
+            ..library::MemberRead::new(library::Collection::Source(fixture.source))
         })
             .page(&fixture.database, library::RouteSeedWindow::top(), &cancel)
             .await
             .unwrap();
         assert_eq!(
-            (match &tracks.rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!(),
+            ({
+                let rows = tracks
+                    .rows
+                    .iter()
+                    .map(library::MemberRow::track)
+                    .collect::<Vec<_>>();
+                rows
             })[..2]
                 .iter()
                 .map(|row| row.media_uri.as_str())
                 .collect::<Vec<_>>(),
             expected.map(String::as_str)
         );
-        let album = (&library::CatalogQuery {
-            subject: library::CatalogSubject::Tracks {
-                scope: library::TrackScope::Album(fixture.albums[0]),
-                sort: Some(sort),
-            },
+        let album = (&library::MemberRead {
+            collection: library::Collection::Album(fixture.albums[0]),
+            sort: Some(sort),
             descending: true,
-            ..library::CatalogQuery::tracks(library::TrackScope::Album(fixture.albums[0]))
+            ..library::MemberRead::new(library::Collection::Album(fixture.albums[0]))
         })
             .page(&fixture.database, library::RouteSeedWindow::top(), &cancel)
             .await
             .unwrap();
         assert_eq!(
-            (match &album.rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!(),
+            ({
+                let rows = album
+                    .rows
+                    .iter()
+                    .map(library::MemberRow::track)
+                    .collect::<Vec<_>>();
+                rows
             })
             .iter()
             .map(|row| row.media_uri.as_str())
@@ -807,15 +807,16 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
         5
     );
     let cancel = ReadCancellation::new();
-    let all = (&library::CatalogQuery {
+    let all = (&library::MemberRead {
         descending: true,
-        ..library::CatalogQuery::tracks(library::TrackScope::History { source: None })
+        ..library::MemberRead::new(library::Collection::History { source: None })
     })
         .rows(&fixture.database, 0, 100, &cancel)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .unwrap();
     assert_eq!(
@@ -830,30 +831,32 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
         ]
     );
     assert_eq!(all[3].state.play_count, 2);
-    let current = (&library::CatalogQuery {
+    let current = (&library::MemberRead {
         descending: true,
-        ..library::CatalogQuery::tracks(library::TrackScope::History {
+        ..library::MemberRead::new(library::Collection::History {
             source: (Some(&SourceId::new("source"))).cloned(),
         })
     })
         .rows(&fixture.database, 0, 100, &cancel)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .unwrap();
     assert_eq!(current, vec![all[3].clone()]);
-    let matching = (&library::CatalogQuery {
+    let matching = (&library::MemberRead {
         filter: (" old TITLE ").into(),
         descending: true,
-        ..library::CatalogQuery::tracks(library::TrackScope::History { source: None })
+        ..library::MemberRead::new(library::Collection::History { source: None })
     })
         .rows(&fixture.database, 0, 100, &cancel)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .unwrap();
     assert_eq!(matching.len(), 1);
@@ -861,19 +864,19 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
     assert_eq!(matching[0].state.last_played, Some(1));
     assert_eq!(matching[0].state.play_count, 2);
     assert!(
-        (&library::CatalogQuery {
+        (&library::MemberRead {
             filter: ("old").into(),
             descending: true,
-            ..library::CatalogQuery::tracks(library::TrackScope::History {
+            ..library::MemberRead::new(library::Collection::History {
                 source: (Some(&SourceId::new("other"))).cloned()
             })
         })
             .rows(&fixture.database, 0, 100, &cancel)
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!(),
-            })
+            .map(|rows| rows
+                .into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>())
             .unwrap()
             .is_empty()
     );
@@ -941,15 +944,16 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     let database = library::Database::open(empty.path().join("store.sqlite"))
         .await
         .unwrap();
-    let history = (&library::CatalogQuery {
+    let history = (&library::MemberRead {
         descending: true,
-        ..library::CatalogQuery::tracks(library::TrackScope::History { source: None })
+        ..library::MemberRead::new(library::Collection::History { source: None })
     })
         .rows(&database, 0, 100, &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .unwrap();
     assert_eq!(

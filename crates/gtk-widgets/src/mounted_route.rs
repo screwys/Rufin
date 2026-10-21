@@ -297,6 +297,7 @@ pub struct NativeListScroll {
     pub list: gtk::ListView,
     items: Rc<dyn Fn() -> Vec<(u32, gtk::Widget)>>,
     query_positions: bool,
+    native_position: Option<Rc<dyn Fn(u32) -> u32>>,
 }
 
 impl NativeListScroll {
@@ -309,7 +310,13 @@ impl NativeListScroll {
             list,
             items,
             query_positions,
+            native_position: None,
         }
+    }
+
+    pub fn with_native_position(mut self, map: Rc<dyn Fn(u32) -> u32>) -> Self {
+        self.native_position = Some(map);
+        self
     }
 
     pub fn capture(&self) -> Option<ItemScrollPosition> {
@@ -330,6 +337,10 @@ impl NativeListScroll {
     }
 
     pub fn scroll_to(&self, position: u32) {
+        let position = self
+            .native_position
+            .as_ref()
+            .map_or(position, |map| map(position));
         let count = self.list.model().map_or(0, |model| model.n_items());
         if count > 0 {
             self.list
@@ -337,23 +348,24 @@ impl NativeListScroll {
         }
     }
 
-    pub fn restore_offset(&self, saved: ItemScrollPosition) {
+    pub fn restore_offset(&self, saved: ItemScrollPosition) -> bool {
         let Some((_, widget)) = (self.items)()
             .into_iter()
             .find(|(position, _)| *position == saved.position)
         else {
-            return;
+            return false;
         };
         let (Some(bounds), Some(adjustment)) =
             (widget.compute_bounds(&self.list), self.list.vadjustment())
         else {
-            return;
+            return false;
         };
         let value = adjustment.value() + f64::from(bounds.y()) - saved.offset;
         adjustment.set_value(value.clamp(
             adjustment.lower(),
             (adjustment.upper() - adjustment.page_size()).max(adjustment.lower()),
         ));
+        true
     }
 }
 

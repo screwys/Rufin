@@ -1,6 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 15;
+pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 16;
 pub const DEFAULT_WINDOW_WIDTH: i32 = 1_500;
 pub const DEFAULT_WINDOW_HEIGHT: i32 = 900;
 pub const MIN_RESTORED_WINDOW_WIDTH: i32 = 450;
@@ -888,6 +888,18 @@ impl LibraryListSettings {
                 }
             }
         }
+        if self.layout_version < 16
+            && key == LibraryListKey::Albums
+            && self.detail_track_fields
+                == [
+                    LibraryField::RowIndex,
+                    LibraryField::Title,
+                    LibraryField::Duration,
+                    LibraryField::Tools,
+                ]
+        {
+            self.detail_track_fields = default_detail_track_fields();
+        }
     }
 }
 pub fn default_library_list_settings() -> Vec<LibraryListSettingsEntry> {
@@ -1190,7 +1202,12 @@ fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
             LibraryField::LastPlayed,
             LibraryField::Tools,
         ],
-        LibraryListKey::AlbumDetailTracks => default_detail_track_fields(),
+        LibraryListKey::AlbumDetailTracks => vec![
+            LibraryField::RowIndex,
+            LibraryField::Title,
+            LibraryField::Duration,
+            LibraryField::Tools,
+        ],
         LibraryListKey::ArtistTracks => vec![
             LibraryField::RowIndex,
             LibraryField::TitleMerged,
@@ -1273,7 +1290,6 @@ fn default_detail_track_fields() -> Vec<LibraryField> {
         LibraryField::RowIndex,
         LibraryField::Title,
         LibraryField::Duration,
-        LibraryField::Tools,
     ]
 }
 fn default_sort_key(key: LibraryListKey) -> LibraryField {

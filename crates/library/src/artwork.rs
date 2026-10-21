@@ -571,16 +571,68 @@ pub(crate) async fn playlist_artwork_choices_on(
     Ok(result)
 }
 
-// Media identities keep the choice and order the same on every device.
-pub(crate) fn collection_artwork_sql(from: &str, predicate: &str) -> String {
-    format!(
-        "SELECT track.track_key,min(track.media_uri) media_uri FROM {from}
-         LEFT JOIN albums album USING(album_key)
-         WHERE {predicate} AND ({artwork}) IS NOT NULL
-         GROUP BY COALESCE(album.media_uri,track.media_uri)
-         ORDER BY COALESCE(album.media_uri,min(track.media_uri)),min(track.media_uri) LIMIT 4",
-        artwork = raw_track_artwork_sql("track")
-    )
+async fn refresh_automatic_playlist_artwork_on(
+    connection: &mut sqlx::SqliteConnection,
+    key: i64,
+    candidate: &mut ArtworkCandidate,
+) -> LibraryResult<()> {
+    let previous = candidate.image.clone();
+    if let ArtworkImage::Playlist {
+        smart,
+        automatic: Some(manifest),
+        resolved,
+        revision,
+        ..
+    } = &mut candidate.image
+    {
+        if !*smart
+            && !manifest.chosen.is_empty()
+            && !sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM playlist_entries WHERE playlist_key=?1)",
+            )
+            .bind(key)
+            .fetch_one(&mut *connection)
+            .await?
+        {
+            manifest.chosen.clear();
+        }
+        let recipes = raw_playlist_artwork_on(connection, &manifest.chosen).await?;
+        manifest.chosen = manifest
+            .chosen
+            .iter()
+            .zip(recipes)
+            .filter_map(|(uri, recipe)| (!recipe.is_empty()).then(|| uri.clone()))
+            .collect();
+        let prefix = if *smart {
+            let (source,folder): (Option<SourceKey>,Option<FolderKey>) = sqlx::query_as("SELECT (SELECT source_key FROM sources WHERE object_id=?1),(SELECT folder_key FROM folders WHERE source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND object_id=?2)").bind(&manifest.source_id).bind(&manifest.folder_id).fetch_one(&mut *connection).await?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            crate::smart_playlists::smart_membership_sql(
+                connection,
+                source,
+                folder,
+                now,
+                Some(&[crate::SmartPlaylistKey::from_raw(key)]),
+            )
+            .await?
+        } else {
+            format!(
+                "WITH selected AS (SELECT track_key FROM playlist_entries WHERE playlist_key={key})"
+            )
+        };
+        manifest.chosen =
+            playlist_artwork_choices_on(connection, &prefix, &manifest.chosen, false).await?;
+        let recipes = raw_playlist_artwork_on(connection, &manifest.chosen).await?;
+        manifest.pending = false;
+        *revision = format!("auto:{:x}", Md5::digest(serde_json::to_vec(&recipes)?));
+        *resolved = Some(recipes);
+    }
+    if candidate.image != previous {
+        *candidate = ArtworkCandidate::new(candidate.image.clone(), None);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -640,7 +692,7 @@ impl ArtworkCacheRetention<'_> {
 }
 
 impl Database {
-    pub async fn mark_playlist_artwork_pending(
+    pub async fn refresh_incomplete_playlist_artwork(
         &self,
         playlist: Option<crate::PlaylistKey>,
         activity_only: bool,
@@ -653,37 +705,86 @@ impl Database {
             {
                 continue;
             }
+            let has_members = if table == "playlists" {
+                "AND (EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.playlist_key=playlists.rowid) OR EXISTS(SELECT 1 FROM json_each(artwork_binding) candidate WHERE json_array_length(json_extract(candidate.value,'$.image.automatic.chosen'))>0))"
+            } else {
+                ""
+            };
+            let definition = if table == "smart_playlists" {
+                "definition_json"
+            } else {
+                "NULL"
+            };
+            let emptied = if table == "playlists" {
+                "OR NOT EXISTS(SELECT 1 FROM playlist_entries entry WHERE entry.playlist_key=playlists.rowid)"
+            } else {
+                ""
+            };
             let mut after = 0;
             loop {
-                let rows: Vec<(i64,Vec<u8>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT rowid,artwork_binding FROM {table} WHERE rowid>?2 AND(?1 IS NULL OR rowid=?1) AND EXISTS(SELECT 1 FROM json_each(artwork_binding) candidate WHERE json_extract(candidate.value,'$.image.automatic.pending')=0 AND json_array_length(json_extract(candidate.value,'$.image.automatic.chosen'))<4) ORDER BY rowid LIMIT 128")))
+                let rows: Vec<(i64,Vec<u8>,Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT rowid,artwork_binding,{definition} FROM {table} WHERE rowid>?2 AND(?1 IS NULL OR rowid=?1) {has_members} AND EXISTS(SELECT 1 FROM json_each(artwork_binding) candidate WHERE json_extract(candidate.value,'$.image.automatic.pending')=0 AND (json_array_length(json_extract(candidate.value,'$.image.automatic.chosen'))<4 {emptied})) ORDER BY rowid LIMIT 128")))
                     .bind(playlist).bind(after).fetch_all(&mut *connection).await?;
                 let Some(last) = rows.last() else { break };
                 after = last.0;
-                for (key, binding) in rows {
-                    let mut candidates: Vec<ArtworkCandidate> = serde_json::from_slice(&binding)?;
-                    for candidate in &mut candidates {
-                        if let ArtworkImage::Playlist {
-                            automatic: Some(manifest),
-                            resolved,
-                            revision,
-                            ..
-                        } = &mut candidate.image
-                            && !manifest.pending
-                            && manifest.chosen.len() < 4
+                for (key, binding, definition) in rows {
+                    if activity_only && let Some(definition) = definition {
+                        use crate::{SmartPlaylistRuleField as Field, SmartPlaylistSort as Sort};
+                        let definition: crate::SmartPlaylistDefinition =
+                            serde_json::from_str(&definition)?;
+                        if !matches!(
+                            definition.sort_field,
+                            Sort::PlayCount | Sort::SkipCount | Sort::LastPlayed
+                        ) && !definition
+                            .match_all
+                            .iter()
+                            .chain(&definition.match_any)
+                            .any(|rule| {
+                                matches!(
+                                    rule.field,
+                                    Field::Played
+                                        | Field::PlayCount
+                                        | Field::SkipCount
+                                        | Field::LastPlayed
+                                )
+                            })
                         {
-                            manifest.pending = true;
-                            *resolved = None;
-                            *revision = format!("pending:{revision}");
-                            *candidate = ArtworkCandidate::new(candidate.image.clone(), None);
+                            continue;
                         }
                     }
+                    let mut candidates: Vec<ArtworkCandidate> = serde_json::from_slice(&binding)?;
+                    for candidate in &mut candidates {
+                        if candidate.is_automatic_playlist() {
+                            refresh_automatic_playlist_artwork_on(connection, key, candidate)
+                                .await?;
+                        }
+                    }
+                    let next = serde_json::to_vec(&candidates)?;
+                    if next == binding {
+                        continue;
+                    }
+                    let mut transaction = connection.begin().await?;
                     sqlx::query(sqlx::AssertSqlSafe(format!(
                         "UPDATE {table} SET artwork_binding=?2 WHERE rowid=?1"
                     )))
                     .bind(key)
-                    .bind(serde_json::to_vec(&candidates)?)
-                    .execute(&mut *connection)
+                    .bind(next)
+                    .execute(&mut *transaction)
                     .await?;
+                    if table == "smart_playlists" {
+                        crate::smart_playlists::sync_smart_on(
+                            &mut transaction,
+                            crate::SmartPlaylistKey::from_raw(key),
+                        )
+                        .await?;
+                    } else {
+                        crate::playlists::sync_playlist_header_on(
+                            &mut transaction,
+                            crate::PlaylistKey::from_raw(key),
+                        )
+                        .await?;
+                    }
+                    transaction.commit().await?;
+                    self.cache_written();
                 }
             }
         }
@@ -855,47 +956,13 @@ impl Database {
         if let ArtworkImage::Playlist {
             automatic: Some(manifest),
             resolved,
-            revision,
             ..
-        } = &mut selected.image
+        } = &selected.image
         {
             if !manifest.pending && resolved.is_some() {
                 return Ok(Some(selected));
             }
-            let recipes = raw_playlist_artwork_on(&mut connection, &manifest.chosen).await?;
-            manifest.chosen = manifest
-                .chosen
-                .iter()
-                .zip(recipes)
-                .filter_map(|(uri, recipe)| (!recipe.is_empty()).then(|| uri.clone()))
-                .collect();
-            let prefix = if smart {
-                let (source,folder): (Option<SourceKey>,Option<FolderKey>) = sqlx::query_as("SELECT (SELECT source_key FROM sources WHERE object_id=?1),(SELECT folder_key FROM folders WHERE source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND object_id=?2)").bind(&manifest.source_id).bind(&manifest.folder_id).fetch_one(&mut *connection).await?;
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64;
-                crate::smart_playlists::smart_membership_sql(
-                    &mut connection,
-                    source,
-                    folder,
-                    now,
-                    Some(&[crate::SmartPlaylistKey::from_raw(key)]),
-                )
-                .await?
-            } else {
-                format!(
-                    "WITH selected AS (SELECT track_key FROM playlist_entries WHERE playlist_key={key})"
-                )
-            };
-            manifest.chosen =
-                playlist_artwork_choices_on(&mut connection, &prefix, &manifest.chosen, false)
-                    .await?;
-            let recipes = raw_playlist_artwork_on(&mut connection, &manifest.chosen).await?;
-            manifest.pending = false;
-            *revision = format!("auto:{:x}", Md5::digest(serde_json::to_vec(&recipes)?));
-            *resolved = Some(recipes);
-            selected = ArtworkCandidate::new(selected.image, None);
+            refresh_automatic_playlist_artwork_on(&mut connection, key, &mut selected).await?;
             drop(connection);
             {
                 let mut writer = self.writer().await?;

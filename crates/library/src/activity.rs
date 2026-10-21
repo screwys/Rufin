@@ -715,13 +715,12 @@ pub(crate) fn history_query(
         .join(" UNION ALL ");
     let direction = if descending { "DESC" } else { "ASC" };
     crate::query::OrderedQuery {
-        albumless:false,
+
         key:"listen.listen_key".into(),text:None,
         from: format!("(SELECT * FROM ({selected}) ORDER BY started_at DESC,listen_key DESC LIMIT {HISTORY_LIMIT}) listen
             JOIN tracks track USING(media_uri) LEFT JOIN albums album ON album.album_key=track.album_key"),
         predicate: "1".into(),
         order: vec![format!("listen.started_at {direction}"), format!("listen.listen_key {direction}")],
-        uri: "track.media_uri".into(),
         entry_key: "NULL".into(),
         arguments: Default::default(),
     }

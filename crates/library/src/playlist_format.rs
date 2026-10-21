@@ -999,12 +999,10 @@ mod tests {
         let keys = database
             .playlist_edit_entries(
                 first.playlist,
-                &crate::CatalogQuery {
-                    subject: crate::CatalogSubject::Tracks {
-                        scope: crate::TrackScope::Playlist(first.playlist),
-                        sort: Some(crate::CatalogSort::Position),
-                    },
-                    ..crate::CatalogQuery::tracks(crate::TrackScope::Playlist(first.playlist))
+                &crate::MemberRead {
+                    collection: crate::Collection::Playlist(first.playlist),
+                    sort: Some(crate::CatalogSort::Position),
+                    ..crate::MemberRead::new(crate::Collection::Playlist(first.playlist))
                 }
                 .selection(),
                 &crate::ReadCancellation::new(),
@@ -1032,12 +1030,10 @@ mod tests {
             database
                 .playlist_edit_entries(
                     first.playlist,
-                    &crate::CatalogQuery {
-                        subject: crate::CatalogSubject::Tracks {
-                            scope: crate::TrackScope::Playlist(first.playlist),
-                            sort: Some(crate::CatalogSort::Position)
-                        },
-                        ..crate::CatalogQuery::tracks(crate::TrackScope::Playlist(first.playlist))
+                    &crate::MemberRead {
+                        collection: crate::Collection::Playlist(first.playlist),
+                        sort: Some(crate::CatalogSort::Position),
+                        ..crate::MemberRead::new(crate::Collection::Playlist(first.playlist))
                     }
                     .selection(),
                     &crate::ReadCancellation::new()
@@ -1065,12 +1061,10 @@ mod tests {
             database
                 .playlist_edit_entries(
                     first.playlist,
-                    &crate::CatalogQuery {
-                        subject: crate::CatalogSubject::Tracks {
-                            scope: crate::TrackScope::Playlist(first.playlist),
-                            sort: Some(crate::CatalogSort::Position)
-                        },
-                        ..crate::CatalogQuery::tracks(crate::TrackScope::Playlist(first.playlist))
+                    &crate::MemberRead {
+                        collection: crate::Collection::Playlist(first.playlist),
+                        sort: Some(crate::CatalogSort::Position),
+                        ..crate::MemberRead::new(crate::Collection::Playlist(first.playlist))
                     }
                     .selection(),
                     &crate::ReadCancellation::new()
@@ -1458,19 +1452,17 @@ mod tests {
                 .is_err()
         );
         assert_eq!(
-            (&crate::CatalogQuery {
-                subject: crate::CatalogSubject::Tracks {
-                    scope: crate::TrackScope::Playlist(second.playlist),
-                    sort: Some(crate::CatalogSort::Position)
-                },
-                ..crate::CatalogQuery::tracks(crate::TrackScope::Playlist(second.playlist))
+            (&crate::MemberRead {
+                collection: crate::Collection::Playlist(second.playlist),
+                sort: Some(crate::CatalogSort::Position),
+                ..crate::MemberRead::new(crate::Collection::Playlist(second.playlist))
             })
                 .rows(&database, 0, 128, &crate::ReadCancellation::new())
                 .await
-                .map(|rows| match rows {
-                    crate::CatalogRows::PlaylistEntries(rows) => rows,
-                    _ => unreachable!(),
-                })
+                .map(|rows| rows
+                    .into_iter()
+                    .filter_map(crate::MemberRow::into_entry)
+                    .collect::<Vec<_>>())
                 .unwrap()
                 .len(),
             1
@@ -1750,18 +1742,17 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(report.imported, 3);
-        let entries = (&crate::CatalogQuery {
-            subject: crate::CatalogSubject::Tracks {
-                scope: crate::TrackScope::Playlist(report.playlist),
-                sort: Some(crate::CatalogSort::Position),
-            },
-            ..crate::CatalogQuery::tracks(crate::TrackScope::Playlist(report.playlist))
+        let entries = (&crate::MemberRead {
+            collection: crate::Collection::Playlist(report.playlist),
+            sort: Some(crate::CatalogSort::Position),
+            ..crate::MemberRead::new(crate::Collection::Playlist(report.playlist))
         })
             .rows(&database, 0, 128, &crate::ReadCancellation::new())
             .await
-            .map(|rows| match rows {
-                crate::CatalogRows::PlaylistEntries(rows) => rows,
-                _ => unreachable!("typed song projection"),
+            .map(|rows| {
+                rows.into_iter()
+                    .filter_map(crate::MemberRow::into_entry)
+                    .collect::<Vec<_>>()
             })
             .unwrap();
         assert_eq!(entries.len(), 3);
@@ -1814,7 +1805,7 @@ mod tests {
         let queued = database
             .queue_entries(
                 crate::QueueLoad::tracks(
-                    crate::CatalogQuery::tracks(crate::TrackScope::Playlist(report.playlist))
+                    crate::MemberRead::new(crate::Collection::Playlist(report.playlist))
                         .selection(),
                 ),
                 None,

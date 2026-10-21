@@ -1,6 +1,6 @@
 use super::*;
 use crate::query::{OrderedQuery, quote};
-use crate::{AlbumKey, ArtistKey, FolderKey, GenreKey, MoodKey, SmartPlaylistKey, TrackScope};
+use crate::{AlbumKey, ArtistKey, Collection, FolderKey, GenreKey, MoodKey, SmartPlaylistKey};
 
 #[derive(serde::Deserialize)]
 struct SavedQueue {
@@ -424,8 +424,7 @@ impl OrderedQuery {
             "json_array((SELECT object_id FROM sources WHERE source_key=playlist.source_key),playlist.object_id,entry.object_id)".to_string()
         };
         let columns = format!(
-            "{},{identity},COALESCE(({}),0)",
-            self.uri,
+            "track.media_uri,{identity},COALESCE(({}),0)",
             anchor.unwrap_or_else(|| "0".into())
         );
         Ok(sqlx::query_as_with(
@@ -519,18 +518,16 @@ async fn source_members_on(
             } else {
                 None
             };
-            crate::query::compile_on(
+            crate::query::member_query_on(
                 connection,
-                &crate::CatalogQuery {
-                    subject: crate::CatalogSubject::Tracks {
-                        scope: crate::TrackScope::Tracks(key),
-                        sort: Some(sort),
-                    },
+                &crate::MemberRead {
+                    collection: crate::Collection::Source(key),
+                    sort: Some(sort),
                     folder,
                     filter: source.filter.clone(),
                     descending: source.descending,
                     favorites_only: *favorites_only,
-                    ..crate::CatalogQuery::tracks(crate::TrackScope::Tracks(key))
+                    ..crate::MemberRead::new(crate::Collection::Source(key))
                 },
             )
             .await?
@@ -544,13 +541,11 @@ async fn source_members_on(
             else {
                 return Ok(Vec::new());
             };
-            crate::query::compile_on(
+            crate::query::member_query_on(
                 connection,
-                &crate::CatalogQuery {
-                    subject: crate::CatalogSubject::Tracks {
-                        scope: collection,
-                        sort: Some(sort),
-                    },
+                &crate::MemberRead {
+                    collection: collection,
+                    sort: Some(sort),
                     folder,
                     filter: source.filter.clone(),
                     descending: source.descending,
@@ -564,7 +559,7 @@ async fn source_members_on(
         QueueScope::Playlist {
             reference, sort, ..
         } => {
-            let Some((TrackScope::Playlist(key), folder)) =
+            let Some((Collection::Playlist(key), folder)) =
                 resolve_collection_reference(connection, reference).await?
             else {
                 return Ok(Vec::new());
@@ -582,7 +577,7 @@ async fn source_members_on(
         source
             .anchor_uri
             .as_ref()
-            .map(|uri| format!("{}={}", query.uri, quote(uri)))
+            .map(|uri| format!("track.media_uri={}", quote(uri)))
     };
 
     if let Some(seed) = legacy_seed {
@@ -646,8 +641,8 @@ pub(crate) struct CollectionSourceReference {
 async fn resolve_collection_reference(
     connection: &mut SqliteConnection,
     reference: &CollectionSourceReference,
-) -> LibraryResult<Option<(crate::TrackScope, Option<FolderKey>)>> {
-    use crate::TrackScope as C;
+) -> LibraryResult<Option<(crate::Collection, Option<FolderKey>)>> {
+    use crate::Collection as C;
     let collection = match &reference.collection {
         CollectionIdentity::Album(uri) => {
             let Some(key) = sqlx::query_scalar::<_, AlbumKey>(
@@ -752,7 +747,7 @@ async fn smart_members_ref(
     )
     .await?;
     Ok(sqlx::query_scalar_with(
-        sqlx::AssertSqlSafe(query.select(&query.uri)),
+        sqlx::AssertSqlSafe(query.select("track.media_uri")),
         query.arguments.clone(),
     )
     .persistent(false)
@@ -834,7 +829,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(matches!(collection,crate::TrackScope::Genre(key) if key.raw()==88));
+        assert!(matches!(collection,crate::Collection::Genre(key) if key.raw()==88));
         assert_eq!(folder.unwrap().raw(), 77);
         sqlx::query("DELETE FROM folders")
             .execute(&mut *connection)

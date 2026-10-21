@@ -14,7 +14,7 @@ use super::track_model::TrackCollectionModel;
 
 #[derive(Clone)]
 pub struct TrackSelection {
-    input: Rc<dyn Fn(&gtk::Bitset) -> library::TrackSelection>,
+    input: Rc<dyn Fn(&gtk::Bitset) -> library::MemberSelection>,
     position: Rc<dyn Fn(&str) -> Option<u32>>,
     selection: PositionSelectionModel,
 }
@@ -121,7 +121,7 @@ impl PlaylistEntrySelection {
             playlist: self.model.playlist_key(),
             playlist_name: Arc::clone(&self.playlist_name),
             count: 1,
-            input: library::CatalogQuery::playlist_entries(vec![entry]).selection(),
+            input: library::MemberSelection::Entries(vec![entry].into()),
         }
     }
 

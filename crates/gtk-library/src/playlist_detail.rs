@@ -165,17 +165,13 @@ impl CatalogUi {
             ));
         };
         (self.update_smart_playlist_pin)(&summary);
-        let library::CatalogSubject::Tracks {
-            scope: library::TrackScope::Smart { source, .. },
-            ..
-        } = projection.query.subject
-        else {
+        let library::Collection::Smart { source, .. } = projection.read.collection else {
             unreachable!("smart playlist page owns a smart song query")
         };
-        let folder = projection.query.folder;
+        let folder = projection.read.folder;
         let owner = PlaylistDetailOwner::Smart {
             key,
-            summary: summary,
+            summary: *summary,
         };
         let list_key = owner.key();
         let model = crate::track_model::TrackCollectionModel::new(
@@ -251,17 +247,24 @@ impl CatalogUi {
                 msgid("This isn't available"),
             ));
         };
-        let library::CatalogRows::PlaylistEntries(first_rows) = page.rows else {
-            unreachable!("playlist entries")
+        let first_rows = page
+            .page
+            .rows
+            .into_iter()
+            .filter_map(library::MemberRow::into_entry)
+            .collect();
+        let owner = PlaylistDetailOwner::Saved {
+            key,
+            summary: *summary,
         };
-        let owner = PlaylistDetailOwner::Saved { key, summary };
         let entries = Rc::new(self.playlist_entries_view(
             key,
             owner.name().to_string(),
             matches!(&owner, PlaylistDetailOwner::Saved { summary, .. } if summary.writable),
-            page.count,
-            page.first_row_position,
+            page.page.count,
+            page.page.first_row_position,
             first_rows,
+            page.read,
         ));
         let item_navigation = entries.item_navigation();
         let tracks_widget = entries.widget();
@@ -272,24 +275,21 @@ impl CatalogUi {
                   cancellation: ReadCancellation| {
                 let database = Arc::clone(&database);
                 Box::pin(async move {
-                    let count = (&request.query)
-                        .count(&database, &cancellation)
-                        .await
-                        .map_err(|error| error.to_string())?
-                        .max(0) as usize;
-                    let rows = (&request.query)
-                        .rows(
+                    let page = request
+                        .query
+                        .page(
                             &database,
-                            request.first_row_position.min(count),
-                            64,
+                            library::RouteSeedWindow::position(request.first_row_position),
                             &cancellation,
                         )
                         .await
-                        .map(|rows| match rows {
-                            library::CatalogRows::PlaylistEntries(rows) => rows,
-                            _ => unreachable!("typed song projection"),
-                        })
                         .map_err(|error| error.to_string())?;
+                    let count = page.count;
+                    let rows = page
+                        .rows
+                        .into_iter()
+                        .filter_map(library::MemberRow::into_entry)
+                        .collect();
                     Ok((count, rows))
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
@@ -548,25 +548,11 @@ impl CatalogUi {
                     Box::pin(async move {
                         match owner_key {
                             PlaylistDetailOwner::Saved { key, .. } => {
-                                let mut summary = library::CatalogQuery::keys(
-                                    library::CatalogKind::Playlist,
-                                    None,
-                                    (&[key]).iter().map(|key| key.raw()).collect(),
-                                )
-                                .rows(&database, 0, (&[key]).len(), &cancellation)
-                                .await
-                                .map(|rows| match rows {
-                                    library::CatalogRows::Playlists(rows) => rows,
-                                    _ => unreachable!("typed catalog projection"),
-                                })
-                                .map_err(|error| error.to_string())?
-                                .pop();
-                                if let Some(summary) = &mut summary {
-                                    summary.genres = database
-                                        .playlist_genres(key, &cancellation)
-                                        .await
-                                        .map_err(|error| error.to_string())?;
-                                }
+                                let summary = database
+                                    .playlists(&[key], &cancellation)
+                                    .await
+                                    .map_err(|error| error.to_string())?
+                                    .pop();
                                 summary.map(|summary| PlaylistDetailOwner::Saved { key, summary })
                             }
                             PlaylistDetailOwner::Smart { key, .. } => {

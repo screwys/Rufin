@@ -6,7 +6,7 @@ impl Shell {
     pub(crate) fn create_playlist_and_pin(
         self: &Rc<Self>,
         name: String,
-        selection: library::TrackSelection,
+        selection: library::MemberSelection,
         source_id: Option<library::SourceId>,
         public: Option<bool>,
     ) {
@@ -37,14 +37,21 @@ impl Shell {
     pub(crate) fn new_playlist_dialog(self: &Rc<Self>) {
         self.new_playlist_dialog_with(
             String::new(),
-            library::CatalogQuery::keys(library::CatalogKind::Track, None, Vec::new()).selection(),
+            library::MemberSelection::Keys {
+                source: None,
+                keys: (Vec::new())
+                    .into_iter()
+                    .map(library::TrackKey::from_raw)
+                    .collect::<Vec<_>>()
+                    .into(),
+            },
         );
     }
 
     pub(crate) fn new_playlist_dialog_with(
         self: &Rc<Self>,
         name: String,
-        selection: library::TrackSelection,
+        selection: library::MemberSelection,
     ) {
         let configured = self.source.configured.borrow();
         let selected = configured

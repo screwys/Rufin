@@ -10,12 +10,10 @@ async fn reopening_without_statistics_preserves_library_order() {
     let before = fixture
         .database
         .selected_track_uris(
-            &library::CatalogQuery {
-                subject: library::CatalogSubject::Tracks {
-                    scope: library::TrackScope::Tracks(fixture.source),
-                    sort: Some(library::CatalogSort::Title),
-                },
-                ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
+            &library::MemberRead {
+                collection: library::Collection::Source(fixture.source),
+                sort: Some(library::CatalogSort::Title),
+                ..library::MemberRead::new(library::Collection::Source(fixture.source))
             }
             .selection(),
             None,
@@ -37,12 +35,10 @@ async fn reopening_without_statistics_preserves_library_order() {
     assert_eq!(durable_rows(&fixture.path).await, durable);
     let after = database
         .selected_track_uris(
-            &library::CatalogQuery {
-                subject: library::CatalogSubject::Tracks {
-                    scope: library::TrackScope::Tracks(fixture.source),
-                    sort: Some(library::CatalogSort::Title),
-                },
-                ..library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
+            &library::MemberRead {
+                collection: library::Collection::Source(fixture.source),
+                sort: Some(library::CatalogSort::Title),
+                ..library::MemberRead::new(library::Collection::Source(fixture.source))
             }
             .selection(),
             None,
@@ -72,7 +68,64 @@ async fn reopening_without_statistics_preserves_library_order() {
     raw.close().await.unwrap();
     reopened.close().await.unwrap();
 
-    let mut raw = super::support::connection(&fixture.path).await;
+    let mut raw = connection(&fixture.path, false).await;
+    sqlx::raw_sql("DROP VIEW local_track_access;
+        CREATE VIEW local_track_access AS
+        SELECT track.track_key,track.source_key,backing.path source_path,owner.path cue_path,
+            CASE WHEN track.cue_path IS NULL THEN backing.local_file_key ELSE owner.local_file_key END local_file_key
+        FROM tracks track
+        JOIN local_files canonical ON canonical.source_key=track.source_key AND canonical.path=track.source_path
+        JOIN observed_local_files backing ON backing.local_file_key=canonical.local_file_key
+        LEFT JOIN local_files cue ON cue.source_key=track.source_key AND cue.path=track.cue_path
+        LEFT JOIN observed_local_files owner ON owner.local_file_key=cue.local_file_key;
+        PRAGMA user_version=53;")
+        .execute(&mut raw).await.unwrap();
+    raw.close().await.unwrap();
+    let migrated = Database::open(&fixture.path).await.unwrap();
+    assert_eq!(durable_rows(&fixture.path).await, durable);
+    let mut raw = connection(&fixture.path, false).await;
+    let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as("EXPLAIN QUERY PLAN SELECT access.source_path FROM tracks track JOIN local_track_access access USING(track_key) WHERE media_uri=?1")
+        .bind(&fixture.track_uris[0]).fetch_all(&mut raw).await.unwrap();
+    assert!(
+        plan.iter().all(|step| !step.3.contains("MATERIALIZE")),
+        "{plan:?}"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        54
+    );
+    raw.close().await.unwrap();
+    migrated.close().await.unwrap();
+
+    let old_paths = [
+        fixture.path.with_extension("schema48.sqlite"),
+        fixture.path.with_extension("schema49.sqlite"),
+    ];
+    for path in &old_paths {
+        let mut raw = connection(path, true).await;
+        super::support::catalog::copy_before_index(&mut raw, &fixture.path).await;
+        sqlx::raw_sql("CREATE VIEW local_access_files AS SELECT * FROM local_locators;
+            CREATE VIEW local_track_access AS SELECT track_key,source_key,source_path,cue_path,local_file_key FROM tracks;
+            DROP TABLE connect_profile;
+            CREATE TABLE connect_profile(singleton INTEGER PRIMARY KEY CHECK(singleton=1),profile TEXT,publisher TEXT,schema_version INTEGER NOT NULL DEFAULT 1) STRICT;
+            INSERT INTO connect_profile VALUES(1,NULL,NULL,1);
+            ALTER TABLE local_access_metadata ADD COLUMN title TEXT NOT NULL DEFAULT '';
+            ALTER TABLE local_access_metadata ADD COLUMN normalized_title TEXT NOT NULL DEFAULT '';
+            ALTER TABLE local_access_metadata ADD COLUMN album TEXT NOT NULL DEFAULT '';
+            ALTER TABLE local_access_metadata ADD COLUMN normalized_album TEXT NOT NULL DEFAULT '';
+            ALTER TABLE local_access_metadata ADD COLUMN artist TEXT NOT NULL DEFAULT '';
+            ALTER TABLE local_access_metadata ADD COLUMN normalized_artist TEXT NOT NULL DEFAULT '';
+            ALTER TABLE local_access_metadata ADD COLUMN disc_number INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE local_access_metadata ADD COLUMN track_number INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE local_access_metadata ADD COLUMN duration_millis INTEGER NOT NULL DEFAULT 0;
+            CREATE INDEX local_access_match_uri_idx ON local_access_metadata(normalized_title,normalized_album,normalized_artist,disc_number,track_number,duration_millis,access_uri);")
+            .execute(&mut raw).await.unwrap();
+        raw.close().await.unwrap();
+    }
+    let mut raw = connection(&old_paths[0], false).await;
     sqlx::query("INSERT INTO albums(source_key,object_id,media_uri,indexed) VALUES(?1,'retired-header','https://example.org/retired-header',1)")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO tracks(source_key,media_uri,metadata,indexed) VALUES(?1,'https://example.org/retired-alias',jsonb('{\"title\":\"Retired alias\"}'),1)")
@@ -82,12 +135,11 @@ async fn reopening_without_statistics_preserves_library_order() {
         .await
         .unwrap();
     raw.close().await.unwrap();
-    let migrated = Database::open(&fixture.path).await.unwrap();
+    let migrated = Database::open(&old_paths[0]).await.unwrap();
     assert_eq!(
         migrated
             .selected_track_uris(
-                &library::CatalogQuery::tracks(library::TrackScope::Tracks(fixture.source))
-                    .selection(),
+                &library::MemberRead::new(library::Collection::Source(fixture.source)).selection(),
                 None,
                 &ReadCancellation::new(),
             )
@@ -96,6 +148,13 @@ async fn reopening_without_statistics_preserves_library_order() {
             .len(),
         fixture.tracks.len()
     );
+    let mut raw = connection(&old_paths[0], false).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sqlite_schema WHERE name IN('album_order','effective_album_artists','effective_album_genres','effective_album_release_types')")
+            .fetch_one(&mut raw).await.unwrap(),
+        0
+    );
+    raw.close().await.unwrap();
     let home = migrated
         .home_page(
             fixture.source,
@@ -115,34 +174,20 @@ async fn reopening_without_statistics_preserves_library_order() {
     }
     migrated.close().await.unwrap();
 
-    let mut raw = super::support::connection(&fixture.path).await;
+    let mut raw = connection(&old_paths[1], false).await;
     sqlx::raw_sql("DROP VIEW local_access_files;
-        ALTER TABLE local_access_metadata ADD COLUMN title TEXT NOT NULL DEFAULT '';
-        ALTER TABLE local_access_metadata ADD COLUMN normalized_title TEXT NOT NULL DEFAULT '';
-        ALTER TABLE local_access_metadata ADD COLUMN album TEXT NOT NULL DEFAULT '';
-        ALTER TABLE local_access_metadata ADD COLUMN normalized_album TEXT NOT NULL DEFAULT '';
-        ALTER TABLE local_access_metadata ADD COLUMN artist TEXT NOT NULL DEFAULT '';
-        ALTER TABLE local_access_metadata ADD COLUMN normalized_artist TEXT NOT NULL DEFAULT '';
-        ALTER TABLE local_access_metadata ADD COLUMN disc_number INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE local_access_metadata ADD COLUMN track_number INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE local_access_metadata ADD COLUMN duration_millis INTEGER NOT NULL DEFAULT 0;
-        CREATE INDEX local_access_match_uri_idx ON local_access_metadata(normalized_title,normalized_album,normalized_artist,disc_number,track_number,duration_millis,access_uri);
         INSERT INTO tracks(media_uri,metadata,native_metadata) VALUES('https://media.example/legacy-access.flac',jsonb('{\"title\":\"Canonical title\",\"source_format\":\"flac\",\"future\":{\"field\":true}}'),1);
         INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES('https://media.example/legacy-access.flac','download','/downloads/legacy.flac','/downloads','legacy.flac','file:///downloads/legacy.flac');
         INSERT INTO local_access_metadata(access_uri,size_bytes,mtime_ns,device_id,inode,parser_version,loudness_analysis_key,title,album,artist,disc_number,track_number,duration_millis)
         VALUES('file:///downloads/legacy.flac',111,222,3,4,17,zeroblob(32),'Legacy title','Legacy album','Legacy artist',1,4,1234);
         UPDATE connect_profile SET profile='shared-profile',publisher='saved-publisher',schema_version=1;
-        ALTER TABLE connect_profile DROP COLUMN actor;
-        ALTER TABLE connect_profile DROP COLUMN clock;
-        ALTER TABLE connect_profile DROP COLUMN receiving;
-        ALTER TABLE connect_profile DROP COLUMN enabled;
         PRAGMA user_version=49;")
         .execute(&mut raw)
         .await
         .unwrap();
     raw.close().await.unwrap();
-    let migrated = Database::open(&fixture.path).await.unwrap();
-    let mut raw = super::support::connection(&fixture.path).await;
+    let migrated = Database::open(&old_paths[1]).await.unwrap();
+    let mut raw = connection(&old_paths[1], false).await;
     let legacy = migrated
         .download_metadata("https://media.example/legacy-access.flac")
         .await
@@ -187,7 +232,7 @@ async fn reopening_without_statistics_preserves_library_order() {
             .fetch_one(&mut raw)
             .await
             .unwrap(),
-        50
+        54
     );
     raw.close().await.unwrap();
     migrated.close().await.unwrap();
@@ -198,11 +243,21 @@ async fn missing_indexed_column_returns_error_without_replacing_the_library() {
     let fixture = super::support::fixture().await;
     fixture.database.close().await.unwrap();
     let mut raw = super::support::connection(&fixture.path).await;
+    let triggers: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_schema WHERE type='trigger' AND sql LIKE '%local_play_count%'",
+    )
+    .fetch_all(&mut raw)
+    .await
+    .unwrap();
+    for trigger in triggers {
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TRIGGER {trigger}")))
+            .execute(&mut raw)
+            .await
+            .unwrap();
+    }
     sqlx::raw_sql(
         "DROP INDEX tracks_local_play_order_idx; DROP INDEX tracks_global_play_order_idx;
         DROP INDEX tracks_local_shuffle_idx; DROP INDEX tracks_global_local_shuffle_idx;
-        DROP TRIGGER local_play_count_listen_insert; DROP TRIGGER local_play_count_listen_delete;
-        DROP TRIGGER local_play_count_track_insert; DROP TRIGGER local_play_count_track_uri;
         ALTER TABLE tracks DROP COLUMN local_play_count;",
     )
     .execute(&mut raw)
@@ -222,7 +277,7 @@ async fn index_setup_failure_returns_error_without_replacing_the_library() {
         .create_playlist(
             None,
             "Keep me",
-            &library::CatalogQuery::uris(library::CatalogKind::Track, vec![]).selection(),
+            &library::MemberSelection::Uris((vec![]).into()),
         )
         .await
         .unwrap();
@@ -896,15 +951,16 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
     let database = Database::open_configured(&path, &configured, Some(&selected))
         .await
         .expect("migrate schema 43 to the current schema");
-    let history = (&library::CatalogQuery {
+    let history = (&library::MemberRead {
         descending: true,
-        ..library::CatalogQuery::tracks(library::TrackScope::History { source: None })
+        ..library::MemberRead::new(library::Collection::History { source: None })
     })
         .rows(&database, 0, 100, &ReadCancellation::new())
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .map(library::MemberRow::into_track)
+                .collect::<Vec<_>>()
         })
         .expect("read migrated orphan Activity");
     assert_eq!(
@@ -929,7 +985,7 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
             .fetch_one(&mut reader)
             .await
             .expect("read migrated version"),
-        50
+        54
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
@@ -1188,7 +1244,7 @@ async fn schema_43_malformed_listen_keeps_valid_siblings_and_preserves_input() {
             .fetch_one(&mut reader)
             .await
             .expect("read rebuilt schema version"),
-        50
+        54
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT external_id FROM listens ORDER BY listen_key")
@@ -1415,7 +1471,7 @@ async fn schema_39_store_converts_directly_into_current_schema() {
             .fetch_one(&mut reader)
             .await
             .expect("read current schema version"),
-        50
+        54
     );
     let definition = sqlx::query_scalar::<_, String>(
         "SELECT definition_json FROM smart_playlists WHERE object_id='smart-list'",
@@ -1456,7 +1512,7 @@ async fn released_migration_ignores_unused_catalog_damage() {
             .fetch_one(&mut restored)
             .await
             .expect("read repaired schema version"),
-        50
+        54
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources WHERE catalog_complete=1")
@@ -1820,11 +1876,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
         .create_playlist(
             None,
             "Durable duplicate list",
-            &library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                vec![uri.clone(), uri.clone()],
-            )
-            .selection(),
+            &library::MemberSelection::Uris((vec![uri.clone(), uri.clone()]).into()),
         )
         .await
         .unwrap();
@@ -1990,11 +2042,7 @@ async fn forgetting_source_retains_canonical_metadata_for_global_playlists() {
         .create_playlist(
             None,
             "Snapshot",
-            &library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                vec![fixture.track_uris[0].clone()],
-            )
-            .selection(),
+            &library::MemberSelection::Uris((vec![fixture.track_uris[0].clone()]).into()),
         )
         .await
         .unwrap();
@@ -2039,17 +2087,55 @@ async fn unsupported_version_preserves_library_data() {
         .create_playlist(
             None,
             "Keep me",
-            &library::CatalogQuery::uris(library::CatalogKind::Track, vec![]).selection(),
+            &library::MemberSelection::Uris((vec![]).into()),
         )
         .await
         .unwrap();
     fixture.database.close().await.unwrap();
+    let supported = durable_rows(&fixture.path).await;
     let mut raw = connection(&fixture.path, false).await;
-    sqlx::raw_sql("ALTER TABLE playlists ADD COLUMN irrelevant TEXT; CREATE TABLE extra(value TEXT); PRAGMA user_version=999;").execute(&mut raw).await.unwrap();
+    sqlx::raw_sql("ALTER TABLE playlists ADD COLUMN irrelevant TEXT; ALTER TABLE playlists DROP COLUMN artwork_mime; CREATE TABLE extra(value TEXT); INSERT INTO extra VALUES('keep in the original'); PRAGMA user_version=999;").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
     let before = durable_rows(&fixture.path).await;
     assert!(Database::open(&fixture.path).await.is_err());
     assert_eq!(durable_rows(&fixture.path).await, before);
+    let recovered = Database::open_installation(
+        &fixture.path,
+        &fixture.path.with_extension("legacy.sqlite"),
+        &fixture.path.with_extension("catalog.sqlite"),
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+    recovered.close().await.unwrap();
+    let facts = |tables: Vec<(String, Vec<String>)>| {
+        tables
+            .into_iter()
+            .filter(|(table, _)| {
+                !matches!(
+                    table.as_str(),
+                    "folder_children"
+                        | "collection_album_index"
+                        | "collection_totals"
+                        | "playlist_genres"
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(facts(durable_rows(&fixture.path).await), facts(supported));
+    let preserved = std::fs::read_dir(fixture.path.parent().unwrap())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.extension().is_some_and(|extension| {
+                extension.to_string_lossy().starts_with("before-migration-")
+            }) && !path.to_string_lossy().ends_with("-wal")
+                && !path.to_string_lossy().ends_with("-shm")
+        })
+        .unwrap();
+    assert_eq!(durable_rows(&preserved).await, before);
 }
 
 #[tokio::test]
@@ -2060,13 +2146,25 @@ async fn missing_listen_identity_returns_error_without_replacing_user_data() {
         .create_playlist(
             None,
             "Keep me",
-            &library::CatalogQuery::uris(library::CatalogKind::Track, vec![]).selection(),
+            &library::MemberSelection::Uris((vec![]).into()),
         )
         .await
         .unwrap();
     fixture.database.close().await.unwrap();
     let mut raw = connection(&fixture.path, false).await;
-    sqlx::raw_sql("DROP TRIGGER local_play_count_listen_insert; DROP TRIGGER local_play_count_listen_delete; DROP TRIGGER local_play_count_track_insert; DROP TRIGGER local_play_count_track_uri; DROP TRIGGER IF EXISTS facts_listen_albums_; DROP TRIGGER IF EXISTS facts_listen_artists_; DROP TRIGGER IF EXISTS facts_listen_artists_album_artist_; DROP TRIGGER IF EXISTS facts_listen_delete; DROP TRIGGER IF EXISTS facts_listen_update; DROP INDEX listens_media_activity_idx; DROP INDEX listens_connect_key_idx; ALTER TABLE listens DROP COLUMN media_uri;").execute(&mut raw).await.unwrap();
+    let triggers: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_schema WHERE type='trigger' AND sql LIKE '%listens%'",
+    )
+    .fetch_all(&mut raw)
+    .await
+    .unwrap();
+    for trigger in triggers {
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP TRIGGER {trigger}")))
+            .execute(&mut raw)
+            .await
+            .unwrap();
+    }
+    sqlx::raw_sql("DROP INDEX listens_media_activity_idx; DROP INDEX listens_connect_key_idx; ALTER TABLE listens DROP COLUMN media_uri;").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
     let before = durable_rows(&fixture.path).await;
     assert!(Database::open(&fixture.path).await.is_err());

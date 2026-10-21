@@ -29,9 +29,9 @@ async fn playlist_selection(
     selection: Option<MediaSelection>,
     source: Option<String>,
     folder: Option<String>,
-) -> Result<library::TrackSelection, Error> {
+) -> Result<library::MemberSelection, Error> {
     let Some(selection) = selection else {
-        return Ok(library::CatalogQuery::uris(library::CatalogKind::Track, uris).selection());
+        return Ok(library::MemberSelection::Uris((uris).into()));
     };
     let (source, folder) = if source.is_some() {
         (source, folder)
@@ -56,27 +56,21 @@ async fn playlist_selection(
         _ => (None, None),
     };
     let scope = match selection {
-        MediaSelection::Album { id } => library::TrackScope::Album(id),
-        MediaSelection::Artist { id, album_artists } => library::TrackScope::Artist {
+        MediaSelection::Album { id } => library::Collection::Album(id),
+        MediaSelection::Artist { id, album_artists } => library::Collection::Artist {
             key: id,
             album_artist: album_artists,
         },
-        MediaSelection::Playlist { id } => library::TrackScope::Playlist(id),
-        MediaSelection::Genre { id } => library::TrackScope::Genre(id),
-        MediaSelection::SmartPlaylist { id } => library::TrackScope::Smart {
+        MediaSelection::Playlist { id } => library::Collection::Playlist(id),
+        MediaSelection::Genre { id } => library::Collection::Genre(id),
+        MediaSelection::SmartPlaylist { id } => library::Collection::Smart {
             key: id,
             source,
             now: catalog::now(),
         },
     };
-    let mut query = library::CatalogQuery::tracks(scope);
-    if matches!(
-        query.subject,
-        library::CatalogSubject::Tracks {
-            scope: library::TrackScope::Smart { .. },
-            ..
-        }
-    ) {
+    let mut query = library::MemberRead::new(scope);
+    if matches!(query.collection, library::Collection::Smart { .. }) {
         query.folder = folder;
     }
     Ok(query.selection())
@@ -367,11 +361,10 @@ pub(super) async fn list_data(
     };
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(128);
-    let query = library::CatalogQuery {
-        subject: library::CatalogSubject::Playlists {
-            source: (source).into(),
-            sort: sort,
-        },
+    let query = library::ListRead {
+        kind: library::ListKind::Playlists,
+        source: (source).into(),
+        sort: sort,
         folder: folder,
         filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
         descending: boolean(parameters, "descending")?,
@@ -380,12 +373,8 @@ pub(super) async fn list_data(
         activity: false,
     };
     let rows = query
-        .rows(&products.library, offset, limit, &cancellation)
+        .playlists(&products.library, offset, limit, &cancellation)
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Playlists(rows) => rows,
-            _ => unreachable!("catalog page projection"),
-        })
         .map_err(internal)?;
     let total = catalog::page_total(products, parameters, &query).await?;
     Ok(
@@ -420,9 +409,10 @@ pub(super) async fn entries_data(
             &library::ReadCancellation::new(),
         )
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::PlaylistEntries(rows) => rows,
-            _ => unreachable!("typed song projection"),
+        .map(|rows| {
+            rows.into_iter()
+                .filter_map(library::MemberRow::into_entry)
+                .collect::<Vec<_>>()
         })
         .map_err(internal)?;
     let total = catalog::track_total(products, parameters, &query).await?;
@@ -580,7 +570,7 @@ async fn remove_entries(
     let changed = completion(rufin_core::playlists::remove_playlist_entries(
         &products.source,
         input.id,
-        library::CatalogQuery::playlist_entries((input.entries).to_vec()).selection(),
+        library::MemberSelection::Entries(((input.entries).to_vec()).into()),
     ))
     .await?;
     Ok(json_response(

@@ -882,18 +882,14 @@ async fn queue_keys(
 ) -> Result<Vec<String>, String> {
     let uris = database
         .selected_track_uris(
-            &library::CatalogQuery::keys(
-                library::CatalogKind::Track,
-                None,
-                (&entries
+            &library::MemberSelection::Keys {
+                source: None,
+                keys: entries
                     .iter()
                     .map(|entry| entry.track_key)
-                    .collect::<Vec<_>>())
-                    .iter()
-                    .map(|key| key.raw())
-                    .collect(),
-            )
-            .selection(),
+                    .collect::<Vec<_>>()
+                    .into(),
+            },
             None,
             &ReadCancellation::new(),
         )
@@ -1217,18 +1213,14 @@ impl PlaybackOwner {
             let entry = local.entries.first().unwrap();
             let uris = self
                 .runtime
-                .block_on(
-                    self.database.selected_track_uris(
-                        &library::CatalogQuery::keys(
-                            library::CatalogKind::Track,
-                            None,
-                            (&[entry.track_key]).iter().map(|key| key.raw()).collect(),
-                        )
-                        .selection(),
-                        None,
-                        &ReadCancellation::new(),
-                    ),
-                )
+                .block_on(self.database.selected_track_uris(
+                    &library::MemberSelection::Keys {
+                        source: None,
+                        keys: vec![entry.track_key].into(),
+                    },
+                    None,
+                    &ReadCancellation::new(),
+                ))
                 .map_err(string_error)?;
             let (source, _, _) = uris.first().and_then(|uri| library::source_entity_parts(uri)).ok_or(
                 "Plex Companion queues require Plex music from one configured server and profile",

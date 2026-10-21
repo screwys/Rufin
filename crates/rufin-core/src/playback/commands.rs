@@ -47,7 +47,7 @@ impl PlayRequest {
         }
     }
     pub fn ordered(
-        selection: library::TrackSelection,
+        selection: library::MemberSelection,
         anchor_index: usize,
         placement: QueuePlacement,
         shuffled_start: bool,
@@ -62,7 +62,7 @@ impl PlayRequest {
         request
     }
     pub fn captured(
-        selection: library::TrackSelection,
+        selection: library::MemberSelection,
         anchor_index: usize,
         placement: QueuePlacement,
         shuffled_start: bool,
@@ -80,14 +80,14 @@ impl PlayRequest {
         }
         Self::from_input(library::QueueLoad::Tracks(groups), placement)
     }
-    pub fn selection(&self) -> Option<library::TrackSelection> {
+    pub fn selection(&self) -> Option<library::MemberSelection> {
         let library::QueueLoad::Tracks(groups) = &self.input else {
             return None;
         };
         if groups.len() == 1 {
             Some(groups[0].0.clone())
         } else {
-            Some(library::TrackSelection::Concat(
+            Some(library::MemberSelection::Concat(
                 groups
                     .iter()
                     .map(|(selection, _)| selection.clone())
@@ -177,22 +177,7 @@ impl PlayRequest {
             .anchor
             .map(|(key, _)| key)
             .or_else(|| match selection {
-                library::TrackSelection::Query {
-                    query:
-                        library::CatalogQuery {
-                            subject:
-                                library::CatalogSubject::Keys {
-                                    kind: library::CatalogKind::Track,
-                                    keys,
-                                    ..
-                                },
-                            ..
-                        },
-                    ranges: None,
-                } => keys
-                    .get(anchor_index)
-                    .copied()
-                    .map(library::TrackKey::from_raw),
+                library::MemberSelection::Keys { keys, .. } => keys.get(anchor_index).copied(),
                 _ => None,
             })?;
         Some((context_id.to_string(), key, source_rank + anchor_index))

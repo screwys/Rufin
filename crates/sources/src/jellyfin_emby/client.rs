@@ -1332,13 +1332,15 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let page = library::CatalogQuery::tracks(library::TrackScope::Playlist(key))
+        let page = library::MemberRead::new(library::Collection::Playlist(key))
             .page(&database, library::RouteSeedWindow::top(), &cancellation)
             .await
             .unwrap();
-        let library::CatalogRows::PlaylistEntries(entries) = page.rows else {
-            panic!("playlist entries")
-        };
+        let entries = page
+            .rows
+            .into_iter()
+            .map(|row| row.into_entry().expect("playlist entry"))
+            .collect::<Vec<_>>();
         assert_eq!(
             entries.iter().map(|row| row.position).collect::<Vec<_>>(),
             [0, 1]
@@ -1347,13 +1349,13 @@ mod tests {
             database
                 .playlist_edit_entries(
                     key,
-                    &library::CatalogQuery::playlist_entries(
-                        entries
+                    &library::MemberSelection::Entries(
+                        (entries
                             .iter()
                             .map(|row| row.playlist_entry_key)
-                            .collect::<Vec<_>>()
-                    )
-                    .selection(),
+                            .collect::<Vec<_>>())
+                        .into()
+                    ),
                     &cancellation
                 )
                 .await
@@ -1670,25 +1672,20 @@ mod tests {
             Ok::<_, crate::SourceError>(())
         }
         .unwrap();
-        let track = library::CatalogQuery::uris(
-            library::CatalogKind::Track,
-            vec![
-                (&library::source_entity_uri(
+        let track = database
+            .tracks_by_uris(
+                &([(&library::source_entity_uri(
                     &crate::SourceId::new("source"),
                     "track",
                     "jellyfin:track:track",
                 ))
-                    .to_owned(),
-            ],
-        )
-        .rows(&database, 0, 256, &library::ReadCancellation::new())
-        .await
-        .map(|rows| match rows {
-            library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-            _ => unreachable!(),
-        })
-        .unwrap()
-        .expect("album track without repeated Type");
+                    .to_owned()]),
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .map(|rows| rows.into_iter().next())
+            .unwrap()
+            .expect("album track without repeated Type");
         assert_eq!(track.metadata.duration_millis, 42_000);
         assert_eq!(track.metadata.year, Some(2024));
         let cancellation = library::ReadCancellation::new();
@@ -1711,17 +1708,19 @@ mod tests {
             .next()
             .map(library::FolderKey::from_raw)
             .expect("album music folder");
-        let mut query = library::CatalogQuery::tracks(library::TrackScope::Tracks(source));
+        let mut query = library::MemberRead::new(library::Collection::Source(source));
         query.folder = Some(folder);
         let page = (query)
             .page(&database, library::RouteSeedWindow::top(), &cancellation)
             .await
-            .map(|page| match page.rows {
-                library::CatalogRows::Tracks(rows) => (page.count, page.first_row_position, rows),
-                _ => unreachable!(),
+            .map(|page| {
+                page.rows
+                    .into_iter()
+                    .map(library::MemberRow::into_track)
+                    .collect::<Vec<_>>()
             })
             .unwrap();
-        assert_eq!(page.2.len(), 2, "both new tracks keep their music folder");
+        assert_eq!(page.len(), 2, "both new tracks keep their music folder");
     }
 
     #[tokio::test]
@@ -1860,16 +1859,7 @@ mod tests {
                 &kind.object_id("track", "track"),
             );
             let cancel = library::ReadCancellation::new();
-            let before =
-                library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                    .rows(&database, 0, 256, &cancel)
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                        _ => unreachable!(),
-                    })
-                    .unwrap()
-                    .unwrap();
+            let before = database.track(&(&uri), &cancel).await.unwrap().unwrap();
             for favorite in [false, true, true] {
                 server.reset().await;
                 let mut updated = track.clone();
@@ -1897,18 +1887,7 @@ mod tests {
                         .mount(&server)
                         .await;
                 }
-                let prior = library::CatalogQuery::uris(
-                    library::CatalogKind::Track,
-                    vec![(&uri).to_owned()],
-                )
-                .rows(&database, 0, 256, &cancel)
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-                .unwrap()
-                .unwrap();
+                let prior = database.track(&(&uri), &cancel).await.unwrap().unwrap();
                 let catalog_source_id = ("source").to_string();
                 let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
 
@@ -1938,39 +1917,15 @@ mod tests {
                     assert_eq!(update.metadata, prior.state.favorite != favorite);
                     assert_eq!(update.activity, prior.state.play_count != 3);
                 }
-                let after = library::CatalogQuery::uris(
-                    library::CatalogKind::Track,
-                    vec![(&uri).to_owned()],
-                )
-                .rows(&database, 0, 256, &cancel)
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-                .unwrap()
-                .unwrap();
+                let after = database.track(&(&uri), &cancel).await.unwrap().unwrap();
                 assert_eq!(after.state.favorite, favorite);
                 assert_eq!(after.state.play_count, 3);
                 assert_eq!(after.artwork_binding, before.artwork_binding);
                 let artist_key = after.links.artists[0].artist_key;
-                let artist = library::CatalogQuery::keys(
-                    library::CatalogKind::Artist,
-                    Some(
-                        database
-                            .source_identity_key(&library::SourceId::new(&catalog_source_id))
-                            .await
-                            .unwrap()
-                            .unwrap(),
-                    ),
-                    vec![artist_key.raw()],
-                )
-                .rows(&database, 0, 1, &cancel)
-                .await
-                .unwrap();
-                let library::CatalogRows::Artists(mut artists) = artist else {
-                    unreachable!()
-                };
+                let mut artists = database
+                    .artists(&[artist_key], false, false, &cancel)
+                    .await
+                    .unwrap();
                 let artist = artists.pop().unwrap();
                 assert!(artist.state.favorite);
                 assert_eq!(
@@ -2104,12 +2059,10 @@ mod tests {
             .expect("cached source")
             .expect("published source")
             .source;
-        let (_, _, albums) = library::CatalogQuery {
-            subject: library::CatalogSubject::Albums {
-                source: source_key,
-                sort: library::CatalogSort::Title,
-                inline_tracks: None,
-            },
+        let albums = library::ListRead {
+            kind: library::ListKind::Albums,
+            source: Some(source_key),
+            sort: library::CatalogSort::Title,
             folder: None,
             filter: ("Updated Album").to_string(),
             descending: false,
@@ -2117,12 +2070,9 @@ mod tests {
             downloaded_only: false,
             activity: false,
         }
-        .page(&database, library::RouteSeedWindow::top(), &cancellation)
+        .page_albums(&database, library::RouteSeedWindow::top(), &cancellation)
         .await
-        .map(|page| match page.rows {
-            library::CatalogRows::Albums(rows) => (page.count, page.first_row_position, rows),
-            _ => unreachable!(),
-        })
+        .map(|page| page.rows)
         .expect("updated Album page");
         assert_eq!(albums[0].metadata.title, "Updated Album");
 
@@ -2131,16 +2081,15 @@ mod tests {
             .await
             .expect("apply exact removal");
         assert!(
-            (library::CatalogQuery::tracks(library::TrackScope::Tracks(source_key)))
+            (library::MemberRead::new(library::Collection::Source(source_key)))
                 .page(&database, library::RouteSeedWindow::top(), &cancellation)
                 .await
-                .map(|page| match page.rows {
-                    library::CatalogRows::Tracks(rows) =>
-                        (page.count, page.first_row_position, rows),
-                    _ => unreachable!(),
-                })
+                .map(|page| page
+                    .rows
+                    .into_iter()
+                    .map(library::MemberRow::into_track)
+                    .collect::<Vec<_>>())
                 .expect("Track page")
-                .2
                 .into_iter()
                 .map(|row| row.media_uri)
                 .collect::<Vec<_>>()

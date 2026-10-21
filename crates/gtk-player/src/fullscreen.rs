@@ -664,18 +664,10 @@ impl crate::PlayerUi {
         let read_cancellation = cancellation.clone();
         let task = self.runtime.spawn(async move {
             let keys = candidates.await?;
-            library::CatalogQuery::keys(
-                library::CatalogKind::Track,
-                None,
-                keys.iter().map(|key| key.raw()).collect(),
-            )
-            .rows(&database, 0, keys.len(), &read_cancellation)
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!("typed catalog projection"),
-            })
-            .map_err(|error| error.to_string())
+            database
+                .tracks(&keys, &read_cancellation)
+                .await
+                .map_err(|error| error.to_string())
         });
         *parts.related_task.borrow_mut() = Some((cancellation, task.abort_handle()));
         let task_id = task.id();

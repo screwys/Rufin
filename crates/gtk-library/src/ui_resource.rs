@@ -1,6 +1,8 @@
 pub const ROUTE_PLACEHOLDER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/placeholder.ui";
 pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     DISC_HEADER_RESOURCE,
+    ALBUM_DETAIL_ROW_RESOURCE,
+    ALBUM_DETAIL_PANEL_RESOURCE,
     SEARCH_ROUTE_RESOURCE,
     LIBRARY_TOOLBAR_RESOURCE,
     LIBRARY_PAGE_RESOURCE,
@@ -37,3 +39,8 @@ mod resource_tests {
         }
     }
 }
+
+pub const ALBUM_DETAIL_ROW_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/routes/album_detail_row.ui";
+pub const ALBUM_DETAIL_PANEL_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/routes/album_detail_panel.ui";

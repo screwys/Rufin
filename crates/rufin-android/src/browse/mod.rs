@@ -14,9 +14,8 @@ pub use records::{
     AndroidScrollSection, AndroidSortField,
 };
 
-use library::{CatalogQuery, CatalogRows, ReadCancellation, TrackScope, TrackSelection};
-use rufin_core::browse::{BrowseQuery, BrowseRequest, library_list_key};
-use rufin_core::source::folders::FolderProjection;
+use library::{Collection, ListRead, MemberRead, MemberRow, MemberSelection, ReadCancellation};
+use rufin_core::browse::{DetailContent, OpenOptions, OpenedCollection, library_list_key};
 use rufin_core::{
     route::{CollectionCategory, Route, sidebar_route_descriptor},
     runtime::SelectedLibrary,
@@ -30,6 +29,35 @@ use crate::{
     host::{AndroidError, error},
     library::AndroidLibrary,
 };
+
+struct CancelReadOnDrop {
+    cancel: ReadCancellation,
+    task: tokio::task::AbortHandle,
+}
+
+impl Drop for CancelReadOnDrop {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+        self.task.abort();
+    }
+}
+
+async fn run_read<T, F>(
+    runtime: &tokio::runtime::Handle,
+    read: impl FnOnce(ReadCancellation) -> F,
+) -> Result<T, AndroidError>
+where
+    T: Send + 'static,
+    F: std::future::Future<Output = Result<T, AndroidError>> + Send + 'static,
+{
+    let cancel = ReadCancellation::new();
+    let task = runtime.spawn(read(cancel.clone()));
+    let _guard = CancelReadOnDrop {
+        cancel,
+        task: task.abort_handle(),
+    };
+    task.await.map_err(error)?
+}
 
 const ARTIST_RELEASE_GROUPS: [(&str, &str); 6] = [
     ("Album", "Albums"),
@@ -68,6 +96,15 @@ fn release_index(class: library::AlbumReleaseClass) -> usize {
         AlbumReleaseClass::Collection => 3,
         AlbumReleaseClass::Other => 4,
     }
+}
+
+fn release_row(album: library::AlbumView, class: usize) -> AndroidBrowseRow {
+    let mut row: AndroidBrowseRow = album.into();
+    let (id, title) = ARTIST_RELEASE_GROUPS[class];
+    row.section_id = id.into();
+    row.section = localization::tr(title);
+    row.section_kind = "artist_release".into();
+    row
 }
 
 fn browse_display(key: LibraryListKey, settings: &LibraryListSettings) -> AndroidBrowseDisplay {
@@ -163,22 +200,18 @@ pub struct AndroidBrowseQuery {
     filter: String,
     sort: LibraryField,
     descending: bool,
-    now: i64,
     blocks: Vec<library::HomeBlockKind>,
     history_current_only: bool,
     favorites_only: bool,
     downloaded_only: bool,
-    home_variations: (i64, i64),
-    home_snapshot: tokio::sync::OnceCell<Vec<(AndroidBrowseRow, TrackSelection)>>,
+    home_snapshot: tokio::sync::OnceCell<Vec<(AndroidBrowseRow, MemberSelection)>>,
     display: LibraryListSettings,
     album_tracks: LibraryListSettings,
     artist_tracks: LibraryListSettings,
     source: rufin_core::runtime::SourceHandle,
     settings: rufin_core::SettingsHandle,
     release_section: Option<ArtistReleaseSection>,
-    release_counts: tokio::sync::OnceCell<[i64; 6]>,
-    folder_projection: tokio::sync::OnceCell<FolderProjection>,
-    query: tokio::sync::OnceCell<BrowseQuery>,
+    opened: tokio::sync::OnceCell<OpenedCollection>,
 }
 
 fn search_rows(rows: library::SearchResults) -> Vec<AndroidBrowseRow> {
@@ -207,28 +240,6 @@ impl AndroidBrowseQuery {
         }
     }
 
-    async fn release_counts(&self) -> Result<[i64; 6], AndroidError> {
-        self.release_counts
-            .get_or_try_init(|| async {
-                let mut request = self.request();
-                request.category = CollectionCategory::Albums;
-                let BrowseQuery::Releases(query) = request
-                    .resolve(&self.database, None, &ReadCancellation::new())
-                    .await
-                    .map_err(error)?
-                else {
-                    return Ok([0; 6]);
-                };
-                query
-                    .counts(&self.database, &ReadCancellation::new())
-                    .await
-                    .map(|counts| counts.map(|count| count as i64))
-                    .map_err(error)
-            })
-            .await
-            .copied()
-    }
-
     fn detail_track_settings(&self) -> &LibraryListSettings {
         if self.detail_identity().is_some() && !matches!(self.route, Route::AlbumDetail(_)) {
             &self.artist_tracks
@@ -254,48 +265,60 @@ impl AndroidBrowseQuery {
         self.display.layout == LibraryLayout::Detail
             && library_list_key(&self.route, self.category) == LibraryListKey::Albums
     }
-    fn request(&self) -> BrowseRequest<'_> {
-        BrowseRequest {
-            history_source: self
-                .history_current_only
-                .then(|| self.selected().source_id.clone()),
-            filter: &self.filter,
-            sort: self.sort,
-            descending: self.descending,
-            favorites_only: self.favorites(),
-            downloaded_only: self.downloaded(),
-            now: self.now,
-            inline_tracks: self.album_detail_layout().then_some(0),
-            ..BrowseRequest::new(
-                &self.route,
-                self.category,
-                self.selected.as_ref().map(|selected| selected.source_key),
-                self.selected
-                    .as_ref()
-                    .and_then(|selected| selected.music_folder_key),
-                &self.display,
-                0,
-            )
-        }
-    }
-
-    async fn query(&self) -> library::LibraryResult<&BrowseQuery> {
-        self.query
+    async fn opened(&self, cancel: &ReadCancellation) -> library::LibraryResult<&OpenedCollection> {
+        self.opened
             .get_or_try_init(|| async {
-                let folder = if matches!(self.route, Route::Folders { .. }) {
-                    Some(self.folder_projection().await?)
-                } else {
-                    None
-                };
-                self.request()
-                    .resolve(&self.database, folder, &ReadCancellation::new())
+                self.source
+                    .open_collection(
+                        &self.route,
+                        self.selected.as_ref(),
+                        &OpenOptions {
+                            category: self.category,
+                            filter: self.filter.clone(),
+                            sort: Some(self.sort),
+                            descending: Some(self.descending),
+                            favorites_only: self.favorites_only,
+                            downloaded_only: self.downloaded_only,
+                            history_current_only: self.history_current_only,
+                            ..Default::default()
+                        },
+                        library::RouteSeedWindow::top(),
+                        cancel,
+                    )
                     .await
             })
             .await
     }
 
-    async fn track_query(&self) -> library::LibraryResult<Option<&CatalogQuery>> {
-        Ok(self.query().await?.tracks())
+    async fn members(
+        &self,
+        cancel: &ReadCancellation,
+    ) -> library::LibraryResult<Option<&MemberRead>> {
+        Ok(match self.opened(&cancel).await? {
+            OpenedCollection::Tracks(page)
+            | OpenedCollection::Detail(Some(rufin_core::browse::DetailPage {
+                content: DetailContent::Tracks(page),
+                ..
+            })) => Some(&page.read),
+            OpenedCollection::Folders(page) => Some(&page.read),
+            _ => None,
+        })
+    }
+
+    async fn list(&self, cancel: &ReadCancellation) -> library::LibraryResult<Option<ListRead>> {
+        Ok(match self.opened(&cancel).await? {
+            OpenedCollection::Albums(page) => Some(page.read.clone()),
+            OpenedCollection::Artists { read, .. }
+            | OpenedCollection::Genres { read, .. }
+            | OpenedCollection::Moods { read, .. }
+            | OpenedCollection::Playlists { read, .. }
+            | OpenedCollection::SmartPlaylists { read, .. } => Some(read.clone()),
+            OpenedCollection::Detail(Some(rufin_core::browse::DetailPage {
+                content: DetailContent::Releases { page, .. },
+                ..
+            })) => Some(page.query.clone()),
+            _ => None,
+        })
     }
 
     fn downloaded(&self) -> bool {
@@ -315,18 +338,160 @@ impl AndroidBrowseQuery {
 
 #[uniffi::export]
 impl AndroidBrowseQuery {
-    pub async fn selection(self: Arc<Self>) -> Result<Arc<TrackSelection>, AndroidError> {
+    pub async fn release_query(
+        self: Arc<Self>,
+        section_id: String,
+        filter: String,
+        sort: Option<LibraryField>,
+        descending: bool,
+    ) -> Result<Arc<Self>, AndroidError> {
+        let section = release_section(&section_id)?;
         let runtime = self.runtime.clone();
-        runtime
-            .spawn(async move {
-                self.query()
-                    .await
-                    .map_err(error)?
-                    .collection_selection(matches!(self.route, Route::Folders { .. }))
-                    .map(Arc::new)
-                    .ok_or_else(|| error("Choose a collection"))
-            })
-            .await
-            .map_err(error)?
+        run_read(&runtime, move |cancel| async move {
+            let OpenedCollection::Detail(Some(detail)) =
+                self.opened(&cancel).await.map_err(error)?
+            else {
+                return Err(error("Choose an artist"));
+            };
+            let DetailContent::Releases { page, .. } = &detail.content else {
+                return Err(error("Choose an artist"));
+            };
+            let display = self
+                .settings
+                .load()
+                .library_list(LibraryListKey::ArtistAlbums);
+            let (sort, descending) = sort.map_or((display.sort_key, display.descending), |sort| {
+                (sort, descending)
+            });
+            let mut read = page.query.clone();
+            let mut selected = library::Page {
+                count: 0,
+                first_row_position: 0,
+                rows: Vec::new(),
+            };
+            if let ArtistReleaseSection::Class(class) = section {
+                let index = release_index(class);
+                let library::ListKind::ArtistAlbums {
+                    release_class,
+                    filters,
+                    ..
+                } = &mut read.kind
+                else {
+                    unreachable!("Artist albums")
+                };
+                let same_filter = filters
+                    .as_ref()
+                    .map_or(read.filter.as_str(), |filters| &filters[index])
+                    .trim()
+                    == filter.trim();
+                *release_class = Some(class);
+                *filters = None;
+                let same_order = read.sort == sort.catalog_sort() && read.descending == descending;
+                read.filter.clone_from(&filter);
+                read.sort = sort.catalog_sort();
+                read.descending = descending;
+                if same_filter {
+                    selected.count = page.counts[index];
+                    if same_order {
+                        let start: usize = page.counts[..index].iter().sum();
+                        let first = page.page.first_row_position.max(start);
+                        let last = (page.page.first_row_position + page.page.rows.len())
+                            .min(start + selected.count);
+                        if first < last {
+                            selected.rows = page.page.rows[first - page.page.first_row_position
+                                ..last - page.page.first_row_position]
+                                .to_vec();
+                            selected.first_row_position = first - start;
+                        }
+                    } else {
+                        let range = library::RouteSeedWindow::top().range(selected.count);
+                        selected.rows = read
+                            .albums(&self.database, range.start, range.len(), &cancel)
+                            .await
+                            .map_err(error)?;
+                    }
+                } else {
+                    selected = read
+                        .page_albums(&self.database, library::RouteSeedWindow::top(), &cancel)
+                        .await
+                        .map_err(error)?;
+                }
+            }
+            let opened = OpenedCollection::Albums(rufin_core::browse::AlbumListPage {
+                read,
+                content: rufin_core::browse::AlbumListContent::Rows(selected),
+            });
+            Ok(Arc::new(Self {
+                selected: self.selected.clone(),
+                database: self.database.clone(),
+                runtime: self.runtime.clone(),
+                playback: self.playback.clone(),
+                route: match &self.route {
+                    Route::ArtistDetail(uri) | Route::ArtistDiscography(uri) => {
+                        Route::ArtistDiscography(uri.clone())
+                    }
+                    Route::AlbumArtistDetail(uri) | Route::AlbumArtistDiscography(uri) => {
+                        Route::AlbumArtistDiscography(uri.clone())
+                    }
+                    _ => unreachable!("Artist releases"),
+                },
+                category: CollectionCategory::Albums,
+                filter,
+                sort,
+                descending,
+                blocks: self.blocks.clone(),
+                history_current_only: false,
+                favorites_only: false,
+                downloaded_only: false,
+                home_snapshot: tokio::sync::OnceCell::new(),
+                display,
+                album_tracks: self.album_tracks.clone(),
+                artist_tracks: self.artist_tracks.clone(),
+                source: self.source.clone(),
+                settings: self.settings.clone(),
+                release_section: Some(section),
+                opened: tokio::sync::OnceCell::new_with(Some(opened)),
+            }))
+        })
+        .await
+    }
+
+    pub async fn selection(self: Arc<Self>) -> Result<Arc<MemberSelection>, AndroidError> {
+        let runtime = self.runtime.clone();
+        run_read(&runtime, move |cancel| async move {
+            if let Some(read) = self.members(&cancel).await.map_err(error)? {
+                let mut read = read.clone();
+                if !matches!(self.route, Route::Folders { .. }) {
+                    if !matches!(read.collection, Collection::Smart { .. }) {
+                        read.folder = None;
+                    }
+                    read.sort = None;
+                    read.descending = false;
+                }
+                return Ok(Arc::new(read.selection()));
+            }
+            if let OpenedCollection::Detail(Some(rufin_core::browse::DetailPage {
+                summary: rufin_core::browse::DetailSummary::Artist(artist),
+                ..
+            })) = self.opened(&cancel).await.map_err(error)?
+            {
+                if self.release_section.is_none() {
+                    return Ok(Arc::new(MemberSelection::Collections(vec![
+                        Collection::Artist {
+                            key: artist.artist_key,
+                            album_artist: self
+                                .artist_release_identity()
+                                .is_some_and(|(_, role)| role),
+                        },
+                    ])));
+                }
+            }
+            self.list(&cancel)
+                .await
+                .map_err(error)?
+                .map(|read| Arc::new(read.selection()))
+                .ok_or_else(|| error("Choose a collection"))
+        })
+        .await
     }
 }

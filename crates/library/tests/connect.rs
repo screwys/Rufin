@@ -81,11 +81,7 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
         .create_playlist(
             None,
             "Saved",
-            &library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                (std::slice::from_ref(uri)).to_vec(),
-            )
-            .selection(),
+            &library::MemberSelection::Uris(((std::slice::from_ref(uri)).to_vec()).into()),
         )
         .await
         .unwrap();
@@ -602,7 +598,7 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_and_source_catalog(
         .create_playlist(
             None,
             "Saved",
-            &library::CatalogQuery::uris(library::CatalogKind::Track, (&uris).to_vec()).selection(),
+            &library::MemberSelection::Uris(((&uris).to_vec()).into()),
         )
         .await
         .unwrap()
@@ -700,7 +696,7 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_and_source_catalog(
     assert_eq!(
         received
             .selected_track_uris(
-                &library::CatalogQuery::tracks(library::TrackScope::Playlist(imported_playlist))
+                &library::MemberRead::new(library::Collection::Playlist(imported_playlist))
                     .selection(),
                 None,
                 &library::ReadCancellation::new()

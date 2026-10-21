@@ -1143,21 +1143,9 @@ impl MediaPlayingBinding {
                 .context()
                 .map(|context| MediaPlayingTarget::Collection(context.to_string()))
                 .or_else(|| match target.selection() {
-                    Some(library::TrackSelection::Query {
-                        query:
-                            library::CatalogQuery {
-                                subject:
-                                    library::CatalogSubject::Keys {
-                                        kind: library::CatalogKind::Track,
-                                        keys,
-                                        ..
-                                    },
-                                ..
-                            },
-                        ranges: None,
-                    }) if keys.len() == 1 => Some(MediaPlayingTarget::Track(
-                        library::TrackKey::from_raw(keys[0]),
-                    )),
+                    Some(library::MemberSelection::Keys { keys, .. }) if keys.len() == 1 => {
+                        Some(MediaPlayingTarget::Track(keys[0]))
+                    }
                     _ => None,
                 })
         }));

@@ -1583,6 +1583,10 @@ impl ProfileStore {
 }
 
 #[cfg(test)]
+#[path = "../tests/support/catalog.rs"]
+mod catalog_fixture;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2065,8 +2069,7 @@ mod tests {
             .create_playlist(
                 None,
                 "Saved",
-                &crate::CatalogQuery::uris(crate::CatalogKind::Track, vec![uri.clone()])
-                    .selection(),
+                &crate::MemberSelection::Uris((vec![uri.clone()]).into()),
             )
             .await
             .unwrap();
@@ -2501,26 +2504,17 @@ mod tests {
                             .await
                             .unwrap()
                             .expect("shared source cache resolves the pin before refresh");
-                        let metadata = crate::CatalogQuery::keys(
-                            crate::CatalogKind::Playlist,
-                            None,
-                            vec![key.raw()],
-                        )
-                        .rows(&target, 0, 1, &cancel)
-                        .await
-                        .unwrap();
-                        let crate::CatalogRows::Playlists(metadata) = metadata else {
-                            unreachable!("playlist metadata")
-                        };
+                        let metadata = target.playlists(&[key], &cancel).await.unwrap();
                         assert_eq!(metadata[0].name, "Server mix");
                         assert_eq!(metadata[0].track_count, 140);
-                        let entries = crate::CatalogQuery::tracks(crate::TrackScope::Playlist(key))
+                        let entries = crate::MemberRead::new(crate::Collection::Playlist(key))
                             .rows(&target, 0, 140, &cancel)
                             .await
                             .unwrap();
-                        let crate::CatalogRows::PlaylistEntries(entries) = entries else {
-                            unreachable!("playlist entries")
-                        };
+                        let entries = entries
+                            .into_iter()
+                            .map(|row| row.into_entry().unwrap())
+                            .collect::<Vec<_>>();
                         assert_eq!(entries.len(), 140);
                         assert_eq!(
                             entries[0].track.media_uri,
@@ -2593,44 +2587,31 @@ mod tests {
                 .unwrap();
             if revision == 2 {
                 assert!(
-                    crate::CatalogQuery {
-                        subject: crate::CatalogSubject::Playlists {
-                            source: (None).into(),
-                            sort: crate::CatalogSort::Position
-                        },
+                    crate::ListRead {
+                        kind: crate::ListKind::Playlists,
+                        source: (None).into(),
+                        sort: crate::CatalogSort::Position,
                         folder: None,
                         filter: ("").to_string(),
                         descending: false,
                         favorites_only: false,
                         downloaded_only: false,
-                        activity: false,
+                        activity: false
                     }
-                    .rows(&target, 0, 140, &cancel)
+                    .playlists(&target, 0, 140, &cancel)
                     .await
-                    .map(|rows| match rows {
-                        crate::CatalogRows::Playlists(rows) => rows,
-                        _ => unreachable!("catalog page projection"),
-                    })
                     .unwrap()
                     .is_empty()
                 );
                 continue;
             }
             let key = key.expect("shared pin resolves from the receiving source cache");
-            let row = crate::CatalogQuery::keys(
-                crate::CatalogKind::Playlist,
-                None,
-                (&[key]).iter().map(|key| key.raw()).collect(),
-            )
-            .rows(&target, 0, (&[key]).len(), &cancel)
-            .await
-            .map(|rows| match rows {
-                crate::CatalogRows::Playlists(rows) => rows,
-                _ => unreachable!("typed catalog projection"),
-            })
-            .unwrap()
-            .pop()
-            .unwrap();
+            let row = target
+                .playlists(&[key], &cancel)
+                .await
+                .unwrap()
+                .pop()
+                .unwrap();
             assert_eq!(row.name, "Server mix");
             assert_eq!(row.track_count, 140);
             assert!(!row.writable);
@@ -2638,12 +2619,13 @@ mod tests {
                 serde_json::from_slice(row.artwork_binding.as_deref().unwrap()).unwrap();
             let native: Vec<crate::ArtworkCandidate> = serde_json::from_slice(&art).unwrap();
             assert_eq!(candidates.first(), native.first());
-            let entries = (&crate::CatalogQuery::tracks(crate::TrackScope::Playlist(key)))
+            let entries = (&crate::MemberRead::new(crate::Collection::Playlist(key)))
                 .rows(&target, 0, 140, &cancel)
                 .await
-                .map(|rows| match rows {
-                    crate::CatalogRows::PlaylistEntries(rows) => rows,
-                    _ => unreachable!("typed song projection"),
+                .map(|rows| {
+                    rows.into_iter()
+                        .filter_map(crate::MemberRow::into_entry)
+                        .collect::<Vec<_>>()
                 })
                 .unwrap();
             let first = if revision == 0 {
@@ -3033,8 +3015,7 @@ mod tests {
             .create_playlist(
                 None,
                 "Saved tracks",
-                &crate::CatalogQuery::uris(crate::CatalogKind::Track, vec![uri.clone()])
-                    .selection(),
+                &crate::MemberSelection::Uris((vec![uri.clone()]).into()),
             )
             .await
             .unwrap()
@@ -4054,11 +4035,16 @@ mod tests {
             .unwrap();
         let floor = recipient.revision().await.unwrap();
         {
+            let legacy_path = directory.path().join("legacy.sqlite");
             let mut incoming = SqliteConnection::connect_with(
-                &sqlx::sqlite::SqliteConnectOptions::new().filename(&copied_path),
+                &sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(&legacy_path)
+                    .create_if_missing(true)
+                    .foreign_keys(false),
             )
             .await
             .unwrap();
+            catalog_fixture::copy_before_index(&mut incoming, &copied_path).await;
             sqlx::raw_sql(
                 "PRAGMA user_version=49;
                 UPDATE connect_profile SET schema_version=1;
@@ -4070,6 +4056,7 @@ mod tests {
             .await
             .unwrap();
             incoming.close().await.unwrap();
+            std::fs::rename(legacy_path, &copied_path).unwrap();
         }
         assert!(
             ProfileStore::prepare_database(&copied_path, &recipient_key, &recipient_key)
@@ -4091,7 +4078,7 @@ mod tests {
                 crate::schema::pragma(&mut incoming, "user_version")
                     .await
                     .unwrap(),
-                50
+                54
             );
             assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM connect_versions WHERE kind='catalog:track' OR json_type(version,'$.lamport') IS NULL").fetch_one(&mut incoming).await.unwrap(), 0);
             incoming.close().await.unwrap();

@@ -1295,21 +1295,14 @@ mod tests {
                 Ok::<_, crate::SourceError>(())
             }
             .unwrap();
-            let row = library::CatalogQuery::uris(
-                library::CatalogKind::Track,
-                vec![
-                    (&library::source_entity_uri(&source_id, "track", "navidrome:track:track"))
-                        .to_owned(),
-                ],
-            )
-            .rows(&database, 0, 256, &library::ReadCancellation::new())
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                _ => unreachable!(),
-            })
-            .unwrap()
-            .unwrap();
+            let row = database
+                .track(
+                    &(&library::source_entity_uri(&source_id, "track", "navidrome:track:track")),
+                    &library::ReadCancellation::new(),
+                )
+                .await
+                .unwrap()
+                .unwrap();
             assert_eq!(row.metadata.title, "Track");
             assert_eq!(
                 row.metadata.release_date.as_deref(),
@@ -1574,12 +1567,10 @@ mod tests {
             .expect("cached source")
             .expect("published source")
             .source;
-        let (_, _, albums) = library::CatalogQuery {
-            subject: library::CatalogSubject::Albums {
-                source: source_key,
-                sort: library::CatalogSort::Title,
-                inline_tracks: None,
-            },
+        let albums = library::ListRead {
+            kind: library::ListKind::Albums,
+            source: Some(source_key),
+            sort: library::CatalogSort::Title,
             folder: None,
             filter: ("AAA Rich Album").to_string(),
             descending: false,
@@ -1587,12 +1578,9 @@ mod tests {
             downloaded_only: false,
             activity: false,
         }
-        .page(&database, library::RouteSeedWindow::top(), &cancellation)
+        .page_albums(&database, library::RouteSeedWindow::top(), &cancellation)
         .await
-        .map(|page| match page.rows {
-            library::CatalogRows::Albums(rows) => (page.count, page.first_row_position, rows),
-            _ => unreachable!(),
-        })
+        .map(|page| page.rows)
         .expect("Album page");
         let album = albums.first().expect("rich Album");
         assert_eq!(
@@ -1618,13 +1606,15 @@ mod tests {
             },
             Some("2026-08-27T00:00:00Z")
         );
-        let tracks = (&library::CatalogQuery::tracks(library::TrackScope::Tracks(source_key)))
+        let tracks = (&library::MemberRead::new(library::Collection::Source(source_key)))
             .page(&database, library::RouteSeedWindow::top(), &cancellation)
             .await
             .expect("Track page");
-        let library::CatalogRows::Tracks(track_rows) = tracks.rows else {
-            unreachable!()
-        };
+        let track_rows = tracks
+            .rows
+            .into_iter()
+            .map(library::MemberRow::into_track)
+            .collect::<Vec<_>>();
         let track = track_rows.first().expect("rich Track");
         assert_eq!(track_rows.len(), 2);
         assert_eq!(track_rows[1].metadata.title, "ZZZ Last Track");
@@ -1645,12 +1635,12 @@ mod tests {
             mapping[0].source_path,
             "/srv/navidrome/audio/Artist/Album/Track.flac"
         );
-        let (_, _, artists) = library::CatalogQuery {
-            subject: library::CatalogSubject::Artists {
-                source: source_key,
-                sort: library::CatalogSort::Title,
+        let artists = library::ListRead {
+            kind: library::ListKind::Artists {
                 album_artist: false,
             },
+            source: Some(source_key),
+            sort: library::CatalogSort::Title,
             folder: None,
             filter: ("Track Artist").to_string(),
             descending: false,
@@ -1658,12 +1648,9 @@ mod tests {
             downloaded_only: false,
             activity: false,
         }
-        .page(&database, library::RouteSeedWindow::top(), &cancellation)
+        .page_artists(&database, library::RouteSeedWindow::top(), &cancellation)
         .await
-        .map(|page| match page.rows {
-            library::CatalogRows::Artists(rows) => (page.count, page.first_row_position, rows),
-            _ => unreachable!(),
-        })
+        .map(|page| page.rows)
         .expect("Track Artist page");
         assert_eq!(
             artists[0].metadata.musicbrainz_artist_id.as_deref(),

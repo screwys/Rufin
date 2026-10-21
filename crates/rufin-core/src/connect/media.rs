@@ -433,15 +433,11 @@ impl ConnectOwner {
         &self,
         uri: &str,
     ) -> Result<Option<library::LyricsCacheRow>, String> {
-        let Some(track) =
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(uri).to_string()])
-                .rows(&self.database, 0, 1, &library::ReadCancellation::new())
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(mut rows) => rows.pop(),
-                    _ => unreachable!("typed catalog projection"),
-                })
-                .map_err(error)?
+        let Some(track) = self
+            .database
+            .track(uri, &library::ReadCancellation::new())
+            .await
+            .map_err(error)?
         else {
             return Ok(None);
         };

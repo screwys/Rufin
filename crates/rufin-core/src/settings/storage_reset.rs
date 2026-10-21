@@ -13,11 +13,14 @@ pub enum StorageReset {
     AllData,
 }
 
-pub struct StorageResetRequest {
-    reset: StorageReset,
-    stored: StoredSettings,
-    connect: crate::connect::ConnectSettings,
-    secrets: Arc<dyn secrets::SecretStore>,
+pub enum StorageResetRequest {
+    Database,
+    Storage {
+        reset: StorageReset,
+        stored: Box<StoredSettings>,
+        connect: Box<crate::connect::ConnectSettings>,
+        secrets: Arc<dyn secrets::SecretStore>,
+    },
 }
 
 impl SettingsOwner {
@@ -36,10 +39,10 @@ impl SettingsOwner {
         } else {
             self.secrets.current().map_err(error)?
         };
-        Ok(StorageResetRequest {
+        Ok(StorageResetRequest::Storage {
             reset,
-            stored,
-            connect,
+            stored: Box::new(stored),
+            connect: Box::new(connect),
             secrets,
         })
     }
@@ -47,7 +50,33 @@ impl SettingsOwner {
 
 impl StorageResetRequest {
     /// The host must stop playback, close the Store and stop its worker runtime first.
-    pub fn apply(mut self, paths: &Paths) -> Result<(), String> {
+    pub fn apply(self, paths: &Paths) -> Result<(), String> {
+        let Self::Storage {
+            reset,
+            stored,
+            mut connect,
+            secrets,
+        } = self
+        else {
+            validate_root(&paths.data_dir())?;
+            validate_root(&paths.cache_dir())?;
+            for path in [
+                paths.store_file(),
+                paths.legacy_store_file(),
+                paths.catalog_file(),
+            ] {
+                for suffix in ["", "-wal", "-shm"] {
+                    let mut file = path.as_os_str().to_os_string();
+                    file.push(suffix);
+                    match fs::remove_file(file) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(cause) => return Err(error(cause)),
+                    }
+                }
+            }
+            return Ok(());
+        };
         let roots = [
             paths.cache_dir(),
             paths.data_dir(),
@@ -59,13 +88,13 @@ impl StorageResetRequest {
         }
         // Keep connection records until deletion succeeds so an I/O error does not lose them.
         let mut keep = vec![paths.settings_file()];
-        if self.reset == StorageReset::KeepCredentials {
+        if reset == StorageReset::KeepCredentials {
             keep.extend(
                 ["secrets.json", "backup-password.json"].map(|name| paths.config_dir().join(name)),
             );
         }
-        let retained = if self.reset == StorageReset::KeepCredentials {
-            retained_connections(self.stored)
+        let retained = if reset == StorageReset::KeepCredentials {
+            retained_connections(*stored)
         } else {
             let mut keys = vec![
                 super::settings_encryption_key(),
@@ -73,7 +102,7 @@ impl StorageResetRequest {
                 super::web_controller::secret_key(),
             ];
             keys.extend(
-                self.stored
+                stored
                     .sources
                     .connections()
                     .filter_map(|source| source.credential.as_ref())
@@ -81,7 +110,7 @@ impl StorageResetRequest {
                     .map(super::provider_secret_key),
             );
             keys.extend(
-                self.stored
+                stored
                     .scrobbling_credentials
                     .values()
                     .filter(|credential| matches!(credential, super::Credential::Legacy(_)))
@@ -93,9 +122,9 @@ impl StorageResetRequest {
                     .copied()
                     .map(super::scrobbling_secret_key),
             );
-            keys.extend(crate::connect::secret_keys(&self.connect));
+            keys.extend(crate::connect::secret_keys(&connect));
             for key in keys {
-                self.secrets.delete_secret(&key).map_err(error)?;
+                secrets.delete_secret(&key).map_err(error)?;
             }
             StoredSettings::default()
         };
@@ -103,9 +132,9 @@ impl StorageResetRequest {
         for root in roots {
             clear_directory(&root, &keep)?;
         }
-        if self.reset == StorageReset::KeepCredentials {
-            self.connect.pending_import = None;
-            crate::connect::write_device_config(&paths.connect_dir(), &self.connect)?;
+        if reset == StorageReset::KeepCredentials {
+            connect.pending_import = None;
+            crate::connect::write_device_config(&paths.connect_dir(), &connect)?;
         }
         fs::create_dir_all(paths.config_dir()).map_err(error)?;
         // Replace the whole document, including settings unknown to this version.

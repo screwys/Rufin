@@ -459,12 +459,10 @@ async fn released_queue_media_uri(
     };
     Ok(database
         .selected_track_uris(
-            &library::CatalogQuery::keys(
-                library::CatalogKind::Track,
-                Some(source),
-                (&[key]).iter().map(|key| key.raw()).collect(),
-            )
-            .selection(),
+            &library::MemberSelection::Keys {
+                source: Some(source),
+                keys: [key].into(),
+            },
             None,
             cancellation,
         )
@@ -665,7 +663,7 @@ async fn rule_media_uris(
     let cancellation = library::ReadCancellation::new();
     match rule {
         DownloadRule::EntireLibrary | DownloadRule::Favorites => {
-            let mut query = library::CatalogQuery::tracks(library::TrackScope::Tracks(source));
+            let mut query = library::MemberRead::new(library::Collection::Source(source));
             query.folder = folder;
             query.favorites_only = matches!(rule, DownloadRule::Favorites);
             database
@@ -4070,11 +4068,7 @@ mod tests {
                     .create_playlist(
                         None,
                         "Saved",
-                        &library::CatalogQuery::uris(
-                            library::CatalogKind::Track,
-                            vec![uri.clone()],
-                        )
-                        .selection(),
+                        &library::MemberSelection::Uris((vec![uri.clone()]).into()),
                     )
                     .await
                     .unwrap();
@@ -4277,8 +4271,7 @@ mod tests {
                 .create_playlist(
                     None,
                     "Saved",
-                    &library::CatalogQuery::uris(library::CatalogKind::Track, uris.clone())
-                        .selection(),
+                    &library::MemberSelection::Uris((uris.clone()).into()),
                 )
                 .await
                 .unwrap();
@@ -4765,18 +4758,10 @@ impl Actor {
             .iter()
             .filter_map(|job| job.preview_uris.first().cloned())
             .collect::<Vec<_>>();
-        let previews = library::CatalogQuery::uris(library::CatalogKind::Track, (&uris).to_vec())
-            .rows(
-                &self.database,
-                0,
-                (&uris).len(),
-                &library::ReadCancellation::new(),
-            )
+        let previews = self
+            .database
+            .tracks_by_uris(&uris, &library::ReadCancellation::new())
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!("typed catalog projection"),
-            })
             .map_err(|error| error.to_string())?;
         Ok(DownloadPage {
             total,

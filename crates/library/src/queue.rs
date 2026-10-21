@@ -233,14 +233,14 @@ async fn decode_queue_export(
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum QueueLoad {
-    Tracks(Vec<(crate::TrackSelection, QueueProvenance)>),
+    Tracks(Vec<(crate::MemberSelection, QueueProvenance)>),
     Items(Vec<(TrackReference, QueueProvenance)>),
     Uris(Vec<String>, QueueProvenance),
     Captured(Arc<[QueueEntry]>),
 }
 
 impl QueueLoad {
-    pub fn tracks(selection: crate::TrackSelection) -> Self {
+    pub fn tracks(selection: crate::MemberSelection) -> Self {
         Self::Tracks(vec![(selection, QueueProvenance::Manual)])
     }
     pub fn track_keys(keys: Vec<crate::TrackKey>, provenance: QueueProvenance) -> Self {
@@ -590,7 +590,7 @@ impl Database {
                 let mut reader = self.acquire_reader().await?;
                 let mut transaction = reader.begin().await?;
                 for (selection, provenance) in groups {
-                    let resolve_anchor = matches!(selection, crate::TrackSelection::Query { .. });
+                    let resolve_anchor = !matches!(selection, crate::MemberSelection::Concat(_));
                     let songs =
                         crate::selection::selected_tracks_on(&mut transaction, &selection).await?;
                     for (rank, (track_key, entry_key)) in songs.into_iter().enumerate() {

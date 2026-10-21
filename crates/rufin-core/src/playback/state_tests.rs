@@ -364,16 +364,14 @@ async fn continuation_preserves_positions_order_and_one_listen_across_devices() 
     assert_eq!(
         destination_database
             .selected_track_uris(
-                &library::CatalogQuery::keys(
-                    library::CatalogKind::Track,
-                    None,
-                    received
+                &library::MemberSelection::Keys {
+                    source: None,
+                    keys: received
                         .entries
                         .iter()
-                        .map(|entry| entry.track_key.raw())
+                        .map(|entry| entry.track_key)
                         .collect()
-                )
-                .selection(),
+                },
                 None,
                 &library::ReadCancellation::new()
             )
@@ -381,17 +379,15 @@ async fn continuation_preserves_positions_order_and_one_listen_across_devices() 
             .unwrap(),
         database
             .selected_track_uris(
-                &library::CatalogQuery::keys(
-                    library::CatalogKind::Track,
-                    None,
-                    first
+                &library::MemberSelection::Keys {
+                    source: None,
+                    keys: first
                         .queue
                         .entries
                         .iter()
-                        .map(|entry| entry.track_key.raw())
+                        .map(|entry| entry.track_key)
                         .collect()
-                )
-                .selection(),
+                },
                 None,
                 &library::ReadCancellation::new()
             )
@@ -897,15 +893,13 @@ async fn newer_captured_play_supersedes_pending_completion_and_stop_is_preserved
     session.publish(&sample);
     assert!(session.pending_hydration.is_some());
     let old_id = session.sequence.id_at(0).unwrap();
-    let library::CatalogRows::Tracks(mut old_rows) = library::CatalogQuery::uris(
-        library::CatalogKind::Track,
-        vec!["https://example.test/track-0".into()],
-    )
-    .rows(&database, 0, 1, &library::ReadCancellation::new())
-    .await
-    .unwrap() else {
-        unreachable!()
-    };
+    let mut old_rows = database
+        .tracks_by_uris(
+            &["https://example.test/track-0".into()],
+            &library::ReadCancellation::new(),
+        )
+        .await
+        .unwrap();
     let old_item = old_rows.pop().unwrap();
     session
         .handle_command(
@@ -1426,18 +1420,15 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
                 .collect::<Vec<_>>();
             let (_directory, database, mut sequence, owner, commands, playback, inbox) =
                 seeded(items.clone()).await;
-            let input = library::CatalogQuery::keys(
-                library::CatalogKind::Track,
-                None,
-                sequence
+            let input = library::MemberSelection::Keys {
+                source: None,
+                keys: sequence
                     .snapshot()
                     .entries
                     .iter()
                     .map(|entry| entry.track_key)
-                    .map(|key| key.raw())
                     .collect(),
-            )
-            .selection();
+            };
             sequence.set_progress_millis(42_000);
             let mut session = Player::new(
                 sequence,
@@ -2274,13 +2265,13 @@ async fn repeat_wraps_when_source_exhaustion_is_discovered_after_a_full_page() {
         .create_playlist(
             None,
             "Source",
-            &library::CatalogQuery::uris(library::CatalogKind::Track, uris.to_vec()).selection(),
+            &library::MemberSelection::Uris((uris.to_vec()).into()),
         )
         .await
         .unwrap()
         .unwrap();
     let page = crate::playback::PlayRequest::ordered(
-        library::CatalogQuery::tracks(library::TrackScope::Playlist(key)).selection(),
+        library::MemberRead::new(library::Collection::Playlist(key)).selection(),
         0,
         Placement::Now,
         false,

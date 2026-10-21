@@ -67,8 +67,7 @@ mod tests {
                 .create_playlist(
                     None,
                     &format!("Root {index}"),
-                    &crate::CatalogQuery::uris(crate::CatalogKind::Track, (&[]).to_vec())
-                        .selection(),
+                    &crate::MemberSelection::Uris(((&[]).to_vec()).into()),
                 )
                 .await?
                 .unwrap()
@@ -233,7 +232,7 @@ mod tests {
             .create_playlist(
                 None,
                 "Shared",
-                &crate::CatalogQuery::uris(crate::CatalogKind::Track, Vec::new()).selection(),
+                &crate::MemberSelection::Uris((Vec::new()).into()),
             )
             .await?
             .unwrap()
@@ -269,11 +268,9 @@ mod tests {
             .create_playlist(
                 None,
                 "Music",
-                &crate::CatalogQuery::uris(
-                    crate::CatalogKind::Track,
-                    (&["file:///song.flac".into(), "file:///two.flac".into()]).to_vec(),
-                )
-                .selection(),
+                &crate::MemberSelection::Uris(
+                    ((&["file:///song.flac".into(), "file:///two.flac".into()]).to_vec()).into(),
+                ),
             )
             .await?
             .unwrap()
@@ -296,7 +293,7 @@ mod tests {
             .create_playlist(
                 None,
                 "Second",
-                &crate::CatalogQuery::uris(crate::CatalogKind::Track, (&[]).to_vec()).selection(),
+                &crate::MemberSelection::Uris(((&[]).to_vec()).into()),
             )
             .await?
             .unwrap()
@@ -328,11 +325,9 @@ mod tests {
                 .add_playlist_tracks(
                     None,
                     playlist,
-                    &crate::CatalogQuery::uris(
-                        crate::CatalogKind::Track,
-                        (&["file:///song.flac".into()]).to_vec()
-                    )
-                    .selection(),
+                    &crate::MemberSelection::Uris(
+                        ((&["file:///song.flac".into()]).to_vec()).into()
+                    ),
                     true
                 )
                 .await?,
@@ -362,11 +357,7 @@ mod tests {
             .add_playlist_tracks(
                 None,
                 playlist,
-                &crate::CatalogQuery::uris(
-                    crate::CatalogKind::Track,
-                    (&["file:///three.flac".into()]).to_vec(),
-                )
-                .selection(),
+                &crate::MemberSelection::Uris(((&["file:///three.flac".into()]).to_vec()).into()),
                 false,
             )
             .await?;
@@ -383,12 +374,10 @@ mod tests {
         let entries = database
             .playlist_edit_entries(
                 playlist,
-                &crate::CatalogQuery {
-                    subject: crate::CatalogSubject::Tracks {
-                        scope: crate::TrackScope::Playlist(playlist),
-                        sort: Some(crate::CatalogSort::Position),
-                    },
-                    ..crate::CatalogQuery::tracks(crate::TrackScope::Playlist(playlist))
+                &crate::MemberRead {
+                    collection: crate::Collection::Playlist(playlist),
+                    sort: Some(crate::CatalogSort::Position),
+                    ..crate::MemberRead::new(crate::Collection::Playlist(playlist))
                 }
                 .selection(),
                 &crate::ReadCancellation::default(),
@@ -476,7 +465,7 @@ mod tests {
             .create_playlist(
                 None,
                 "Playlist",
-                &crate::CatalogQuery::uris(crate::CatalogKind::Track, (&[]).to_vec()).selection(),
+                &crate::MemberSelection::Uris(((&[]).to_vec()).into()),
             )
             .await?
             .unwrap()

@@ -67,7 +67,7 @@ where
         .map(|source| source.configuration.source_id.clone())
         .collect::<Vec<_>>();
     let store_path = paths.store_file();
-    let (database, temporary_store, replaced_store) = match library::Database::open_installation(
+    let (database, temporary_store) = match library::Database::open_installation(
         &store_path,
         &paths.legacy_store_file(),
         &paths.catalog_file(),
@@ -76,47 +76,22 @@ where
     )
     .await
     {
-        Ok(database) => (database, false, false),
-        Err(error) => {
-            let replaced = !error.is_store_unavailable();
-            let replacement = if replaced {
-                warn!(%error, path=%store_path.display(), "could not open the Store; replacing it");
-                async {
-                    for suffix in ["", "-wal", "-shm"] {
-                        let mut file = store_path.as_os_str().to_os_string();
-                        file.push(suffix);
-                        match tokio::fs::remove_file(std::path::PathBuf::from(file)).await {
-                            Ok(()) => {}
-                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                            Err(error) => return Err(library::LibraryError::Io(error)),
-                        }
-                    }
-                    library::Database::open(&store_path).await
-                }
-                .await
-            } else {
-                Err(error)
-            };
-            let (database, temporary) = match replacement {
-                Ok(database) => (database, false),
-                Err(error) if error.is_store_unavailable() => {
-                    warn!(%error, path=%store_path.display(), "could not access the durable Store; startup will continue with temporary storage");
-                    let directory = tempfile::Builder::new()
-                        .prefix("rufin-store-")
-                        .tempdir()
-                        .map_err(string_error)?
-                        .keep();
-                    (
-                        library::Database::open(directory.join("store.sqlite"))
-                            .await
-                            .map_err(string_error)?,
-                        true,
-                    )
-                }
-                Err(error) => return Err(string_error(error)),
-            };
-            (database, temporary, replaced)
+        Ok(database) => (database, false),
+        Err(error) if error.is_store_unavailable() => {
+            warn!(%error, path=%store_path.display(), "could not access the durable Store; startup will continue with temporary storage");
+            let directory = tempfile::Builder::new()
+                .prefix("rufin-store-")
+                .tempdir()
+                .map_err(string_error)?
+                .keep();
+            (
+                library::Database::open(directory.join("store.sqlite"))
+                    .await
+                    .map_err(string_error)?,
+                true,
+            )
         }
+        Err(error) => return Err(string_error(error)),
     };
     let library = Arc::new(database);
     library
@@ -353,12 +328,6 @@ where
         runtime.clone(),
         paths.data_dir().join("backups"),
     );
-    if replaced_store
-        && !temporary_store
-        && let Err(error) = backup.restore_latest().await
-    {
-        warn!(%error, "could not restore the latest scheduled backup; startup will continue with the new Store");
-    }
     backup.start();
     let stored = settings.load();
 

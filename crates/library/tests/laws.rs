@@ -25,14 +25,14 @@ proptest! {
                 .collect::<Vec<_>>();
             let playlist = fixture
                 .database
-                .create_playlist(Some(fixture.source), "Property Playlist", &library::CatalogQuery::uris(library::CatalogKind::Track,expected.clone()).selection())
+                .create_playlist(Some(fixture.source), "Property Playlist", &library::MemberSelection::Uris((expected.clone()).into()))
                 .await
                 .expect("create property Playlist")
                 .expect("all property Tracks exist")
                 .0;
             let projection = fixture
                 .database
-                .selected_track_uris(&library::CatalogQuery::tracks(library::TrackScope::Playlist(playlist)).selection(),None, &ReadCancellation::new())
+                .selected_track_uris(&library::MemberRead::new(library::Collection::Playlist(playlist)).selection(),None, &ReadCancellation::new())
                 .await
                 .expect("property Playlist projection");
             (expected, projection)

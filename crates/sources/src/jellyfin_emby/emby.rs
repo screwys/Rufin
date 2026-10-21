@@ -315,16 +315,11 @@ mod tests {
         }
         .unwrap();
         let uri = library::source_entity_uri(&SourceId::new("source"), "track", "emby:track:11");
-        let track =
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                .rows(&database, 0, 256, &library::ReadCancellation::new())
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-                .unwrap()
-                .unwrap();
+        let track = database
+            .track(&(&uri), &library::ReadCancellation::new())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(track.object_id.as_deref(), Some("emby:track:11"));
         assert_eq!(track.state.rating, Some(7));
         assert!(track.state.last_played.is_some());
@@ -352,16 +347,11 @@ mod tests {
             Ok::<_, crate::SourceError>(())
         }
         .unwrap();
-        let rated =
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_owned()])
-                .rows(&database, 0, 256, &library::ReadCancellation::new())
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(rows) => rows.into_iter().next(),
-                    _ => unreachable!(),
-                })
-                .unwrap()
-                .unwrap();
+        let rated = database
+            .track(&(&uri), &library::ReadCancellation::new())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(rated.state.rating, Some(9));
         assert_eq!(rated.state.last_played, track.state.last_played);
         let requests = server.received_requests().await.unwrap();

@@ -31,7 +31,7 @@ struct PlaylistChoice {
 
 #[derive(Clone)]
 struct ReadyPlaylistTracks {
-    selection: library::TrackSelection,
+    selection: library::MemberSelection,
     title: String,
     preview_uris: Vec<String>,
 }
@@ -41,7 +41,7 @@ pub fn populate_context_playlist_picker(
     source: rufin_core::runtime::SourceHandle,
     feedback: Rc<dyn Fn(&OperationFeedback)>,
     popover: &gtk::PopoverMenu,
-) -> Rc<dyn Fn(Vec<library::PlaylistRow>, library::TrackSelection, String, Vec<String>)> {
+) -> Rc<dyn Fn(Vec<library::PlaylistRow>, library::MemberSelection, String, Vec<String>)> {
     let resource = crate::ui_resource::PLAYLIST_PICKER_CONTEXT_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
@@ -196,10 +196,10 @@ struct PickerRow {
 pub fn playlist_picker_dialog(
     source: rufin_core::runtime::SourceHandle,
     artwork: Rc<gtk_widgets::artwork::ArtworkState>,
-    create_playlist: Rc<dyn Fn(String, library::TrackSelection)>,
+    create_playlist: Rc<dyn Fn(String, library::MemberSelection)>,
     feedback: Rc<dyn Fn(&OperationFeedback)>,
     playlists: Vec<library::PlaylistRow>,
-    selection: library::TrackSelection,
+    selection: library::MemberSelection,
     title: String,
     preview_uris: Vec<String>,
 ) -> (adw::Dialog, Rc<dyn Fn(Vec<library::PlaylistRow>)>) {

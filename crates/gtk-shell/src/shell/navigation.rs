@@ -532,7 +532,7 @@ fn primary_menu_private_mode_label(shell: &Shell) -> String {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 enum SidebarPinItem {
     Album(Box<AlbumView>),
     Artist(ArtistView, bool),
@@ -642,10 +642,10 @@ impl SidebarPinItem {
                 }
             }
             Self::Genre(genre) => {
-                collection_play_request(library::TrackScope::Genre(genre.genre_key))
+                collection_play_request(library::Collection::Genre(genre.genre_key))
             }
             Self::Playlist(playlist) => {
-                collection_play_request(library::TrackScope::Playlist(playlist.playlist_key))
+                collection_play_request(library::Collection::Playlist(playlist.playlist_key))
             }
             Self::SmartPlaylist(playlist) => {
                 gtk_widgets::selection::smart_play_request(playlist.smart_playlist_key, selected)
@@ -812,10 +812,13 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
     {
         let retained = {
             let mut items = shell.navigation.pin_items.borrow_mut();
+            let previous_len = items.len();
             items.retain(|item| pins.contains(&item.stored_pin()));
-            items.clone()
+            (items.len() != previous_len).then(|| items.clone())
         };
-        reconcile_sidebar_pin_widgets(shell, &retained);
+        if let Some(retained) = retained {
+            reconcile_sidebar_pin_widgets(shell, &retained);
+        }
     }
     if pins.is_empty() {
         shell
@@ -851,14 +854,10 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
                     album_id,
                 } => {
                     let uri = library::source_entity_uri(&source_id, "album", &album_id);
-                    let library::CatalogRows::Albums(mut rows) =
-                        library::CatalogQuery::uris(library::CatalogKind::Album, vec![uri])
-                            .rows(&database, 0, 1, &cancellation)
-                            .await?
-                    else {
-                        unreachable!("album pin")
-                    };
-                    rows.pop().map(|row| SidebarPinItem::Album(Box::new(row)))
+                    database
+                        .album(&uri, false, &cancellation)
+                        .await?
+                        .map(|row| SidebarPinItem::Album(Box::new(row)))
                 }
                 SidebarPin::Artist {
                     source_id,
@@ -866,20 +865,9 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
                     album_artist,
                 } => {
                     let uri = library::source_entity_uri(&source_id, "artist", &artist_id);
-                    let mut query =
-                        library::CatalogQuery::uris(library::CatalogKind::Artist, vec![uri]);
-                    if let library::CatalogSubject::Uris {
-                        album_artist: role, ..
-                    } = &mut query.subject
-                    {
-                        *role = album_artist;
-                    }
-                    let library::CatalogRows::Artists(mut rows) =
-                        query.rows(&database, 0, 1, &cancellation).await?
-                    else {
-                        unreachable!("artist pin")
-                    };
-                    rows.pop()
+                    database
+                        .artist(&uri, album_artist, false, &cancellation)
+                        .await?
                         .map(|artist| SidebarPinItem::Artist(artist, album_artist))
                 }
                 SidebarPin::Genre {
@@ -887,14 +875,10 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
                     genre_id,
                 } => {
                     let uri = library::source_entity_uri(&source_id, "genre", &genre_id);
-                    let library::CatalogRows::Genres(mut rows) =
-                        library::CatalogQuery::uris(library::CatalogKind::Genre, vec![uri])
-                            .rows(&database, 0, 1, &cancellation)
-                            .await?
-                    else {
-                        unreachable!("genre pin")
-                    };
-                    rows.pop().map(SidebarPinItem::Genre)
+                    database
+                        .genre(&uri, None, &cancellation)
+                        .await?
+                        .map(SidebarPinItem::Genre)
                 }
                 SidebarPin::Playlist {
                     source_id,
@@ -904,19 +888,11 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
                         .playlist_key_by_identity(source_id.as_ref(), &playlist_id, &cancellation)
                         .await?;
                     let Some(key) = key else { continue };
-                    library::CatalogQuery::keys(
-                        library::CatalogKind::Playlist,
-                        None,
-                        (&[key]).iter().map(|key| key.raw()).collect(),
-                    )
-                    .rows(&database, 0, (&[key]).len(), &cancellation)
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Playlists(rows) => rows,
-                        _ => unreachable!("typed catalog projection"),
-                    })?
-                    .pop()
-                    .map(SidebarPinItem::Playlist)
+                    database
+                        .playlists(&[key], &cancellation)
+                        .await?
+                        .pop()
+                        .map(SidebarPinItem::Playlist)
                 }
                 SidebarPin::SmartPlaylist { playlist_id, .. } => {
                     let Some(key) = database
@@ -957,8 +933,10 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
         }
         match items {
             Some(items) => {
-                reconcile_sidebar_pin_widgets(&shell, &items);
-                shell.navigation.pin_items.replace(items);
+                if *shell.navigation.pin_items.borrow() != items {
+                    reconcile_sidebar_pin_widgets(&shell, &items);
+                    shell.navigation.pin_items.replace(items);
+                }
             }
             None => {
                 shell.navigation.pin_identity.borrow_mut().take();

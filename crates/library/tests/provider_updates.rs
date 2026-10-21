@@ -685,12 +685,12 @@ async fn first_activity_observation_publishes_without_invalidating_catalog_fresh
         let cancellation = ReadCancellation::new();
         let uri = library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
         assert_eq!(
-            library::CatalogQuery::uris(library::CatalogKind::Track, vec![(&uri).to_string()])
-                .rows(&database, 0, 1, &cancellation)
+            database
+                .tracks_by_uris(&([(&uri).to_string()]), &cancellation)
                 .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Tracks(mut rows) => rows.pop(),
-                    _ => unreachable!(),
+                .map(|rows| {
+                    let mut rows = rows;
+                    rows.pop()
                 })
                 .unwrap()
                 .unwrap()

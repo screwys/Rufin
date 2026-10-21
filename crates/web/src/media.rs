@@ -22,13 +22,10 @@ async fn metadata(
     let uri = required(&parameters, "uri")?;
     let cancel = library::ReadCancellation::new();
     if library::source_entity_parts(uri).is_some_and(|(_, kind, _)| kind == "album") {
-        let row = library::CatalogQuery::uris(library::CatalogKind::Album, vec![(uri).to_string()])
-            .rows(&products.library, 0, 1, &cancel)
+        let row = products
+            .library
+            .album(uri, false, &cancel)
             .await
-            .map(|rows| match rows {
-                library::CatalogRows::Albums(mut rows) => rows.pop(),
-                _ => unreachable!("typed catalog projection"),
-            })
             .map_err(internal)?
             .ok_or_else(|| error(StatusCode::NOT_FOUND, "Album unavailable"))?;
         let artists = row.links.album_artists.iter().map(|link|json!({"id":link.artist_key,"uri":link.media_uri,"name":link.name,"source":library::source_entity_parts(&link.media_uri).map(|(source,_,_)|source),"album_artists":true})).collect::<Vec<_>>();
@@ -37,16 +34,11 @@ async fn metadata(
             json!({"favorite":row.state.favorite,"album":null,"artists":artists}),
         ));
     }
-    let row =
-        library::CatalogQuery::uris(library::CatalogKind::Track, (&[uri.to_owned()]).to_vec())
-            .rows(&products.library, 0, (&[uri.to_owned()]).len(), &cancel)
-            .await
-            .map(|rows| match rows {
-                library::CatalogRows::Tracks(rows) => rows,
-                _ => unreachable!("typed catalog projection"),
-            })
-            .map_err(internal)?
-            .pop();
+    let row = products
+        .library
+        .track(uri, &cancel)
+        .await
+        .map_err(internal)?;
     let mut album = None;
     let mut artists = Vec::new();
     let favorite = if let Some(row) = row {
@@ -148,11 +140,10 @@ async fn random_settings(
         parameters.get("folder").map(String::as_str),
     )
     .await?;
-    let query = library::CatalogQuery {
-        subject: library::CatalogSubject::Genres {
-            source: source,
-            sort: library::CatalogSort::Title,
-        },
+    let query = library::ListRead {
+        kind: library::ListKind::Genres,
+        source: Some(source),
+        sort: library::CatalogSort::Title,
         folder: folder,
         filter: (parameters.get("q").map(String::as_str).unwrap_or("")).to_string(),
         descending: false,
@@ -161,17 +152,13 @@ async fn random_settings(
         activity: false,
     };
     let rows = query
-        .rows(
+        .genres(
             &products.library,
             number(&parameters, "offset", 0)?,
             64,
             &library::ReadCancellation::new(),
         )
         .await
-        .map(|rows| match rows {
-            library::CatalogRows::Genres(rows) => rows,
-            _ => unreachable!("catalog page projection"),
-        })
         .map_err(internal)?;
     let settings = products.settings.load().random_play.clone();
     let mut selected_genre = None;
@@ -192,25 +179,14 @@ async fn random_settings(
             .map(|keys| keys.into_iter().next().map(library::GenreKey::from_raw))
             .map_err(internal)?
         {
-            selected_genre = {
-                let mut query = library::CatalogQuery::keys(
-                    library::CatalogKind::Genre,
-                    Some(source),
-                    (&[key]).iter().map(|key| key.raw()).collect(),
-                );
-                query.folder = folder;
-                query
-                    .rows(&products.library, 0, (&[key]).len(), &cancel)
-                    .await
-                    .map(|rows| match rows {
-                        library::CatalogRows::Genres(rows) => rows,
-                        _ => unreachable!("typed catalog projection"),
-                    })
-            }
-            .map_err(internal)?
-            .into_iter()
-            .next()
-            .map(|row| json!({"id":row.genre_key,"name":row.metadata.name}));
+            selected_genre = products
+                .library
+                .genres(&[key], folder, &cancel)
+                .await
+                .map_err(internal)?
+                .into_iter()
+                .next()
+                .map(|row| json!({"id":row.genre_key,"name":row.metadata.name}));
         }
     }
     Ok(json_response(
@@ -382,68 +358,42 @@ async fn artwork(
             parameters.get("folder").map(String::as_str),
         )
         .await?;
-        {
-            let mut query = library::CatalogQuery::keys(
-                library::CatalogKind::Genre,
-                Some(source),
-                (&[key::<library::GenreKey>(&parameters, "genre")?])
-                    .iter()
-                    .map(|key| key.raw())
-                    .collect(),
-            );
-            query.folder = folder;
-            query
-                .rows(
-                    &products.library,
-                    0,
-                    (&[key::<library::GenreKey>(&parameters, "genre")?]).len(),
-                    &cancel,
-                )
-                .await
-                .map(|rows| match rows {
-                    library::CatalogRows::Genres(rows) => rows,
-                    _ => unreachable!("typed catalog projection"),
-                })
-        }
-        .map_err(internal)?
-        .pop()
-        .and_then(|row| {
-            row.artwork_binding
-                .as_ref()
-                .map(std::slice::from_ref)
-                .unwrap_or(&row.representative_artwork)
-                .get(
-                    parameters
-                        .get("part")
-                        .and_then(|part| part.parse::<usize>().ok())
-                        .unwrap_or(0),
-                )
-                .cloned()
-        })
+        products
+            .library
+            .genres(
+                &[key::<library::GenreKey>(&parameters, "genre")?],
+                folder,
+                &cancel,
+            )
+            .await
+            .map_err(internal)?
+            .into_iter()
+            .find(|row| row.source_key == source)
+            .and_then(|row| {
+                row.artwork_binding
+                    .as_ref()
+                    .map(std::slice::from_ref)
+                    .unwrap_or(&row.representative_artwork)
+                    .get(
+                        parameters
+                            .get("part")
+                            .and_then(|part| part.parse::<usize>().ok())
+                            .unwrap_or(0),
+                    )
+                    .cloned()
+            })
     } else if parameters.contains_key("playlist") {
-        library::CatalogQuery::keys(
-            library::CatalogKind::Playlist,
-            None,
-            (&[key::<library::PlaylistKey>(&parameters, "playlist")?])
-                .iter()
-                .map(|key| key.raw())
-                .collect(),
-        )
-        .rows(
-            &products.library,
-            0,
-            (&[key::<library::PlaylistKey>(&parameters, "playlist")?]).len(),
-            &cancel,
-        )
-        .await
-        .map(|rows| match rows {
-            library::CatalogRows::Playlists(rows) => rows,
-            _ => unreachable!("typed catalog projection"),
-        })
-        .map_err(internal)?
-        .into_iter()
-        .next()
-        .and_then(|row| row.artwork_binding)
+        products
+            .library
+            .playlists(
+                &[key::<library::PlaylistKey>(&parameters, "playlist")?],
+                &cancel,
+            )
+            .await
+            .map_err(internal)?
+            .into_iter()
+            .next()
+            .and_then(|row| row.artwork_binding)
     } else if parameters.contains_key("smart_playlist") {
         let (source, folder) = if parameters.contains_key("source") {
             let (source, folder) = catalog::scope(

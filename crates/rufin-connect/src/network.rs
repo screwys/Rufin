@@ -987,6 +987,7 @@ impl ConnectNetwork {
             write_frame(&mut send, &body).await?;
             send.finish()?;
             let response: Result<Vec<u8>, String> = read_frame(&mut recv).await?;
+            let response = response.map_err(anyhow::Error::msg)?;
             let _ = self
                 .events
                 .send(NetworkEvent::Reachable {
@@ -994,7 +995,6 @@ impl ConnectNetwork {
                     peer: peer.to_string(),
                 })
                 .await;
-            let response = response.map_err(anyhow::Error::msg)?;
             let route = conn
                 .paths()
                 .iter()
@@ -1695,7 +1695,7 @@ mod tests {
                 .create_playlist(
                     None,
                     "Saved",
-                    &library::TrackSelection::from_uris(vec![uri.clone()]),
+                    &library::MemberSelection::from_uris(vec![uri.clone()]),
                 )
                 .await
                 .unwrap()

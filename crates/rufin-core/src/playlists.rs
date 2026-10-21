@@ -404,7 +404,7 @@ pub async fn create_playlist(
     owner: &SourceOwner,
     source_id: Option<SourceId>,
     name: String,
-    songs: Arc<library::TrackSelection>,
+    songs: Arc<library::MemberSelection>,
     public: Option<bool>,
     current: Option<bool>,
 ) -> sources::SourceResult<Option<PlaylistCreation>> {
@@ -540,20 +540,12 @@ pub fn playlist_artwork_editing(
     playlist: PlaylistKey,
 ) -> Receiver<Result<PlaylistArtworkEditing, String>> {
     owner.reply(move |owner, database| async move {
-        let row = library::CatalogQuery::keys(
-            library::CatalogKind::Playlist,
-            None,
-            (&[playlist]).iter().map(|key| key.raw()).collect(),
-        )
-        .rows(&database, 0, (&[playlist]).len(), &ReadCancellation::new())
-        .await
-        .map(|rows| match rows {
-            library::CatalogRows::Playlists(rows) => rows,
-            _ => unreachable!("typed catalog projection"),
-        })
-        .map_err(string_error)?
-        .pop()
-        .ok_or("Playlist no longer exists")?;
+        let row = database
+            .playlists(&[playlist], &ReadCancellation::new())
+            .await
+            .map_err(string_error)?
+            .pop()
+            .ok_or("Playlist no longer exists")?;
         let writable = row.metadata_writable
             && (!row.source_owned
                 || row
@@ -861,7 +853,7 @@ pub async fn delete_playlist(
 pub async fn add_playlist_tracks(
     owner: &SourceOwner,
     playlist: PlaylistKey,
-    songs: Arc<library::TrackSelection>,
+    songs: Arc<library::MemberSelection>,
     skip_duplicates: bool,
 ) -> sources::SourceResult<usize> {
     let (sender, receiver) = async_channel::bounded(1);
@@ -938,7 +930,7 @@ pub async fn add_playlist_tracks(
 pub fn remove_playlist_entries(
     owner: &SourceOwner,
     playlist: PlaylistKey,
-    selection: library::TrackSelection,
+    selection: library::MemberSelection,
 ) -> Receiver<Result<Vec<library::TrackKey>, String>> {
     crate::playlist_files::run(owner, move |owner| async move {
         let (target, id) = playlist_source(&owner, playlist, Some(true)).await?;
@@ -950,14 +942,7 @@ pub fn remove_playlist_entries(
             .await
             .map_err(string_error)?;
         if !local
-            && let library::TrackSelection::Query {
-                query:
-                    library::CatalogQuery {
-                        subject: library::CatalogSubject::PlaylistEntries { keys: requested },
-                        ..
-                    },
-                ..
-            } = &selection
+            && let library::MemberSelection::Entries(requested) = &selection
             && entries.len() != requested.len()
         {
             return Err("Playlist entry is no longer current".into());
@@ -1098,7 +1083,7 @@ pub fn move_playlist_entry(
                     let entry = database
                         .playlist_edit_entries(
                             playlist,
-                            &library::CatalogQuery::playlist_entries(vec![entry]).selection(),
+                            &library::MemberSelection::Entries(vec![entry].into()),
                             &ReadCancellation::new(),
                         )
                         .await?
@@ -1270,7 +1255,7 @@ async fn local_playlist_changed(
     if let Err(error) = owner
         .shared
         .database
-        .mark_playlist_artwork_pending(playlist, false)
+        .refresh_incomplete_playlist_artwork(playlist, false)
         .await
     {
         owner.shared.warn_nonfatal(&error.to_string());

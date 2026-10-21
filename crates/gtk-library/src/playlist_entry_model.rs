@@ -12,7 +12,7 @@ const PLAYLIST_ENTRY_OVERSCAN: usize = 64;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaylistEntryProjectionRequest {
-    pub query: library::CatalogQuery,
+    pub query: library::MemberRead,
     pub settings: LibraryListSettings,
     pub first_row_position: usize,
 }
@@ -38,18 +38,10 @@ impl PlaylistEntryModel {
         first_row_position: usize,
         first_rows: Vec<PlaylistEntryView>,
         settings: LibraryListSettings,
+        read: library::MemberRead,
     ) -> Self {
         let request = PlaylistEntryProjectionRequest {
-            query: rufin_core::browse::BrowseRequest::new(
-                &rufin_core::route::Route::PlaylistDetail(playlist_key),
-                rufin_core::route::CollectionCategory::Tracks,
-                None,
-                None,
-                &settings,
-                8,
-            )
-            .tracks()
-            .expect("playlist route"),
+            query: read,
             settings: settings.clone(),
             first_row_position,
         };
@@ -63,12 +55,14 @@ impl PlaylistEntryModel {
                 let database = Arc::clone(&loader_database);
                 let request = load_request.borrow().clone();
                 Box::pin(async move {
-                    (&request.query)
+                    request
+                        .query
                         .rows(&database, range.start, range.len(), &cancellation)
                         .await
-                        .map(|rows| match rows {
-                            library::CatalogRows::PlaylistEntries(rows) => rows,
-                            _ => unreachable!("typed song projection"),
+                        .map(|rows| {
+                            rows.into_iter()
+                                .filter_map(library::MemberRow::into_entry)
+                                .collect()
                         })
                         .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
@@ -105,9 +99,9 @@ impl PlaylistEntryModel {
             .ready_position(|row| row.playlist_entry_key == entry)
     }
 
-    pub fn selection_input(&self, positions: &gtk::Bitset) -> library::TrackSelection {
-        library::TrackSelection::Query {
-            query: self.inner.applied.borrow().query.clone(),
+    pub fn selection_input(&self, positions: &gtk::Bitset) -> library::MemberSelection {
+        library::MemberSelection::Members {
+            read: self.inner.applied.borrow().query.clone(),
             ranges: Some(gtk_widgets::selection::selected_ranges(positions)),
         }
     }
@@ -149,9 +143,7 @@ impl PlaylistEntryModel {
         if request.settings == settings {
             return false;
         }
-        if let library::CatalogSubject::Tracks { sort, .. } = &mut request.query.subject {
-            *sort = Some(settings.sort_key.catalog_sort());
-        }
+        request.query.sort = Some(settings.sort_key.catalog_sort());
         request.query.descending = settings.descending;
         request.settings = settings;
         true

@@ -7,6 +7,7 @@ pub(crate) mod cache;
 pub(crate) mod collections;
 pub(crate) mod file_reads;
 pub(crate) mod files;
+pub(crate) mod index;
 mod observations;
 pub(crate) use cache::{remember_collection, remember_track};
 pub use observations::*;
