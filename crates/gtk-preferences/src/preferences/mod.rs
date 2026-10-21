@@ -981,7 +981,6 @@ fn general_page(
         page: adw::PreferencesPage,
         prefer_distinct_track_covers_row: adw::SwitchRow,
         external_metadata_row: adw::SwitchRow,
-        acoustid_key: adw::EntryRow,
         external_lyrics_row: adw::SwitchRow,
         language_row: adw::ComboRow,
         starting_page_row: adw::ComboRow,
@@ -1021,17 +1020,6 @@ fn general_page(
         }
     });
 
-    acoustid_key.set_text(&settings.application.acoustid_client_key);
-    let weak = Rc::downgrade(shell);
-    acoustid_key.connect_apply(move |row| {
-        if let Some(shell) = weak.upgrade() {
-            shell.settings.set_app_setting(
-                "AcoustID client key",
-                row.text().trim().to_string(),
-                |settings| &mut settings.application.acoustid_client_key,
-            );
-        }
-    });
     external_metadata_row.set_active(settings.application.external_metadata_enabled);
     let metadata_shell = Rc::clone(shell);
     external_metadata_row.connect_active_notify(move |row| {

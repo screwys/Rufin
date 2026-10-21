@@ -266,9 +266,6 @@ msgstr ""
 msgid "Accessibility"
 msgstr ""
 
-msgid "AcoustID client key"
-msgstr ""
-
 msgid "Actions"
 msgstr ""
 
@@ -297,9 +294,6 @@ msgid "Add a source to configure downloads."
 msgstr ""
 
 msgid "Add a title"
-msgstr ""
-
-msgid "Add an AcoustID client key in Preferences"
 msgstr ""
 
 msgid "Add band"

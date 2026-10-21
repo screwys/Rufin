@@ -32,11 +32,6 @@ impl MetadataEditor {
         if !settings.allows_external_metadata_lookup() {
             return Err(Error::Unavailable);
         }
-        if settings.application.acoustid_client_key.trim().is_empty() {
-            return Err(Error::InvalidInput(localization::tr(
-                "Add an AcoustID client key in Preferences",
-            )));
-        }
         let cancel = ScanCancellation(Arc::new(AtomicBool::new(false)));
         let cancelled = cancel.0.clone();
         let runtime = self.source.shared.runtime.clone();
@@ -71,13 +66,7 @@ impl MetadataEditor {
                     };
                     match outcome {
                         Ok(fingerprint) => {
-                            let matches = self
-                                .scan_matches(
-                                    offset,
-                                    &settings.application.acoustid_client_key,
-                                    fingerprint,
-                                )
-                                .await?;
+                            let matches = self.scan_matches(offset, fingerprint).await?;
                             for candidate in matches.candidates {
                                 if (count == 1 || candidate.kind == MetadataMatchKind::Release)
                                     && result.candidates.len() < 20
@@ -192,7 +181,6 @@ impl MetadataEditor {
     async fn scan_matches(
         &self,
         offset: usize,
-        key: &str,
         fingerprint: AudioFingerprint,
     ) -> Result<metadata_lookup::FingerprintMatches, Error> {
         let AudioFingerprint {
@@ -210,14 +198,11 @@ impl MetadataEditor {
         {
             return Ok(matches);
         }
-        let key = key.to_owned();
         let matches = self
             .source
             .shared
             .runtime
-            .spawn_blocking(move || {
-                metadata_lookup::lookup_fingerprint(&key, &fingerprint, duration)
-            })
+            .spawn_blocking(move || metadata_lookup::lookup_fingerprint(&fingerprint, duration))
             .await
             .map_err(scan_error)?
             .map_err(scan_error)?;

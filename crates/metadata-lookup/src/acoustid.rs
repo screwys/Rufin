@@ -3,23 +3,21 @@ use crate::{MetadataCandidate, MetadataMatchKind};
 use serde_json::Value;
 use std::{sync::Mutex, time::Duration};
 
+const CLIENT_KEY: &str = "Bz6ACWI5Hm";
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct FingerprintMatches {
     pub candidates: Vec<MetadataCandidate>,
     pub recordings: Vec<String>,
 }
 
-pub fn lookup_fingerprint(
-    key: &str,
-    fingerprint: &str,
-    duration: u64,
-) -> Result<FingerprintMatches, String> {
+pub fn lookup_fingerprint(fingerprint: &str, duration: u64) -> Result<FingerprintMatches, String> {
     static NEXT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
     wait_for_slot(&NEXT, Duration::from_millis(334));
     let response = client()?
         .post("https://api.acoustid.org/v2/lookup")
         .form(&[
-            ("client", key),
+            ("client", CLIENT_KEY),
             ("fingerprint", fingerprint),
             ("duration", &duration.to_string()),
             ("meta", "recordings releases"),
