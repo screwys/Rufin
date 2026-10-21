@@ -1692,9 +1692,6 @@ msgstr "Ühetasane"
 msgid "Folder path"
 msgstr "Kausta asukoht"
 
-msgid "Folder"
-msgstr "Kaust"
-
 msgid "Folders"
 msgstr "Kaustad"
 
@@ -2533,6 +2530,11 @@ msgstr "Ühtegi võrguseadet ei leidu"
 msgid "No playable entries were found"
 msgstr "Ühtegi esitatavat kirjet ei leidu"
 
+#, fuzzy
+#| msgid "No smart playlists yet"
+msgid "No playlists yet"
+msgstr "Ühtegi nutikat esitusloendit veel pole"
+
 msgid "No related tracks found"
 msgstr "Ühtegi seotud lugu ei leidu"
 
@@ -3231,6 +3233,9 @@ msgstr "Eemalda reegel"
 msgid "Remove search"
 msgstr "Eemalda otsing"
 
+msgid "Remove the library database? Settings and saved logins will be kept."
+msgstr ""
+
 msgid "Remove unavailable tracks"
 msgstr "Eemalda lood, mis pole saadaval"
 
@@ -3285,6 +3290,16 @@ msgstr "Eelda SMB puhul krüptimist"
 
 msgid "Reset appearance"
 msgstr "Lähtesta välimus"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database"
+msgstr "Avaldamise kuupäev"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database?"
+msgstr "Avaldamise kuupäev"
 
 msgid "Reset to defaults"
 msgstr "Taasta vaikimisi väärtus"
@@ -4542,6 +4557,9 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Folder"
+#~ msgstr "Kaust"
 
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "Loob ja salvestab praeguse loo lainekujud"

@@ -1705,9 +1705,6 @@ msgstr "Neutral"
 msgid "Folder path"
 msgstr "Ordnerpfad"
 
-msgid "Folder"
-msgstr "Ordner"
-
 msgid "Folders"
 msgstr "Ordner"
 
@@ -2551,6 +2548,11 @@ msgstr "Keine Netzwerkgeräte gefunden"
 msgid "No playable entries were found"
 msgstr "Keine abspielbaren Einträge gefunden"
 
+#, fuzzy
+#| msgid "No smart playlists yet"
+msgid "No playlists yet"
+msgstr "Noch keine Smart-Playlists"
+
 msgid "No related tracks found"
 msgstr "Keine verwandten Titel gefunden"
 
@@ -3251,6 +3253,9 @@ msgstr "Regel entfernen"
 msgid "Remove search"
 msgstr "Suche entfernen"
 
+msgid "Remove the library database? Settings and saved logins will be kept."
+msgstr ""
+
 msgid "Remove unavailable tracks"
 msgstr "Nicht verfügbare Titel entfernen"
 
@@ -3305,6 +3310,16 @@ msgstr "SMB-Verschlüsselung anfordern"
 
 msgid "Reset appearance"
 msgstr "Darstellung zurücksetzen"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database"
+msgstr "Veröffentlichungsdatum"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database?"
+msgstr "Veröffentlichungsdatum"
 
 msgid "Reset to defaults"
 msgstr "Auf Standardeinstellungen zurücksetzen"
@@ -4563,6 +4578,9 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Folder"
+#~ msgstr "Ordner"
 
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr ""

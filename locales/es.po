@@ -1699,9 +1699,6 @@ msgstr "Plano"
 msgid "Folder path"
 msgstr "Ruta de la carpeta"
 
-msgid "Folder"
-msgstr "Carpeta"
-
 msgid "Folders"
 msgstr "Carpetas"
 
@@ -2540,6 +2537,11 @@ msgstr "No se encontraron dispositivos en red"
 msgid "No playable entries were found"
 msgstr "No se encontraron entradas reproducibles"
 
+#, fuzzy
+#| msgid "No smart playlists yet"
+msgid "No playlists yet"
+msgstr "Aún no hay Listas de Reproducción Inteligentes"
+
 msgid "No related tracks found"
 msgstr "No se encontraron pistas relacionadas"
 
@@ -3237,6 +3239,9 @@ msgstr "Remover regla"
 msgid "Remove search"
 msgstr "Remover búsqueda"
 
+msgid "Remove the library database? Settings and saved logins will be kept."
+msgstr ""
+
 msgid "Remove unavailable tracks"
 msgstr "Quitar pistas no disponibles"
 
@@ -3291,6 +3296,16 @@ msgstr "Necesita encriptación SMB"
 
 msgid "Reset appearance"
 msgstr "Reiniciar la apariencia"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database"
+msgstr "Fecha de salida"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database?"
+msgstr "Fecha de salida"
 
 msgid "Reset to defaults"
 msgstr "Restablecer los ajustes predeterminados"
@@ -4553,6 +4568,9 @@ msgstr "La opción de actualización automática de {app_name} no es válida."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenido al instalador de Rufin"
+
+#~ msgid "Folder"
+#~ msgstr "Carpeta"
 
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "Generar y guardar en caché las ondas de audio para la pista actual"
