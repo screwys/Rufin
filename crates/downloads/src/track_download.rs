@@ -769,7 +769,7 @@ pub(super) async fn download_access(
     completed_size: Option<i64>,
 ) -> Result<library::LocalAccessWrite, String> {
     let loudness_analysis_key = database
-        .waveform_analysis_key(media_uri)
+        .audio_analysis_key(media_uri)
         .await
         .map_err(|error| error.to_string())?;
     let metadata = paths

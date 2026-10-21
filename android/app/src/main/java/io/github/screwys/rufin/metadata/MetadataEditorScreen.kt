@@ -101,9 +101,12 @@ private fun MetadataFields(connection: MetadataConnection, state: MetadataEditor
         item {
             if (state.trackCount > 1UL) Text(state.scopeSummary,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (state.canScan) FilledTonalButton(connection::scan, enabled = editable && state.externalLookupAllowed) { Text(translate("Scan")) }
             FilledTonalButton({ connection.lookup(lookupQuery) }, enabled = editable && state.externalLookupAllowed) {
                 RufinIcon("rufin-search-symbolic", null, Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp)); Text(translate("Lookup"))
+            }
             }
         }
         connection.lookupResults?.let { candidates ->

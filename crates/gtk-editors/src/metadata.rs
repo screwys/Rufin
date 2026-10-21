@@ -35,6 +35,8 @@ struct Editor {
     model: RefCell<Arc<MetadataEditor>>,
     status: gtk::Label,
     lookup: gtk::Button,
+    scan: gtk::Button,
+    lookup_task: RefCell<Option<gtk::glib::JoinHandle<()>>>,
     save: gtk::Button,
     cancel: gtk::Button,
     busy: Cell<bool>,
@@ -53,6 +55,14 @@ struct Editor {
     scope_label: gtk::Label,
     scope_spacer: gtk::Box,
     lock_group: adw::PreferencesGroup,
+}
+
+impl Drop for Editor {
+    fn drop(&mut self) {
+        if let Some(task) = self.lookup_task.get_mut().take() {
+            task.abort();
+        }
+    }
 }
 
 pub fn metadata_error_dialog(message: &str) -> adw::Dialog {
@@ -101,7 +111,7 @@ fn build_editor_view(
         lyrics_host: gtk::Box,
         scope_label: gtk::Label,
         scope_spacer: gtk::Box,
-        lookup: gtk::Button,
+        lookup: gtk::Button, scan: gtk::Button,
         status: gtk::Label,
         cancel: gtk::Button,
         save: gtk::Button,
@@ -148,6 +158,8 @@ fn build_editor_view(
         lock_group,
         status,
         lookup,
+        scan,
+        lookup_task: RefCell::new(None),
         save,
         cancel,
         busy: Cell::new(false),
@@ -446,20 +458,41 @@ fn refresh_save_state(editor: &Editor) {
     editor
         .lookup
         .set_sensitive(editable && state.external_lookup_allowed);
+    editor.scan.set_visible(state.can_scan);
+    editor
+        .scan
+        .set_sensitive(editable && state.external_lookup_allowed);
 }
 
-fn lookup_metadata(editor: &Rc<Editor>, query: String) {
-    editor.set_busy(true, &tr("Looking up..."));
+fn lookup_metadata(editor: &Rc<Editor>, query: String, scan: bool) {
+    editor.set_busy(
+        true,
+        &if scan {
+            tr("Scanning...")
+        } else {
+            tr("Looking up...")
+        },
+    );
     editor.lookup_panel.set_visible(true);
     editor.status.set_visible(false);
     let model = editor.model().clone();
     let weak = Rc::downgrade(editor);
-    gtk::glib::spawn_future_local(async move {
-        let result = model.lookup(query).await;
+    let task = gtk::glib::spawn_future_local(async move {
+        let result = if scan {
+            model
+                .scan()
+                .await
+                .map(|result| (result.candidates, result.failure))
+        } else {
+            model
+                .lookup(query)
+                .await
+                .map(|candidates| (candidates, None))
+        };
         if let Some(editor) = weak.upgrade() {
             editor.lookup_results.remove_all();
             match result {
-                Ok(candidates) => {
+                Ok((candidates, failure)) => {
                     if candidates.is_empty() {
                         editor.show_error(&tr("No results"));
                     }
@@ -473,26 +506,36 @@ fn lookup_metadata(editor: &Rc<Editor>, query: String) {
                         editor.lookup_results.append(&row);
                     }
                     editor.candidates.replace(candidates);
+                    if let Some(failure) = failure {
+                        editor.show_error(&failure);
+                    }
                 }
                 Err(error) => editor.show_error(&error.to_string()),
             }
             editor.set_busy(false, &tr("Lookup"));
         }
     });
+    editor.lookup_task.replace(Some(task));
 }
 
 fn connect_lookup(editor: &Rc<Editor>, apply: &gtk::Button) {
     let weak = Rc::downgrade(editor);
+    editor.scan.connect_clicked(move |_| {
+        if let Some(editor) = weak.upgrade() {
+            lookup_metadata(&editor, String::new(), true);
+        }
+    });
+    let weak = Rc::downgrade(editor);
     editor.lookup.connect_clicked(move |_| {
         if let Some(editor) = weak.upgrade() {
             let query = editor.lookup_query.text().to_string();
-            lookup_metadata(&editor, query);
+            lookup_metadata(&editor, query, false);
         }
     });
     let weak = Rc::downgrade(editor);
     editor.lookup_query.connect_activate(move |entry| {
         if let Some(editor) = weak.upgrade() {
-            lookup_metadata(&editor, entry.text().to_string());
+            lookup_metadata(&editor, entry.text().to_string(), false);
         }
     });
     let weak_apply = apply.downgrade();
@@ -626,6 +669,7 @@ impl Editor {
         self.busy.set(true);
         self.artwork.set_busy(true);
         self.lookup.set_sensitive(false);
+        self.scan.set_sensitive(false);
         self.save.set_sensitive(false);
         self.save
             .set_label(&if fully_saved { tr("Saved") } else { tr("Save") });

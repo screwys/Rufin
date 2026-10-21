@@ -3343,7 +3343,7 @@ mod tests {
         );
         assert!(
             peer.database
-                .waveform_analysis_key(&analyzed_uri)
+                .audio_analysis_key(&analyzed_uri)
                 .await
                 .unwrap()
                 .is_none()

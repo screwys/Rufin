@@ -4,7 +4,7 @@ pub use search::{
     MetadataCandidate, MetadataLookup, MetadataMatchKind, lookup_metadata, search_metadata,
 };
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use reqwest::Url;
@@ -52,6 +52,7 @@ pub fn metadata_identity(
     keys.iter().find_map(|(key, kind)| {
         let id = usable(values.get(*key).map(String::as_str))?.to_string();
         Some(MetadataCandidate {
+            from_fingerprint: false,
             title: values
                 .get("title")
                 .filter(|title| !title.trim().is_empty())
@@ -286,19 +287,8 @@ fn send_with_musicbrainz_retry<T>(
 }
 
 fn wait_for_musicbrainz_slot() {
-    static NEXT_REQUEST: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
-    let lock = NEXT_REQUEST.get_or_init(|| Mutex::new(None));
-    let Ok(mut next_request) = lock.lock() else {
-        return;
-    };
-    let now = Instant::now();
-    let slot = next_request.map_or(now, |next| next.max(now));
-    *next_request = Some(slot + MUSICBRAINZ_MIN_INTERVAL);
-    drop(next_request);
-    let delay = slot.saturating_duration_since(now);
-    if !delay.is_zero() {
-        std::thread::sleep(delay);
-    }
+    static NEXT: Mutex<Option<Instant>> = Mutex::new(None);
+    crate::http::wait_for_slot(&NEXT, MUSICBRAINZ_MIN_INTERVAL);
 }
 
 fn json_ids(value: &Value, collection_pointer: &str) -> Vec<String> {

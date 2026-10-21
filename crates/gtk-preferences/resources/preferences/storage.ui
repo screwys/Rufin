@@ -250,6 +250,70 @@
                   </object>
                 </child>
                 <child>
+                  <object class="AdwPreferencesRow" id="fingerprints_row">
+                    <property name="title" translatable="yes">Audio fingerprints</property>
+                    <property name="activatable">false</property>
+                    <property name="focusable">true</property>
+                    <property name="child">
+                      <object class="GtkBox">
+                        <property name="spacing">12</property>
+                        <property name="margin-top">10</property>
+                        <property name="margin-bottom">10</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <child>
+                          <object class="AdwWrapBox">
+                            <property name="child-spacing">8</property>
+                            <property name="line-spacing">2</property>
+                            <property name="hexpand">true</property>
+                            <property name="valign">center</property>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label" translatable="yes">Audio fingerprints</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="fingerprints_count">
+                                <property name="label">...</property>
+                                <property name="xalign">0</property>
+                                <style>
+                                  <class name="dim-label" />
+                                  <class name="caption" />
+                                </style>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="fingerprints_size">
+                            <property name="label">...</property>
+                            <property name="valign">center</property>
+                            <style>
+                              <class name="numeric" />
+                              <class name="dim-label" />
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkButton" id="clear_fingerprints">
+                            <property name="tooltip-text" translatable="yes">Clear fingerprint cache</property>
+                            <property name="valign">center</property>
+                            <property name="sensitive">false</property>
+                            <property name="icon-name">rufin-user-trash-symbolic</property>
+                            <style>
+                              <class name="flat" />
+                            </style>
+                            <accessibility>
+                              <property name="label" translatable="yes">Clear fingerprint cache</property>
+                            </accessibility>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
                   <object class="AdwPreferencesRow" id="artwork_row">
                     <property name="title" translatable="yes">Artwork</property>
                     <property name="activatable">false</property>

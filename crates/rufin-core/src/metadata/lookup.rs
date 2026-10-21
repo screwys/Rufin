@@ -84,7 +84,14 @@ impl MetadataEditor {
         }
         let mut state = self.state();
         let changes = lookup
-            .changes(self.draft.kind, &state.values())
+            .changes(
+                self.draft.kind,
+                &state.values(),
+                state
+                    .scan
+                    .as_ref()
+                    .map_or(&[], |(_, matches)| matches.recordings.as_slice()),
+            )
             .ok_or_else(|| Error::InvalidInput(tr(msgid("No matching track in this release"))))?;
         state.apply_identified(&self.draft, changes, fill_missing);
         Ok(())

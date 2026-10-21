@@ -32,6 +32,7 @@ pub use connect::connect_current_kind;
 mod connect_media;
 mod db;
 mod favorites;
+mod fingerprint;
 mod home;
 mod keys;
 mod local;

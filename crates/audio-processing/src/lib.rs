@@ -4,7 +4,10 @@ use gst::prelude::*;
 use gstreamer as gst;
 use std::sync::OnceLock;
 
+mod decode;
 pub mod effects;
+mod fingerprint;
+pub use fingerprint::{AudioFingerprint, FINGERPRINT_VERSION, fingerprint_audio};
 mod loudness;
 mod media_input;
 pub use media_input::{ResolvedStream, StreamWindow};

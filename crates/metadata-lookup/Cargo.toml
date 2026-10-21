@@ -19,6 +19,7 @@ sources.workspace = true
 library.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 serde_json.workspace = true
+serde.workspace = true
 tracing.workspace = true
 
 [lints]

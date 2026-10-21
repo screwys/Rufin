@@ -37,6 +37,7 @@ pub struct MetadataEditorSnapshot {
     pub can_remove_artwork: bool,
     pub has_current_artwork: bool,
     pub external_lookup_allowed: bool,
+    pub can_scan: bool,
     pub search_artist: String,
     pub search_album: Option<String>,
 }
@@ -127,6 +128,7 @@ impl MetadataEditor {
             },
             has_current_artwork: state.current.is_some(),
             external_lookup_allowed: self.external_lookup_allowed,
+            can_scan: self.draft.kind == SourceEntityKind::Track,
             search_artist,
             search_album,
         }
@@ -319,6 +321,7 @@ pub(super) struct Editing {
     pub(super) values: MetadataChanges,
     pub(super) touched: HashSet<String>,
     pub(super) lyrics: Option<super::lyrics::LyricsEdit>,
+    pub(super) scan: Option<(String, metadata_lookup::FingerprintMatches)>,
     pub(super) identified: HashMap<String, IdentifiedField>,
     pub(super) committed: Option<bool>,
     #[serde(skip)]
@@ -341,6 +344,7 @@ impl Editing {
             values: MetadataChanges::new(),
             touched: HashSet::new(),
             lyrics: None,
+            scan: None,
             identified: HashMap::new(),
             committed: None,
             artwork: None,

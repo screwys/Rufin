@@ -292,6 +292,13 @@ impl NativeFile {
         }
     }
 
+    fn analysis_key(&self, revision: Option<&str>) -> [u8; 32] {
+        let mut hash = blake3::Hasher::new();
+        hash.update(self.media_uri.as_bytes());
+        hash.update(revision.unwrap_or_default().as_bytes());
+        *hash.finalize().as_bytes()
+    }
+
     pub(crate) async fn prepare(&self, expected: Option<&str>) -> Result<PreparedFile, Error> {
         if self.cue {
             return Err(Error::Unavailable);
@@ -429,11 +436,28 @@ impl PreparedFile {
         Ok(self)
     }
 
+    pub(crate) async fn preserve_fingerprint(&self, database: &Database) -> Result<(), Error> {
+        let previous = self.target.analysis_key(self.revision.as_deref());
+        let current = self
+            .target
+            .analysis_key(self.target.revision().await?.as_deref());
+        database
+            .preserve_fingerprint(&self.target.media_uri, &previous, &current)
+            .await
+            .map_err(failure)
+    }
+
     async fn write_catalog(
         &self,
         source: &Source,
         catalog: &mut library::Catalog<'_>,
     ) -> Result<(), Error> {
+        self.preserve_fingerprint(catalog.database).await?;
+        let previous = catalog
+            .database
+            .audio_analysis_key(&self.target.media_uri)
+            .await
+            .map_err(failure)?;
         let result: Result<(), Error> = async {
             let (observation, facts) = match &self.target.location {
                 FileLocation::Remote { source, path } => {
@@ -480,6 +504,13 @@ impl PreparedFile {
                 )
                 .await
                 .map_err(failure)?;
+            if let Some(previous) = previous {
+                catalog
+                    .database
+                    .preserve_audio_analysis(&self.target.media_uri, &previous)
+                    .await
+                    .map_err(failure)?;
+            }
             Ok(())
         }
         .await;
@@ -543,6 +574,14 @@ pub struct FileEditSession {
 }
 
 impl FileEditSession {
+    pub async fn audio_revision(&self) -> Result<Option<[u8; 32]>, Error> {
+        let file = self.single.as_ref().ok_or(Error::Unavailable)?;
+        Ok(file
+            .revision()
+            .await?
+            .map(|revision| file.analysis_key(Some(&revision))))
+    }
+
     pub fn lyrics_storage(&self) -> Vec<crate::LyricsStorage> {
         self.single
             .as_ref()
@@ -563,7 +602,9 @@ impl FileEditSession {
             return source.refresh_written_lyrics().await;
         }
         let file = self.single.as_ref().ok_or(Error::Unavailable)?;
-        file.save_lyrics(text, sidecar, || false).await?;
+        if let Some(saved) = file.save_lyrics(text, sidecar, || false).await? {
+            saved.preserve_fingerprint(database).await?;
+        }
         if !sidecar {
             file.publish_direct(database).await?;
         }
@@ -939,6 +980,9 @@ impl FileEditSession {
                             Err(error) => return Err(error),
                         };
                         saved = true;
+                        if mapped || self.source.is_none() {
+                            committed.preserve_fingerprint(database).await?;
+                        }
                         if !mapped && let Some(source) = &self.source {
                             committed
                                 .write_catalog(source, catalog.as_mut().unwrap())
@@ -1219,6 +1263,7 @@ impl Source {
                     .save_lyrics(lyrics, sidecar, || self.is_retired())
                     .await?
                 {
+                    committed.preserve_fingerprint(database).await?;
                     if matches!(
                         self.implementation,
                         Implementation::Local(_) | Implementation::Files(_)

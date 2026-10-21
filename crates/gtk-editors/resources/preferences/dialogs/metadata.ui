@@ -129,6 +129,7 @@
                                         <property name="hexpand">true</property>
                                       </object>
                                     </child>
+                                    <child><object class="GtkButton" id="scan"><property name="label" translatable="yes">Scan</property></object></child>
                                     <child>
                                       <object class="GtkButton" id="lookup">
                                         <property name="label" translatable="yes">Lookup</property>

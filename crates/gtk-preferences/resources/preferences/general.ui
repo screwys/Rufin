@@ -92,6 +92,7 @@
             <property name="title" translatable="yes">External metadata lookup</property>
           </object>
         </child>
+        <child><object class="AdwEntryRow" id="acoustid_key"><property name="title" translatable="yes">AcoustID client key</property><property name="show-apply-button">true</property></object></child>
         <child>
           <object class="AdwSwitchRow" id="external_lyrics_row">
             <property name="title" translatable="yes">External lyrics lookup</property>

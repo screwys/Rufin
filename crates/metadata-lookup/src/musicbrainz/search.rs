@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum MetadataMatchKind {
     Recording,
@@ -9,18 +9,20 @@ pub enum MetadataMatchKind {
     Artist,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct MetadataCandidate {
     pub id: String,
     pub kind: MetadataMatchKind,
     pub title: String,
     pub detail: String,
+    pub from_fingerprint: bool,
 }
 
 pub struct MetadataLookup {
     kind: MetadataMatchKind,
     value: Value,
+    from_fingerprint: bool,
 }
 
 pub fn search_metadata(
@@ -133,6 +135,7 @@ pub fn search_metadata(
             }
             Some(MetadataCandidate {
                 id,
+                from_fingerprint: false,
                 kind: match_kind,
                 title,
                 detail: detail.join(" · "),
@@ -157,6 +160,7 @@ pub fn lookup_metadata(candidate: &MetadataCandidate) -> Result<MetadataLookup, 
     let value = fetch_musicbrainz_entity(root, &candidate.id, inc, "MusicBrainz lookup")?
         .ok_or_else(|| "MusicBrainz did not return this result".to_string())?;
     Ok(MetadataLookup {
+        from_fingerprint: candidate.from_fingerprint,
         kind: candidate.kind,
         value,
     })
@@ -167,6 +171,7 @@ impl MetadataLookup {
         &self,
         kind: SourceEntityKind,
         values: &MetadataChanges,
+        recordings: &[String],
     ) -> Option<MetadataChanges> {
         let id = text(&self.value, "id")?;
         match self.kind {
@@ -177,7 +182,15 @@ impl MetadataLookup {
                 ("musicbrainz_artist_id", Some(id)),
             ])),
             MetadataMatchKind::Release if kind == SourceEntityKind::Track => {
-                let track_id = match_release_track(&self.value, values)?;
+                let track_id = match_release_track(
+                    &self.value,
+                    values,
+                    if self.from_fingerprint {
+                        recordings
+                    } else {
+                        &[]
+                    },
+                )?;
                 track_from_release(&self.value, &track_id)
             }
             MetadataMatchKind::Release => Some(album_from_release(&self.value, &id)),
@@ -222,8 +235,12 @@ fn normalized(value: &str) -> String {
         .collect()
 }
 
-fn match_release_track(release: &Value, values: &MetadataChanges) -> Option<String> {
-    let tracks = release
+fn match_release_track(
+    release: &Value,
+    values: &MetadataChanges,
+    recordings: &[String],
+) -> Option<String> {
+    let mut tracks = release
         .get("media")?
         .as_array()?
         .iter()
@@ -244,6 +261,20 @@ fn match_release_track(release: &Value, values: &MetadataChanges) -> Option<Stri
             None
         }
     };
+    if !recordings.is_empty() {
+        tracks.retain(|(_, track)| {
+            track
+                .pointer("/recording/id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| recordings.iter().any(|recording| recording == id))
+        });
+        if let Some(id) = unique(tracks.clone()) {
+            return Some(id);
+        }
+        if tracks.is_empty() {
+            return None;
+        }
+    }
     for key in ["musicbrainz_release_track_id", "musicbrainz_recording_id"] {
         if !value(key).is_empty() {
             let found = tracks

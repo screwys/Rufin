@@ -45,6 +45,7 @@ pub(super) fn page(
         unavailable_text: gtk::Label,
         waveforms_count: gtk::Label, waveforms_size: gtk::Label, clear_waveforms: gtk::Button,
         loudness_count: gtk::Label, loudness_size: gtk::Label, clear_loudness: gtk::Button,
+        fingerprints_count: gtk::Label, fingerprints_size: gtk::Label, clear_fingerprints: gtk::Button,
         artwork_count: gtk::Label, artwork_size: gtk::Label, clear_artwork: gtk::Button,
         lyrics_count: gtk::Label, lyrics_size: gtk::Label, clear_lyrics: gtk::Button,
         dictionary_size: gtk::Label, clear_dictionary: gtk::Button,
@@ -130,6 +131,12 @@ pub(super) fn page(
     storage_page.connect_destroy(move |_| task.abort());
 
     let controls = [
+        (
+            CacheKind::Fingerprints,
+            Some(fingerprints_count),
+            fingerprints_size,
+            clear_fingerprints,
+        ),
         (
             CacheKind::Waveforms,
             Some(waveforms_count),

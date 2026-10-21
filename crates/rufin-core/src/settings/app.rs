@@ -197,6 +197,12 @@ macro_rules! preference_group {
     };
 }
 
+fn default_acoustid_client_key() -> String {
+    option_env!("RUFIN_ACOUSTID_CLIENT_KEY")
+        .unwrap_or_default()
+        .to_string()
+}
+
 preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] ApplicationPreferences, application, {
     #[serde(default = "default_starting_page")]
     starting_page: SidebarRouteItem = default_starting_page() => set_starting_page;
@@ -205,6 +211,8 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     cast_proxy_enabled: bool = false => set_cast_proxy_enabled;
     #[serde(default = "default_true")]
     external_metadata_enabled: bool = true => set_external_metadata_enabled;
+    #[serde(default = "default_acoustid_client_key")]
+    acoustid_client_key: String = default_acoustid_client_key() => set_acoustid_client_key;
     #[serde(default)]
     prefer_distinct_track_covers: bool = false => set_prefer_distinct_track_covers;
     notifications_enabled: bool = false => set_notifications_enabled;
@@ -409,6 +417,8 @@ impl Settings {
             .auto_dj_refill_threshold
             .clamp(MIN_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD);
         self.lastfm_api_key = self.lastfm_api_key.trim().to_string();
+        self.application.acoustid_client_key =
+            self.application.acoustid_client_key.trim().to_string();
         self.cast_network_interface = self
             .cast_network_interface
             .as_deref()

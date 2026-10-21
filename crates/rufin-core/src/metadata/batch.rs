@@ -17,13 +17,13 @@ fn error(error: impl std::fmt::Display) -> Error {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct Record {
+pub(super) struct Record {
     draft: MetadataDraft,
-    state: Editing,
+    pub(super) state: Editing,
     failure: Option<String>,
 }
 
-struct Records {
+pub(super) struct Records {
     file: File,
     offsets: Vec<(u64, u64)>,
     artwork: HashMap<usize, ArtworkChange>,
@@ -31,7 +31,7 @@ struct Records {
 }
 
 impl Records {
-    fn read(&mut self, index: usize) -> Result<Record, Error> {
+    pub(super) fn read(&mut self, index: usize) -> Result<Record, Error> {
         let (offset, length) = self.offsets[index];
         self.file.seek(SeekFrom::Start(offset)).map_err(error)?;
         let mut bytes = vec![0; length as usize];
@@ -41,7 +41,7 @@ impl Records {
         Ok(record)
     }
 
-    fn write(&mut self, index: usize, record: &Record) -> Result<(), Error> {
+    pub(super) fn write(&mut self, index: usize, record: &Record) -> Result<(), Error> {
         if record.state.has_changes() || record.state.artwork.is_some() {
             self.changed.insert(index);
         } else {
@@ -220,11 +220,12 @@ impl MetadataBatch {
         }
         let selected = indices.clone();
         let selected_len = selected.len();
-        let (draft, current, identified, artwork, has_artwork, lyrics) = self
+        let (draft, current, identified, artwork, has_artwork, lyrics, scan) = self
             .work(move |records| {
                 let mut identified = HashSet::new();
                 let mut has_artwork = false;
                 let mut lyrics = None;
+                let mut scan = None;
                 let mut artwork: Option<Option<ArtworkChange>> = None;
                 let mut combined: Option<MetadataDraft> = None;
                 let mut originals: Option<MetadataDraft> = None;
@@ -232,6 +233,7 @@ impl MetadataBatch {
                     let record = records.read(index)?;
                     if selected_len == 1 {
                         lyrics = record.state.lyrics.clone();
+                        scan = record.state.scan.clone();
                     }
                     has_artwork |= match &record.state.artwork {
                         Some(ArtworkChange::Replace(_)) => true,
@@ -279,6 +281,7 @@ impl MetadataBatch {
                     artwork.flatten(),
                     has_artwork,
                     lyrics,
+                    scan,
                 ))
             })
             .await?;
@@ -287,6 +290,7 @@ impl MetadataBatch {
         let mut state = Editing::new(&current);
         state.artwork = artwork.clone();
         state.lyrics = lyrics;
+        state.scan = scan;
         let storage = state.storage;
         for key in identified {
             state.identified.insert(
@@ -408,7 +412,7 @@ impl MetadataBatch {
 }
 
 impl MetadataBatch {
-    async fn work<T: Send + 'static>(
+    pub(super) async fn work<T: Send + 'static>(
         self: &Arc<Self>,
         work: impl FnOnce(&mut Records) -> Result<T, Error> + Send + 'static,
     ) -> Result<T, Error> {
@@ -435,9 +439,15 @@ impl MetadataBatch {
                 let mut unmatched = Vec::new();
                 for index in indices {
                     let mut record = records.read(index)?;
-                    if let Some(changes) =
-                        lookup.changes(SourceEntityKind::Track, &record.state.values())
-                    {
+                    if let Some(changes) = lookup.changes(
+                        SourceEntityKind::Track,
+                        &record.state.values(),
+                        record
+                            .state
+                            .scan
+                            .as_ref()
+                            .map_or(&[], |(_, matches)| matches.recordings.as_slice()),
+                    ) {
                         record
                             .state
                             .apply_identified(&record.draft, changes, fill_missing);
@@ -503,7 +513,7 @@ impl MetadataBatch {
         .map(|(session, _)| session)
     }
 
-    async fn read(self: &Arc<Self>, index: usize) -> Result<Record, Error> {
+    pub(super) async fn read(self: &Arc<Self>, index: usize) -> Result<Record, Error> {
         self.work(move |records| records.read(index)).await
     }
 

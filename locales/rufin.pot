@@ -266,6 +266,9 @@ msgstr ""
 msgid "Accessibility"
 msgstr ""
 
+msgid "AcoustID client key"
+msgstr ""
+
 msgid "Actions"
 msgstr ""
 
@@ -294,6 +297,9 @@ msgid "Add a source to configure downloads."
 msgstr ""
 
 msgid "Add a title"
+msgstr ""
+
+msgid "Add an AcoustID client key in Preferences"
 msgstr ""
 
 msgid "Add band"
@@ -484,6 +490,9 @@ msgid "Audio effects"
 msgstr ""
 
 msgid "Audio fade on play/pause"
+msgstr ""
+
+msgid "Audio fingerprints"
 msgstr ""
 
 msgid "Audio output"
@@ -747,6 +756,9 @@ msgstr ""
 msgid "Clear fetched lyrics for this track"
 msgstr ""
 
+msgid "Clear fingerprint cache"
+msgstr ""
+
 msgid "Clear lyrics cache"
 msgstr ""
 
@@ -990,6 +1002,12 @@ msgstr ""
 
 msgid "Could not save diagnostic log"
 msgstr ""
+
+#, rust-format
+msgid "Could not scan {count} track: {reason}"
+msgid_plural "Could not scan {count} tracks: {reason}"
+msgstr[0] ""
+msgstr[1] ""
 
 #, rust-format
 msgid "Could not update Rufin to {version}"
@@ -3288,7 +3306,13 @@ msgstr ""
 msgid "Saving..."
 msgstr ""
 
+msgid "Scan"
+msgstr ""
+
 msgid "Scanning tracks"
+msgstr ""
+
+msgid "Scanning..."
 msgstr ""
 
 msgid "Schedule"

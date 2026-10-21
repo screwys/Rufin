@@ -121,6 +121,7 @@ rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", 
 rustls-native-certs = "0.8.4"
 rustix = { version = "1.1.4", features = ["fs"] }
 rustfft = "6.2.0"
+chromaprint = { package = "chromaprint-next", git = "https://github.com/attilagyorffy/chromaprint-next", rev = "7a384eee09caf17b4f6241f481dd784c2e937d9a" }
 syn = { version = "3.0.0", features = ["full", "visit"] }
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0.150"

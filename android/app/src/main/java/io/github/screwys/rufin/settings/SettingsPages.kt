@@ -131,6 +131,9 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                 SettingsGroup(translate("Metadata")) {
                     SettingsSwitch(translate("Prefer distinct track covers"), state.preferDistinctTrackCovers) { preferences.changePreference { setPreferDistinctTrackCovers(it) } }
                     SettingsSwitch(translate("External metadata lookup"), state.externalMetadataEnabled) { preferences.changePreference { setExternalMetadataEnabled(it) } }
+                    var acoustidKey by remember(state.acoustidClientKey) { mutableStateOf(state.acoustidClientKey) }
+                    OutlinedTextField(acoustidKey, { acoustidKey = it }, label = { Text(translate("AcoustID client key")) }, singleLine = true)
+                    TextButton({ preferences.changePreference { setAcoustidClientKey(acoustidKey.trim()) } }) { Text(translate("Apply")) }
                     player.settings?.lyrics?.let { lyrics -> SettingsSwitch(translate("External lyrics lookup"), lyrics.externalLyricsEnabled) { player.lyricsPreference { setExternalLyricsEnabled(it) } } }
                 }
             }

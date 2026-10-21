@@ -149,6 +149,7 @@ internal fun StorageSettingsPage(model: RufinConnection, preferences: Preference
 private fun CacheKind.title() = when (this) {
     CacheKind.WAVEFORMS -> "Waveforms"
     CacheKind.LOUDNESS -> "EBU R128 analysis"
+    CacheKind.FINGERPRINTS -> "Audio fingerprints"
     CacheKind.ARTWORK -> "Artwork"
     CacheKind.LYRICS -> "Lyrics"
     CacheKind.JAPANESE_DICTIONARY -> "Japanese dictionary"
@@ -157,6 +158,7 @@ private fun CacheKind.title() = when (this) {
 private fun CacheKind.clearTitle() = when (this) {
     CacheKind.WAVEFORMS -> "Clear waveform cache"
     CacheKind.LOUDNESS -> "Clear EBU R128 cache"
+    CacheKind.FINGERPRINTS -> "Clear fingerprint cache"
     CacheKind.ARTWORK -> "Clear artwork cache"
     CacheKind.LYRICS -> "Clear lyrics cache"
     CacheKind.JAPANESE_DICTIONARY -> "Clear Japanese dictionary"

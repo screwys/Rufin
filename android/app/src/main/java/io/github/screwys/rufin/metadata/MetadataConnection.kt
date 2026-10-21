@@ -112,6 +112,11 @@ internal class MetadataConnection(
         }
     }
 
+    fun scan() = action { editor ->
+        val result = editor.scan()
+        lookupResults = result.candidates
+        result.failure?.let { failure = IllegalStateException(it) }
+    }
     fun lookup(query: String) = action { lookupResults = it.lookup(query) }
     fun applyLookup(candidate: MetadataCandidate, fillMissing: Boolean) = action { it.applyLookup(candidate, fillMissing) }
     fun save() = action { it.save(); onSaved() }

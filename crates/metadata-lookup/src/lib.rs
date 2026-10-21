@@ -1,6 +1,8 @@
 #[cfg(feature = "bindings")]
 uniffi::setup_scaffolding!();
 
+mod acoustid;
+pub use acoustid::{FingerprintMatches, lookup_fingerprint};
 mod cover;
 mod http;
 mod images;

@@ -1,8 +1,7 @@
 //! Cancellable waveform decoding for one prepared audio stream.
 
-use super::ensure_gstreamer_initialized;
+use super::decode::DecodePipeline;
 use crate::ResolvedStream;
-use gst::prelude::*;
 use gstreamer as gst;
 use std::time::{Duration, Instant};
 const WAVEFORM_GENERATION_TIMEOUT: Duration = Duration::from_secs(180);
@@ -12,108 +11,31 @@ pub fn generate_waveform_peaks_cancellable(
     stream: &ResolvedStream,
     cancelled: impl Fn() -> bool,
 ) -> Result<Vec<(f64, f64)>, String> {
-    ensure_gstreamer_initialized()?;
-    if cancelled() {
-        return Err("waveform generation cancelled".to_string());
-    }
-
-    let pipeline =
-        gst::parse::launch("uridecodebin name=decoder ! audioconvert ! audio/x-raw,channels=2 ! level name=level interval=250000000 ! fakesink name=sink")
-            .map_err(|error| error.to_string())?;
-    let bin = pipeline
-        .downcast_ref::<gst::Bin>()
-        .ok_or_else(|| "waveform pipeline is not a bin".to_string())?;
-    let decoder = bin
-        .by_name("decoder")
-        .ok_or_else(|| "waveform pipeline is missing decoder".to_string())?;
-    let trust_invalid_certificate = stream.trust_invalid_certificate();
-    super::configure_sources(&decoder, move || trust_invalid_certificate);
-    decoder.set_property("uri", stream.uri());
-
-    let sink = bin
-        .by_name("sink")
-        .ok_or_else(|| "waveform pipeline is missing sink".to_string())?;
-    sink.set_property("qos", false);
-    sink.set_property("sync", false);
-
-    let bus = pipeline
-        .bus()
-        .ok_or_else(|| "waveform pipeline is missing bus".to_string())?;
-
+    let pipeline = DecodePipeline::new(
+        stream,
+        "audio/x-raw,channels=2 ! level name=level interval=250000000 ! fakesink name=sink sync=false qos=false",
+    )?;
     let started = Instant::now();
-    let result = (|| {
-        let startup_state = if stream.window().is_some() {
-            gst::State::Paused
-        } else {
-            gst::State::Playing
-        };
-        pipeline
-            .set_state(startup_state)
-            .map_err(|error| error.to_string())?;
-
-        if let Some(window) = stream.window() {
-            wait_for_preroll(&bus, &cancelled, started)?;
-            pipeline
-                .seek(
-                    1.0,
-                    gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
-                    gst::SeekType::Set,
-                    gst::ClockTime::from_mseconds(window.start_millis),
-                    gst::SeekType::Set,
-                    gst::ClockTime::from_mseconds(window.end_millis),
-                )
-                .map_err(|error| error.to_string())?;
-            pipeline
-                .set_state(gst::State::Playing)
-                .map_err(|error| error.to_string())?;
-        }
-
-        let mut peaks = Vec::new();
-        loop {
-            check_waveform_deadline(&cancelled, started)?;
-            let Some(message) = bus.timed_pop(WAVEFORM_BUS_POLL) else {
-                continue;
-            };
-            use gst::MessageView;
-            match message.view() {
-                MessageView::Eos(..) => return Ok(peaks),
-                MessageView::Error(error) => return Err(error.error().to_string()),
-                MessageView::Element(element) => {
-                    if let Some(structure) = element.structure()
-                        && structure.has_name("level")
-                        && let Ok(values) = structure.get::<&gst::glib::ValueArray>("peak")
-                        && values.len() >= 2
-                        && let (Ok(left), Ok(right)) =
-                            (values[0].get::<f64>(), values[1].get::<f64>())
-                    {
-                        peaks.push((db_to_amplitude(left), db_to_amplitude(right)));
-                    }
-                }
-                _ => {}
-            }
-        }
-    })();
-
-    let _ = pipeline.set_state(gst::State::Null);
-    result
-}
-
-fn wait_for_preroll(
-    bus: &gst::Bus,
-    cancelled: &impl Fn() -> bool,
-    started: Instant,
-) -> Result<(), String> {
+    pipeline.start(|| check_waveform_deadline(&cancelled, started))?;
+    let mut peaks = Vec::new();
     loop {
-        check_waveform_deadline(cancelled, started)?;
-        let Some(message) = bus.timed_pop(WAVEFORM_BUS_POLL) else {
+        check_waveform_deadline(&cancelled, started)?;
+        let Some(message) = pipeline.bus.timed_pop(WAVEFORM_BUS_POLL) else {
             continue;
         };
         use gst::MessageView;
         match message.view() {
-            MessageView::AsyncDone(..) => return Ok(()),
+            MessageView::Eos(..) => return Ok(peaks),
             MessageView::Error(error) => return Err(error.error().to_string()),
-            MessageView::Eos(..) => {
-                return Err("waveform source ended before its requested window".to_string());
+            MessageView::Element(element) => {
+                if let Some(structure) = element.structure()
+                    && structure.has_name("level")
+                    && let Ok(values) = structure.get::<&gst::glib::ValueArray>("peak")
+                    && values.len() >= 2
+                    && let (Ok(left), Ok(right)) = (values[0].get::<f64>(), values[1].get::<f64>())
+                {
+                    peaks.push((db_to_amplitude(left), db_to_amplitude(right)));
+                }
             }
             _ => {}
         }
