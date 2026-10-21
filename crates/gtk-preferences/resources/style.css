@@ -612,6 +612,7 @@ headerbar.shared-topbar:backdrop > windowhandle {
 headerbar.shared-topbar button.topbar-button,
 headerbar.shared-topbar menubutton.topbar-button,
 headerbar.shared-topbar menubutton.topbar-button > button,
+headerbar.shared-topbar button.close,
 headerbar.shared-topbar windowcontrols > button,
 .track-toolbar button.library-toolbar-icon-button,
 .queue-toolbar button.icon-button,
@@ -630,6 +631,7 @@ headerbar.shared-topbar windowcontrols > button,
 
 headerbar.shared-topbar button.topbar-button image,
 headerbar.shared-topbar menubutton.topbar-button image,
+headerbar.shared-topbar button.close image,
 headerbar.shared-topbar windowcontrols > button image,
 .track-toolbar button.library-toolbar-icon-button image,
 .queue-toolbar button.icon-button image,
@@ -638,6 +640,10 @@ headerbar.shared-topbar windowcontrols > button image,
 .player-action-buttons > box > button image,
 .player-action-buttons > box > menubutton image {
   -gtk-icon-size: 16px;
+}
+
+headerbar.shared-topbar button.close image {
+  margin: 4px;
 }
 
 .player-action-buttons .favorite-toggle {
@@ -1325,6 +1331,16 @@ headerbar.preferences-header:backdrop,
   padding: 0;
   margin: 0;
   border-radius: 9px;
+}
+
+.metadata-tracks > row {
+  margin-bottom: 4px;
+}
+
+.lyrics-offset-controls > button {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 4px 6px;
 }
 
 .preferences-category-content {

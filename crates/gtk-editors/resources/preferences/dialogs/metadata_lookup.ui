@@ -104,10 +104,11 @@
                                 <property name="child">
                                   <object class="GtkListView" id="tracks">
                                     <property name="enable-rubberband">true</property>
-                                    <property name="single-click-activate">true</property>
+                                    <property name="single-click-activate">false</property>
                                     <style>
                                       <class name="navigation-sidebar" />
                                       <class name="preferences-categories" />
+                                      <class name="metadata-tracks" />
                                     </style>
                                   </object>
                                 </property>
@@ -163,7 +164,7 @@
                                       <object class="GtkListBox" id="matches">
                                         <property name="selection-mode">single</property>
                                         <style>
-                                          <class name="boxed-list" />
+                                          <class name="boxed-list-separate" />
                                         </style>
                                       </object>
                                     </property>

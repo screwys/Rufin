@@ -8,7 +8,7 @@
     <property name="child">
       <object class="AdwToolbarView">
         <child type="top">
-          <object class="AdwHeaderBar" id="error_header"><style><class name="preferences-header"/></style>
+          <object class="AdwHeaderBar" id="error_header"><style><class name="preferences-header"/><class name="shared-topbar"/></style>
             <property name="title-widget"><object class="AdwWindowTitle" id="error_title"><property name="title" translatable="yes">Edit metadata</property></object></property>
           </object>
         </child>
@@ -32,7 +32,7 @@
     <property name="child">
       <object class="AdwToolbarView" id="recovery_toolbar">
         <child type="top">
-          <object class="AdwHeaderBar" id="recovery_header"><style><class name="preferences-header"/></style>
+          <object class="AdwHeaderBar" id="recovery_header"><style><class name="preferences-header"/><class name="shared-topbar"/></style>
             <property name="title-widget"><object class="AdwWindowTitle" id="recovery_title"><property name="title" translatable="yes">Edit metadata</property></object></property>
           </object>
         </child>
@@ -61,14 +61,17 @@
     <style><class name="preferences"/></style>
     <property name="child">
       <object class="AdwToolbarView" id="editor_toolbar">
+        <property name="hexpand">true</property>
+        <property name="vexpand">true</property>
         <child type="top">
-          <object class="AdwHeaderBar" id="editor_header"><style><class name="preferences-header"/></style>
+          <object class="AdwHeaderBar" id="editor_header"><style><class name="preferences-header"/><class name="shared-topbar"/></style>
             <property name="title-widget"><object class="AdwWindowTitle" id="editor_title"><property name="title" translatable="yes">Edit metadata</property></object></property>
           </object>
         </child>
         <property name="content">
-          <object class="GtkBox">
+          <object class="GtkBox" id="editor_content">
             <property name="orientation">vertical</property>
+            <property name="margin-top">12</property>
             <property name="spacing">12</property>
             <child>
               <object class="GtkStackSwitcher">
@@ -91,6 +94,7 @@
                     <property name="margin-end">24</property>
                     <property name="child">
                       <object class="GtkStack" id="editor_pages">
+                        <property name="vexpand">true</property>
                         <property name="vhomogeneous">false</property>
                         <child>
                           <object class="GtkStackPage">
