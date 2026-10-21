@@ -1589,12 +1589,7 @@ impl Player {
     }
 
     fn activate_index(&mut self, index: usize, sample: &ClockSample) {
-        if self
-            .current_run
-            .as_ref()
-            .is_some_and(|_| self.sequence.selected_index() == Some(index))
-            || index >= self.sequence.total()
-        {
+        if index >= self.sequence.total() {
             return;
         }
         self.cancel_candidate_tasks(true);

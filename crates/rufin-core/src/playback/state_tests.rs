@@ -1475,7 +1475,7 @@ async fn collection_starts_and_selected_rows_keep_distinct_shuffle_anchors() {
                 request.activation_context(shuffled).is_none(),
                 collection_start
             );
-            session.apply_batch(request, &sample).unwrap();
+            session.play(request, &sample).unwrap();
             let random_start = collection_start && shuffled;
             finish_queue(&mut session, &inbox, &sample).await;
             assert_eq!(session.position_millis(), 0);

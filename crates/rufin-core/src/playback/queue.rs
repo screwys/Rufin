@@ -312,9 +312,6 @@ impl Sequence {
         }
     }
     pub(super) fn activate_index(&mut self, index: usize) -> bool {
-        if self.selected_index == Some(index) {
-            return false;
-        }
         self.activate_backend(index)
     }
     pub(super) fn activate_backend(&mut self, index: usize) -> bool {
