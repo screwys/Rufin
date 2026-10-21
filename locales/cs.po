@@ -1877,11 +1877,6 @@ msgstr "Plochý"
 msgid "Folder path"
 msgstr "Složka"
 
-#, fuzzy
-#| msgid "Folders"
-msgid "Folder"
-msgstr "Složky"
-
 msgid "Folders"
 msgstr "Složky"
 
@@ -2824,6 +2819,11 @@ msgid "No playable entries were found"
 msgstr "Nebyly nalezeny žádné servery"
 
 #, fuzzy
+#| msgid "No smart playlists yet"
+msgid "No playlists yet"
+msgstr "Zatím žádné chytré playlisty"
+
+#, fuzzy
 #| msgid "No matching tracks"
 msgid "No related tracks found"
 msgstr "Žádné odpovídající skladby"
@@ -3641,6 +3641,9 @@ msgstr "Odebrat pravidlo"
 msgid "Remove search"
 msgstr "Odebrat složku"
 
+msgid "Remove the library database? Settings and saved logins will be kept."
+msgstr ""
+
 #, fuzzy
 #| msgid "Album title"
 msgid "Remove unavailable tracks"
@@ -3703,6 +3706,16 @@ msgstr ""
 #| msgid "Appearance"
 msgid "Reset appearance"
 msgstr "Vzhled"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database"
+msgstr "Datum vydání"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database?"
+msgstr "Datum vydání"
 
 msgid "Reset to defaults"
 msgstr "Obnovit výchozí nastavení"
@@ -5108,6 +5121,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Folders"
+#~ msgid "Folder"
+#~ msgstr "Složky"
 
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "Vygenerovat a uložit do mezipaměti průběhy pro aktuální skladbu"

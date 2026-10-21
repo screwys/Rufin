@@ -1828,11 +1828,6 @@ msgstr ""
 msgid "Folder path"
 msgstr "資料夾"
 
-#, fuzzy
-#| msgid "Folders"
-msgid "Folder"
-msgstr "資料夾"
-
 msgid "Folders"
 msgstr "資料夾"
 
@@ -2755,6 +2750,11 @@ msgid "No playable entries were found"
 msgstr "未找到伺服器"
 
 #, fuzzy
+#| msgid "No smart playlists yet"
+msgid "No playlists yet"
+msgstr "暫無智慧播放清單"
+
+#, fuzzy
 #| msgid "No matching tracks"
 msgid "No related tracks found"
 msgstr "無匹配的曲目"
@@ -3555,6 +3555,9 @@ msgstr "移除規則"
 msgid "Remove search"
 msgstr "移除資料夾"
 
+msgid "Remove the library database? Settings and saved logins will be kept."
+msgstr ""
+
 #, fuzzy
 #| msgid "Album title"
 msgid "Remove unavailable tracks"
@@ -3617,6 +3620,16 @@ msgstr ""
 #| msgid "Appearance"
 msgid "Reset appearance"
 msgstr "外觀"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database"
+msgstr "發行日期"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Reset database?"
+msgstr "發行日期"
 
 msgid "Reset to defaults"
 msgstr "重置回預設值"
@@ -4968,6 +4981,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Folders"
+#~ msgid "Folder"
+#~ msgstr "資料夾"
 
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "生成並快取目前曲目的波形圖"
