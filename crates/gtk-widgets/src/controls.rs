@@ -14,6 +14,15 @@ pub const MORE_ICON: &str = "rufin-more-symbolic";
 const SORT_ORDER_ICON: &str = "rufin-sort-name-symbolic";
 const SORT_ORDER_DESCENDING_ICON: &str = "rufin-sort-name-descending-symbolic";
 
+pub fn configure_dialog_header(header: &adw::HeaderBar) {
+    if let Some(settings) = gtk::Settings::default() {
+        settings
+            .bind_property("gtk-decoration-layout", header, "decoration-layout")
+            .sync_create()
+            .build();
+    }
+}
+
 pub fn configure_search_entry(entry: &gtk::SearchEntry) {
     entry
         .first_child()

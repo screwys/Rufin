@@ -14,12 +14,15 @@ pub(super) fn connect(
         let tracks = tracks.downgrade();
         action.connect_activate(move |_, _| {
             if let Some(model) = model.upgrade()
+                && let Some(tracks) = tracks.upgrade()
+                && tracks.is_sensitive()
                 && let Some(position) = adjacent(&model, forward)
             {
-                model.select_item(position, true);
-                if let Some(tracks) = tracks.upgrade() {
-                    tracks.scroll_to(position, gtk::ListScrollFlags::NONE, None);
-                }
+                tracks.scroll_to(
+                    position,
+                    gtk::ListScrollFlags::FOCUS | gtk::ListScrollFlags::SELECT,
+                    None,
+                );
             }
         });
         group.add_action(action);
@@ -37,6 +40,59 @@ pub(super) fn connect(
         }
     });
     root.insert_action_group("tracks", Some(&group));
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let root_widget = root.as_ref().downgrade();
+    keys.connect_key_pressed(move |_, key, _, state| {
+        let action = match (key, state & gtk::accelerator_get_default_mod_mask()) {
+            (gtk::gdk::Key::Left, gtk::gdk::ModifierType::ALT_MASK) | (gtk::gdk::Key::Back, _) => {
+                "tracks.previous"
+            }
+            (gtk::gdk::Key::Right, gtk::gdk::ModifierType::ALT_MASK)
+            | (gtk::gdk::Key::Forward, _) => "tracks.next",
+            _ => return gtk::glib::Propagation::Proceed,
+        };
+        if let Some(root) = root_widget.upgrade() {
+            let _ = root.activate_action(action, None);
+        }
+        gtk::glib::Propagation::Stop
+    });
+    root.add_controller(keys);
+    for (button, action) in [(8, "tracks.previous"), (9, "tracks.next")] {
+        let click = gtk::GestureClick::new();
+        click.set_button(button);
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let root_widget = root.as_ref().downgrade();
+        click.connect_pressed(move |gesture, _, _, _| {
+            if let Some(root) = root_widget.upgrade() {
+                let _ = root.activate_action(action, None);
+            }
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+        });
+        root.add_controller(click);
+    }
+}
+
+pub(super) fn current_after_selection(
+    selection: &gtk::MultiSelection,
+    current: u32,
+    position: u32,
+    length: u32,
+) -> u32 {
+    let selected = selection.selection();
+    if selected.is_empty() || selected.size() == selection.n_items() as u64 {
+        return current;
+    }
+    let end = position + length.saturating_sub(1);
+    if selected.contains(position) && position < current {
+        position
+    } else if selected.contains(end) && end > current {
+        end
+    } else if selected.contains(current) {
+        current
+    } else {
+        current.clamp(selected.minimum(), selected.maximum())
+    }
 }
 
 fn adjacent(selection: &gtk::SelectionModel, forward: bool) -> Option<u32> {

@@ -2,16 +2,13 @@
 <interface domain="rufin">
   <requires lib="gtk" version="4.20"/>
   <requires lib="libadwaita" version="1.9"/>
-
   <object class="AdwDialog" id="error_dialog">
     <property name="title" translatable="yes">Edit metadata</property>
     <style><class name="preferences"/></style>
     <property name="child">
       <object class="AdwToolbarView">
         <child type="top">
-          <object class="AdwHeaderBar">
-            <property name="show-start-title-buttons">false</property>
-            <property name="show-end-title-buttons">true</property>
+          <object class="AdwHeaderBar" id="error_header"><style><class name="preferences-header"/></style>
             <property name="title-widget"><object class="AdwWindowTitle" id="error_title"><property name="title" translatable="yes">Edit metadata</property></object></property>
           </object>
         </child>
@@ -29,16 +26,13 @@
       </object>
     </property>
   </object>
-
   <object class="AdwDialog" id="recovery_dialog">
     <property name="title" translatable="yes">Edit metadata</property>
     <style><class name="preferences"/></style>
     <property name="child">
       <object class="AdwToolbarView" id="recovery_toolbar">
         <child type="top">
-          <object class="AdwHeaderBar">
-            <property name="show-start-title-buttons">false</property>
-            <property name="show-end-title-buttons">true</property>
+          <object class="AdwHeaderBar" id="recovery_header"><style><class name="preferences-header"/></style>
             <property name="title-widget"><object class="AdwWindowTitle" id="recovery_title"><property name="title" translatable="yes">Edit metadata</property></object></property>
           </object>
         </child>
@@ -61,7 +55,6 @@
       </object>
     </property>
   </object>
-
   <object class="AdwDialog" id="editor_dialog">
     <property name="content-height">1140</property>
     <property name="title" translatable="yes">Edit metadata</property>
@@ -69,9 +62,7 @@
     <property name="child">
       <object class="AdwToolbarView" id="editor_toolbar">
         <child type="top">
-          <object class="AdwHeaderBar" id="editor_header">
-            <property name="show-start-title-buttons">false</property>
-            <property name="show-end-title-buttons">true</property>
+          <object class="AdwHeaderBar" id="editor_header"><style><class name="preferences-header"/></style>
             <property name="title-widget"><object class="AdwWindowTitle" id="editor_title"><property name="title" translatable="yes">Edit metadata</property></object></property>
           </object>
         </child>
@@ -131,9 +122,7 @@
                                     </child>
                                     <child>
                                       <object class="GtkButton" id="lookup">
-                                        <property name="icon-name">io.github.screwys.Rufin.external.musicbrainz</property>
-                                        <property name="tooltip-text" translatable="yes">Lookup</property>
-                                        <accessibility><property name="label" translatable="yes">Lookup</property></accessibility>
+                                        <property name="label" translatable="yes">Search by AcoustID</property>
                                       </object>
                                     </child>
                                   </object>

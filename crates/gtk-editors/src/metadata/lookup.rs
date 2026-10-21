@@ -12,7 +12,8 @@ use std::{
 struct ReviewView {
     review: Arc<MetadataLookupReview>,
     dialog: gtk::glib::WeakRef<adw::Dialog>,
-    selection: gtk::SingleSelection,
+    selection: gtk::MultiSelection,
+    current: Cell<u32>,
     rows: Rc<SparseRouteModel<u64, MetadataTrackSummary>>,
     title: gtk::Label,
     query: gtk::SearchEntry,
@@ -64,6 +65,7 @@ pub(super) fn present(
     let builder = crate::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
         dialog: adw::Dialog, responsive: adw::BreakpointBin, split: adw::NavigationSplitView,
+        header: adw::HeaderBar,
         sidebar: gtk::Box, tracks: gtk::ListView, show_tracks: gtk::Button,
         title: gtk::Label, query: gtk::SearchEntry, status: gtk::Label, matches: gtk::ListBox,
         original: adw::ActionRow, comparison: gtk::ColumnView,
@@ -71,6 +73,7 @@ pub(super) fn present(
         fill_missing: gtk::CheckButton, progress: gtk::Label, stop: gtk::Button, cancel: gtk::Button, done: gtk::Button,
         review_content: gtk::Box,
     });
+    gtk_widgets::controls::configure_dialog_header(&header);
     let breakpoint = adw::Breakpoint::new(
         adw::BreakpointCondition::parse("max-width: 760sp").expect("metadata lookup breakpoint"),
     );
@@ -110,10 +113,11 @@ pub(super) fn present(
         runtime,
         load,
     );
-    let selection = gtk::SingleSelection::new(Some(rows.list_model()));
+    let selection = gtk::MultiSelection::new(Some(rows.list_model()));
+    selection.select_item(0, true);
     tracks.set_model(Some(&selection));
     tracks.set_factory(Some(&super::batch::track_factory()));
-    super::navigation::connect(&sidebar, &tracks, &selection);
+    super::navigation::connect(&dialog, &tracks, &selection);
     let fields = gtk::gio::ListStore::new::<gtk::glib::BoxedAnyObject>();
     comparison.set_model(Some(&gtk::NoSelection::new(Some(fields.clone()))));
     for (column, value) in [
@@ -127,6 +131,7 @@ pub(super) fn present(
         review,
         dialog: dialog.downgrade(),
         selection,
+        current: Cell::new(0),
         rows,
         title,
         query,
@@ -152,21 +157,31 @@ pub(super) fn present(
         updates: RefCell::new(None),
     });
     let weak = Rc::downgrade(&view);
-    view.selection.connect_selected_notify(move |_| {
-        if let Some(view) = weak.upgrade() {
-            if view.busy.get() && !view.accepting.get() {
-                if let Some(task) = view.action.borrow_mut().take() {
-                    task.abort();
+    view.selection
+        .connect_selection_changed(move |selection, position, length| {
+            if let Some(view) = weak.upgrade() {
+                let current = super::navigation::current_after_selection(
+                    selection,
+                    view.current.get(),
+                    position,
+                    length,
+                );
+                if current == view.current.replace(current) {
+                    return;
                 }
-                view.set_busy(false);
+                if view.busy.get() && !view.accepting.get() {
+                    if let Some(task) = view.action.borrow_mut().take() {
+                        task.abort();
+                    }
+                    view.set_busy(false);
+                }
+                view.matches.set_sensitive(false);
+                view.query.set_sensitive(false);
+                view.query.set_text("");
+                view.last.borrow_mut().take();
+                view.load_item();
             }
-            view.matches.set_sensitive(false);
-            view.query.set_sensitive(false);
-            view.query.set_text("");
-            view.last.borrow_mut().take();
-            view.load_item();
-        }
-    });
+        });
     let weak = Rc::downgrade(&view);
     view.matches.connect_row_selected(move |_, row| {
         let Some(view) = weak.upgrade() else { return };
@@ -180,7 +195,7 @@ pub(super) fn present(
                 .and_then(|item| item.candidates.get(row.index() as usize - 1))
                 .cloned()
         });
-        let index = view.selection.selected() as u64;
+        let index = view.current.get() as u64;
         let review = view.review.clone();
         view.start_action(async move { review.choose(index, candidate).await });
     });
@@ -196,7 +211,7 @@ pub(super) fn present(
             && !view.busy.get()
         {
             let review = view.review.clone();
-            let index = view.selection.selected() as u64;
+            let index = view.current.get() as u64;
             let query = query.text().to_string();
             view.start_action(async move { review.search(index, query).await });
         }
@@ -365,7 +380,7 @@ impl ReviewView {
         if let Some(task) = self.load.borrow_mut().take() {
             task.abort();
         }
-        let index = self.selection.selected();
+        let index = self.current.get();
         if index == gtk::INVALID_LIST_POSITION {
             return;
         }
@@ -375,7 +390,7 @@ impl ReviewView {
         let task = gtk::glib::spawn_future_local(async move {
             let item = review.item(index as u64, fill_missing).await;
             if let Some(view) = weak.upgrade()
-                && view.selection.selected() == index
+                && view.current.get() == index
             {
                 match item {
                     Ok(item) => view.render(item),
@@ -476,6 +491,8 @@ fn field_factory(column: u8) -> gtk::SignalListItemFactory {
             .ellipsize(gtk::pango::EllipsizeMode::End)
             .max_width_chars(28)
             .selectable(true)
+            .hexpand(true)
+            .vexpand(true)
             .build();
         item.set_child(Some(&label));
     });
@@ -497,10 +514,10 @@ fn field_factory(column: u8) -> gtk::SignalListItemFactory {
             1 => &field.original,
             _ => &field.suggested,
         }));
-        if column == 2 && field.changed {
-            label.add_css_class("accent");
+        if field.changed {
+            label.add_css_class("metadata-lookup-changed");
         } else {
-            label.remove_css_class("accent");
+            label.remove_css_class("metadata-lookup-changed");
         }
     });
     factory

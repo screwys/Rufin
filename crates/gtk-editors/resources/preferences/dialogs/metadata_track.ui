@@ -2,6 +2,7 @@
 <interface domain="rufin">
   <object class="AdwActionRow" id="track">
     <property name="use-markup">false</property>
+    <property name="focusable">false</property>
     <property name="title-lines">1</property>
     <property name="subtitle-lines">1</property>
     <style><class name="preferences-category-label"/></style>

@@ -3329,6 +3329,9 @@ msgstr ""
 msgid "Search artwork"
 msgstr ""
 
+msgid "Search by AcoustID"
+msgstr ""
+
 msgid "Search current folder"
 msgstr ""
 

@@ -136,8 +136,10 @@ fn present_local_access_recovery(
     let builder = gtk_widgets::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
         recovery_dialog: adw::Dialog,
+        recovery_header: adw::HeaderBar,
         recovery_content: gtk::Box,
     });
+    gtk_widgets::controls::configure_dialog_header(&recovery_header);
     recovery_dialog.set_content_width(large_popup_content_width(650));
     let retry_requested = Rc::new(Cell::new(false));
     recovery_dialog.connect_closed({

@@ -59,8 +59,10 @@ pub fn metadata_error_dialog(message: &str) -> adw::Dialog {
     let builder = crate::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
         error_dialog: adw::Dialog,
+        error_header: adw::HeaderBar,
         error_message: gtk::Label,
     });
+    gtk_widgets::controls::configure_dialog_header(&error_header);
     error_dialog.set_content_width(large_popup_content_width(480));
     error_message.set_label(message);
     error_dialog
@@ -106,6 +108,7 @@ fn build_editor_view(
         save: gtk::Button,
     });
     editor_header.set_visible(outer.is_none());
+    gtk_widgets::controls::configure_dialog_header(&editor_header);
     let width = large_popup_content_width(EDITOR_WIDTH);
     editor_dialog.set_content_width(width);
     editor_dialog.set_child(None::<&gtk::Widget>);

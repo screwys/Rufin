@@ -1300,6 +1300,18 @@ entry.metadata-identified-change:dir(rtl) {
   --sidebar-backdrop-color: var(--sidebar-bg-color);
 }
 
+.metadata-comparison > listview > row > cell {
+  padding: 0;
+}
+
+.metadata-comparison > listview > row > cell > label {
+  padding: 8px 12px;
+}
+
+.metadata-comparison .metadata-lookup-changed {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 15%, transparent);
+}
+
 .preferences-header:backdrop > windowhandle {
   filter: none;
 }

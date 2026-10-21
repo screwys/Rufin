@@ -48,9 +48,11 @@ pub fn build_batch_dialog(
     let builder = crate::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
         batch_dialog: adw::Dialog, responsive: adw::BreakpointBin, split: adw::NavigationSplitView,
+        header: adw::HeaderBar,
         sidebar: gtk::Box, editor_host: gtk::Box, tracks: gtk::ListView, content: gtk::Stack, lookup: gtk::Button,
         select_all: gtk::ToggleButton, edit_selected: gtk::Button, show_tracks: gtk::Button,
     });
+    gtk_widgets::controls::configure_dialog_header(&header);
     let breakpoint = adw::Breakpoint::new(
         adw::BreakpointCondition::parse("max-width: 760sp").expect("metadata breakpoint"),
     );
@@ -101,7 +103,7 @@ pub fn build_batch_dialog(
     select_all.set_active(true);
     tracks.set_model(Some(&selection));
     tracks.set_factory(Some(&track_factory()));
-    super::navigation::connect(&sidebar, &tracks, &selection);
+    super::navigation::connect(&batch_dialog, &tracks, &selection);
     lookup.set_sensitive(batch.external_lookup_allowed());
     let active_selection = RefCell::new(selection.selection());
     let view = Rc::new(BatchView {

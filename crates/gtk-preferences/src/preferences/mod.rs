@@ -359,12 +359,7 @@ fn rebuild_preferences_dialog(
         content_stack: gtk::Stack,
     });
     gtk_widgets::controls::configure_search_entry(&search_entry);
-    if let Some(settings) = gtk::Settings::default() {
-        settings
-            .bind_property("gtk-decoration-layout", &page_header, "decoration-layout")
-            .sync_create()
-            .build();
-    }
+    gtk_widgets::controls::configure_dialog_header(&page_header);
     let navigation_controls = PreferencesNavigationControls::new(back.clone());
     let update_header: Rc<dyn Fn()> = {
         let split = split_view.downgrade();

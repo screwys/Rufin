@@ -103,7 +103,7 @@ private fun MetadataFields(connection: MetadataConnection, state: MetadataEditor
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             FilledTonalButton(connection::openLookup, enabled = editable && state.externalLookupAllowed) {
                 DetailLinkIcon("io.github.screwys.Rufin.external.musicbrainz", Modifier.size(24.dp))
-                Spacer(Modifier.width(8.dp)); Text(translate("Lookup"))
+                Spacer(Modifier.width(8.dp)); Text(translate("Search by AcoustID"))
             }
         }
         items(state.fields, key = { it.field.key }) { presented ->

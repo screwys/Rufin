@@ -16,7 +16,7 @@
         <property name="child">
           <object class="AdwToolbarView">
             <child type="top">
-              <object class="AdwHeaderBar">
+              <object class="AdwHeaderBar" id="header"><style><class name="preferences-header"/></style>
                 <property name="title-widget">
                   <object class="AdwWindowTitle">
                     <property name="title" translatable="yes">Lookup</property>
@@ -55,7 +55,7 @@
                                 <property name="vexpand">true</property>
                                 <property name="hscrollbar-policy">never</property>
                                 <property name="child">
-                                  <object class="GtkListView" id="tracks">
+                                  <object class="GtkListView" id="tracks"><property name="enable-rubberband">true</property>
                                     <property name="single-click-activate">true</property>
                                     <style>
                                       <class name="navigation-sidebar" />
@@ -159,7 +159,7 @@
                                   <object class="GtkScrolledWindow">
                                     <property name="vexpand">true</property>
                                     <property name="child">
-                                      <object class="GtkColumnView" id="comparison">
+                                      <object class="GtkColumnView" id="comparison"><style><class name="metadata-comparison"/></style>
                                         <child>
                                           <object class="GtkColumnViewColumn" id="field_column">
                                             <property name="title" translatable="yes">Field</property>
