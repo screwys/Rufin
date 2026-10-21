@@ -34,7 +34,11 @@ struct Editor {
     locked: Option<adw::SwitchRow>,
     model: RefCell<Arc<MetadataEditor>>,
     status: gtk::Label,
-    lookup: gtk::Button,
+    lookup: adw::SplitButton,
+    lookup_menu: gtk::Popover,
+    lookup_status: gtk::Label,
+    lookup_cancellable: Cell<bool>,
+    on_change: Option<Rc<dyn Fn()>>,
     scan: gtk::Button,
     lookup_task: RefCell<Option<gtk::glib::JoinHandle<()>>>,
     save: gtk::Button,
@@ -83,7 +87,7 @@ struct MetadataView {
 }
 
 pub fn build_dialog(model: Arc<MetadataEditor>) -> adw::Dialog {
-    let (dialog, view) = build_editor_view(model, None, None);
+    let (dialog, view) = build_editor_view(model, None, None, None);
     dialog.set_child(Some(&view.content));
     let owner = RefCell::new(Some(view));
     dialog.connect_closed(move |_| {
@@ -96,6 +100,7 @@ fn build_editor_view(
     model: Arc<MetadataEditor>,
     outer: Option<&adw::Dialog>,
     scope_controls: Option<&gtk::Widget>,
+    on_change: Option<Rc<dyn Fn()>>,
 ) -> (adw::Dialog, MetadataView) {
     let resource = crate::ui_resource::METADATA_DIALOG_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
@@ -104,14 +109,14 @@ fn build_editor_view(
         editor_toolbar: adw::ToolbarView,
         editor_header: adw::HeaderBar,
         lookup_panel: gtk::Box, lookup_results: gtk::ListBox, lookup_query: gtk::SearchEntry,
-        fill_missing: gtk::CheckButton, apply_lookup: gtk::Button,
+        fill_missing: gtk::CheckButton, lookup_status: gtk::Label, lookup_menu: gtk::Popover,
         editor_pages: gtk::Stack,
         fields: gtk::Box,
         artwork_host: gtk::Box,
         lyrics_host: gtk::Box,
         scope_label: gtk::Label,
         scope_spacer: gtk::Box,
-        lookup: gtk::Button, scan: gtk::Button,
+        lookup: adw::SplitButton, scan: gtk::Button,
         status: gtk::Label,
         cancel: gtk::Button,
         save: gtk::Button,
@@ -158,6 +163,10 @@ fn build_editor_view(
         lock_group,
         status,
         lookup,
+        lookup_menu,
+        lookup_status,
+        lookup_cancellable: Cell::new(false),
+        on_change,
         scan,
         lookup_task: RefCell::new(None),
         save,
@@ -177,12 +186,25 @@ fn build_editor_view(
     refresh_editor_fields(&editor);
     refresh_save_state(&editor);
     let close = outer.unwrap_or(&editor_dialog).downgrade();
+    let weak = Rc::downgrade(&editor);
     editor.cancel.connect_clicked(move |_| {
+        if let Some(editor) = weak.upgrade()
+            && editor.lookup_cancellable.replace(false)
+        {
+            if let Some(task) = editor.lookup_task.borrow_mut().take() {
+                task.abort();
+            }
+            editor.lookup_status.set_visible(false);
+            editor.set_busy(false, &tr("Save"));
+            editor.changed();
+            return;
+        }
         if let Some(dialog) = close.upgrade() {
             dialog.close();
         }
     });
-    connect_lookup(&editor, &apply_lookup);
+    connect_lookup(&editor);
+    restore_candidates(&editor);
     artwork::connect(&editor);
     lyrics::connect(&editor);
     refresh_pages(&editor);
@@ -339,6 +361,7 @@ fn connect_editor_changes(editor: &Rc<Editor>) {
                     }
                     refresh_editor_fields(&editor);
                     editor.set_busy(false, &tr("Save"));
+                    editor.changed();
                 }
             });
         });
@@ -377,8 +400,10 @@ fn refresh_editor_fields(editor: &Editor) {
             } else {
                 &field.label
             });
-            row.entry
-                .set_text(if field.mixed { "" } else { &field.value });
+            let text = if field.mixed { "" } else { &field.value };
+            if row.entry.text().as_str() != text {
+                row.entry.set_text(text);
+            }
             row.entry
                 .set_sensitive(!editor.busy.get() && field.writable);
             refresh_identified_field(editor, &field.key, presented.identified);
@@ -458,28 +483,68 @@ fn refresh_save_state(editor: &Editor) {
     editor
         .lookup
         .set_sensitive(editable && state.external_lookup_allowed);
-    editor.scan.set_visible(state.can_scan);
+    editor
+        .lookup
+        .set_popover(state.can_scan.then_some(&editor.lookup_menu));
     editor
         .scan
         .set_sensitive(editable && state.external_lookup_allowed);
 }
 
+fn show_candidates(editor: &Editor, mut candidates: Vec<rufin_core::metadata::MetadataCandidate>) {
+    let preview = editor.model().snapshot().lookup_preview;
+    if let Some(preview) = &preview
+        && !candidates
+            .iter()
+            .any(|candidate| candidate.id == preview.id)
+    {
+        candidates.push(preview.clone());
+    }
+    editor.updating.set(true);
+    editor.lookup_results.remove_all();
+    for candidate in &candidates {
+        let row = adw::ActionRow::builder()
+            .title(&candidate.title)
+            .subtitle(&candidate.detail)
+            .use_markup(false)
+            .activatable(true)
+            .build();
+        editor.lookup_results.append(&row);
+        if preview
+            .as_ref()
+            .is_some_and(|preview| preview.id == candidate.id)
+        {
+            editor.lookup_results.select_row(Some(&row));
+        }
+    }
+    editor.candidates.replace(candidates);
+    editor.updating.set(false);
+}
+
+fn restore_candidates(editor: &Editor) {
+    let snapshot = editor.model().snapshot();
+    let visible = !snapshot.scan_candidates.is_empty() || snapshot.lookup_preview.is_some();
+    show_candidates(editor, snapshot.scan_candidates);
+    editor.lookup_panel.set_visible(visible);
+}
+
 fn lookup_metadata(editor: &Rc<Editor>, query: String, scan: bool) {
-    editor.set_busy(
-        true,
-        &if scan {
-            tr("Scanning...")
-        } else {
-            tr("Looking up...")
-        },
-    );
+    editor.lookup_cancellable.set(true);
+    editor.set_busy(true, &tr("Save"));
+    editor.lookup_status.set_label(&if scan {
+        tr("Scanning...")
+    } else {
+        tr("Looking up...")
+    });
+    editor.lookup_status.set_visible(true);
     editor.lookup_panel.set_visible(true);
     editor.status.set_visible(false);
-    let model = editor.model().clone();
+    let model = editor.model();
     let weak = Rc::downgrade(editor);
     let task = gtk::glib::spawn_future_local(async move {
         let result = if scan {
             model
+                .clone()
                 .scan()
                 .await
                 .map(|result| (result.candidates, result.failure))
@@ -490,46 +555,77 @@ fn lookup_metadata(editor: &Rc<Editor>, query: String, scan: bool) {
                 .map(|candidates| (candidates, None))
         };
         if let Some(editor) = weak.upgrade() {
-            editor.lookup_results.remove_all();
+            editor.lookup_cancellable.set(false);
+            editor.lookup_status.set_visible(false);
             match result {
                 Ok((candidates, failure)) => {
                     if candidates.is_empty() {
                         editor.show_error(&tr("No results"));
                     }
-                    for candidate in &candidates {
-                        let row = adw::ActionRow::builder()
-                            .title(&candidate.title)
-                            .subtitle(&candidate.detail)
-                            .build();
-                        row.set_use_markup(false);
-                        row.set_activatable(true);
-                        editor.lookup_results.append(&row);
-                    }
-                    editor.candidates.replace(candidates);
+                    show_candidates(&editor, candidates);
                     if let Some(failure) = failure {
                         editor.show_error(&failure);
                     }
                 }
-                Err(error) => editor.show_error(&error.to_string()),
+                Err(error) => {
+                    restore_candidates(&editor);
+                    editor.show_error(&error.to_string());
+                }
             }
-            editor.set_busy(false, &tr("Lookup"));
+            editor.set_busy(false, &tr("Save"));
+            editor.changed();
         }
     });
     editor.lookup_task.replace(Some(task));
 }
 
-fn connect_lookup(editor: &Rc<Editor>, apply: &gtk::Button) {
+fn preview_selected(editor: &Rc<Editor>) {
+    if editor.updating.get() || editor.busy.get() {
+        return;
+    }
+    let candidate = editor.lookup_results.selected_row().and_then(|row| {
+        editor
+            .candidates
+            .borrow()
+            .get(row.index() as usize)
+            .cloned()
+    });
+    let fill_missing = editor.fill_missing.is_active();
+    editor.set_busy(true, &tr("Save"));
+    editor.lookup_status.set_label(&tr("Looking up..."));
+    editor.lookup_status.set_visible(true);
+    editor.status.set_visible(false);
+    let model = editor.model();
+    let weak = Rc::downgrade(editor);
+    let task = gtk::glib::spawn_future_local(async move {
+        let result = model.preview_lookup(candidate, fill_missing).await;
+        if let Some(editor) = weak.upgrade() {
+            if let Err(error) = result {
+                editor.show_error(&error.to_string());
+                let candidates = editor.candidates.borrow().clone();
+                show_candidates(&editor, candidates);
+            }
+            editor.lookup_status.set_visible(false);
+            refresh_editor_fields(&editor);
+            editor.set_busy(false, &tr("Save"));
+            editor.changed();
+        }
+    });
+    editor.lookup_task.replace(Some(task));
+}
+
+fn connect_lookup(editor: &Rc<Editor>) {
     let weak = Rc::downgrade(editor);
     editor.scan.connect_clicked(move |_| {
         if let Some(editor) = weak.upgrade() {
+            editor.lookup_menu.popdown();
             lookup_metadata(&editor, String::new(), true);
         }
     });
     let weak = Rc::downgrade(editor);
     editor.lookup.connect_clicked(move |_| {
         if let Some(editor) = weak.upgrade() {
-            let query = editor.lookup_query.text().to_string();
-            lookup_metadata(&editor, query, false);
+            lookup_metadata(&editor, editor.lookup_query.text().to_string(), false);
         }
     });
     let weak = Rc::downgrade(editor);
@@ -538,37 +634,19 @@ fn connect_lookup(editor: &Rc<Editor>, apply: &gtk::Button) {
             lookup_metadata(&editor, entry.text().to_string(), false);
         }
     });
-    let weak_apply = apply.downgrade();
-    editor.lookup_results.connect_row_selected(move |_, row| {
-        if let Some(apply) = weak_apply.upgrade() {
-            apply.set_sensitive(row.is_some());
+    let weak = Rc::downgrade(editor);
+    editor.lookup_results.connect_row_selected(move |_, _| {
+        if let Some(editor) = weak.upgrade() {
+            preview_selected(&editor);
         }
     });
     let weak = Rc::downgrade(editor);
-    apply.connect_clicked(move |_| {
-        let Some(editor) = weak.upgrade() else { return };
-        let candidate = editor.lookup_results.selected_row().and_then(|row| {
-            editor
-                .candidates
-                .borrow()
-                .get(row.index() as usize)
-                .cloned()
-        });
-        let Some(candidate) = candidate else { return };
-        let fill_missing = editor.fill_missing.is_active();
-        editor.set_busy(true, &tr("Looking up..."));
-        let model = editor.model().clone();
-        let weak = Rc::downgrade(&editor);
-        gtk::glib::spawn_future_local(async move {
-            let result = model.apply_lookup(candidate, fill_missing).await;
-            if let Some(editor) = weak.upgrade() {
-                if let Err(error) = result {
-                    editor.show_error(&error.to_string());
-                }
-                refresh_editor_fields(&editor);
-                editor.set_busy(false, &tr("Lookup"));
-            }
-        });
+    editor.fill_missing.connect_toggled(move |_| {
+        if let Some(editor) = weak.upgrade()
+            && editor.lookup_results.selected_row().is_some()
+        {
+            preview_selected(&editor);
+        }
     });
 }
 
@@ -622,10 +700,8 @@ impl Editor {
         self.lyrics.cancel();
         self.model.replace(model);
         self.status.set_visible(false);
-        self.lookup_panel.set_visible(false);
-        self.lookup_results.remove_all();
         self.lookup_query.set_text("");
-        self.candidates.borrow_mut().clear();
+        restore_candidates(self);
         refresh_editor_fields(self);
         refresh_save_state(self);
         refresh_pages(self);
@@ -633,6 +709,12 @@ impl Editor {
         self.lyrics.reset();
         if self.pages.visible_child_name().as_deref() == Some("lyrics") {
             lyrics::activate(self);
+        }
+    }
+
+    fn changed(&self) {
+        if let Some(changed) = &self.on_change {
+            changed();
         }
     }
 
@@ -645,7 +727,13 @@ impl Editor {
         self.lyrics.set_busy(busy);
         self.lookup_panel.set_sensitive(!busy);
         refresh_save_state(self);
-        self.cancel.set_sensitive(!busy);
+        self.cancel
+            .set_sensitive(!busy || self.lookup_cancellable.get());
+        self.cancel.set_label(&if self.lookup_cancellable.get() {
+            tr("Stop")
+        } else {
+            tr("Cancel")
+        });
         for row in self.entries.iter() {
             row.entry.set_sensitive(!busy && self.writable(&row.field));
         }
@@ -656,7 +744,6 @@ impl Editor {
             self.save.set_label(label);
         } else {
             self.save.set_label(&tr("Save"));
-            self.lookup.set_label(&tr("Lookup"));
         }
     }
     fn show_error(&self, message: &str) {

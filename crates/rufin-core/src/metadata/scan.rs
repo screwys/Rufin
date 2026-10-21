@@ -66,20 +66,20 @@ impl MetadataEditor {
                     };
                     match outcome {
                         Ok(fingerprint) => {
-                            let matches = self.scan_matches(offset, fingerprint).await?;
-                            for candidate in matches.candidates {
-                                if (count == 1 || candidate.kind == MetadataMatchKind::Release)
-                                    && result.candidates.len() < 20
-                                    && !result
-                                        .candidates
-                                        .iter()
-                                        .any(|known| known.id == candidate.id)
-                                {
-                                    result.candidates.push(candidate);
+                            let matches = match self.scan_matches(offset, fingerprint).await {
+                                Ok(matches) => matches,
+                                Err(error) => {
+                                    self.record_scan_error(offset, Some(error.to_string()))
+                                        .await?;
+                                    self.reload_batch().await?;
+                                    return Err(error);
                                 }
-                            }
+                            };
+                            merge_candidates(&mut result.candidates, matches.candidates, count);
                         }
                         Err(error) => {
+                            self.record_scan_error(offset, Some(error.to_string()))
+                                .await?;
                             failures += 1;
                             result.failure.get_or_insert_with(|| error.to_string());
                         }
@@ -104,6 +104,23 @@ impl MetadataEditor {
 }
 
 impl MetadataEditor {
+    async fn record_scan_error(&self, offset: usize, error: Option<String>) -> Result<(), Error> {
+        if let Some(scope) = &self.batch {
+            let index = scope.indices[offset];
+            scope
+                .batch
+                .work(move |records| {
+                    let mut record = records.read(index)?;
+                    record.state.scan_error = error;
+                    records.write(index, &record)
+                })
+                .await
+        } else {
+            self.state().scan_error = error;
+            Ok(())
+        }
+    }
+
     async fn fingerprint_track(
         &self,
         session: Arc<EditSession>,
@@ -188,14 +205,19 @@ impl MetadataEditor {
             duration_seconds: duration,
         } = fingerprint;
         let identity = format!("{duration}:{fingerprint}");
-        let cached = if let Some(scope) = &self.batch {
-            scope.batch.read(scope.indices[offset]).await?.state.scan
+        let (cached, had_error) = if let Some(scope) = &self.batch {
+            let state = scope.batch.read(scope.indices[offset]).await?.state;
+            (state.scan, state.scan_error.is_some())
         } else {
-            self.state().scan.clone()
+            let state = self.state();
+            (state.scan.clone(), state.scan_error.is_some())
         };
         if let Some((previous, matches)) = cached
             && previous == identity
         {
+            if had_error {
+                self.record_scan_error(offset, None).await?;
+            }
             return Ok(matches);
         }
         let matches = self
@@ -214,13 +236,31 @@ impl MetadataEditor {
                 .work(move |records| {
                     let mut record = records.read(index)?;
                     record.state.scan = Some((identity, matches));
+                    record.state.scan_error = None;
                     records.write(index, &record)
                 })
                 .await?;
         } else {
-            self.state().scan = Some((identity, matches.clone()));
+            let mut state = self.state();
+            state.scan = Some((identity, matches.clone()));
+            state.scan_error = None;
         }
         Ok(matches)
+    }
+}
+
+pub(super) fn merge_candidates(
+    candidates: &mut Vec<MetadataCandidate>,
+    matches: Vec<MetadataCandidate>,
+    selected: usize,
+) {
+    for candidate in matches {
+        if (selected == 1 || candidate.kind == MetadataMatchKind::Release)
+            && candidates.len() < 20
+            && !candidates.iter().any(|known| known.id == candidate.id)
+        {
+            candidates.push(candidate);
+        }
     }
 }
 

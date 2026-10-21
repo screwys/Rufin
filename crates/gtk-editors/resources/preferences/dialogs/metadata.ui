@@ -129,10 +129,17 @@
                                         <property name="hexpand">true</property>
                                       </object>
                                     </child>
-                                    <child><object class="GtkButton" id="scan"><property name="label" translatable="yes">Scan</property></object></child>
                                     <child>
-                                      <object class="GtkButton" id="lookup">
-                                        <property name="label" translatable="yes">Lookup</property>
+                                      <object class="AdwSplitButton" id="lookup">
+                                        <property name="icon-name">io.github.screwys.Rufin.external.musicbrainz</property>
+                                        <property name="tooltip-text" translatable="yes">Lookup</property>
+                                        <accessibility><property name="label" translatable="yes">Lookup</property></accessibility>
+                                        <property name="dropdown-tooltip" translatable="yes">Scan</property>
+                                        <property name="popover"><object class="GtkPopover" id="lookup_menu">
+                                          <property name="child"><object class="GtkBox"><property name="orientation">vertical</property><style><class name="menu"/></style>
+                                            <child><object class="GtkButton" id="scan"><property name="label" translatable="yes">Scan</property><style><class name="flat"/></style></object></child>
+                                          </object></property>
+                                        </object></property>
                                       </object>
                                     </child>
                                   </object>
@@ -148,9 +155,9 @@
                                     <child><object class="GtkScrolledWindow"><property name="hscrollbar-policy">never</property><property name="min-content-height">120</property><property name="max-content-height">240</property><property name="propagate-natural-height">true</property>
                                       <property name="child"><object class="GtkListBox" id="lookup_results"><property name="selection-mode">single</property><style><class name="boxed-list"/></style></object></property>
                                     </object></child>
+                                    <child><object class="GtkLabel" id="lookup_status"><property name="visible">false</property><property name="xalign">0</property><property name="wrap">true</property></object></child>
                                     <child><object class="GtkBox"><property name="spacing">8</property>
                                       <child><object class="GtkCheckButton" id="fill_missing"><property name="label" translatable="yes">Fill missing</property><property name="active">true</property><property name="hexpand">true</property></object></child>
-                                      <child><object class="GtkButton" id="apply_lookup"><property name="label" translatable="yes">Apply</property><property name="sensitive">false</property></object></child>
                                     </object></child>
                                   </object>
                                 </child>
@@ -177,42 +184,36 @@
               </object>
             </child>
             <child>
-              <object class="AdwClamp">
-                <property name="maximum-size">650</property>
+              <object class="GtkBox" id="editor_footer">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">8</property>
+                <property name="hexpand">true</property>
                 <property name="margin-start">24</property>
                 <property name="margin-end">24</property>
                 <property name="margin-bottom">14</property>
-                <property name="child">
+                <child>
                   <object class="GtkBox">
-                    <property name="orientation">horizontal</property>
-                    <property name="spacing">8</property>
                     <property name="hexpand">true</property>
                     <child>
-                      <object class="GtkBox">
-                        <property name="orientation">horizontal</property>
+                      <object class="GtkLabel" id="status">
+                        <property name="visible">false</property>
+                        <property name="halign">start</property>
+                        <property name="valign">center</property>
                         <property name="hexpand">true</property>
-                        <child>
-                          <object class="GtkLabel" id="status">
-                            <property name="visible">false</property>
-                            <property name="halign">start</property>
-                            <property name="valign">center</property>
-                            <property name="hexpand">true</property>
-                            <property name="ellipsize">end</property>
-                            <style><class name="error"/></style>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                    <child><object class="GtkButton" id="cancel"><property name="label" translatable="yes">Cancel</property></object></child>
-                    <child>
-                      <object class="GtkButton" id="save">
-                        <property name="label" translatable="yes">Save</property>
-                        <property name="sensitive">false</property>
-                        <style><class name="suggested-action"/></style>
+                        <property name="ellipsize">end</property>
+                        <style><class name="error"/></style>
                       </object>
                     </child>
                   </object>
-                </property>
+                </child>
+                <child><object class="GtkButton" id="cancel"><property name="label" translatable="yes">Cancel</property></object></child>
+                <child>
+                  <object class="GtkButton" id="save">
+                    <property name="label" translatable="yes">Save</property>
+                    <property name="sensitive">false</property>
+                    <style><class name="suggested-action"/></style>
+                  </object>
+                </child>
               </object>
             </child>
           </object>

@@ -99,46 +99,38 @@ pub fn build_batch_dialog(
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, object| {
         let item = object.downcast_ref::<gtk::ListItem>().unwrap();
-        let label = gtk::Label::builder()
-            .xalign(0.0)
-            .hexpand(true)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .build();
-        label.add_css_class("preferences-category-label");
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-        content.add_css_class("preferences-category-content");
-        let icon = gtk::Image::from_icon_name("rufin-audio-x-generic-symbolic");
-        icon.set_pixel_size(20);
-        content.append(&icon);
-        content.append(&label);
-        item.set_child(Some(&content));
+        let resource = crate::ui_resource::METADATA_TRACK_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        let track: adw::ActionRow = crate::ui_resource::object(&builder, resource, "track");
+        item.set_child(Some(&track));
     });
     connect_sparse_bind(&factory, |object| {
         let item = object.downcast_ref::<gtk::ListItem>().unwrap();
-        let content = item.child().and_downcast::<gtk::Box>().unwrap();
-        let label = content.last_child().and_downcast::<gtk::Label>().unwrap();
+        let track = item.child().and_downcast::<adw::ActionRow>().unwrap();
         let row = item
             .item()
             .and_downcast::<SparseObjectItem>()
             .and_then(|item| item.value::<Arc<MetadataTrackSummary>>());
         if let Some(row) = row {
-            label.set_label(&row.title);
-            label.set_tooltip_text(row.error.as_deref().or(Some(&row.title)));
+            track.set_title(&row.title);
+            track.set_subtitle(row.error.as_deref().unwrap_or(&row.scan_status));
+            track.set_tooltip_text(row.error.as_deref().or(Some(&row.title)));
             if row.modified {
-                label.add_css_class("heading");
+                track.add_css_class("heading");
             } else {
-                label.remove_css_class("heading");
+                track.remove_css_class("heading");
             }
             if row.error.is_some() {
-                label.add_css_class("error");
+                track.add_css_class("error");
             } else {
-                label.remove_css_class("error");
+                track.remove_css_class("error");
             }
         } else {
-            label.set_label("");
-            label.set_tooltip_text(None);
-            label.remove_css_class("heading");
-            label.remove_css_class("error");
+            track.set_title("");
+            track.set_subtitle("");
+            track.set_tooltip_text(None);
+            track.remove_css_class("heading");
+            track.remove_css_class("error");
         }
     });
     tracks.set_factory(Some(&factory));
@@ -182,7 +174,7 @@ pub fn build_batch_dialog(
 }
 
 impl BatchView {
-    fn mount(&self, model: Arc<MetadataEditor>) {
+    fn mount(self: &Rc<Self>, model: Arc<MetadataEditor>) {
         let Some(dialog) = self.dialog.upgrade() else {
             return;
         };
@@ -195,7 +187,18 @@ impl BatchView {
             editor.rebind(model);
             return;
         }
-        let (_, view) = build_editor_view(model, Some(&dialog), Some(self.sidebar.upcast_ref()));
+        let weak = Rc::downgrade(self);
+        let changed = Rc::new(move || {
+            if let Some(view) = weak.upgrade() {
+                view.refresh_rows();
+            }
+        });
+        let (_, view) = build_editor_view(
+            model,
+            Some(&dialog),
+            Some(self.sidebar.upcast_ref()),
+            Some(changed),
+        );
         self.host.append(&view.content);
         self.current.replace(Some(view));
     }
@@ -260,21 +263,28 @@ impl BatchView {
                 view.sidebar.set_sensitive(true);
                 view.host.set_sensitive(true);
                 view.loading.set(false);
-                if let Some(first) = view.rows.first_live_position() {
-                    let batch = view.batch.clone();
-                    let rows = view.rows.clone();
-                    gtk::glib::spawn_future_local(async move {
-                        if let Ok(updated) = batch.tracks(first as u64, 192).await {
-                            for row in updated {
-                                rows.update_ready(row.index as usize, |current| {
-                                    *current = row.clone()
-                                });
-                            }
-                        }
-                    });
-                }
+                view.refresh_rows();
             }
         });
         self.task.replace(Some(task));
+    }
+    fn refresh_rows(&self) {
+        if let Some(first) = self.rows.first_live_position() {
+            let batch = self.batch.clone();
+            let rows = self.rows.clone();
+            gtk::glib::spawn_future_local(async move {
+                if let Ok(updated) = batch.tracks(first as u64, 192).await {
+                    for row in updated {
+                        if rows
+                            .peek_ready(row.index as usize)
+                            .is_some_and(|current| current.as_ref() == &row)
+                        {
+                            continue;
+                        }
+                        rows.update_ready(row.index as usize, |current| *current = row.clone());
+                    }
+                }
+            });
+        }
     }
 }

@@ -65,12 +65,13 @@ impl Records {
 }
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MetadataTrackSummary {
     pub index: u64,
     pub title: String,
     pub modified: bool,
     pub error: Option<String>,
+    pub scan_status: String,
 }
 
 pub(super) struct BatchScope {
@@ -177,7 +178,22 @@ impl MetadataBatch {
                                 .cloned()
                                 .unwrap_or_default(),
                             modified: record.state.has_changes() || record.state.artwork.is_some(),
-                            error: record.failure,
+                            scan_status: record.state.scan.as_ref().map_or_else(
+                                String::new,
+                                |(_, matches)| {
+                                    if matches.candidates.is_empty() {
+                                        localization::tr("No results")
+                                    } else {
+                                        localization::trn_with(
+                                            "{count} result",
+                                            "{count} results",
+                                            matches.candidates.len() as u64,
+                                            &[("count", &matches.candidates.len().to_string())],
+                                        )
+                                    }
+                                },
+                            ),
+                            error: record.failure.or(record.state.scan_error),
                         })
                     })
                     .collect()
@@ -220,17 +236,40 @@ impl MetadataBatch {
         }
         let selected = indices.clone();
         let selected_len = selected.len();
-        let (draft, current, identified, artwork, has_artwork, lyrics, scan) = self
-            .work(move |records| {
+        let (draft, current, identified, artwork, has_artwork, lyrics, scan, candidates, preview) =
+            self.work(move |records| {
                 let mut identified = HashSet::new();
                 let mut has_artwork = false;
                 let mut lyrics = None;
                 let mut scan = None;
+                let mut candidates = Vec::new();
+                let mut preview = None;
                 let mut artwork: Option<Option<ArtworkChange>> = None;
                 let mut combined: Option<MetadataDraft> = None;
                 let mut originals: Option<MetadataDraft> = None;
                 for index in selected {
                     let record = records.read(index)?;
+                    super::scan::merge_candidates(
+                        &mut candidates,
+                        record.state.scan_candidates(),
+                        selected_len,
+                    );
+                    match &mut preview {
+                        None => preview = Some(record.state.lookup_preview.clone()),
+                        Some(current)
+                            if current
+                                .as_ref()
+                                .map(|candidate: &super::MetadataCandidate| &candidate.id)
+                                != record
+                                    .state
+                                    .lookup_preview
+                                    .as_ref()
+                                    .map(|candidate| &candidate.id) =>
+                        {
+                            *current = None
+                        }
+                        _ => {}
+                    }
                     if selected_len == 1 {
                         lyrics = record.state.lyrics.clone();
                         scan = record.state.scan.clone();
@@ -282,6 +321,8 @@ impl MetadataBatch {
                     has_artwork,
                     lyrics,
                     scan,
+                    candidates,
+                    preview.flatten(),
                 ))
             })
             .await?;
@@ -291,6 +332,8 @@ impl MetadataBatch {
         state.artwork = artwork.clone();
         state.lyrics = lyrics;
         state.scan = scan;
+        state.batch_candidates = candidates;
+        state.lookup_preview = preview;
         let storage = state.storage;
         for key in identified {
             state.identified.insert(
@@ -322,6 +365,7 @@ impl MetadataBatch {
                 .ui
                 .allows_external_metadata_lookup(),
             state: Mutex::new(state),
+            lookup: Mutex::new(None),
             batch: Some(BatchScope {
                 batch: self.clone(),
                 indices,
@@ -427,10 +471,11 @@ impl MetadataBatch {
             .map_err(error)?
     }
 
-    pub(super) async fn apply_lookup(
+    pub(super) async fn preview_lookup(
         self: &Arc<Self>,
         indices: &[usize],
-        lookup: metadata_lookup::MetadataLookup,
+        lookup: Option<Arc<metadata_lookup::MetadataLookup>>,
+        candidate: Option<super::MetadataCandidate>,
         fill_missing: bool,
     ) -> Result<(), Error> {
         let indices = indices.to_vec();
@@ -439,29 +484,33 @@ impl MetadataBatch {
                 let mut unmatched = Vec::new();
                 for index in indices {
                     let mut record = records.read(index)?;
-                    if let Some(changes) = lookup.changes(
-                        SourceEntityKind::Track,
-                        &record.state.values(),
-                        record
-                            .state
-                            .scan
-                            .as_ref()
-                            .map_or(&[], |(_, matches)| matches.recordings.as_slice()),
-                    ) {
-                        record
-                            .state
-                            .apply_identified(&record.draft, changes, fill_missing);
-                        records.write(index, &record)?;
-                    } else {
-                        unmatched.push(
+                    record.state.clear_preview();
+                    if let Some(lookup) = &lookup {
+                        if let Some(changes) = lookup.changes(
+                            SourceEntityKind::Track,
+                            &record.state.values(),
                             record
                                 .state
-                                .values
-                                .get("title")
-                                .cloned()
-                                .unwrap_or_else(|| (index + 1).to_string()),
-                        );
+                                .scan
+                                .as_ref()
+                                .map_or(&[], |(_, matches)| matches.recordings.as_slice()),
+                        ) {
+                            record
+                                .state
+                                .preview_identified(&record.draft, changes, fill_missing);
+                            record.state.lookup_preview = candidate.clone();
+                        } else {
+                            unmatched.push(
+                                record
+                                    .state
+                                    .values
+                                    .get("title")
+                                    .cloned()
+                                    .unwrap_or_else(|| (index + 1).to_string()),
+                            );
+                        }
                     }
+                    records.write(index, &record)?;
                 }
                 Ok((unmatched, !records.changed.is_empty()))
             })

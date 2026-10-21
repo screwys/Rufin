@@ -116,14 +116,19 @@ private fun MetadataFields(connection: MetadataConnection, state: MetadataEditor
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { if (editable) connection.lookup(lookupQuery) }))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(fillMissing, { fillMissing = it }, enabled = editable)
+                    Checkbox(fillMissing, { value ->
+                        fillMissing = value
+                        state.lookupPreview?.let { connection.previewLookup(it, value) }
+                    }, enabled = editable)
                     Text(translate("Fill missing"), Modifier.weight(1f))
                 }
                 if (candidates.isEmpty()) Text(translate("No results"))
             }
             items(candidates, key = { it.id }) { candidate ->
                 ListItem(headlineContent = { Text(candidate.title) }, supportingContent = { Text(candidate.detail) },
-                    modifier = Modifier.clickable(enabled = editable) { connection.applyLookup(candidate, fillMissing) })
+                    colors = ListItemDefaults.colors(containerColor = if (state.lookupPreview?.id == candidate.id)
+                        MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.clickable(enabled = editable) { connection.previewLookup(candidate, fillMissing) })
             }
         }
         items(state.fields, key = { it.field.key }) { presented ->

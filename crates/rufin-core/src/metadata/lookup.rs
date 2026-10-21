@@ -1,6 +1,12 @@
 use super::{MetadataCandidate, MetadataEditor};
 use localization::{msgid, tr};
 use sources::SourceMetadataError as Error;
+use std::sync::Arc;
+
+pub(super) struct CachedLookup {
+    candidate: MetadataCandidate,
+    value: Arc<metadata_lookup::MetadataLookup>,
+}
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl MetadataEditor {
@@ -50,9 +56,9 @@ impl MetadataEditor {
             .map_err(Error::Write)
     }
 
-    pub async fn apply_lookup(
+    pub async fn preview_lookup(
         &self,
-        candidate: MetadataCandidate,
+        candidate: Option<MetadataCandidate>,
         fill_missing: bool,
     ) -> Result<(), Error> {
         if !self
@@ -65,24 +71,55 @@ impl MetadataEditor {
         {
             return Ok(());
         }
-        let lookup = self
-            .source
-            .shared
-            .runtime
-            .spawn_blocking(move || metadata_lookup::lookup_metadata(&candidate))
-            .await
-            .map_err(|e| Error::Write(e.to_string()))?
-            .map_err(Error::Write)?;
+        let lookup = if let Some(candidate) = candidate.clone() {
+            let cached = self
+                .lookup
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .filter(|cached| {
+                    cached.candidate.id == candidate.id
+                        && cached.candidate.kind == candidate.kind
+                        && cached.candidate.from_fingerprint == candidate.from_fingerprint
+                })
+                .map(|cached| cached.value.clone());
+            if let Some(value) = cached {
+                Some(value)
+            } else {
+                let request = candidate.clone();
+                let value = Arc::new(
+                    self.source
+                        .shared
+                        .runtime
+                        .spawn_blocking(move || metadata_lookup::lookup_metadata(&request))
+                        .await
+                        .map_err(|e| Error::Write(e.to_string()))?
+                        .map_err(Error::Write)?,
+                );
+                self.lookup
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .replace(CachedLookup {
+                        candidate,
+                        value: value.clone(),
+                    });
+                Some(value)
+            }
+        } else {
+            None
+        };
         if let Some(scope) = &self.batch {
             scope.batch.stage(self).await?;
             let result = scope
                 .batch
-                .apply_lookup(&scope.indices, lookup, fill_missing)
+                .preview_lookup(&scope.indices, lookup, candidate, fill_missing)
                 .await;
             self.reload_batch().await?;
             return result;
         }
         let mut state = self.state();
+        state.clear_preview();
+        let Some(lookup) = lookup else { return Ok(()) };
         let changes = lookup
             .changes(
                 self.draft.kind,
@@ -93,7 +130,8 @@ impl MetadataEditor {
                     .map_or(&[], |(_, matches)| matches.recordings.as_slice()),
             )
             .ok_or_else(|| Error::InvalidInput(tr(msgid("No matching track in this release"))))?;
-        state.apply_identified(&self.draft, changes, fill_missing);
+        state.preview_identified(&self.draft, changes, fill_missing);
+        state.lookup_preview = candidate;
         Ok(())
     }
 }

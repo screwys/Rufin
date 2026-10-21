@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="AdwActionRow" id="track">
+    <property name="use-markup">false</property>
+    <property name="title-lines">1</property>
+    <property name="subtitle-lines">1</property>
+    <style><class name="preferences-category-label"/></style>
+    <child type="prefix"><object class="GtkImage"><property name="icon-name">rufin-audio-x-generic-symbolic</property><property name="pixel-size">20</property></object></child>
+  </object>
+</interface>

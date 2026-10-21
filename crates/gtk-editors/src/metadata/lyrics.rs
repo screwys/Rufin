@@ -8,7 +8,7 @@ use std::{
 };
 
 pub(super) struct LyricsPane {
-    content: adw::BreakpointBin,
+    content: gtk::Paned,
     artist: gtk::Entry,
     title: gtk::Entry,
     search: gtk::Button,
@@ -17,7 +17,6 @@ pub(super) struct LyricsPane {
     storage: gtk::Box,
     embed: gtk::ToggleButton,
     sidecar: gtk::ToggleButton,
-    split: adw::NavigationSplitView,
     reveal: gtk::Revealer,
     editor: gtk_widgets::lyrics_editor::LyricsEditor,
     settings: RefCell<Option<rufin_core::metadata::MetadataLyricsSettings>>,
@@ -41,28 +40,12 @@ impl LyricsPane {
         let resource = crate::ui_resource::METADATA_LYRICS_RESOURCE;
         let builder = crate::ui_resource::builder(resource);
         gtk_widgets::objects!(builder, resource, {
-            lyrics_content: adw::BreakpointBin, split: adw::NavigationSplitView,
+            lyrics_content: gtk::Paned,
             artist: gtk::Entry, title: gtk::Entry, search: gtk::Button, status: gtk::Label,
             results: gtk::ListBox, storage: gtk::Box, embed: gtk::ToggleButton, sidecar: gtk::ToggleButton,
-            back: gtk::Button, editor_revealer: gtk::Revealer, editor_host: gtk::Box,
-        });
-        let breakpoint = adw::Breakpoint::new(
-            adw::BreakpointCondition::parse("max-width: 600sp").expect("lyrics breakpoint"),
-        );
-        breakpoint.add_setter(&split, "collapsed", Some(&true.to_value()));
-        lyrics_content.add_breakpoint(breakpoint);
-        split
-            .bind_property("collapsed", &back, "visible")
-            .sync_create()
-            .build();
-        let weak = split.downgrade();
-        back.connect_clicked(move |_| {
-            if let Some(split) = weak.upgrade() {
-                split.set_show_content(false);
-            }
+            editor_revealer: gtk::Revealer, editor_host: gtk::Box,
         });
         let editor = gtk_widgets::lyrics_editor::LyricsEditor::new("", 0, Rc::new(|_| {}));
-        split.set_show_content(false);
         editor_host.append(&editor.content);
         host.append(&lyrics_content);
         Self {
@@ -75,7 +58,6 @@ impl LyricsPane {
             storage,
             embed,
             sidecar,
-            split,
             reveal: editor_revealer,
             editor,
             settings: RefCell::new(None),
@@ -102,7 +84,6 @@ impl LyricsPane {
         self.active.set(false);
         self.updating.set(true);
         self.reveal.set_reveal_child(false);
-        self.split.set_show_content(false);
         self.editor.set_content("", 0);
         self.results.remove_all();
         self.status.set_visible(false);
@@ -230,7 +211,6 @@ pub(super) fn connect(editor: &Rc<Editor>) {
                         .is_some_and(|settings| !settings.storages.is_empty());
                     editor.lyrics.editor.set_editable(writable);
                     editor.lyrics.reveal.set_reveal_child(true);
-                    editor.lyrics.split.set_show_content(true);
                     if writable {
                         model.set_lyrics(text, editor.lyrics.mode());
                         refresh_save_state(&editor);

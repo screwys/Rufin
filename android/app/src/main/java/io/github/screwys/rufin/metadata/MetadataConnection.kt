@@ -118,7 +118,7 @@ internal class MetadataConnection(
         result.failure?.let { failure = IllegalStateException(it) }
     }
     fun lookup(query: String) = action { lookupResults = it.lookup(query) }
-    fun applyLookup(candidate: MetadataCandidate, fillMissing: Boolean) = action { it.applyLookup(candidate, fillMissing) }
+    fun previewLookup(candidate: MetadataCandidate?, fillMissing: Boolean) = action { it.previewLookup(candidate, fillMissing) }
     fun save() = action { it.save(); onSaved() }
     fun removeArtwork() = action { it.removeArtwork() }
     fun useCurrentArtwork() = action { it.useCurrentArtwork() }
