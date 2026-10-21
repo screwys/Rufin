@@ -20,6 +20,7 @@ pub use activity_overview::{ActivityOverview, ActivityTotals, GenreActivity};
 mod artwork;
 mod backup;
 mod metadata;
+mod metadata_lookup;
 mod query;
 pub use metadata::*;
 mod collections;

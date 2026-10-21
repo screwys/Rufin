@@ -70,7 +70,7 @@ pub(super) fn present(
         dialog: adw::Dialog, responsive: adw::BreakpointBin, split: adw::NavigationSplitView,
         header: adw::HeaderBar,
         sidebar: gtk::Box, tracks: gtk::ListView, show_tracks: gtk::Button,
-        title: gtk::Label, query: gtk::SearchEntry, status: gtk::Label, matches: gtk::ListBox,
+        title: gtk::Label, refresh: gtk::Button, query: gtk::SearchEntry, status: gtk::Label, matches: gtk::ListBox,
         original: adw::ActionRow, comparison: gtk::ColumnView,
         field_column: gtk::ColumnViewColumn, original_column: gtk::ColumnViewColumn, suggested_column: gtk::ColumnViewColumn,
         fill_missing: gtk::CheckButton, progress: adw::WindowTitle, progress_bar: gtk::ProgressBar,
@@ -229,6 +229,17 @@ pub(super) fn present(
         }
     });
     let weak = Rc::downgrade(&view);
+    refresh.connect_clicked(move |_| {
+        if let Some(view) = weak.upgrade() {
+            let review = view.review.clone();
+            let index = view.current.get() as u64;
+            let query = view.query.text().trim().to_string();
+            view.start_action(&localization::tr("Searching MusicBrainz..."), async move {
+                review.refresh(index, query).await
+            });
+        }
+    });
+    let weak = Rc::downgrade(&view);
     view.stop.connect_clicked(move |_| {
         if let Some(view) = weak.upgrade() {
             view.review.cancel();
@@ -287,32 +298,38 @@ pub(super) fn present(
     let weak = Rc::downgrade(&view);
     view.updates
         .replace(Some(gtk::glib::spawn_future_local(async move {
-            let mut completed = 0;
+            let mut restoring = true;
             let mut previous_active = None;
             while let Some(progress) = review.next_update().await {
                 let Some(view) = weak.upgrade() else { return };
-                if view.rows.first_live_position().is_some_and(|first| {
-                    let first = first as u64;
-                    let end = first + 192;
-                    let visible = |index: Option<u64>| {
-                        index.is_some_and(|index| index >= first && index < end)
-                    };
-                    visible(progress.active_track)
-                        || visible(previous_active)
-                        || (completed < end
-                            && progress.completed > first
-                            && completed != progress.completed)
-                }) {
+                let phase_changed = restoring != progress.restoring_cache;
+                let visited_start = if phase_changed {
+                    0
+                } else {
+                    previous_active.unwrap_or(0)
+                };
+                let visited_end = progress.active_track.unwrap_or(visited_start);
+                if progress.finished
+                    || phase_changed
+                    || view.rows.first_live_position().is_some_and(|first| {
+                        let first = first as u64;
+                        let end = first + 192;
+                        visited_start < end && visited_end >= first
+                    })
+                {
                     view.refresh_rows();
                 }
                 if !view.busy.get() {
                     view.show_progress(&progress);
                     let current = u64::from(view.current.get());
-                    if progress.finished || (current >= completed && current < progress.completed) {
+                    if progress.finished
+                        || phase_changed
+                        || (current >= visited_start && current <= visited_end)
+                    {
                         view.load_item();
                     }
                 }
-                completed = progress.completed;
+                restoring = progress.restoring_cache;
                 previous_active = progress.active_track;
                 if progress.finished {
                     return;
@@ -351,11 +368,12 @@ impl ReviewView {
                 ("stage", progress.stage.as_str()),
                 ("completed", &progress.completed.to_string()),
                 ("total", &progress.total.to_string()),
+                ("cached", &progress.cached.to_string()),
             ];
             if progress.stage.is_empty() {
-                localization::tr_with("{completed} of {total}", &values)
+                localization::tr_with("{completed} of {total} ({cached} cached)", &values)
             } else {
-                localization::tr_with("{stage} ({completed} of {total})", &values)
+                localization::tr_with("{stage} ({completed} of {total}, {cached} cached)", &values)
             }
         });
         self.progress.set_subtitle(&label);

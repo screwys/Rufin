@@ -756,6 +756,9 @@ msgstr ""
 msgid "Clear fingerprint cache"
 msgstr ""
 
+msgid "Clear lookup cache"
+msgstr ""
+
 msgid "Clear lyrics cache"
 msgstr ""
 
@@ -1217,6 +1220,12 @@ msgstr ""
 
 msgid "Do not encrypt"
 msgstr ""
+
+#, rust-format
+msgid "Do you want to apply metadata changes to {count} track?"
+msgid_plural "Do you want to apply metadata changes to {count} tracks?"
+msgstr[0] ""
+msgstr[1] ""
 
 msgid "Do you want to use the existing configuration?"
 msgstr ""
@@ -1961,6 +1970,9 @@ msgstr ""
 msgid "Load file contents"
 msgstr ""
 
+msgid "Loading cached lookups..."
+msgstr ""
+
 msgid "Loading related tracks..."
 msgstr ""
 
@@ -2102,6 +2114,9 @@ msgid "Metadata editing is no longer available"
 msgstr ""
 
 msgid "Metadata editing requires Local access"
+msgstr ""
+
+msgid "Metadata lookups"
 msgstr ""
 
 msgid "Metadata source"
@@ -4259,7 +4274,7 @@ msgid "{action} (Shuffle)"
 msgstr ""
 
 #, rust-format
-msgid "{completed} of {total}"
+msgid "{completed} of {total} ({cached} cached)"
 msgstr ""
 
 #, rust-format
@@ -4337,7 +4352,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #, rust-format
-msgid "{stage} ({completed} of {total})"
+msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr ""
 
 #, rust-format

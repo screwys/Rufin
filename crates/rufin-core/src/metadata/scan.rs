@@ -17,10 +17,22 @@ impl Drop for ScanCancellation {
 }
 
 impl MetadataEditor {
+    pub(super) fn lookup_cache(
+        &self,
+        mode: metadata_lookup::CacheMode,
+    ) -> Arc<metadata_lookup::LookupCache> {
+        Arc::new(metadata_lookup::LookupCache::new(
+            self.source.shared.database.as_ref().clone(),
+            self.source.shared.runtime.clone(),
+            mode,
+        ))
+    }
+
     pub(super) async fn scan(
         self: Arc<Self>,
         report: LookupProgress,
-    ) -> Result<Vec<MetadataCandidate>, Error> {
+        cache: Arc<metadata_lookup::LookupCache>,
+    ) -> Result<Option<Vec<MetadataCandidate>>, Error> {
         if !self
             .source
             .shared
@@ -41,11 +53,15 @@ impl MetadataEditor {
                         self.session.clone().ok_or(Error::Unavailable)?,
                         cancelled,
                         &report,
+                        cache.mode == metadata_lookup::CacheMode::Only,
                     )
                     .await?;
-                self.scan_matches(fingerprint, &report)
+                let Some(fingerprint) = fingerprint else {
+                    return Ok(None);
+                };
+                self.scan_matches(fingerprint, &report, cache)
                     .await
-                    .map(|matches| matches.candidates)
+                    .map(|matches| matches.map(|matches| matches.candidates))
             })
             .await
             .map_err(scan_error)?
@@ -56,7 +72,8 @@ impl MetadataEditor {
         session: Arc<EditSession>,
         cancelled: Arc<AtomicBool>,
         report: &LookupProgress,
-    ) -> Result<AudioFingerprint, Error> {
+        cached_only: bool,
+    ) -> Result<Option<AudioFingerprint>, Error> {
         let database = &self.source.shared.database;
         let uri = &session.media_uri;
         database
@@ -80,6 +97,9 @@ impl MetadataEditor {
         let (fingerprint, duration) = if let Some(cached) = cached {
             cached
         } else {
+            if cached_only {
+                return Ok(None);
+            }
             report(&localization::tr("Calculating fingerprint..."));
             let local = self.source.shared.settings.local_configuration();
             let owner = self.source.clone();
@@ -121,37 +141,42 @@ impl MetadataEditor {
             }
             (fingerprint.encoded, fingerprint.duration_seconds)
         };
-        Ok(AudioFingerprint {
+        Ok(Some(AudioFingerprint {
             encoded: fingerprint,
             duration_seconds: duration,
-        })
+        }))
     }
 
     async fn scan_matches(
         &self,
         fingerprint: AudioFingerprint,
         report: &LookupProgress,
-    ) -> Result<metadata_lookup::FingerprintMatches, Error> {
+        cache: Arc<metadata_lookup::LookupCache>,
+    ) -> Result<Option<metadata_lookup::FingerprintMatches>, Error> {
         let AudioFingerprint {
             encoded: fingerprint,
             duration_seconds: duration,
         } = fingerprint;
-        let identity = format!("{duration}:{fingerprint}");
-        if let Some((previous, matches)) = self.state().scan.clone()
-            && previous == identity
-        {
-            return Ok(matches);
-        }
         report(&localization::tr("Searching AcoustID..."));
+        let uri = self
+            .session
+            .as_ref()
+            .ok_or(Error::Unavailable)?
+            .media_uri
+            .clone();
         let matches = self
             .source
             .shared
             .runtime
-            .spawn_blocking(move || metadata_lookup::lookup_fingerprint(&fingerprint, duration))
+            .spawn_blocking(move || {
+                metadata_lookup::lookup_fingerprint(&cache, &uri, &fingerprint, duration)
+            })
             .await
             .map_err(scan_error)?
             .map_err(scan_error)?;
-        self.state().scan = Some((identity, matches.clone()));
+        if let Some(matches) = &matches {
+            self.state().recordings = matches.recordings.clone();
+        }
         Ok(matches)
     }
 }

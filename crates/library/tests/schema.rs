@@ -95,7 +95,7 @@ async fn reopening_without_statistics_preserves_library_order() {
             .fetch_one(&mut raw)
             .await
             .unwrap(),
-        54
+        55
     );
     raw.close().await.unwrap();
     migrated.close().await.unwrap();
@@ -232,7 +232,7 @@ async fn reopening_without_statistics_preserves_library_order() {
             .fetch_one(&mut raw)
             .await
             .unwrap(),
-        54
+        55
     );
     raw.close().await.unwrap();
     migrated.close().await.unwrap();
@@ -985,7 +985,7 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
             .fetch_one(&mut reader)
             .await
             .expect("read migrated version"),
-        54
+        55
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
@@ -1244,7 +1244,7 @@ async fn schema_43_malformed_listen_keeps_valid_siblings_and_preserves_input() {
             .fetch_one(&mut reader)
             .await
             .expect("read rebuilt schema version"),
-        54
+        55
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT external_id FROM listens ORDER BY listen_key")
@@ -1471,7 +1471,7 @@ async fn schema_39_store_converts_directly_into_current_schema() {
             .fetch_one(&mut reader)
             .await
             .expect("read current schema version"),
-        54
+        55
     );
     let definition = sqlx::query_scalar::<_, String>(
         "SELECT definition_json FROM smart_playlists WHERE object_id='smart-list'",
@@ -1512,7 +1512,7 @@ async fn released_migration_ignores_unused_catalog_damage() {
             .fetch_one(&mut restored)
             .await
             .expect("read repaired schema version"),
-        54
+        55
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources WHERE catalog_complete=1")

@@ -87,6 +87,12 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
             onDismiss = onDismiss, onSaved = { connection.reload() })
     }
     if (connection.lookupReview != null) MetadataLookupDialog(connection)
+    connection.saveConfirmation?.let { summary ->
+        AlertDialog(onDismissRequest = connection::cancelSave,
+            title = { Text(summary.message) },
+            confirmButton = { TextButton(connection::confirmSave) { Text(translate("Save")) } },
+            dismissButton = { TextButton(connection::cancelSave) { Text(translate("Cancel")) } })
+    }
     if (confirmReload) AlertDialog(onDismissRequest = { confirmReload = false },
         title = { Text(translate("Discard changes?")) },
         text = { Text(translate("Reload metadata to review the current values.")) },

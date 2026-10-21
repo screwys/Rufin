@@ -11,7 +11,21 @@ pub struct FingerprintMatches {
     pub recordings: Vec<String>,
 }
 
-pub fn lookup_fingerprint(fingerprint: &str, duration: u64) -> Result<FingerprintMatches, String> {
+pub fn lookup_fingerprint(
+    cache: &crate::LookupCache,
+    uri: &str,
+    fingerprint: &str,
+    duration: u64,
+) -> Result<Option<FingerprintMatches>, String> {
+    let key = crate::cache::cache_key("acoustid", &(fingerprint, duration));
+    let matches = cache.fetch(&key, || fetch_matches(fingerprint, duration))?;
+    if matches.is_some() && cache.mode != crate::CacheMode::Only {
+        cache.link_fingerprint(uri, &key)?;
+    }
+    Ok(matches)
+}
+
+fn fetch_matches(fingerprint: &str, duration: u64) -> Result<FingerprintMatches, String> {
     static NEXT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
     wait_for_slot(&NEXT, Duration::from_millis(334));
     let response = client()?

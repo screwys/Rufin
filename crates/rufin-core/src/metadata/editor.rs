@@ -11,6 +11,12 @@ use std::{
 };
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct MetadataSaveSummary {
+    pub tracks: u64,
+    pub message: String,
+}
+
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct MetadataFieldPresentation {
     pub field: MetadataField,
     pub identified: bool,
@@ -95,7 +101,7 @@ impl MetadataEditor {
             locked: state.locked(),
             lock_writable: state.writable(&self.draft, "locked"),
             lock_mixed: state.mixed.contains("locked"),
-            has_changes: state.has_changes()
+            has_changes: state.has_changes(&self.draft)
                 || state.artwork.is_some()
                 || self
                     .batch
@@ -186,6 +192,32 @@ impl MetadataEditor {
         self.set_field("locked".into(), value.to_string())
     }
 
+    pub async fn prepare_save(&self) -> Result<MetadataSaveSummary, SourceMetadataError> {
+        self.stage_changes().await?;
+        let tracks = if let Some(scope) = &self.batch {
+            scope
+                .batch
+                .work(|records| Ok(records.changed.len() as u64))
+                .await?
+        } else {
+            let state = self.state();
+            if state.has_changes(&self.draft) || state.artwork.is_some() {
+                self.draft.track_count.max(1) as u64
+            } else {
+                0
+            }
+        };
+        Ok(MetadataSaveSummary {
+            tracks,
+            message: trn_with(
+                "Do you want to apply metadata changes to {count} track?",
+                "Do you want to apply metadata changes to {count} tracks?",
+                tracks,
+                &[("count", &tracks.to_string())],
+            ),
+        })
+    }
+
     pub async fn save(&self) -> Result<(), SourceMetadataError> {
         let edit = self
             .state()
@@ -198,6 +230,9 @@ impl MetadataEditor {
             return result;
         }
         let lyrics = self.state().lyrics.clone();
+        if edit.changes.is_empty() && edit.artwork.is_none() && lyrics.is_none() {
+            return Ok(());
+        }
         let result = self
             .session
             .as_ref()
@@ -319,7 +354,7 @@ pub(super) struct Editing {
     pub(super) values: MetadataChanges,
     pub(super) touched: HashSet<String>,
     pub(super) lyrics: Option<super::lyrics::LyricsEdit>,
-    pub(super) scan: Option<(String, metadata_lookup::FingerprintMatches)>,
+    pub(super) recordings: Vec<String>,
     pub(super) scan_error: Option<String>,
     pub(super) lookup_candidates: Option<Vec<super::MetadataCandidate>>,
     pub(super) lookup_result: Option<(super::MetadataCandidate, MetadataChanges)>,
@@ -346,7 +381,7 @@ impl Editing {
             values: MetadataChanges::new(),
             touched: HashSet::new(),
             lyrics: None,
-            scan: None,
+            recordings: Vec::new(),
             scan_error: None,
             lookup_candidates: None,
             lookup_result: None,
@@ -453,8 +488,14 @@ impl Editing {
         true
     }
 
-    pub(super) fn has_changes(&self) -> bool {
-        !self.touched.is_empty() || self.lyrics.is_some()
+    fn field_changed(&self, field: &MetadataField) -> bool {
+        field.writable
+            && self.touched.contains(&field.key)
+            && (field.mixed || self.text(&field.key).trim() != field.value.trim())
+    }
+
+    pub(super) fn has_changes(&self, draft: &MetadataDraft) -> bool {
+        draft.fields.iter().any(|field| self.field_changed(field)) || self.lyrics.is_some()
     }
 
     pub(super) fn values(&self) -> MetadataChanges {
@@ -465,11 +506,32 @@ impl Editing {
     }
 
     pub(super) fn edit(&self, draft: &MetadataDraft) -> Result<MetadataEdit, String> {
+        self.edit_fields(
+            draft,
+            draft
+                .fields
+                .iter()
+                .filter(|field| self.field_changed(field)),
+        )
+    }
+
+    pub(super) fn stage_edit(&self, draft: &MetadataDraft) -> Result<MetadataEdit, String> {
+        self.edit_fields(
+            draft,
+            draft
+                .fields
+                .iter()
+                .filter(|field| field.writable && self.touched.contains(&field.key)),
+        )
+    }
+
+    fn edit_fields<'a>(
+        &self,
+        draft: &MetadataDraft,
+        fields: impl Iterator<Item = &'a MetadataField>,
+    ) -> Result<MetadataEdit, String> {
         let mut changes = MetadataChanges::new();
-        for field in &draft.fields {
-            if !field.writable || !self.touched.contains(&field.key) {
-                continue;
-            }
+        for field in fields {
             let value = self.text(&field.key).trim();
             if field.key == "title" && value.is_empty() {
                 return Err(tr(msgid("Add a title")));
@@ -534,6 +596,7 @@ impl Editing {
     }
 
     pub(super) fn begin_lookup(&mut self) {
+        self.recordings.clear();
         self.lookup_preview = None;
         self.lookup_result = None;
         self.lookup_candidates = None;

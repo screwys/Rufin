@@ -9,6 +9,7 @@ import io.github.screwys.rufin.core.*
 import io.github.screwys.rufin.shared.rufin_core.MetadataEditor
 import io.github.screwys.rufin.shared.rufin_core.MetadataItemId
 import io.github.screwys.rufin.shared.rufin_core.MetadataEditorSnapshot
+import io.github.screwys.rufin.shared.rufin_core.MetadataSaveSummary
 import io.github.screwys.rufin.shared.rufin_core.MetadataLookupReview
 import io.github.screwys.rufin.shared.rufin_core.MetadataLookupItem
 import io.github.screwys.rufin.shared.rufin_core.MetadataLookupProgress
@@ -43,6 +44,8 @@ internal class MetadataConnection(
     var results by mutableStateOf<List<ArtworkResult>?>(null)
         private set
     var searching by mutableStateOf(false)
+        private set
+    var saveConfirmation by mutableStateOf<MetadataSaveSummary?>(null)
         private set
     var lookupReview by mutableStateOf<MetadataLookupReview?>(null)
         private set
@@ -177,6 +180,7 @@ internal class MetadataConnection(
     fun updateLookupFillMissing(value: Boolean) {
         lookupFillMissing = value
     }
+    fun refreshLookup(query: String) = lookupAction { it.refresh(0UL, query.trim()) }
     fun stopLookup() { lookupReview?.cancel() }
     fun cancelLookup() {
         lookupReview?.cancel()
@@ -197,7 +201,17 @@ internal class MetadataConnection(
             finally { lookupBusy = false; lookupAccepting = false }
         }
     }
-    fun save() = action { it.save(); onSaved() }
+    fun save() = action {
+        if (kind == "track") {
+            val summary = it.prepareSave()
+            if (summary.tracks > 0UL) saveConfirmation = summary
+        } else { it.save(); onSaved() }
+    }
+    fun cancelSave() { saveConfirmation = null }
+    fun confirmSave() {
+        saveConfirmation = null
+        action { it.save(); onSaved() }
+    }
     fun removeArtwork() = action { it.removeArtwork() }
     fun useCurrentArtwork() = action { it.useCurrentArtwork() }
     fun chooseArtwork(url: String) = action { editor -> editor.downloadArtwork(url).use { editor.selectArtwork(it) } }

@@ -417,8 +417,10 @@ pub(super) fn track_factory() -> gtk::SignalListItemFactory {
             track.set_tooltip_text(row.error.as_deref().or(Some(&row.title)));
             if row.modified {
                 track.imp().title.add_css_class("heading");
+                track.imp().title.add_css_class("accent");
             } else {
                 track.imp().title.remove_css_class("heading");
+                track.imp().title.remove_css_class("accent");
             }
             if row.error.is_some() {
                 track.add_css_class("error");
@@ -430,6 +432,7 @@ pub(super) fn track_factory() -> gtk::SignalListItemFactory {
             track.imp().status.set_label("");
             track.set_tooltip_text(None);
             track.imp().title.remove_css_class("heading");
+            track.imp().title.remove_css_class("accent");
             track.remove_css_class("error");
         }
     });

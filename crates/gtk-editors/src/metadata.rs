@@ -501,15 +501,45 @@ fn connect_save(dialog: &adw::Dialog, editor: &Rc<Editor>) {
         let editor = Rc::downgrade(&editor);
         let dialog = dialog.clone();
         gtk::glib::spawn_future_local(async move {
-            let response = model.save().await;
+            let response = async {
+                if model.draft.kind == sources::SourceEntityKind::Track {
+                    let summary = model.prepare_save().await?;
+                    let Some(current) = editor.upgrade() else {
+                        return Ok(false);
+                    };
+                    current.changed();
+                    drop(current);
+                    if summary.tracks == 0 {
+                        return Ok(false);
+                    }
+                    let resource = crate::ui_resource::METADATA_DIALOG_RESOURCE;
+                    let builder = crate::ui_resource::builder(resource);
+                    let confirm: adw::AlertDialog = builder
+                        .object("save_confirmation")
+                        .expect("metadata save confirmation");
+                    confirm.set_heading(Some(&summary.message));
+                    let Some(parent) = dialog.upgrade() else {
+                        return Ok(false);
+                    };
+                    if confirm.choose_future(Some(&parent)).await != "save" {
+                        return Ok(false);
+                    }
+                }
+                model.save().await.map(|()| true)
+            }
+            .await;
             let Some(editor) = editor.upgrade() else {
                 return;
             };
             match response {
-                Ok(()) => {
+                Ok(true) => {
                     if let Some(dialog) = dialog.upgrade() {
                         dialog.force_close();
                     }
+                }
+                Ok(false) => {
+                    editor.set_busy(false, &tr("Save"));
+                    refresh_save_state(&editor);
                 }
                 Err(error) => {
                     editor.show_error(&error.to_string());

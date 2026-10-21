@@ -23,7 +23,7 @@ impl Database {
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        sqlx::query("INSERT INTO fingerprint_cache(media_uri,analysis_key,version,fingerprint,duration_seconds) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(media_uri) DO UPDATE SET analysis_key=excluded.analysis_key,version=excluded.version,fingerprint=excluded.fingerprint,duration_seconds=excluded.duration_seconds")
+        sqlx::query("INSERT INTO fingerprint_cache(media_uri,analysis_key,version,fingerprint,duration_seconds) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(media_uri) DO UPDATE SET analysis_key=excluded.analysis_key,version=excluded.version,fingerprint=excluded.fingerprint,duration_seconds=excluded.duration_seconds,lookup_key=''")
             .bind(uri).bind(key.as_slice()).bind(version).bind(fingerprint).bind(duration as i64).execute(connection).await?;
         drop(writer);
         self.cache_written();

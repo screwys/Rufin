@@ -14,6 +14,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.shared.metadata_lookup.MetadataMatchKind
 
@@ -25,11 +26,12 @@ internal fun MetadataLookupDialog(connection: MetadataConnection) {
     val progress = connection.lookupProgress
     val stage = progress?.stage.orEmpty()
     val progressText = if (stage.isEmpty()) {
-        translate("{completed} of {total}")
+        translate("{completed} of {total} ({cached} cached)")
     } else {
-        translate("{stage} ({completed} of {total})").replace("{stage}", stage)
+        translate("{stage} ({completed} of {total}, {cached} cached)").replace("{stage}", stage)
     }.replace("{completed}", (progress?.completed ?: 0UL).toString())
         .replace("{total}", (progress?.total ?: 1UL).toString())
+        .replace("{cached}", (progress?.cached ?: 0UL).toString())
     val editable = !connection.lookupBusy
     Dialog(onDismissRequest = { if (!connection.lookupAccepting) connection.cancelLookup() },
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false,
@@ -43,10 +45,16 @@ internal fun MetadataLookupDialog(connection: MetadataConnection) {
                     progress = { progress.completed.toFloat() / progress.total.toFloat() }, modifier = Modifier.fillMaxWidth())
                 val failure = connection.lookupFailure?.message ?: progress?.failure ?: item?.failure
                 failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                OutlinedTextField(query, { query = it; connection.searchLookup(it, delayed = true) }, Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text(translate("Search MusicBrainz")) }, enabled = !connection.lookupAccepting && (item?.ready == true || progress?.finished == true),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { connection.searchLookup(query) }))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val canSearch = !connection.lookupAccepting && (item?.ready == true || progress?.finished == true)
+                    OutlinedTextField(query, { query = it; connection.searchLookup(it, delayed = true) }, Modifier.weight(1f), singleLine = true,
+                        label = { Text(translate("Search MusicBrainz")) }, enabled = canSearch,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { connection.searchLookup(query) }))
+                    IconButton({ connection.refreshLookup(query) }, enabled = canSearch) {
+                        RufinIcon("rufin-view-refresh-symbolic", translate("Refresh"))
+                    }
+                }
                 LazyColumn(Modifier.weight(1f)) {
                     item {
                         ListItem(headlineContent = { Text(translate("Original")) },

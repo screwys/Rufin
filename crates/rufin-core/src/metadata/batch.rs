@@ -27,7 +27,7 @@ pub(super) struct Records {
     file: File,
     offsets: HashMap<usize, (u64, u64)>,
     artwork: HashMap<usize, ArtworkChange>,
-    changed: HashSet<usize>,
+    pub(super) changed: HashSet<usize>,
 }
 
 impl Records {
@@ -42,7 +42,7 @@ impl Records {
     }
 
     pub(super) fn write(&mut self, index: usize, record: &Record) -> Result<(), Error> {
-        if record.state.has_changes() || record.state.artwork.is_some() {
+        if record.state.has_changes(&record.draft) || record.state.artwork.is_some() {
             self.changed.insert(index);
         } else {
             self.changed.remove(&index);
@@ -174,7 +174,8 @@ impl MetadataBatch {
                                 .filter(|title| !title.is_empty())
                                 .cloned()
                                 .unwrap_or_default(),
-                            modified: record.state.has_changes() || record.state.artwork.is_some(),
+                            modified: record.state.has_changes(&record.draft)
+                                || record.state.artwork.is_some(),
                             scan_status: super::review::lookup_status(&record.state),
                             error: record.failure.or(record.state.scan_error),
                         })
@@ -227,12 +228,12 @@ impl MetadataBatch {
         let _cancel = cancelled.clone().drop_guard();
         let selected = indices.clone();
         let selected_len = selected.len();
-        let (draft, current, identified, artwork, has_artwork, lyrics, scan) = self
+        let (draft, current, identified, artwork, has_artwork, lyrics, recordings) = self
             .work(move |records| {
                 let mut identified = HashSet::new();
                 let mut has_artwork = false;
                 let mut lyrics = None;
-                let mut scan = None;
+                let mut recordings = Vec::new();
                 let mut artwork: Option<Option<ArtworkChange>> = None;
                 let mut combined: Option<MetadataDraft> = None;
                 let mut originals: Option<MetadataDraft> = None;
@@ -243,7 +244,7 @@ impl MetadataBatch {
                     let record = records.read(index)?;
                     if selected_len == 1 {
                         lyrics = record.state.lyrics.clone();
-                        scan = record.state.scan.clone();
+                        recordings = record.state.recordings.clone();
                     }
                     has_artwork |= match &record.state.artwork {
                         Some(ArtworkChange::Replace(_)) => true,
@@ -291,7 +292,7 @@ impl MetadataBatch {
                     artwork.flatten(),
                     has_artwork,
                     lyrics,
-                    scan,
+                    recordings,
                 ))
             })
             .await?;
@@ -300,7 +301,7 @@ impl MetadataBatch {
         let mut state = Editing::new(&current);
         state.artwork = artwork.clone();
         state.lyrics = lyrics;
-        state.scan = scan;
+        state.recordings = recordings;
         let storage = state.storage;
         for key in identified {
             state.identified.insert(
@@ -349,7 +350,7 @@ impl MetadataBatch {
             .await?;
         for index in changed_indices {
             let mut record = self.read(index).await?;
-            if !record.state.has_changes() && record.state.artwork.is_none() {
+            if !record.state.has_changes(&record.draft) && record.state.artwork.is_none() {
                 continue;
             }
             let result = async {
@@ -482,7 +483,7 @@ impl MetadataBatch {
             .map_or(self.uris.len(), |(_, indices)| indices.len())
     }
 
-    fn uri(&self, index: usize) -> &str {
+    pub(super) fn uri(&self, index: usize) -> &str {
         match &self.parent {
             Some((parent, indices)) => parent.uri(indices[index]),
             None => &self.uris[index],
@@ -622,7 +623,7 @@ impl MetadataBatch {
                     if chosen {
                         original.state = reviewed.state;
                     } else {
-                        original.state.scan = reviewed.state.scan;
+                        original.state.recordings = reviewed.state.recordings;
                         original.state.lookup_candidates = reviewed.state.lookup_candidates;
                         original.state.scan_error = reviewed.state.scan_error;
                     }
@@ -641,7 +642,7 @@ impl MetadataBatch {
         let scope = editor.batch.as_ref().unwrap();
         let mut edit = editor
             .state()
-            .edit(&editor.draft)
+            .stage_edit(&editor.draft)
             .map_err(Error::InvalidInput)?;
         if edit.artwork.as_ref().is_some_and(|artwork| {
             scope.artwork.as_ref() == Some(&artwork.change) && scope.storage == artwork.storage

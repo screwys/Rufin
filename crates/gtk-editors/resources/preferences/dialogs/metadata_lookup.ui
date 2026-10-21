@@ -143,8 +143,18 @@
                                   </object>
                                 </child>
                                 <child>
-                                  <object class="GtkSearchEntry" id="query">
-                                    <property name="placeholder-text" translatable="yes">Search MusicBrainz</property>
+                                  <object class="GtkBox">
+                                    <property name="spacing">8</property>
+                                    <child><object class="GtkSearchEntry" id="query">
+                                      <property name="hexpand">true</property>
+                                      <property name="placeholder-text" translatable="yes">Search MusicBrainz</property>
+                                    </object></child>
+                                    <child><object class="GtkButton" id="refresh">
+                                      <property name="icon-name">rufin-view-refresh-symbolic</property>
+                                      <property name="tooltip-text" translatable="yes">Refresh</property>
+                                      <property name="sensitive" bind-source="query" bind-property="sensitive" bind-flags="sync-create"/>
+                                      <accessibility><property name="label" translatable="yes">Refresh</property></accessibility>
+                                    </object></child>
                                   </object>
                                 </child>
                                 <child>

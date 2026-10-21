@@ -19,17 +19,18 @@ pub struct MetadataCandidate {
     pub from_fingerprint: bool,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct MetadataLookup {
     kind: MetadataMatchKind,
     value: Value,
-    from_fingerprint: bool,
 }
 
 pub fn search_metadata(
+    cache: &crate::LookupCache,
     kind: SourceEntityKind,
     values: &MetadataChanges,
     query: &str,
-) -> Result<Vec<MetadataCandidate>, String> {
+) -> Result<Option<Vec<MetadataCandidate>>, String> {
     let value = |key| {
         values
             .get(key)
@@ -94,57 +95,67 @@ pub fn search_metadata(
         query.trim().to_string()
     };
     if query.is_empty() {
-        return Ok(Vec::new());
+        return Ok(Some(Vec::new()));
     }
     let url = Url::parse_with_params(
         endpoint,
         [("query", query.as_str()), ("fmt", "json"), ("limit", "20")],
     )
     .map_err(|e| e.to_string())?;
-    let data = fetch_musicbrainz_json(client()?, url, "MusicBrainz search")?;
-    Ok(data
-        .get(collection)
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|entity| {
-            let id = text(entity, "id")?;
-            let title = text(
-                entity,
-                if kind == SourceEntityKind::Artist {
-                    "name"
-                } else {
-                    "title"
-                },
-            )?;
-            let mut detail = Vec::new();
-            if let Some(artist) = artist_credit(entity) {
-                detail.push(artist);
-            }
-            for key in ["date", "country", "disambiguation"] {
-                if let Some(value) = text(entity, key) {
-                    detail.push(value);
+    let key = crate::cache::cache_key("musicbrainz-search", &url.as_str());
+    let Some(data) = cache.fetch(&key, || {
+        fetch_musicbrainz_json(client()?, url, "MusicBrainz search")
+    })?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(
+        data.get(collection)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|entity| {
+                let id = text(entity, "id")?;
+                let title = text(
+                    entity,
+                    if kind == SourceEntityKind::Artist {
+                        "name"
+                    } else {
+                        "title"
+                    },
+                )?;
+                let mut detail = Vec::new();
+                if let Some(artist) = artist_credit(entity) {
+                    detail.push(artist);
                 }
-            }
-            if let Some(media) = entity.get("media").and_then(Value::as_array) {
-                for medium in media {
-                    if let Some(format) = text(medium, "format") {
-                        detail.push(format);
+                for key in ["date", "country", "disambiguation"] {
+                    if let Some(value) = text(entity, key) {
+                        detail.push(value);
                     }
                 }
-            }
-            Some(MetadataCandidate {
-                id,
-                from_fingerprint: false,
-                kind: match_kind,
-                title,
-                detail: detail.join(" · "),
+                if let Some(media) = entity.get("media").and_then(Value::as_array) {
+                    for medium in media {
+                        if let Some(format) = text(medium, "format") {
+                            detail.push(format);
+                        }
+                    }
+                }
+                Some(MetadataCandidate {
+                    id,
+                    from_fingerprint: false,
+                    kind: match_kind,
+                    title,
+                    detail: detail.join(" · "),
+                })
             })
-        })
-        .collect())
+            .collect(),
+    ))
 }
 
-pub fn lookup_metadata(candidate: &MetadataCandidate) -> Result<MetadataLookup, String> {
+pub fn lookup_metadata(
+    cache: &crate::LookupCache,
+    candidate: &MetadataCandidate,
+) -> Result<Option<MetadataLookup>, String> {
     let (root, inc) = match candidate.kind {
         MetadataMatchKind::Release => (
             MUSICBRAINZ_RELEASE_SEARCH_URL,
@@ -157,12 +168,14 @@ pub fn lookup_metadata(candidate: &MetadataCandidate) -> Result<MetadataLookup, 
         MetadataMatchKind::Recording => (MUSICBRAINZ_RECORDING_URL, "artist-credits+genres"),
         MetadataMatchKind::Artist => (MUSICBRAINZ_ARTIST_URL, "genres"),
     };
-    let value = fetch_musicbrainz_entity(root, &candidate.id, inc, "MusicBrainz lookup")?
-        .ok_or_else(|| "MusicBrainz did not return this result".to_string())?;
-    Ok(MetadataLookup {
-        from_fingerprint: candidate.from_fingerprint,
-        kind: candidate.kind,
-        value,
+    let key = crate::cache::cache_key("musicbrainz-entity", &(root, &candidate.id, inc));
+    cache.fetch(&key, || {
+        let value = fetch_musicbrainz_entity(root, &candidate.id, inc, "MusicBrainz lookup")?
+            .ok_or_else(|| "MusicBrainz did not return this result".to_string())?;
+        Ok(MetadataLookup {
+            kind: candidate.kind,
+            value,
+        })
     })
 }
 
@@ -182,15 +195,7 @@ impl MetadataLookup {
                 ("musicbrainz_artist_id", Some(id)),
             ])),
             MetadataMatchKind::Release if kind == SourceEntityKind::Track => {
-                let track_id = match_release_track(
-                    &self.value,
-                    values,
-                    if self.from_fingerprint {
-                        recordings
-                    } else {
-                        &[]
-                    },
-                )?;
+                let track_id = match_release_track(&self.value, values, recordings)?;
                 track_from_release(&self.value, &track_id)
             }
             MetadataMatchKind::Release => Some(album_from_release(&self.value, &id)),

@@ -2,6 +2,7 @@ use super::{
     MetadataBatch, MetadataCandidate, MetadataEditor, MetadataMatchKind, MetadataTrackSummary,
 };
 use localization::{msgid, tr};
+use metadata_lookup::{CacheMode, LookupCache};
 use sources::{MetadataDraft, SourceEntityKind, SourceMetadataError as Error};
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -10,6 +11,8 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 pub struct MetadataLookupProgress {
     pub completed: u64,
+    pub cached: u64,
+    pub restoring_cache: bool,
     pub total: u64,
     pub finished: bool,
     pub failure: Option<String>,
@@ -50,7 +53,6 @@ enum Items {
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct MetadataLookupReview {
     items: Items,
-    response: Mutex<Option<(MetadataCandidate, Arc<metadata_lookup::MetadataLookup>)>>,
     progress: Mutex<MetadataLookupProgress>,
     updates: (async_channel::Sender<()>, async_channel::Receiver<()>),
     cancelled: CancellationToken,
@@ -141,13 +143,97 @@ impl MetadataLookupReview {
 
     pub async fn run(self: Arc<Self>) {
         let _run = self.run_lock.lock().await;
+        if self.cancelled.is_cancelled() {
+            return;
+        }
+        {
+            let mut progress = self.progress.lock().unwrap_or_else(|e| e.into_inner());
+            progress.completed = 0;
+            progress.cached = 0;
+            progress.restoring_cache = true;
+            progress.finished = false;
+            progress.failure = None;
+        }
         let count = self.progress().total;
-        for index in 0..count {
-            let source = match &self.items {
-                Items::Batch(batch) => &batch.source,
-                Items::Single { working, .. } => &working.source,
+        let mut pending = Vec::new();
+        self.report(0, &tr(msgid("Loading cached lookups...")));
+        for start in (0..count).step_by(512) {
+            if self.cancelled.is_cancelled() {
+                break;
+            }
+            let end = count.min(start + 512);
+            let uris = (start..end)
+                .map(|index| self.uri(index).to_string())
+                .collect::<Vec<_>>();
+            let cached = self
+                .source()
+                .shared
+                .database
+                .cached_fingerprint_lookups(&uris, metadata_lookup::cache_time())
+                .await;
+            let cached = match cached {
+                Ok(cached) => cached.into_iter().collect::<std::collections::HashSet<_>>(),
+                Err(error) => {
+                    self.progress
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .failure = Some(error.to_string());
+                    break;
+                }
             };
-            if !source
+            for index in start..end {
+                if self.cancelled.is_cancelled() {
+                    break;
+                }
+                if !self
+                    .source()
+                    .shared
+                    .settings
+                    .load()
+                    .ui
+                    .allows_external_metadata_lookup()
+                {
+                    self.progress
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .failure = Some(Error::Unavailable.to_string());
+                    self.cancelled.cancel();
+                    break;
+                }
+                let outcome = if cached.contains(self.uri(index)) {
+                    tokio::select! {
+                        _ = self.cancelled.cancelled() => break,
+                        result = self.discover(index, String::new(), Arc::new(|_| {}), CacheMode::Only) => result,
+                    }
+                } else {
+                    Ok(Discovery::Missing)
+                };
+                {
+                    let mut progress = self.progress.lock().unwrap_or_else(|e| e.into_inner());
+                    progress.active_track = Some(index);
+                    if matches!(outcome, Ok(Discovery::Cached)) {
+                        progress.completed += 1;
+                        progress.cached += 1;
+                    } else {
+                        pending.push(index);
+                    }
+                }
+                if (index + 1) % 64 == 0 {
+                    let _ = self.updates.0.try_send(());
+                }
+            }
+        }
+        self.progress
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .restoring_cache = false;
+        let _ = self.updates.0.try_send(());
+        for index in pending {
+            if self.cancelled.is_cancelled() || self.progress().failure.is_some() {
+                break;
+            }
+            if !self
+                .source()
                 .shared
                 .settings
                 .load()
@@ -168,13 +254,17 @@ impl MetadataLookupReview {
             });
             let outcome = tokio::select! {
                 _ = self.cancelled.cancelled() => break,
-                result = self.discover(index, String::new(), report) => result,
+                result = self.discover(index, String::new(), report, CacheMode::Use) => result,
             };
             let mut progress = self.progress.lock().unwrap_or_else(|e| e.into_inner());
-            progress.completed = index + 1;
-            if let Err(error) = outcome {
-                progress.failure = Some(error.to_string());
-                break;
+            progress.completed += 1;
+            match outcome {
+                Ok(Discovery::Cached) => progress.cached += 1,
+                Err(error) => {
+                    progress.failure = Some(error.to_string());
+                    break;
+                }
+                _ => {}
             }
             drop(progress);
             let _ = self.updates.0.try_send(());
@@ -260,8 +350,15 @@ impl MetadataLookupReview {
     ) -> Result<(), Error> {
         let editor = self.editor(index, false).await?;
         let changes = if let Some(candidate) = &candidate {
-            match self.resolve_candidate(&editor, candidate.clone()).await {
-                Ok(changes) => Some(changes),
+            match self
+                .resolve_candidate(
+                    &editor,
+                    candidate.clone(),
+                    editor.lookup_cache(CacheMode::Use),
+                )
+                .await
+            {
+                Ok(changes) => Some(changes.ok_or(Error::Unavailable)?),
                 Err(error) => {
                     editor.state().scan_error = Some(error.to_string());
                     self.store(index, &editor).await?;
@@ -283,13 +380,21 @@ impl MetadataLookupReview {
     }
 
     pub async fn search(&self, index: u64, query: String) -> Result<(), Error> {
-        let result = self.discover(index, query, Arc::new(|_| {})).await;
+        let result = self
+            .discover(index, query, Arc::new(|_| {}), CacheMode::Use)
+            .await;
         if let Err(error) = &result {
             let editor = self.editor(index, false).await?;
             editor.state().scan_error = Some(error.to_string());
             self.store(index, &editor).await?;
         }
-        result
+        result.map(|_| ())
+    }
+
+    pub async fn refresh(&self, index: u64, query: String) -> Result<(), Error> {
+        self.discover(index, query, Arc::new(|_| {}), CacheMode::Refresh)
+            .await
+            .map(|_| ())
     }
 
     pub async fn accept(&self, fill_missing: bool) -> Result<(), Error> {
@@ -313,9 +418,10 @@ impl MetadataLookupReview {
     fn new(items: Items, total: u64) -> Arc<Self> {
         Arc::new(Self {
             items,
-            response: Mutex::new(None),
             progress: Mutex::new(MetadataLookupProgress {
                 completed: 0,
+                cached: 0,
+                restoring_cache: true,
                 total,
                 finished: false,
                 failure: None,
@@ -358,7 +464,6 @@ impl MetadataLookupReview {
         if let Items::Batch(batch) = &self.items {
             batch.store_editor(index as usize, editor).await?;
         }
-        let _ = self.updates.0.try_send(());
         Ok(())
     }
 
@@ -367,20 +472,26 @@ impl MetadataLookupReview {
         index: u64,
         query: String,
         report: LookupProgress,
-    ) -> Result<(), Error> {
+        mode: CacheMode,
+    ) -> Result<Discovery, Error> {
         report(&tr(msgid("Reading tags...")));
         let mut editor = self.editor(index, false).await?;
-        if query.is_empty() && editor.state().lookup_candidates.is_some() {
-            return Ok(());
+        if mode != CacheMode::Refresh
+            && query.is_empty()
+            && editor.state().lookup_candidates.is_some()
+        {
+            return Ok(Discovery::Cached);
         }
+        let cache = editor.lookup_cache(mode);
         let mut candidates = Vec::new();
         let mut failure = None;
         if query.is_empty() && editor.draft.kind == SourceEntityKind::Track {
             match self.editor(index, true).await {
                 Ok(scanning) => {
                     editor = scanning;
-                    match editor.clone().scan(report.clone()).await {
-                        Ok(found) => candidates = found,
+                    match editor.clone().scan(report.clone(), cache.clone()).await {
+                        Ok(Some(found)) => candidates = found,
+                        Ok(None) => return Ok(Discovery::Missing),
                         Err(error) => failure = Some(error.to_string()),
                     }
                 }
@@ -389,7 +500,13 @@ impl MetadataLookupReview {
         }
         if candidates.is_empty() {
             report(&tr(msgid("Searching MusicBrainz...")));
-            candidates = self.search_candidates(&editor, query).await?;
+            let Some(found) = self
+                .search_candidates(&editor, query, cache.clone())
+                .await?
+            else {
+                return Ok(Discovery::Missing);
+            };
+            candidates = found;
         }
         if !candidates.is_empty() {
             failure = None;
@@ -402,11 +519,11 @@ impl MetadataLookupReview {
                 .find(|candidate| release == Some(&candidate.id))
                 .cloned()
                 .or_else(|| {
-                    let recordings = state.scan.as_ref().map(|(_, matches)| &matches.recordings);
+                    let recordings = &state.recordings;
                     if candidates
                         .iter()
                         .any(|candidate| candidate.from_fingerprint)
-                        && recordings.is_some_and(|recordings| recordings.len() == 1)
+                        && recordings.len() == 1
                     {
                         candidates
                             .iter()
@@ -421,8 +538,12 @@ impl MetadataLookupReview {
         };
         let resolved = if let Some(chosen) = chosen {
             report(&tr(msgid("Fetching metadata...")));
-            match self.resolve_candidate(&editor, chosen.clone()).await {
-                Ok(changes) => Some((chosen, changes)),
+            match self
+                .resolve_candidate(&editor, chosen.clone(), cache.clone())
+                .await
+            {
+                Ok(Some(changes)) => Some((chosen, changes)),
+                Ok(None) => return Ok(Discovery::Missing),
                 Err(Error::InvalidInput(error)) => {
                     failure = Some(error);
                     None
@@ -441,16 +562,36 @@ impl MetadataLookupReview {
             state.scan_error = failure;
             state.lookup_candidates = Some(candidates);
         }
-        self.store(index, &editor).await
+        self.store(index, &editor).await?;
+        Ok(if cache.used_cache() && !cache.used_network() {
+            Discovery::Cached
+        } else {
+            Discovery::Fetched
+        })
     }
 }
 
 impl MetadataLookupReview {
+    fn source(&self) -> &Arc<crate::source::SourceOwner> {
+        match &self.items {
+            Items::Batch(batch) => &batch.source,
+            Items::Single { working, .. } => &working.source,
+        }
+    }
+
+    fn uri(&self, index: u64) -> &str {
+        match &self.items {
+            Items::Batch(batch) => batch.uri(index as usize),
+            Items::Single { working, .. } => &working.session.as_ref().unwrap().media_uri,
+        }
+    }
+
     async fn search_candidates(
         &self,
         editor: &MetadataEditor,
         query: String,
-    ) -> Result<Vec<MetadataCandidate>, Error> {
+        cache: Arc<LookupCache>,
+    ) -> Result<Option<Vec<MetadataCandidate>>, Error> {
         if !editor
             .source
             .shared
@@ -459,7 +600,7 @@ impl MetadataLookupReview {
             .ui
             .allows_external_metadata_lookup()
         {
-            return Ok(Vec::new());
+            return Ok(Some(Vec::new()));
         }
         let values = {
             let state = editor.state();
@@ -473,13 +614,13 @@ impl MetadataLookupReview {
         if query.trim().is_empty()
             && let Some(candidate) = metadata_lookup::metadata_identity(kind, &values)
         {
-            return Ok(vec![candidate]);
+            return Ok(Some(vec![candidate]));
         }
         editor
             .source
             .shared
             .runtime
-            .spawn_blocking(move || metadata_lookup::search_metadata(kind, &values, &query))
+            .spawn_blocking(move || metadata_lookup::search_metadata(&cache, kind, &values, &query))
             .await
             .map_err(|e| Error::Write(e.to_string()))?
             .map_err(Error::Write)
@@ -489,7 +630,8 @@ impl MetadataLookupReview {
         &self,
         editor: &MetadataEditor,
         candidate: MetadataCandidate,
-    ) -> Result<sources::MetadataChanges, Error> {
+        cache: Arc<LookupCache>,
+    ) -> Result<Option<sources::MetadataChanges>, Error> {
         if !editor
             .source
             .shared
@@ -500,55 +642,39 @@ impl MetadataLookupReview {
         {
             return Err(Error::Unavailable);
         }
-        {
+        if cache.mode != CacheMode::Refresh {
             let state = editor.state();
             if let Some((cached, changes)) = &state.lookup_result
                 && cached == &candidate
             {
-                return Ok(changes.clone());
+                return Ok(Some(changes.clone()));
             }
         }
-        let cached = self
-            .response
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-            .filter(|(known, _)| {
-                known.id == candidate.id
-                    && known.kind == candidate.kind
-                    && known.from_fingerprint == candidate.from_fingerprint
-            })
-            .map(|(_, response)| response.clone());
-        let lookup = if let Some(response) = cached {
-            response
-        } else {
-            let request = candidate.clone();
-            let response = Arc::new(
-                editor
-                    .source
-                    .shared
-                    .runtime
-                    .spawn_blocking(move || metadata_lookup::lookup_metadata(&request))
-                    .await
-                    .map_err(|e| Error::Write(e.to_string()))?
-                    .map_err(Error::Write)?,
-            );
-            self.response
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .replace((candidate, response.clone()));
-            response
+        let request = candidate.clone();
+        let lookup = editor
+            .source
+            .shared
+            .runtime
+            .spawn_blocking(move || metadata_lookup::lookup_metadata(&cache, &request))
+            .await
+            .map_err(|e| Error::Write(e.to_string()))?
+            .map_err(Error::Write)?;
+        let Some(lookup) = lookup else {
+            return Ok(None);
         };
+
         let state = editor.state();
         lookup
             .changes(
                 editor.draft.kind,
                 &state.values(),
-                state
-                    .scan
-                    .as_ref()
-                    .map_or(&[], |(_, matches)| matches.recordings.as_slice()),
+                if candidate.from_fingerprint {
+                    &state.recordings
+                } else {
+                    &[]
+                },
             )
+            .map(Some)
             .ok_or_else(|| Error::InvalidInput(tr(msgid("No matching track in this release"))))
     }
 }
@@ -564,4 +690,11 @@ pub(super) fn lookup_status(state: &super::editor::Editing) -> String {
         Some(candidates) if candidates.is_empty() => localization::tr("No results"),
         Some(_) => localization::tr("Needs review"),
     }
+}
+
+#[derive(Clone, Copy)]
+enum Discovery {
+    Missing,
+    Cached,
+    Fetched,
 }

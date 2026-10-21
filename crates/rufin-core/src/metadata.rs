@@ -9,7 +9,8 @@ use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
 pub use batch::{MetadataBatch, MetadataTrackSummary};
 pub use editor::{
-    MetadataEditor, MetadataEditorSnapshot, MetadataFieldPresentation, mixed_field_label,
+    MetadataEditor, MetadataEditorSnapshot, MetadataFieldPresentation, MetadataSaveSummary,
+    mixed_field_label,
 };
 use library::Database;
 pub use lyrics::MetadataLyricsSettings;

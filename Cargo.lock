@@ -5364,11 +5364,13 @@ dependencies = [
 name = "metadata-lookup"
 version = "0.16.6"
 dependencies = [
+ "blake3",
  "library",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
  "sources",
+ "tokio",
  "tracing",
  "uniffi",
 ]

@@ -2,7 +2,9 @@
 uniffi::setup_scaffolding!();
 
 mod acoustid;
+mod cache;
 pub use acoustid::{FingerprintMatches, lookup_fingerprint};
+pub use cache::{CacheMode, LookupCache, cache_time};
 mod cover;
 mod http;
 mod images;
