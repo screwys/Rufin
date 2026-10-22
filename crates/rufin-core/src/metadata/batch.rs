@@ -22,6 +22,7 @@ pub(super) struct Record {
     pub(super) state: Editing,
     failure: Option<String>,
     scope_artwork: bool,
+    scope_artist: Option<String>,
 }
 
 pub(super) struct Records {
@@ -33,6 +34,24 @@ pub(super) struct Records {
 }
 
 impl Records {
+    fn changed_in<'a>(&'a self, indices: &'a [usize]) -> Box<dyn Iterator<Item = usize> + 'a> {
+        if indices.len() < self.changed.len() {
+            Box::new(
+                indices
+                    .iter()
+                    .copied()
+                    .filter(|index| self.changed.contains(index)),
+            )
+        } else {
+            Box::new(
+                self.changed
+                    .iter()
+                    .copied()
+                    .filter(|index| indices.binary_search(index).is_ok()),
+            )
+        }
+    }
+
     pub(super) fn read(&mut self, index: usize) -> Result<Record, Error> {
         let (offset, length) = *self.offsets.get(&index).ok_or(Error::Unavailable)?;
         self.file.seek(SeekFrom::Start(offset)).map_err(error)?;
@@ -77,10 +96,26 @@ pub struct MetadataTrackSummary {
 
 pub(super) struct BatchScope {
     pub batch: Arc<MetadataBatch>,
+    // Sorted so changed-track reads can check membership without another set.
     pub indices: Vec<usize>,
     pub has_artwork: bool,
     artwork: Option<ArtworkChange>,
     storage: sources::ArtworkStorage,
+}
+
+impl BatchScope {
+    pub(super) fn changed_count(&self) -> usize {
+        let records = self
+            .batch
+            .records
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if self.indices.len() == self.batch.len() {
+            records.changed.len()
+        } else {
+            records.changed_in(&self.indices).count()
+        }
+    }
 }
 
 struct FileScope {
@@ -149,6 +184,7 @@ impl MetadataBatch {
                     let indices = records.offsets.keys().copied().collect::<Vec<_>>();
                     for index in indices {
                         let track = records.read(index)?;
+                        let artist = track.scope_artist.as_deref().unwrap_or(artist);
                         let draft = sources::FileEditSession::scope_metadata(
                             record.draft.kind,
                             artist,
@@ -344,17 +380,22 @@ impl MetadataBatch {
         })
         .await
     }
+}
 
-    pub async fn save(self: Arc<Self>) -> Result<(), Error> {
+impl MetadataBatch {
+    pub(super) async fn save(self: &Arc<Self>, selected: &[usize]) -> Result<(), Error> {
         let runtime = self.source.shared.runtime.clone();
         super::on_runtime(runtime, async {
+            let changed_indices = self
+                .records
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .changed_in(selected)
+                .collect::<Vec<_>>();
             if self.scope.is_some() {
-                return self.save_file_scope().await;
+                return self.save_file_scope(changed_indices).await;
             }
             let mut failures = Vec::new();
-            let changed_indices = self
-                .work(|records| Ok(records.changed.iter().copied().collect::<Vec<_>>()))
-                .await?;
             for index in changed_indices {
                 let mut record = self.read(index).await?;
                 if !record.state.has_changes(&record.draft) && record.state.artwork.is_none() {
@@ -432,9 +473,6 @@ impl MetadataBatch {
         })
         .await
     }
-}
-
-impl MetadataBatch {
     fn from_uris(source: Arc<SourceOwner>, uris: Vec<Arc<str>>) -> Result<Arc<Self>, Error> {
         if uris.is_empty() {
             return Err(Error::Unavailable);
@@ -456,21 +494,15 @@ impl MetadataBatch {
         Ok(batch)
     }
 
-    async fn save_file_scope(self: &Arc<Self>) -> Result<(), Error> {
+    async fn save_file_scope(self: &Arc<Self>, mut changed: Vec<usize>) -> Result<(), Error> {
         let scope = self.scope.as_ref().ok_or(Error::Unavailable)?;
         let super::EditDestination::Files(files) = &scope.session.destination else {
             return Err(Error::Unavailable);
         };
-        let (edit, mut changed) = self
+        let edit = self
             .work(|records| {
                 let scope = records.scope.as_ref().ok_or(Error::Unavailable)?;
-                Ok((
-                    scope
-                        .state
-                        .edit(&scope.draft)
-                        .map_err(Error::InvalidInput)?,
-                    records.changed.iter().copied().collect::<Vec<_>>(),
-                ))
+                scope.state.edit(&scope.draft).map_err(Error::InvalidInput)
             })
             .await?;
         if changed.is_empty() {
@@ -487,6 +519,7 @@ impl MetadataBatch {
         let batch_done = self.clone();
         let indexes_done = changed;
         let artwork_changed = edit.artwork.is_some();
+        let kind = edit.kind;
         let lyrics = Arc::new(Mutex::new(Vec::new()));
         let lyric_done = lyrics.clone();
         let images = Arc::new(Mutex::new(Vec::new()));
@@ -540,6 +573,18 @@ impl MetadataBatch {
                                 .push(binding.clone());
                         }
                         if let Ok(revision) = &outcome {
+                            if kind == SourceEntityKind::Artist {
+                                let values = sources::FileEditSession::scope_values(
+                                    kind,
+                                    record
+                                        .scope_artist
+                                        .as_deref()
+                                        .unwrap_or(&batch.scope.as_ref().unwrap().title),
+                                    &record.draft.values(),
+                                    &record.state.values(),
+                                );
+                                record.scope_artist = values.get("title").cloned();
+                            }
                             for field in &mut record.draft.fields {
                                 if let Some(value) = record.state.values.get(&field.key) {
                                     field.value = value.trim().to_string();
@@ -629,8 +674,10 @@ impl MetadataBatch {
 
     async fn selected_editor(
         self: Arc<Self>,
-        indices: Vec<usize>,
+        mut indices: Vec<usize>,
     ) -> Result<Arc<MetadataEditor>, Error> {
+        indices.sort_unstable();
+        indices.dedup();
         if indices.iter().any(|index| *index >= self.len()) {
             return Err(Error::Unavailable);
         }
@@ -844,6 +891,7 @@ impl MetadataBatch {
             draft,
             failure: None,
             scope_artwork: false,
+            scope_artist: None,
         });
         Ok(Arc::new(batch))
     }
@@ -886,12 +934,13 @@ impl MetadataBatch {
                 let indices = records.offsets.keys().copied().collect::<Vec<_>>();
                 for index in indices {
                     let mut record = records.read(index)?;
+                    let artist = record.scope_artist.as_deref().unwrap_or(&artist);
                     let original = Editing::new(&record.draft).values();
                     let baseline =
-                        sources::FileEditSession::scope_values(kind, &artist, &original, &original);
+                        sources::FileEditSession::scope_values(kind, artist, &original, &original);
                     let current = sources::FileEditSession::scope_values(
                         kind,
-                        &artist,
+                        artist,
                         &original,
                         &record.state.values(),
                     );
@@ -901,7 +950,7 @@ impl MetadataBatch {
                     let changes = sources::FileEditSession::project_edit(
                         &record.state.values(),
                         &scope_edit,
-                        current.get("title").map(String::as_str).unwrap_or(&artist),
+                        current.get("title").map(String::as_str).unwrap_or(artist),
                     );
                     for (field, value) in changes {
                         let value = if kind == SourceEntityKind::Artist {
@@ -1035,6 +1084,7 @@ impl MetadataBatch {
                 draft,
                 failure,
                 scope_artwork: false,
+                scope_artist: None,
             }
         };
         let changed = self
@@ -1089,24 +1139,12 @@ impl MetadataBatch {
         .await
     }
 
-    pub(super) async fn accept_lookup(
-        self: &Arc<Self>,
-        fill_missing: bool,
-        indices: HashSet<u64>,
-        exclude: bool,
-    ) -> Result<(), Error> {
+    pub(super) async fn accept_lookup(self: &Arc<Self>, fill_missing: bool) -> Result<(), Error> {
         let Some((parent, targets)) = &self.parent else {
             return Ok(());
         };
         let loaded = self
-            .work(move |records| {
-                Ok(records
-                    .offsets
-                    .keys()
-                    .copied()
-                    .filter(|index| indices.contains(&(*index as u64)) != exclude)
-                    .collect::<Vec<_>>())
-            })
+            .work(|records| Ok(records.offsets.keys().copied().collect::<Vec<_>>()))
             .await?;
         for index in loaded {
             let mut reviewed = self.read(index).await?;
@@ -1192,19 +1230,17 @@ impl MetadataBatch {
                         record.scope_artwork = editor_artwork_pending;
                     }
                     let changes = if scoped {
+                        let artist = record.scope_artist.as_deref().unwrap_or(&previous_artist);
                         let values = sources::FileEditSession::scope_values(
                             edit.kind,
-                            &previous_artist,
+                            artist,
                             &Editing::new(&record.draft).values(),
                             &record.state.values(),
                         );
                         sources::FileEditSession::project_edit(
                             &record.state.values(),
                             &edit,
-                            values
-                                .get("title")
-                                .map(String::as_str)
-                                .unwrap_or(&previous_artist),
+                            values.get("title").map(String::as_str).unwrap_or(artist),
                         )
                     } else {
                         edit.changes.clone()
@@ -1271,16 +1307,8 @@ impl MetadataBatch {
 
 impl MetadataEditor {
     pub(super) async fn reload_batch(&self) -> Result<(), Error> {
-        if let Some(scope) = &self.batch {
-            let editor = if self.draft.kind == SourceEntityKind::Track {
-                scope
-                    .batch
-                    .clone()
-                    .editor(scope.indices.iter().map(|index| *index as u64).collect())
-                    .await?
-            } else {
-                scope.batch.clone().scope_editor().await?
-            };
+        if self.batch.is_some() {
+            let editor = self.reload().await?;
             let mut next = editor.state().clone();
             let mut state = self.state();
             next.current = state.current.clone();

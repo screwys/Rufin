@@ -13,7 +13,7 @@ use std::{
 struct ReviewView {
     review: Arc<MetadataLookupReview>,
     dialog: gtk::glib::WeakRef<adw::Dialog>,
-    selection: gtk::MultiSelection,
+    selection: gtk::SingleSelection,
     current: Cell<u32>,
     rows: Rc<SparseRouteModel<u64, MetadataTrackSummary>>,
     title: gtk::Label,
@@ -69,7 +69,7 @@ pub(super) fn present(
     gtk_widgets::objects!(builder, resource, {
         dialog: adw::Dialog, responsive: adw::BreakpointBin, split: adw::NavigationSplitView,
         header: adw::HeaderBar,
-        scope_title: gtk::Label, track_navigation: gtk::Box, sidebar: gtk::Box, tracks: gtk::ListView, show_tracks: gtk::Button, select_all: gtk::Button,
+        scope_title: gtk::Label, track_navigation: gtk::Box, sidebar: gtk::Box, tracks: gtk::ListView, show_tracks: gtk::Button,
         title: gtk::Label, refresh: gtk::Button, query: gtk::SearchEntry, status: gtk::Label, matches: gtk::ListBox,
         original: adw::ActionRow, comparison: gtk::ColumnView,
         field_column: gtk::ColumnViewColumn, original_column: gtk::ColumnViewColumn, suggested_column: gtk::ColumnViewColumn,
@@ -98,7 +98,6 @@ pub(super) fn present(
         split.set_show_content(true);
         track_navigation.set_visible(false);
         show_tracks.set_visible(false);
-        select_all.set_visible(false);
     }
     let weak = split.downgrade();
     show_tracks.connect_clicked(move |_| {
@@ -130,14 +129,7 @@ pub(super) fn present(
         runtime,
         load,
     );
-    let selection = gtk::MultiSelection::new(Some(rows.list_model()));
-    selection.select_all();
-    let weak = selection.downgrade();
-    select_all.connect_clicked(move |_| {
-        if let Some(selection) = weak.upgrade() {
-            selection.select_all();
-        }
-    });
+    let selection = gtk::SingleSelection::new(Some(rows.list_model()));
     tracks.set_model(Some(&selection));
     tracks.set_factory(Some(&super::batch::track_factory()));
     super::navigation::connect(&dialog, &tracks, &selection);
@@ -187,33 +179,25 @@ pub(super) fn present(
         updates: RefCell::new(None),
     });
     let weak = Rc::downgrade(&view);
-    view.selection
-        .connect_selection_changed(move |selection, position, length| {
-            if let Some(view) = weak.upgrade() {
-                view.done
-                    .set_sensitive(!view.busy.get() && !selection.selection().is_empty());
-                let current = super::navigation::current_after_selection(
-                    selection,
-                    view.current.get(),
-                    position,
-                    length,
-                );
-                if current == view.current.replace(current) {
-                    return;
-                }
-                if view.busy.get() && !view.accepting.get() {
-                    if let Some(task) = view.action.borrow_mut().take() {
-                        task.abort();
-                    }
-                    view.set_busy(false);
-                }
-                view.matches.set_sensitive(false);
-                view.query.set_sensitive(false);
-                view.query.set_text("");
-                view.last.borrow_mut().take();
-                view.load_item();
+    view.selection.connect_selected_notify(move |selection| {
+        if let Some(view) = weak.upgrade() {
+            let current = selection.selected();
+            if current == view.current.replace(current) {
+                return;
             }
-        });
+            if view.busy.get() && !view.accepting.get() {
+                if let Some(task) = view.action.borrow_mut().take() {
+                    task.abort();
+                }
+                view.set_busy(false);
+            }
+            view.matches.set_sensitive(false);
+            view.query.set_sensitive(false);
+            view.query.set_text("");
+            view.last.borrow_mut().take();
+            view.load_item();
+        }
+    });
     let weak = Rc::downgrade(&view);
     view.matches.connect_row_selected(move |_, row| {
         let Some(view) = weak.upgrade() else { return };
@@ -276,18 +260,6 @@ pub(super) fn present(
         let Some(view) = weak.upgrade() else { return };
         let review = view.review.clone();
         let fill_missing = view.fill_missing.is_active();
-        let selected = view.selection.selection();
-        let exclude = selected.size() > u64::from(view.selection.n_items()) / 2;
-        let indices = if exclude {
-            let excluded = gtk::Bitset::new_range(0, view.selection.n_items());
-            excluded.subtract(&selected);
-            excluded
-        } else {
-            selected
-        };
-        let indices = (0..indices.size())
-            .map(|index| indices.nth(index as u32) as u64)
-            .collect();
         view.accepting.set(true);
         view.cancel.set_sensitive(false);
         view.sidebar.set_sensitive(false);
@@ -297,7 +269,7 @@ pub(super) fn present(
         view.set_busy(true);
         let weak = Rc::downgrade(&view);
         let task = gtk::glib::spawn_future_local(async move {
-            let result = review.accept(fill_missing, indices, exclude).await;
+            let result = review.accept(fill_missing).await;
             if let Some(view) = weak.upgrade() {
                 match result {
                     Ok(()) => {
@@ -427,8 +399,7 @@ impl ReviewView {
         self.content.set_sensitive(!self.accepting.get());
         self.matches.set_sensitive(!busy);
         self.fill_missing.set_sensitive(!busy);
-        self.done
-            .set_sensitive(!busy && !self.selection.selection().is_empty());
+        self.done.set_sensitive(!busy);
     }
 
     fn search(self: &Rc<Self>, delayed: bool) {

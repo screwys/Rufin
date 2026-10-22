@@ -496,7 +496,7 @@ fn connect_save(dialog: &adw::Dialog, editor: &Rc<Editor>) {
         let editor = Rc::downgrade(&editor);
         let dialog = dialog.clone();
         gtk::glib::spawn_future_local(async move {
-            let response = async {
+            let response: Result<bool, sources::SourceMetadataError> = async {
                 if model.draft.kind == sources::SourceEntityKind::Track
                     || model.track_batch().is_some()
                 {
@@ -522,7 +522,17 @@ fn connect_save(dialog: &adw::Dialog, editor: &Rc<Editor>) {
                         return Ok(false);
                     }
                 }
-                model.save().await.map(|()| true)
+                model.save().await?;
+                if model.track_batch().is_some_and(|batch| batch.has_changes()) {
+                    let model = model.reload().await?;
+                    if let Some(editor) = editor.upgrade() {
+                        editor.rebind(model);
+                        editor.changed();
+                    }
+                    Ok(false)
+                } else {
+                    Ok(true)
+                }
             }
             .await;
             let Some(editor) = editor.upgrade() else {

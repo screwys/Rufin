@@ -74,28 +74,6 @@ pub(super) fn connect(
     }
 }
 
-pub(super) fn current_after_selection(
-    selection: &gtk::MultiSelection,
-    current: u32,
-    position: u32,
-    length: u32,
-) -> u32 {
-    let selected = selection.selection();
-    if selected.is_empty() || selected.size() == selection.n_items() as u64 {
-        return current;
-    }
-    let end = position + length.saturating_sub(1);
-    if selected.contains(position) && position < current {
-        position
-    } else if selected.contains(end) && end > current {
-        end
-    } else if selected.contains(current) {
-        current
-    } else {
-        current.clamp(selected.minimum(), selected.maximum())
-    }
-}
-
 fn adjacent(selection: &gtk::SelectionModel, forward: bool) -> Option<u32> {
     let count = selection.n_items();
     if count == 0 {

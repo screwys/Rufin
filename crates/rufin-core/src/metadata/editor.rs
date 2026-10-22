@@ -109,6 +109,32 @@ impl MetadataEditor {
         self.batch.as_ref().map(|scope| scope.batch.clone())
     }
 
+    pub async fn reload(&self) -> Result<Arc<Self>, SourceMetadataError> {
+        let runtime = self.source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            if let Some(scope) = &self.batch {
+                if self.draft.kind == SourceEntityKind::Track {
+                    scope
+                        .batch
+                        .clone()
+                        .editor(scope.indices.iter().map(|index| *index as u64).collect())
+                        .await
+                } else {
+                    scope.batch.clone().scope_editor().await
+                }
+            } else {
+                let uri = self.session.as_ref().unwrap().media_uri.clone();
+                let item = match self.draft.kind {
+                    SourceEntityKind::Track => MetadataItemId::Track(uri),
+                    SourceEntityKind::Album => MetadataItemId::Album(uri),
+                    SourceEntityKind::Artist => MetadataItemId::Artist(uri),
+                };
+                Self::open(self.source.clone(), item).await
+            }
+        })
+        .await
+    }
+
     pub fn snapshot(&self) -> MetadataEditorSnapshot {
         let state = self.state();
         let (search_artist, search_album) = state.artwork_search_fields(&self.draft);
@@ -122,7 +148,7 @@ impl MetadataEditor {
                 || self
                     .batch
                     .as_ref()
-                    .is_some_and(|scope| scope.batch.has_changes()),
+                    .is_some_and(|scope| scope.changed_count() > 0),
             committed: state.committed,
             track_count: self.draft.track_count as u64,
             selected_count: self.batch.as_ref().map_or(1, |scope| {
@@ -229,10 +255,7 @@ impl MetadataEditor {
         super::on_runtime(runtime, async {
             self.stage_changes().await?;
             let tracks = if let Some(scope) = &self.batch {
-                scope
-                    .batch
-                    .work(|records| Ok(records.changed.len() as u64))
-                    .await?
+                scope.changed_count() as u64
             } else {
                 let state = self.state();
                 if state.has_changes(&self.draft) || state.artwork.is_some() {
@@ -263,7 +286,7 @@ impl MetadataEditor {
                 .map_err(SourceMetadataError::InvalidInput)?;
             if let Some(scope) = &self.batch {
                 scope.batch.stage(self).await?;
-                let result = scope.batch.clone().save().await;
+                let result = scope.batch.save(&scope.indices).await;
                 self.reload_batch().await?;
                 return result;
             }
