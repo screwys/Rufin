@@ -1,17 +1,12 @@
 #[cfg(test)]
 use gtk_widgets::selection::collection_play_request;
 use gtk_widgets::sparse_model::{item_at, item_at_from_item};
-use rufin_core::playback::PlayRequest;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
-    sync::Arc,
 };
 
-use ::library::{
-    AlbumView, ArtistKey, ArtistView, PlaylistKey, PlaylistRow, SmartPlaylistKey, SmartPlaylistRow,
-    TrackView,
-};
+use ::library::{AlbumView, ArtistKey, ArtistView, PlaylistRow, TrackView};
 use adw::prelude::*;
 use gtk::{gio, glib};
 
@@ -19,7 +14,6 @@ use crate::CatalogUi;
 use crate::{LibraryField, LibraryLayout, LibraryListKey};
 use gtk_widgets::layout::{AllocationOwner, width_allocation_owner};
 use gtk_widgets::mounted_route::{MountedRouteItemNavigation, item_navigation_entry_position};
-use rufin_core::playlists::SmartPlaylistChange;
 
 use super::album_detail::{AlbumCollectionModels, AlbumDetailVirtualList, album_detail_list};
 use super::columns::{
@@ -1183,154 +1177,30 @@ fn selected_position(selection: &gtk::SelectionModel) -> u32 {
         positions.minimum()
     }
 }
-pub fn install_smart_playlist_reorder(
-    target: &impl IsA<gtk::Widget>,
-    shell: &Rc<CatalogUi>,
-    current: Rc<dyn Fn() -> Option<SmartPlaylistRow>>,
-) {
-    let shell = Rc::downgrade(shell);
-    install_playlist_order_drop(
-        target,
-        Rc::new(move || current().map(|playlist| playlist.smart_playlist_key.raw())),
-        |target| match target.selection() {
-            Some(library::MemberSelection::Members {
-                read:
-                    library::MemberRead {
-                        collection: library::Collection::Smart { key, .. },
-                        ..
-                    },
-                ..
-            }) => Some(key.raw()),
-            _ => None,
-        },
-        Rc::new(|_| false),
-        Rc::new(move |dragged, target| {
-            if let Some(shell) = shell.upgrade() {
-                shell.update_library_list_settings(LibraryListKey::SmartPlaylists, |settings| {
-                    settings.sort_key = LibraryField::RowIndex;
-                    settings.descending = false;
-                });
-                (shell.media_menus.publish_smart_playlist_change)(
-                    SmartPlaylistChange::Move {
-                        dragged: SmartPlaylistKey::from_raw(dragged),
-                        target: SmartPlaylistKey::from_raw(target),
-                    },
-                    None,
-                );
-            }
-        }),
-    );
-}
-
-pub fn install_playlist_reorder(
+pub fn install_playlist_drop(
     target: &impl IsA<gtk::Widget>,
     shell: &Rc<CatalogUi>,
     current: Rc<dyn Fn() -> Option<PlaylistRow>>,
 ) {
-    let drop_current = Rc::clone(&current);
     let menus = Rc::downgrade(&shell.media_menus);
-    let shell = Rc::downgrade(shell);
-    install_playlist_order_drop(
-        target,
-        Rc::new(move || current().map(|playlist| playlist.playlist_key.raw())),
-        |target| match target.selection() {
-            Some(library::MemberSelection::Members {
-                read:
-                    library::MemberRead {
-                        collection: library::Collection::Playlist(key),
-                        ..
-                    },
-                ..
-            }) => Some(key.raw()),
-            _ => None,
-        },
-        Rc::new(move |source| {
-            let (Some(menus), Some(playlist)) = (menus.upgrade(), drop_current()) else {
-                return false;
-            };
-            gtk_media_menus::media_menus::add_drag_to_playlist(&menus, playlist, source)
-        }),
-        Rc::new(move |dragged, target| {
-            let Some(shell) = shell.upgrade() else { return };
-            shell.update_library_list_settings(LibraryListKey::Playlists, |settings| {
-                settings.sort_key = LibraryField::RowIndex;
-                settings.descending = false;
-            });
-            let Some(selected) = shell.selected_library().as_deref().cloned() else {
-                return;
-            };
-            let database = Arc::clone(&shell.library);
-            let task = shell.runtime.spawn(async move {
-                database
-                    .move_playlist(
-                        selected.source_key,
-                        PlaylistKey::from_raw(dragged),
-                        PlaylistKey::from_raw(target),
-                    )
-                    .await
-            });
-            let shell = Rc::downgrade(&shell);
-            glib::spawn_future_local(async move {
-                if task.await.ok().and_then(Result::ok) == Some(true)
-                    && let Some(shell) = shell.upgrade()
-                {
-                    (shell.refresh_catalog)();
-                }
-            });
-        }),
-    );
-}
-
-fn install_playlist_order_drop(
-    widget: &impl IsA<gtk::Widget>,
-    current: Rc<dyn Fn() -> Option<i64>>,
-    key: fn(&PlayRequest) -> Option<i64>,
-    drop_media: Rc<dyn Fn(gtk_widgets::media_drag::MediaDragSource) -> bool>,
-    reorder: Rc<dyn Fn(i64, i64)>,
-) {
     let drop = gtk::DropTarget::new(
         glib::BoxedAnyObject::static_type(),
-        gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
+        gtk::gdk::DragAction::COPY,
     );
     drop.connect_drop(move |_, value, _, _| {
-        let Some(source) = gtk_widgets::media_drag::media_drag_source(value) else {
+        let (Some(menus), Some(playlist), Some(source)) = (
+            menus.upgrade(),
+            current(),
+            gtk_widgets::media_drag::media_drag_source(value),
+        ) else {
             return false;
         };
-        let Some(dragged) = playlist_order_key(&source, key) else {
-            return drop_media(source);
-        };
-        let Some(current) = current() else {
-            return false;
-        };
-        if dragged == current {
+        if gtk_media_menus::playlist_folders::single_regular_playlist_drag(&source) {
             return false;
         }
-        reorder(dragged, current);
-        true
+        gtk_media_menus::media_menus::add_drag_to_playlist(&menus, playlist, source)
     });
-    gtk_widgets::media_drag::style_order_drop_target(&drop, false, move |drop| {
-        drop.value()
-            .as_ref()
-            .and_then(gtk_widgets::media_drag::media_drag_source)
-            .and_then(|source| playlist_order_key(&source, key))
-            .is_some()
-    });
-    widget.add_controller(drop);
-}
-fn playlist_order_key(
-    source: &gtk_widgets::media_drag::MediaDragSource,
-    key: fn(&PlayRequest) -> Option<i64>,
-) -> Option<i64> {
-    use gtk_widgets::media_drag::{CollectionTargets, MediaDragSource};
-    let target = match source {
-        MediaDragSource::Target { target, .. } => target,
-        MediaDragSource::Targets {
-            targets: CollectionTargets::Ready(targets),
-            ..
-        } if targets.len() == 1 => &targets[0],
-        _ => return None,
-    };
-    key(target)
+    target.add_controller(drop);
 }
 
 fn collection_grid_field_class(field: LibraryField) -> &'static str {

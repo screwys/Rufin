@@ -361,6 +361,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
     assert!(mood.representative_artwork.is_empty());
     for sort in [CatalogSort::Title, CatalogSort::TrackCount] {
         let (count, _, rows) = library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Genres,
             source: Some(fixture.source),
             sort: sort,
@@ -381,6 +382,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
     }
     for sort in [CatalogSort::Title, CatalogSort::TrackCount] {
         let (count, _, rows) = library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Moods,
             source: Some(fixture.source),
             sort: sort,
@@ -720,6 +722,7 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
 
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Albums,
             source: Some(fixture.source),
             sort: CatalogSort::Title,
@@ -742,6 +745,7 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
     );
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Artists {
                 album_artist: false
             },
@@ -952,6 +956,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Albums,
             source: Some(fixture.source),
             sort: CatalogSort::Title,
@@ -974,6 +979,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Albums,
             source: Some(fixture.source),
             sort: CatalogSort::DateAdded,
@@ -996,6 +1002,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Artists { album_artist: true },
             source: Some(fixture.source),
             sort: CatalogSort::Title,
@@ -1018,6 +1025,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Artists {
                 album_artist: false
             },
@@ -1042,6 +1050,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Genres,
             source: Some(fixture.source),
             sort: CatalogSort::Title,
@@ -1064,6 +1073,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Genres,
             source: Some(fixture.source),
             sort: CatalogSort::TrackCount,
@@ -1086,6 +1096,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Moods,
             source: Some(fixture.source),
             sort: CatalogSort::Duration,
@@ -1494,6 +1505,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Artists {
                 album_artist: false
             },
@@ -1518,6 +1530,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Artists { album_artist: true },
             source: Some(fixture.source),
             sort: CatalogSort::Title,
@@ -1591,6 +1604,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         .bind(fixture.source).fetch_one(&mut raw).await.expect("insert empty Folder");
     assert!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Albums,
             source: Some(fixture.source),
             sort: CatalogSort::Title,
@@ -1631,6 +1645,7 @@ async fn empty_named_collection_routes_return_empty_pages() {
     let cancellation = ReadCancellation::new();
 
     let genres = library::ListRead {
+        playlist_folder: None,
         kind: library::ListKind::Genres,
         source: Some(source),
         sort: CatalogSort::TrackCount,
@@ -1646,6 +1661,7 @@ async fn empty_named_collection_routes_return_empty_pages() {
     .map(|page| (page.count, page.first_row_position, page.rows))
     .expect("empty Genre route");
     let moods = library::ListRead {
+        playlist_folder: None,
         kind: library::ListKind::Moods,
         source: Some(source),
         sort: CatalogSort::Duration,
@@ -1844,6 +1860,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
     );
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Albums,
             source: Some(fixture.source),
             sort: CatalogSort::Title,
@@ -1866,6 +1883,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
     );
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Albums,
             source: Some(fixture.source),
             sort: CatalogSort::Title,
@@ -1888,6 +1906,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
     );
     assert_eq!(
         library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Albums,
             source: Some(fixture.source),
             sort: CatalogSort::Title,

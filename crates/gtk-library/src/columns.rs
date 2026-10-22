@@ -37,7 +37,7 @@ const DETAIL_TRACK_UTILITY_COLUMN_WIDTH: i32 = 48;
 pub fn bind_collection_title<T: Clone + 'static>(
     factory: &gtk::SignalListItemFactory,
     shell: &Rc<CatalogUi>,
-    target: impl Fn(&T) -> PlayRequest + 'static,
+    target: impl Fn(&T) -> Option<PlayRequest> + 'static,
 ) {
     let bindings = Rc::new(RefCell::new(HashMap::<
         usize,
@@ -59,7 +59,8 @@ pub fn bind_collection_title<T: Clone + 'static>(
             .clone();
         let target = item
             .item()
-            .and_then(|object| object_item::<T, _>(object, &target));
+            .and_then(|object| object_item::<T, _>(object, &target))
+            .flatten();
         binding.bind(&shell, target);
     });
     factory.connect_unbind(move |_, item| {
@@ -494,11 +495,10 @@ pub fn artist_column(
     match field {
         LibraryField::RowIndex => {
             mapped_row_index_column::<ArtistView>(shell, column_width(field), move |row| {
-                if album_artist {
-                    gtk_widgets::selection::artist_play_request(&row, true)
-                } else {
-                    gtk_widgets::selection::artist_play_request(&row, false)
-                }
+                Some(gtk_widgets::selection::artist_play_request(
+                    row,
+                    album_artist,
+                ))
             })
         }
         LibraryField::Image => artist_image_column(shell, album_artist),
@@ -821,7 +821,7 @@ pub fn row_index_column_with_width(width: i32) -> gtk::ColumnViewColumn {
 pub fn mapped_row_index_column<T: Clone + 'static>(
     shell: &Rc<CatalogUi>,
     width: i32,
-    target: impl Fn(&T) -> PlayRequest + 'static,
+    target: impl Fn(&T) -> Option<PlayRequest> + 'static,
 ) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let shell = Rc::clone(shell);
@@ -839,7 +839,8 @@ pub fn mapped_row_index_column<T: Clone + 'static>(
         };
         let target = item
             .item()
-            .and_then(|object| object_item::<T, _>(object, &target));
+            .and_then(|object| object_item::<T, _>(object, &target))
+            .flatten();
         cell.bind(item.position(), target);
     });
     factory.connect_unbind(|_, item| {
@@ -1035,7 +1036,7 @@ fn install_artist_list_item_context_menu(
             } else {
                 gtk_widgets::selection::artist_play_request(&artist, false)
             };
-            (target, artist.metadata.name)
+            Some((target, artist.metadata.name))
         }),
     );
     let item = item.downgrade();
@@ -1062,13 +1063,13 @@ fn install_collection_cell_drag<T: Clone + 'static>(
     widget: &impl IsA<gtk::Widget>,
     shell: &Rc<CatalogUi>,
     item: &gtk::ListItem,
-    target: Rc<dyn Fn(T) -> (PlayRequest, String)>,
+    target: Rc<dyn Fn(T) -> Option<(PlayRequest, String)>>,
 ) {
     let shell = Rc::downgrade(shell);
     let item = item.downgrade();
     install_media_drag_source(widget, move || {
         let _shell = shell.upgrade()?;
-        let (target, title) = target(item_at_from_item::<T>(&item.upgrade()?)?);
+        let (target, title) = target(item_at_from_item::<T>(&item.upgrade()?)?)?;
         Some((MediaDragSource::capture_target(target), title))
     });
 }
@@ -1078,7 +1079,7 @@ pub fn artwork_column<T, F>(
     title: &str,
     width: i32,
     candidates: F,
-    drag: Option<Rc<dyn Fn(T) -> (PlayRequest, String)>>,
+    drag: Option<Rc<dyn Fn(T) -> Option<(PlayRequest, String)>>>,
 ) -> gtk::ColumnViewColumn
 where
     T: Clone + 'static,
@@ -1193,11 +1194,10 @@ where
     let factory = gtk::SignalListItemFactory::new();
     if matches!(field, LibraryField::Title | LibraryField::TitleMerged) {
         bind_collection_title::<ArtistView>(&factory, shell, move |row| {
-            if album_artist {
-                gtk_widgets::selection::artist_play_request(&row, true)
-            } else {
-                gtk_widgets::selection::artist_play_request(&row, false)
-            }
+            Some(gtk_widgets::selection::artist_play_request(
+                row,
+                album_artist,
+            ))
         });
     }
     let shell = Rc::clone(shell);

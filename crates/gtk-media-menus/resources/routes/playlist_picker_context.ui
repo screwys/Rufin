@@ -4,6 +4,7 @@
 
   <object class="GtkBox" id="content">
     <property name="orientation">vertical</property>
+    <child><object class="GtkButton" id="back"><property name="visible">false</property><property name="icon-name">go-previous-symbolic</property><property name="tooltip-text" translatable="yes">Back</property><property name="halign">start</property></object></child>
     <child>
       <object class="GtkOverlay">
         <property name="child">

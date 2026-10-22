@@ -187,6 +187,9 @@ pub enum AndroidBrowseItem {
     SmartPlaylist {
         row: library::SmartPlaylistRow,
     },
+    PlaylistFolder {
+        row: library::PlaylistFolderRow,
+    },
     Recent {
         row: rufin_core::settings::app::RecentSearchResult,
     },
@@ -351,4 +354,27 @@ impl From<rufin_core::detail_links::DetailLink> for AndroidDetailLink {
 pub struct AndroidTargetDownloadStatus {
     pub total: u64,
     pub downloaded: u64,
+}
+
+impl From<library::PlaylistFolderRow> for AndroidBrowseRow {
+    fn from(row: library::PlaylistFolderRow) -> Self {
+        let pin = Some(SidebarPin::PlaylistFolder {
+            folder_id: row.object_id.clone(),
+            smart: row.smart,
+        });
+        Self {
+            pin,
+            ..Self::new(AndroidBrowseItem::PlaylistFolder { row })
+        }
+    }
+}
+
+impl From<library::PlaylistListRow> for AndroidBrowseRow {
+    fn from(row: library::PlaylistListRow) -> Self {
+        match row {
+            library::PlaylistListRow::Playlist(row) => row.into(),
+            library::PlaylistListRow::SmartPlaylist(row) => row.into(),
+            library::PlaylistListRow::Folder(row) => row.into(),
+        }
+    }
 }

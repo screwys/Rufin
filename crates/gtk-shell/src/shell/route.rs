@@ -488,7 +488,10 @@ impl Shell {
         let selected = if source_scoped
             || matches!(
                 route,
-                Route::Playlists | Route::SmartPlaylists | Route::SmartPlaylistDetail(_)
+                Route::Playlists
+                    | Route::SmartPlaylists
+                    | Route::SmartPlaylistDetail(_)
+                    | Route::PlaylistFolder { .. }
             ) {
             selected
         } else {

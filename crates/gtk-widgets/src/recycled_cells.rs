@@ -221,11 +221,15 @@ crate::composite_box!(
     "/io/github/screwys/Rufin/ui/routes/recycled_badged_text_cell.ui",
     {
         label: gtk::Label,
+        folder_icon: gtk::Image,
         downloaded: gtk::Image,
     }
 );
 
 impl RecycledBadgedTextCell {
+    pub fn set_folder(&self, folder: bool) {
+        self.imp().folder_icon.set_visible(folder);
+    }
     pub fn with_downloads(downloads: &Rc<DownloadsState>) -> Self {
         let cell = Self::new();
         downloads.register_download_badge(&cell.imp().downloaded);
@@ -242,6 +246,7 @@ impl RecycledBadgedTextCell {
 
     pub fn clear(&self) {
         self.imp().label.set_text("");
+        self.imp().folder_icon.set_visible(false);
         self.imp().downloaded.set_visible(false);
     }
 }

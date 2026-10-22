@@ -189,7 +189,7 @@ internal class BrowsePage(
             try {
                 val labelsVersion = browse.labelsVersion
                 val kind = if (pins) "Pins" else context.route.kind
-                if (!pins && context.source?.selectedSourceId == null && kind !in listOf("Playlists", "PlaylistDetail") &&
+                if (!pins && context.source?.selectedSourceId == null && kind !in listOf("Playlists", "PlaylistDetail", "SmartPlaylists", "SmartPlaylistDetail", "PlaylistFolder") &&
                     !(kind == "History" && context.category != "current")) return@collectLatest
                 if (pins) library.importPlaylistPins()
                 val query = when {

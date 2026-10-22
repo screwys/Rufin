@@ -178,3 +178,160 @@ impl AndroidLibrary {
         playlist_files::is_conflict(&message)
     }
 }
+
+#[uniffi::export]
+impl AndroidLibrary {
+    pub async fn playlist_folders(
+        &self,
+        smart: bool,
+    ) -> Result<Vec<library::PlaylistFolderRow>, AndroidError> {
+        let database = self.database.clone();
+        self.runtime
+            .spawn(async move {
+                database
+                    .playlist_folders(smart, &library::ReadCancellation::new())
+                    .await
+                    .map_err(error)
+            })
+            .await
+            .map_err(error)?
+    }
+
+    pub async fn playlist_member_folder(
+        &self,
+        member: library::PlaylistFolderMember,
+    ) -> Result<Option<library::PlaylistFolderKey>, AndroidError> {
+        let database = self.database.clone();
+        self.runtime
+            .spawn(async move {
+                database
+                    .playlist_member_folder(&member, &library::ReadCancellation::new())
+                    .await
+                    .map_err(error)
+            })
+            .await
+            .map_err(error)?
+    }
+
+    pub async fn create_playlist_folder(
+        &self,
+        name: String,
+        smart: bool,
+    ) -> Result<library::PlaylistFolderKey, AndroidError> {
+        playlists::create_playlist_folder(&self.source, name, smart)
+            .await
+            .map_err(error)
+    }
+
+    pub async fn rename_playlist_folder(
+        &self,
+        key: library::PlaylistFolderKey,
+        name: String,
+    ) -> Result<(), AndroidError> {
+        playlists::rename_playlist_folder(&self.source, key, name)
+            .await
+            .map_err(error)
+    }
+
+    pub async fn delete_playlist_folder(
+        &self,
+        key: library::PlaylistFolderKey,
+    ) -> Result<(), AndroidError> {
+        playlists::delete_playlist_folder(&self.source, key)
+            .await
+            .map_err(error)
+    }
+
+    pub async fn move_playlist_to_folder(
+        &self,
+        member: library::PlaylistFolderMember,
+        folder: Option<library::PlaylistFolderKey>,
+    ) -> Result<(), AndroidError> {
+        playlists::move_playlist_to_folder(&self.source, member, folder)
+            .await
+            .map_err(error)
+    }
+
+    pub async fn save_smart_playlist(
+        &self,
+        key: Option<library::SmartPlaylistKey>,
+        name: String,
+        definition: library::SmartPlaylistDefinition,
+        folder: Option<library::PlaylistFolderKey>,
+    ) -> Result<library::SmartPlaylistKey, AndroidError> {
+        let source = self.source.clone();
+        let database = self.database.clone();
+        self.runtime
+            .spawn(async move {
+                let key = if let Some(key) = key {
+                    if !database
+                        .update_smart_playlist(key, &name, &definition, None)
+                        .await
+                        .map_err(error)?
+                    {
+                        return Err(error("Playlist no longer exists"));
+                    }
+                    key
+                } else {
+                    database
+                        .create_smart_playlist(&name, &definition)
+                        .await
+                        .map_err(error)?
+                };
+                if let Some(folder) = folder {
+                    playlists::move_playlist_to_folder(
+                        &source,
+                        library::PlaylistFolderMember::SmartPlaylist { key },
+                        Some(folder),
+                    )
+                    .await
+                    .map_err(error)?;
+                } else {
+                    playlists::playlist_folders_changed(&source).await;
+                }
+                Ok(key)
+            })
+            .await
+            .map_err(error)?
+    }
+
+    pub async fn delete_smart_playlist(
+        &self,
+        key: library::SmartPlaylistKey,
+    ) -> Result<(), AndroidError> {
+        let source = self.source.clone();
+        let database = self.database.clone();
+        self.runtime
+            .spawn(async move {
+                database.delete_smart_playlist(key).await.map_err(error)?;
+                playlists::playlist_folders_changed(&source).await;
+                Ok(())
+            })
+            .await
+            .map_err(error)?
+    }
+
+    pub fn smart_playlist_default_definition(&self) -> library::SmartPlaylistDefinition {
+        library::SmartPlaylistDefinition::default()
+    }
+
+    pub fn smart_playlist_rule_operators(
+        &self,
+        field: library::SmartPlaylistRuleField,
+    ) -> Vec<library::SmartPlaylistRuleOperator> {
+        field.operators().to_vec()
+    }
+
+    pub fn smart_playlist_rule(
+        &self,
+        field: library::SmartPlaylistRuleField,
+        operator: Option<library::SmartPlaylistRuleOperator>,
+    ) -> library::SmartPlaylistRule {
+        let operator = operator.unwrap_or(field.operators()[0]);
+        library::SmartPlaylistRule {
+            field,
+            operator,
+            value: field.default_value(operator),
+        }
+    }
+}

@@ -23,6 +23,7 @@
             <property name="margin-start">18</property>
             <property name="margin-end">18</property>
             <style><class name="context-playlist-picker"/></style>
+            <child><object class="GtkButton" id="back"><property name="visible">false</property><property name="icon-name">go-previous-symbolic</property><property name="tooltip-text" translatable="yes">Back</property><property name="halign">start</property></object></child>
             <child><object class="GtkSearchEntry" id="search"><property name="placeholder-text" translatable="yes">Type to search or create a new playlist</property></object></child>
             <child>
               <object class="GtkScrolledWindow">

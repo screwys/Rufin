@@ -190,6 +190,12 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     var menu by remember { mutableStateOf<BrowseItem?>(null) }
     var playlist by remember { mutableStateOf<BrowseItem?>(null) }
     var createPlaylist by rememberSaveable { mutableStateOf(false) }
+    var createMenu by remember { mutableStateOf(false) }
+    var createFolder by rememberSaveable { mutableStateOf(false) }
+    var createSmartPlaylist by rememberSaveable { mutableStateOf(false) }
+    val playlistFolder = browse.current?.route as? Route.PlaylistFolder
+    val playlistList = browse.current?.route.let { it is Route.Playlists || it is Route.SmartPlaylists || it is Route.PlaylistFolder }
+    val smartPlaylistList = playlistFolder?.smart ?: (browse.current?.route is Route.SmartPlaylists)
     val context = LocalContext.current
     val importTheme = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(preferences::importTheme) }
     val importPlaylist = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -203,6 +209,9 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                         intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
                         context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     val imported = browse.library?.importPlaylist(uri.toString()) ?: return@forEach
+                    playlistFolder?.let { folder ->
+                        imported.row.playlistFolderMember?.let { browse.library?.movePlaylistToFolder(it, folder.key) }
+                    }
                     browse.open(BrowseItem(imported.row, 0UL, null))
                     if (imported.skipped > 0UL) model.showFeedback(translate("Some playlist entries could not be imported"))
                 }
@@ -257,7 +266,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val destinationPage = if (destination.location != null) detailPages[destination.location]
         else rootPages[destination.root]?.takeIf {
             browse.library != null && browse.routes.any { it.id == destination.root } &&
-                (model.sources?.sources?.isEmpty() != true || destination.root in listOf("History", "Playlists"))
+                (model.sources?.sources?.isEmpty() != true || destination.root in listOf("History", "Playlists", "SmartPlaylists"))
         }
     val navigation = remember(browse.section) { SeekableTransitionState(destination) }
     val navigationTransition = rememberTransition(navigation, label = "libraryNavigation")
@@ -326,9 +335,18 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                         RufinIcon("rufin-document-open-symbolic", translate("Import theme"))
                     }
                 }
-                if (browse.section == AppSection.Browse && !browse.detail && browse.rootId == "Playlists") {
-                    PlayerIconButton("rufin-list-add-symbolic", "New Playlist", { createPlaylist = true })
-                    PlayerIconButton("rufin-document-open-symbolic", "Import Playlist", {
+                if (browse.section == AppSection.Browse && playlistList) {
+                    Box {
+                        PlayerIconButton("rufin-list-add-symbolic", "Create", { createMenu = true })
+                        DropdownMenu(createMenu, { createMenu = false }) {
+                            DropdownMenuItem(text = { Text(translate(if (smartPlaylistList) "New Smart Playlist" else "New Playlist")) }, onClick = {
+                                createMenu = false
+                                if (smartPlaylistList) createSmartPlaylist = true else createPlaylist = true
+                            })
+                            if (playlistFolder == null) DropdownMenuItem(text = { Text(translate("New folder")) }, onClick = { createMenu = false; createFolder = true })
+                        }
+                    }
+                    if (!smartPlaylistList) PlayerIconButton("rufin-document-open-symbolic", "Import Playlist", {
                         importPlaylist.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*")
                             .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION))
@@ -456,7 +474,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                         CircularProgressIndicator(Modifier.semantics { contentDescription = label("Loading...") })
                                     }
-                                } else if (model.sources?.sources?.isEmpty() == true && routeId !in listOf("History", "Playlists")) {
+                                } else if (model.sources?.sources?.isEmpty() == true && routeId !in listOf("History", "Playlists", "SmartPlaylists")) {
                                     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                                         RufinIcon("rufin-library-symbolic", null, Modifier.size(48.dp))
                                         Text(translate("No sources configured"), Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
@@ -544,14 +562,21 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
         initialCurrentSource = preferences.applicationSettings?.newPlaylistCurrent != false) { name, sourceId, public ->
         io.github.screwys.rufin.shared.library.MemberSelection.fromUris(emptyList()).use { selection ->
             val source = model.sourceOwner ?: return@PlaylistCreateSheet
-            io.github.screwys.rufin.shared.rufin_core.createPlaylist(source, sourceId, name, selection, public, null)
-                ?.settingsError?.let { error(it) }
+            io.github.screwys.rufin.shared.rufin_core.createPlaylist(source, sourceId, name, selection, public, null)?.let { created ->
+                playlistFolder?.let { folder ->
+                    created.playlistKey?.let { key -> browse.library?.movePlaylistToFolder(
+                        io.github.screwys.rufin.shared.library.PlaylistFolderMember.Playlist(key), folder.key) }
+                }
+                created.settingsError?.let { error(it) }
+            }
         }
         browse.refresh()
         createPlaylist = false
     }
+    if (createFolder) PlaylistFolderNameDialog(model, browse, smartPlaylistList, { createFolder = false })
+    if (createSmartPlaylist) SmartPlaylistEditor(model, browse, { createSmartPlaylist = false }, folder = playlistFolder?.key)
     metadata?.let { item -> MetadataEditorScreen(model, item.row.kind, item.row.mediaUri) { metadata = null } }
-    if (metadata == null && menu == null && playlist == null && !createPlaylist && !sources && !outputs && !sort && !random) {
+    if (metadata == null && menu == null && playlist == null && !createPlaylist && !createFolder && !createSmartPlaylist && !sources && !outputs && !sort && !random) {
         ConnectPairingPrompt(model) { openMore(MoreDestination.Connect) }
     }
     if (sources) Dialog(onDismissRequest = { model.closeSourceSetup(); sources = false },

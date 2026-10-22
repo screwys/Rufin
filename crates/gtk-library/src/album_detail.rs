@@ -141,8 +141,8 @@ impl AlbumCollectionModels {
             }),
         );
         gtk_widgets::media_drag::install_parent_selection(&rows, request, |row| {
-            gtk_widgets::selection::collection_play_request(library::Collection::Album(
-                row.album_key,
+            Some(gtk_widgets::selection::collection_play_request(
+                library::Collection::Album(row.album_key),
             ))
         });
         rows.seed_matching_at(first_row_position, first_rows, |row| row.album_key);

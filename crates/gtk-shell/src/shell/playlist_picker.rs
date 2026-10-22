@@ -6,9 +6,24 @@ use adw::prelude::*;
 use localization::msgid;
 
 use crate::shell::Shell;
+use gtk_media_menus::playlist_picker::PlaylistPickerData;
 use gtk_widgets::downloads::OperationFeedback;
 use gtk_widgets::interactions::{ADD_TO_PLAYLIST_ICON, ContextMenuSurface};
 use rufin_core::settings::ContextMenuItem;
+
+async fn load_picker_data(
+    database: &library::Database,
+    source: Option<library::SourceKey>,
+) -> library::LibraryResult<PlaylistPickerData> {
+    let cancel = library::ReadCancellation::new();
+    Ok(PlaylistPickerData {
+        playlists: database.playlist_destinations(source, &cancel).await?,
+        folders: database.playlist_folders(false, &cancel).await?,
+        memberships: database
+            .playlist_destination_folders(source, &cancel)
+            .await?,
+    })
+}
 
 use gtk_widgets::selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
 use rufin_core::playback::PlayRequest;
@@ -84,8 +99,7 @@ fn open_full_playlist_picker(shell: &Rc<Shell>, source: MediaDragSource) {
     let database = shell.products.library.clone();
     let task = shell.products.runtime.spawn(async move {
         let (selection, title, preview_uris) = source.playlist_input(&database).await?;
-        let playlists = database
-            .playlist_destinations(source_key, &library::ReadCancellation::new())
+        let playlists = load_picker_data(&database, source_key)
             .await
             .map_err(|error| error.to_string())?;
         Ok::<_, String>((playlists, selection, title, preview_uris))
@@ -154,8 +168,7 @@ fn populate_context_playlist_picker(
     let database = shell.products.library.clone();
     let task = shell.products.runtime.spawn(async move {
         let (selection, title, preview_uris) = source.playlist_input(&database).await?;
-        let playlists = database
-            .playlist_destinations(source_key, &library::ReadCancellation::new())
+        let playlists = load_picker_data(&database, source_key)
             .await
             .map_err(|error| error.to_string())?;
         Ok::<_, String>((playlists, selection, title, preview_uris))
@@ -181,7 +194,7 @@ fn picker_feedback(shell: &Rc<Shell>) -> Rc<dyn Fn(&OperationFeedback)> {
 fn present_playlist_picker(
     shell: &Rc<Shell>,
     source_key: Option<library::SourceKey>,
-    playlists: Vec<library::PlaylistRow>,
+    playlists: PlaylistPickerData,
     selection: library::MemberSelection,
     title: String,
     preview_uris: Vec<String>,
@@ -190,9 +203,9 @@ fn present_playlist_picker(
     let (dialog, update) = gtk_media_menus::playlist_picker::playlist_picker_dialog(
         shell.products.source.clone(),
         Rc::clone(&shell.artwork),
-        Rc::new(move |name, tracks| {
+        Rc::new(move |name, tracks, folder| {
             if let Some(shell) = create_shell.upgrade() {
-                shell.new_playlist_dialog_with(name, tracks);
+                shell.new_playlist_dialog_in_folder(name, tracks, folder);
             }
         }),
         picker_feedback(shell),
@@ -217,11 +230,10 @@ fn present_playlist_picker(
             return;
         };
         let database = shell_now.products.library.clone();
-        let task = shell_now.products.runtime.spawn(async move {
-            database
-                .playlist_destinations(source_key, &library::ReadCancellation::new())
-                .await
-        });
+        let task = shell_now
+            .products
+            .runtime
+            .spawn(async move { load_picker_data(&database, source_key).await });
         let shell = refresh_shell.clone();
         let update = Rc::clone(&update);
         let dialog = refresh_dialog.clone();

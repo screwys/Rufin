@@ -14,5 +14,6 @@
     <file compressed="true">routes/library_page.ui</file>
     <file compressed="true">routes/library_toolbar.ui</file>
     <file compressed="true">routes/search.ui</file>
+  <file compressed="true">routes/playlist_commands.ui</file>
   </gresource>
 </gresources>

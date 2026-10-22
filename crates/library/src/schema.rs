@@ -14,7 +14,7 @@ pub(crate) async fn pragma(
 }
 pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 55;
+PRAGMA user_version = 56;
 
 CREATE TABLE IF NOT EXISTS queue_contexts (
     context_key INTEGER PRIMARY KEY,
@@ -123,6 +123,32 @@ CREATE TABLE IF NOT EXISTS smart_playlists (
 
 CREATE INDEX IF NOT EXISTS smart_playlists_title_idx
     ON smart_playlists(normalized_name, smart_playlist_key);
+
+CREATE TABLE IF NOT EXISTS playlist_folders (
+    folder_key INTEGER PRIMARY KEY,
+    object_id TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    smart INTEGER NOT NULL CHECK(smart IN(0,1)),
+    playlist_cover_key INTEGER REFERENCES playlists ON DELETE SET NULL,
+    smart_cover_key INTEGER REFERENCES smart_playlists ON DELETE SET NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS playlist_folder_members (
+    playlist_key INTEGER PRIMARY KEY REFERENCES playlists ON DELETE CASCADE,
+    folder_key INTEGER NOT NULL REFERENCES playlist_folders ON DELETE CASCADE
+) STRICT;
+CREATE INDEX IF NOT EXISTS playlist_folder_members_folder_idx ON playlist_folder_members(folder_key,playlist_key);
+CREATE TABLE IF NOT EXISTS smart_playlist_folder_members (
+    smart_playlist_key INTEGER PRIMARY KEY REFERENCES smart_playlists ON DELETE CASCADE,
+    folder_key INTEGER NOT NULL REFERENCES playlist_folders ON DELETE CASCADE
+) STRICT;
+CREATE INDEX IF NOT EXISTS smart_playlist_folder_members_folder_idx ON smart_playlist_folder_members(folder_key,smart_playlist_key);
+CREATE TRIGGER IF NOT EXISTS playlist_folder_members_cover_insert AFTER INSERT ON playlist_folder_members BEGIN UPDATE playlist_folders SET playlist_cover_key=(SELECT child.playlist_key FROM playlist_folder_members member JOIN playlists child USING(playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed) ORDER BY child.playlist_key LIMIT 1) WHERE (folder_key=NEW.folder_key) AND smart=0 AND NOT EXISTS(SELECT 1 FROM playlist_folder_members member JOIN playlists child USING(playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.playlist_key=playlist_folders.playlist_cover_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed)); END;
+CREATE TRIGGER IF NOT EXISTS playlist_folder_members_cover_delete AFTER DELETE ON playlist_folder_members BEGIN UPDATE playlist_folders SET playlist_cover_key=(SELECT child.playlist_key FROM playlist_folder_members member JOIN playlists child USING(playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed) ORDER BY child.playlist_key LIMIT 1) WHERE (folder_key=OLD.folder_key) AND smart=0 AND NOT EXISTS(SELECT 1 FROM playlist_folder_members member JOIN playlists child USING(playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.playlist_key=playlist_folders.playlist_cover_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed)); END;
+CREATE TRIGGER IF NOT EXISTS playlist_folder_members_cover_update AFTER UPDATE ON playlist_folder_members BEGIN UPDATE playlist_folders SET playlist_cover_key=(SELECT child.playlist_key FROM playlist_folder_members member JOIN playlists child USING(playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed) ORDER BY child.playlist_key LIMIT 1) WHERE (folder_key IN(OLD.folder_key,NEW.folder_key)) AND smart=0 AND NOT EXISTS(SELECT 1 FROM playlist_folder_members member JOIN playlists child USING(playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.playlist_key=playlist_folders.playlist_cover_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed)); END;
+CREATE TRIGGER IF NOT EXISTS playlists_folder_cover_update AFTER UPDATE OF name,indexed ON playlists BEGIN UPDATE playlist_folders SET playlist_cover_key=(SELECT child.playlist_key FROM playlist_folder_members member JOIN playlists child USING(playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed) ORDER BY child.playlist_key LIMIT 1) WHERE (folder_key IN(SELECT folder_key FROM playlist_folder_members WHERE playlist_key=NEW.playlist_key)) AND smart=0 AND NOT EXISTS(SELECT 1 FROM playlist_folder_members member JOIN playlists child USING(playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.playlist_key=playlist_folders.playlist_cover_key AND child.name IS NOT NULL AND (child.owner='rufin' OR child.indexed)); END;
+CREATE TRIGGER IF NOT EXISTS smart_playlist_folder_members_cover_insert AFTER INSERT ON smart_playlist_folder_members BEGIN UPDATE playlist_folders SET smart_cover_key=(SELECT child.smart_playlist_key FROM smart_playlist_folder_members member JOIN smart_playlists child USING(smart_playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.name IS NOT NULL ORDER BY child.smart_playlist_key LIMIT 1) WHERE (folder_key=NEW.folder_key) AND smart=1 AND NOT EXISTS(SELECT 1 FROM smart_playlist_folder_members member JOIN smart_playlists child USING(smart_playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.smart_playlist_key=playlist_folders.smart_cover_key AND child.name IS NOT NULL); END;
+CREATE TRIGGER IF NOT EXISTS smart_playlist_folder_members_cover_delete AFTER DELETE ON smart_playlist_folder_members BEGIN UPDATE playlist_folders SET smart_cover_key=(SELECT child.smart_playlist_key FROM smart_playlist_folder_members member JOIN smart_playlists child USING(smart_playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.name IS NOT NULL ORDER BY child.smart_playlist_key LIMIT 1) WHERE (folder_key=OLD.folder_key) AND smart=1 AND NOT EXISTS(SELECT 1 FROM smart_playlist_folder_members member JOIN smart_playlists child USING(smart_playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.smart_playlist_key=playlist_folders.smart_cover_key AND child.name IS NOT NULL); END;
+CREATE TRIGGER IF NOT EXISTS smart_playlist_folder_members_cover_update AFTER UPDATE ON smart_playlist_folder_members BEGIN UPDATE playlist_folders SET smart_cover_key=(SELECT child.smart_playlist_key FROM smart_playlist_folder_members member JOIN smart_playlists child USING(smart_playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.name IS NOT NULL ORDER BY child.smart_playlist_key LIMIT 1) WHERE (folder_key IN(OLD.folder_key,NEW.folder_key)) AND smart=1 AND NOT EXISTS(SELECT 1 FROM smart_playlist_folder_members member JOIN smart_playlists child USING(smart_playlist_key) WHERE member.folder_key=playlist_folders.folder_key AND child.smart_playlist_key=playlist_folders.smart_cover_key AND child.name IS NOT NULL); END;
 
 CREATE TABLE IF NOT EXISTS favorite_outbox (
     outbox_key INTEGER PRIMARY KEY,
@@ -711,7 +737,7 @@ CREATE TABLE IF NOT EXISTS native_playlist_pending (
 
 pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
     let version = pragma(connection, "user_version").await?;
-    if !matches!(version, 0 | 47 | 48 | 49 | 50 | 51 | 53 | 54 | 55) {
+    if !matches!(version, 0 | 47 | 48 | 49 | 50 | 51 | 53 | 54 | 55 | 56) {
         return Err(crate::LibraryError::Migration(format!(
             "unsupported library schema {version}"
         )));

@@ -115,7 +115,14 @@ impl AndroidBrowseQuery {
                 if self.artist_release_identity().is_some() && self.release_section.is_none() {
                     return Ok(Vec::new());
                 }
-                read.sections(&self.database, &cancel).await
+                if matches!(
+                    self.route,
+                    Route::Playlists | Route::SmartPlaylists | Route::PlaylistFolder { .. }
+                ) {
+                    read.playlist_items_sections(&self.database, &cancel).await
+                } else {
+                    read.sections(&self.database, &cancel).await
+                }
             } else {
                 Ok(Vec::new())
             }

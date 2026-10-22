@@ -8,13 +8,36 @@ impl Shell {
         change: SmartPlaylistChange,
         settled: Option<Rc<dyn Fn(Result<(), String>)>>,
     ) {
+        self.publish_smart_playlist_change_in_folder(change, settled, None);
+    }
+
+    fn publish_smart_playlist_change_in_folder(
+        self: &Rc<Self>,
+        change: SmartPlaylistChange,
+        settled: Option<Rc<dyn Fn(Result<(), String>)>>,
+        folder: Option<library::PlaylistFolderKey>,
+    ) {
         let database = std::sync::Arc::clone(&self.products.library);
         let task = self.products.runtime.spawn(async move {
             let accepted = match change {
-                SmartPlaylistChange::Create { name, definition } => database
-                    .create_smart_playlist(&name, &definition)
-                    .await
-                    .map(|_| true),
+                SmartPlaylistChange::Create { name, definition } => {
+                    match database.create_smart_playlist(&name, &definition).await {
+                        Ok(key) => {
+                            if let Some(folder) = folder {
+                                database
+                                    .move_playlist_to_folder(
+                                        library::PlaylistFolderMember::SmartPlaylist { key },
+                                        Some(folder),
+                                    )
+                                    .await
+                                    .map(|_| true)
+                            } else {
+                                Ok(true)
+                            }
+                        }
+                        Err(error) => Err(error),
+                    }
+                }
                 SmartPlaylistChange::Update {
                     key,
                     name,
@@ -36,9 +59,6 @@ impl Shell {
                         .await
                 }
                 SmartPlaylistChange::Delete(key) => database.delete_smart_playlist(key).await,
-                SmartPlaylistChange::Move { dragged, target } => {
-                    database.move_smart_playlist(dragged, target).await
-                }
             };
             accepted
                 .map_err(|error| error.to_string())
@@ -56,9 +76,7 @@ impl Shell {
                 .and_then(|result| result);
             let Some(shell) = shell.upgrade() else { return };
             if result.is_ok() {
-                shell.refresh_mounted_catalog();
-                crate::shell::playlist_picker::refresh_context_playlist_picker(&shell);
-                crate::shell::navigation::refresh_sidebar_pins(&shell);
+                rufin_core::playlists::playlist_folders_changed(&shell.products.source).await;
             }
             if let Err(error) = result.as_ref() {
                 shell
@@ -124,6 +142,14 @@ impl Shell {
             .and_then(|id| configured.sources.iter().find(|source| &source.id == id))
             .cloned();
         drop(configured);
+        let folder = if playlist.is_none() {
+            match self.navigation.routes.borrow().current() {
+                gtk_widgets::route::Route::PlaylistFolder { key, smart: true } => Some(*key),
+                _ => None,
+            }
+        } else {
+            None
+        };
         let shell = Rc::downgrade(self);
         let dialog = gtk_editors::smart_playlist::build_dialog(
             playlist,
@@ -131,7 +157,7 @@ impl Shell {
             source,
             Rc::new(move |change, settled| {
                 if let Some(shell) = shell.upgrade() {
-                    shell.publish_smart_playlist_change(change, settled);
+                    shell.publish_smart_playlist_change_in_folder(change, settled, folder);
                 }
             }),
             &self.products.source,

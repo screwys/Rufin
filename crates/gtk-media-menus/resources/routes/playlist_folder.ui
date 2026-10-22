@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwDialog" id="name_dialog">
+    <property name="title" translatable="yes">New folder</property>
+    <property name="content-width">320</property>
+    <property name="default-widget">save</property>
+    <property name="focus-widget">name</property>
+    <property name="child"><object class="AdwToolbarView">
+      <child type="top"><object class="AdwHeaderBar"/></child>
+      <property name="content"><object class="GtkBox">
+        <property name="orientation">vertical</property><property name="spacing">12</property>
+        <property name="margin-start">18</property><property name="margin-end">18</property><property name="margin-bottom">18</property>
+        <child><object class="GtkEntry" id="name"><property name="placeholder-text" translatable="yes">Folder name</property><property name="activates-default">true</property></object></child>
+        <child><object class="GtkBox"><property name="halign">end</property><property name="spacing">8</property>
+          <child><object class="GtkButton" id="cancel"><property name="label" translatable="yes">Cancel</property></object></child>
+          <child><object class="GtkButton" id="save"><property name="label" translatable="yes">Create</property><style><class name="suggested-action"/></style></object></child>
+        </object></child>
+      </object></property>
+    </object></property>
+  </object>
+  <object class="GtkStringList" id="folder_labels"><items><item translatable="yes">Rename folder</item><item translatable="yes">Apply</item></items></object>
+  <object class="GtkBox" id="picker_content">
+    <property name="orientation">vertical</property><property name="spacing">12</property>
+    <property name="margin-start">12</property><property name="margin-end">12</property><property name="margin-bottom">12</property>
+    <child><object class="GtkSearchEntry" id="search"><property name="placeholder-text" translatable="yes">Search</property></object></child>
+    <child><object class="GtkScrolledWindow"><property name="vexpand">true</property><property name="hscrollbar-policy">never</property><property name="propagate-natural-height">true</property><property name="max-content-height">320</property><property name="child"><object class="GtkListBox" id="folders"><property name="selection-mode">none</property><property name="activate-on-single-click">true</property><style><class name="boxed-list"/></style></object></property></object></child>
+    <child><object class="GtkButton" id="create_folder"><property name="label" translatable="yes">New folder</property></object></child>
+  </object>
+  <object class="AdwDialog" id="picker_dialog">
+    <property name="title" translatable="yes">Add to folder</property>
+    <property name="content-width">400</property><property name="content-height">420</property>
+    <property name="child"><object class="AdwToolbarView" id="picker_toolbar">
+      <child type="top"><object class="AdwHeaderBar"/></child>
+      <property name="content">picker_content</property>
+    </object></property>
+  </object>
+</interface>

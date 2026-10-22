@@ -320,6 +320,9 @@ pub fn stage_backup(
         return Err(invalid("unsupported backup version"));
     }
     for name in manifest.contents.members() {
+        if name == "playlist-folders.jsonl" {
+            continue;
+        }
         if !directory.path().join(name).is_file() {
             return Err(invalid(format!("backup is missing {name}")));
         }

@@ -62,6 +62,8 @@ pub enum ListKind {
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ListRead {
+    #[serde(default)]
+    pub playlist_folder: Option<PlaylistFolderKey>,
     pub kind: ListKind,
     pub source: Option<SourceKey>,
     pub folder: Option<FolderKey>,
@@ -282,6 +284,7 @@ impl ListRead {
         Self {
             kind,
             source,
+            playlist_folder: None,
             sort,
             folder: None,
             filter: String::new(),

@@ -40,8 +40,10 @@ mod local;
 mod loudness;
 mod lyrics;
 mod migration;
+mod playlist_folders;
 mod playlist_format;
 mod playlist_links;
+pub use playlist_folders::{PlaylistFolderMember, PlaylistFolderRow, PlaylistListRow};
 mod playlists;
 mod queue;
 mod waveform;
@@ -91,11 +93,11 @@ pub use home::{
 };
 pub use keys::{
     AlbumKey, ArtistKey, FolderKey, GenreKey, ListenKey, ListenOutboxKey, LocalAccessFileKey,
-    LocalFileKey, MoodKey, PlaylistEntryKey, PlaylistKey, SmartPlaylistKey, SourceId, SourceKey,
-    TrackKey, cue_media_parts, cue_media_uri, document_access_uri, document_fragment_parts,
-    document_locator_fragment, document_locator_parts, document_media_id, document_media_uri,
-    file_media_path, normalize_direct_media_uri, source_entity_parts, source_entity_uri,
-    source_id_for_uri,
+    LocalFileKey, MoodKey, PlaylistEntryKey, PlaylistFolderKey, PlaylistKey, SmartPlaylistKey,
+    SourceId, SourceKey, TrackKey, cue_media_parts, cue_media_uri, document_access_uri,
+    document_fragment_parts, document_locator_fragment, document_locator_parts, document_media_id,
+    document_media_uri, file_media_path, normalize_direct_media_uri, source_entity_parts,
+    source_entity_uri, source_id_for_uri,
 };
 pub use local::{
     DownloadMetadata, FileEditRow, LocalAccessOrigin, LocalAccessWrite, LocalFileKind,

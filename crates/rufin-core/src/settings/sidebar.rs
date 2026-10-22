@@ -82,6 +82,10 @@ pub enum SidebarPin {
     SmartPlaylist {
         playlist_id: String,
     },
+    PlaylistFolder {
+        folder_id: String,
+        smart: bool,
+    },
 }
 
 fn is_false(value: &bool) -> bool {
@@ -114,10 +118,13 @@ impl Default for SidebarSettings {
 impl SidebarSettings {
     pub fn pins_use_activity(&self) -> bool {
         self.pins_visible
-            && self
-                .pins
-                .iter()
-                .any(|pin| matches!(pin, SidebarPin::SmartPlaylist { .. }))
+            && self.pins.iter().any(|pin| {
+                matches!(
+                    pin,
+                    SidebarPin::SmartPlaylist { .. }
+                        | SidebarPin::PlaylistFolder { smart: true, .. }
+                )
+            })
     }
 
     pub fn set_route_visible(&mut self, item: SidebarRouteItem, visible: bool) -> bool {
