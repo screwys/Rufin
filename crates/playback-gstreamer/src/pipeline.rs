@@ -1284,6 +1284,20 @@ mod tests {
     #[test]
     #[allow(clippy::print_stderr, reason = "temporary macOS timeout diagnostics")]
     fn repeated_tracks_release_streams_and_reuse_the_player() {
+        #[cfg(target_os = "macos")]
+        thread::spawn(|| {
+            thread::sleep(Duration::from_secs(60));
+            let pid = std::process::id().to_string();
+            let report = std::env::temp_dir().join(format!("rufin-retention-{pid}.sample"));
+            let result = std::process::Command::new("/usr/bin/sample")
+                .args([pid.as_str(), "1", "1", "-file"])
+                .arg(&report)
+                .output();
+            eprintln!("retention native sample: {result:?}");
+            if let Ok(report) = std::fs::read_to_string(report) {
+                eprintln!("{report}");
+            }
+        });
         ensure_gstreamer_initialized().unwrap();
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("track.wav");
@@ -1317,7 +1331,7 @@ mod tests {
             ..BackendAudioSettings::default()
         };
         let mut retired: Vec<(String, glib::WeakRef<gst::Object>)> = Vec::new();
-        for index in 1..=100 {
+        for index in 1..=1_000 {
             let resource = Arc::new(());
             let resource_ref = Arc::downgrade(&resource);
             let item = PreparedRun {
