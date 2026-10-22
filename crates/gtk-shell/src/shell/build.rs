@@ -466,7 +466,12 @@ pub async fn build(
                 products.runtime.clone(),
             )),
             web_controller,
-            media_menus: super::media_menus::build(weak, &products, Rc::clone(&settings_state)),
+            media_menus: super::media_menus::build(
+                weak,
+                &products,
+                Rc::clone(&settings_state),
+                Rc::clone(&artwork),
+            ),
             quitting,
             storage_reset,
             diagnostics,

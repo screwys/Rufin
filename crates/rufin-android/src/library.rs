@@ -25,6 +25,15 @@ impl AndroidLibrary {
 
 #[uniffi::export]
 impl AndroidLibrary {
+    pub async fn media_details(
+        &self,
+        item: rufin_core::metadata::MediaDetailsItem,
+    ) -> Result<rufin_core::metadata::MediaDetails, crate::host::AndroidError> {
+        rufin_core::metadata::media_details(self.source.clone(), self.playback.clone(), item)
+            .await
+            .map_err(crate::host::error)
+    }
+
     pub fn track_item(&self, song: library::TrackView) -> crate::browse::AndroidBrowseRow {
         song.into()
     }

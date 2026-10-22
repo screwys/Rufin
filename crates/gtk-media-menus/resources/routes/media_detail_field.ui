@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="GtkListBoxRow" id="row">
+    <property name="activatable">false</property><property name="selectable">false</property>
+    <property name="child"><object class="GtkBox"><property name="spacing">12</property>
+      <property name="margin-top">10</property><property name="margin-bottom">10</property><property name="margin-start">12</property><property name="margin-end">12</property>
+      <child><object class="GtkLabel" id="label"><property name="xalign">0</property><property name="yalign">0</property><property name="wrap">true</property><property name="wrap-mode">word-char</property><property name="width-chars">16</property><property name="max-width-chars">16</property><style><class name="dim-label"/></style></object></child>
+      <child><object class="GtkLabel" id="value"><property name="xalign">0</property><property name="yalign">0</property><property name="hexpand">true</property><property name="wrap">true</property><property name="wrap-mode">word-char</property><property name="width-chars">1</property><property name="selectable">true</property></object></child>
+      <child><object class="GtkButton" id="copy"><property name="valign">center</property><property name="visible">false</property><property name="tooltip-text" translatable="yes">Copy</property><property name="child"><object class="GtkImage" id="copy_icon"><property name="icon-name">rufin-edit-copy-symbolic</property></object></property><style><class name="flat"/><class name="circular"/></style></object></child>
+      <child><object class="GtkButton" id="musicbrainz"><property name="valign">center</property><property name="visible">false</property><property name="tooltip-text" translatable="yes">Open on MusicBrainz</property><property name="child"><object class="GtkImage"><property name="icon-name">io.github.screwys.Rufin.external.musicbrainz</property><property name="pixel-size">18</property></object></property><style><class name="flat"/><class name="circular"/></style></object></child>
+    </object></property>
+  </object>
+</interface>

@@ -11,14 +11,13 @@ use rufin_core::playback::{QueuePlacement, RadioPlayRequest};
 
 use gtk_widgets::controls::{ADD_ICON, DELETE_ICON, EDIT_ICON, REMOVE_ICON, TRASH_ICON};
 use gtk_widgets::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
-use gtk_widgets::favorites::{FAVORITE_ADD_ICON, FAVORITE_REMOVE_ICON};
 use gtk_widgets::interactions::{
     ContextMenuSurface, DOWNLOAD_ICON, GO_TO_ICON, RADIO_ICON, go_to_context_submenu,
     radio_context_submenu,
 };
 use gtk_widgets::ratings::context_rating_row;
 use localization::msgid;
-use rufin_core::metadata::MetadataItemId;
+use rufin_core::metadata::{MediaDetailsItem, MetadataItemId};
 use rufin_core::playlists::SmartPlaylistChange;
 use rufin_core::settings::ContextMenuItem;
 use rufin_core::settings::SidebarPin;
@@ -83,6 +82,7 @@ pub fn add_drag_to_playlist(
 pub struct MediaMenus {
     pub current_route: Rc<dyn Fn() -> Route>,
     pub present_dialog: Rc<dyn Fn(&adw::Dialog)>,
+    pub artwork: Rc<gtk_widgets::artwork::ArtworkState>,
     pub library: Arc<library::Database>,
     pub runtime: tokio::runtime::Handle,
     pub source: rufin_core::runtime::SourceHandle,
@@ -110,6 +110,17 @@ pub struct MediaMenus {
     pub download: Rc<dyn Fn(&gtk_widgets::media_drag::MediaDragSource)>,
     pub remove_download: Rc<dyn Fn(&gtk_widgets::media_drag::MediaDragSource)>,
 }
+fn track_menu_subtitle(track: &TrackView) -> String {
+    [
+        track.metadata.artist.as_str(),
+        track.metadata.album.as_str(),
+    ]
+    .into_iter()
+    .filter(|value| !value.is_empty())
+    .collect::<Vec<_>>()
+    .join(" · ")
+}
+
 pub fn present_track_menu(
     target: &gtk::Widget,
     menus: &Rc<MediaMenus>,
@@ -133,7 +144,21 @@ pub fn present_track_menu(
     } else {
         "track"
     };
+    let favorite = menus.projected_track_favorite(&track.media_uri, track.state.favorite);
     let surface = ContextMenuSurface::new(target, action_group, position);
+    crate::media_details::append_header(
+        &surface,
+        target,
+        menus,
+        action_group,
+        crate::media_details::MenuHeader {
+            item: MediaDetailsItem::Track(track.media_uri.clone()),
+            title: &track.metadata.title,
+            subtitle: &track_menu_subtitle(&track),
+            artwork: track.artwork_binding.as_deref(),
+            favorite,
+        },
+    );
     if queue_entry.is_some() {
         surface.append_fixed_action(msgid("Remove from Queue"), "remove-from-queue", REMOVE_ICON);
     }
@@ -144,8 +169,6 @@ pub fn present_track_menu(
         &radio_context_submenu(action_group),
         RADIO_ICON,
     );
-    let favorite = menus.projected_track_favorite(&track.media_uri, track.state.favorite);
-    append_favorite_action(&surface, favorite);
     append_context_menu_picker(&surface, menus, track_play_request(track.track_key));
     if track.access.cue_path.is_none()
         && (track.source_key.is_some() || track.media_uri.starts_with("file:"))
@@ -313,7 +336,21 @@ pub fn present_playlist_entry_menu(
     _playlist: library::PlaylistKey,
     removal: Option<PlaylistEntrySelectionSnapshot>,
 ) {
+    let favorite = menus.projected_track_favorite(&row.track.media_uri, row.track.state.favorite);
     let surface = ContextMenuSurface::new(target, "playlist-entry", position);
+    crate::media_details::append_header(
+        &surface,
+        target,
+        menus,
+        "playlist-entry",
+        crate::media_details::MenuHeader {
+            item: MediaDetailsItem::Track(row.track.media_uri.clone()),
+            title: &row.track.metadata.title,
+            subtitle: &track_menu_subtitle(&row.track),
+            artwork: row.track.artwork_binding.as_deref(),
+            favorite,
+        },
+    );
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     if removal.as_ref().is_some_and(|selection| selection.writable) {
         surface.append_fixed_action(
@@ -330,8 +367,6 @@ pub fn present_playlist_entry_menu(
         &row.track.links.album_artists,
         row.track.links.album_media_uri.as_deref(),
     );
-    let favorite = menus.projected_track_favorite(&row.track.media_uri, row.track.state.favorite);
-    append_favorite_action(&surface, favorite);
     install_download_actions(
         &surface,
         menus,
@@ -861,6 +896,19 @@ pub fn present_album_context_menu(
         album.state.favorite,
     );
     let surface = ContextMenuSurface::new(target, "album", position);
+    crate::media_details::append_header(
+        &surface,
+        target,
+        menus,
+        "album",
+        crate::media_details::MenuHeader {
+            item: MediaDetailsItem::Album(album.media_uri.clone()),
+            title: &album.metadata.title,
+            subtitle: &album.metadata.artist,
+            artwork: album.artwork_binding.as_deref(),
+            favorite,
+        },
+    );
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     surface.append_configurable_submenu(
         ContextMenuItem::PlayRadio,
@@ -868,7 +916,6 @@ pub fn present_album_context_menu(
         &radio_context_submenu("album"),
         RADIO_ICON,
     );
-    append_favorite_action(&surface, favorite);
     append_context_menu_picker(
         &surface,
         menus,
@@ -989,6 +1036,22 @@ pub fn present_artist_context_menu(
         artist.state.favorite,
     );
     let surface = ContextMenuSurface::new(target, "artist", position);
+    crate::media_details::append_header(
+        &surface,
+        target,
+        menus,
+        "artist",
+        crate::media_details::MenuHeader {
+            item: MediaDetailsItem::Artist {
+                media_uri: artist.media_uri.clone(),
+                album_artist,
+            },
+            title: &artist.metadata.name,
+            subtitle: "",
+            artwork: artist.artwork_binding.as_deref(),
+            favorite,
+        },
+    );
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     surface.append_configurable_submenu(
         ContextMenuItem::PlayRadio,
@@ -996,7 +1059,6 @@ pub fn present_artist_context_menu(
         &radio_context_submenu("artist"),
         RADIO_ICON,
     );
-    append_favorite_action(&surface, favorite);
     append_context_menu_picker(
         &surface,
         menus,
@@ -1501,23 +1563,6 @@ fn present_smart_playlist_context_menu_ready(
         dialog.present(Some(&target));
     });
     surface.popup(&menus.settings.current.borrow().application.context_menu);
-}
-
-fn append_favorite_action(surface: &ContextMenuSurface, favorite: bool) {
-    surface.append_configurable_action(
-        ContextMenuItem::Favorites,
-        if favorite {
-            msgid("Remove from Favorites")
-        } else {
-            msgid("Add to Favorites")
-        },
-        "favorite",
-        if favorite {
-            FAVORITE_REMOVE_ICON
-        } else {
-            FAVORITE_ADD_ICON
-        },
-    );
 }
 
 fn add_favorite_action(
