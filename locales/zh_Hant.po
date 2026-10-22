@@ -375,6 +375,21 @@ msgstr "專輯藝人"
 msgid "Album artists"
 msgstr "專輯藝人"
 
+#, fuzzy
+#| msgid "Album title"
+msgid "Album details"
+msgstr "專輯標題"
+
+#, fuzzy
+#| msgid "Album radio"
+msgid "Album gain"
+msgstr "專輯電台"
+
+#, fuzzy
+#| msgid "Album tracks"
+msgid "Album peak"
+msgstr "專輯曲目"
+
 msgid "Album radio"
 msgstr "專輯電台"
 
@@ -482,6 +497,11 @@ msgid "April {year}"
 msgstr ""
 
 msgid "Artist albums"
+msgstr "藝人專輯"
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Artist details"
 msgstr "藝人專輯"
 
 msgid "Artist name"
@@ -686,6 +706,11 @@ msgstr ""
 
 msgid "Browse"
 msgstr ""
+
+#, fuzzy
+#| msgid "Change Secret Storage"
+msgid "CUE file"
+msgstr "變更敏感存儲空間"
 
 #, fuzzy
 #| msgid "Cached"
@@ -1345,6 +1370,9 @@ msgstr[0] "刪除播放清單"
 msgid "Delete"
 msgstr "刪除"
 
+msgid "Delivery"
+msgstr ""
+
 msgid "Descending"
 msgstr "遞減"
 
@@ -1352,6 +1380,9 @@ msgid "Detail track columns"
 msgstr ""
 
 msgid "Detail"
+msgstr ""
+
+msgid "Details"
 msgstr ""
 
 msgid "Device invitation"
@@ -1832,6 +1863,9 @@ msgstr "資料夾"
 msgid "File path"
 msgstr "資料夾"
 
+msgid "File size"
+msgstr ""
+
 #, fuzzy
 #| msgid "Rename"
 msgid "Filename"
@@ -1877,6 +1911,11 @@ msgstr "重新命名"
 #, fuzzy
 #| msgid "Folder"
 msgid "Folder path"
+msgstr "資料夾"
+
+#, fuzzy
+#| msgid "Folders"
+msgid "Folder"
 msgstr "資料夾"
 
 msgid "Folders"
@@ -2149,6 +2188,14 @@ msgstr ""
 msgid "Invite"
 msgstr ""
 
+msgid "Item ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Item is no longer available"
+msgstr "元資料已經不再能編輯"
+
 msgid "January {year}"
 msgstr ""
 
@@ -2295,6 +2342,11 @@ msgstr "ListenBrainz"
 #| msgid "Searching for devices..."
 msgid "Listening overview"
 msgstr "正在尋找裝置..."
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Listening"
+msgstr "ListenBrainz"
 
 msgid "Load file contents"
 msgstr ""
@@ -3054,6 +3106,11 @@ msgstr "橘色"
 
 #, fuzzy
 #| msgid "Release date"
+msgid "Original audio"
+msgstr "發行日期"
+
+#, fuzzy
+#| msgid "Release date"
 msgid "Original release date"
 msgstr "發行日期"
 
@@ -3244,6 +3301,11 @@ msgstr "在此裝置上播放"
 
 msgid "Playing on {device}"
 msgstr "在 {device} 上播放"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Playing stream"
+msgstr "任意播放"
 
 #, fuzzy
 #| msgid "Playlist name"
@@ -3577,6 +3639,11 @@ msgstr "發行日期"
 msgid "Release notifications"
 msgstr ""
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Release type"
+msgstr "發行日期"
+
 msgid "Release"
 msgstr ""
 
@@ -3727,6 +3794,11 @@ msgstr ""
 
 msgid "Replace saved custom headers"
 msgstr ""
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "ReplayGain tags"
+msgstr "正在儲存..."
 
 msgid "ReplayGain"
 msgstr ""
@@ -4055,6 +4127,16 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Select Music Folder"
+msgid "Segment end"
+msgstr "選擇音樂資料夾"
+
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Segment start"
+msgstr "選擇音樂資料夾"
+
+#, fuzzy
+#| msgid "Select Music Folder"
 msgid "Segmented bars"
 msgstr "選擇音樂資料夾"
 
@@ -4153,6 +4235,9 @@ msgid "Shadow"
 msgstr ""
 
 msgid "Share"
+msgstr ""
+
+msgid "Shared file size"
 msgstr ""
 
 msgid "Shared secret"
@@ -4336,6 +4421,11 @@ msgstr "歌曲"
 #| msgid "Sort"
 msgid "Sort by"
 msgstr "排序"
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Sort name"
+msgstr "藝人名稱"
 
 msgid "Sort title"
 msgstr ""
@@ -4595,8 +4685,23 @@ msgstr ""
 msgid "Total tracks"
 msgstr "氛圍曲目"
 
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track details"
+msgstr "曲目電台"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track gain"
+msgstr "曲目電台"
+
 msgid "Track number"
 msgstr "曲序"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track peak"
+msgstr "曲目電台"
 
 msgid "Track radio"
 msgstr "曲目電台"
@@ -4612,6 +4717,9 @@ msgstr "五個最新專輯的曲目"
 
 msgid "Tracks"
 msgstr "曲目"
+
+msgid "Transcoded"
+msgstr ""
 
 msgid "Transition mode"
 msgstr ""
@@ -5141,11 +5249,6 @@ msgstr ""
 
 #~ msgid "Identifying..."
 #~ msgstr "認證中..."
-
-#, fuzzy
-#~| msgid "Folders"
-#~ msgid "Folder"
-#~ msgstr "資料夾"
 
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "生成並快取目前曲目的波形圖"

@@ -390,6 +390,21 @@ msgstr "Interpret alba"
 msgid "Album artists"
 msgstr "Interpreti alba"
 
+#, fuzzy
+#| msgid "Album title"
+msgid "Album details"
+msgstr "Název alba"
+
+#, fuzzy
+#| msgid "Album radio"
+msgid "Album gain"
+msgstr "Rádio podle alba"
+
+#, fuzzy
+#| msgid "Album tracks"
+msgid "Album peak"
+msgstr "Skladby alba"
+
 msgid "Album radio"
 msgstr "Rádio podle alba"
 
@@ -501,6 +516,11 @@ msgid "April {year}"
 msgstr ""
 
 msgid "Artist albums"
+msgstr "Alba interpretů"
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Artist details"
 msgstr "Alba interpretů"
 
 msgid "Artist name"
@@ -711,6 +731,11 @@ msgstr ""
 
 msgid "Browse"
 msgstr ""
+
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "CUE file"
+msgstr "Uložené zdroje"
 
 #, fuzzy
 #| msgid "Cached"
@@ -1386,6 +1411,9 @@ msgstr[2] "Smazat playlist"
 msgid "Delete"
 msgstr "Smazat"
 
+msgid "Delivery"
+msgstr ""
+
 msgid "Descending"
 msgstr "Sestupně"
 
@@ -1393,6 +1421,11 @@ msgid "Detail track columns"
 msgstr "Sloupce s podrobnostmi o skladbě"
 
 msgid "Detail"
+msgstr "Podrobnosti"
+
+#, fuzzy
+#| msgid "Detail"
+msgid "Details"
 msgstr "Podrobnosti"
 
 msgid "Device invitation"
@@ -1881,6 +1914,9 @@ msgstr "Složka"
 msgid "File path"
 msgstr "Složka"
 
+msgid "File size"
+msgstr ""
+
 #, fuzzy
 #| msgid "Rename"
 msgid "Filename"
@@ -1929,6 +1965,11 @@ msgstr "Přejmenovat"
 #| msgid "Folder"
 msgid "Folder path"
 msgstr "Složka"
+
+#, fuzzy
+#| msgid "Folders"
+msgid "Folder"
+msgstr "Složky"
 
 msgid "Folders"
 msgstr "Složky"
@@ -2206,6 +2247,14 @@ msgstr "Integrace"
 msgid "Invite"
 msgstr ""
 
+msgid "Item ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Item is no longer available"
+msgstr "Úprava metadat již není k dispozici"
+
 msgid "January {year}"
 msgstr ""
 
@@ -2356,6 +2405,11 @@ msgstr "ListenBrainz"
 #| msgid "Searching for devices..."
 msgid "Listening overview"
 msgstr "Hledání zařízení..."
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Listening"
+msgstr "ListenBrainz"
 
 #, fuzzy
 #| msgid "Local File Access"
@@ -3127,6 +3181,11 @@ msgid "Orange"
 msgstr "Oranžová"
 
 #, fuzzy
+#| msgid "Original"
+msgid "Original audio"
+msgstr "Originál"
+
+#, fuzzy
 #| msgid "Release date"
 msgid "Original release date"
 msgstr "Datum vydání"
@@ -3322,6 +3381,11 @@ msgstr "Přehrává se na tomto zařízení"
 
 msgid "Playing on {device}"
 msgstr "Přehrává se na {device}"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Playing stream"
+msgstr "Přehrát náhodně"
 
 #, fuzzy
 #| msgid "Playlist name"
@@ -3667,6 +3731,11 @@ msgstr "Vydání"
 msgid "Release notifications"
 msgstr "Notifikace vydání"
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Release type"
+msgstr "Datum vydání"
+
 msgid "Release"
 msgstr "Vydání"
 
@@ -3817,6 +3886,11 @@ msgstr ""
 
 msgid "Replace saved custom headers"
 msgstr ""
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "ReplayGain tags"
+msgstr "Ukládání..."
 
 msgid "ReplayGain"
 msgstr ""
@@ -4157,6 +4231,16 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Select Music Folder"
+msgid "Segment end"
+msgstr "Vybrat složku s hudbou"
+
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Segment start"
+msgstr "Vybrat složku s hudbou"
+
+#, fuzzy
+#| msgid "Select Music Folder"
 msgid "Segmented bars"
 msgstr "Vybrat složku s hudbou"
 
@@ -4256,6 +4340,11 @@ msgstr ""
 
 msgid "Share"
 msgstr ""
+
+#, fuzzy
+#| msgid "Shared secret"
+msgid "Shared file size"
+msgstr "Sdílený tajný klíč"
 
 msgid "Shared secret"
 msgstr "Sdílený tajný klíč"
@@ -4438,6 +4527,11 @@ msgstr "Skladba"
 #| msgid "Sort"
 msgid "Sort by"
 msgstr "Seřadit"
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Sort name"
+msgstr "Jméno interpreta"
 
 msgid "Sort title"
 msgstr "Seřadit podle názvu"
@@ -4701,8 +4795,23 @@ msgstr ""
 msgid "Total tracks"
 msgstr "Skladby podle nálady"
 
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track details"
+msgstr "Rádio skladeb"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track gain"
+msgstr "Rádio skladeb"
+
 msgid "Track number"
 msgstr "Číslo skladby"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track peak"
+msgstr "Rádio skladeb"
 
 msgid "Track radio"
 msgstr "Rádio skladeb"
@@ -4718,6 +4827,11 @@ msgstr "Skladby z vašich pěti nejnovějších alb"
 
 msgid "Tracks"
 msgstr "Skladby"
+
+#, fuzzy
+#| msgid "Transition mode"
+msgid "Transcoded"
+msgstr "Režim přechodu"
 
 msgid "Transition mode"
 msgstr "Režim přechodu"
@@ -5293,11 +5407,6 @@ msgstr ""
 
 #~ msgid "Undo identified value"
 #~ msgstr "Vrátit zpět určenou hodnotu"
-
-#, fuzzy
-#~| msgid "Folders"
-#~ msgid "Folder"
-#~ msgstr "Složky"
 
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "Vygenerovat a uložit do mezipaměti průběhy pro aktuální skladbu"

@@ -373,6 +373,21 @@ msgstr "Albumiesittäjät"
 msgid "Album artists"
 msgstr "Albumiesittäjät"
 
+#, fuzzy
+#| msgid "Album artist"
+msgid "Album details"
+msgstr "Albumiesittäjät"
+
+#, fuzzy
+#| msgid "Album artist"
+msgid "Album gain"
+msgstr "Albumiesittäjät"
+
+#, fuzzy
+#| msgid "Album"
+msgid "Album peak"
+msgstr "Albumi"
+
 msgid "Album radio"
 msgstr ""
 
@@ -483,6 +498,11 @@ msgstr ""
 
 msgid "Artist albums"
 msgstr ""
+
+#, fuzzy
+#| msgid "Artists"
+msgid "Artist details"
+msgstr "Esittäjät"
 
 msgid "Artist name"
 msgstr "Esittäjän nimi"
@@ -670,6 +690,11 @@ msgstr ""
 
 msgid "Browse"
 msgstr ""
+
+#, fuzzy
+#| msgid "Change Profile"
+msgid "CUE file"
+msgstr "Vaihda profiilia"
 
 #, fuzzy
 #| msgid "Cached"
@@ -1319,6 +1344,9 @@ msgstr[1] "Poista soittolista"
 msgid "Delete"
 msgstr "Poista"
 
+msgid "Delivery"
+msgstr ""
+
 msgid "Descending"
 msgstr "Laskevasti"
 
@@ -1326,6 +1354,9 @@ msgid "Detail track columns"
 msgstr ""
 
 msgid "Detail"
+msgstr ""
+
+msgid "Details"
 msgstr ""
 
 msgid "Device invitation"
@@ -1790,6 +1821,11 @@ msgid "File path"
 msgstr "Kansio"
 
 #, fuzzy
+#| msgid "Files"
+msgid "File size"
+msgstr "Tiedostot"
+
+#, fuzzy
 #| msgid "Rename"
 msgid "Filename"
 msgstr "Nimeä uudelleen"
@@ -1835,6 +1871,11 @@ msgstr "Nimeä uudelleen"
 #| msgid "Folder"
 msgid "Folder path"
 msgstr "Kansio"
+
+#, fuzzy
+#| msgid "Folders"
+msgid "Folder"
+msgstr "Kansiot"
 
 msgid "Folders"
 msgstr "Kansiot"
@@ -2102,6 +2143,14 @@ msgstr "Integraatiot"
 msgid "Invite"
 msgstr "Kutsu"
 
+msgid "Item ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Item is no longer available"
+msgstr "Metatietojen muokkaaminen ei ole enää saatavilla"
+
 msgid "January {year}"
 msgstr ""
 
@@ -2248,6 +2297,11 @@ msgstr "ListenBrainz"
 #| msgid "Searching for devices..."
 msgid "Listening overview"
 msgstr "Haetaan laitteita..."
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Listening"
+msgstr "ListenBrainz"
 
 msgid "Load file contents"
 msgstr ""
@@ -2967,6 +3021,11 @@ msgid "Orange"
 msgstr "Oranssi"
 
 #, fuzzy
+#| msgid "Original"
+msgid "Original audio"
+msgstr "Alkuperäinen"
+
+#, fuzzy
 #| msgid "Release date"
 msgid "Original release date"
 msgstr "Julkaisupäivä"
@@ -3150,6 +3209,11 @@ msgstr "Toistetaan tällä laitteella"
 
 msgid "Playing on {device}"
 msgstr "Toistetaan laitteella {device}"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Playing stream"
+msgstr "Toista satunnainen"
 
 msgid "Playlist File"
 msgstr "Soittolistatiedosto"
@@ -3473,6 +3537,11 @@ msgstr "Julkaisu"
 msgid "Release notifications"
 msgstr "Julkaisuilmoitukset"
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Release type"
+msgstr "Julkaisupäivä"
+
 msgid "Release"
 msgstr "Julkaisu"
 
@@ -3617,6 +3686,11 @@ msgstr ""
 
 msgid "Replace saved custom headers"
 msgstr ""
+
+#, fuzzy
+#| msgid "ReplayGain"
+msgid "ReplayGain tags"
+msgstr "ReplayGain"
 
 msgid "ReplayGain"
 msgstr "ReplayGain"
@@ -3938,6 +4012,12 @@ msgstr "Kelaa toistoa"
 msgid "Seek to {time}"
 msgstr "Siirry kohtaan {time}"
 
+msgid "Segment end"
+msgstr ""
+
+msgid "Segment start"
+msgstr ""
+
 msgid "Segmented bars"
 msgstr ""
 
@@ -4031,6 +4111,11 @@ msgstr ""
 
 msgid "Share"
 msgstr ""
+
+#, fuzzy
+#| msgid "Shared secret"
+msgid "Shared file size"
+msgstr "Jaettu salaisuus"
 
 msgid "Shared secret"
 msgstr "Jaettu salaisuus"
@@ -4215,6 +4300,11 @@ msgstr "Kappale"
 #| msgid "Sort"
 msgid "Sort by"
 msgstr "Lajittelu"
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Sort name"
+msgstr "Esittäjän nimi"
 
 msgid "Sort title"
 msgstr ""
@@ -4470,8 +4560,23 @@ msgstr ""
 msgid "Total tracks"
 msgstr "Kappaleet"
 
+#, fuzzy
+#| msgid "Tracks"
+msgid "Track details"
+msgstr "Kappaleet"
+
+#, fuzzy
+#| msgid "Track"
+msgid "Track gain"
+msgstr "Kappale"
+
 msgid "Track number"
 msgstr "Raidan numero"
+
+#, fuzzy
+#| msgid "Track"
+msgid "Track peak"
+msgstr "Kappale"
 
 msgid "Track radio"
 msgstr ""
@@ -4487,6 +4592,11 @@ msgstr "Kappaleet viideltä uusimmalta albumilta"
 
 msgid "Tracks"
 msgstr "Kappaleet"
+
+#, fuzzy
+#| msgid "Transition mode"
+msgid "Transcoded"
+msgstr "Siirtymätila"
 
 msgid "Transition mode"
 msgstr "Siirtymätila"
@@ -5043,11 +5153,6 @@ msgstr "Tervetuloa Rufinin asennukseen"
 #~ msgid "Multiple values"
 #~ msgstr "Useita arvoja"
 
-#, fuzzy
-#~| msgid "Folders"
-#~ msgid "Folder"
-#~ msgstr "Kansiot"
-
 #~ msgid "Keep album transitions gapless when possible"
 #~ msgstr "Pidä albumisiirtymät tauottomina jos mahdollista"
 
@@ -5081,9 +5186,6 @@ msgstr "Tervetuloa Rufinin asennukseen"
 
 #~ msgid "Continue from where {device} left off?"
 #~ msgstr "Jatketaanko siitä, mihin toisto jäi laitteella {device}?"
-
-#~ msgid "Files"
-#~ msgstr "Tiedostot"
 
 #, fuzzy
 #~| msgid "Search is unavailable"
