@@ -1334,13 +1334,21 @@ mod tests {
                     1.0,
                     false,
                     1.0,
-                    gst::State::Playing,
+                    gst::State::Paused,
                 )
                 .unwrap();
             drop(item);
             assert!(resource_ref.upgrade().is_some());
             let (pipeline, bus) = player.native.as_ref().unwrap();
-            pipeline.state(gst::ClockTime::from_seconds(5)).0.unwrap();
+            assert_eq!(
+                pipeline.state(gst::ClockTime::from_seconds(5)),
+                (
+                    Ok(gst::StateChangeSuccess::Success),
+                    gst::State::Paused,
+                    gst::State::VoidPending
+                ),
+                "cycle {index}: audio did not preroll"
+            );
             if let Some((_, previous)) = retired.first() {
                 assert_eq!(previous.upgrade().as_ref(), Some(pipeline.upcast_ref()));
             }
@@ -1366,6 +1374,16 @@ mod tests {
                     ));
                 }
             }
+            player.set_state(gst::State::Playing).unwrap();
+            assert_eq!(
+                pipeline.state(gst::ClockTime::from_seconds(5)),
+                (
+                    Ok(gst::StateChangeSuccess::Success),
+                    gst::State::Playing,
+                    gst::State::VoidPending
+                ),
+                "cycle {index}: playback did not start"
+            );
             player.stop();
             assert!(!player.has_session());
             assert_eq!(bin.current_state(), gst::State::Null);
