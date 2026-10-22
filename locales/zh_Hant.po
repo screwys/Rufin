@@ -533,6 +533,9 @@ msgstr ""
 msgid "Audio fade on play/pause"
 msgstr "播放/暫停時淡入淡出"
 
+msgid "Audio fingerprints"
+msgstr ""
+
 msgid "Audio output"
 msgstr "音訊輸出"
 
@@ -693,6 +696,9 @@ msgstr "快取庫"
 msgid "Caching local library..."
 msgstr "正在快取本地媒體庫..."
 
+msgid "Calculating fingerprint..."
+msgstr ""
+
 msgid "Cancel download and clear downloaded items"
 msgstr "取消下載並清除已下載的項目"
 
@@ -852,6 +858,16 @@ msgstr "搜尋歌詞"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "清除此曲目已抓取的歌詞"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear fingerprint cache"
+msgstr "搜尋歌詞"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear lookup cache"
+msgstr "搜尋歌詞"
 
 #, fuzzy
 #| msgid "Search lyrics"
@@ -1410,6 +1426,10 @@ msgstr ""
 msgid "Do not encrypt"
 msgstr "不為空"
 
+msgid "Do you want to apply metadata changes to {count} track?"
+msgid_plural "Do you want to apply metadata changes to {count} tracks?"
+msgstr[0] ""
+
 msgid "Do you want to use the existing configuration?"
 msgstr ""
 
@@ -1417,6 +1437,9 @@ msgid "Don't duplicate"
 msgstr ""
 
 msgid "Donate"
+msgstr ""
+
+msgid "Done"
 msgstr ""
 
 msgid "Download Folder"
@@ -1762,9 +1785,17 @@ msgid "Fetching lyrics"
 msgstr "搜尋歌詞"
 
 #, fuzzy
+#| msgid "Search Lyrics"
+msgid "Fetching metadata..."
+msgstr "搜尋歌詞"
+
+#, fuzzy
 #| msgid "Smart playlists"
 msgid "Fetching playlists"
 msgstr "智慧播放清單"
+
+msgid "Field"
+msgstr ""
 
 #, fuzzy
 #| msgid "Connection"
@@ -2021,12 +2052,6 @@ msgstr ""
 msgid "Hz"
 msgstr ""
 
-msgid "Identify"
-msgstr "認證"
-
-msgid "Identifying..."
-msgstr "認證中..."
-
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr "如果頁面沒有載入，表示 Libre.fm 阻擋了您的 IP 區段或 VPN"
 
@@ -2256,6 +2281,11 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Loading folders..."
+msgid "Loading cached lookups..."
+msgstr "資料夾載入中..."
+
+#, fuzzy
+#| msgid "Loading folders..."
 msgid "Loading related tracks..."
 msgstr "資料夾載入中..."
 
@@ -2346,6 +2376,9 @@ msgstr "鎖定元資料"
 msgid "Logs are copied"
 msgstr ""
 
+msgid "Lookup"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr "響度正規化"
 
@@ -2389,6 +2422,11 @@ msgstr ""
 msgid "March {year}"
 msgstr ""
 
+#, fuzzy
+#| msgid "Cached"
+msgid "Matched"
+msgstr "已快取"
+
 msgid "Maximum year"
 msgstr "最大年份"
 
@@ -2410,6 +2448,11 @@ msgstr "元資料已經不再能編輯"
 #| msgid "Metadata editing is no longer available"
 msgid "Metadata editing requires Local access"
 msgstr "元資料已經不再能編輯"
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata lookups"
+msgstr "元資料來源"
 
 msgid "Metadata source"
 msgstr "元資料來源"
@@ -2508,9 +2551,6 @@ msgstr "上移"
 msgid "Multi-selection"
 msgstr "選擇"
 
-msgid "Multiple values"
-msgstr ""
-
 msgid "Music Folder"
 msgstr "音樂資料夾"
 
@@ -2599,6 +2639,11 @@ msgstr ""
 
 msgid "Needs attention"
 msgstr ""
+
+#, fuzzy
+#| msgid "Overview"
+msgid "Needs review"
+msgstr "總覽"
 
 msgid "NetEase"
 msgstr "NetEase"
@@ -2724,6 +2769,11 @@ msgstr "無歌詞"
 
 msgid "No lyrics"
 msgstr "無歌詞"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching track in this release"
+msgstr "無匹配的曲目"
 
 #, fuzzy
 #| msgid "No matching tracks"
@@ -2868,6 +2918,9 @@ msgstr ""
 msgid "One path per line"
 msgstr ""
 
+msgid "Only fill missing information"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "僅播放過的曲目"
 
@@ -2965,6 +3018,9 @@ msgid "Original release date"
 msgstr "發行日期"
 
 msgid "Original"
+msgstr ""
+
+msgid "Original: {value}"
 msgstr ""
 
 #, fuzzy
@@ -3381,6 +3437,11 @@ msgstr "選擇"
 msgid "Rating"
 msgstr "評分"
 
+#, fuzzy
+#| msgid "Saving..."
+msgid "Reading tags..."
+msgstr "正在儲存..."
+
 msgid "Ready"
 msgstr ""
 
@@ -3411,6 +3472,11 @@ msgstr "重新連接"
 
 msgid "Record label"
 msgstr ""
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Recording"
+msgstr "正在下載"
 
 msgid "Red"
 msgstr "紅色"
@@ -3461,6 +3527,11 @@ msgid "Relay"
 msgstr ""
 
 msgid "Release date"
+msgstr "發行日期"
+
+#, fuzzy
+#| msgid "Release date"
+msgid "Release group"
 msgstr "發行日期"
 
 msgid "Release notifications"
@@ -3823,8 +3894,18 @@ msgid "Search Lyrics"
 msgstr "搜尋歌詞"
 
 #, fuzzy
+#| msgid "MusicBrainz"
+msgid "Search MusicBrainz"
+msgstr "MusicBrainz"
+
+#, fuzzy
 #| msgid "Search Lyrics"
 msgid "Search artwork"
+msgstr "搜尋歌詞"
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search by AcoustID"
 msgstr "搜尋歌詞"
 
 #, fuzzy
@@ -3882,8 +3963,18 @@ msgstr "搜尋"
 msgid "Search..."
 msgstr "正在搜尋..."
 
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching AcoustID..."
+msgstr "正在搜尋..."
+
 msgid "Searching Local Network"
 msgstr ""
+
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching MusicBrainz..."
+msgstr "正在搜尋..."
 
 msgid "Searching for devices..."
 msgstr "正在尋找裝置..."
@@ -4299,6 +4390,9 @@ msgstr "音訊"
 msgid "Style"
 msgstr ""
 
+msgid "Suggested"
+msgstr ""
+
 msgid "Sunday"
 msgstr ""
 
@@ -4514,9 +4608,6 @@ msgstr "UPnP"
 #| msgid "Album title"
 msgid "Unavailable"
 msgstr "專輯標題"
-
-msgid "Undo identified value"
-msgstr ""
 
 msgid "Undo"
 msgstr ""
@@ -4851,6 +4942,9 @@ msgstr "昨天"
 msgid "{action} (Shuffle)"
 msgstr "播放篩選內容"
 
+msgid "{completed} of {total} ({cached} cached)"
+msgstr ""
+
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] "{count} 張專輯"
@@ -4901,6 +4995,16 @@ msgid "{current} / {total} MiB ({percent}%)"
 msgstr ""
 
 msgid "{current} MiB"
+msgstr ""
+
+msgid "{field} · Different across {count} track"
+msgid_plural "{field} · Different across {count} tracks"
+msgstr[0] ""
+
+msgid "{stage} ({completed} of {total}, {cached} cached)"
+msgstr ""
+
+msgid "{stage} ({count} of {total} tracks)"
 msgstr ""
 
 msgid "{stage}: {completed} / {total}"
@@ -4981,6 +5085,12 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Identify"
+#~ msgstr "認證"
+
+#~ msgid "Identifying..."
+#~ msgstr "認證中..."
 
 #, fuzzy
 #~| msgid "Folders"

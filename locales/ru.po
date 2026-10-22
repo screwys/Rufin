@@ -573,6 +573,9 @@ msgstr ""
 msgid "Audio fade on play/pause"
 msgstr "Плавное затухание звука при воспроизведении/паузе"
 
+msgid "Audio fingerprints"
+msgstr ""
+
 msgid "Audio output"
 msgstr "Аудиовыход"
 
@@ -719,6 +722,9 @@ msgstr "Кэширование библиотеки"
 msgid "Caching local library..."
 msgstr "Кэширование локальной библиотеки…"
 
+msgid "Calculating fingerprint..."
+msgstr ""
+
 msgid "Cancel download and clear downloaded items"
 msgstr "Отменить загрузку и удалить загруженные файлы"
 
@@ -864,6 +870,16 @@ msgstr "Поиск обложки"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Удалить загруженные тексты песен для этого трека"
+
+#, fuzzy
+#| msgid "Clear Cache"
+msgid "Clear fingerprint cache"
+msgstr "Очистить Кэш"
+
+#, fuzzy
+#| msgid "Clear Cache"
+msgid "Clear lookup cache"
+msgstr "Очистить Кэш"
 
 #, fuzzy
 #| msgid "Clear Cache"
@@ -1338,6 +1354,12 @@ msgstr "Отображение"
 msgid "Do not encrypt"
 msgstr "Не шифровать"
 
+msgid "Do you want to apply metadata changes to {count} track?"
+msgid_plural "Do you want to apply metadata changes to {count} tracks?"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
 msgid "Do you want to use the existing configuration?"
 msgstr "Вы хотите использовать существующую конфигурацию?"
 
@@ -1346,6 +1368,9 @@ msgstr "Не дублировать"
 
 msgid "Donate"
 msgstr "Пожертвовать"
+
+msgid "Done"
+msgstr ""
 
 msgid "Download Folder"
 msgstr "Локальная папка"
@@ -1660,9 +1685,17 @@ msgid "Fetching lyrics"
 msgstr "Поиск текста песни"
 
 #, fuzzy
+#| msgid "Search artwork"
+msgid "Fetching metadata..."
+msgstr "Поиск обложки"
+
+#, fuzzy
 #| msgid "Search playlists"
 msgid "Fetching playlists"
 msgstr "Поиск по плейлистам"
+
+msgid "Field"
+msgstr ""
 
 msgid "File connection"
 msgstr "Подключение к файлу"
@@ -1903,12 +1936,6 @@ msgstr "Часы"
 msgid "Hz"
 msgstr ""
 
-msgid "Identify"
-msgstr "Идентифицировать"
-
-msgid "Identifying..."
-msgstr "Идентификация..."
-
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr ""
 "Если страница не загружается, значит, Libre.fm блокирует ваш диапазон IP-"
@@ -2123,6 +2150,11 @@ msgstr "Обзор прослушивания"
 msgid "Load file contents"
 msgstr "Загрузить содержимое файла"
 
+#, fuzzy
+#| msgid "Loading related tracks..."
+msgid "Loading cached lookups..."
+msgstr "Загрузка похожих треков..."
+
 msgid "Loading related tracks..."
 msgstr "Загрузка похожих треков..."
 
@@ -2207,6 +2239,9 @@ msgstr "Заблокировать метаданные"
 msgid "Logs are copied"
 msgstr "Журналы скопированы"
 
+msgid "Lookup"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr "Нормализация громкости"
 
@@ -2248,6 +2283,11 @@ msgstr "Сопоставленный локальный путь"
 msgid "March {year}"
 msgstr "Март {year}"
 
+#, fuzzy
+#| msgid "Match"
+msgid "Matched"
+msgstr "Соответствие"
+
 msgid "Maximum year"
 msgstr "Максимальный год"
 
@@ -2267,6 +2307,11 @@ msgstr "Редактирование метаданных больше недо�
 
 msgid "Metadata editing requires Local access"
 msgstr "Для редактирования метаданных требуется доступ к локальному источнику"
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata lookups"
+msgstr "Источник метаданных"
 
 msgid "Metadata source"
 msgstr "Источник метаданных"
@@ -2357,9 +2402,6 @@ msgstr "Переместить вверх"
 msgid "Multi-selection"
 msgstr "Множественный выбор"
 
-msgid "Multiple values"
-msgstr "Несколько значений"
-
 msgid "Music Folder"
 msgstr "Папка с музыкой"
 
@@ -2440,6 +2482,11 @@ msgstr "Обнаружение поблизости"
 
 msgid "Needs attention"
 msgstr "Требуется внимание"
+
+#, fuzzy
+#| msgid "Overview"
+msgid "Needs review"
+msgstr "Обзор"
 
 msgid "NetEase"
 msgstr "NetEase"
@@ -2543,6 +2590,11 @@ msgstr "Текст песни отсутствует."
 
 msgid "No lyrics"
 msgstr "Текст песни отсутствует"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching track in this release"
+msgstr "Нет соответствующих треков"
 
 msgid "No matching tracks found"
 msgstr "Не найдено ни одного трека, соответствующего запросу"
@@ -2674,6 +2726,9 @@ msgstr ""
 msgid "One path per line"
 msgstr "Один путь на строку"
 
+msgid "Only fill missing information"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "Только проигранные треки"
 
@@ -2753,6 +2808,11 @@ msgid "Original release date"
 msgstr "Дата первого выпуска"
 
 msgid "Original"
+msgstr "Оригинал"
+
+#, fuzzy
+#| msgid "Original"
+msgid "Original: {value}"
 msgstr "Оригинал"
 
 msgid "Other releases"
@@ -3117,6 +3177,11 @@ msgstr "Выбор диапазона"
 msgid "Rating"
 msgstr "Оценка"
 
+#, fuzzy
+#| msgid "Loading..."
+msgid "Reading tags..."
+msgstr "Загрузка..."
+
 msgid "Ready"
 msgstr "Готово"
 
@@ -3143,6 +3208,11 @@ msgstr "Повторное подключение"
 
 msgid "Record label"
 msgstr "Лейбл"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Recording"
+msgstr "Загрузка"
 
 msgid "Red"
 msgstr "Красный"
@@ -3188,6 +3258,11 @@ msgstr "Ретранслятор"
 
 msgid "Release date"
 msgstr "Дата выпуска"
+
+#, fuzzy
+#| msgid "Release"
+msgid "Release group"
+msgstr "Выпуск"
 
 msgid "Release notifications"
 msgstr "Уведомления о новых версиях"
@@ -3523,8 +3598,18 @@ msgstr "Повторить поиск"
 msgid "Search Lyrics"
 msgstr "Поиск текстов песен"
 
+#, fuzzy
+#| msgid "MusicBrainz"
+msgid "Search MusicBrainz"
+msgstr "MusicBrainz"
+
 msgid "Search artwork"
 msgstr "Поиск обложки"
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search by AcoustID"
+msgstr "Поиск текстов песен"
 
 msgid "Search current folder"
 msgstr "Поиск в текущей папке"
@@ -3565,8 +3650,18 @@ msgstr "Поиск"
 msgid "Search..."
 msgstr "Поиск..."
 
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching AcoustID..."
+msgstr "Выполняется поиск..."
+
 msgid "Searching Local Network"
 msgstr "Поиск в локальной сети"
+
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching MusicBrainz..."
+msgstr "Выполняется поиск..."
 
 msgid "Searching for devices..."
 msgstr "Выполняется поиск устройств..."
@@ -3943,6 +4038,9 @@ msgstr "Студии"
 msgid "Style"
 msgstr "Стиль"
 
+msgid "Suggested"
+msgstr ""
+
 msgid "Sunday"
 msgstr "Воскресенье"
 
@@ -4140,9 +4238,6 @@ msgstr "UPnP"
 #| msgid "Album unavailable"
 msgid "Unavailable"
 msgstr "Альбом недоступен"
-
-msgid "Undo identified value"
-msgstr "Отменить изменение значения"
 
 msgid "Undo"
 msgstr "Отменить"
@@ -4453,6 +4548,9 @@ msgstr "вчера"
 msgid "{action} (Shuffle)"
 msgstr "{action} (Перемешать)"
 
+msgid "{completed} of {total} ({cached} cached)"
+msgstr ""
+
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] "{count} альбом"
@@ -4521,6 +4619,22 @@ msgstr ""
 
 msgid "{current} MiB"
 msgstr ""
+
+msgid "{field} · Different across {count} track"
+msgid_plural "{field} · Different across {count} tracks"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage} ({completed} of {total}, {cached} cached)"
+msgstr "{статус} · {этап} {выполнено}{всего}"
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage} ({count} of {total} tracks)"
+msgstr "{статус} · {этап} {выполнено}{всего}"
 
 #, fuzzy
 #| msgid "{status} · {stage} {completed}{total}"
@@ -4615,6 +4729,18 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Identify"
+#~ msgstr "Идентифицировать"
+
+#~ msgid "Identifying..."
+#~ msgstr "Идентификация..."
+
+#~ msgid "Multiple values"
+#~ msgstr "Несколько значений"
+
+#~ msgid "Undo identified value"
+#~ msgstr "Отменить изменение значения"
 
 #~ msgid "Folder"
 #~ msgstr "Папка"
@@ -5127,9 +5253,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Map server tracks to local files"
 #~ msgstr "Сопоставить треки с сервера с локальными файлами"
-
-#~ msgid "Match"
-#~ msgstr "Соответствие"
 
 #~ msgid "Music Folders"
 #~ msgstr "Папки с музыкой"
