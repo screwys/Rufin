@@ -127,7 +127,7 @@ pub(in crate::playback) async fn seeded(
         artwork,
         waveform,
         lyrics,
-        Arc::new(|_, _| {}),
+        Arc::new(|_| {}),
         Vec::new,
         scrobbler,
         move |_| Ok(Box::new(IdleBackend(backend_commands.clone()))),
@@ -1625,6 +1625,55 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
         local_period: "1970-01".into(),
     };
     session.handle_backend(BackendEvent::Started { run: current_run }, &sample);
+    session.publish(&sample);
+    session.handle_backend(
+        BackendEvent::Position {
+            run: current_run,
+            millis: 1_000,
+        },
+        &sample,
+    );
+    session.publish(&sample);
+    session.handle_command(Command::Pause, &sample).unwrap();
+    session.publish(&sample);
+    session.handle_backend(
+        BackendEvent::State {
+            run: current_run,
+            state: BackendState::Paused,
+        },
+        &sample,
+    );
+    session.publish(&sample);
+    session
+        .handle_command(Command::Seek(7_000), &sample)
+        .unwrap();
+    session.publish(&sample);
+    session.handle_backend(
+        BackendEvent::Position {
+            run: current_run,
+            millis: 7_000,
+        },
+        &sample,
+    );
+    session.publish(&sample);
+    session.handle_command(Command::Play, &sample).unwrap();
+    session.handle_backend(
+        BackendEvent::State {
+            run: current_run,
+            state: BackendState::Playing,
+        },
+        &sample,
+    );
+    session.publish(&sample);
+    session
+        .handle_command(Command::SetVolume(0.25), &sample)
+        .unwrap();
+    session.publish(&sample);
+    session
+        .handle_command(Command::SetMuted(true), &sample)
+        .unwrap();
+    session.publish(&sample);
+
     session.handle_backend(
         BackendEvent::Position {
             run: current_run,
@@ -1676,6 +1725,35 @@ async fn gapless_preparation_resolves_exactly_the_next_position() {
     })
     .await
     .unwrap_or_else(|error| panic!("Plex timelines {observed:?}: {error}"));
+    assert!(
+        observed
+            .iter()
+            .any(|report| report["state"] == "paused" && report["time"] == "1000")
+    );
+    assert!(
+        observed
+            .iter()
+            .any(|report| report["state"] == "paused" && report["time"] == "7000")
+    );
+    assert!(
+        observed
+            .iter()
+            .any(|report| report["state"] == "playing" && report["time"] == "7000")
+    );
+    assert!(observed.iter().any(|report| report["volume"] == "25"));
+    assert!(observed.iter().any(|report| report["volume"] == "0"));
+    let ended = observed
+        .iter()
+        .position(|report| {
+            report["X-Plex-Session-Identifier"] == current_identifier
+                && report["state"] == "stopped"
+        })
+        .unwrap();
+    let started = observed
+        .iter()
+        .position(|report| report["X-Plex-Session-Identifier"] == next_identifier)
+        .unwrap();
+    assert!(ended < started);
     server.abort();
 }
 

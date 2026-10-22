@@ -36,7 +36,7 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
             paths.clone(),
             |_| Ok(Box::new(IdleBackend) as Box<dyn PlaybackBackend>),
             Vec::new,
-            Arc::new(|_, _| {}),
+            Arc::new(|_| {}),
             Arc::new(|_, _| {}),
         ));
         assert!(opened.is_err());
@@ -72,7 +72,7 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
                     paths.clone(),
                     |_| Ok(Box::new(IdleBackend) as Box<dyn PlaybackBackend>),
                     Vec::new,
-                    Arc::new(|_, _| {}),
+                    Arc::new(|_| {}),
                     Arc::new(|_, _| {}),
                 )))
                 .unwrap()

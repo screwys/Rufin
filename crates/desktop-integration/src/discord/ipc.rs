@@ -404,7 +404,7 @@ mod tests {
                 link_type: LinkType::LastFm,
                 ..Settings::default()
             },
-            &view,
+            &view.transport,
             0,
             APP_ICON_ASSET.to_string(),
         )
@@ -429,12 +429,55 @@ mod tests {
                 link_type: LinkType::MusicBrainz,
                 ..Settings::default()
             },
-            &view,
+            &view.transport,
             0,
             APP_ICON_ASSET.to_string(),
         )
         .expect("visible activity");
 
+        let mut faster = view.transport.clone();
+        faster.playback_rate = 2.0;
+        faster.position_millis = 10_000;
+        let projection = playback::PlaybackProjection {
+            view: playback::PlaybackView {
+                transport: faster,
+                ..view.clone()
+            },
+            notices: vec![playback::PlaybackNotice::PositionDiscontinuity(
+                playback::PositionDiscontinuity {
+                    run: playback::RunId::new(1),
+                    position_millis: 20_000,
+                },
+            )],
+        };
+        let transport = projection.reporting_transport();
+        assert!(!activity.matches(&transport));
+        let faster_activity = Activity::new(
+            &Settings {
+                enabled: true,
+                ..Settings::default()
+            },
+            &transport,
+            1_000_000,
+            APP_ICON_ASSET.to_string(),
+        )
+        .unwrap();
+        assert_eq!(faster_activity.json()["timestamps"]["start"], 990);
+        assert_eq!(faster_activity.json()["timestamps"]["end"], 1011);
+        let mut paused = projection.clone();
+        paused.view.transport.desired_playing = false;
+        assert!(
+            Activity::new(
+                &Settings {
+                    enabled: true,
+                    ..Settings::default()
+                },
+                &paused.reporting_transport(),
+                1_000_000,
+                APP_ICON_ASSET.to_string()
+            )
+            .is_none()
+        );
         let payload = activity.json();
         let details = payload["details_url"].as_str();
         let state = payload["state_url"].as_str();
@@ -487,7 +530,7 @@ mod tests {
                 client_id: "client".to_string(),
                 ..Settings::default()
             },
-            &view,
+            &view.transport,
             0,
             APP_ICON_ASSET.to_string(),
         )

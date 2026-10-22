@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use playback::{CurrentMedia, PlaybackView, TransportStatus};
+use playback::{CurrentMedia, TransportStatus, TransportView};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -87,6 +87,7 @@ pub struct Activity {
     settings: Settings,
     media: Arc<CurrentMedia>,
     playback_state: PlaybackState,
+    playback_rate: f64,
     started_at_millis: Option<u64>,
     ended_at_millis: Option<u64>,
     pub large_image: String,
@@ -103,24 +104,25 @@ impl Activity {
 
     pub fn new(
         settings: &Settings,
-        view: &PlaybackView,
+        view: &TransportView,
         now_millis: u64,
         large_image: String,
     ) -> Option<Self> {
-        let playback_state = visible_playback_state(settings, view.transport.state)?;
-        let media = Arc::new(view.transport.current.as_ref()?.clone());
+        let playback_state = visible_playback_state(settings, view.state)?;
+        let media = Arc::new(view.current.as_ref()?.clone());
         media.id.run?;
-        let duration_millis = duration_millis(&media);
+        let duration_millis = view.duration_millis;
+        let elapsed_millis = (view.position_millis as f64 / view.playback_rate) as u64;
+        let duration_millis = (duration_millis as f64 / view.playback_rate) as u64;
         let started_at_millis = match playback_state {
-            PlaybackState::Playing => {
-                Some(now_millis.saturating_sub(view.transport.position_millis))
-            }
+            PlaybackState::Playing => Some(now_millis.saturating_sub(elapsed_millis)),
             PlaybackState::Paused => None,
         };
         Some(Self {
             settings: settings.clone(),
             media,
             playback_state,
+            playback_rate: view.playback_rate,
             started_at_millis,
             ended_at_millis: started_at_millis.and_then(|started| {
                 (duration_millis > 0).then(|| started.saturating_add(duration_millis))
@@ -129,18 +131,14 @@ impl Activity {
         })
     }
 
-    pub fn matches(&self, view: &PlaybackView) -> bool {
-        Some(self.playback_state) == visible_playback_state(&self.settings, view.transport.state)
+    pub fn matches(&self, view: &TransportView) -> bool {
+        Some(self.playback_state) == visible_playback_state(&self.settings, view.state)
+            && self.playback_rate == view.playback_rate
             && view
-                .transport
                 .current
                 .as_ref()
                 .is_some_and(|media| media == self.media.as_ref())
     }
-}
-
-fn duration_millis(media: &CurrentMedia) -> u64 {
-    u64::try_from(media.row.track.metadata.duration_millis.max(0)).unwrap_or(u64::MAX)
 }
 
 pub fn visible_playback_state(

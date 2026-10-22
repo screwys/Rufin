@@ -277,7 +277,7 @@ pub struct SubsonicSource {
     navidrome_session: navidrome::NavidromeSession,
     trust_invalid_cert: bool,
     metadata_editing: AtomicBool,
-    song_lyrics_version: tokio::sync::OnceCell<u64>,
+    extensions: tokio::sync::OnceCell<serde_json::Value>,
 }
 impl SubsonicSource {
     fn open(
@@ -319,7 +319,7 @@ impl SubsonicSource {
             navidrome_session: navidrome::NavidromeSession::default(),
             trust_invalid_cert: config.trust_invalid_cert,
             metadata_editing: AtomicBool::new(false),
-            song_lyrics_version: tokio::sync::OnceCell::new(),
+            extensions: tokio::sync::OnceCell::new(),
         })
     }
 
@@ -441,7 +441,7 @@ impl SubsonicSource {
             navidrome_session: navidrome::NavidromeSession::default(),
             trust_invalid_cert,
             metadata_editing: AtomicBool::new(metadata_editing),
-            song_lyrics_version: tokio::sync::OnceCell::new(),
+            extensions: tokio::sync::OnceCell::new(),
         };
         Ok(AuthenticatedSubsonic {
             configuration,

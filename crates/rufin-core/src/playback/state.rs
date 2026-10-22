@@ -142,7 +142,6 @@ struct RunContext {
     last_monotonic_millis: Option<u64>,
     position_observed_at_millis: u64,
     qualified: bool,
-    last_progress_bucket: Option<u64>,
     desired_playing: bool,
     resolved_stream: Option<PreparedStream>,
     backend_loaded: bool,
@@ -163,12 +162,35 @@ impl RunContext {
             last_monotonic_millis: None,
             position_observed_at_millis: 0,
             qualified: false,
-            last_progress_bucket: None,
             desired_playing: true,
             resolved_stream: None,
             backend_loaded: false,
             seekable: true,
         }
+    }
+
+    fn listen(&self, skipped: bool) -> Option<library::ListenWrite> {
+        let track = &self.row.track;
+        let metadata = &track.metadata;
+        Some(library::ListenWrite {
+            external_id: Some(self.play_id.clone()),
+            media_uri: track.media_uri.clone(),
+            title: metadata.title.clone(),
+            artist: metadata.artist.clone(),
+            album: metadata.album.clone(),
+            duration_millis: metadata.duration_millis,
+            disc_number: (metadata.disc_number > 0).then_some(metadata.disc_number),
+            track_number: (metadata.track_number > 0).then_some(metadata.track_number),
+            year: metadata.year,
+            release_date: metadata.release_date.clone(),
+            source_format: metadata.source_format.clone(),
+            musicbrainz_recording_id: metadata.musicbrainz_recording_id.clone(),
+            musicbrainz_release_track_id: metadata.musicbrainz_release_track_id.clone(),
+            started_at: self.started_at_unix_seconds?,
+            local_period: self.local_period.clone()?,
+            listened_millis: self.audible_millis.min(i64::MAX as u64) as i64,
+            skipped,
+        })
     }
 
     fn advance_clock(&mut self, monotonic_millis: u64) {
@@ -2149,22 +2171,10 @@ impl Player {
         }
         current.status = status;
         self.dirty = true;
-        let progress_reported = self.emit_progress_facts();
-        if matches!(status, TransportStatus::Playing | TransportStatus::Paused)
-            && !progress_reported
-            && let Some(current) = self.current_run.as_ref()
-            && current.started_at_unix_seconds.is_some()
-        {
-            self.owner().report_source(self.source_report(
-                current,
-                SourceReportPhase::Progress,
-                false,
-            ));
-        }
-        if status == TransportStatus::Paused && !progress_reported {
+        self.qualify_current();
+        if status == TransportStatus::Paused {
             self.sequence.persist_state();
         }
-        if matches!(status, TransportStatus::Paused | TransportStatus::Stopped) {}
     }
 
     fn accept_position(&mut self, run: RunId, millis: u64, sample: &ClockSample) {
@@ -2189,7 +2199,7 @@ impl Player {
         }
         self.sequence.set_progress_millis(playhead_millis);
         self.dirty |= changed || clock_changed;
-        self.emit_progress_facts();
+        self.qualify_current();
     }
 
     fn accept_duration(&mut self, run: RunId, millis: u64) {
@@ -2460,102 +2470,40 @@ impl Player {
     }
 
     fn mark_started(&mut self, sample: &ClockSample) {
-        let (run, row) = {
-            let Some(current) = self.current_run.as_mut() else {
-                return;
-            };
-            if current.started_at_unix_seconds.is_some() {
-                return;
-            }
-            current.status = TransportStatus::Playing;
-            current.started_at_unix_seconds = Some(sample.unix_seconds);
-            current.local_period = Some(sample.local_period.clone());
-            current.last_monotonic_millis = Some(sample.monotonic_millis);
-            (current.id, current.row.clone())
+        let Some(current) = self
+            .current_run
+            .as_mut()
+            .filter(|run| run.started_at_unix_seconds.is_none())
+        else {
+            return;
         };
-        self.notices.push(PlaybackNotice::RunStarted(run));
-        self.owner().scrobbler.now_playing(&row.track.metadata);
-        if let Some(current) = self.current_run.as_ref() {
-            self.owner().report_source(self.source_report(
-                current,
-                SourceReportPhase::Started,
-                false,
-            ));
-        }
-        self.emit_progress_facts();
-    }
-
-    fn emit_progress_facts(&mut self) -> bool {
-        let playhead_millis = self.sequence.progress_millis();
-        let bucket_changed = {
-            let Some(current) = self.current_run.as_mut() else {
-                return false;
-            };
-            if current.started_at_unix_seconds.is_none() {
-                return false;
-            }
-            let bucket = playhead_millis / 10_000;
-            let bucket_changed = current.last_progress_bucket != Some(bucket);
-            if bucket_changed {
-                current.last_progress_bucket = Some(bucket);
-            }
-            bucket_changed
-        };
+        current.status = TransportStatus::Playing;
+        current.started_at_unix_seconds = Some(sample.unix_seconds);
+        current.local_period = Some(sample.local_period.clone());
+        current.last_monotonic_millis = Some(sample.monotonic_millis);
+        self.notices.push(PlaybackNotice::RunStarted(current.id));
+        let current = self.current_run.as_ref().unwrap();
+        self.owner()
+            .report_source(self.source_report(current, SourceReportPhase::Started, false));
         self.qualify_current();
-        if bucket_changed {
-            self.sequence.persist_state();
-            if let Some(current) = self.current_run.as_ref() {
-                self.owner().report_source(self.source_report(
-                    current,
-                    SourceReportPhase::Progress,
-                    false,
-                ));
-            }
-        }
-        bucket_changed
     }
 
     fn qualify_current(&mut self) {
-        let activity = {
-            let Some(current) = self.current_run.as_mut() else {
-                return;
-            };
-            if !current.qualified
-                && current.started_at_unix_seconds.is_some()
-                && current.audible_millis
-                    >= qualified_play_threshold_millis(current.duration_millis)
-            {
-                current.qualified = true;
-                Some((
-                    current.play_id.clone(),
-                    current.row.clone(),
-                    current.started_at_unix_seconds,
-                    current.audible_millis,
-                    current.local_period.clone(),
-                ))
-            } else {
-                None
-            }
+        let Some(current) = self.current_run.as_mut() else {
+            return;
         };
-        let activity_qualified = activity.is_some();
-        if let Some((play_id, row, Some(started_at), listened_millis, Some(local_period))) =
-            activity
+        if current.qualified
+            || current.started_at_unix_seconds.is_none()
+            || current.audible_millis < qualified_play_threshold_millis(current.duration_millis)
         {
-            let track = library::TrackReference::from(row.track.clone());
-            self.owner().record_activity(
-                row.track.track_key,
-                Box::new(playback::ActivityListen {
-                    play_id: play_id.clone(),
-                    item: track.clone(),
-                    started_at_unix_seconds: started_at,
-                    local_period,
-                    listened_millis,
-                    skipped: false,
-                }),
-            );
+            return;
         }
-
-        if activity_qualified && let Some(current) = self.current_run.as_ref() {
+        current.qualified = true;
+        let key = current.row.track.track_key;
+        if let Some(listen) = current.listen(false) {
+            self.owner().record_activity(key, Box::new(listen));
+        }
+        if let Some(current) = self.current_run.as_ref() {
             self.owner().report_source(self.source_report(
                 current,
                 SourceReportPhase::QualifiedPlay,
@@ -2575,7 +2523,6 @@ impl Player {
         let Some(current) = self.current_run.take() else {
             return;
         };
-        let track = library::TrackReference::from(current.row.track.clone());
         self.current_media_changed = true;
         if current.started_at_unix_seconds.is_some() {
             self.owner().report_source(self.source_report(
@@ -2590,22 +2537,10 @@ impl Player {
                     current.audible_millis,
                     self.sequence.progress_millis(),
                 )
-                && let (Some(period), Some(started_at)) = (
-                    current.local_period.clone(),
-                    current.started_at_unix_seconds,
-                )
+                && let Some(listen) = current.listen(true)
             {
-                self.owner().record_activity(
-                    current.row.track.track_key,
-                    Box::new(playback::ActivityListen {
-                        play_id: current.play_id,
-                        item: track,
-                        started_at_unix_seconds: started_at,
-                        local_period: period,
-                        listened_millis: current.audible_millis,
-                        skipped: true,
-                    }),
-                );
+                self.owner()
+                    .record_activity(current.row.track.track_key, Box::new(listen));
             }
         }
         if reason == RunEndReason::Completed {
@@ -2635,6 +2570,11 @@ impl Player {
             phase,
             started_at_unix_seconds: current.started_at_unix_seconds.unwrap_or_default(),
             position_millis: self.sequence.progress_millis(),
+            playback_rate: if self.playback_output.is_local() {
+                self.settings.playback_rate
+            } else {
+                1.0
+            },
             duration_millis: (current.duration_millis > 0).then_some(current.duration_millis),
             paused: !current.desired_playing,
             muted: self.settings.muted,
@@ -2862,10 +2802,6 @@ impl Player {
                 false
             }
         });
-        let persistence = self.take_queue_persistence();
-        if let Some(update) = persistence {
-            self.owner().save_queue(update);
-        }
         let current_media_changed = std::mem::take(&mut self.current_media_changed);
         if current_media_changed && self.current_run.is_some() {
             self.maybe_request_auto_dj();
@@ -2875,7 +2811,52 @@ impl Player {
                 view: self.view(),
                 notices: std::mem::take(&mut self.notices),
             };
+            let view = &projection.view;
+            let transport = projection.reporting_transport();
+            let position_millis = transport.position_millis;
+            let previous = self.owner().updates.current();
+            let state_changed = previous.as_ref().is_none_or(|previous| {
+                previous.transport.current.as_ref().map(|media| &media.id)
+                    != view.transport.current.as_ref().map(|media| &media.id)
+                    || previous.transport.effective_state() != transport.state
+            });
+            if state_changed {
+                self.owner().scrobbler.now_playing(
+                    self.current_run
+                        .as_ref()
+                        .filter(|run| {
+                            run.started_at_unix_seconds.is_some()
+                                && transport.state == TransportStatus::Playing
+                        })
+                        .map(|run| &run.row.track.metadata),
+                );
+            }
+            if let Some(current) = self
+                .current_run
+                .as_ref()
+                .filter(|run| run.started_at_unix_seconds.is_some())
+                && (state_changed
+                    || position_millis != view.transport.position_millis
+                    || previous.as_ref().is_none_or(|previous| {
+                        previous.transport.playback_rate != view.transport.playback_rate
+                            || previous.controls != view.controls
+                            || previous.transport.position_millis / 10_000
+                                != view.transport.position_millis / 10_000
+                    }))
+            {
+                let mut report = self.source_report(current, SourceReportPhase::Progress, false);
+                report.position_millis = position_millis;
+                report.paused = transport.state != TransportStatus::Playing;
+                report.volume = self.output_volume;
+                report.muted = self.output_muted;
+                self.owner().report_source(report);
+                self.sequence.persist_state();
+            }
             self.owner().publish(projection, current_media_changed);
+        }
+        let persistence = self.take_queue_persistence();
+        if let Some(update) = persistence {
+            self.owner().save_queue(update);
         }
     }
 

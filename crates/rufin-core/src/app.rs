@@ -43,7 +43,7 @@ pub async fn runtime_inputs<StartBackend>(
     paths: Paths,
     start_backend: StartBackend,
     audio_outputs: fn() -> Vec<playback::AudioOutput>,
-    observe_playback: Arc<dyn Fn(Option<&playback::PlaybackProjection>, bool) + Send + Sync>,
+    observe_playback: Arc<dyn Fn(Option<&playback::PlaybackProjection>) + Send + Sync>,
     observe_settings: Arc<
         dyn Fn(&crate::settings::Settings, Option<&playback::PlaybackProjection>) + Send + Sync,
     >,

@@ -203,7 +203,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         artwork,
         waveform,
         lyrics,
-        Arc::new(|_, _| {}),
+        Arc::new(|_| {}),
         Vec::new,
         scrobbler,
         |_| Ok(Box::new(Idle)),

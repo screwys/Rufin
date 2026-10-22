@@ -658,28 +658,33 @@ impl SubsonicSource {
 }
 
 impl SubsonicSource {
+    async fn extension_version(&self, name: &str) -> SourceResult<u64> {
+        let extensions = self
+            .extensions
+            .get_or_try_init(|| async {
+                match self.get_json("getOpenSubsonicExtensions", &[]).await {
+                    Ok(extensions) => Ok(extensions),
+                    Err(SourceError::NotFound) => Ok(Value::Null),
+                    Err(error) => Err(error),
+                }
+            })
+            .await?;
+        Ok(json::items(&extensions["openSubsonicExtensions"])
+            .iter()
+            .find(|extension| extension["name"].as_str() == Some(name))
+            .and_then(|extension| {
+                json::items(&extension["versions"])
+                    .iter()
+                    .filter_map(Value::as_u64)
+                    .max()
+            })
+            .unwrap_or_default())
+    }
+
     pub(crate) async fn lyrics(&self, track_id: &str) -> SourceResult<Option<LyricsBundle>> {
         let song_lyrics_version = self
-            .song_lyrics_version
-            .get_or_try_init(|| async {
-                let extensions = match self.get_json("getOpenSubsonicExtensions", &[]).await {
-                    Ok(extensions) => extensions,
-                    Err(SourceError::NotFound) => return Ok(0),
-                    Err(error) => return Err(error),
-                };
-                Ok(json::items(&extensions["openSubsonicExtensions"])
-                    .iter()
-                    .find(|extension| extension["name"].as_str() == Some("songLyrics"))
-                    .and_then(|extension| {
-                        json::items(&extension["versions"])
-                            .iter()
-                            .filter_map(Value::as_u64)
-                            .max()
-                    })
-                    .unwrap_or_default())
-            })
+            .extension_version("songLyrics")
             .await
-            .copied()
             .unwrap_or_default();
         if song_lyrics_version >= 1 {
             let mut extra = vec![("id", raw_item_id(track_id).to_string())];
@@ -840,36 +845,55 @@ impl SubsonicSource {
         track_object_id: &str,
         report: &SourceReportFact,
     ) -> SourceResult<()> {
-        match report.phase {
-            SourceReportPhase::Started => {
-                self.get_unit(
-                    "scrobble",
+        if report.phase != SourceReportPhase::QualifiedPlay
+            && self
+                .extension_version("playbackReport")
+                .await
+                .unwrap_or_default()
+                >= 1
+        {
+            let state = match report.phase {
+                SourceReportPhase::Started => "starting",
+                SourceReportPhase::Ended => "stopped",
+                _ if report.paused => "paused",
+                _ => "playing",
+            };
+            return self
+                .get_unit(
+                    "reportPlayback",
                     &[
-                        ("id", raw_item_id(track_object_id).to_string()),
-                        ("submission", "false".to_string()),
+                        ("mediaId", raw_item_id(track_object_id).to_string()),
+                        ("mediaType", "song".into()),
+                        ("positionMs", report.position_millis.to_string()),
+                        ("state", state.into()),
+                        ("playbackRate", report.playback_rate.to_string()),
+                        // Rufin submits qualified listens separately, using listening time.
+                        ("ignoreScrobble", "true".into()),
                     ],
                 )
-                .await
-            }
-            SourceReportPhase::QualifiedPlay => {
-                let started_at_millis = u64::try_from(report.started_at_unix_seconds)
-                    .ok()
-                    .and_then(|seconds| seconds.checked_mul(1_000))
-                    .ok_or(SourceError::InvalidRequest(
-                        "playback start time is outside the OpenSubsonic range",
-                    ))?;
-                self.get_unit(
-                    "scrobble",
-                    &[
-                        ("id", raw_item_id(track_object_id).to_string()),
-                        ("submission", "true".to_string()),
-                        ("time", started_at_millis.to_string()),
-                    ],
-                )
-                .await
-            }
-            SourceReportPhase::Progress | SourceReportPhase::Ended => Ok(()),
+                .await;
         }
+        if !matches!(
+            report.phase,
+            SourceReportPhase::Started | SourceReportPhase::QualifiedPlay
+        ) {
+            return Ok(());
+        }
+        let submission = report.phase == SourceReportPhase::QualifiedPlay;
+        let mut params = vec![
+            ("id", raw_item_id(track_object_id).to_string()),
+            ("submission", submission.to_string()),
+        ];
+        if submission {
+            let time = u64::try_from(report.started_at_unix_seconds)
+                .ok()
+                .and_then(|seconds| seconds.checked_mul(1_000))
+                .ok_or(SourceError::InvalidRequest(
+                    "playback start time is outside the OpenSubsonic range",
+                ))?;
+            params.push(("time", time.to_string()));
+        }
+        self.get_unit("scrobble", &params).await
     }
 }
 #[derive(Clone)]

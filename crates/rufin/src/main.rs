@@ -73,15 +73,13 @@ fn main() -> ExitCode {
                     .map_err(|error| error.to_string())
             },
             playback_gstreamer::available_audio_outputs,
-            Arc::new(move |projection, discontinuity| {
-                presence.observe(projection.map(|p| &p.view), discontinuity)
-            }),
+            Arc::new(move |projection| presence.observe(projection)),
             Arc::new(move |settings, projection| {
                 discord.update(
                     settings.rich_presence.clone(),
                     !settings.application.private_mode,
                     &settings.lastfm_api_key,
-                    projection.map(|p| &p.view),
+                    projection,
                 )
             }),
         )

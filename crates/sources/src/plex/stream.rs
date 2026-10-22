@@ -269,7 +269,16 @@ impl PlexSource {
                 "X-Plex-Session-Identifier",
                 report.session_identifier.clone(),
             ),
-            ("volume", (report.volume * 100.0).round().to_string()),
+            (
+                "volume",
+                if report.muted {
+                    0.0
+                } else {
+                    report.volume * 100.0
+                }
+                .round()
+                .to_string(),
+            ),
             ("shuffle", u8::from(report.shuffle).to_string()),
             (
                 "repeat",
@@ -384,6 +393,7 @@ mod tests {
             phase: SourceReportPhase::Ended,
             started_at_unix_seconds: 1,
             position_millis: 179000,
+            playback_rate: 1.0,
             paused: false,
             muted: false,
             volume: 0.5,

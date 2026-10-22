@@ -220,8 +220,8 @@ impl Worker {
         })
     }
 
-    fn now_playing(&self, track: SubmissionTrack) {
-        self.update(|pending| pending.now_playing = Some((track, Instant::now())));
+    fn now_playing(&self, track: Option<SubmissionTrack>) {
+        self.update(|pending| pending.now_playing = track.map(|track| (track, Instant::now())));
     }
 
     fn update(&self, update: impl FnOnce(&mut PendingWork)) {
@@ -416,26 +416,30 @@ impl Scrobbler {
         Ok(())
     }
 
-    pub fn now_playing(&self, track: &TrackMetadata) {
+    pub fn now_playing(&self, track: Option<&TrackMetadata>) {
         let enabled = self
             .state
             .lock()
             .is_ok_and(|state| !state.private_mode && !targets(&state.settings, true).is_empty());
-        if enabled && let Some(track) = SubmissionTrack::capture(track) {
-            self.worker.now_playing(track);
-        }
+        self.worker
+            .now_playing(track.filter(|_| enabled).and_then(SubmissionTrack::capture));
     }
 
-    pub fn listen_delivery_targets(&self, duration_millis: i64) -> Vec<ListenDeliveryTarget> {
+    pub fn listen_delivery_targets(
+        &self,
+        listen: &library::ListenWrite,
+    ) -> Vec<ListenDeliveryTarget> {
         let targets = {
             let state = self.state.lock().ok();
             let Some(state) = state else {
                 return Vec::new();
             };
-            if state.private_mode {
+            if state.private_mode || listen.skipped {
                 return Vec::new();
             }
-            if external_scrobble_threshold_millis(duration_millis.max(0) as u64).is_some() {
+            if external_scrobble_threshold_millis(listen.duration_millis.max(0) as u64)
+                .is_some_and(|threshold| listen.listened_millis.max(0) as u64 >= threshold)
+            {
                 targets(&state.settings, false)
             } else {
                 Vec::new()
@@ -959,8 +963,6 @@ mod tests {
             .expect("materialize Track")
             .pop()
             .expect("Track");
-        let deliveries = scrobbler.listen_delivery_targets(track.metadata.duration_millis);
-        assert_eq!(deliveries.len(), 2);
         let listen = ListenWrite {
             external_id: Some("play".to_string()),
             media_uri: track.media_uri.clone(),
@@ -980,6 +982,14 @@ mod tests {
             listened_millis: 90_000,
             skipped: false,
         };
+        let deliveries = scrobbler.listen_delivery_targets(&listen);
+        assert_eq!(deliveries.len(), 2);
+        let mut early = listen.clone();
+        early.listened_millis = 4_000;
+        assert!(scrobbler.listen_delivery_targets(&early).is_empty());
+        early = listen.clone();
+        early.skipped = true;
+        assert!(scrobbler.listen_delivery_targets(&early).is_empty());
         database
             .record_listen(&listen, None, &deliveries)
             .await

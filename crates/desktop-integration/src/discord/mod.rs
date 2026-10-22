@@ -7,7 +7,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use playback::{PlaybackView, TransportStatus};
+use playback::{PlaybackProjection, TransportStatus, TransportView};
 use tracing::debug;
 
 use presence::{APP_ICON_ASSET, Activity, Settings, visible_playback_state};
@@ -116,13 +116,8 @@ impl ArtworkRequests {
 }
 
 #[derive(Clone)]
-struct Presence {
-    inner: Arc<Inner>,
-}
-
-#[derive(Clone)]
 pub struct Discord {
-    presence: Presence,
+    inner: Arc<Inner>,
 }
 
 struct Inner {
@@ -154,14 +149,15 @@ enum ArtworkState {
     },
 }
 
-impl Presence {
-    fn new() -> (Self, ArtworkRequests) {
+impl Discord {
+    pub fn new() -> Self {
         let (artwork, receiver) = latest_slot();
         let inner = Arc::new(Inner {
             state: Mutex::new(State::default()),
             artwork,
         });
-        (Self { inner }, ArtworkRequests { receiver })
+        cover::start(ArtworkRequests { receiver });
+        Self { inner }
     }
 
     pub fn update(
@@ -169,7 +165,7 @@ impl Presence {
         mut settings: Settings,
         delivery_enabled: bool,
         lastfm_api_key: &str,
-        view: Option<&PlaybackView>,
+        projection: Option<&PlaybackProjection>,
     ) {
         settings.enabled &= delivery_enabled && ipc::SUPPORTED;
         let Ok(mut state) = self.inner.state.lock() else {
@@ -177,31 +173,40 @@ impl Presence {
         };
         state.settings = settings;
         state.lastfm_api_key = lastfm_api_key.to_string();
-        self.refresh(&mut state, view, unix_now_millis());
+        let transport = projection.map(PlaybackProjection::reporting_transport);
+        self.refresh(&mut state, transport.as_ref(), unix_now_millis());
     }
 
-    pub fn observe(&self, view: Option<&PlaybackView>, position_discontinuity: bool) {
+    pub fn observe(&self, projection: Option<&PlaybackProjection>) {
+        let transport = projection.map(PlaybackProjection::reporting_transport);
+        let view = transport.as_ref();
         let Ok(mut state) = self.inner.state.lock() else {
             return;
         };
-        if !position_discontinuity && state.matches(view) {
+        if state.matches(view)
+            && transport.as_ref().is_none_or(|transport| {
+                projection.is_none_or(|projection| {
+                    transport.position_millis == projection.view.transport.position_millis
+                })
+            })
+        {
             return;
         }
         self.refresh(&mut state, view, unix_now_millis());
     }
 
-    fn refresh(&self, state: &mut State, view: Option<&PlaybackView>, now_millis: u64) {
+    fn refresh(&self, state: &mut State, view: Option<&TransportView>, now_millis: u64) {
         let Some(view) = view else {
             self.clear(state);
             return;
         };
         if state.settings.enabled
             && matches!(
-                view.transport.state,
+                view.state,
                 TransportStatus::Resolving | TransportStatus::Buffering
             )
         {
-            if view.transport.state == TransportStatus::Resolving
+            if view.state == TransportStatus::Resolving
                 && matches!(
                     &state.artwork,
                     ArtworkState::Pending { key, .. }
@@ -243,7 +248,7 @@ impl Presence {
         }
     }
 
-    fn artwork_image(&self, state: &mut State, view: &PlaybackView) -> String {
+    fn artwork_image(&self, state: &mut State, view: &TransportView) -> String {
         let Some(key) = ArtworkKey::from_view(view, &state.lastfm_api_key) else {
             state.artwork = ArtworkState::Empty;
             self.inner.artwork.clear();
@@ -279,43 +284,18 @@ impl Presence {
     }
 }
 
-impl Discord {
-    pub fn new() -> Self {
-        let (presence, requests) = Presence::new();
-        cover::start(requests);
-        Self { presence }
-    }
-
-    pub fn update(
-        &self,
-        settings: Settings,
-        delivery_enabled: bool,
-        lastfm_api_key: &str,
-        view: Option<&PlaybackView>,
-    ) {
-        self.presence
-            .update(settings, delivery_enabled, lastfm_api_key, view);
-    }
-
-    pub fn observe(&self, view: Option<&PlaybackView>, position_discontinuity: bool) {
-        self.presence.observe(view, position_discontinuity);
-    }
-}
-
 impl State {
-    fn matches(&self, view: Option<&PlaybackView>) -> bool {
+    fn matches(&self, view: Option<&TransportView>) -> bool {
         match (&self.activity, view) {
             (None, None) => true,
             (Some(_), None) => false,
             (None, Some(view)) => {
-                visible_playback_state(&self.settings, view.transport.state).is_none()
+                visible_playback_state(&self.settings, view.state).is_none()
                     || view
-                        .transport
                         .current
                         .as_ref()
                         .and_then(|media| media.id.run)
                         .is_none()
-                    || view.transport.current.is_none()
             }
             (Some(activity), Some(view)) => activity.matches(view),
         }
@@ -367,8 +347,8 @@ impl State {
 }
 
 impl ArtworkKey {
-    fn from_view(view: &PlaybackView, lastfm_api_key: &str) -> Option<Self> {
-        let track = &view.transport.current.as_ref()?;
+    fn from_view(view: &TransportView, lastfm_api_key: &str) -> Option<Self> {
+        let track = &view.current.as_ref()?;
         let album_artist = track
             .row
             .track

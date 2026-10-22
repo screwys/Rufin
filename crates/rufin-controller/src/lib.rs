@@ -102,7 +102,7 @@ fn run_inner(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), 
                     .map_err(|error| error.to_string())
             },
             playback_gstreamer::available_audio_outputs,
-            Arc::new(|_, _| {}),
+            Arc::new(|_| {}),
             Arc::new(|_, _| {}),
         ))?;
         // An unattached presentation has no event backlog to retain.

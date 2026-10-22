@@ -158,3 +158,21 @@ pub struct PlaybackProjection {
     pub view: PlaybackView,
     pub notices: Vec<PlaybackNotice>,
 }
+
+impl PlaybackProjection {
+    /// Live state for observers, including playback intent and the latest seek.
+    pub fn reporting_transport(&self) -> TransportView {
+        let mut transport = self.view.transport.clone();
+        transport.state = transport.effective_state();
+        let run = transport.current.as_ref().and_then(|media| media.id.run);
+        if let Some(position) = self.notices.iter().rev().find_map(|notice| match notice {
+            PlaybackNotice::PositionDiscontinuity(seek) if Some(seek.run) == run => {
+                Some(seek.position_millis)
+            }
+            _ => None,
+        }) {
+            transport.position_millis = position;
+        }
+        transport
+    }
+}

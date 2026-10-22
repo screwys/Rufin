@@ -157,7 +157,7 @@ impl AndroidRuntime {
                         .map_err(|error| error.to_string())
                 },
                 playback_gstreamer::available_audio_outputs,
-                Arc::new(|_, _| {}),
+                Arc::new(|_| {}),
                 Arc::new(|_, _| {}),
             ))
             .map_err(error)?;

@@ -61,7 +61,7 @@ pub struct PlaybackOwner {
     waveform: Arc<WaveformOwner>,
     loudness: Arc<LoudnessAnalysisOwner>,
     pub(crate) lyrics: Arc<LyricsService>,
-    observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>, bool) + Send + Sync>,
+    observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>) + Send + Sync>,
     audio_outputs: fn() -> Vec<playback::AudioOutput>,
     scrobbler: Arc<Scrobbler>,
     source: Mutex<std::sync::Weak<SourceOwner>>,
@@ -70,6 +70,7 @@ pub struct PlaybackOwner {
     pending_queue: Mutex<Option<QueueUpdate>>,
     equalizer: Mutex<equalizer::EqualizerState>,
     store_sender: async_channel::Sender<PlaybackStoreWork>,
+    report_sender: async_channel::Sender<(sources::SourceId, playback::SourceReportFact)>,
     monotonic_origin: Instant,
     start_backend: Box<
         dyn Fn(
@@ -90,7 +91,7 @@ enum PlaybackStoreWork {
         prepared: Box<PreparedContinuation>,
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
-    Activity(library::TrackKey, Box<playback::ActivityListen>),
+    Activity(library::TrackKey, Box<ListenWrite>),
     Flush(std::sync::mpsc::SyncSender<()>),
     Output {
         volume: f64,
@@ -154,7 +155,7 @@ impl PlaybackOwner {
         artwork: artwork::Artwork,
         waveform: Arc<WaveformOwner>,
         lyrics: Arc<LyricsService>,
-        observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>, bool) + Send + Sync>,
+        observe_playback: Arc<dyn Fn(Option<&PlaybackProjection>) + Send + Sync>,
         audio_outputs: fn() -> Vec<playback::AudioOutput>,
         scrobbler: Arc<Scrobbler>,
         start_backend: StartBackend,
@@ -174,6 +175,7 @@ impl PlaybackOwner {
         );
         let ui = stored.ui;
         let (store_sender, store_receiver) = async_channel::unbounded();
+        let (report_sender, report_receiver) = async_channel::unbounded();
         let artwork_settings = settings.clone();
         let cast_artwork = artwork.clone();
         let cast_artwork_path = move |stream: &playback::PreparedStream| {
@@ -202,6 +204,7 @@ impl PlaybackOwner {
             pending_queue: Mutex::new(None),
             equalizer: Mutex::new(eq),
             store_sender,
+            report_sender,
             monotonic_origin: Instant::now(),
             start_backend: Box::new(start_backend),
             cast: playback_cast::CastManager::new(
@@ -216,6 +219,22 @@ impl PlaybackOwner {
             plex_targets: Mutex::new(std::collections::HashMap::new()),
             plex: Mutex::new(None),
             rufin: Mutex::new(None),
+        });
+        let weak = Arc::downgrade(&owner);
+        owner.runtime.spawn(async move {
+            while let Ok((source_id, report)) = report_receiver.recv().await {
+                let Some(owner) = weak.upgrade() else { break };
+                if owner.settings.load().ui.application.private_mode {
+                    continue;
+                }
+                let source = owner.source_owner();
+                if let Ok(Some(source)) =
+                    tokio::task::spawn_blocking(move || source?.client(&source_id).ok()).await
+                    && let Err(error) = source.report_playback(&report).await
+                {
+                    debug!(%error, "could not report playback to source");
+                }
+            }
         });
         let weak = Arc::downgrade(&owner);
         owner.runtime.spawn(async move {
@@ -344,7 +363,7 @@ impl PlaybackOwner {
         let active = self.active.lock().unwrap_or_else(|p| p.into_inner()).take();
         self.loudness.cancel();
         self.publish_current_media(None);
-        (self.observe_playback)(None, false);
+        (self.observe_playback)(None);
         self.updates.clear();
         active
     }
@@ -353,13 +372,7 @@ impl PlaybackOwner {
         if current_media_changed {
             self.publish_current_media(projection.view.transport.current.clone().map(Arc::new));
         }
-        (self.observe_playback)(
-            Some(&projection),
-            projection
-                .notices
-                .iter()
-                .any(|notice| matches!(notice, playback::PlaybackNotice::PositionDiscontinuity(_))),
-        );
+        (self.observe_playback)(Some(&projection));
         self.updates.publish(projection);
     }
 
@@ -431,7 +444,7 @@ impl PlaybackOwner {
         }
     }
 
-    fn record_activity(&self, key: library::TrackKey, activity: Box<playback::ActivityListen>) {
+    fn record_activity(&self, key: library::TrackKey, activity: Box<ListenWrite>) {
         let _ = self
             .store_sender
             .try_send(PlaybackStoreWork::Activity(key, activity));
@@ -442,14 +455,7 @@ impl PlaybackOwner {
             && let Some((source_id, kind, _)) = library::source_entity_parts(&report.media_uri)
             && kind == "track"
         {
-            let owner = self.source_owner();
-            self.runtime.spawn(async move {
-                if let Ok(Some(source)) =
-                    tokio::task::spawn_blocking(move || owner?.client(&source_id).ok()).await
-                {
-                    let _ = source.report_playback(&report).await;
-                }
-            });
+            let _ = self.report_sender.try_send((source_id, report));
         }
     }
 
@@ -494,38 +500,8 @@ impl PlaybackOwner {
         });
     }
 
-    async fn store_activity(
-        &self,
-        current_track: library::TrackKey,
-        activity: playback::ActivityListen,
-    ) {
-        let deliveries = if activity.skipped {
-            Vec::new()
-        } else {
-            self.scrobbler
-                .listen_delivery_targets(activity.item.metadata.duration_millis)
-        };
-        let listen = ListenWrite {
-            external_id: Some(activity.play_id),
-            media_uri: activity.item.media_uri,
-            title: activity.item.metadata.title,
-            artist: activity.item.metadata.artist,
-            album: activity.item.metadata.album,
-            duration_millis: activity.item.metadata.duration_millis,
-            disc_number: (activity.item.metadata.disc_number > 0)
-                .then_some(activity.item.metadata.disc_number),
-            track_number: (activity.item.metadata.track_number > 0)
-                .then_some(activity.item.metadata.track_number),
-            year: activity.item.metadata.year,
-            release_date: activity.item.metadata.release_date,
-            source_format: activity.item.metadata.source_format,
-            musicbrainz_recording_id: activity.item.metadata.musicbrainz_recording_id,
-            musicbrainz_release_track_id: activity.item.metadata.musicbrainz_release_track_id,
-            started_at: activity.started_at_unix_seconds,
-            local_period: activity.local_period,
-            listened_millis: i64::try_from(activity.listened_millis).unwrap_or(i64::MAX),
-            skipped: activity.skipped,
-        };
+    async fn store_activity(&self, current_track: library::TrackKey, listen: ListenWrite) {
+        let deliveries = self.scrobbler.listen_delivery_targets(&listen);
         match self
             .database
             .record_listen(&listen, Some(current_track), &deliveries)

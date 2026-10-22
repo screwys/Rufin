@@ -35,7 +35,7 @@ fn controller_http_api_and_browser_share_application_operations() {
                 paths.clone(),
                 |_| Ok(Box::new(IdleBackend) as Box<dyn PlaybackBackend>),
                 Vec::new,
-                Arc::new(|_, _| {}),
+                Arc::new(|_| {}),
                 Arc::new(|_, _| {}),
             )))
             .unwrap()
