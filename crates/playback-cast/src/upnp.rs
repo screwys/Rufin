@@ -1282,6 +1282,16 @@ impl UpnpController {
     }
 
     fn stop_transport(&self) -> Result<(), String> {
+        if self
+            .transport_state()
+            .is_ok_and(|state| state.eq_ignore_ascii_case("NO_MEDIA_PRESENT"))
+        {
+            tracing::debug!(
+                session = self.diagnostic_session,
+                "UPnP renderer has no media to stop"
+            );
+            return Ok(());
+        }
         let result = self
             .action(AV_TRANSPORT, "Stop", "<InstanceID>0</InstanceID>")
             .map(|_| ());
@@ -1785,54 +1795,87 @@ mod tests {
 
     #[test]
     fn start_resets_transport_and_waits_until_play_is_available() {
-        let mut stopped = false;
-        let mut action_polls = 0;
-        let (address, received, renderer) =
-            test_renderer(TEST_DEVICE_DESCRIPTION, 9, move |action, _| {
-                if action.contains("#Stop") {
-                    stopped = true;
-                }
-                if action.contains("SetAVTransportURI") && !stopped {
-                    return Err("transport locked".to_string());
-                }
-                Ok(if action.contains("GetTransportInfo") {
-                    if stopped {
-                        "<CurrentTransportState>STOPPED</CurrentTransportState>"
-                    } else {
-                        "<CurrentTransportState>LG_TRANSITIONING</CurrentTransportState>"
+        for initial_state in ["NO_MEDIA_PRESENT", "LG_TRANSITIONING"] {
+            let mut stopped = false;
+            let mut loaded = false;
+            let mut action_polls = 0;
+            let no_media = initial_state == "NO_MEDIA_PRESENT";
+            let (address, received, renderer) = test_renderer(
+                TEST_DEVICE_DESCRIPTION,
+                if no_media { 9 } else { 10 },
+                move |action, _| {
+                    if action.contains("#Stop") {
+                        if no_media && !loaded {
+                            return Err("Transition not available".to_string());
+                        }
+                        stopped = true;
                     }
-                    .to_string()
-                } else if action.contains("GetCurrentTransportActions") {
-                    action_polls += 1;
-                    if action_polls <= 2 {
-                        "<Actions>Stop</Actions>".to_string()
-                    } else {
-                        "<Actions>Play,Stop,Seek</Actions>".to_string()
+                    if action.contains("SetAVTransportURI") {
+                        if !no_media && !stopped {
+                            return Err("transport locked".to_string());
+                        }
+                        loaded = true;
                     }
-                } else {
-                    String::new()
-                })
-            });
-        let device = test_device(address);
-        let (_directory, stream) = test_stream();
-        let relay =
-            RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
-        let mut controller = UpnpController::new(device).expect("controller");
+                    if action.contains("#Play") && action_polls < 3 {
+                        return Err("Play is not available yet".to_string());
+                    }
+                    Ok(if action.contains("GetTransportInfo") {
+                        format!(
+                            "<CurrentTransportState>{}</CurrentTransportState>",
+                            if stopped || loaded {
+                                "STOPPED"
+                            } else {
+                                initial_state
+                            }
+                        )
+                    } else if action.contains("GetCurrentTransportActions") {
+                        action_polls += 1;
+                        if no_media && !loaded {
+                            "<Actions></Actions>".to_string()
+                        } else if action_polls <= 2 {
+                            "<Actions>Stop</Actions>".to_string()
+                        } else {
+                            "<Actions>Play,Stop,Seek</Actions>".to_string()
+                        }
+                    } else {
+                        String::new()
+                    })
+                },
+            );
+            let device = test_device(address);
+            let (_directory, stream) = test_stream();
+            let relay =
+                RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
+            let mut controller = UpnpController::new(device).expect("controller");
 
-        controller
-            .start(RunId::new(1), stream, None, 0, &relay)
-            .expect("start after renderer reset");
-
-        let actions = received.try_iter().collect::<Vec<_>>();
-        assert!(actions[0].0.contains("GetCurrentTransportActions"));
-        assert!(actions[1].0.contains("#Stop"));
-        assert!(actions[2].0.contains("SetAVTransportURI"));
-        assert!(actions[3].0.contains("GetTransportInfo"));
-        assert!(actions[4].0.contains("GetCurrentTransportActions"));
-        assert!(actions[5].0.contains("GetCurrentTransportActions"));
-        assert!(actions[6].0.contains("GetTransportInfo"));
-        assert!(actions[7].0.contains("#Play"));
-        drop(renderer);
+            let events = controller
+                .start(RunId::new(1), stream, None, 0, &relay)
+                .expect("start playback");
+            assert!(events.iter().any(|event| matches!(event,
+                BackendEvent::State { run, state: BackendState::Playing } if *run == RunId::new(1))));
+            let actions = received.try_iter().collect::<Vec<_>>();
+            let loaded = actions
+                .iter()
+                .position(|(action, _)| action.contains("SetAVTransportURI"))
+                .expect("media URI loaded");
+            let played = actions
+                .iter()
+                .position(|(action, _)| action.contains("#Play"))
+                .expect("play command");
+            assert!(loaded < played);
+            let stopped = actions
+                .iter()
+                .position(|(action, _)| action.contains("#Stop"));
+            if no_media {
+                assert!(
+                    stopped.is_none(),
+                    "empty renderer must accept its first media URI without Stop"
+                );
+            } else {
+                assert!(stopped.expect("reset active renderer") < loaded);
+            }
+            drop(renderer);
+        }
     }
 
     #[test]
@@ -1855,7 +1898,7 @@ mod tests {
                 );
             let (address, received, renderer) = test_renderer(
                 TEST_DEVICE_DESCRIPTION,
-                if failed_action == "Play" { 9 } else { 3 },
+                if failed_action == "Play" { 11 } else { 4 },
                 move |action, _| {
                     if action.contains(&format!("#{failed_action}\"")) {
                         let description = if failed_action == "Play" {
@@ -1904,21 +1947,22 @@ mod tests {
             assert!(error.contains("UPnP error 701"), "{error}");
             assert!(controller.current.is_none());
             let actions = received.try_iter().collect::<Vec<_>>();
+            assert!(actions[1].0.contains("GetTransportInfo"));
             if failed_action == "Play" {
                 assert!(actions[0].0.contains("GetCurrentTransportActions"));
-                assert!(actions[1].0.contains("#Stop"));
-                assert!(actions[2].0.contains("SetAVTransportURI"));
-                assert!(actions[3].0.contains("GetTransportInfo"));
-                assert!(actions[4].0.contains("GetCurrentTransportActions"));
-                assert!(actions[5].0.contains("GetTransportInfo"));
-                assert!(actions[6].0.contains("#Play"));
-                assert!(actions[7].0.contains("GetCurrentTransportActions"));
-                assert!(actions[8].0.contains("#Stop"));
+                assert!(actions[2].0.contains("#Stop"));
+                assert!(actions[3].0.contains("SetAVTransportURI"));
+                assert!(actions[4].0.contains("GetTransportInfo"));
+                assert!(actions[5].0.contains("GetCurrentTransportActions"));
+                assert!(actions[6].0.contains("GetTransportInfo"));
+                assert!(actions[7].0.contains("#Play"));
+                assert!(actions[8].0.contains("GetCurrentTransportActions"));
+                assert!(actions[10].0.contains("#Stop"));
             } else {
-                assert_eq!(actions.len(), 3);
+                assert_eq!(actions.len(), 4);
                 assert!(actions[0].0.contains("GetCurrentTransportActions"));
-                assert!(actions[1].0.contains("#Stop"));
-                assert!(actions[2].0.contains("GetTransportInfo"));
+                assert!(actions[2].0.contains("#Stop"));
+                assert!(actions[3].0.contains("GetTransportInfo"));
             }
             let output = std::fs::read_to_string(log.path()).expect("recorded diagnostics");
             let completed = output
@@ -2013,7 +2057,7 @@ mod tests {
         let mut playing = false;
         let (address, received, renderer) = test_renderer(
             TEST_DEVICE_DESCRIPTION,
-            11,
+            12,
             move |action, body| {
                 if action.contains("SetAVTransportURI") {
                     current_uri = xml_element(body, "CurrentURI").unwrap_or_default();
@@ -2086,20 +2130,20 @@ mod tests {
         let transition = controller.poll(&relay).expect("poll transition");
 
         let actions = received.try_iter().collect::<Vec<_>>();
-        assert_eq!(actions.len(), 11);
+        assert_eq!(actions.len(), 12);
         assert!(actions[0].0.contains("GetCurrentTransportActions"));
-        assert!(actions[1].0.contains("#Stop"));
-        assert!(actions[2].0.contains("SetAVTransportURI"));
-        assert!(actions[2].1.contains("CurrentURI"));
-        assert!(actions[3].0.contains("GetTransportInfo"));
-        assert!(actions[4].0.contains("GetCurrentTransportActions"));
-        assert!(actions[5].0.contains("GetTransportInfo"));
-        assert!(actions[6].0.contains("#Play"));
-        assert!(actions[7].0.contains("SetNextAVTransportURI"));
-        assert!(actions[7].1.contains("<NextURI>http://"));
-        assert!(actions[8].0.contains("GetTransportInfo"));
-        assert!(actions[9].0.contains("GetPositionInfo"));
-        assert!(actions[10].0.contains("GetCurrentTransportActions"));
+        assert!(actions[2].0.contains("#Stop"));
+        assert!(actions[3].0.contains("SetAVTransportURI"));
+        assert!(actions[3].1.contains("CurrentURI"));
+        assert!(actions[4].0.contains("GetTransportInfo"));
+        assert!(actions[5].0.contains("GetCurrentTransportActions"));
+        assert!(actions[6].0.contains("GetTransportInfo"));
+        assert!(actions[7].0.contains("#Play"));
+        assert!(actions[8].0.contains("SetNextAVTransportURI"));
+        assert!(actions[8].1.contains("<NextURI>http://"));
+        assert!(actions[9].0.contains("GetTransportInfo"));
+        assert!(actions[10].0.contains("GetPositionInfo"));
+        assert!(actions[11].0.contains("GetCurrentTransportActions"));
         assert!(!actions.iter().any(|(action, _)| action.contains("#Seek")));
         assert!(
             transition.iter().any(|event| {
@@ -2120,7 +2164,7 @@ mod tests {
         let mut seek_attempts = 0;
         let mut playing = false;
         let description = r#"<root xmlns="urn:schemas-upnp-org:device-1-0"><device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType><friendlyName>Test Renderer</friendlyName><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><serviceId>urn:upnp-org:serviceId:AVTransport</serviceId><SCPDURL>/transport.xml</SCPDURL><controlURL>/transport</controlURL><eventSubURL>/events</eventSubURL></service><service><serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType><serviceId>urn:upnp-org:serviceId:RenderingControl</serviceId><SCPDURL>/rendering.xml</SCPDURL><controlURL>/rendering</controlURL><eventSubURL>/rendering-events</eventSubURL></service></serviceList></device></root>"#;
-        let (address, received, renderer) = test_renderer(description, 23, move |action, body| {
+        let (address, received, renderer) = test_renderer(description, 24, move |action, body| {
             if action.contains("SetAVTransportURI") {
                 current_uri = xml_element(body, "CurrentURI").unwrap_or_default();
             } else if action.contains("#Play") {
@@ -2199,21 +2243,21 @@ mod tests {
         );
 
         let actions = received.try_iter().collect::<Vec<_>>();
-        assert_eq!(actions.len(), 23);
+        assert_eq!(actions.len(), 24);
         assert!(actions[0].0.contains("GetCurrentTransportActions"));
-        assert!(actions[1].0.contains("#Stop"));
-        assert!(actions[2].0.contains("SetAVTransportURI"));
-        assert!(actions[3].0.contains("GetVolume"));
-        assert!(actions[4].0.contains("GetMute"));
-        assert!(actions[5].0.contains("SetVolume"));
-        assert!(actions[5].1.contains("<DesiredVolume>0</DesiredVolume>"));
-        assert!(actions[6].0.contains("SetMute"));
-        assert!(actions[6].1.contains("<DesiredMute>1</DesiredMute>"));
-        assert!(actions[7].0.contains("GetTransportInfo"));
-        assert!(actions[8].0.contains("GetCurrentTransportActions"));
-        assert!(actions[9].0.contains("GetTransportInfo"));
-        assert!(actions[10].0.contains("#Play"));
-        assert!(actions[11].0.contains("GetCurrentTransportActions"));
+        assert!(actions[2].0.contains("#Stop"));
+        assert!(actions[3].0.contains("SetAVTransportURI"));
+        assert!(actions[4].0.contains("GetVolume"));
+        assert!(actions[5].0.contains("GetMute"));
+        assert!(actions[6].0.contains("SetVolume"));
+        assert!(actions[6].1.contains("<DesiredVolume>0</DesiredVolume>"));
+        assert!(actions[7].0.contains("SetMute"));
+        assert!(actions[7].1.contains("<DesiredMute>1</DesiredMute>"));
+        assert!(actions[8].0.contains("GetTransportInfo"));
+        assert!(actions[9].0.contains("GetCurrentTransportActions"));
+        assert!(actions[10].0.contains("GetTransportInfo"));
+        assert!(actions[11].0.contains("#Play"));
+        assert!(actions[12].0.contains("GetCurrentTransportActions"));
         let seeks = actions
             .iter()
             .filter(|(action, _)| action.contains("#Seek"))
@@ -2224,10 +2268,10 @@ mod tests {
                 .iter()
                 .all(|(_, body)| body.contains("<Target>00:00:42</Target>"))
         );
-        assert!(actions[21].0.contains("SetVolume"));
-        assert!(actions[21].1.contains("<DesiredVolume>40</DesiredVolume>"));
-        assert!(actions[22].0.contains("SetMute"));
-        assert!(actions[22].1.contains("<DesiredMute>0</DesiredMute>"));
+        assert!(actions[22].0.contains("SetVolume"));
+        assert!(actions[22].1.contains("<DesiredVolume>40</DesiredVolume>"));
+        assert!(actions[23].0.contains("SetMute"));
+        assert!(actions[23].1.contains("<DesiredMute>0</DesiredMute>"));
         drop(renderer);
         relay.shutdown();
     }
@@ -2239,7 +2283,7 @@ mod tests {
         let mut failed_status = false;
         let (address, _received, renderer) = test_renderer(
             TEST_DEVICE_DESCRIPTION,
-            11,
+            12,
             move |action, body| {
                 if action.contains("SetAVTransportURI") {
                     current_uri = xml_element(body, "CurrentURI").unwrap_or_default();
