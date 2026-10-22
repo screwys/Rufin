@@ -435,6 +435,21 @@ msgstr "Album-Künstler"
 msgid "Album artists"
 msgstr "Album-Künstler"
 
+#, fuzzy
+#| msgid "Album title"
+msgid "Album details"
+msgstr "Albumtitel"
+
+#, fuzzy
+#| msgid "Album radio"
+msgid "Album gain"
+msgstr "Album-Radio"
+
+#, fuzzy
+#| msgid "Album tracks"
+msgid "Album peak"
+msgstr "Album-Titel"
+
 msgid "Album radio"
 msgstr "Album-Radio"
 
@@ -534,6 +549,11 @@ msgid "April {year}"
 msgstr "April {year}"
 
 msgid "Artist albums"
+msgstr "Alben"
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Artist details"
 msgstr "Alben"
 
 msgid "Artist name"
@@ -712,6 +732,11 @@ msgstr ""
 
 msgid "Browse"
 msgstr "Durchsuchen"
+
+#, fuzzy
+#| msgid "New file"
+msgid "CUE file"
+msgstr "Neue Datei"
 
 #, fuzzy
 #| msgid "Cached"
@@ -1281,6 +1306,9 @@ msgstr[1] "Playlist löschen"
 msgid "Delete"
 msgstr "Löschen"
 
+msgid "Delivery"
+msgstr ""
+
 msgid "Descending"
 msgstr "Absteigend"
 
@@ -1288,6 +1316,11 @@ msgid "Detail track columns"
 msgstr "Spalten der Detailansicht"
 
 msgid "Detail"
+msgstr "Detail"
+
+#, fuzzy
+#| msgid "Detail"
+msgid "Details"
 msgstr "Detail"
 
 msgid "Device invitation"
@@ -1714,6 +1747,11 @@ msgstr "Format"
 msgid "File path"
 msgstr "Dateipfad"
 
+#, fuzzy
+#| msgid "Files"
+msgid "File size"
+msgstr "Dateien"
+
 msgid "Filename"
 msgstr "Dateiname"
 
@@ -1756,6 +1794,9 @@ msgstr "Dateiname"
 
 msgid "Folder path"
 msgstr "Ordnerpfad"
+
+msgid "Folder"
+msgstr "Ordner"
 
 msgid "Folders"
 msgstr "Ordner"
@@ -2016,6 +2057,14 @@ msgstr "Integrationen"
 msgid "Invite"
 msgstr "Einladen"
 
+msgid "Item ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "Source is no longer available"
+msgid "Item is no longer available"
+msgstr "Quelle ist nicht mehr verfügbar"
+
 msgid "January {year}"
 msgstr "Januar {year}"
 
@@ -2154,6 +2203,11 @@ msgstr "ListenBrainz"
 
 msgid "Listening overview"
 msgstr "Höraktivität"
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Listening"
+msgstr "ListenBrainz"
 
 msgid "Load file contents"
 msgstr "Dateiinhalt laden"
@@ -2830,6 +2884,11 @@ msgstr "Optionen"
 msgid "Orange"
 msgstr "Orange"
 
+#, fuzzy
+#| msgid "Original"
+msgid "Original audio"
+msgstr "Original"
+
 msgid "Original release date"
 msgstr "Ursprüngliches Veröffentlichungsdatum"
 
@@ -2998,6 +3057,11 @@ msgstr "Wiedergabe auf diesem Gerät"
 
 msgid "Playing on {device}"
 msgstr "Wiedergabe auf {device}"
+
+#, fuzzy
+#| msgid "Playing from"
+msgid "Playing stream"
+msgstr "Wiedergabe von"
 
 msgid "Playlist File"
 msgstr "Wiedergabelistendatei"
@@ -3290,6 +3354,11 @@ msgstr "Veröffentlichung"
 msgid "Release notifications"
 msgstr "Benachrichtigungen zu Neuerscheinungen"
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Release type"
+msgstr "Veröffentlichungsdatum"
+
 msgid "Release"
 msgstr "Veröffentlichung"
 
@@ -3422,6 +3491,11 @@ msgstr "Dateiinhalt ersetzen"
 
 msgid "Replace saved custom headers"
 msgstr "Gespeicherte benutzerdefinierte Header ersetzen"
+
+#, fuzzy
+#| msgid "ReplayGain"
+msgid "ReplayGain tags"
+msgstr "ReplayGain"
 
 msgid "ReplayGain"
 msgstr "ReplayGain"
@@ -3721,6 +3795,16 @@ msgstr "Spulen"
 msgid "Seek to {time}"
 msgstr "Zu {time} springen"
 
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Segment end"
+msgstr "Segmentierte Balken"
+
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Segment start"
+msgstr "Segmentierte Balken"
+
 msgid "Segmented bars"
 msgstr "Segmentierte Balken"
 
@@ -3810,6 +3894,11 @@ msgstr ""
 
 msgid "Share"
 msgstr "Freigabe"
+
+#, fuzzy
+#| msgid "Shared secret"
+msgid "Shared file size"
+msgstr "Shared Secret"
 
 msgid "Shared secret"
 msgstr "Shared Secret"
@@ -3972,6 +4061,11 @@ msgstr "Song"
 
 msgid "Sort by"
 msgstr "Sortieren nach"
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Sort name"
+msgstr "Künstler-Name"
 
 msgid "Sort title"
 msgstr "Sortiertitel"
@@ -4197,8 +4291,23 @@ msgstr "Discs gesamt"
 msgid "Total tracks"
 msgstr "Titel gesamt"
 
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track details"
+msgstr "Titel-Radio"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track gain"
+msgstr "Titel-Radio"
+
 msgid "Track number"
 msgstr "Titelnummer"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track peak"
+msgstr "Titel-Radio"
 
 msgid "Track radio"
 msgstr "Titel-Radio"
@@ -4214,6 +4323,11 @@ msgstr "Titel aus deinen fünf neuesten Alben"
 
 msgid "Tracks"
 msgstr "Titel"
+
+#, fuzzy
+#| msgid "Transition mode"
+msgid "Transcoded"
+msgstr "Übergangsmodus"
 
 msgid "Transition mode"
 msgstr "Übergangsmodus"
@@ -4753,9 +4867,6 @@ msgstr "Willkommen beim Rufin-Setup"
 #~ msgid "Undo identified value"
 #~ msgstr "Erkannten Wert rückgängig machen"
 
-#~ msgid "Folder"
-#~ msgstr "Ordner"
-
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr ""
 #~ "Wellenformen für den aktuellen Titel generieren und zwischenspeichern"
@@ -4803,9 +4914,6 @@ msgstr "Willkommen beim Rufin-Setup"
 
 #~ msgid "Files received: {count}"
 #~ msgstr "Empfangene Dateien: {count}"
-
-#~ msgid "Files"
-#~ msgstr "Dateien"
 
 #~ msgid "Media available"
 #~ msgstr "Medien verfügbar"
