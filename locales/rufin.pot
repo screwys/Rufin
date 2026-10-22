@@ -2332,6 +2332,9 @@ msgstr ""
 msgid "New folder"
 msgstr ""
 
+msgid "New playlist"
+msgstr ""
+
 msgid "New release is available"
 msgstr ""
 

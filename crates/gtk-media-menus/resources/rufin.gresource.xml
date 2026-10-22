@@ -5,6 +5,5 @@
     <file compressed="true">routes/playlist_picker_context.ui</file>
     <file compressed="true">routes/playlist_picker_row.ui</file>
     <file compressed="true">routes/playlist_folder.ui</file>
-    <file compressed="true">routes/playlist_picker_folder_row.ui</file>
   </gresource>
 </gresources>

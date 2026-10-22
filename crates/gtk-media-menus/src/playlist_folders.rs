@@ -131,8 +131,10 @@ fn populate_folder_picker(
         let mut child = list.first_child();
         while let Some(row) = child {
             child = row.next_sibling();
-            if let Some(row) = row.downcast_ref::<adw::ActionRow>() {
-                row.set_visible(row.title().to_lowercase().contains(&query));
+            if let Some(row) = row.downcast_ref::<gtk::ListBoxRow>()
+                && let Some(label) = row.child().and_downcast::<gtk::Label>()
+            {
+                row.set_visible(label.text().to_lowercase().contains(&query));
             }
         }
     });
@@ -207,13 +209,19 @@ fn populate_folder_picker(
             }
         };
         for folder in rows {
-            let row = adw::ActionRow::new();
-            row.set_title(&folder.name);
-            row.set_activatable(true);
+            let row = gtk::ListBoxRow::new();
+            let label = gtk::Label::new(Some(&folder.name));
+            label.set_xalign(0.0);
+            label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            label.set_margin_start(4);
+            label.set_margin_end(4);
+            label.set_margin_top(2);
+            label.set_margin_bottom(2);
+            row.set_child(Some(&label));
             let members = members.clone();
             let menus = Rc::downgrade(&menus);
             let dismiss = Rc::clone(&dismiss);
-            row.connect_activated(move |_| {
+            row.connect_activate(move |_| {
                 if let Some(menus) = menus.upgrade() {
                     for member in &members {
                         move_member(&menus, member.clone(), Some(folder.folder_key));

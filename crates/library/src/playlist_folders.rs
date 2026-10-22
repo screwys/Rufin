@@ -85,17 +85,6 @@ impl Database {
         .fetch_optional(connection)
         .await?)
     }
-    pub async fn playlist_destination_folders(
-        &self,
-        source: Option<SourceKey>,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<(PlaylistKey, PlaylistFolderKey)>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_as("SELECT member.playlist_key,member.folder_key FROM playlist_folder_members member JOIN playlists playlist USING(playlist_key) WHERE playlist.writable AND playlist.name IS NOT NULL AND (playlist.owner='rufin' OR playlist.indexed) AND (playlist.source_key IS NULL OR playlist.source_key=?1)")
-            .bind(source)
-            .fetch_all(&mut *connection)
-            .await?)
-    }
     pub async fn playlist_member_folder(
         &self,
         member: &PlaylistFolderMember,

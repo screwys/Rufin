@@ -24,22 +24,9 @@ gtk_widgets::composite_box!(
 
 #[derive(Clone, Debug)]
 struct PlaylistChoice {
-    key: PlaylistChoiceKey,
-    folder: Option<library::PlaylistFolderKey>,
+    key: library::PlaylistKey,
     name: String,
     normalized_name: String,
-}
-#[derive(Clone, Debug)]
-enum PlaylistChoiceKey {
-    Playlist(library::PlaylistKey),
-    Folder(library::PlaylistFolderKey),
-}
-
-#[derive(Clone)]
-pub struct PlaylistPickerData {
-    pub playlists: Vec<library::PlaylistRow>,
-    pub folders: Vec<library::PlaylistFolderRow>,
-    pub memberships: Vec<(library::PlaylistKey, library::PlaylistFolderKey)>,
 }
 
 #[derive(Clone)]
@@ -54,7 +41,8 @@ pub fn populate_context_playlist_picker(
     source: rufin_core::runtime::SourceHandle,
     feedback: Rc<dyn Fn(&OperationFeedback)>,
     popover: &gtk::PopoverMenu,
-) -> Rc<dyn Fn(PlaylistPickerData, library::MemberSelection, String, Vec<String>)> {
+    new_playlist: Rc<dyn Fn(String, library::MemberSelection)>,
+) -> Rc<dyn Fn(Vec<library::PlaylistRow>, library::MemberSelection, String, Vec<String>)> {
     let resource = crate::ui_resource::PLAYLIST_PICKER_CONTEXT_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
@@ -63,7 +51,7 @@ pub fn populate_context_playlist_picker(
         skip_duplicates: gtk::CheckButton,
         list: gtk::ListView,
         spinner: gtk::Spinner,
-        back: gtk::Button,
+        create_playlist: gtk::Button,
     });
     gtk_widgets::controls::configure_search_entry(&search);
     search.set_placeholder_text(Some(&tr("Search")));
@@ -73,8 +61,6 @@ pub fn populate_context_playlist_picker(
     root.append(&content);
 
     let store = gio::ListStore::new::<glib::BoxedAnyObject>();
-    let folder = Rc::new(Cell::new(None::<library::PlaylistFolderKey>));
-    let filter_folder = Rc::clone(&folder);
     let query = Rc::new(RefCell::new(String::new()));
     let filter_query = Rc::clone(&query);
     let filter = gtk::CustomFilter::new(move |item| {
@@ -83,14 +69,7 @@ pub fn populate_context_playlist_picker(
         };
         let choice = item.borrow::<PlaylistChoice>();
         let query = filter_query.borrow();
-        let current = filter_folder.get();
-        let location_matches = match choice.key {
-            PlaylistChoiceKey::Folder(_) => current.is_none(),
-            PlaylistChoiceKey::Playlist(_) => {
-                (!query.is_empty() && current.is_none()) || choice.folder == current
-            }
-        };
-        location_matches && (query.is_empty() || choice.normalized_name.contains(query.as_str()))
+        query.is_empty() || choice.normalized_name.contains(query.as_str())
     });
     let filtered = gtk::FilterListModel::new(Some(store.clone()), Some(filter.clone()));
     let selection = gtk::NoSelection::new(Some(filtered.clone()));
@@ -99,26 +78,32 @@ pub fn populate_context_playlist_picker(
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        item.set_child(Some(&glib::Object::new::<
-            gtk_widgets::recycled_cells::RecycledBadgedTextCell,
-        >()));
+        let label = gtk::Label::new(None);
+        label.set_xalign(0.0);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        label.set_margin_top(2);
+        label.set_margin_bottom(2);
+        label.set_margin_start(4);
+        label.set_margin_end(4);
+        item.set_child(Some(&label));
     });
     factory.connect_bind(|_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(cell) = item
+        let Some(label) = item
             .child()
-            .and_downcast::<gtk_widgets::recycled_cells::RecycledBadgedTextCell>()
+            .and_then(|child| child.downcast::<gtk::Label>().ok())
         else {
             return;
         };
-        let Some(choice) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
+        let Some(choice) = item
+            .item()
+            .and_then(|item| item.downcast::<glib::BoxedAnyObject>().ok())
+        else {
             return;
         };
-        let choice = choice.borrow::<PlaylistChoice>();
-        cell.label().set_label(&choice.name);
-        cell.set_folder(matches!(choice.key, PlaylistChoiceKey::Folder(_)));
+        label.set_label(&choice.borrow::<PlaylistChoice>().name);
     });
     list.set_model(Some(&selection));
     list.set_factory(Some(&factory));
@@ -130,18 +115,19 @@ pub fn populate_context_playlist_picker(
     });
 
     let ready = Rc::new(RefCell::new(None::<ReadyPlaylistTracks>));
-    let activate_folder = Rc::clone(&folder);
-    let activate_filter = filter.clone();
-    let activate_search = search.clone();
-    let activate_back = back.downgrade();
-    let back_folder = Rc::clone(&folder);
-    let back_filter = filter.clone();
-    let back_search = search.clone();
-    back.connect_clicked(move |back| {
-        back_folder.set(None);
-        back_search.set_text("");
-        back.set_visible(false);
-        back_filter.changed(gtk::FilterChange::Different);
+    let create_ready = Rc::clone(&ready);
+    let create_search = search.clone();
+    let create_popover = popover.downgrade();
+    create_playlist.connect_clicked(move |_| {
+        let selection = create_ready
+            .borrow()
+            .as_ref()
+            .map(|ready| ready.selection.clone());
+        let Some(selection) = selection else { return };
+        if let Some(popover) = create_popover.upgrade() {
+            popdown_native_menu(&popover);
+        }
+        new_playlist(create_search.text().trim().to_owned(), selection);
     });
     let activate_ready = Rc::clone(&ready);
     let activate_model = filtered.clone();
@@ -158,25 +144,13 @@ pub fn populate_context_playlist_picker(
         else {
             return;
         };
-        let key = match choice.key {
-            PlaylistChoiceKey::Playlist(key) => key,
-            PlaylistChoiceKey::Folder(key) => {
-                activate_folder.set(Some(key));
-                activate_search.set_text("");
-                if let Some(back) = activate_back.upgrade() {
-                    back.set_visible(true);
-                }
-                activate_filter.changed(gtk::FilterChange::Different);
-                return;
-            }
-        };
         let title = ready.title.clone();
         let preview_uris = ready.preview_uris.clone();
         let destination = choice.name;
         let feedback = Rc::clone(&feedback);
         gtk_widgets::playlists::add_media_to_playlist(
             &source,
-            key,
+            choice.key,
             ready.selection,
             activate_skip.is_active(),
             Rc::new(move |accepted| {
@@ -198,41 +172,31 @@ pub fn populate_context_playlist_picker(
     });
 
     let root = root.downgrade();
+    let create_playlist = create_playlist.downgrade();
     let spinner = spinner.downgrade();
-    Rc::new(move |data, selection, title, preview_uris| {
+    Rc::new(move |playlists, selection, title, preview_uris| {
         if root.upgrade().is_none() {
             return;
         }
-        let memberships = data
-            .memberships
-            .into_iter()
-            .collect::<std::collections::HashMap<_, _>>();
-        let mut choices = data
-            .playlists
+        let choices = playlists
             .into_iter()
             .map(|playlist| {
                 glib::BoxedAnyObject::new(PlaylistChoice {
-                    key: PlaylistChoiceKey::Playlist(playlist.playlist_key),
-                    folder: memberships.get(&playlist.playlist_key).copied(),
+                    key: playlist.playlist_key,
                     normalized_name: playlist.name.to_lowercase(),
                     name: playlist.name,
                 })
             })
             .collect::<Vec<_>>();
-        choices.extend(data.folders.into_iter().map(|folder| {
-            glib::BoxedAnyObject::new(PlaylistChoice {
-                key: PlaylistChoiceKey::Folder(folder.folder_key),
-                folder: None,
-                normalized_name: folder.name.to_lowercase(),
-                name: folder.name,
-            })
-        }));
-        store.splice(0, store.n_items(), &choices);
+        store.splice(0, 0, &choices);
         ready.replace(Some(ReadyPlaylistTracks {
             selection,
             title,
             preview_uris,
         }));
+        if let Some(create_playlist) = create_playlist.upgrade() {
+            create_playlist.set_sensitive(true);
+        }
         if let Some(spinner) = spinner.upgrade() {
             spinner.stop();
             spinner.set_visible(false);
@@ -246,45 +210,19 @@ struct PickerRow {
     check: gtk::CheckButton,
     playlist: library::PlaylistRow,
     haystack: String,
-    folder: Option<library::PlaylistFolderKey>,
-}
-#[derive(Clone)]
-struct PickerFolderRow {
-    row: gtk::Widget,
-    name: String,
-}
-
-fn filter_picker(
-    rows: &[PickerRow],
-    folders: &[PickerFolderRow],
-    current: Option<library::PlaylistFolderKey>,
-    query: &str,
-) {
-    for row in rows {
-        row.row.set_visible(
-            ((!query.is_empty() && current.is_none()) || row.folder == current)
-                && (query.is_empty() || row.haystack.contains(query)),
-        );
-    }
-    for row in folders {
-        row.row
-            .set_visible(current.is_none() && (query.is_empty() || row.name.contains(query)));
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn playlist_picker_dialog(
     source: rufin_core::runtime::SourceHandle,
     artwork: Rc<gtk_widgets::artwork::ArtworkState>,
-    create_playlist: Rc<
-        dyn Fn(String, library::MemberSelection, Option<library::PlaylistFolderKey>),
-    >,
+    create_playlist: Rc<dyn Fn(String, library::MemberSelection)>,
     feedback: Rc<dyn Fn(&OperationFeedback)>,
-    data: PlaylistPickerData,
+    playlists: Vec<library::PlaylistRow>,
     selection: library::MemberSelection,
     title: String,
     preview_uris: Vec<String>,
-) -> (adw::Dialog, Rc<dyn Fn(PlaylistPickerData)>) {
+) -> (adw::Dialog, Rc<dyn Fn(Vec<library::PlaylistRow>)>) {
     let resource = crate::ui_resource::PLAYLIST_PICKER_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
@@ -292,45 +230,14 @@ pub fn playlist_picker_dialog(
         search: gtk::SearchEntry,
         list: gtk::Box,
         create: gtk::Button,
+        create_label: gtk::Label,
         skip: gtk::CheckButton,
         cancel: gtk::Button,
         add: gtk::Button,
-        back: gtk::Button,
     });
     gtk_widgets::controls::configure_search_entry(&search);
     let rows = Rc::new(RefCell::new(Vec::<PickerRow>::new()));
-    let folder_rows = Rc::new(RefCell::new(Vec::<PickerFolderRow>::new()));
-    let folder = Rc::new(Cell::new(None::<library::PlaylistFolderKey>));
-    let change_folder: Rc<dyn Fn(Option<library::PlaylistFolderKey>)> = {
-        let folder = Rc::clone(&folder);
-        let rows = Rc::clone(&rows);
-        let folder_rows = Rc::clone(&folder_rows);
-        let search = search.downgrade();
-        let back = back.downgrade();
-        Rc::new(move |next| {
-            folder.set(next);
-            if let Some(search) = search.upgrade() {
-                search.set_text("");
-            }
-            if let Some(back) = back.upgrade() {
-                back.set_visible(next.is_some());
-            }
-            filter_picker(&rows.borrow(), &folder_rows.borrow(), next, "");
-        })
-    };
-    replace_picker_rows(
-        &artwork,
-        &list,
-        &create,
-        &rows,
-        &folder_rows,
-        &add,
-        data,
-        Rc::clone(&change_folder),
-    );
-    change_folder(None);
-    let go_back = Rc::clone(&change_folder);
-    back.connect_clicked(move |_| go_back(None));
+    replace_picker_rows(&artwork, &list, &create, &rows, &add, playlists);
 
     let close = dialog.downgrade();
     cancel.connect_clicked(move |_| {
@@ -340,30 +247,26 @@ pub fn playlist_picker_dialog(
     });
 
     let filter_rows = Rc::clone(&rows);
-    let filter_folder_rows = Rc::clone(&folder_rows);
-    let filter_folder = Rc::clone(&folder);
     let filter_create = create.clone();
+    let filter_create_label = create_label.clone();
     let filter_add = add.clone();
     search.connect_search_changed(move |entry| {
         let text = entry.text();
         let query = text.trim().to_lowercase();
-        filter_create.set_label(&format!("+ {} {}", tr("Create"), text.trim()));
+        filter_create_label.set_label(&format!("{} {}", tr("Create"), text.trim()));
         filter_create.set_visible(!query.is_empty());
-        filter_picker(
-            &filter_rows.borrow(),
-            &filter_folder_rows.borrow(),
-            filter_folder.get(),
-            &query,
-        );
+        for row in filter_rows.borrow().iter() {
+            row.row
+                .set_visible(query.is_empty() || row.haystack.contains(&query));
+        }
         filter_add.set_sensitive(filter_rows.borrow().iter().any(|row| row.check.is_active()));
     });
     let create_tracks = selection.clone();
     let create_search = search.clone();
-    let create_folder = Rc::clone(&folder);
     create.connect_clicked(move |_| {
         let name = create_search.text().trim().to_string();
         if !name.is_empty() {
-            create_playlist(name, create_tracks.clone(), create_folder.get());
+            create_playlist(name, create_tracks.clone());
             create_search.set_text("");
         }
     });
@@ -419,79 +322,28 @@ pub fn playlist_picker_dialog(
         }
     });
     let refresh_dialog = dialog.downgrade();
-    let update = Rc::new(move |data| {
+    let update = Rc::new(move |playlists| {
         if refresh_dialog.upgrade().is_some() {
-            replace_picker_rows(
-                &artwork,
-                &list,
-                &create,
-                &rows,
-                &folder_rows,
-                &add,
-                data,
-                Rc::clone(&change_folder),
-            );
-            change_folder(folder.get());
+            replace_picker_rows(&artwork, &list, &create, &rows, &add, playlists);
         }
     });
     (dialog, update)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn replace_picker_rows(
     artwork: &Rc<gtk_widgets::artwork::ArtworkState>,
     list: &gtk::Box,
     create: &gtk::Button,
     rows: &Rc<RefCell<Vec<PickerRow>>>,
-    folder_rows: &Rc<RefCell<Vec<PickerFolderRow>>>,
     add: &gtk::Button,
-    data: PlaylistPickerData,
-    change_folder: Rc<dyn Fn(Option<library::PlaylistFolderKey>)>,
+    playlists: Vec<library::PlaylistRow>,
 ) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
     list.append(create);
     rows.borrow_mut().clear();
-    folder_rows.borrow_mut().clear();
-    let memberships = data
-        .memberships
-        .into_iter()
-        .collect::<std::collections::HashMap<_, _>>();
-    for folder in data.folders {
-        let resource = crate::ui_resource::PLAYLIST_PICKER_FOLDER_ROW_RESOURCE;
-        let builder = crate::ui_resource::builder(resource);
-        gtk_widgets::objects!(builder, resource, { folder_row: gtk::Button, cover_host: gtk::Box, title: gtk::Label, track_count: gtk::Label, duration: gtk::Label });
-        let bindings = folder
-            .artwork_binding
-            .iter()
-            .map(|binding| gtk_widgets::library_fields::opaque_artwork(Some(binding.as_slice())))
-            .collect::<Vec<_>>();
-        cover_host.append(
-            &artwork
-                .cover_group_projection_for_artwork(&bindings, 48, 48, false)
-                .widget(),
-        );
-        title.set_label(&folder.name);
-        track_count.set_label(&localization::track_count_text(
-            folder.track_count.max(0) as u64
-        ));
-        duration.set_label(&gtk_widgets::format_duration_units(
-            (folder.duration_millis.max(0) / 1_000) as u32,
-        ));
-        let change = Rc::downgrade(&change_folder);
-        folder_row.connect_clicked(move |_| {
-            if let Some(change) = change.upgrade() {
-                change(Some(folder.folder_key));
-            }
-        });
-        list.append(&folder_row);
-        folder_rows.borrow_mut().push(PickerFolderRow {
-            row: folder_row.upcast(),
-            name: folder.name.to_lowercase(),
-        });
-    }
-    for playlist in data.playlists {
+    for playlist in playlists {
         let row = PlaylistPickerRowView::new();
         let check = row.imp().check.get();
         let bindings = playlist_artwork(&playlist);
@@ -531,7 +383,6 @@ fn replace_picker_rows(
                 )
             )
             .to_lowercase(),
-            folder: memberships.get(&playlist.playlist_key).copied(),
             playlist,
             row: widget,
             check: check.clone(),

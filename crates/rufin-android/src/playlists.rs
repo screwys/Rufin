@@ -7,8 +7,46 @@ use crate::{
 use library::{PlaylistKey, PlaylistPathMode, SourceId};
 use rufin_core::{playlist_files, playlists};
 
+#[derive(uniffi::Record)]
+pub struct AndroidPlaylistChoices {
+    pub count: u64,
+    pub rows: Vec<crate::browse::AndroidBrowseRow>,
+}
+
 #[uniffi::export]
 impl AndroidLibrary {
+    pub async fn playlist_choices(
+        &self,
+        filter: String,
+        offset: u64,
+        limit: u32,
+    ) -> Result<AndroidPlaylistChoices, AndroidError> {
+        let selected = self.source.selected_library();
+        let mut read = library::ListRead::new(
+            library::ListKind::Playlists,
+            selected.as_ref().map(|selected| selected.source_key),
+            library::CatalogSort::Title,
+        );
+        read.folder = selected.and_then(|selected| selected.music_folder_key);
+        read.filter = filter;
+        let database = self.database.clone();
+        self.runtime
+            .spawn(async move {
+                let cancel = library::ReadCancellation::new();
+                let count = read.count(&database, &cancel).await.map_err(error)? as u64;
+                let rows = read
+                    .playlists(&database, offset as usize, limit as usize, &cancel)
+                    .await
+                    .map_err(error)?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect();
+                Ok(AndroidPlaylistChoices { count, rows })
+            })
+            .await
+            .map_err(error)?
+    }
+
     pub async fn playlist_file_settings(
         &self,
         playlist: PlaylistKey,

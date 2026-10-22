@@ -92,7 +92,7 @@ internal fun PlaylistFolderPicker(model: RufinConnection, browse: BrowseConnecti
     }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Text(translate("Add to folder"), Modifier.padding(horizontal = 24.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)
-        BrowseMenuAction("rufin-folder-new-symbolic", "New folder") { create = true }
+        BrowseMenuAction("rufin-list-add-symbolic", "New folder") { create = true }
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
             if (folders == null) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
             items(folders.orEmpty(), key = { it.folderKey }) { folder ->

@@ -522,7 +522,6 @@ fn present_playlist_selection_menu(
         return false;
     };
     let folder_targets = targets.clone();
-    surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
     let delete_menus = Rc::clone(menus);
     let delete_target = target.downgrade();
     surface.add_action("delete", move || {
@@ -600,6 +599,7 @@ fn present_playlist_selection_menu(
                         &surface, &menus, members, in_folder,
                     );
                 }
+                surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
                 surface.popup(&menus.settings.current.borrow().application.context_menu);
             }
             Ok(Err(error)) => (menus.show_error)(error),
@@ -1233,14 +1233,6 @@ fn present_playlist_context_menu_ready(
         return;
     }
     let surface = ContextMenuSurface::new(target, "playlist", position);
-    crate::playlist_folders::append_folder_actions(
-        &surface,
-        menus,
-        vec![library::PlaylistFolderMember::Playlist {
-            key: playlist.playlist_key,
-        }],
-        in_folder,
-    );
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     surface.append_configurable_submenu(
         ContextMenuItem::PlayRadio,
@@ -1276,6 +1268,14 @@ fn present_playlist_context_menu_ready(
     if playlist.writable {
         surface.append_fixed_action(msgid("Add current"), "add-current", ADD_ICON);
     }
+    crate::playlist_folders::append_folder_actions(
+        &surface,
+        menus,
+        vec![library::PlaylistFolderMember::Playlist {
+            key: playlist.playlist_key,
+        }],
+        in_folder,
+    );
     if rufin_core::playlists::can_remove_unavailable(&menus.source, &playlist) {
         surface.append_fixed_action(
             msgid("Remove unavailable tracks"),
@@ -1429,14 +1429,6 @@ fn present_smart_playlist_context_menu_ready(
         return;
     }
     let surface = ContextMenuSurface::new(target, "smart-playlist", position);
-    crate::playlist_folders::append_folder_actions(
-        &surface,
-        menus,
-        vec![library::PlaylistFolderMember::SmartPlaylist {
-            key: playlist.smart_playlist_key,
-        }],
-        in_folder,
-    );
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     install_sidebar_pin_action(
         &surface,
@@ -1460,6 +1452,14 @@ fn present_smart_playlist_context_menu_ready(
         )
     });
     surface.append_fixed_action(msgid("Edit"), "edit-definition", EDIT_ICON);
+    crate::playlist_folders::append_folder_actions(
+        &surface,
+        menus,
+        vec![library::PlaylistFolderMember::SmartPlaylist {
+            key: playlist.smart_playlist_key,
+        }],
+        in_folder,
+    );
     surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
     let playback = gtk_widgets::selection::smart_play_request(
         playlist.smart_playlist_key,

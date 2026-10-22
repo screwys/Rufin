@@ -4,7 +4,6 @@
 
   <object class="GtkBox" id="content">
     <property name="orientation">vertical</property>
-    <child><object class="GtkButton" id="back"><property name="visible">false</property><property name="icon-name">go-previous-symbolic</property><property name="tooltip-text" translatable="yes">Back</property><property name="halign">start</property></object></child>
     <child>
       <object class="GtkOverlay">
         <property name="child">
@@ -37,6 +36,14 @@
         </property>
       </object>
     </child>
+    <child><object class="GtkButton" id="create_playlist">
+      <property name="sensitive">false</property>
+      <style><class name="flat"/><class name="context-playlist-submenu-create"/></style>
+      <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">start</property>
+        <child><object class="GtkImage"><property name="icon-name">rufin-list-add-symbolic</property></object></child>
+        <child><object class="GtkLabel"><property name="label" translatable="yes">New playlist</property></object></child>
+      </object></property>
+    </object></child>
     <child>
       <object class="GtkSpinner" id="spinner">
         <property name="spinning">true</property>
