@@ -53,7 +53,6 @@ pub struct MetadataEditor {
     pub(super) source: Arc<SourceOwner>,
     pub(super) session: Option<Arc<super::EditSession>>,
     pub(super) batch: Option<super::batch::BatchScope>,
-    pub(super) external_lookup_allowed: bool,
     pub(super) state: Mutex<Editing>,
 }
 
@@ -76,18 +75,11 @@ impl MetadataEditor {
                     .await;
             }
             let state = Mutex::new(Editing::new(&draft));
-            let external_lookup_allowed = source
-                .shared
-                .settings
-                .load()
-                .ui
-                .allows_external_metadata_lookup();
             Ok(Arc::new(Self {
                 draft: Arc::new(draft),
                 source,
                 session: Some(session),
                 batch: None,
-                external_lookup_allowed,
                 state,
             }))
         })
@@ -177,7 +169,13 @@ impl MetadataEditor {
                 }
             },
             has_current_artwork: state.current.is_some(),
-            external_lookup_allowed: self.external_lookup_allowed,
+            external_lookup_allowed: self
+                .source
+                .shared
+                .settings
+                .load()
+                .ui
+                .allows_external_metadata_lookup(),
             search_artist,
             search_album,
         }
@@ -277,22 +275,25 @@ impl MetadataEditor {
         .await
     }
 
-    pub async fn save(&self) -> Result<(), SourceMetadataError> {
+    pub async fn save(self: Arc<Self>) -> Result<Arc<Self>, SourceMetadataError> {
         let runtime = self.source.shared.runtime.clone();
         super::on_runtime(runtime, async {
+            if let Some(scope) = &self.batch {
+                scope.batch.stage(&self).await?;
+                let result = scope.batch.save(&scope.indices).await;
+                if let Err(error) = result {
+                    self.reload_batch().await?;
+                    return Err(error);
+                }
+                return self.reload().await;
+            }
             let edit = self
                 .state()
                 .edit(&self.draft)
                 .map_err(SourceMetadataError::InvalidInput)?;
-            if let Some(scope) = &self.batch {
-                scope.batch.stage(self).await?;
-                let result = scope.batch.save(&scope.indices).await;
-                self.reload_batch().await?;
-                return result;
-            }
             let lyrics = self.state().lyrics.clone();
             if edit.changes.is_empty() && edit.artwork.is_none() && lyrics.is_none() {
-                return Ok(());
+                return Ok(self.clone());
             }
             let result = self
                 .session
@@ -300,8 +301,12 @@ impl MetadataEditor {
                 .unwrap()
                 .save(&self.source, edit, lyrics)
                 .await;
-            self.state().record_save_result(&result);
-            result
+            self.state().committed = match &result {
+                Ok(()) | Err(SourceMetadataError::SavedRefreshFailed(_)) => Some(true),
+                Err(SourceMetadataError::PartiallySaved { .. }) => Some(false),
+                Err(_) => None,
+            };
+            result.map(|()| self.clone())
         })
         .await
     }
@@ -436,8 +441,7 @@ pub(super) struct Editing {
     pub(super) recordings: Vec<String>,
     pub(super) scan_error: Option<String>,
     pub(super) lookup_candidates: Option<Vec<super::MetadataCandidate>>,
-    pub(super) lookup_result: Option<(super::MetadataCandidate, MetadataChanges)>,
-    pub(super) lookup_preview: Option<super::MetadataCandidate>,
+    pub(super) lookup_choice: Option<(super::MetadataCandidate, MetadataChanges)>,
     pub(super) identified: HashMap<String, IdentifiedField>,
     pub(super) committed: Option<bool>,
     #[serde(skip)]
@@ -463,8 +467,7 @@ impl Editing {
             recordings: Vec::new(),
             scan_error: None,
             lookup_candidates: None,
-            lookup_result: None,
-            lookup_preview: None,
+            lookup_choice: None,
             identified: HashMap::new(),
             committed: None,
             artwork: None,
@@ -490,6 +493,16 @@ impl Editing {
             }
         }
         editor
+    }
+
+    pub(super) fn apply_values(&self, draft: &mut MetadataDraft) {
+        for field in &mut draft.fields {
+            if let Some(value) = self.values.get(&field.key) {
+                field.value = value.trim().to_string();
+            }
+            field.mixed = self.mixed.contains(&field.key);
+            field.suggestion = None;
+        }
     }
 
     pub(super) fn fields(&self, draft: &MetadataDraft) -> Vec<MetadataFieldPresentation> {
@@ -679,16 +692,13 @@ impl Editing {
 
     pub(super) fn begin_lookup(&mut self) {
         self.recordings.clear();
-        self.lookup_preview = None;
-        self.lookup_result = None;
+        self.lookup_choice = None;
         self.lookup_candidates = None;
         self.scan_error = None;
     }
 
     pub(super) fn apply_lookup_choice(&mut self, draft: &MetadataDraft, fill_missing: bool) {
-        if let Some((candidate, changes)) = self.lookup_result.clone()
-            && self.lookup_preview.as_ref() == Some(&candidate)
-        {
+        if let Some((_, changes)) = self.lookup_choice.clone() {
             self.apply_identified(draft, changes, fill_missing);
         }
     }
@@ -741,14 +751,6 @@ impl Editing {
                 release_group_id: value("musicbrainz_release_group_id"),
             }
         }
-    }
-
-    fn record_save_result(&mut self, result: &Result<(), SourceMetadataError>) {
-        self.committed = match result {
-            Ok(()) | Err(SourceMetadataError::SavedRefreshFailed(_)) => Some(true),
-            Err(SourceMetadataError::PartiallySaved { .. }) => Some(false),
-            Err(_) => None,
-        };
     }
 }
 

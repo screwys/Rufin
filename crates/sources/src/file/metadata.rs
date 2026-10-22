@@ -1214,17 +1214,17 @@ mod tests {
             editor
                 .save_tracks(
                     &database,
-                    MetadataEdit {
+                    Some(MetadataEdit {
                         kind,
                         changes: [("title".into(), title.into())].into(),
                         artwork: None,
-                    },
+                    }),
                     paths
                         .iter()
                         .map(|path| url::Url::from_file_path(path).unwrap().to_string())
                         .collect(),
-                    |_| async { Ok(Some((track_edit(&[]), None))) },
-                    |_, _| async { Ok(()) },
+                    |_| async { Ok((track_edit(&[]), None, None)) },
+                    |_, _, _| async { Ok(()) },
                 )
                 .await
                 .unwrap();

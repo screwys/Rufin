@@ -288,13 +288,13 @@ internal class MetadataConnection(
         action { saveEditor(it) }
     }
     private suspend fun saveEditor(editor: MetadataEditor) {
-        editor.save()
+        val saved = editor.save()
         if (batch?.hasChanges() == true) {
-            bridge = editor.reload()
+            bridge = saved
             editor.destroy()
             artworkRevision = null
             rowsRevision++
-        } else onSaved()
+        } else { saved.destroy(); onSaved() }
     }
     fun removeArtwork() = action { it.removeArtwork() }
     fun useCurrentArtwork() = action { it.useCurrentArtwork() }

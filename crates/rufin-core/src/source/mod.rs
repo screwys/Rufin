@@ -3125,17 +3125,26 @@ impl SourceOwner {
         receiver
     }
 
-    pub(crate) async fn media_client(&self, media_uri: &str) -> Result<Arc<Source>, String> {
-        let source_id = match library::source_entity_parts(media_uri) {
-            Some((source_id, _, _)) => Some(source_id),
+    pub(crate) async fn media_source_id(
+        &self,
+        media_uri: &str,
+    ) -> Result<Option<SourceId>, String> {
+        match library::source_entity_parts(media_uri) {
+            Some((source_id, _, _)) => Ok(Some(source_id)),
             None => self
                 .shared
                 .database
                 .track_source_by_uri(media_uri, &ReadCancellation::new())
                 .await
-                .map_err(string_error)?,
+                .map_err(string_error),
         }
-        .ok_or_else(source_access_unavailable)?;
+    }
+
+    pub(crate) async fn media_client(&self, media_uri: &str) -> Result<Arc<Source>, String> {
+        let source_id = self
+            .media_source_id(media_uri)
+            .await?
+            .ok_or_else(source_access_unavailable)?;
         self.client(&source_id)
     }
 

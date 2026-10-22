@@ -83,13 +83,10 @@ impl EditSession {
     ) -> Result<(Arc<Self>, MetadataDraft), SourceMetadataError> {
         let database = &owner.shared.database;
         let cancel = library::ReadCancellation::new();
-        let source_id = match library::source_entity_parts(item.media_uri()) {
-            Some((source, _, _)) => Some(source),
-            None => database
-                .track_source_by_uri(item.media_uri(), &cancel)
-                .await
-                .map_err(|error| SourceMetadataError::Write(error.to_string()))?,
-        };
+        let source_id = owner
+            .media_source_id(item.media_uri())
+            .await
+            .map_err(SourceMetadataError::Write)?;
         let source = match source_id {
             Some(id) => Some(
                 owner
@@ -196,8 +193,8 @@ impl EditSession {
         ))
     }
     async fn invalidate_artwork(
-        &self,
         owner: &SourceOwner,
+        source: Option<&Arc<Source>>,
         binding: Option<&[u8]>,
         result: &Result<(), SourceMetadataError>,
     ) -> Result<(), SourceMetadataError> {
@@ -215,7 +212,7 @@ impl EditSession {
                 .map_err(string_error)
                 .and_then(|result| result.map_err(string_error))
                 .map_err(SourceMetadataError::SavedRefreshFailed)?;
-                if invalidated && let Some(source) = &self.source {
+                if invalidated && let Some(source) = source {
                     owner
                         .artwork_invalidated(source.source_id(), CatalogChange::Broad)
                         .await;
@@ -277,8 +274,13 @@ impl EditSession {
         }
         .await;
         if artwork_changed {
-            self.invalidate_artwork(owner, self.previous_artwork.as_deref(), &result)
-                .await?;
+            Self::invalidate_artwork(
+                owner,
+                self.source.as_ref(),
+                self.previous_artwork.as_deref(),
+                &result,
+            )
+            .await?;
         }
         if self.source.is_none()
             && matches!(
@@ -301,7 +303,7 @@ impl EditSession {
         result?;
         if let Some(lyrics) = lyrics {
             let saved = self.save_lyrics(owner, &lyrics).await;
-            sources::finish_metadata_save(saved, Ok(()), metadata_changed)?;
+            sources::finish_metadata_save(saved.map(|_| ()), Ok(()), metadata_changed)?;
         }
         Ok(())
     }

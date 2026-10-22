@@ -6,10 +6,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex},
 };
 
 fn error(error: impl std::fmt::Display) -> Error {
@@ -34,6 +31,16 @@ pub(super) struct Records {
 }
 
 impl Records {
+    fn new() -> Result<Self, Error> {
+        Ok(Self {
+            file: tempfile::tempfile().map_err(error)?,
+            scope: None,
+            offsets: HashMap::new(),
+            artwork: HashMap::new(),
+            changed: HashSet::new(),
+        })
+    }
+
     fn changed_in<'a>(&'a self, indices: &'a [usize]) -> Box<dyn Iterator<Item = usize> + 'a> {
         if indices.len() < self.changed.len() {
             Box::new(
@@ -131,7 +138,6 @@ pub struct MetadataBatch {
     uris: Vec<Arc<str>>,
     // Original tags and pending drafts stay off the UI heap for large selections.
     records: Mutex<Records>,
-    changed: AtomicBool,
 }
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
@@ -256,7 +262,6 @@ impl MetadataBatch {
                     artwork: state.artwork.clone(),
                     storage: state.storage,
                 }),
-                external_lookup_allowed: self.external_lookup_allowed(),
                 state: Mutex::new(state),
             }))
         })
@@ -276,7 +281,12 @@ impl MetadataBatch {
         self.len() as u64
     }
     pub fn has_changes(&self) -> bool {
-        self.changed.load(Ordering::Relaxed)
+        !self
+            .records
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .changed
+            .is_empty()
     }
 
     pub async fn tracks(
@@ -384,95 +394,103 @@ impl MetadataBatch {
 
 impl MetadataBatch {
     pub(super) async fn save(self: &Arc<Self>, selected: &[usize]) -> Result<(), Error> {
-        let runtime = self.source.shared.runtime.clone();
-        super::on_runtime(runtime, async {
-            let changed_indices = self
-                .records
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .changed_in(selected)
-                .collect::<Vec<_>>();
-            if self.scope.is_some() {
-                return self.save_file_scope(changed_indices).await;
-            }
-            let mut failures = Vec::new();
-            for index in changed_indices {
-                let mut record = self.read(index).await?;
-                if !record.state.has_changes(&record.draft) && record.state.artwork.is_none() {
-                    continue;
-                }
-                let result = async {
-                    let edit = record
-                        .state
-                        .edit(&record.draft)
-                        .map_err(Error::InvalidInput)?;
-                    let (session, current) = super::EditSession::open(
-                        &self.source,
-                        &MetadataItemId::Track(self.uri(index).to_string()),
-                    )
-                    .await?;
-                    if current.revision != record.draft.revision {
-                        return Err(Error::Conflict);
-                    }
-                    session
-                        .save(&self.source, edit, record.state.lyrics.clone())
-                        .await
-                }
-                .await;
-                let saved = matches!(result, Ok(()) | Err(Error::SavedRefreshFailed(_)));
-                if saved {
-                    match super::EditSession::open(
-                        &self.source,
-                        &MetadataItemId::Track(self.uri(index).to_string()),
-                    )
-                    .await
-                    {
-                        Ok((_, draft)) => {
-                            record.state = Editing::new(&draft);
-                            record.draft = draft;
-                        }
-                        Err(_) => {
-                            record.state.touched.clear();
-                            record.state.artwork = None;
-                            record.state.lyrics = None;
-                        }
-                    }
-                }
-                if matches!(result, Err(Error::PartiallySaved { .. })) {
-                    if let Ok((_, current)) = super::EditSession::open(
-                        &self.source,
-                        &MetadataItemId::Track(self.uri(index).to_string()),
-                    )
-                    .await
-                    {
-                        record.draft.revision = current.revision;
-                    }
-                }
-                record.failure = result.as_ref().err().map(ToString::to_string);
-                if let Err(error) = result {
-                    failures.push(format!(
-                        "{}: {error}",
-                        record
-                            .state
-                            .values
-                            .get("title")
-                            .cloned()
-                            .unwrap_or_else(|| (index + 1).to_string())
-                    ));
-                }
-                self.work(move |records| records.write(index, &record))
-                    .await?;
-            }
-            let changed = self.work(|records| Ok(!records.changed.is_empty())).await?;
-            self.changed.store(changed, Ordering::Relaxed);
-            if failures.is_empty() {
-                Ok(())
+        let changed = self
+            .records
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .changed_in(selected)
+            .collect::<Vec<_>>();
+        let mut failures = Vec::new();
+        let mut groups = HashMap::<_, Vec<usize>>::new();
+        for index in changed {
+            let id = if let Some(scope) = &self.scope {
+                scope
+                    .session
+                    .source
+                    .as_ref()
+                    .map(|source| source.source_id().clone())
             } else {
-                Err(Error::Write(failures.join("\n")))
+                self.source
+                    .media_source_id(self.uri(index))
+                    .await
+                    .map_err(Error::Write)?
+            };
+            groups.entry(id).or_default().push(index);
+        }
+        for (id, indices) in groups {
+            let source = match id {
+                Some(id) => match self.source.open_client(id).await {
+                    Ok(source) => Some(source),
+                    Err(error) => {
+                        failures.push(Error::Write(error));
+                        continue;
+                    }
+                },
+                None => None,
+            };
+            if source.as_ref().is_some_and(|source| {
+                matches!(
+                    source.implementation,
+                    sources::Implementation::JellyfinEmby(_) | sources::Implementation::Plex(_)
+                )
+            }) {
+                for index in indices {
+                    if let Err(error) = self.save_server(index).await {
+                        failures.push(error);
+                    }
+                }
+            } else {
+                let files = sources::FileEditSession::for_tracks(source.clone());
+                let files = match self.scope.as_ref().map(|scope| &scope.session.destination) {
+                    Some(super::EditDestination::Files(scope)) => scope,
+                    _ => &files,
+                };
+                if let Err(error) = self.save_files(files, source.as_ref(), indices).await {
+                    failures.push(error);
+                }
             }
-        })
-        .await
+        }
+        Error::combine(failures)
     }
+
+    async fn save_server(self: &Arc<Self>, index: usize) -> Result<(), Error> {
+        let mut record = self.read(index).await?;
+        let result = async {
+            let edit = record
+                .state
+                .edit(&record.draft)
+                .map_err(Error::InvalidInput)?;
+            let (session, current) = self.session(index).await?;
+            if current.revision != record.draft.revision {
+                return Err(Error::Conflict);
+            }
+            session
+                .save(&self.source, edit, record.state.lyrics.clone())
+                .await
+        }
+        .await;
+        let saved = matches!(result, Ok(()) | Err(Error::SavedRefreshFailed(_)));
+        if saved || matches!(result, Err(Error::PartiallySaved { .. })) {
+            match self.session(index).await {
+                Ok((_, draft)) if saved => {
+                    record.state = Editing::new(&draft);
+                    record.draft = draft;
+                }
+                Ok((_, draft)) => record.draft.revision = draft.revision,
+                Err(_) if saved => {
+                    record.state.touched.clear();
+                    record.state.artwork = None;
+                    record.state.lyrics = None;
+                }
+                Err(_) => {}
+            }
+        }
+        record.failure = result.as_ref().err().map(ToString::to_string);
+        self.work(move |records| records.write(index, &record))
+            .await?;
+        result
+    }
+
     fn from_uris(source: Arc<SourceOwner>, uris: Vec<Arc<str>>) -> Result<Arc<Self>, Error> {
         if uris.is_empty() {
             return Err(Error::Unavailable);
@@ -482,194 +500,159 @@ impl MetadataBatch {
             source,
             parent: None,
             uris,
-            records: Mutex::new(Records {
-                file: tempfile::tempfile().map_err(error)?,
-                scope: None,
-                offsets: HashMap::new(),
-                artwork: HashMap::new(),
-                changed: HashSet::new(),
-            }),
-            changed: AtomicBool::new(false),
+            records: Mutex::new(Records::new()?),
         });
         Ok(batch)
     }
 
-    async fn save_file_scope(self: &Arc<Self>, mut changed: Vec<usize>) -> Result<(), Error> {
-        let scope = self.scope.as_ref().ok_or(Error::Unavailable)?;
-        let super::EditDestination::Files(files) = &scope.session.destination else {
-            return Err(Error::Unavailable);
-        };
+    async fn save_files(
+        self: &Arc<Self>,
+        files: &sources::FileEditSession,
+        source: Option<&Arc<sources::Source>>,
+        changed: Vec<usize>,
+    ) -> Result<(), Error> {
         let edit = self
             .work(|records| {
-                let scope = records.scope.as_ref().ok_or(Error::Unavailable)?;
-                scope.state.edit(&scope.draft).map_err(Error::InvalidInput)
+                records
+                    .scope
+                    .as_ref()
+                    .map(|scope| scope.state.edit(&scope.draft).map_err(Error::InvalidInput))
+                    .transpose()
             })
             .await?;
         if changed.is_empty() {
             return Ok(());
         }
-        changed.sort_unstable_by(|left, right| self.uri(*left).cmp(self.uri(*right)));
         let uris = changed
             .iter()
             .map(|index| self.uri(*index).to_owned())
             .collect();
-        let changed = Arc::new(changed);
-        let batch = self.clone();
-        let indexes = changed.clone();
-        let batch_done = self.clone();
-        let indexes_done = changed;
-        let artwork_changed = edit.artwork.is_some();
-        let kind = edit.kind;
-        let lyrics = Arc::new(Mutex::new(Vec::new()));
-        let lyric_done = lyrics.clone();
-        let images = Arc::new(Mutex::new(Vec::new()));
-        let image_done = images.clone();
+        let artwork_changed = edit.as_ref().is_some_and(|edit| edit.artwork.is_some());
+        let artist_scope = edit
+            .as_ref()
+            .is_some_and(|edit| edit.kind == SourceEntityKind::Artist);
+        let followups = Mutex::new(Vec::new());
+        let (pending, changed) = (&followups, &changed);
         let result = files
             .save_tracks(
                 &self.source.shared.database,
                 edit,
                 uris,
-                move |uri| {
-                    let batch = batch.clone();
-                    let indexes = indexes.clone();
-                    async move {
-                        let Ok(position) =
-                            indexes.binary_search_by(|index| batch.uri(*index).cmp(&uri))
-                        else {
-                            return Ok(None);
-                        };
-                        let record = batch.read(indexes[position]).await?;
-                        Ok(Some((
-                            record
-                                .state
-                                .edit(&record.draft)
-                                .map_err(Error::InvalidInput)?,
-                            record.draft.revision,
-                        )))
-                    }
+                |position| async move {
+                    let record = self.read(changed[position]).await?;
+                    Ok((
+                        record
+                            .state
+                            .edit(&record.draft)
+                            .map_err(Error::InvalidInput)?,
+                        record.draft.revision,
+                        sources::artwork_file(record.draft.artwork.binding.as_deref()),
+                    ))
                 },
-                move |uri, outcome| {
-                    let batch = batch_done.clone();
-                    let indexes = indexes_done.clone();
-                    let lyrics = lyric_done.clone();
-                    let images = image_done.clone();
-                    async move {
-                        let success = outcome.is_ok();
-                        let Ok(position) =
-                            indexes.binary_search_by(|index| batch.uri(*index).cmp(&uri))
-                        else {
-                            return Ok(());
-                        };
-                        let index = indexes[position];
-                        let mut record = batch.read(index).await?;
-                        let pending_lyrics = record.state.lyrics.clone();
-                        if success
-                            && record.state.artwork.is_some()
-                            && let Some(binding) = &record.draft.artwork.binding
-                        {
-                            images
+                |position, revision, outcome| async move {
+                    let index = changed[position];
+                    let mut record = self.read(index).await?;
+                    if outcome.is_ok() {
+                        let artwork_changed =
+                            record.state.artwork.is_some() || record.scope_artwork;
+                        let lyrics = record.state.lyrics.take();
+                        if artwork_changed || lyrics.is_some() {
+                            pending
                                 .lock()
                                 .unwrap_or_else(|e| e.into_inner())
-                                .push(binding.clone());
+                                .push((index, artwork_changed));
                         }
-                        if let Ok(revision) = &outcome {
-                            if kind == SourceEntityKind::Artist {
-                                let values = sources::FileEditSession::scope_values(
-                                    kind,
-                                    record
-                                        .scope_artist
-                                        .as_deref()
-                                        .unwrap_or(&batch.scope.as_ref().unwrap().title),
-                                    &record.draft.values(),
-                                    &record.state.values(),
-                                );
-                                record.scope_artist = values.get("title").cloned();
-                            }
-                            for field in &mut record.draft.fields {
-                                if let Some(value) = record.state.values.get(&field.key) {
-                                    field.value = value.trim().to_string();
-                                }
-                                field.mixed = record.state.mixed.contains(&field.key);
-                                field.suggestion = None;
-                            }
-                            record.draft.revision = revision.clone();
-                            record.state = Editing::new(&record.draft);
+                        if artist_scope {
+                            let values = sources::FileEditSession::scope_values(
+                                SourceEntityKind::Artist,
+                                record
+                                    .scope_artist
+                                    .as_deref()
+                                    .unwrap_or(&self.scope.as_ref().unwrap().title),
+                                &record.draft.values(),
+                                &record.state.values(),
+                            );
+                            record.scope_artist = values.get("title").cloned();
                         }
-                        if success {
-                            record.scope_artwork = false;
-                        }
-                        record.failure = outcome.err();
-                        if success && pending_lyrics.is_some() {
-                            record.state.lyrics = pending_lyrics;
-                            lyrics.lock().unwrap_or_else(|e| e.into_inner()).push(index);
-                        }
-                        batch
-                            .work(move |records| records.write(index, &record))
-                            .await
+                        record.state.apply_values(&mut record.draft);
+                        record.state = Editing::new(&record.draft);
+                        record.scope_artwork = false;
+                        record.state.lyrics = lyrics;
                     }
+                    if outcome.is_ok() || revision.is_some() {
+                        record.draft.revision = revision;
+                    }
+                    record.failure = outcome.err().map(|error| error.to_string());
+                    self.work(move |records| records.write(index, &record))
+                        .await
                 },
             )
             .await;
+        if source.is_none() && matches!(result, Ok(()) | Err(Error::PartiallySaved { .. })) {
+            self.source
+                .publish_current_catalog(None, crate::runtime::CatalogChange::Broad)
+                .await;
+        }
         if artwork_changed {
-            scope
-                .session
-                .invalidate_artwork(
-                    &self.source,
-                    scope.session.previous_artwork.as_deref(),
-                    &result,
-                )
-                .await?;
+            super::EditSession::invalidate_artwork(
+                &self.source,
+                source,
+                self.scope
+                    .as_ref()
+                    .and_then(|scope| scope.session.previous_artwork.as_deref()),
+                &result,
+            )
+            .await?;
         }
-        let bindings = std::mem::take(&mut *images.lock().unwrap_or_else(|e| e.into_inner()));
-        for binding in bindings {
-            scope
-                .session
-                .invalidate_artwork(&self.source, Some(&binding), &result)
-                .await?;
-        }
-        let lyric_indices = std::mem::take(&mut *lyrics.lock().unwrap_or_else(|e| e.into_inner()));
-        let mut lyric_failures = Vec::new();
-        for index in lyric_indices {
+        let mut failures = Vec::new();
+        for (index, artwork_changed) in followups.into_inner().unwrap_or_else(|e| e.into_inner()) {
             let mut record = self.read(index).await?;
-            if let Some(lyrics) = &record.state.lyrics {
-                let (session, _) = super::EditSession::open(
-                    &self.source,
-                    &MetadataItemId::Track(self.uri(index).to_string()),
-                )
-                .await?;
-                match session.save_lyrics(&self.source, lyrics).await {
-                    Ok(()) => record.state.lyrics = None,
-                    Err(error) => {
-                        record.failure = Some(error.to_string());
-                        lyric_failures.push(error.to_string());
+            match self.session(index).await {
+                Ok((session, draft)) => {
+                    if artwork_changed {
+                        super::EditSession::invalidate_artwork(
+                            &self.source,
+                            source,
+                            record.draft.artwork.binding.as_deref(),
+                            &result,
+                        )
+                        .await?;
+                        record.draft.artwork = draft.artwork;
+                        record.state.storage = record.draft.artwork.storage;
+                    }
+                    if let Some(lyrics) = &record.state.lyrics {
+                        match session.save_lyrics(&self.source, lyrics).await {
+                            Ok(revision) => {
+                                record.state.lyrics = None;
+                                record.draft.revision = revision;
+                            }
+                            Err(error) => {
+                                record.failure = Some(error.to_string());
+                                failures.push(error);
+                            }
+                        }
                     }
                 }
+                Err(error) if record.state.lyrics.is_some() => {
+                    record.failure = Some(error.to_string());
+                    failures.push(error);
+                }
+                Err(_) => {}
             }
             self.work(move |records| records.write(index, &record))
                 .await?;
         }
-        let pending = self
-            .work(|records| {
-                if records.changed.is_empty()
-                    && let Some(scope) = &mut records.scope
-                {
-                    for field in &mut scope.draft.fields {
-                        if let Some(value) = scope.state.values.get(&field.key) {
-                            field.value = value.clone();
-                        }
-                        field.mixed = scope.state.mixed.contains(&field.key);
-                    }
-                    scope.state = Editing::new(&scope.draft);
-                }
-                Ok(!records.changed.is_empty())
-            })
-            .await?;
-        self.changed.store(pending, Ordering::Relaxed);
-        result.and(if lyric_failures.is_empty() {
+        self.work(|records| {
+            if records.changed.is_empty()
+                && let Some(scope) = &mut records.scope
+            {
+                scope.state.apply_values(&mut scope.draft);
+                scope.state = Editing::new(&scope.draft);
+            }
             Ok(())
-        } else {
-            Err(Error::Write(lyric_failures.join("\n")))
         })
+        .await?;
+        result.and(Error::combine(failures))
     }
 
     async fn selected_editor(
@@ -681,9 +664,7 @@ impl MetadataBatch {
         if indices.iter().any(|index| *index >= self.len()) {
             return Err(Error::Unavailable);
         }
-        for &index in &indices {
-            self.read(index).await?;
-        }
+        self.ensure_loaded(&indices).await?;
         let cancelled = tokio_util::sync::CancellationToken::new();
         let _cancel = cancelled.clone().drop_guard();
         let selected = indices.clone();
@@ -731,12 +712,7 @@ impl MetadataBatch {
                     }
                     let mut draft = record.draft;
                     draft.artwork.storage = record.state.storage;
-                    for field in &mut draft.fields {
-                        if let Some(value) = record.state.values.get(&field.key) {
-                            field.value = value.clone();
-                        }
-                        field.suggestion = None;
-                    }
+                    record.state.apply_values(&mut draft);
                     if let Some(current) = &mut combined {
                         current.merge(draft);
                     } else {
@@ -784,13 +760,6 @@ impl MetadataBatch {
             draft: Arc::new(draft),
             source: self.source.clone(),
             session: None,
-            external_lookup_allowed: self
-                .source
-                .shared
-                .settings
-                .load()
-                .ui
-                .allows_external_metadata_lookup(),
             state: Mutex::new(state),
             batch: Some(BatchScope {
                 batch: self.clone(),
@@ -912,69 +881,66 @@ impl MetadataBatch {
     }
 
     pub(super) async fn reset_scope(self: &Arc<Self>, key: String) -> Result<(), Error> {
-        for index in 0..self.len() {
-            self.read(index).await?;
-        }
-        let changed = self
-            .work(move |records| {
-                let scope = records.scope.as_ref().ok_or(Error::Unavailable)?;
-                let kind = scope.draft.kind;
-                let artist = scope
-                    .draft
-                    .fields
-                    .iter()
-                    .find(|field| field.key == "title")
-                    .map(|field| field.value.clone())
-                    .unwrap_or_default();
-                let mut scope_edit = scope
-                    .state
-                    .stage_edit(&scope.draft)
-                    .map_err(Error::InvalidInput)?;
-                scope_edit.changes = [(key.clone(), String::new())].into();
-                let indices = records.offsets.keys().copied().collect::<Vec<_>>();
-                for index in indices {
-                    let mut record = records.read(index)?;
-                    let artist = record.scope_artist.as_deref().unwrap_or(&artist);
-                    let original = Editing::new(&record.draft).values();
-                    let baseline =
-                        sources::FileEditSession::scope_values(kind, artist, &original, &original);
-                    let current = sources::FileEditSession::scope_values(
-                        kind,
-                        artist,
-                        &original,
-                        &record.state.values(),
-                    );
-                    scope_edit
-                        .changes
-                        .insert(key.clone(), baseline.get(&key).cloned().unwrap_or_default());
-                    let changes = sources::FileEditSession::project_edit(
-                        &record.state.values(),
-                        &scope_edit,
-                        current.get("title").map(String::as_str).unwrap_or(artist),
-                    );
-                    for (field, value) in changes {
-                        let value = if kind == SourceEntityKind::Artist {
-                            value
-                        } else {
-                            original.get(&field).cloned().unwrap_or_default()
-                        };
-                        record.state.set_text(&field, value);
-                    }
-                    records.write(index, &record)?;
-                }
-                if let Some(record) = &mut records.scope {
-                    if let Some(field) = record.draft.fields.iter().find(|field| field.key == key) {
-                        record.state.values.insert(key.clone(), field.value.clone());
-                        if field.mixed {
-                            record.state.mixed.insert(key.clone());
-                        }
-                    }
-                    record.state.touched.remove(&key);
-                }
-                Ok(!records.changed.is_empty())
-            })
+        self.ensure_loaded(&(0..self.len()).collect::<Vec<_>>())
             .await?;
-        self.changed.store(changed, Ordering::Relaxed);
+        self.work(move |records| {
+            let scope = records.scope.as_ref().ok_or(Error::Unavailable)?;
+            let kind = scope.draft.kind;
+            let artist = scope
+                .draft
+                .fields
+                .iter()
+                .find(|field| field.key == "title")
+                .map(|field| field.value.clone())
+                .unwrap_or_default();
+            let mut scope_edit = scope
+                .state
+                .stage_edit(&scope.draft)
+                .map_err(Error::InvalidInput)?;
+            scope_edit.changes = [(key.clone(), String::new())].into();
+            let indices = records.offsets.keys().copied().collect::<Vec<_>>();
+            for index in indices {
+                let mut record = records.read(index)?;
+                let artist = record.scope_artist.as_deref().unwrap_or(&artist);
+                let original = Editing::new(&record.draft).values();
+                let baseline =
+                    sources::FileEditSession::scope_values(kind, artist, &original, &original);
+                let current = sources::FileEditSession::scope_values(
+                    kind,
+                    artist,
+                    &original,
+                    &record.state.values(),
+                );
+                scope_edit
+                    .changes
+                    .insert(key.clone(), baseline.get(&key).cloned().unwrap_or_default());
+                let changes = sources::FileEditSession::project_edit(
+                    &record.state.values(),
+                    &scope_edit,
+                    current.get("title").map(String::as_str).unwrap_or(artist),
+                );
+                for (field, value) in changes {
+                    let value = if kind == SourceEntityKind::Artist {
+                        value
+                    } else {
+                        original.get(&field).cloned().unwrap_or_default()
+                    };
+                    record.state.set_text(&field, value);
+                }
+                records.write(index, &record)?;
+            }
+            if let Some(record) = &mut records.scope {
+                if let Some(field) = record.draft.fields.iter().find(|field| field.key == key) {
+                    record.state.values.insert(key.clone(), field.value.clone());
+                    if field.mixed {
+                        record.state.mixed.insert(key.clone());
+                    }
+                }
+                record.state.touched.remove(&key);
+            }
+            Ok(())
+        })
+        .await?;
         Ok(())
     }
 
@@ -984,34 +950,32 @@ impl MetadataBatch {
         key: String,
     ) -> Result<(), Error> {
         let indices = indices.to_vec();
-        let changed = self
-            .work(move |records| {
-                for index in indices {
-                    let mut record = records.read(index)?;
-                    if !record.state.undo_identified(&key) {
-                        if let Some(field) =
-                            record.draft.fields.iter().find(|field| field.key == key)
-                        {
-                            record.state.values.insert(key.clone(), field.value.clone());
-                            record.state.touched.remove(&key);
-                        }
+        self.work(move |records| {
+            for index in indices {
+                let mut record = records.read(index)?;
+                if !record.state.undo_identified(&key) {
+                    if let Some(field) = record.draft.fields.iter().find(|field| field.key == key) {
+                        record.state.values.insert(key.clone(), field.value.clone());
+                        record.state.touched.remove(&key);
                     }
-                    records.write(index, &record)?;
                 }
-                Ok(!records.changed.is_empty())
-            })
-            .await?;
-        self.changed.store(changed, Ordering::Relaxed);
+                records.write(index, &record)?;
+            }
+            Ok(())
+        })
+        .await?;
         Ok(())
     }
 
-    pub(super) async fn session(&self, index: usize) -> Result<Arc<super::EditSession>, Error> {
+    pub(super) async fn session(
+        &self,
+        index: usize,
+    ) -> Result<(Arc<super::EditSession>, MetadataDraft), Error> {
         super::EditSession::open(
             &self.source,
             &MetadataItemId::Track(self.uri(index).to_string()),
         )
         .await
-        .map(|(session, _)| session)
     }
 
     fn len(&self) -> usize {
@@ -1033,36 +997,42 @@ impl MetadataBatch {
             source: self.source.clone(),
             parent: Some((self.clone(), indices)),
             uris: Vec::new(),
-            records: Mutex::new(Records {
-                file: tempfile::tempfile().map_err(error)?,
-                scope: None,
-                offsets: HashMap::new(),
-                artwork: HashMap::new(),
-                changed: HashSet::new(),
-            }),
-            changed: AtomicBool::new(false),
+            records: Mutex::new(Records::new()?),
         }))
     }
 
-    pub(super) async fn read(self: &Arc<Self>, index: usize) -> Result<Record, Error> {
-        if index >= self.len() {
-            return Err(Error::Unavailable);
+    async fn ensure_loaded(self: &Arc<Self>, indices: &[usize]) -> Result<(), Error> {
+        let indices = indices.to_vec();
+        let missing = self
+            .work(move |records| {
+                Ok(indices
+                    .into_iter()
+                    .filter(|index| !records.offsets.contains_key(index))
+                    .collect::<Vec<_>>())
+            })
+            .await?;
+        for index in missing {
+            self.read(index).await?;
         }
-        if self
-            .work(move |records| Ok(records.offsets.contains_key(&index)))
+        Ok(())
+    }
+
+    pub(super) async fn read(self: &Arc<Self>, index: usize) -> Result<Record, Error> {
+        if let Some(record) = self
+            .work(move |records| {
+                records
+                    .offsets
+                    .contains_key(&index)
+                    .then(|| records.read(index))
+                    .transpose()
+            })
             .await?
         {
-            return self.work(move |records| records.read(index)).await;
+            return Ok(record);
         }
         let record = if let Some((parent, indices)) = &self.parent {
             let mut record = Box::pin(parent.read(indices[index])).await?;
-            for field in &mut record.draft.fields {
-                if let Some(value) = record.state.values.get(&field.key) {
-                    field.value = value.clone();
-                }
-                field.mixed = record.state.mixed.contains(&field.key);
-                field.suggestion = None;
-            }
+            record.state.apply_values(&mut record.draft);
             record.state.begin_lookup();
             record
         } else {
@@ -1087,16 +1057,16 @@ impl MetadataBatch {
                 scope_artist: None,
             }
         };
-        let changed = self
-            .work(move |records| {
-                if !records.offsets.contains_key(&index) {
-                    records.write(index, &record)?;
-                }
-                Ok(!records.changed.is_empty())
-            })
-            .await?;
-        self.changed.store(changed, Ordering::Relaxed);
-        self.work(move |records| records.read(index)).await
+        self.work(move |records| {
+            let record = if records.offsets.contains_key(&index) {
+                records.read(index)?
+            } else {
+                records.write(index, &record)?;
+                record
+            };
+            Ok(record)
+        })
+        .await
     }
 
     pub(super) async fn detached_editor(
@@ -1109,18 +1079,11 @@ impl MetadataBatch {
             draft: Arc::new(record.draft),
             source: self.source.clone(),
             session: if scan {
-                Some(self.session(index).await?)
+                Some(self.session(index).await?.0)
             } else {
                 None
             },
             batch: None,
-            external_lookup_allowed: self
-                .source
-                .shared
-                .settings
-                .load()
-                .ui
-                .allows_external_metadata_lookup(),
             state: Mutex::new(record.state),
         }))
     }
@@ -1148,7 +1111,7 @@ impl MetadataBatch {
             .await?;
         for index in loaded {
             let mut reviewed = self.read(index).await?;
-            let chosen = reviewed.state.lookup_preview.is_some();
+            let chosen = reviewed.state.lookup_choice.is_some();
             if !chosen && reviewed.state.lookup_candidates.is_none() {
                 continue;
             }
@@ -1172,10 +1135,6 @@ impl MetadataBatch {
                 })
                 .await?;
         }
-        let changed = parent
-            .work(|records| Ok(!records.changed.is_empty()))
-            .await?;
-        parent.changed.store(changed, Ordering::Relaxed);
         Ok(())
     }
 
@@ -1198,95 +1157,92 @@ impl MetadataBatch {
         {
             return Ok(());
         }
-        for &index in &scope.indices {
-            self.read(index).await?;
-        }
+        self.ensure_loaded(&scope.indices).await?;
         let next_scope = scoped.then(|| editor.state().clone());
         let editor_artwork_pending = editor.state().artwork.is_some();
         let indices = scope.indices.clone();
         let cancelled = tokio_util::sync::CancellationToken::new();
         let _cancel = cancelled.clone().drop_guard();
-        let changed = self
-            .work(move |records| {
-                let previous_artist = records
-                    .scope
-                    .as_ref()
-                    .and_then(|record| {
-                        record
-                            .draft
-                            .fields
-                            .iter()
-                            .find(|field| field.key == "title")
-                    })
-                    .map(|field| field.value.clone())
-                    .unwrap_or_default();
-                for index in indices {
-                    if cancelled.is_cancelled() {
-                        return Err(Error::Unavailable);
-                    }
-                    let mut record = records.read(index)?;
-                    let mut changed = lyrics.is_some() || artwork_changed;
-                    if artwork_changed {
-                        record.scope_artwork = editor_artwork_pending;
-                    }
-                    let changes = if scoped {
-                        let artist = record.scope_artist.as_deref().unwrap_or(&previous_artist);
-                        let values = sources::FileEditSession::scope_values(
-                            edit.kind,
-                            artist,
-                            &Editing::new(&record.draft).values(),
-                            &record.state.values(),
-                        );
-                        sources::FileEditSession::project_edit(
-                            &record.state.values(),
-                            &edit,
-                            values.get("title").map(String::as_str).unwrap_or(artist),
-                        )
-                    } else {
-                        edit.changes.clone()
-                    };
-                    for (key, value) in &changes {
-                        if record.state.values.get(key) != Some(value) {
-                            changed = true;
-                            record.state.set_text(key, value.clone());
-                        }
-                    }
-                    if let Some(artwork) = &edit.artwork
-                        && !scoped
-                    {
-                        let storage =
-                            if record.draft.artwork.storage == sources::ArtworkStorage::Server {
-                                sources::ArtworkStorage::Server
-                            } else {
-                                artwork.storage
-                            };
-                        if record.state.artwork.as_ref() != Some(&artwork.change)
-                            || record.state.storage != storage
-                        {
-                            record.state.artwork = Some(artwork.change.clone());
-                            record.state.storage = storage;
-                            changed = true;
-                        }
-                    }
-                    if lyrics.is_some() {
-                        record.state.lyrics = lyrics.clone();
-                    }
-                    if changed {
-                        records.write(index, &record)?;
-                    }
+        self.work(move |records| {
+            let previous_artist = records
+                .scope
+                .as_ref()
+                .and_then(|record| {
+                    record
+                        .draft
+                        .fields
+                        .iter()
+                        .find(|field| field.key == "title")
+                })
+                .map(|field| field.value.clone())
+                .unwrap_or_default();
+            for index in indices {
+                if cancelled.is_cancelled() {
+                    return Err(Error::Unavailable);
                 }
-                if let Some(next) = next_scope
-                    && let Some(record) = &mut records.scope
-                {
-                    for (key, value) in &edit.changes {
+                let mut record = records.read(index)?;
+                let mut changed = lyrics.is_some() || artwork_changed;
+                if artwork_changed {
+                    record.scope_artwork = editor_artwork_pending;
+                }
+                let changes = if scoped {
+                    let artist = record.scope_artist.as_deref().unwrap_or(&previous_artist);
+                    let values = sources::FileEditSession::scope_values(
+                        edit.kind,
+                        artist,
+                        &Editing::new(&record.draft).values(),
+                        &record.state.values(),
+                    );
+                    sources::FileEditSession::project_edit(
+                        &record.state.values(),
+                        &edit,
+                        values.get("title").map(String::as_str).unwrap_or(artist),
+                    )
+                } else {
+                    edit.changes.clone()
+                };
+                for (key, value) in &changes {
+                    if record.state.values.get(key) != Some(value) {
+                        changed = true;
                         record.state.set_text(key, value.clone());
                     }
-                    record.state.artwork = next.artwork;
-                    record.state.storage = next.storage;
                 }
-                Ok(!records.changed.is_empty())
-            })
-            .await?;
+                if let Some(artwork) = &edit.artwork
+                    && !scoped
+                {
+                    let storage = if record.draft.artwork.storage == sources::ArtworkStorage::Server
+                    {
+                        sources::ArtworkStorage::Server
+                    } else {
+                        artwork.storage
+                    };
+                    if record.state.artwork.as_ref() != Some(&artwork.change)
+                        || record.state.storage != storage
+                    {
+                        record.state.artwork = Some(artwork.change.clone());
+                        record.state.storage = storage;
+                        changed = true;
+                    }
+                }
+                if lyrics.is_some() {
+                    record.state.lyrics = lyrics.clone();
+                }
+                if changed {
+                    records.write(index, &record)?;
+                }
+            }
+            if let Some(next) = next_scope
+                && let Some(record) = &mut records.scope
+            {
+                for (key, value) in &edit.changes {
+                    record.state.set_text(key, value.clone());
+                }
+                record.state.artwork = next.artwork;
+                record.state.storage = next.storage;
+            }
+            Ok(())
+        })
+        .await?;
         let mut state = editor.state();
         for key in std::mem::take(&mut state.touched) {
             if let Some(field) = editor.draft.fields.iter().find(|field| field.key == key) {
@@ -1300,7 +1256,6 @@ impl MetadataBatch {
                     });
             }
         }
-        self.changed.store(changed, Ordering::Relaxed);
         Ok(())
     }
 }

@@ -169,6 +169,22 @@ pub enum SourceMetadataError {
     Write(String),
 }
 
+impl SourceMetadataError {
+    pub fn combine(mut errors: Vec<Self>) -> Result<(), Self> {
+        match errors.len() {
+            0 => Ok(()),
+            1 => Err(errors.pop().unwrap()),
+            _ => Err(Self::Write(
+                errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )),
+        }
+    }
+}
+
 impl From<crate::SourceError> for SourceMetadataError {
     fn from(error: crate::SourceError) -> Self {
         Self::Write(error.to_string())

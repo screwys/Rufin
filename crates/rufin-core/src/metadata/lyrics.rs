@@ -30,7 +30,11 @@ impl MetadataEditor {
         if scope.indices.len() != 1 {
             return Err(Error::Unavailable);
         }
-        scope.batch.session(scope.indices[0]).await
+        scope
+            .batch
+            .session(scope.indices[0])
+            .await
+            .map(|(session, _)| session)
     }
 }
 
@@ -180,7 +184,7 @@ impl EditSession {
         &self,
         owner: &crate::source::SourceOwner,
         edit: &LyricsEdit,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<String>, Error> {
         let text = ::lyrics::lyrics_from_edited_text(&edit.text)
             .and_then(|bundle| {
                 bundle
@@ -191,7 +195,7 @@ impl EditSession {
             .ok_or_else(|| {
                 Error::InvalidInput(localization::tr(localization::msgid("No lyrics")))
             })?;
-        match &self.destination {
+        let revision = match &self.destination {
             EditDestination::Files(files) => {
                 files
                     .save_lyrics(
@@ -212,11 +216,12 @@ impl EditSession {
                     )
                     .await?;
                 source.refresh_written_lyrics(&owner.shared.database);
+                None
             }
-        }
+        };
         if let Ok(playback) = owner.shared.playback() {
             playback.lyrics.accept_edited(&self.media_uri, &text).await;
         }
-        Ok(())
+        Ok(revision)
     }
 }

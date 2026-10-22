@@ -551,11 +551,11 @@ impl SaveWork {
         Ok(Self(connection))
     }
 
-    async fn remember(&mut self, page: &[(i64, Option<String>, NativeFile)]) -> Result<(), Error> {
-        let members = page
-            .iter()
-            .filter_map(|(key, id, _)| id.as_ref().map(|id| (*key, id)))
-            .collect::<Vec<_>>();
+    async fn remember<'a>(
+        &mut self,
+        page: impl Iterator<Item = (i64, &'a str)>,
+    ) -> Result<(), Error> {
+        let members = page.collect::<Vec<_>>();
         if members.is_empty() {
             return Ok(());
         }
@@ -579,7 +579,7 @@ impl SaveWork {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct FileEditSession {
     source: Option<Arc<Source>>,
     media_uri: String,
@@ -590,6 +590,13 @@ pub struct FileEditSession {
 }
 
 impl FileEditSession {
+    pub fn for_tracks(source: Option<Arc<Source>>) -> Self {
+        Self {
+            source,
+            ..Self::default()
+        }
+    }
+
     pub async fn audio_revision(&self) -> Result<Option<[u8; 32]>, Error> {
         let file = self.single.as_ref().ok_or(Error::Unavailable)?;
         Ok(file
@@ -610,13 +617,18 @@ impl FileEditSession {
         database: &Database,
         text: &str,
         sidecar: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<String>, Error> {
         if let Some(source) = &self.source {
             source
                 .write_lyrics(database, &self.media_uri, text, sidecar)
                 .await?;
             source.refresh_written_lyrics(database);
-            return Ok(());
+            return self
+                .single
+                .as_ref()
+                .ok_or(Error::Unavailable)?
+                .revision()
+                .await;
         }
         let file = self.single.as_ref().ok_or(Error::Unavailable)?;
         if let Some(saved) = file.save_lyrics(text, sidecar, || false).await? {
@@ -629,7 +641,7 @@ impl FileEditSession {
             .remove_track_lyrics_by_authority(&self.media_uri, "source")
             .await
             .map_err(failure)?;
-        Ok(())
+        file.revision().await
     }
 
     pub fn media_uri(&self) -> &str {
@@ -783,19 +795,13 @@ impl FileEditSession {
         let file = self.single.as_ref().ok_or(Error::Unavailable)?;
         self.save_tracks(
             database,
-            edit,
+            None,
             vec![file.media_uri.clone()],
-            |_| async {
-                Ok(Some((
-                    MetadataEdit {
-                        kind: SourceEntityKind::Track,
-                        changes: Default::default(),
-                        artwork: None,
-                    },
-                    None,
-                )))
+            |_| {
+                let edit = edit.clone();
+                async move { Ok((edit, self.expected.clone(), self.folder_image.clone())) }
             },
-            |_, _| async { Ok(()) },
+            |_, _, _| async { Ok(()) },
         )
         .await
     }
@@ -803,25 +809,30 @@ impl FileEditSession {
     pub async fn save_tracks<F, Fut, C, Done>(
         &self,
         database: &Database,
-        edit: MetadataEdit,
+        edit: Option<MetadataEdit>,
         tracks: Vec<String>,
         mut extra: F,
         mut complete: C,
     ) -> Result<(), Error>
     where
-        F: FnMut(String) -> Fut,
-        Fut: std::future::Future<Output = Result<Option<(MetadataEdit, Option<String>)>, Error>>,
-        C: FnMut(String, Result<Option<String>, String>) -> Done,
+        F: FnMut(usize) -> Fut,
+        Fut: std::future::Future<
+                Output = Result<(MetadataEdit, Option<String>, Option<String>), Error>,
+            >,
+        C: FnMut(usize, Option<String>, Result<(), Error>) -> Done,
         Done: std::future::Future<Output = Result<(), Error>>,
     {
-        let edits = [(
-            edit,
-            self.previous_artist.clone(),
-            self.folder_image.clone(),
-        )]
-        .into_iter()
-        .filter(|(edit, _, _)| !edit.changes.is_empty() || edit.artwork.is_some())
-        .collect::<Vec<_>>();
+        let edits = edit
+            .into_iter()
+            .map(|edit| {
+                (
+                    edit,
+                    self.previous_artist.clone(),
+                    self.folder_image.clone(),
+                )
+            })
+            .filter(|(edit, _, _)| !edit.changes.is_empty() || edit.artwork.is_some())
+            .collect::<Vec<_>>();
         if edits.iter().any(|(edit, _, _)| {
             edit.artwork
                 .as_ref()
@@ -873,54 +884,61 @@ impl FileEditSession {
         });
         let mut selected = tracks.chunks(128);
         let mut ordinal = 0i64;
+        let mut failures = Vec::new();
         let result = async {
             loop {
                 let Some(uris) = selected.next() else { break };
                 let mut page = Vec::with_capacity(uris.len());
                 for uri in uris {
-                    let (file, id) = if let Some(file) =
+                    let resolved = if let Some(file) =
                         self.single.as_ref().filter(|file| file.media_uri == *uri)
                     {
-                        (
+                        Ok((
                             file.clone(),
                             library::source_entity_parts(uri).map(|(_, _, id)| id),
-                        )
+                        ))
                     } else if let Some(source) = &self.source {
-                        let (file, row) = source.resolved_track(database, uri).await?;
-                        (file, row.object_id)
+                        source
+                            .resolved_track(database, uri)
+                            .await
+                            .map(|(file, row)| (file, row.object_id))
                     } else {
-                        (NativeFile::direct(uri)?, None)
+                        NativeFile::direct(uri).map(|file| (file, None))
                     };
-                    page.push((ordinal, id, file));
+                    page.push((ordinal, resolved));
                     ordinal += 1;
                 }
                 if mapped {
-                    work.as_mut().unwrap().remember(&page).await?;
+                    work.as_mut()
+                        .unwrap()
+                        .remember(page.iter().filter_map(|(key, file)| {
+                            file.as_ref().ok()?.1.as_deref().map(|id| (*key, id))
+                        }))
+                        .await?;
                 }
-                for (_, _, file) in page {
-                    let Some((track_edit, expected)) = extra(file.media_uri.clone()).await? else {
-                        continue;
-                    };
-                    let tags_changed = scope_tags_changed
-                        || !track_edit.changes.is_empty()
-                        || track_edit
-                            .artwork
-                            .as_ref()
-                            .is_some_and(|art| art.storage == crate::ArtworkStorage::Embedded);
-                    let mut edits = edits.clone();
-                    if !track_edit.changes.is_empty() || track_edit.artwork.is_some() {
-                        edits.push((track_edit, String::new(), self.folder_image.clone()));
-                    }
-                    let folder_changed = folder_changed
-                        || edits.iter().any(|(edit, _, _)| {
-                            edit.artwork
-                                .as_ref()
-                                .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
-                        });
-                    if folder_changed && work.is_none() {
-                        work = Some(SaveWork::new().await?);
-                    }
+                for (ordinal, resolved) in page {
                     let file_result = async {
+                        let (file, _) = resolved.as_ref().map_err(Clone::clone)?;
+                        let (track_edit, expected, hint) = extra(ordinal as usize).await?;
+                        let tags_changed = scope_tags_changed
+                            || !track_edit.changes.is_empty()
+                            || track_edit
+                                .artwork
+                                .as_ref()
+                                .is_some_and(|art| art.storage == crate::ArtworkStorage::Embedded);
+                        let mut edits = edits.clone();
+                        if !track_edit.changes.is_empty() || track_edit.artwork.is_some() {
+                            edits.push((track_edit, String::new(), hint));
+                        }
+                        let folder_changed = folder_changed
+                            || edits.iter().any(|(edit, _, _)| {
+                                edit.artwork
+                                    .as_ref()
+                                    .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
+                            });
+                        if folder_changed && work.is_none() {
+                            work = Some(SaveWork::new().await?);
+                        }
                         if tags_changed {
                             let prepared =
                                 file.prepare(expected.as_deref().or_else(|| {
@@ -1019,7 +1037,15 @@ impl FileEditSession {
                             if work
                                 .as_mut()
                                 .unwrap()
-                                .first_folder(&format!("{}:{directory}", edit.kind.as_str()))
+                                .first_folder(&format!(
+                                    "{}:{directory}:{}",
+                                    edit.kind.as_str(),
+                                    if edit.kind == SourceEntityKind::Track {
+                                        ordinal
+                                    } else {
+                                        -1
+                                    }
+                                ))
                                 .await?
                             {
                                 if cancelled() {
@@ -1077,15 +1103,25 @@ impl FileEditSession {
                         file.revision().await
                     }
                     .await;
+                    let revision = match (&file_result, &resolved) {
+                        (Ok(revision), _) => revision.clone(),
+                        (Err(Error::PartiallySaved { .. }), Ok((file, _))) => {
+                            file.revision().await.ok().flatten()
+                        }
+                        _ => None,
+                    };
                     complete(
-                        file.media_uri.clone(),
-                        file_result.as_ref().cloned().map_err(ToString::to_string),
+                        ordinal as usize,
+                        revision,
+                        file_result.as_ref().map(|_| ()).map_err(Clone::clone),
                     )
                     .await?;
-                    file_result?;
+                    if let Err(error) = file_result {
+                        failures.push(error);
+                    }
                 }
             }
-            Ok::<_, Error>(())
+            Error::combine(failures)
         }
         .await;
         let publication = if !pending.is_empty() {

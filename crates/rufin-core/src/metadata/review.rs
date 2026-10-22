@@ -3,7 +3,7 @@ use super::{
 };
 use localization::{msgid, tr};
 use metadata_lookup::{CacheMode, LookupCache};
-use sources::{MetadataDraft, SourceEntityKind, SourceMetadataError as Error};
+use sources::{SourceEntityKind, SourceMetadataError as Error};
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
@@ -59,18 +59,6 @@ pub struct MetadataLookupReview {
     run_lock: tokio::sync::Mutex<()>,
 }
 
-fn baseline(draft: &MetadataDraft, state: &super::editor::Editing) -> MetadataDraft {
-    let mut draft = draft.clone();
-    for field in &mut draft.fields {
-        if let Some(value) = state.values.get(&field.key) {
-            field.value = value.clone();
-        }
-        field.mixed = state.mixed.contains(&field.key);
-        field.suggestion = None;
-    }
-    draft
-}
-
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl MetadataLookupReview {
     #[cfg_attr(feature = "bindings", uniffi::constructor)]
@@ -86,14 +74,14 @@ impl MetadataLookupReview {
                 .await;
             }
             let mut state = editor.state().clone();
-            let draft = baseline(&editor.draft, &state);
+            let mut draft = editor.draft.as_ref().clone();
+            state.apply_values(&mut draft);
             state.begin_lookup();
             let working = Arc::new(MetadataEditor {
                 draft: Arc::new(draft),
                 source: editor.source.clone(),
                 session: editor.session.clone(),
                 batch: None,
-                external_lookup_allowed: editor.external_lookup_allowed,
                 state: Mutex::new(state),
             });
             Ok(Self::new(
@@ -346,25 +334,16 @@ impl MetadataLookupReview {
                 ready: state.lookup_candidates.is_some(),
                 candidates: state.lookup_candidates.clone().unwrap_or_default(),
                 selected: state
-                    .lookup_preview
+                    .lookup_choice
                     .as_ref()
-                    .map(|candidate| candidate.id.clone()),
+                    .map(|(candidate, _)| candidate.id.clone()),
                 fields: fields
                     .into_iter()
-                    .map(|field| {
-                        let original = editor
-                            .draft
-                            .fields
-                            .iter()
-                            .find(|original| original.key == field.field.key)
-                            .map(|field| field.value.clone())
-                            .unwrap_or_default();
-                        MetadataLookupField {
-                            changed: original != field.field.value,
-                            label: field.field.label,
-                            original,
-                            suggested: field.field.value,
-                        }
+                    .map(|field| MetadataLookupField {
+                        changed: field.original_value != field.field.value,
+                        label: field.field.label,
+                        original: field.original_value,
+                        suggested: field.field.value,
                     })
                     .collect(),
                 failure: state.scan_error.clone(),
@@ -402,10 +381,7 @@ impl MetadataLookupReview {
             };
             {
                 let mut state = editor.state();
-                if let Some(changes) = changes {
-                    state.lookup_result = candidate.clone().map(|candidate| (candidate, changes));
-                }
-                state.lookup_preview = candidate;
+                state.lookup_choice = candidate.zip(changes);
                 state.scan_error = None;
             }
             self.store(index, &editor).await
@@ -448,7 +424,7 @@ impl MetadataLookupReview {
                 Items::Batch(batch) => batch.accept_lookup(fill_missing).await,
                 Items::Single { original, working } => {
                     let mut state = working.state().clone();
-                    if state.lookup_preview.is_some() {
+                    if state.lookup_choice.is_some() {
                         state.apply_lookup_choice(&working.draft, fill_missing);
                         *original.state() = state;
                     }
@@ -620,10 +596,7 @@ impl MetadataLookupReview {
         };
         {
             let mut state = editor.state();
-            state.lookup_preview = resolved.as_ref().map(|(candidate, _)| candidate.clone());
-            if let Some(resolved) = resolved {
-                state.lookup_result = Some(resolved);
-            }
+            state.lookup_choice = resolved;
             state.scan_error = failure;
             state.lookup_candidates = Some(candidates);
         }
@@ -780,7 +753,7 @@ impl MetadataLookupReview {
         }
         if cache.mode != CacheMode::Refresh {
             let state = editor.state();
-            if let Some((cached, changes)) = &state.lookup_result
+            if let Some((cached, changes)) = &state.lookup_choice
                 && cached == &candidate
             {
                 return Ok(Some(changes.clone()));
@@ -822,7 +795,7 @@ fn title_values(state: &super::editor::Editing) -> String {
 pub(super) fn lookup_status(state: &super::editor::Editing) -> String {
     match &state.lookup_candidates {
         None => String::new(),
-        Some(_) if state.lookup_preview.is_some() => localization::tr("Matched"),
+        Some(_) if state.lookup_choice.is_some() => localization::tr("Matched"),
         Some(candidates) if candidates.is_empty() => localization::tr("No results"),
         Some(_) => localization::tr("Needs review"),
     }
