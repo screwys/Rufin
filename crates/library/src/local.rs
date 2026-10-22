@@ -278,6 +278,10 @@ impl Database {
         folder: Option<crate::FolderKey>,
     ) -> LibraryResult<Option<(String, String)>> {
         let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let folder = folder.filter(|_| {
+            crate::source_entity_parts(media_uri)
+                .is_some_and(|(_, kind, _)| matches!(kind.as_str(), "album" | "artist"))
+        });
         let members = match crate::source_entity_parts(media_uri).map(|(_, kind, _)| kind) {
             Some(kind) if kind == "album" => {
                 "SELECT track.track_key,track.source_key,track.source_path FROM albums album JOIN tracks track USING(album_key) WHERE album.media_uri=?1".to_owned()
@@ -288,7 +292,7 @@ impl Database {
             Some(kind) if kind == "artist" => {
                 "SELECT track.track_key,track.source_key,track.source_path FROM artists artist JOIN track_artists credit USING(artist_key) JOIN tracks track USING(track_key) WHERE artist.media_uri=?1".to_owned()
             }
-            _ => return Ok(None),
+            _ => "SELECT track_key,source_key,source_path FROM tracks WHERE media_uri=?1".to_owned(),
         };
         let mut query = QueryBuilder::<Sqlite>::new(
             "SELECT min(path),max(path) FROM (SELECT member.track_key,CASE WHEN (SELECT kind FROM sources WHERE source_key=member.source_key)='local' THEN(SELECT access.source_path FROM local_track_access access WHERE access.track_key=member.track_key) ELSE member.source_path END path FROM (",

@@ -446,6 +446,13 @@ async fn detail_folder_bounds_follow_collection_roles_and_selected_folder() {
     let database = &fixture.database;
     assert_eq!(
         database
+            .collection_source_path_bounds(&fixture.track_uris[2], false, Some(fixture.folder))
+            .await
+            .unwrap(),
+        Some((paths[2].clone(), paths[2].clone()))
+    );
+    assert_eq!(
+        database
             .collection_source_path_bounds(&fixture.album_uris[0], false, None)
             .await
             .unwrap(),

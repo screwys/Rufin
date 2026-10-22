@@ -5,7 +5,7 @@ import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.browse.*
 import android.content.Intent
 import android.net.Uri
-import android.provider.DocumentsContract
+import io.github.screwys.rufin.ui.openMediaUri
 
 import io.github.screwys.rufin.R
 import io.github.screwys.rufin.settings.LocalTranslationRevision
@@ -665,16 +665,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
                 browse::open, onMenu, { item, placement, shuffled -> browse.play(item, placement, shuffled) }, browse::favorite,
                 onPlaylist, { route, title -> browse.openRoute(route, title, route.kind, summary.row.title) },
                 onLink = { link -> model.runAction {
-                    var uri = Uri.parse(link.url ?: page.sourceUri() ?: return@runAction)
-                    val intent = Intent(Intent.ACTION_VIEW)
-                    if (uri.scheme == "content") {
-                        if (DocumentsContract.isTreeUri(uri) && !DocumentsContract.isDocumentUri(context, uri)) {
-                            uri = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
-                        }
-                        intent.setDataAndType(uri, DocumentsContract.Document.MIME_TYPE_DIR)
-                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
-                    } else intent.data = uri
-                    context.startActivity(intent)
+                    openMediaUri(context, link.url ?: page.sourceUri() ?: return@runAction)
                 } }, onScrolled, onRadio = { browse.radio(it, "now") })
             return@Column
         }

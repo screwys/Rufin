@@ -180,14 +180,7 @@ pub fn present_track_menu(
             EDIT_ICON,
         );
     }
-    install_track_navigation(
-        &surface,
-        menus,
-        action_group,
-        &track.links.artists,
-        &track.links.album_artists,
-        track.links.album_media_uri.as_deref(),
-    );
+    install_track_navigation(&surface, menus, action_group, &track);
     let playback = track_play_request(track.track_key);
     install_download_actions(
         &surface,
@@ -281,10 +274,11 @@ fn install_track_navigation(
     surface: &ContextMenuSurface,
     menus: &Rc<MediaMenus>,
     action_group: &str,
-    track_artists: &[library::TrackArtistLink],
-    album_artists: &[library::TrackArtistLink],
-    album_media_uri: Option<&str>,
+    track: &TrackView,
 ) {
+    let track_artists = &track.links.artists;
+    let album_artists = &track.links.album_artists;
+    let album_media_uri = track.links.album_media_uri.as_deref();
     let artists = if track_artists.is_empty() {
         album_artists
     } else {
@@ -295,11 +289,22 @@ fn install_track_navigation(
         .map(|artist| artist.name.clone())
         .collect::<Vec<_>>();
 
-    if !artist_names.is_empty() || album_media_uri.is_some() {
+    let submenu = go_to_context_submenu(action_group, &artist_names, album_media_uri.is_some());
+    install_source_navigation(
+        surface,
+        menus,
+        &submenu,
+        action_group,
+        &track.media_uri,
+        track.source_id.as_deref(),
+        album_media_uri,
+        false,
+    );
+    if submenu.n_items() > 0 {
         surface.append_configurable_submenu(
             ContextMenuItem::GoTo,
             msgid("Go to"),
-            &go_to_context_submenu(action_group, &artist_names, album_media_uri.is_some()),
+            &submenu,
             GO_TO_ICON,
         );
     }
@@ -326,6 +331,79 @@ fn install_track_navigation(
             (menus.navigate)(Route::AlbumDetail(album.clone()))
         });
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn install_source_navigation(
+    surface: &ContextMenuSurface,
+    menus: &Rc<MediaMenus>,
+    submenu: &gtk::gio::Menu,
+    group: &str,
+    media_uri: &str,
+    source_id: Option<&str>,
+    album_uri: Option<&str>,
+    album_artist: bool,
+) {
+    let source_id = source_id
+        .map(sources::SourceId::new)
+        .or_else(|| library::source_entity_parts(media_uri).map(|(id, _, _)| id));
+    let configuration = source_id
+        .as_ref()
+        .and_then(|id| menus.source.configuration(id));
+    let Some(link) = rufin_core::detail_links::navigation_source_link(
+        configuration.as_ref(),
+        media_uri,
+        album_uri,
+    ) else {
+        return;
+    };
+    let item = gtk::gio::MenuItem::new(
+        Some(&localization::tr(link.title)),
+        Some(&format!("{group}.go-source")),
+    );
+    item.set_icon(&gtk::gio::ThemedIcon::new(link.icon_name));
+    submenu.append_item(&item);
+    let window = surface
+        .popover()
+        .root()
+        .and_downcast::<gtk::ApplicationWindow>()
+        .map(|window| window.downgrade());
+    let menus = Rc::clone(menus);
+    let media_uri = media_uri.to_owned();
+    surface.add_action("go-source", move || {
+        let Some(window) = window.as_ref().and_then(glib::WeakRef::upgrade) else {
+            return;
+        };
+        let source = menus.source.clone();
+        let folder = source
+            .selected_library()
+            .filter(|selected| source_id.as_ref() == Some(&selected.source_id))
+            .and_then(|selected| selected.music_folder_key);
+        let media_uri = media_uri.clone();
+        let url = link.url.clone();
+        let show_error = Rc::clone(&menus.show_error);
+        glib::spawn_future_local(async move {
+            let result = async {
+                if let Some(url) = url {
+                    gtk::UriLauncher::new(&url)
+                        .launch_future(Some(&window))
+                        .await
+                        .map_err(|error| error.to_string())
+                } else {
+                    let uri = source
+                        .collection_folder_uri(media_uri, album_artist, folder)
+                        .recv()
+                        .await
+                        .map_err(|error| error.to_string())??;
+                    gtk_widgets::folder_launcher::open_folder_uri(&window, &uri).await
+                }
+            }
+            .await;
+            if let Err(error) = result {
+                show_error(error);
+            }
+        });
+    });
 }
 
 pub fn present_playlist_entry_menu(
@@ -359,14 +437,7 @@ pub fn present_playlist_entry_menu(
             REMOVE_ICON,
         );
     }
-    install_track_navigation(
-        &surface,
-        menus,
-        "playlist-entry",
-        &row.track.links.artists,
-        &row.track.links.album_artists,
-        row.track.links.album_media_uri.as_deref(),
-    );
+    install_track_navigation(&surface, menus, "playlist-entry", &row.track);
     install_download_actions(
         &surface,
         menus,
@@ -941,11 +1012,22 @@ pub fn present_album_context_menu(
         .iter()
         .map(|artist| artist.name.clone())
         .collect::<Vec<_>>();
-    if !artist_names.is_empty() {
+    let submenu = go_to_context_submenu("album", &artist_names, true);
+    install_source_navigation(
+        &surface,
+        menus,
+        &submenu,
+        "album",
+        &album.media_uri,
+        None,
+        None,
+        false,
+    );
+    if submenu.n_items() > 0 {
         surface.append_configurable_submenu(
             ContextMenuItem::GoTo,
             msgid("Go to"),
-            &go_to_context_submenu("album", &artist_names, true),
+            &submenu,
             GO_TO_ICON,
         );
     }
@@ -1085,10 +1167,22 @@ pub fn present_artist_context_menu(
             }
         }),
     );
+    let submenu =
+        go_to_context_submenu("artist", std::slice::from_ref(&artist.metadata.name), false);
+    install_source_navigation(
+        &surface,
+        menus,
+        &submenu,
+        "artist",
+        &artist.media_uri,
+        None,
+        None,
+        album_artist,
+    );
     surface.append_configurable_submenu(
         ContextMenuItem::GoTo,
         msgid("Go to"),
-        &go_to_context_submenu("artist", std::slice::from_ref(&artist.metadata.name), false),
+        &submenu,
         GO_TO_ICON,
     );
     let playback = if album_artist {

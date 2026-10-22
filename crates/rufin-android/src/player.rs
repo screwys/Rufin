@@ -26,6 +26,7 @@ pub struct AndroidPlayerMetadata {
     pub artist_links: Vec<AndroidArtistLink>,
     pub album_text: String,
     pub album_links: Vec<AndroidArtistLink>,
+    pub source_link: Option<crate::browse::AndroidDetailLink>,
 }
 
 #[derive(uniffi::Record)]
@@ -190,6 +191,8 @@ impl AndroidPlayer {
         origin_route: Option<rufin_core::route::Route>,
     ) -> Result<Option<AndroidPlayerMetadata>, AndroidError> {
         let database = self.products.library.clone();
+        let source = self.products.source.clone();
+        let selected = source.selected_library();
         self.products
             .runtime
             .spawn(async move {
@@ -232,9 +235,9 @@ impl AndroidPlayer {
                             return Ok(None);
                         };
                         let name = artist.metadata.name;
-                        let route = match origin_route {
-                            Some(Route::AlbumArtistDetail(uri)) if uri == media_uri => {
-                                Route::AlbumArtistDetail(uri)
+                        let route = match &origin_route {
+                            Some(Route::AlbumArtistDetail(uri)) if *uri == media_uri => {
+                                Route::AlbumArtistDetail(uri.clone())
                             }
                             _ => Route::ArtistDetail(media_uri.clone()),
                         };
@@ -265,6 +268,40 @@ impl AndroidPlayer {
                         )
                     }
                 };
+                let configuration = source_id
+                    .as_deref()
+                    .and_then(|id| source.configuration(&sources::SourceId::new(id)));
+                let album_uri = album.spans().first().and_then(|link| match &link.route {
+                    Route::AlbumDetail(uri) => Some(uri.as_str()),
+                    _ => None,
+                });
+                let mut source_link = rufin_core::detail_links::navigation_source_link(
+                    configuration.as_ref(),
+                    &media_uri,
+                    album_uri,
+                );
+                if let Some(link) = source_link.as_mut()
+                    && link.url.is_none()
+                {
+                    link.url = source
+                        .collection_folder_uri(
+                            media_uri.clone(),
+                            matches!(origin_route, Some(Route::AlbumArtistDetail(_))),
+                            selected
+                                .as_ref()
+                                .filter(|selected| {
+                                    Some(selected.source_id.as_str()) == source_id.as_deref()
+                                })
+                                .and_then(|selected| selected.music_folder_key),
+                        )
+                        .recv()
+                        .await
+                        .ok()
+                        .and_then(Result::ok);
+                    if link.url.is_none() {
+                        source_link = None;
+                    }
+                }
                 let mut artist_links = AndroidArtistLink::from_detail_links(&artists)?;
                 let mut album_links = AndroidArtistLink::from_detail_links(&album)?;
                 let media_uris: Vec<_> = artists
@@ -301,6 +338,7 @@ impl AndroidPlayer {
                     artist_links,
                     album_text: album.display_text().to_string(),
                     album_links,
+                    source_link: source_link.map(Into::into),
                 }))
             })
             .await

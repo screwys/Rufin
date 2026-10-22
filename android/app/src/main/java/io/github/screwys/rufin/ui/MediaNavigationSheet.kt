@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -27,6 +28,7 @@ internal fun MediaNavigationSheet(metadata: AndroidPlayerMetadata?, player: Play
     mediaUri: String? = metadata?.mediaUri,
     originRoute: Route? = null,
 ) {
+    val context = LocalContext.current
     val bridge = player.bridge
     val loaded by produceState<Result<AndroidPlayerMetadata?>?>(metadata?.let { Result.success(it) }, metadata, mediaUri, originRoute, bridge) {
         try { value = Result.success(metadata ?: mediaUri?.let { bridge?.metadataLinks(it, originRoute) }) }
@@ -44,7 +46,7 @@ internal fun MediaNavigationSheet(metadata: AndroidPlayerMetadata?, player: Play
             else loaded?.exceptionOrNull()?.let { failure -> item {
                 ErrorRow(failure, translate("Close"), onDismiss)
             } }
-            if (loaded?.isSuccess == true && links.isEmpty()) item {
+            if (loaded?.isSuccess == true && links.isEmpty() && resolved?.sourceLink == null) item {
                 Text(translate("No results"), Modifier.padding(horizontal = 24.dp, vertical = 16.dp))
             }
             itemsIndexed(links, key = { index, (_, link) -> "$index:${link.route}" }) { _, (kind, link) ->
@@ -55,6 +57,14 @@ internal fun MediaNavigationSheet(metadata: AndroidPlayerMetadata?, player: Play
                     leadingContent = { Artwork(artwork, Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))) },
                     modifier = Modifier.clickable { onDismiss(); onNavigate(link.route, link.title, resolved?.sourceId) })
             }
+            resolved?.sourceLink?.let { link -> item {
+                ListItem(headlineContent = { Text(translate(link.title)) },
+                    leadingContent = { DetailLinkIcon(link.iconId, Modifier.size(40.dp)) },
+                    modifier = Modifier.clickable {
+                        try { link.url?.let { openMediaUri(context, it) }; onDismiss() }
+                        catch (error: Exception) { player.reportError(error) }
+                    })
+            } }
         }
     }
 }
