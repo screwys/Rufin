@@ -56,7 +56,8 @@ internal fun PinsContent(model: RufinConnection, browse: BrowseConnection, playe
                     trailingContent = {
                         PlayerIconButton("rufin-view-more-symbolic", "More", { action = item })
                     },
-                    modifier = Modifier.combinedClickable(onClick = { browse.open(item) }, onLongClick = { action = item }))
+                    modifier = Modifier.playlistFolderDrag(item, model).combinedClickable(onClick = { browse.open(item) },
+                        onLongClick = if (item.row.playlistFolderMember == null) ({ action = item }) else null))
                 }
             }
         }

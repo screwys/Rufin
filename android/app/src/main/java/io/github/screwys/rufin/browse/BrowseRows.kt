@@ -20,6 +20,7 @@ internal val AndroidBrowseRow.kind: String
         is AndroidBrowseItem.Mood -> "mood"
         is AndroidBrowseItem.Playlist -> "playlist"
         is AndroidBrowseItem.SmartPlaylist -> "smart_playlist"
+        is AndroidBrowseItem.PlaylistFolder -> "playlist_folder"
         is AndroidBrowseItem.Folder -> "folder"
         is AndroidBrowseItem.Recent -> item.row.kind.name.lowercase()
     }
@@ -34,6 +35,7 @@ internal val AndroidBrowseRow.key: String
         is AndroidBrowseItem.Mood -> item.row.moodKey.toString()
         is AndroidBrowseItem.Playlist -> item.row.objectId
         is AndroidBrowseItem.SmartPlaylist -> item.row.objectId
+        is AndroidBrowseItem.PlaylistFolder -> "playlist-folder:${item.row.objectId}"
         is AndroidBrowseItem.Recent -> item.row.mediaUri
         is AndroidBrowseItem.Folder -> item.key
     }
@@ -58,6 +60,7 @@ internal val AndroidBrowseRow.title: String
         is AndroidBrowseItem.Mood -> item.row.metadata.name
         is AndroidBrowseItem.Playlist -> item.row.name
         is AndroidBrowseItem.SmartPlaylist -> item.row.name
+        is AndroidBrowseItem.PlaylistFolder -> item.row.name
         is AndroidBrowseItem.Recent -> item.row.title
         is AndroidBrowseItem.Folder -> item.title
     }
@@ -84,6 +87,7 @@ internal val AndroidBrowseRow.subtitle: String
         is AndroidBrowseItem.Track -> if (displayTitle != null) "${item.row.metadata.artist}\n${item.row.metadata.album}" else "${item.row.metadata.artist} · ${item.row.metadata.album}"
         is AndroidBrowseItem.PlaylistEntry -> "${item.row.track.metadata.artist} · ${item.row.track.metadata.album}"
         is AndroidBrowseItem.Album -> item.row.metadata.artist
+        is AndroidBrowseItem.PlaylistFolder -> "${io.github.screwys.rufin.core.trackCountText(trackCount)} · ${browseDuration(durationMillis)}"
         is AndroidBrowseItem.Recent -> item.row.subtitle
         else -> ""
     }
@@ -107,6 +111,7 @@ internal val AndroidBrowseRow.durationMillis: ULong
         is AndroidBrowseItem.Mood -> item.row.summary.durationMillis.coerceAtLeast(0).toULong()
         is AndroidBrowseItem.Playlist -> item.row.durationMillis.coerceAtLeast(0).toULong()
         is AndroidBrowseItem.SmartPlaylist -> item.row.durationMillis.coerceAtLeast(0).toULong()
+        is AndroidBrowseItem.PlaylistFolder -> item.row.durationMillis.coerceAtLeast(0).toULong()
         else -> 0UL
     }
 
@@ -118,6 +123,7 @@ internal val AndroidBrowseRow.detailRoute: Route?
         is AndroidBrowseItem.Mood -> Route.MoodDetail(item.row.moodKey)
         is AndroidBrowseItem.Playlist -> Route.PlaylistDetail(item.row.playlistKey)
         is AndroidBrowseItem.SmartPlaylist -> Route.SmartPlaylistDetail(item.row.smartPlaylistKey)
+        is AndroidBrowseItem.PlaylistFolder -> Route.PlaylistFolder(item.row.folderKey, item.row.smart)
         is AndroidBrowseItem.Folder -> item.route
         is AndroidBrowseItem.Recent -> when (item.row.kind) {
             RecentSearchKind.ALBUM -> Route.AlbumDetail(item.row.mediaUri)
@@ -157,6 +163,7 @@ internal val AndroidBrowseRow.trackCount: ULong
         is AndroidBrowseItem.Mood -> item.row.summary.trackCount.coerceAtLeast(0).toULong()
         is AndroidBrowseItem.Playlist -> item.row.trackCount.coerceAtLeast(0).toULong()
         is AndroidBrowseItem.SmartPlaylist -> item.row.trackCount.coerceAtLeast(0).toULong()
+        is AndroidBrowseItem.PlaylistFolder -> item.row.trackCount.coerceAtLeast(0).toULong()
         else -> 0UL
     }
 
@@ -171,6 +178,7 @@ internal val AndroidBrowseRow.artworkIdentity: ByteArray?
         is AndroidBrowseItem.Mood -> item.row.representativeArtwork.firstOrNull()
         is AndroidBrowseItem.Playlist -> item.row.artworkBinding
         is AndroidBrowseItem.SmartPlaylist -> item.row.artworkBinding
+        is AndroidBrowseItem.PlaylistFolder -> item.row.artworkBinding
         is AndroidBrowseItem.Folder -> item.artwork
     }
 
@@ -267,6 +275,7 @@ internal val Route.kind: String
         is Route.Playlists -> "Playlists"
         is Route.PlaylistDetail -> "PlaylistDetail"
         is Route.SmartPlaylists -> "SmartPlaylists"
+        is Route.PlaylistFolder -> "PlaylistFolder"
         is Route.SmartPlaylistDetail -> "SmartPlaylistDetail"
     }
 
@@ -305,3 +314,10 @@ internal val AndroidBrowseRow.rating: UByte?
         is AndroidBrowseItem.Artist -> item.row.state.rating
         else -> null
     })?.takeIf { it in 0..255 }?.toUByte()
+
+internal val AndroidBrowseRow.playlistFolderMember: io.github.screwys.rufin.shared.library.PlaylistFolderMember?
+    get() = when (val item = item) {
+        is AndroidBrowseItem.Playlist -> io.github.screwys.rufin.shared.library.PlaylistFolderMember.Playlist(item.row.playlistKey)
+        is AndroidBrowseItem.SmartPlaylist -> io.github.screwys.rufin.shared.library.PlaylistFolderMember.SmartPlaylist(item.row.smartPlaylistKey)
+        else -> null
+    }

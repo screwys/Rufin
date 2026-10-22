@@ -18,6 +18,7 @@ impl StateGroups {
     pub fn members(self) -> impl Iterator<Item = &'static str> {
         [
             ("playlist-order.jsonl", self.playlists),
+            ("playlist-folders.jsonl", self.playlists),
             ("smart.jsonl", self.playlists),
             ("user-state.jsonl", self.favorites),
             ("local-locators.jsonl", self.local_imports),
@@ -80,6 +81,9 @@ impl Database {
                 cursor = key.raw();
                 ordinal += 1;
             }
+            let mut output = private_file(&directory.join("playlist-folders.jsonl"))?;
+            crate::playlist_folders::export_on(&mut transaction, &mut output).await?;
+            output.flush()?;
             let mut output = private_file(&directory.join("smart.jsonl"))?;
             crate::smart_playlists::export_smart_playlists_jsonl_on(&mut transaction, &mut output)
                 .await?;
@@ -135,7 +139,7 @@ impl Database {
                 .await?;
         crate::connect::set_receiving_on(&mut transaction, true).await?;
         if contents.playlists {
-            sqlx::raw_sql("DELETE FROM main.playlists WHERE owner='rufin';DELETE FROM smart_playlists;DELETE FROM playlist_file_ignored;DELETE FROM playlist_file_settings;")
+            sqlx::raw_sql("DELETE FROM playlist_folders;DELETE FROM main.playlists WHERE owner='rufin';DELETE FROM smart_playlists;DELETE FROM playlist_file_ignored;DELETE FROM playlist_file_settings;")
                 .execute(&mut *transaction)
                 .await?;
             report.playlists = crate::playlists::import_playlists_jsonl_on(
@@ -163,6 +167,11 @@ impl Database {
             )
             .await?;
         }
+        if contents.playlists && directory.join("playlist-folders.jsonl").exists() {
+            crate::playlist_folders::import_on(&mut transaction, open("playlist-folders.jsonl")?)
+                .await?;
+        }
+
         if contents.favorites {
             sqlx::raw_sql("DELETE FROM user_media_state;DELETE FROM favorite_outbox;")
                 .execute(&mut *transaction)

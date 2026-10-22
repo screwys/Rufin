@@ -230,6 +230,7 @@ impl Database {
                 .await?;
         Ok(rows
             .into_iter()
+            .filter(|(key,)| read.playlist_scope == PlaylistScope::All || *key >= 0)
             .map(|(key,)| parent_collection(read, key))
             .collect())
     }

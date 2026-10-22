@@ -63,7 +63,7 @@ gtk_widgets::composite_box!(
     {
         search_host: gtk::Box,
         controls: gtk::Box,
-        command_button: gtk::Button,
+        command_button: gtk::MenuButton,
         import_button: gtk::Button,
         sort_dropdown: gtk::DropDown,
         direction: gtk::Button,
@@ -320,17 +320,18 @@ impl CatalogUi {
             key,
             LibraryListKey::Playlists | LibraryListKey::SmartPlaylists
         ));
-        {
-            let state = Rc::clone(&toolbar_state);
-            command_button.connect_clicked(move |button| {
-                let action = match state.borrow().key {
-                    LibraryListKey::Playlists => "win.new-playlist",
-                    LibraryListKey::SmartPlaylists => "win.new-smart-playlist",
-                    _ => return,
-                };
-                let _ = button.activate_action(action, None);
-            });
-        }
+        let resource = crate::ui_resource::PLAYLIST_COMMANDS_RESOURCE;
+        let builder = gtk_widgets::ui_resource::builder(resource);
+        let menu = gtk_widgets::ui_resource::object::<gtk::gio::Menu>(
+            &builder,
+            resource,
+            if key == LibraryListKey::SmartPlaylists {
+                "smart_playlist_commands"
+            } else {
+                "playlist_commands"
+            },
+        );
+        command_button.set_menu_model(Some(&menu));
         let settings = self.settings.current.borrow().library_list(key);
         let sort_options = gtk::StringList::new(&[]);
         let sort_dropdown = toolbar.imp().sort_dropdown.get();

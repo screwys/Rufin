@@ -81,6 +81,8 @@ pub fn add_drag_to_playlist(
 }
 
 pub struct MediaMenus {
+    pub current_route: Rc<dyn Fn() -> Route>,
+    pub present_dialog: Rc<dyn Fn(&adw::Dialog)>,
     pub library: Arc<library::Database>,
     pub runtime: tokio::runtime::Handle,
     pub source: rufin_core::runtime::SourceHandle,
@@ -513,12 +515,13 @@ fn present_playlist_selection_menu(
     menus: &Rc<MediaMenus>,
     clicked: PlayRequest,
     position: Option<(f64, f64)>,
+    in_folder: bool,
 ) -> bool {
     let Some((surface, targets)) = collection_selection_surface(target, menus, clicked, position)
     else {
         return false;
     };
-    surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
+    let folder_targets = targets.clone();
     let delete_menus = Rc::clone(menus);
     let delete_target = target.downgrade();
     surface.add_action("delete", move || {
@@ -571,7 +574,38 @@ fn present_playlist_selection_menu(
         });
         dialog.present(Some(&target));
     });
-    surface.popup(&menus.settings.current.borrow().application.context_menu);
+    let database = menus.library.clone();
+    let task = menus
+        .runtime
+        .spawn(async move { folder_targets.collections(&database).await });
+    let menus = Rc::clone(menus);
+    glib::spawn_future_local(async move {
+        match task.await {
+            Ok(Ok(collections)) => {
+                let members = collections
+                    .into_iter()
+                    .filter_map(|collection| match collection {
+                        library::Collection::Playlist(key) => {
+                            Some(library::PlaylistFolderMember::Playlist { key })
+                        }
+                        library::Collection::Smart { key, .. } => {
+                            Some(library::PlaylistFolderMember::SmartPlaylist { key })
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                if !members.is_empty() {
+                    crate::playlist_folders::append_folder_actions(
+                        &surface, &menus, members, in_folder,
+                    );
+                }
+                surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
+                surface.popup(&menus.settings.current.borrow().application.context_menu);
+            }
+            Ok(Err(error)) => (menus.show_error)(error),
+            Err(error) => (menus.show_error)(error.to_string()),
+        }
+    });
     true
 }
 
@@ -1149,11 +1183,52 @@ pub fn present_playlist_context_menu(
     position: Option<(f64, f64)>,
     current: Option<String>,
 ) {
+    let database = menus.library.clone();
+    let member = library::PlaylistFolderMember::Playlist {
+        key: playlist.playlist_key,
+    };
+    let task = menus.runtime.spawn(async move {
+        database
+            .playlist_member_folder(&member, &library::ReadCancellation::new())
+            .await
+    });
+    let target = target.downgrade();
+    let menus = Rc::downgrade(menus);
+    gtk::glib::spawn_future_local(async move {
+        let (Some(target), Some(menus)) = (target.upgrade(), menus.upgrade()) else {
+            return;
+        };
+        match task.await {
+            Ok(Ok(folder)) => present_playlist_context_menu_ready(
+                &target,
+                &menus,
+                playlist,
+                play,
+                position,
+                current,
+                folder.is_some(),
+            ),
+            Ok(Err(error)) => (menus.show_error)(error.to_string()),
+            Err(error) => (menus.show_error)(error.to_string()),
+        }
+    });
+}
+
+fn present_playlist_context_menu_ready(
+    target: &gtk::Widget,
+    menus: &Rc<MediaMenus>,
+    playlist: PlaylistRow,
+    play: Option<CollectionPlay>,
+    position: Option<(f64, f64)>,
+    current: Option<String>,
+    in_folder: bool,
+) {
     if present_playlist_selection_menu(
         target,
         menus,
         collection_play_request(library::Collection::Playlist(playlist.playlist_key)),
         position,
+        in_folder,
     ) {
         return;
     }
@@ -1193,6 +1268,14 @@ pub fn present_playlist_context_menu(
     if playlist.writable {
         surface.append_fixed_action(msgid("Add current"), "add-current", ADD_ICON);
     }
+    crate::playlist_folders::append_folder_actions(
+        &surface,
+        menus,
+        vec![library::PlaylistFolderMember::Playlist {
+            key: playlist.playlist_key,
+        }],
+        in_folder,
+    );
     if rufin_core::playlists::can_remove_unavailable(&menus.source, &playlist) {
         surface.append_fixed_action(
             msgid("Remove unavailable tracks"),
@@ -1295,6 +1378,44 @@ pub fn present_smart_playlist_context_menu(
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
+    let database = menus.library.clone();
+    let member = library::PlaylistFolderMember::SmartPlaylist {
+        key: playlist.smart_playlist_key,
+    };
+    let task = menus.runtime.spawn(async move {
+        database
+            .playlist_member_folder(&member, &library::ReadCancellation::new())
+            .await
+    });
+    let target = target.downgrade();
+    let menus = Rc::downgrade(menus);
+    gtk::glib::spawn_future_local(async move {
+        let (Some(target), Some(menus)) = (target.upgrade(), menus.upgrade()) else {
+            return;
+        };
+        match task.await {
+            Ok(Ok(folder)) => present_smart_playlist_context_menu_ready(
+                &target,
+                &menus,
+                playlist,
+                play,
+                position,
+                folder.is_some(),
+            ),
+            Ok(Err(error)) => (menus.show_error)(error.to_string()),
+            Err(error) => (menus.show_error)(error.to_string()),
+        }
+    });
+}
+
+fn present_smart_playlist_context_menu_ready(
+    target: &gtk::Widget,
+    menus: &Rc<MediaMenus>,
+    playlist: SmartPlaylistRow,
+    play: Option<CollectionPlay>,
+    position: Option<(f64, f64)>,
+    in_folder: bool,
+) {
     if present_playlist_selection_menu(
         target,
         menus,
@@ -1303,6 +1424,7 @@ pub fn present_smart_playlist_context_menu(
             menus.source.selected_library().as_ref(),
         ),
         position,
+        in_folder,
     ) {
         return;
     }
@@ -1330,6 +1452,14 @@ pub fn present_smart_playlist_context_menu(
         )
     });
     surface.append_fixed_action(msgid("Edit"), "edit-definition", EDIT_ICON);
+    crate::playlist_folders::append_folder_actions(
+        &surface,
+        menus,
+        vec![library::PlaylistFolderMember::SmartPlaylist {
+            key: playlist.smart_playlist_key,
+        }],
+        in_folder,
+    );
     surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
     let playback = gtk_widgets::selection::smart_play_request(
         playlist.smart_playlist_key,
@@ -1402,7 +1532,7 @@ fn add_favorite_action(
     });
 }
 
-fn install_sidebar_pin_action(
+pub(crate) fn install_sidebar_pin_action(
     surface: &ContextMenuSurface,
     menus: &Rc<MediaMenus>,
     pin: Option<SidebarPin>,

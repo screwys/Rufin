@@ -221,6 +221,7 @@ integer_key!(GenreKey);
 integer_key!(MoodKey);
 integer_key!(FolderKey);
 integer_key!(PlaylistKey);
+integer_key!(PlaylistFolderKey);
 integer_key!(PlaylistEntryKey);
 integer_key!(SmartPlaylistKey);
 integer_key!(ListenKey);

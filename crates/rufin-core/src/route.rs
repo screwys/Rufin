@@ -58,11 +58,17 @@ pub enum Route {
     GenreDetail(GenreKey),
     Moods,
     MoodDetail(MoodKey),
-    Folders { path: Vec<FolderPathItem> },
+    Folders {
+        path: Vec<FolderPathItem>,
+    },
     Playlists,
     PlaylistDetail(PlaylistKey),
     SmartPlaylists,
     SmartPlaylistDetail(SmartPlaylistKey),
+    PlaylistFolder {
+        key: library::PlaylistFolderKey,
+        smart: bool,
+    },
 }
 
 pub struct SidebarRouteDescriptor {

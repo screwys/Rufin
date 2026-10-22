@@ -7,8 +7,61 @@ use crate::{
 use library::{PlaylistKey, PlaylistPathMode, SourceId};
 use rufin_core::{playlist_files, playlists};
 
+#[derive(uniffi::Record)]
+pub struct AndroidPlaylistChoices {
+    pub count: u64,
+    pub rows: Vec<crate::browse::AndroidBrowseRow>,
+}
+
 #[uniffi::export]
 impl AndroidLibrary {
+    pub async fn playlist_choices(
+        &self,
+        filter: String,
+        folder_kind: Option<bool>,
+        offset: u64,
+        limit: u32,
+    ) -> Result<AndroidPlaylistChoices, AndroidError> {
+        let selected = self.source.selected_library();
+        let mut read = library::ListRead::new(
+            if folder_kind == Some(true) {
+                library::ListKind::SmartPlaylists {
+                    now: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(error)?
+                        .as_secs() as i64,
+                }
+            } else {
+                library::ListKind::Playlists
+            },
+            selected.as_ref().map(|selected| selected.source_key),
+            library::CatalogSort::Title,
+        );
+        read.folder = selected.and_then(|selected| selected.music_folder_key);
+        read.filter = filter;
+        read.playlist_scope = if folder_kind.is_some() {
+            library::PlaylistScope::Folders
+        } else {
+            library::PlaylistScope::All
+        };
+        let database = self.database.clone();
+        self.runtime
+            .spawn(async move {
+                let cancel = library::ReadCancellation::new();
+                let count = read.count(&database, &cancel).await.map_err(error)? as u64;
+                let rows = read
+                    .playlist_items(&database, offset as usize, limit as usize, &cancel)
+                    .await
+                    .map_err(error)?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect();
+                Ok(AndroidPlaylistChoices { count, rows })
+            })
+            .await
+            .map_err(error)?
+    }
+
     pub async fn playlist_file_settings(
         &self,
         playlist: PlaylistKey,
@@ -176,5 +229,107 @@ impl AndroidLibrary {
     }
     pub fn playlist_file_is_conflict(&self, message: String) -> bool {
         playlist_files::is_conflict(&message)
+    }
+}
+
+#[uniffi::export]
+impl AndroidLibrary {
+    pub async fn playlist_member_folder(
+        &self,
+        member: library::PlaylistFolderMember,
+    ) -> Result<Option<library::PlaylistFolderKey>, AndroidError> {
+        let database = self.database.clone();
+        self.runtime
+            .spawn(async move {
+                database
+                    .playlist_member_folder(&member, &library::ReadCancellation::new())
+                    .await
+                    .map_err(error)
+            })
+            .await
+            .map_err(error)?
+    }
+
+    pub async fn save_smart_playlist(
+        &self,
+        key: Option<library::SmartPlaylistKey>,
+        name: String,
+        definition: library::SmartPlaylistDefinition,
+        folder: Option<library::PlaylistFolderKey>,
+    ) -> Result<library::SmartPlaylistKey, AndroidError> {
+        let source = self.source.clone();
+        let database = self.database.clone();
+        self.runtime
+            .spawn(async move {
+                let key = if let Some(key) = key {
+                    if !database
+                        .update_smart_playlist(key, &name, &definition, None)
+                        .await
+                        .map_err(error)?
+                    {
+                        return Err(error("Playlist no longer exists"));
+                    }
+                    key
+                } else {
+                    database
+                        .create_smart_playlist(&name, &definition)
+                        .await
+                        .map_err(error)?
+                };
+                if let Some(folder) = folder {
+                    playlists::move_playlist_to_folder(
+                        &source,
+                        library::PlaylistFolderMember::SmartPlaylist { key },
+                        Some(folder),
+                    )
+                    .await
+                    .map_err(error)?;
+                } else {
+                    playlists::playlist_folders_changed(&source).await;
+                }
+                Ok(key)
+            })
+            .await
+            .map_err(error)?
+    }
+
+    pub async fn delete_smart_playlist(
+        &self,
+        key: library::SmartPlaylistKey,
+    ) -> Result<(), AndroidError> {
+        let source = self.source.clone();
+        let database = self.database.clone();
+        self.runtime
+            .spawn(async move {
+                database.delete_smart_playlist(key).await.map_err(error)?;
+                playlists::playlist_folders_changed(&source).await;
+                Ok(())
+            })
+            .await
+            .map_err(error)?
+    }
+
+    pub fn smart_playlist_default_definition(&self) -> library::SmartPlaylistDefinition {
+        library::SmartPlaylistDefinition::default()
+    }
+
+    pub fn smart_playlist_rule_operators(
+        &self,
+        field: library::SmartPlaylistRuleField,
+    ) -> Vec<library::SmartPlaylistRuleOperator> {
+        field.operators().to_vec()
+    }
+
+    pub fn smart_playlist_rule(
+        &self,
+        field: library::SmartPlaylistRuleField,
+        operator: Option<library::SmartPlaylistRuleOperator>,
+    ) -> library::SmartPlaylistRule {
+        let operator = operator.unwrap_or(field.operators()[0]);
+        library::SmartPlaylistRule {
+            field,
+            operator,
+            value: field.default_value(operator),
+        }
     }
 }

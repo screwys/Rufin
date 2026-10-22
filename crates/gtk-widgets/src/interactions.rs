@@ -280,6 +280,33 @@ impl ContextMenuSurface {
             .push(ContextMenuEntry::Configurable(setting, item));
     }
 
+    pub fn append_fixed_widget_submenu(
+        &self,
+        label: &str,
+        id: &str,
+        widget: &impl IsA<gtk::Widget>,
+        icon_name: &str,
+        primary_click: impl Fn() + 'static,
+    ) {
+        let submenu = gio::Menu::new();
+        let custom = gio::MenuItem::new(None, None);
+        custom.set_attribute_value("custom", Some(&id.to_variant()));
+        submenu.append_item(&custom);
+        let item = gio::MenuItem::new_submenu(Some(&tr(label)), &submenu);
+        item.set_icon(&gio::ThemedIcon::new(icon_name));
+        self.entries
+            .borrow_mut()
+            .push(ContextMenuEntry::Fixed(item));
+        self.custom_children
+            .borrow_mut()
+            .push(ContextMenuCustomChild {
+                setting: None,
+                id: id.to_string(),
+                widget: widget.as_ref().clone(),
+                primary_click: Some(Rc::new(primary_click)),
+            });
+    }
+
     pub fn append_configurable_widget_submenu(
         &self,
         setting: ContextMenuItem,

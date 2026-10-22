@@ -395,6 +395,7 @@ pub(crate) async fn export_contents(
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct PlaylistCreation {
+    pub playlist_key: Option<PlaylistKey>,
     pub object_id: String,
     pub settings_error: Option<String>,
 }
@@ -499,6 +500,7 @@ pub async fn create_playlist(
         .and_then(|result| result)
         .err();
         Ok(Some(PlaylistCreation {
+            playlist_key: playlist,
             object_id,
             settings_error,
         }))
@@ -1280,6 +1282,99 @@ pub fn smart_playlist_display_name(playlist: &library::SmartPlaylistRow) -> Stri
     }
 }
 
+pub async fn playlist_folders_changed(owner: &SourceOwner) {
+    owner
+        .shared
+        .send(SourceEvent::CatalogPublished(CatalogPublication {
+            source_key: None,
+            favorite: None,
+            change: CatalogChange::Playlists(None),
+        }))
+        .await;
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub async fn create_playlist_folder(
+    owner: &SourceOwner,
+    name: String,
+    smart: bool,
+) -> sources::SourceResult<library::PlaylistFolderKey> {
+    owner
+        .reply(move |owner, database| async move {
+            let key = database.create_playlist_folder(&name, smart).await?;
+            playlist_folders_changed(&owner).await;
+            Ok::<_, SourceError>(key)
+        })
+        .recv()
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))?
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub async fn rename_playlist_folder(
+    owner: &SourceOwner,
+    key: library::PlaylistFolderKey,
+    name: String,
+) -> sources::SourceResult<()> {
+    owner
+        .reply(move |owner, database| async move {
+            database.rename_playlist_folder(key, &name).await?;
+            playlist_folders_changed(&owner).await;
+            Ok::<_, SourceError>(())
+        })
+        .recv()
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))?
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub async fn delete_playlist_folder(
+    owner: &SourceOwner,
+    key: library::PlaylistFolderKey,
+) -> sources::SourceResult<()> {
+    owner
+        .reply(move |owner, database| async move {
+            let folder = database.delete_playlist_folder(key).await?;
+            playlist_folders_changed(&owner).await;
+            if let Some((folder_id, smart)) = folder {
+                let settings = owner.shared.settings.clone();
+                tokio::task::spawn_blocking(move || {
+                    settings.update(|stored| {
+                        stored.ui.sidebar.set_pinned(
+                            crate::settings::SidebarPin::PlaylistFolder { folder_id, smart },
+                            false,
+                        );
+                        Ok(())
+                    })
+                })
+                .await
+                .map_err(|error| SourceError::Other(error.to_string()))?
+                .map_err(SourceError::Other)?;
+            }
+            Ok::<_, SourceError>(())
+        })
+        .recv()
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))?
+}
+
+#[cfg_attr(feature = "bindings", uniffi::export)]
+pub async fn move_playlist_to_folder(
+    owner: &SourceOwner,
+    member: library::PlaylistFolderMember,
+    folder: Option<library::PlaylistFolderKey>,
+) -> sources::SourceResult<()> {
+    owner
+        .reply(move |owner, database| async move {
+            database.move_playlist_to_folder(member, folder).await?;
+            playlist_folders_changed(&owner).await;
+            Ok::<_, SourceError>(())
+        })
+        .recv()
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))?
+}
+
 #[derive(Clone)]
 pub enum SmartPlaylistChange {
     Create {
@@ -1293,10 +1388,6 @@ pub enum SmartPlaylistChange {
         artwork: Option<sources::ArtworkChange>,
     },
     Delete(library::SmartPlaylistKey),
-    Move {
-        dragged: library::SmartPlaylistKey,
-        target: library::SmartPlaylistKey,
-    },
 }
 
 async fn append_native_tracks(

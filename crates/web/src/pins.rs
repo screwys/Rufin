@@ -29,6 +29,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
     let mut items = Vec::new();
     for pin in &sidebar.pins {
         let row = match pin {
+            SidebarPin::PlaylistFolder { .. } => continue,
             SidebarPin::Album {
                 album_id,
                 source_id,

@@ -284,7 +284,7 @@ impl AndroidBrowseQuery {
                 page,
                 offset,
                 limit,
-                read.playlists(db, offset, limit, cancel),
+                read.playlist_items(db, offset, limit, cancel),
             )
             .await?
             .into_iter()
@@ -294,7 +294,7 @@ impl AndroidBrowseQuery {
                 page,
                 offset,
                 limit,
-                read.smart_playlists(db, offset, limit, cancel),
+                read.playlist_items(db, offset, limit, cancel),
             )
             .await?
             .into_iter()

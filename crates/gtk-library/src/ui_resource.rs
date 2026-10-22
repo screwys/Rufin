@@ -1,5 +1,8 @@
 pub const ROUTE_PLACEHOLDER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/placeholder.ui";
+pub const PLAYLIST_COMMANDS_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/routes/playlist_commands.ui";
 pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
+    PLAYLIST_COMMANDS_RESOURCE,
     DISC_HEADER_RESOURCE,
     ALBUM_DETAIL_ROW_RESOURCE,
     ALBUM_DETAIL_PANEL_RESOURCE,

@@ -539,6 +539,7 @@ enum SidebarPinItem {
     Genre(GenreView),
     Playlist(PlaylistRow),
     SmartPlaylist(SmartPlaylistRow),
+    PlaylistFolder(library::PlaylistFolderRow),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -571,6 +572,10 @@ impl SidebarPinItem {
                 source_id: playlist.source_id.clone().map(sources::SourceId::new),
                 playlist_id: playlist.object_id.clone(),
             },
+            Self::PlaylistFolder(folder) => SidebarPin::PlaylistFolder {
+                folder_id: folder.object_id.clone(),
+                smart: folder.smart,
+            },
             Self::SmartPlaylist(playlist) => SidebarPin::SmartPlaylist {
                 playlist_id: playlist.object_id.clone(),
             },
@@ -584,6 +589,7 @@ impl SidebarPinItem {
             Self::Genre(genre) => genre.metadata.name.clone(),
             Self::Playlist(playlist) => playlist.name.clone(),
             Self::SmartPlaylist(playlist) => smart_playlist_display_name(playlist),
+            Self::PlaylistFolder(folder) => folder.name.clone(),
         }
     }
 
@@ -594,6 +600,7 @@ impl SidebarPinItem {
             Self::Genre(genre) => genre.summary.track_count,
             Self::Playlist(playlist) => playlist.track_count,
             Self::SmartPlaylist(playlist) => playlist.track_count,
+            Self::PlaylistFolder(folder) => folder.track_count,
         }
         .max(0)
         .try_into()
@@ -607,6 +614,7 @@ impl SidebarPinItem {
             Self::Genre(genre) => genre.summary.duration_millis,
             Self::Playlist(playlist) => playlist.duration_millis,
             Self::SmartPlaylist(playlist) => playlist.duration_millis,
+            Self::PlaylistFolder(folder) => folder.duration_millis,
         }
         .max(0)
         .saturating_div(1_000)
@@ -625,14 +633,19 @@ impl SidebarPinItem {
             Self::SmartPlaylist(playlist) => {
                 Route::SmartPlaylistDetail(playlist.smart_playlist_key)
             }
+            Self::PlaylistFolder(folder) => Route::PlaylistFolder {
+                key: folder.folder_key,
+                smart: folder.smart,
+            },
         }
     }
 
     fn playback_target(
         &self,
         selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> PlayRequest {
-        match self {
+    ) -> Option<PlayRequest> {
+        Some(match self {
+            Self::PlaylistFolder(_) => return None,
             Self::Album(album) => gtk_widgets::selection::album_play_request(&album),
             Self::Artist(artist, album_artist) => {
                 if *album_artist {
@@ -650,7 +663,7 @@ impl SidebarPinItem {
             Self::SmartPlaylist(playlist) => {
                 gtk_widgets::selection::smart_play_request(playlist.smart_playlist_key, selected)
             }
-        }
+        })
     }
 
     fn artwork(&self) -> Vec<ArtworkBinding> {
@@ -674,6 +687,11 @@ impl SidebarPinItem {
                 .map(|binding| ArtworkBinding::opaque(binding))
                 .collect(),
             Self::Playlist(playlist) => playlist_artwork(playlist),
+            Self::PlaylistFolder(folder) => folder
+                .artwork_binding
+                .iter()
+                .map(|binding| ArtworkBinding::opaque(binding))
+                .collect(),
             Self::SmartPlaylist(playlist) => playlist
                 .artwork_binding
                 .iter()
@@ -689,6 +707,14 @@ impl SidebarPinItem {
         position: Option<(f64, f64)>,
     ) {
         match self {
+            Self::PlaylistFolder(folder) => {
+                gtk_media_menus::playlist_folders::present_folder_context_menu(
+                    target,
+                    &shell.media_menus,
+                    folder.clone(),
+                    position,
+                )
+            }
             Self::Album(album) => {
                 present_album_context_menu(
                     target,
@@ -894,6 +920,10 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
                         .pop()
                         .map(SidebarPinItem::Playlist)
                 }
+                SidebarPin::PlaylistFolder { folder_id, .. } => database
+                    .playlist_folder_by_id(&folder_id, current_source, folder, &cancellation)
+                    .await?
+                    .map(SidebarPinItem::PlaylistFolder),
                 SidebarPin::SmartPlaylist { playlist_id, .. } => {
                     let Some(key) = database
                         .smart_playlist_key_by_object(&playlist_id, &cancellation)
@@ -1076,6 +1106,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
     let row_changed = |key: &str, item: &SidebarPinItem| {
         previous_items.get(key).is_some_and(|previous| {
             previous.artwork() != item.artwork()
+                || matches!((previous, item), (SidebarPinItem::PlaylistFolder(previous), SidebarPinItem::PlaylistFolder(next)) if previous.name != next.name)
                 || matches!((previous, item), (SidebarPinItem::SmartPlaylist(previous), SidebarPinItem::SmartPlaylist(next))
                     if previous.definition.current != next.definition.current)
         })
@@ -1279,7 +1310,12 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     title_label.set_hexpand(true);
     title_label.set_width_chars(1);
     title_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    identity.append(&title_label);
+    let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+    if matches!(&pin, SidebarPinItem::PlaylistFolder(_)) {
+        title_row.append(&gtk::Image::from_icon_name("rufin-folders-symbolic"));
+    }
+    title_row.append(&title_label);
+    identity.append(&title_row);
     let metadata = sidebar_pin_metadata(track_count, duration_seconds);
     let source_label = {
         let configured = shell.source.configured.borrow();
@@ -1320,11 +1356,9 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
             shell.navigate(route.clone());
         }
     });
-    install_sidebar_pin_double_click(
-        &activate,
-        shell,
-        pin.playback_target(shell.selected_library().as_deref()),
-    );
+    if let Some(target) = pin.playback_target(shell.selected_library().as_deref()) {
+        install_sidebar_pin_double_click(&activate, shell, target);
+    }
     row.set_child(Some(&activate));
     install_sidebar_pin_drag(&row, &cover, shell, &pin);
     install_playlist_pin_drop(&row, shell, &pin);
@@ -1336,18 +1370,20 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     controls.set_margin_end(2);
     controls.set_visible(false);
     let playback_target = pin.playback_target(shell.selected_library().as_deref());
-    for (icon_name, label, placement) in [
-        (PLAY_ICON, "Play", QueuePlacement::Now),
-        (PLAY_NEXT_ICON, "Play Next", QueuePlacement::Next),
-        (PLAY_LATER_ICON, "Play Later", QueuePlacement::Last),
-    ] {
-        controls.append(&sidebar_pin_transport_button(
-            shell,
-            &playback_target,
-            icon_name,
-            label,
-            placement,
-        ));
+    if let Some(playback_target) = playback_target {
+        for (icon_name, label, placement) in [
+            (PLAY_ICON, "Play", QueuePlacement::Now),
+            (PLAY_NEXT_ICON, "Play Next", QueuePlacement::Next),
+            (PLAY_LATER_ICON, "Play Later", QueuePlacement::Last),
+        ] {
+            controls.append(&sidebar_pin_transport_button(
+                shell,
+                &playback_target,
+                icon_name,
+                label,
+                placement,
+            ));
+        }
     }
     row.add_overlay(&controls);
     row.set_measure_overlay(&controls, false);
@@ -1424,34 +1460,34 @@ fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
             shell.navigate(route.clone());
         }
     });
-    install_sidebar_pin_double_click(
-        &activate,
-        shell,
-        pin.playback_target(shell.selected_library().as_deref()),
-    );
+    if let Some(target) = pin.playback_target(shell.selected_library().as_deref()) {
+        install_sidebar_pin_double_click(&activate, shell, target);
+    }
     row.set_child(Some(&activate));
     install_sidebar_pin_drag(&row, &cover, shell, &pin);
     install_playlist_pin_drop(&row, shell, &pin);
 
-    let (controls, play) = cover_play_only_hover_controls(COMPACT_SIDEBAR_PIN_COVER_SIZE, "Play");
-    play.add_css_class("compact-sidebar-pin-play");
-    play.set_size_request(32, 32);
-    play.set_tooltip_text(Some(&title));
-    let playback_shell = Rc::downgrade(shell);
-    let playback_target = pin.playback_target(shell.selected_library().as_deref());
-    play.connect_clicked(move |_| {
-        let Some(playback_shell) = playback_shell.upgrade() else {
-            return;
-        };
-        crate::shell::catalog_actions::play_target(
-            &playback_target,
-            &playback_shell,
-            QueuePlacement::Now,
-            false,
-        );
-    });
-    controls.add_to_overlay(&row);
-    controls.connect_hover(&row);
+    if let Some(playback_target) = pin.playback_target(shell.selected_library().as_deref()) {
+        let (controls, play) =
+            cover_play_only_hover_controls(COMPACT_SIDEBAR_PIN_COVER_SIZE, "Play");
+        play.add_css_class("compact-sidebar-pin-play");
+        play.set_size_request(32, 32);
+        play.set_tooltip_text(Some(&title));
+        let playback_shell = Rc::downgrade(shell);
+        play.connect_clicked(move |_| {
+            let Some(playback_shell) = playback_shell.upgrade() else {
+                return;
+            };
+            crate::shell::catalog_actions::play_target(
+                &playback_target,
+                &playback_shell,
+                QueuePlacement::Now,
+                false,
+            );
+        });
+        controls.add_to_overlay(&row);
+        controls.connect_hover(&row);
+    }
 
     let context_shell = Rc::downgrade(shell);
     install_context_menu_openers(
@@ -1488,11 +1524,14 @@ fn install_sidebar_pin_drag(
             .upgrade()
             .map(|cover| gtk::WidgetPaintable::new(Some(&cover)).current_image());
         preview.prepare(title.clone(), artwork);
-        let source = MediaDragSource::capture_target(playback.clone());
-        Some(gtk::gdk::ContentProvider::new_union(&[
-            gtk::gdk::ContentProvider::for_value(&payload.to_value()),
-            media_drag_content_provider(source),
-        ]))
+        let pin_provider = gtk::gdk::ContentProvider::for_value(&payload.to_value());
+        Some(match &playback {
+            Some(playback) => gtk::gdk::ContentProvider::new_union(&[
+                pin_provider,
+                media_drag_content_provider(MediaDragSource::capture_target(playback.clone())),
+            ]),
+            None => pin_provider,
+        })
     });
     target.add_controller(drag);
 
@@ -1534,6 +1573,7 @@ fn sidebar_pin_drag_variant(pin: &SidebarPin) -> glib::Variant {
             playlist_id,
         } => (3, source_id.as_ref(), playlist_id, false),
         SidebarPin::SmartPlaylist { playlist_id } => (4, None, playlist_id, false),
+        SidebarPin::PlaylistFolder { folder_id, smart } => (5, None, folder_id, *smart),
     };
     (
         kind,
@@ -1570,6 +1610,10 @@ fn sidebar_pin_from_drag_value(value: &glib::Value) -> Option<SidebarPin> {
         4 => Some(SidebarPin::SmartPlaylist {
             playlist_id: object_id,
         }),
+        5 => Some(SidebarPin::PlaylistFolder {
+            folder_id: object_id,
+            smart: album_artist,
+        }),
         _ => None,
     }
 }
@@ -1579,6 +1623,42 @@ fn install_playlist_pin_drop(
     shell: &Rc<Shell>,
     pin: &SidebarPinItem,
 ) {
+    if let SidebarPinItem::PlaylistFolder(folder) = pin {
+        let folder = folder.clone();
+        let menus = Rc::downgrade(&shell.media_menus);
+        let drop = gtk::DropTarget::new(
+            glib::BoxedAnyObject::static_type(),
+            gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
+        );
+        let smart = folder.smart;
+        drop.set_preload(true);
+        drop.connect_notify_local(Some("value"), move |drop, _| {
+            if let Some(source) = drop
+                .value()
+                .as_ref()
+                .and_then(gtk_widgets::media_drag::media_drag_source)
+                && !gtk_media_menus::playlist_folders::playlist_drag_matches(&source, smart)
+            {
+                drop.reject();
+            }
+        });
+        gtk_widgets::media_drag::style_order_drop_target(&drop, false, |_| false);
+        drop.connect_drop(move |_, value, _, _| {
+            let (Some(menus), Some(source)) = (
+                menus.upgrade(),
+                gtk_widgets::media_drag::media_drag_source(value),
+            ) else {
+                return false;
+            };
+            gtk_media_menus::playlist_folders::drop_playlist_on_folder(
+                &menus,
+                folder.clone(),
+                source,
+            )
+        });
+        target.add_controller(drop);
+        return;
+    }
     let SidebarPinItem::Playlist(playlist) = pin else {
         return;
     };
@@ -1712,6 +1792,7 @@ fn sidebar_pin_route_key(route: &Route) -> Option<String> {
         Route::GenreDetail(id) => Some(format!("sidebar-pin-genre:{id}")),
         Route::PlaylistDetail(id) => Some(format!("sidebar-pin-playlist:{id}")),
         Route::SmartPlaylistDetail(id) => Some(format!("sidebar-pin-smart-playlist:{id}")),
+        Route::PlaylistFolder { key, .. } => Some(format!("sidebar-pin-playlist-folder:{key}")),
         _ => None,
     }
 }

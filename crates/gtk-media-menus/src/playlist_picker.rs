@@ -23,8 +23,8 @@ gtk_widgets::composite_box!(
 );
 
 #[derive(Clone, Debug)]
-struct PlaylistChoice {
-    key: library::PlaylistKey,
+struct PlaylistChoice<Key> {
+    key: Key,
     name: String,
     normalized_name: String,
 }
@@ -41,7 +41,76 @@ pub fn populate_context_playlist_picker(
     source: rufin_core::runtime::SourceHandle,
     feedback: Rc<dyn Fn(&OperationFeedback)>,
     popover: &gtk::PopoverMenu,
+    new_playlist: Rc<dyn Fn(String, library::MemberSelection)>,
 ) -> Rc<dyn Fn(Vec<library::PlaylistRow>, library::MemberSelection, String, Vec<String>)> {
+    let ready = Rc::new(RefCell::new(None::<ReadyPlaylistTracks>));
+    let create_ready = Rc::clone(&ready);
+    let create_popover = popover.downgrade();
+    let activate_ready = Rc::clone(&ready);
+    let activate_popover = popover.downgrade();
+    let update = populate_context_picker(
+        root,
+        false,
+        Rc::new(move |key, destination, skip_duplicates| {
+            let Some(ready) = activate_ready.borrow().clone() else {
+                return;
+            };
+            let feedback = Rc::clone(&feedback);
+            gtk_widgets::playlists::add_media_to_playlist(
+                &source,
+                key,
+                ready.selection,
+                skip_duplicates,
+                Rc::new(move |accepted| {
+                    if accepted > 0 {
+                        feedback(&OperationFeedback {
+                            title: ready.title.clone(),
+                            artwork: OperationArtwork::MediaUris(ready.preview_uris.clone()),
+                            item_count: accepted,
+                            kind: OperationFeedbackKind::PlaylistAdded {
+                                destination: destination.clone(),
+                            },
+                        });
+                    }
+                }),
+            );
+            if let Some(popover) = activate_popover.upgrade() {
+                popdown_native_menu(&popover);
+            }
+        }),
+        Rc::new(move |name| {
+            let selection = create_ready
+                .borrow()
+                .as_ref()
+                .map(|ready| ready.selection.clone());
+            let Some(selection) = selection else { return };
+            if let Some(popover) = create_popover.upgrade() {
+                popdown_native_menu(&popover);
+            }
+            new_playlist(name, selection);
+        }),
+    );
+    Rc::new(move |playlists, selection, title, preview_uris| {
+        ready.replace(Some(ReadyPlaylistTracks {
+            selection,
+            title,
+            preview_uris,
+        }));
+        update(
+            playlists
+                .into_iter()
+                .map(|row| (row.playlist_key, row.name))
+                .collect(),
+        );
+    })
+}
+
+pub(crate) fn populate_context_picker<Key: Clone + 'static>(
+    root: &gtk::Box,
+    folders: bool,
+    activate: Rc<dyn Fn(Key, String, bool)>,
+    create: Rc<dyn Fn(String)>,
+) -> Rc<dyn Fn(Vec<(Key, String)>)> {
     let resource = crate::ui_resource::PLAYLIST_PICKER_CONTEXT_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
@@ -50,12 +119,15 @@ pub fn populate_context_playlist_picker(
         skip_duplicates: gtk::CheckButton,
         list: gtk::ListView,
         spinner: gtk::Spinner,
+        create_playlist: gtk::Button,
+        create_label: gtk::Label,
+        folder_labels: gtk::StringList,
     });
     gtk_widgets::controls::configure_search_entry(&search);
-    search.set_placeholder_text(Some(&tr("Search")));
-    let skip_duplicates_label = tr("Don't duplicate");
-    skip_duplicates.set_tooltip_text(Some(&skip_duplicates_label));
-    skip_duplicates.update_property(&[gtk::accessible::Property::Label(&skip_duplicates_label)]);
+    skip_duplicates.set_visible(!folders);
+    if folders {
+        create_label.set_label(folder_labels.string(0).as_deref().unwrap());
+    }
     root.append(&content);
 
     let store = gio::ListStore::new::<glib::BoxedAnyObject>();
@@ -65,7 +137,7 @@ pub fn populate_context_playlist_picker(
         let Some(item) = item.downcast_ref::<glib::BoxedAnyObject>() else {
             return false;
         };
-        let choice = item.borrow::<PlaylistChoice>();
+        let choice = item.borrow::<PlaylistChoice<Key>>();
         let query = filter_query.borrow();
         query.is_empty() || choice.normalized_name.contains(query.as_str())
     });
@@ -89,19 +161,13 @@ pub fn populate_context_playlist_picker(
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(label) = item
-            .child()
-            .and_then(|child| child.downcast::<gtk::Label>().ok())
-        else {
+        let Some(label) = item.child().and_downcast::<gtk::Label>() else {
             return;
         };
-        let Some(choice) = item
-            .item()
-            .and_then(|item| item.downcast::<glib::BoxedAnyObject>().ok())
-        else {
+        let Some(choice) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
             return;
         };
-        label.set_label(&choice.borrow::<PlaylistChoice>().name);
+        label.set_label(&choice.borrow::<PlaylistChoice<Key>>().name);
     });
     list.set_model(Some(&selection));
     list.set_factory(Some(&factory));
@@ -112,76 +178,70 @@ pub fn populate_context_playlist_picker(
         search_filter.changed(gtk::FilterChange::Different);
     });
 
-    let ready = Rc::new(RefCell::new(None::<ReadyPlaylistTracks>));
-    let activate_ready = Rc::clone(&ready);
+    create_playlist.connect_clicked(move |_| create(search.text().trim().to_owned()));
     let activate_model = filtered.clone();
-    let activate_skip = skip_duplicates.clone();
-    let activate_popover = popover.downgrade();
     list.connect_activate(move |_, position| {
-        let Some(ready) = activate_ready.borrow().clone() else {
-            return;
-        };
-        let Some(choice) = activate_model
+        if let Some(choice) = activate_model
             .item(position)
-            .and_then(|item| item.downcast::<glib::BoxedAnyObject>().ok())
-            .map(|item| item.borrow::<PlaylistChoice>().clone())
-        else {
-            return;
-        };
-        let title = ready.title.clone();
-        let preview_uris = ready.preview_uris.clone();
-        let destination = choice.name;
-        let feedback = Rc::clone(&feedback);
-        gtk_widgets::playlists::add_media_to_playlist(
-            &source,
-            choice.key,
-            ready.selection,
-            activate_skip.is_active(),
-            Rc::new(move |accepted| {
-                if accepted > 0 {
-                    feedback(&OperationFeedback {
-                        title: title.clone(),
-                        artwork: OperationArtwork::MediaUris(preview_uris.clone()),
-                        item_count: accepted,
-                        kind: OperationFeedbackKind::PlaylistAdded {
-                            destination: destination.clone(),
-                        },
-                    });
-                }
-            }),
-        );
-        if let Some(popover) = activate_popover.upgrade() {
-            popdown_native_menu(&popover);
+            .and_downcast::<glib::BoxedAnyObject>()
+        {
+            let choice = choice.borrow::<PlaylistChoice<Key>>();
+            activate(
+                choice.key.clone(),
+                choice.name.clone(),
+                skip_duplicates.is_active(),
+            );
         }
     });
-
     let root = root.downgrade();
+    let create_playlist = create_playlist.downgrade();
     let spinner = spinner.downgrade();
-    Rc::new(move |playlists, selection, title, preview_uris| {
+    Rc::new(move |choices| {
         if root.upgrade().is_none() {
             return;
         }
-        let choices = playlists
+        let choices = choices
             .into_iter()
-            .map(|playlist| {
+            .map(|(key, name)| {
                 glib::BoxedAnyObject::new(PlaylistChoice {
-                    key: playlist.playlist_key,
-                    normalized_name: playlist.name.to_lowercase(),
-                    name: playlist.name,
+                    key,
+                    normalized_name: name.to_lowercase(),
+                    name,
                 })
             })
             .collect::<Vec<_>>();
-        store.splice(0, 0, &choices);
-        ready.replace(Some(ReadyPlaylistTracks {
-            selection,
-            title,
-            preview_uris,
-        }));
+        store.splice(0, store.n_items(), &choices);
+        if let Some(create_playlist) = create_playlist.upgrade() {
+            create_playlist.set_sensitive(true);
+        }
         if let Some(spinner) = spinner.upgrade() {
             spinner.stop();
             spinner.set_visible(false);
         }
     })
+}
+
+pub(crate) fn folder_picker_dialog() -> (adw::Dialog, gtk::Box) {
+    let resource = crate::ui_resource::PLAYLIST_PICKER_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    gtk_widgets::objects!(builder, resource, {
+        dialog: adw::Dialog, title: adw::WindowTitle, search: gtk::SearchEntry,
+        list: gtk::Box, skip: gtk::CheckButton, cancel: gtk::Button, add: gtk::Button,
+        folder_labels: gtk::StringList,
+    });
+    let label = folder_labels.string(0).unwrap();
+    dialog.set_title(&label);
+    title.set_title(&label);
+    search.set_visible(false);
+    skip.set_visible(false);
+    add.set_visible(false);
+    let close = dialog.downgrade();
+    cancel.connect_clicked(move |_| {
+        if let Some(dialog) = close.upgrade() {
+            dialog.close();
+        }
+    });
+    (dialog, list)
 }
 
 #[derive(Clone)]
@@ -210,6 +270,7 @@ pub fn playlist_picker_dialog(
         search: gtk::SearchEntry,
         list: gtk::Box,
         create: gtk::Button,
+        create_label: gtk::Label,
         skip: gtk::CheckButton,
         cancel: gtk::Button,
         add: gtk::Button,
@@ -227,11 +288,12 @@ pub fn playlist_picker_dialog(
 
     let filter_rows = Rc::clone(&rows);
     let filter_create = create.clone();
+    let filter_create_label = create_label.clone();
     let filter_add = add.clone();
     search.connect_search_changed(move |entry| {
         let text = entry.text();
         let query = text.trim().to_lowercase();
-        filter_create.set_label(&format!("+ {} {}", tr("Create"), text.trim()));
+        filter_create_label.set_label(&format!("{} {}", tr("Create"), text.trim()));
         filter_create.set_visible(!query.is_empty());
         for row in filter_rows.borrow().iter() {
             row.row

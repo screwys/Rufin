@@ -2588,6 +2588,7 @@ mod tests {
             if revision == 2 {
                 assert!(
                     crate::ListRead {
+                        playlist_scope: Default::default(),
                         kind: crate::ListKind::Playlists,
                         source: (None).into(),
                         sort: crate::CatalogSort::Position,

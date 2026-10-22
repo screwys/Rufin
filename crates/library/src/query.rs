@@ -60,8 +60,21 @@ pub enum ListKind {
     },
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum PlaylistScope {
+    #[default]
+    All,
+    Root,
+    Folder {
+        key: PlaylistFolderKey,
+    },
+    Folders,
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ListRead {
+    #[serde(default)]
+    pub playlist_scope: PlaylistScope,
     pub kind: ListKind,
     pub source: Option<SourceKey>,
     pub folder: Option<FolderKey>,
@@ -282,6 +295,7 @@ impl ListRead {
         Self {
             kind,
             source,
+            playlist_scope: PlaylistScope::All,
             sort,
             folder: None,
             filter: String::new(),
@@ -421,6 +435,9 @@ list_windows!(moods, page_moods, MoodView, connection, read, requested => {
 });
 list_windows!(playlists, page_playlists, PlaylistRow, connection, _read, requested => {
     Database::load_playlist_requested(connection, requested)
+});
+list_windows!(playlist_items, page_playlist_items, PlaylistListRow, connection, read, requested => {
+    crate::playlist_folders::load_items_on(connection, read, requested)
 });
 list_windows!(smart_playlists, page_smart_playlists, SmartPlaylistRow, connection, read, requested => {
     let ListKind::SmartPlaylists { now } = read.kind else {
@@ -566,25 +583,9 @@ pub(crate) async fn list_query_on(
     read: &ListRead,
 ) -> LibraryResult<OrderedQuery> {
     match read.kind {
-        ListKind::SmartPlaylists { now } => {
-            crate::smart_playlists::smart_list_query(
-                connection,
-                read.source,
-                read.folder,
-                read.sort,
-                read.descending,
-                &read.filter,
-                now,
-            )
-            .await
+        ListKind::Playlists | ListKind::SmartPlaylists { .. } => {
+            crate::playlist_folders::playlist_query_on(connection, read).await
         }
-        ListKind::Playlists => Ok(crate::playlists::playlist_list_query(
-            read.source,
-            read.folder,
-            read.sort,
-            read.descending,
-            &read.filter,
-        )),
         _ => Ok(crate::collections::collection_query(read)),
     }
 }

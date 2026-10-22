@@ -282,7 +282,7 @@ impl Database {
                     .await?
             }
             44..=46 => crate::migration::import_current(input, destination, catalog).await?,
-            0 | 47 | 48 | 49 | 50 | 51 | 53 | 54 | 55 => {
+            0 | 47 | 48 | 49 | 50 | 51 | 53 | 54 | 55 | 56 => {
                 if input != destination {
                     Self::relocate(input, destination).await?;
                 }

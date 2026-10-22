@@ -150,6 +150,7 @@ gtk_widgets::composite_box!(
     {
         title_row: gtk::Box,
         title: gtk::Label,
+        folder_icon: gtk::Image,
     }
 );
 
@@ -1235,6 +1236,10 @@ impl CollectionGridCardCell {
             self.title_row.remove(&previous);
         }
         self.title_row.append(&badge);
+    }
+
+    pub fn set_folder(&self, folder: bool) {
+        self.card.imp().folder_icon.set_visible(folder);
     }
 
     pub fn bind_playing_target(&self, shell: &CatalogUi, target: PlayRequest) {

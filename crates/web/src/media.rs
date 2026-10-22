@@ -141,6 +141,7 @@ async fn random_settings(
     )
     .await?;
     let query = library::ListRead {
+        playlist_scope: Default::default(),
         kind: library::ListKind::Genres,
         source: Some(source),
         sort: library::CatalogSort::Title,

@@ -168,8 +168,10 @@ pub fn library_list_key(route: &Route, category: CollectionCategory) -> LibraryL
         Route::AlbumArtists => LibraryListKey::AlbumArtists,
         Route::Genres => LibraryListKey::Genres,
         Route::Moods => LibraryListKey::Moods,
-        Route::Playlists => LibraryListKey::Playlists,
-        Route::SmartPlaylists => LibraryListKey::SmartPlaylists,
+        Route::Playlists | Route::PlaylistFolder { smart: false, .. } => LibraryListKey::Playlists,
+        Route::SmartPlaylists | Route::PlaylistFolder { smart: true, .. } => {
+            LibraryListKey::SmartPlaylists
+        }
         Route::PlaylistDetail(_) => LibraryListKey::PlaylistTracks,
         Route::SmartPlaylistDetail(_) => LibraryListKey::SmartPlaylistTracks,
         Route::AlbumDetail(_) => LibraryListKey::AlbumDetailTracks,
@@ -366,11 +368,11 @@ pub enum OpenedCollection {
     },
     Playlists {
         read: ListRead,
-        page: Page<library::PlaylistRow>,
+        page: Page<library::PlaylistListRow>,
     },
     SmartPlaylists {
         read: ListRead,
-        page: Page<library::SmartPlaylistRow>,
+        page: Page<library::PlaylistListRow>,
     },
     Folders(FolderPage),
     Home(Box<library::HomePage>),
@@ -434,7 +436,11 @@ pub fn supports_downloaded_filter(route: &Route, category: CollectionCategory) -
 pub fn uses_activity(route: &Route, settings: &LibraryListSettings) -> bool {
     matches!(
         route,
-        Route::Home | Route::SmartPlaylists | Route::SmartPlaylistDetail(_) | Route::History
+        Route::Home
+            | Route::SmartPlaylists
+            | Route::SmartPlaylistDetail(_)
+            | Route::PlaylistFolder { smart: true, .. }
+            | Route::History
     ) || settings.sort_key.catalog_sort().activity_sensitive()
         || match settings.layout {
             LibraryLayout::Grid => &settings.grid_fields,
@@ -784,14 +790,26 @@ impl crate::source::SourceOwner {
                 let page = read.page_moods(database, window, cancel).await?;
                 OpenedCollection::Moods { read, page }
             }
-            Route::Playlists => {
-                let read = list(ListKind::Playlists);
-                let page = read.page_playlists(database, window, cancel).await?;
+            Route::Playlists | Route::PlaylistFolder { smart: false, .. } => {
+                let mut read = list(ListKind::Playlists);
+                read.playlist_scope = match route {
+                    Route::PlaylistFolder { key, .. } => {
+                        library::PlaylistScope::Folder { key: *key }
+                    }
+                    _ => library::PlaylistScope::Root,
+                };
+                let page = read.page_playlist_items(database, window, cancel).await?;
                 OpenedCollection::Playlists { read, page }
             }
-            Route::SmartPlaylists => {
-                let read = list(ListKind::SmartPlaylists { now });
-                let page = read.page_smart_playlists(database, window, cancel).await?;
+            Route::SmartPlaylists | Route::PlaylistFolder { smart: true, .. } => {
+                let mut read = list(ListKind::SmartPlaylists { now });
+                read.playlist_scope = match route {
+                    Route::PlaylistFolder { key, .. } => {
+                        library::PlaylistScope::Folder { key: *key }
+                    }
+                    _ => library::PlaylistScope::Root,
+                };
+                let page = read.page_playlist_items(database, window, cancel).await?;
                 OpenedCollection::SmartPlaylists { read, page }
             }
             Route::Folders { path } => {

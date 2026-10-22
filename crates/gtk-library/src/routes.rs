@@ -665,13 +665,13 @@ impl CatalogUi {
     pub fn library_playlists_route(
         self: &Rc<Self>,
         read: library::ListRead,
-        page: library::Page<library::PlaylistRow>,
+        page: library::Page<library::PlaylistListRow>,
     ) -> MountedRoute {
         self.collection_list_route(
             LibraryListKey::Playlists,
             msgid("No playlists yet"),
             page,
-            |row: &library::PlaylistRow| row.playlist_key,
+            |row: &library::PlaylistListRow| row.key(),
             read,
         )
     }
@@ -679,13 +679,13 @@ impl CatalogUi {
     pub fn library_smart_playlists_route(
         self: &Rc<Self>,
         read: library::ListRead,
-        page: library::Page<library::SmartPlaylistRow>,
+        page: library::Page<library::PlaylistListRow>,
     ) -> MountedRoute {
         self.collection_list_route(
             LibraryListKey::SmartPlaylists,
             msgid("No smart playlists yet"),
             page,
-            |row: &library::SmartPlaylistRow| row.smart_playlist_key,
+            |row: &library::PlaylistListRow| row.key(),
             read,
         )
     }

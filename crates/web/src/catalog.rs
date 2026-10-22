@@ -355,6 +355,7 @@ pub(super) async fn artists_data(
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(128);
     let query = library::ListRead {
+        playlist_scope: Default::default(),
         kind: library::ListKind::Artists {
             album_artist: boolean(parameters, "album_artists")?,
         },
@@ -458,6 +459,7 @@ pub(super) async fn smart_playlists_data(
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 48)?.min(64);
     let query = library::ListRead {
+        playlist_scope: Default::default(),
         kind: library::ListKind::SmartPlaylists { now: now() },
         source: (source).into(),
         sort: sort,
@@ -559,6 +561,7 @@ pub(super) async fn albums_data(
         _ => return Err(bad_request("Unknown album sort")),
     };
     let query = library::ListRead {
+        playlist_scope: Default::default(),
         kind: library::ListKind::Albums,
         source: Some(source),
         sort: sort,

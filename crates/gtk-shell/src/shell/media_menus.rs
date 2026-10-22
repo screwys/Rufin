@@ -7,6 +7,22 @@ pub(super) fn build(
     settings: Rc<gtk_widgets::settings::SettingsState>,
 ) -> Rc<MediaMenus> {
     Rc::new(MediaMenus {
+        current_route: {
+            let weak = weak.clone();
+            Rc::new(move || {
+                weak.upgrade()
+                    .map(|shell| shell.navigation.routes.borrow().current().clone())
+                    .unwrap_or(gtk_widgets::route::Route::Home)
+            })
+        },
+        present_dialog: {
+            let weak = weak.clone();
+            Rc::new(move |dialog| {
+                if let Some(shell) = weak.upgrade() {
+                    shell.present_selected_dialog(dialog);
+                }
+            })
+        },
         library: products.library.clone(),
         runtime: products.runtime.clone(),
         source: products.source.clone(),

@@ -2060,6 +2060,7 @@ mod tests {
             .expect("published source")
             .source;
         let albums = library::ListRead {
+            playlist_scope: Default::default(),
             kind: library::ListKind::Albums,
             source: Some(source_key),
             sort: library::CatalogSort::Title,

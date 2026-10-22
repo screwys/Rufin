@@ -22,7 +22,7 @@
           <object class="GtkBox" id="controls">
             <property name="spacing">12</property>
             <child>
-              <object class="GtkButton" id="command_button">
+              <object class="GtkMenuButton" id="command_button">
                 <style><class name="library-toolbar-icon-button"/></style>
                 <property name="visible">false</property>
                 <property name="icon-name">rufin-list-add-symbolic</property>

@@ -8,6 +8,10 @@ import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.createPlaylist
 import io.github.screwys.rufin.shared.rufin_core.addPlaylistTracks
 import io.github.screwys.rufin.shared.rufin_core.deletePlaylist
+import io.github.screwys.rufin.shared.rufin_core.deletePlaylistFolder
+import io.github.screwys.rufin.shared.rufin_core.movePlaylistToFolder
+import io.github.screwys.rufin.shared.library.PlaylistFolderMember
+import io.github.screwys.rufin.core.AndroidBrowseItem
 import io.github.screwys.rufin.shared.library.MemberSelection
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.RufinIcon
@@ -181,6 +185,18 @@ internal fun BrowseMenuSheet(
     var rename by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf(false) }
     var random by remember { mutableStateOf(false) }
+    var folderPicker by remember { mutableStateOf(false) }
+    val playlistFolder = (item.row.item as? io.github.screwys.rufin.core.AndroidBrowseItem.PlaylistFolder)?.row
+    val smartPlaylist = (item.row.item as? io.github.screwys.rufin.core.AndroidBrowseItem.SmartPlaylist)?.row
+    val folderMember = item.row.playlistFolderMember
+    var memberFolder by remember(item.row.key) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(folderMember, browse.library) {
+        if (folderMember != null) {
+            try { memberFolder = browse.library?.playlistMemberFolder(folderMember) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { model.runAction { throw failure } }
+        }
+    }
     var navigation by remember(item.row.key) { mutableStateOf(false) }
     val canRate = item.row.kind in setOf("track", "album", "album_header", "artist")
     var rating by remember(item.row.item) { mutableStateOf(item.row.rating) }
@@ -270,6 +286,15 @@ internal fun BrowseMenuSheet(
                     })
                 }
                 BrowseMenuAction("rufin-playlists-symbolic", "Add to Playlist", onPlaylist)
+                if (folderMember != null) {
+                    BrowseMenuAction("rufin-folders-symbolic", "Add to folder") { folderPicker = true }
+                    if (memberFolder != null) BrowseMenuAction("rufin-list-remove-symbolic", "Remove from folder") { model.runAction {
+                        val source = model.sourceOwner ?: return@runAction
+                        movePlaylistToFolder(source, folderMember, null)
+                        browse.refresh()
+                        onDismiss()
+                    } }
+                }
                 downloaded?.let { status ->
                     if (status.downloaded == 0UL || status.downloaded < status.total)
                         BrowseMenuAction("rufin-download-symbolic", "Download") { browse.download(item); onDismiss() }
@@ -284,6 +309,14 @@ internal fun BrowseMenuSheet(
             pinned?.let { isPinned -> BrowseMenuAction("rufin-bookmark-symbolic",
                 if (isPinned) "Remove from Pins" else "Add to Pins") { browse.pin(item, !isPinned); onDismiss() } }
             onRemove?.let { BrowseMenuAction("rufin-user-trash-symbolic", "Remove", it) }
+            if (playlistFolder != null) {
+                BrowseMenuAction("rufin-document-edit-symbolic", "Rename folder") { rename = true }
+                BrowseMenuAction("rufin-user-trash-symbolic", "Delete folder") { delete = true }
+            }
+            if (smartPlaylist != null) {
+                BrowseMenuAction("rufin-document-edit-symbolic", "Edit Smart Playlist") { rename = true }
+                BrowseMenuAction("rufin-user-trash-symbolic", "Delete Playlist") { delete = true }
+            }
             if ((item.row.item as? io.github.screwys.rufin.core.AndroidBrowseItem.Playlist)?.row?.metadataWritable == true && item.row.detailRoute is Route.PlaylistDetail) {
                 MediaMenuDivider()
                 BrowseMenuAction("rufin-document-edit-symbolic", "Edit Playlist") { rename = true }
@@ -303,14 +336,26 @@ internal fun BrowseMenuSheet(
         navigation = false; onDismiss(); onNavigate(route, title, source)
     }, { navigation = false }, mediaUri = item.row.mediaUri, originRoute = item.row.detailRoute)
     if (random) RandomPlaySheet(model, browse) { random = false; onDismiss() }
-    if (rename) browse.library?.let { library ->
-        PlaylistEditor(model, library, player, (item.row.detailRoute as Route.PlaylistDetail).v1, item.row.title,
-            onChanged = browse::refresh, onDismiss = { rename = false; onDismiss() })
+    if (folderPicker) PlaylistPickerSheet(model, browse, item, player,
+        folderKind = folderMember is PlaylistFolderMember.SmartPlaylist) { folderPicker = false; onDismiss() }
+    if (rename) {
+        if (playlistFolder != null) PlaylistFolderNameDialog(model, browse, playlistFolder.smart,
+            { rename = false; onDismiss() }, playlistFolder)
+        else if (smartPlaylist != null) SmartPlaylistEditor(model, browse, { rename = false; onDismiss() }, smartPlaylist)
+        else browse.library?.let { library ->
+            PlaylistEditor(model, library, player, (item.row.detailRoute as Route.PlaylistDetail).v1, item.row.title,
+                onChanged = browse::refresh, onDismiss = { rename = false; onDismiss() })
+        }
     }
     if (delete) AlertDialog(onDismissRequest = { delete = false },
         title = { Text(translate("Delete \"{name}\"?").replace("{name}", item.row.title)) },
         confirmButton = { TextButton({ model.runAction {
-            model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
+            if (playlistFolder != null) {
+                val source = model.sourceOwner ?: return@runAction
+                deletePlaylistFolder(source, playlistFolder.folderKey)
+                if ((browse.current?.route as? Route.PlaylistFolder)?.key == playlistFolder.folderKey) browse.back()
+            } else if (smartPlaylist != null) browse.library?.deleteSmartPlaylist(smartPlaylist.smartPlaylistKey)
+            else model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
                 deletePlaylist(source, (item.row.detailRoute as Route.PlaylistDetail).v1)
             }
             browse.refresh()
@@ -444,27 +489,30 @@ internal fun BrowseMenuAction(icon: String, label: String, action: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun PlaylistPickerSheet(model: RufinConnection, browse: BrowseConnection, item: BrowseItem, player: PlayerConnection, onDismiss: () -> Unit) {
+internal fun PlaylistPickerSheet(
+    model: RufinConnection, browse: BrowseConnection, item: BrowseItem, player: PlayerConnection,
+    folderKind: Boolean? = null, onDismiss: () -> Unit,
+) {
     var filter by remember { mutableStateOf("") }
     var skipDuplicates by remember { mutableStateOf(true) }
     var create by remember { mutableStateOf(false) }
     val library = browse.library
-    val route = browse.routes.firstOrNull { it.id == "Playlists" }?.route
-    val pages = remember(library, route, filter) {
+    val pages = remember(library, filter, folderKind) {
         Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
-            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, route, filter) }.flow
+            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, Route.Playlists, filter, folderKind) }.flow
     }.collectAsLazyPagingItems()
     val loadError = (pages.loadState.refresh as? LoadState.Error)?.error ?: (pages.loadState.append as? LoadState.Error)?.error
     LaunchedEffect(loadError) { loadError?.let { error -> model.runAction { throw error } } }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surface,
         dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Text(translate("Add to Playlist"), Modifier.padding(horizontal = 24.dp, vertical = 16.dp), style = MaterialTheme.typography.titleLarge)
+        Text(translate(if (folderKind == null) "Add to Playlist" else "Add to folder"),
+            Modifier.padding(horizontal = 24.dp, vertical = 16.dp), style = MaterialTheme.typography.titleLarge)
         BrowseMenuHeader(item, player)
-        OutlinedTextField(filter, { filter = it }, label = { Text(translate("Search playlists")) }, singleLine = true,
+        OutlinedTextField(filter, { filter = it }, label = { Text(translate(if (folderKind == null) "Search playlists" else "Search")) }, singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp))
-        ListItem(headlineContent = { Text(translate("Don't duplicate")) },
+        if (folderKind == null) ListItem(headlineContent = { Text(translate("Don't duplicate")) },
             trailingContent = { Switch(skipDuplicates, { skipDuplicates = it }) })
-        BrowseMenuAction("rufin-folder-new-symbolic", "New Playlist") { create = true }
+        BrowseMenuAction("rufin-list-add-symbolic", if (folderKind == null) "New Playlist" else "New folder") { create = true }
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
             if (pages.itemCount == 0 && pages.loadState.refresh is LoadState.NotLoading) item {
                 BrowseEmptyState(filter.isNotBlank()) { filter = "" }
@@ -479,7 +527,11 @@ internal fun PlaylistPickerSheet(model: RufinConnection, browse: BrowseConnectio
                         leadingContent = { Artwork(artwork, Modifier.size(50.dp).clip(RoundedCornerShape(8.dp))) },
                         modifier = Modifier.clickable {
                         model.runAction {
-                            playlist.detailRoute?.let { destination ->
+                            if (folderKind != null) {
+                                val source = model.sourceOwner ?: return@runAction
+                                movePlaylistToFolder(source, item.row.playlistFolderMember!!,
+                                    (playlist.item as AndroidBrowseItem.PlaylistFolder).row.folderKey)
+                            } else playlist.detailRoute?.let { destination ->
                                 browse.library?.let { library ->
                                     playlistSelection(library, item).use { selection ->
                                         model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
@@ -502,7 +554,11 @@ internal fun PlaylistPickerSheet(model: RufinConnection, browse: BrowseConnectio
             } }
         }
     }
-    if (create) PlaylistCreateSheet(model, { create = false }) { name, sourceId, public ->
+    if (create && folderKind != null) PlaylistFolderNameDialog(model, browse, folderKind, {
+        create = false
+        pages.refresh()
+    })
+    if (create && folderKind == null) PlaylistCreateSheet(model, { create = false }) { name, sourceId, public ->
         browse.library?.let { library ->
             playlistSelection(library, item).use { selection ->
                 model.connectedService().runtime.value!!.getOrThrow().source().use { source ->
@@ -561,12 +617,22 @@ internal fun PlaylistCreateSheet(
 
 internal class BrowseChoiceSource(
     private val library: AndroidLibrary?, private val route: Route?, private val filter: String,
+    private val folderKind: Boolean? = null,
 ) : PagingSource<Int, AndroidBrowseRow>() {
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, AndroidBrowseRow> = try {
         withContext(Dispatchers.Default) {
             val offset = params.key ?: 0
             if (library == null || route == null) LoadResult.Page(emptyList(), null, null)
             else {
+                if (route == Route.Playlists) {
+                    val page = library.playlistChoices(filter, folderKind, offset.toULong(), params.loadSize.toUInt())
+                    val count = page.count.toInt()
+                    val rows = page.rows
+                    return@withContext LoadResult.Page(rows,
+                        if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
+                        if (offset + rows.size >= count) null else offset + rows.size,
+                        itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))
+                }
                 val tracks = when (route) {
                     is Route.ArtistDetail -> Route.ArtistTracks(route.v1)
                     is Route.AlbumArtistDetail -> Route.AlbumArtistTracks(route.v1)

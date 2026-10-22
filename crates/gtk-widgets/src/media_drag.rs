@@ -43,12 +43,7 @@ impl CollectionTargets {
             Self::Parents(reads) => {
                 let mut collections = Vec::new();
                 for (read, ranges) in reads {
-                    collections.extend(
-                        database
-                            .selected_collections(read, ranges, &library::ReadCancellation::new())
-                            .await
-                            .map_err(|error| error.to_string())?,
-                    );
+                    collections.extend(selected_parent_collections(database, read, ranges).await?);
                 }
                 Ok(collections)
             }
@@ -60,10 +55,7 @@ impl CollectionTargets {
             Self::Parents(reads) => {
                 let mut targets = Vec::new();
                 for (read, ranges) in reads {
-                    let collections = database
-                        .selected_collections(read, ranges, &library::ReadCancellation::new())
-                        .await
-                        .map_err(|error| error.to_string())?;
+                    let collections = selected_parent_collections(database, read, ranges).await?;
                     targets.extend(collections.into_iter().map(|collection| {
                         if let library::Collection::Smart { key, .. } = collection {
                             let mut members = library::MemberRead::new(collection);
@@ -86,10 +78,22 @@ impl CollectionTargets {
     }
 }
 
+async fn selected_parent_collections(
+    database: &library::Database,
+    read: &library::ListRead,
+    ranges: &[Range<usize>],
+) -> Result<Vec<library::Collection>, String> {
+    let cancel = library::ReadCancellation::new();
+    database
+        .selected_collections(read, ranges, &cancel)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 pub fn install_parent_selection<K, R>(
     sparse: &Rc<crate::sparse_model::SparseRouteModel<K, R>>,
     read: Rc<RefCell<library::ListRead>>,
-    target: impl Fn(&R) -> PlayRequest + Send + Sync + 'static,
+    target: impl Fn(&R) -> Option<PlayRequest> + Send + Sync + 'static,
 ) where
     K: Clone + Eq + Send + Sync + 'static,
     R: Clone + Send + Sync + 'static,
@@ -100,7 +104,10 @@ pub fn install_parent_selection<K, R>(
         .set_collection_selection(Box::new(move |dragged, positions| {
             let sparse = weak.upgrade()?;
             let position = sparse.ready_position(|row| {
-                match (target(row).selection(), dragged.selection()) {
+                match (
+                    target(row).and_then(|target| target.selection()),
+                    dragged.selection(),
+                ) {
                     (
                         Some(library::MemberSelection::Members { read: left, .. }),
                         Some(library::MemberSelection::Members { read: right, .. }),
@@ -539,6 +546,17 @@ impl MediaDragSource {
         database: &library::Database,
     ) -> Result<library::MemberSelection, String> {
         match self {
+            Self::Targets {
+                targets: CollectionTargets::Parents(reads),
+            } => Ok(library::MemberSelection::Concat(
+                reads
+                    .iter()
+                    .map(|(read, ranges)| library::MemberSelection::Parents {
+                        read: read.clone(),
+                        ranges: Some(ranges.clone()),
+                    })
+                    .collect(),
+            )),
             Self::MediaUris(uris)
             | Self::Queue {
                 media_uris: uris, ..

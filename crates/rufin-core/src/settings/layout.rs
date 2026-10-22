@@ -1128,13 +1128,11 @@ pub fn available_sort_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::Duration,
         ],
         LibraryListKey::Playlists => &[
-            LibraryField::RowIndex,
             LibraryField::Title,
             LibraryField::SongCount,
             LibraryField::Duration,
         ],
         LibraryListKey::SmartPlaylists => &[
-            LibraryField::RowIndex,
             LibraryField::Title,
             LibraryField::SongCount,
             LibraryField::Duration,
@@ -1302,12 +1300,12 @@ fn default_sort_key(key: LibraryListKey) -> LibraryField {
         | LibraryListKey::ArtistAlbums
         | LibraryListKey::Tracks
         | LibraryListKey::Folders
-        | LibraryListKey::FavoriteTracks => LibraryField::Title,
+        | LibraryListKey::FavoriteTracks
+        | LibraryListKey::Playlists
+        | LibraryListKey::SmartPlaylists => LibraryField::Title,
         LibraryListKey::History => LibraryField::LastPlayed,
         LibraryListKey::Queue
         | LibraryListKey::FullscreenTracks
-        | LibraryListKey::Playlists
-        | LibraryListKey::SmartPlaylists
         | LibraryListKey::PlaylistTracks => LibraryField::RowIndex,
         LibraryListKey::AlbumDetailTracks
         | LibraryListKey::ArtistTracks

@@ -10,7 +10,7 @@ use crate::{
     SmartPlaylistKey, SourceKey,
 };
 
-const SMART_PLAYLIST_ROW_LIMIT: usize = 64;
+pub(crate) const SMART_PLAYLIST_ROW_LIMIT: usize = 64;
 const SMART_PLAYLIST_RULE_LIMIT: usize = 64;
 const SMART_PLAYLIST_DEFINITION_BYTES: usize = 256 * 1024;
 const MOST_PLAYED_OBJECT_ID: &str = "builtin:most_played";
@@ -1553,13 +1553,18 @@ pub(crate) async fn smart_query(
 
 pub(crate) async fn smart_list_query(
     connection: &mut SqliteConnection,
-    source: Option<SourceKey>,
-    folder: Option<FolderKey>,
-    sort: CatalogSort,
-    descending: bool,
-    filter: &str,
+    read: &crate::ListRead,
     now: i64,
 ) -> LibraryResult<crate::query::OrderedQuery> {
+    let source = read.source;
+    let folder = read.folder;
+    let sort = read.sort;
+    let descending = read.descending;
+    let filter = &read.filter;
+    let playlist_folder = match read.playlist_scope {
+        crate::PlaylistScope::Folder { key } => Some(key),
+        _ => None,
+    };
     let text = (sort == CatalogSort::Title).then(|| "playlist.normalized_name".into());
     let field = match sort {
         CatalogSort::Position => "playlist.position",
@@ -1571,7 +1576,19 @@ pub(crate) async fn smart_list_query(
     let from = if folder.is_none() && matches!(sort, CatalogSort::Position | CatalogSort::Title) {
         "smart_playlists playlist".into()
     } else {
-        let policy = smart_membership_sql(connection, source, folder, now, None).await?;
+        let keys = if let Some(key) = playlist_folder {
+            Some(
+                sqlx::query_scalar(
+                    "SELECT smart_playlist_key FROM smart_playlists WHERE playlist_folder_key=?1",
+                )
+                .bind(key)
+                .fetch_all(&mut *connection)
+                .await?,
+            )
+        } else {
+            None
+        };
+        let policy = smart_membership_sql(connection, source, folder, now, keys.as_deref()).await?;
         format!(
             "({policy}, totals AS (SELECT definition_key,count(*) track_count,COALESCE(sum(track.duration_millis),0) duration_millis FROM selected JOIN tracks track INDEXED BY tracks_duration_idx USING(track_key) GROUP BY definition_key) SELECT definitions.*,definition_key smart_playlist_key,COALESCE(track_count,0) track_count,COALESCE(duration_millis,0) duration_millis FROM definitions LEFT JOIN totals USING(definition_key) WHERE current_scope=0 OR {} OR track_count>0) playlist",
             if folder.is_none() { "1" } else { "0" }

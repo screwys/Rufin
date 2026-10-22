@@ -13,6 +13,7 @@
       <object class="GtkBox" id="title_row">
         <property name="spacing">5</property>
         <property name="hexpand">true</property>
+        <child><object class="GtkImage" id="folder_icon"><property name="visible">false</property><property name="icon-name">rufin-folders-symbolic</property></object></child>
         <child>
           <object class="GtkLabel" id="title">
             <property name="width-request">1</property>

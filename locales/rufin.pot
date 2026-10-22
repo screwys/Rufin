@@ -320,6 +320,9 @@ msgstr ""
 msgid "Add to Playlist"
 msgstr ""
 
+msgid "Add to folder"
+msgstr ""
+
 msgid "Add to library"
 msgstr ""
 
@@ -846,6 +849,9 @@ msgstr ""
 msgid "Composer"
 msgstr ""
 
+msgid "Condition"
+msgstr ""
+
 msgid "Configure another"
 msgstr ""
 
@@ -1125,6 +1131,9 @@ msgstr ""
 
 #, python-brace-format, rust-format
 msgid "Delete \"{name}\"?"
+msgstr ""
+
+msgid "Delete folder"
 msgstr ""
 
 msgid "Delete playlist file"
@@ -1576,6 +1585,9 @@ msgid "Fixed position"
 msgstr ""
 
 msgid "Flat"
+msgstr ""
+
+msgid "Folder name"
 msgstr ""
 
 msgid "Folder path"
@@ -2100,6 +2112,9 @@ msgstr ""
 msgid "Maximum year"
 msgstr ""
 
+msgid "Maximum"
+msgstr ""
+
 #, rust-format
 msgid "May {year}"
 msgstr ""
@@ -2132,6 +2147,9 @@ msgid "Minimize overview"
 msgstr ""
 
 msgid "Minimum year"
+msgstr ""
+
+msgid "Minimum"
 msgstr ""
 
 msgid "Mirrored bars"
@@ -2309,6 +2327,12 @@ msgid "New download rule"
 msgstr ""
 
 msgid "New file"
+msgstr ""
+
+msgid "New folder"
+msgstr ""
+
+msgid "New playlist"
 msgstr ""
 
 msgid "New release is available"
@@ -3112,6 +3136,9 @@ msgstr ""
 msgid "Remove from Queue"
 msgstr ""
 
+msgid "Remove from folder"
+msgstr ""
+
 msgid "Remove rule"
 msgstr ""
 
@@ -3131,6 +3158,9 @@ msgid "Removed from"
 msgstr ""
 
 msgid "Rename file"
+msgstr ""
+
+msgid "Rename folder"
 msgstr ""
 
 msgid "Rename preset"

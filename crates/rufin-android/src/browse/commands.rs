@@ -126,7 +126,14 @@ impl AndroidLibrary {
         });
         let selected = self.source.selected_library();
         if selected.is_none()
-            && !matches!(route, Route::Playlists | Route::PlaylistDetail(_))
+            && !matches!(
+                route,
+                Route::Playlists
+                    | Route::PlaylistDetail(_)
+                    | Route::SmartPlaylists
+                    | Route::SmartPlaylistDetail(_)
+                    | Route::PlaylistFolder { .. }
+            )
             && (!matches!(route, Route::History) || history_current_only)
         {
             return Err(error("No source selected"));
@@ -776,6 +783,18 @@ impl AndroidLibrary {
                                 None
                             }
                         }
+                        SidebarPin::PlaylistFolder { folder_id, .. } => db
+                            .playlist_folder_by_id(
+                                folder_id,
+                                selected.as_ref().map(|selected| selected.source_key),
+                                selected
+                                    .as_ref()
+                                    .and_then(|selected| selected.music_folder_key),
+                                &cancel,
+                            )
+                            .await
+                            .map_err(error)?
+                            .map(Into::into),
                         SidebarPin::SmartPlaylist { playlist_id } => {
                             if let Some(key) = db
                                 .smart_playlist_key_by_object(playlist_id, &cancel)
@@ -812,7 +831,8 @@ impl AndroidLibrary {
                             SidebarPin::Playlist { source_id, .. } => {
                                 source_id.as_ref().map(ToString::to_string)
                             }
-                            SidebarPin::SmartPlaylist { .. } => None,
+                            SidebarPin::SmartPlaylist { .. }
+                            | SidebarPin::PlaylistFolder { .. } => None,
                         };
                         row.pin = Some(pin);
                         rows.push(row);

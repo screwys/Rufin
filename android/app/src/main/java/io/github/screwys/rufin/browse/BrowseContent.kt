@@ -386,6 +386,7 @@ internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
             }
     } }
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (row.item is AndroidBrowseItem.PlaylistFolder) RufinIcon("rufin-folders-symbolic", null, Modifier.size(18.dp))
         if (playing) PlayingIndicator()
         Text(title, Modifier.weight(1f, fill = false).then(if (marquee) Modifier.rufinMarquee() else Modifier),
             maxLines = maxLines, overflow = TextOverflow.Ellipsis, style = style,
@@ -468,13 +469,19 @@ internal fun CoverCard(item: BrowseItem, player: PlayerConnection, modifier: Mod
     BoxWithConstraints(modifier) {
         val artwork = rememberBrowseArtwork(item, player, maxWidth)
         BrowseSwipeActions(item, !marquee) {
-        Column(Modifier.fillMaxWidth().combinedClickable(onClick = { onActivate(item) }, onLongClick = { onMenu(item) }),
+        Column(Modifier.fillMaxWidth().playlistFolderDrag(item, player.model).combinedClickable(onClick = { onActivate(item) },
+            onLongClick = if (item.row.playlistFolderMember == null) ({ onMenu(item) }) else null),
             verticalArrangement = Arrangement.spacedBy(0.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
                 BrowseCover(item, artwork, Modifier.fillMaxSize())
             }
-            BrowseTitle(item, Modifier.fillMaxWidth().padding(top = 6.dp),
-                maxLines = if (marquee) 1 else 2, style = MaterialTheme.typography.titleSmall, player = player, marquee = marquee)
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                BrowseTitle(item, Modifier.weight(1f), maxLines = if (marquee) 1 else 2,
+                    style = MaterialTheme.typography.titleSmall, player = player, marquee = marquee)
+                if (item.row.playlistFolderMember != null) CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 32.dp) {
+                    PlayerIconButton("rufin-view-more-symbolic", "More", { onMenu(item) }, Modifier.size(32.dp), iconSize = 18.dp)
+                }
+            }
             val subtitle = listOf(item.row.subtitle, item.row.year?.takeIf { item.row.kind != "track" }?.toString().orEmpty())
                 .filter(String::isNotBlank).joinToString(" · ")
             if (subtitle.isNotBlank()) Text(subtitle, Modifier.fillMaxWidth().then(if (marquee) Modifier.rufinMarquee() else Modifier), style = MaterialTheme.typography.bodySmall,
@@ -557,7 +564,8 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
     val artwork = rememberBrowseArtwork(item, player, imageSize)
     BrowseSwipeActions(item, true) {
     Row(Modifier.fillMaxWidth().heightIn(min = if (displaySize == DisplaySize.COMPACT) 48.dp else 64.dp)
-        .combinedClickable(onClick = { onActivate(item) }, onLongClick = { onMenu(item) }).padding(start = 16.dp, end = 8.dp, top = rowPadding, bottom = rowPadding),
+        .playlistFolderDrag(item, player.model)
+        .combinedClickable(onClick = { onActivate(item) }, onLongClick = if (item.row.playlistFolderMember == null) ({ onMenu(item) }) else null).padding(start = 16.dp, end = 8.dp, top = rowPadding, bottom = rowPadding),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         BrowseCover(item, artwork, Modifier.size(imageSize))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -574,7 +582,7 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
     }
 }
 
-private fun browseDuration(millis: ULong): String {
+internal fun browseDuration(millis: ULong): String {
     val seconds = millis / 1000UL
     return if (seconds >= 3600UL) "${seconds / 3600UL}:${((seconds / 60UL) % 60UL).toString().padStart(2, '0')}:${(seconds % 60UL).toString().padStart(2, '0')}"
     else "${seconds / 60UL}:${(seconds % 60UL).toString().padStart(2, '0')}"

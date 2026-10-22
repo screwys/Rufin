@@ -362,6 +362,7 @@ pub(super) async fn list_data(
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(128);
     let query = library::ListRead {
+        playlist_scope: Default::default(),
         kind: library::ListKind::Playlists,
         source: (source).into(),
         sort: sort,

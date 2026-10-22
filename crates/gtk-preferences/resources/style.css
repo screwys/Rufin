@@ -1250,6 +1250,15 @@ button.suggested-action:disabled {
   padding: 0;
 }
 
+.context-playlist-submenu-create {
+  min-height: 28px;
+  padding: 0 4px;
+}
+
+.playlist-folder-dialog .context-playlist-submenu {
+  margin: 12px;
+}
+
 .settings-group {
   padding: 12px;
   border-radius: 12px;

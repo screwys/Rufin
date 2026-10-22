@@ -9,12 +9,15 @@
         <property name="child">
           <object class="GtkSearchEntry" id="search">
             <property name="hexpand">true</property>
+            <property name="placeholder-text" translatable="yes">Search</property>
             <style><class name="context-playlist-submenu-search"/></style>
           </object>
         </property>
         <child type="overlay">
           <object class="GtkCheckButton" id="skip_duplicates">
             <property name="active">true</property>
+            <property name="tooltip-text" translatable="yes">Don't duplicate</property>
+            <accessibility><property name="label" translatable="yes">Don't duplicate</property></accessibility>
             <property name="halign">end</property>
             <property name="valign">center</property>
             <property name="margin-end">6</property>
@@ -36,6 +39,14 @@
         </property>
       </object>
     </child>
+    <child><object class="GtkButton" id="create_playlist">
+      <property name="sensitive">false</property>
+      <style><class name="flat"/><class name="context-playlist-submenu-create"/></style>
+      <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">start</property>
+        <child><object class="GtkImage"><property name="icon-name">rufin-list-add-symbolic</property></object></child>
+        <child><object class="GtkLabel" id="create_label"><property name="label" translatable="yes">New playlist</property></object></child>
+      </object></property>
+    </object></child>
     <child>
       <object class="GtkSpinner" id="spinner">
         <property name="spinning">true</property>
@@ -44,4 +55,5 @@
       </object>
     </child>
   </object>
+<object class="GtkStringList" id="folder_labels"><items><item translatable="yes">New folder</item></items></object>
 </interface>
