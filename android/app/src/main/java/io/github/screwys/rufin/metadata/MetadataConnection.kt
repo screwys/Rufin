@@ -7,6 +7,7 @@ import androidx.compose.runtime.*
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.core.*
 import io.github.screwys.rufin.shared.rufin_core.MetadataEditor
+import io.github.screwys.rufin.shared.rufin_core.MetadataBatch
 import io.github.screwys.rufin.shared.rufin_core.MetadataItemId
 import io.github.screwys.rufin.shared.rufin_core.MetadataEditorSnapshot
 import io.github.screwys.rufin.shared.rufin_core.MetadataSaveSummary
@@ -28,6 +29,20 @@ internal class MetadataConnection(
     private val kind: String, private val mediaUri: String,
     private val scope: CoroutineScope, private val onSaved: () -> Unit,
 ) {
+    var batch by mutableStateOf<MetadataBatch?>(null)
+        private set
+    var scopeActive by mutableStateOf(false)
+        private set
+    var allTracks by mutableStateOf(false)
+        private set
+    var selectedTracks by mutableStateOf(emptySet<ULong>())
+        private set
+    var rowsRevision by mutableStateOf(0UL)
+        private set
+    var lookupIndex by mutableStateOf(0UL)
+        private set
+    val activeTrack: ULong? get() = if (!scopeActive && !allTracks && selectedTracks.size == 1) selectedTracks.first() else null
+
     private val resolver = context.applicationContext.contentResolver
     var bridge by mutableStateOf<MetadataEditor?>(null)
         private set
@@ -87,6 +102,12 @@ internal class MetadataConnection(
                 else -> error("Choose a track, album or artist")
             }
             val editor = MetadataEditor.open(source, item)
+            batch?.destroy()
+            batch = editor.trackBatch()
+            scopeActive = batch != null
+            allTracks = false
+            selectedTracks = emptySet()
+            rowsRevision++
             bridge = editor
             artworkRevision = null
             refresh(editor)
@@ -126,30 +147,68 @@ internal class MetadataConnection(
         scope.launch {
             busy = true
             failure = null
-            try { block(editor); refresh(editor) }
+            try { block(editor); bridge?.let { refresh(it) } }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { failure = error; state = editor.snapshot() }
+            catch (error: Exception) { failure = error; state = bridge?.snapshot() }
             finally { busy = false }
         }
+    }
+
+    suspend fun tracks(offset: ULong, limit: ULong) = try { batch?.tracks(offset, limit).orEmpty() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { failure = error; emptyList() }
+    suspend fun lookupTracks(offset: ULong, limit: ULong) = try { lookupReview?.tracks(offset, limit).orEmpty() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { lookupFailure = error; emptyList() }
+
+    fun selectScope() = switchTracks(true, false, emptySet())
+    fun selectAllTracks() = switchTracks(false, true, emptySet())
+    fun selectTrack(index: ULong, toggle: Boolean) {
+        val all = toggle && !scopeActive && allTracks
+        val selected = if (!toggle) setOf(index) else (if (scopeActive) emptySet() else selectedTracks).toMutableSet().also { if (!it.add(index)) it.remove(index) }
+        if (!all && selected.isEmpty()) selectScope() else switchTracks(false, all, selected)
+    }
+    private fun switchTracks(entity: Boolean, all: Boolean, selected: Set<ULong>) {
+        if (busy) return
+        action { current ->
+        val batch = batch ?: return@action
+        artworkTask?.cancelAndJoin()
+        searchTask?.cancelAndJoin()
+        current.stageChanges()
+        val next = if (entity) batch.scopeEditor() else if (all) batch.editorExcept(selected.toList()) else batch.editor(selected.toList())
+        bridge = next
+        scopeActive = entity; allTracks = all; selectedTracks = selected
+        artworkRevision = null
+        current.destroy()
+        refresh(next)
+        rowsRevision++
+        next.loadCurrentArtwork()?.destroy()
+    }
     }
 
     fun openLookup() = action { editor ->
         artworkTask?.cancelAndJoin()
         val review = MetadataLookupReview.open(editor)
         lookupReview = review
+        lookupIndex = 0UL
         lookupFillMissing = false
         lookupFailure = null
         lookupProgress = review.progress()
-        lookupItem = review.item(0UL)
+        lookupItem = review.item(lookupIndex)
         lookupRun = scope.launch { review.run() }
         lookupUpdates = scope.launch {
             while (true) {
                 val progress = review.nextUpdate() ?: break
                 lookupProgress = progress
-                if (!lookupBusy) lookupItem = review.item(0UL)
+                if (!lookupBusy) lookupItem = review.item(lookupIndex)
                 if (progress.finished) break
             }
         }
+    }
+
+    fun selectLookupTrack(index: ULong) = lookupAction { review ->
+        lookupIndex = index
+        lookupItem = review.item(index)
     }
 
     private fun lookupAction(block: suspend (MetadataLookupReview) -> Unit) {
@@ -159,7 +218,7 @@ internal class MetadataConnection(
             previous?.cancelAndJoin()
             lookupBusy = true
             lookupFailure = null
-            try { block(review); lookupItem = review.item(0UL) }
+            try { block(review); lookupItem = review.item(lookupIndex) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { lookupFailure = error }
             finally { lookupBusy = false }
@@ -195,6 +254,7 @@ internal class MetadataConnection(
             try {
                 review.accept(lookupFillMissing)
                 bridge?.let { refresh(it) }
+                rowsRevision++
                 cancelLookup()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { lookupFailure = error }
@@ -202,7 +262,7 @@ internal class MetadataConnection(
         }
     }
     fun save() = action {
-        if (kind == "track") {
+        if (kind == "track" || batch != null) {
             val summary = it.prepareSave()
             if (summary.tracks > 0UL) saveConfirmation = summary
         } else { it.save(); onSaved() }
@@ -247,5 +307,5 @@ internal class MetadataConnection(
     }
 
     fun reload() { scope.launch { open() } }
-    fun close() { cancelLookup(); artworkTask?.cancel(); searchTask?.cancel(); bridge?.destroy(); bridge = null }
+    fun close() { cancelLookup(); artworkTask?.cancel(); searchTask?.cancel(); bridge?.destroy(); bridge = null; batch?.destroy(); batch = null }
 }

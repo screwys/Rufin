@@ -1163,12 +1163,14 @@ mod tests {
             crate::file::metadata::edit_copy(
                 &path,
                 Some("mp3"),
-                &crate::file::metadata::TagUpdate::Metadata(crate::MetadataEdit {
-                    kind: crate::SourceEntityKind::Track,
-                    changes: [("title".into(), "Updated".into())].into(),
-                    artwork: None,
-                }),
-                "",
+                &crate::file::metadata::TagUpdate::Metadata(vec![(
+                    crate::MetadataEdit {
+                        kind: crate::SourceEntityKind::Track,
+                        changes: [("title".into(), "Updated".into())].into(),
+                        artwork: None,
+                    },
+                    String::new(),
+                )]),
                 &mut None,
             )
             .expect("write audio metadata");

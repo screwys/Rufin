@@ -180,6 +180,25 @@ pub fn lookup_metadata(
 }
 
 impl MetadataLookup {
+    pub fn artists(&self) -> Vec<MetadataCandidate> {
+        self.value
+            .get("artist-credit")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|credit| {
+                let artist = credit.get("artist")?;
+                Some(MetadataCandidate {
+                    id: text(artist, "id")?,
+                    kind: MetadataMatchKind::Artist,
+                    title: text(artist, "name")?,
+                    detail: text(artist, "disambiguation").unwrap_or_default(),
+                    from_fingerprint: true,
+                })
+            })
+            .collect()
+    }
+
     pub fn changes(
         &self,
         kind: SourceEntityKind,

@@ -24,6 +24,46 @@ use sources::{Implementation, Source, SourceEntityKind, SourceMetadataError};
 use std::sync::Arc;
 pub const MAX_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 
+struct RuntimeFuture<F> {
+    runtime: tokio::runtime::Handle,
+    future: Option<std::pin::Pin<Box<F>>>,
+}
+
+impl<F: std::future::Future> std::future::Future for RuntimeFuture<F> {
+    type Output = F::Output;
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = self.get_mut();
+        let _entered = this.runtime.enter();
+        this.future
+            .as_mut()
+            .expect("metadata future")
+            .as_mut()
+            .poll(context)
+    }
+}
+
+impl<F> Drop for RuntimeFuture<F> {
+    fn drop(&mut self) {
+        let _entered = self.runtime.enter();
+        self.future.take();
+    }
+}
+
+// Foreign callers poll and cancel on their own threads. SQLx also needs the
+// application runtime when a cancelled future returns a connection to its pool.
+fn on_runtime<F: std::future::Future>(
+    runtime: tokio::runtime::Handle,
+    future: F,
+) -> RuntimeFuture<F> {
+    RuntimeFuture {
+        runtime,
+        future: Some(Box::pin(future)),
+    }
+}
+
 pub(super) struct EditSession {
     source: Option<Arc<Source>>,
     destination: EditDestination,
@@ -155,6 +195,35 @@ impl EditSession {
             draft,
         ))
     }
+    async fn invalidate_artwork(
+        &self,
+        owner: &SourceOwner,
+        binding: Option<&[u8]>,
+        result: &Result<(), SourceMetadataError>,
+    ) -> Result<(), SourceMetadataError> {
+        if matches!(
+            result,
+            Ok(()) | Err(SourceMetadataError::PartiallySaved { .. })
+        ) {
+            if let Some(binding) = binding {
+                let artwork = owner.shared.artwork.clone();
+                let binding = binding.to_vec();
+                let invalidated = tokio::task::spawn_blocking(move || {
+                    artwork.invalidate_image(&artwork::ArtworkBinding::opaque(&binding))
+                })
+                .await
+                .map_err(string_error)
+                .and_then(|result| result.map_err(string_error))
+                .map_err(SourceMetadataError::SavedRefreshFailed)?;
+                if invalidated && let Some(source) = &self.source {
+                    owner
+                        .artwork_invalidated(source.source_id(), CatalogChange::Broad)
+                        .await;
+                }
+            }
+        }
+        Ok(())
+    }
 
     async fn save(
         &self,
@@ -207,28 +276,9 @@ impl EditSession {
             }
         }
         .await;
-        if artwork_changed
-            && matches!(
-                &result,
-                Ok(()) | Err(SourceMetadataError::PartiallySaved { .. })
-            )
-        {
-            if let Some(binding) = &self.previous_artwork {
-                let artwork = owner.shared.artwork.clone();
-                let binding = binding.clone();
-                let invalidated = tokio::task::spawn_blocking(move || {
-                    artwork.invalidate_image(&artwork::ArtworkBinding::opaque(&binding))
-                })
-                .await
-                .map_err(string_error)
-                .and_then(|result| result.map_err(string_error))
-                .map_err(SourceMetadataError::SavedRefreshFailed)?;
-                if invalidated && let Some(source) = &self.source {
-                    owner
-                        .artwork_invalidated(source.source_id(), CatalogChange::Broad)
-                        .await;
-                }
-            }
+        if artwork_changed {
+            self.invalidate_artwork(owner, self.previous_artwork.as_deref(), &result)
+                .await?;
         }
         if self.source.is_none()
             && matches!(

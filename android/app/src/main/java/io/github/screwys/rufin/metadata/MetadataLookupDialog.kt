@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
@@ -21,7 +22,10 @@ import io.github.screwys.rufin.shared.metadata_lookup.MetadataMatchKind
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MetadataLookupDialog(connection: MetadataConnection) {
-    var query by remember { mutableStateOf("") }
+    var query by remember(connection.lookupIndex) { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val review = connection.lookupReview
     val item = connection.lookupItem
     val progress = connection.lookupProgress
     val stage = progress?.stage.orEmpty()
@@ -37,8 +41,19 @@ internal fun MetadataLookupDialog(connection: MetadataConnection) {
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false,
             dismissOnBackPress = !connection.lookupAccepting)) {
         Surface(Modifier.fillMaxSize()) {
+            ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = (progress?.total ?: 0UL) > 1UL, drawerContent = {
+                review?.takeIf { (progress?.total ?: 0UL) > 1UL }?.let { review -> ModalDrawerSheet {
+                    MetadataTracks(review, progress!!.total, review.scopeTitle(), false, false,
+                        setOf(connection.lookupIndex), if (progress.finished) ULong.MAX_VALUE else progress.completed / 64UL,
+                        load = { offset, limit -> connection.lookupTracks(offset, limit) }, onScope = null, onAll = null,
+                        onTrack = { index, _ -> connection.selectLookupTrack(index); scope.launch { drawer.close() } })
+                } }
+            }) {
             Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(translate("Lookup"), style = MaterialTheme.typography.titleLarge)
+                Row(Modifier.fillMaxWidth()) {
+                    Text(translate("Lookup"), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                    if ((progress?.total ?: 0UL) > 1UL) TextButton({ scope.launch { drawer.open() } }) { Text(translate("Tracks")) }
+                }
                 Text(progressText, style = MaterialTheme.typography.labelMedium)
                 item?.let { Text(it.title, style = MaterialTheme.typography.titleMedium) }
                 if (progress?.finished == false) LinearProgressIndicator(
@@ -102,6 +117,7 @@ internal fun MetadataLookupDialog(connection: MetadataConnection) {
                     Button(connection::acceptLookup, enabled = editable) { Text(translate("Done")) }
                 }
             }
+        }
         }
     }
 }

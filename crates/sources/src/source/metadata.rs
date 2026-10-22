@@ -286,7 +286,7 @@ impl NativeFile {
             let (prepared, _) = self
                 .prepare(None)
                 .await?
-                .mutate(TagUpdate::Lyrics(text.into()), String::new(), None)
+                .mutate(TagUpdate::Lyrics(text.into()), None)
                 .await?;
             Ok(Some(prepared.commit(&cancelled).await?))
         }
@@ -361,20 +361,13 @@ impl PreparedFile {
     pub(crate) async fn mutate(
         self,
         update: TagUpdate,
-        previous_artist: String,
-        mut mp4: Option<Arc<crate::ImageBytes>>,
-    ) -> Result<(Self, Option<Arc<crate::ImageBytes>>), Error> {
+        mut mp4: tags::MetadataImageCache,
+    ) -> Result<(Self, tags::MetadataImageCache), Error> {
         if self.target.cue {
             return Err(Error::Unavailable);
         }
         tokio::task::spawn_blocking(move || {
-            tags::edit_copy(
-                &self.file,
-                self.target.format.as_deref(),
-                &update,
-                &previous_artist,
-                &mut mp4,
-            )?;
+            tags::edit_copy(&self.file, self.target.format.as_deref(), &update, &mut mp4)?;
             std::fs::File::options()
                 .write(true)
                 .open(&self.file)
@@ -564,6 +557,7 @@ impl SaveWork {
     }
 }
 
+#[derive(Clone)]
 pub struct FileEditSession {
     source: Option<Arc<Source>>,
     media_uri: String,
@@ -866,14 +860,111 @@ impl FileEditSession {
     }
 
     pub async fn save(&self, database: &Database, edit: MetadataEdit) -> Result<(), Error> {
-        if edit.changes.is_empty() && edit.artwork.is_none() {
+        self.save_edits(
+            database,
+            vec![(
+                edit,
+                self.previous_artist.clone(),
+                self.folder_image.clone(),
+            )],
+        )
+        .await
+    }
+
+    pub async fn save_tracks<F, Fut, C, Done>(
+        &self,
+        database: &Database,
+        edit: MetadataEdit,
+        extra: F,
+        complete: C,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: std::future::Future<Output = Result<Option<(MetadataEdit, Option<String>)>, Error>>,
+        C: FnMut(String, Result<(), String>) -> Done,
+        Done: std::future::Future<Output = Result<(), Error>>,
+    {
+        self.save_plan(
+            database,
+            vec![(
+                edit,
+                self.previous_artist.clone(),
+                self.folder_image.clone(),
+            )],
+            extra,
+            complete,
+        )
+        .await
+    }
+
+    pub fn project_edit(
+        values: &crate::MetadataChanges,
+        edit: &MetadataEdit,
+        previous_artist: &str,
+    ) -> crate::MetadataChanges {
+        tags::project_edit(values, edit, previous_artist)
+    }
+
+    pub fn scope_values(
+        kind: SourceEntityKind,
+        artist: &str,
+        original: &crate::MetadataChanges,
+        current: &crate::MetadataChanges,
+    ) -> crate::MetadataChanges {
+        tags::scope_values(kind, artist, original, current)
+    }
+
+    async fn save_edits(
+        &self,
+        database: &Database,
+        edits: Vec<(MetadataEdit, String, Option<String>)>,
+    ) -> Result<(), Error> {
+        if edits
+            .iter()
+            .all(|(edit, _, _)| edit.changes.is_empty() && edit.artwork.is_none())
+        {
             return Ok(());
         }
-        if edit
-            .artwork
-            .as_ref()
-            .is_some_and(|art| art.storage == crate::ArtworkStorage::Server)
-        {
+        self.save_plan(
+            database,
+            edits,
+            |_| async {
+                Ok(Some((
+                    MetadataEdit {
+                        kind: SourceEntityKind::Track,
+                        changes: Default::default(),
+                        artwork: None,
+                    },
+                    None,
+                )))
+            },
+            |_, _| async { Ok(()) },
+        )
+        .await
+    }
+
+    async fn save_plan<F, Fut, C, Done>(
+        &self,
+        database: &Database,
+        edits: Vec<(MetadataEdit, String, Option<String>)>,
+        mut extra: F,
+        mut complete: C,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: std::future::Future<Output = Result<Option<(MetadataEdit, Option<String>)>, Error>>,
+        C: FnMut(String, Result<(), String>) -> Done,
+        Done: std::future::Future<Output = Result<(), Error>>,
+    {
+        let edits = edits
+            .into_iter()
+            .filter(|(edit, _, _)| !edit.changes.is_empty() || edit.artwork.is_some())
+            .collect::<Vec<_>>();
+        if edits.iter().any(|(edit, _, _)| {
+            edit.artwork
+                .as_ref()
+                .is_some_and(|art| art.storage == crate::ArtworkStorage::Server)
+        }) {
             return Err(Error::Unavailable);
         }
         let mut catalog = match &self.source {
@@ -900,25 +991,24 @@ impl FileEditSession {
             .source
             .as_ref()
             .is_some_and(|source| matches!(source.implementation, Implementation::OpenSubsonic(_)));
-        let folder_changed = edit
-            .artwork
-            .as_ref()
-            .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
-            || tags::artist_image_needs_rename(
-                &edit,
-                &self.previous_artist,
-                self.folder_image.as_deref().map(Path::new),
-            );
+        let folder_changed = edits.iter().any(|(edit, artist, hint)| {
+            edit.artwork
+                .as_ref()
+                .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
+                || tags::artist_image_needs_rename(edit, artist, hint.as_deref().map(Path::new))
+        });
         let mut work = if mapped || folder_changed {
             Some(SaveWork::new().await?)
         } else {
             None
         };
-        let tags_changed = !edit.changes.is_empty()
-            || edit
-                .artwork
-                .as_ref()
-                .is_some_and(|art| art.storage == crate::ArtworkStorage::Embedded);
+        let scope_tags_changed = edits.iter().any(|(edit, _, _)| {
+            !edit.changes.is_empty()
+                || edit
+                    .artwork
+                    .as_ref()
+                    .is_some_and(|art| art.storage == crate::ArtworkStorage::Embedded)
+        });
         let result = async {
             loop {
                 let page = self.file_page(database, after).await?;
@@ -930,93 +1020,64 @@ impl FileEditSession {
                 }
                 for (key, _, file) in page {
                     after = Some(key);
-                    if tags_changed {
-                        let prepared = file
-                            .prepare(self.single.as_ref().and(self.expected.as_deref()))
-                            .await?;
-                        let (prepared, next) = prepared
-                            .mutate(
-                                TagUpdate::Metadata(edit.clone()),
-                                self.previous_artist.clone(),
-                                mp4.take(),
-                            )
-                            .await?;
-                        mp4 = next;
-                        let committed = match prepared.commit(&cancelled).await {
-                            Ok(committed) => committed,
-                            Err(error @ Error::PartiallySaved { .. }) => {
-                                saved = true;
-                                if !mapped && self.source.is_some() {
-                                    let path = match &file.location {
-                                        FileLocation::Native(path) => {
-                                            path.to_string_lossy().into_owned()
-                                        }
-                                        FileLocation::Document { uri, .. } => uri.clone(),
-                                        FileLocation::Remote { path, .. } => path.clone(),
-                                    };
-                                    let source = self.source.as_ref().unwrap();
-                                    let refresh = source
-                                        .acquire_paths(
-                                            catalog.as_mut().unwrap(),
-                                            &[path],
-                                            None,
-                                            &|| false,
-                                        )
-                                        .await
-                                        .map_err(|error| {
-                                            Error::SavedRefreshFailed(error.to_string())
-                                        });
-                                    return crate::finish_metadata_save(Err(error), refresh, true);
-                                }
-                                if self.source.is_none() {
-                                    return crate::finish_metadata_save(
-                                        Err(error),
-                                        file.publish_direct(database).await,
-                                        true,
-                                    );
-                                }
-                                return Err(error);
-                            }
-                            Err(error) => return Err(error),
-                        };
-                        saved = true;
-                        if mapped || self.source.is_none() {
-                            committed.preserve_fingerprint(database).await?;
-                        }
-                        if !mapped && let Some(source) = &self.source {
-                            committed
-                                .write_catalog(source, catalog.as_mut().unwrap())
-                                .await?;
-                        } else if self.source.is_none() {
-                            file.publish_direct(database)
-                                .await
-                                .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
-                        }
+                    let Some((track_edit, expected)) = extra(file.media_uri.clone()).await? else {
+                        continue;
+                    };
+                    let tags_changed = scope_tags_changed
+                        || !track_edit.changes.is_empty()
+                        || track_edit
+                            .artwork
+                            .as_ref()
+                            .is_some_and(|art| art.storage == crate::ArtworkStorage::Embedded);
+                    let mut edits = edits.clone();
+                    if !track_edit.changes.is_empty() || track_edit.artwork.is_some() {
+                        edits.push((track_edit, String::new(), self.folder_image.clone()));
                     }
-                    if folder_changed {
-                        let directory = file.folder_identity(self.folder_image.as_deref())?;
-                        if work.as_mut().unwrap().first_folder(&directory).await? {
-                            if cancelled() {
-                                return Err(crate::SourceError::Cancelled.into());
-                            }
-                            let paths = match file
-                                .write_folder_artwork(
-                                    database,
-                                    &edit,
-                                    self.folder_image.as_deref(),
-                                    &self.previous_artist,
+                    let folder_changed = folder_changed
+                        || edits.iter().any(|(edit, _, _)| {
+                            edit.artwork
+                                .as_ref()
+                                .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
+                        });
+                    if folder_changed && work.is_none() {
+                        work = Some(SaveWork::new().await?);
+                    }
+                    let file_result = async {
+                        if tags_changed {
+                            let prepared =
+                                file.prepare(expected.as_deref().or_else(|| {
+                                    self.single.as_ref().and(self.expected.as_deref())
+                                }))
+                                .await?;
+                            let (prepared, next) = prepared
+                                .mutate(
+                                    TagUpdate::Metadata(
+                                        edits
+                                            .iter()
+                                            .map(|(edit, artist, _)| (edit.clone(), artist.clone()))
+                                            .collect(),
+                                    ),
+                                    mp4.take(),
                                 )
-                                .await
-                            {
-                                Ok(paths) => paths,
+                                .await?;
+                            mp4 = next;
+                            let committed = match prepared.commit(&cancelled).await {
+                                Ok(committed) => committed,
                                 Err(error @ Error::PartiallySaved { .. }) => {
                                     saved = true;
                                     if !mapped && self.source.is_some() {
+                                        let path = match &file.location {
+                                            FileLocation::Native(path) => {
+                                                path.to_string_lossy().into_owned()
+                                            }
+                                            FileLocation::Document { uri, .. } => uri.clone(),
+                                            FileLocation::Remote { path, .. } => path.clone(),
+                                        };
                                         let source = self.source.as_ref().unwrap();
                                         let refresh = source
                                             .acquire_paths(
                                                 catalog.as_mut().unwrap(),
-                                                &[directory],
+                                                &[path],
                                                 None,
                                                 &|| false,
                                             )
@@ -1030,25 +1091,114 @@ impl FileEditSession {
                                             true,
                                         );
                                     }
+                                    if self.source.is_none() {
+                                        return crate::finish_metadata_save(
+                                            Err(error),
+                                            file.publish_direct(database).await,
+                                            true,
+                                        );
+                                    }
                                     return Err(error);
                                 }
                                 Err(error) => return Err(error),
                             };
                             saved = true;
-                            if !mapped && self.source.is_some() && !paths.is_empty() {
-                                self.source
-                                    .as_ref()
-                                    .unwrap()
-                                    .acquire_paths(catalog.as_mut().unwrap(), &paths, None, &|| {
-                                        false
-                                    })
-                                    .await
-                                    .map_err(|error| {
-                                        Error::SavedRefreshFailed(error.to_string())
-                                    })?;
+                            if mapped || self.source.is_none() {
+                                committed.preserve_fingerprint(database).await?;
+                            }
+                            if !mapped && let Some(source) = &self.source {
+                                committed
+                                    .write_catalog(source, catalog.as_mut().unwrap())
+                                    .await?;
+                            } else if self.source.is_none() {
+                                file.publish_direct(database).await.map_err(|error| {
+                                    Error::SavedRefreshFailed(error.to_string())
+                                })?;
                             }
                         }
+                        for (edit, artist, hint) in &edits {
+                            if !(edit
+                                .artwork
+                                .as_ref()
+                                .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
+                                || tags::artist_image_needs_rename(
+                                    edit,
+                                    artist,
+                                    hint.as_deref().map(Path::new),
+                                ))
+                            {
+                                continue;
+                            }
+                            let directory = file.folder_identity(hint.as_deref())?;
+                            if work
+                                .as_mut()
+                                .unwrap()
+                                .first_folder(&format!("{}:{directory}", edit.kind.as_str()))
+                                .await?
+                            {
+                                if cancelled() {
+                                    return Err(crate::SourceError::Cancelled.into());
+                                }
+                                let paths = match file
+                                    .write_folder_artwork(database, edit, hint.as_deref(), artist)
+                                    .await
+                                {
+                                    Ok(paths) => paths,
+                                    Err(error @ Error::PartiallySaved { .. }) => {
+                                        saved = true;
+                                        if !mapped && self.source.is_some() {
+                                            let source = self.source.as_ref().unwrap();
+                                            let refresh = source
+                                                .acquire_paths(
+                                                    catalog.as_mut().unwrap(),
+                                                    &[directory],
+                                                    None,
+                                                    &|| false,
+                                                )
+                                                .await
+                                                .map_err(|error| {
+                                                    Error::SavedRefreshFailed(error.to_string())
+                                                });
+                                            return crate::finish_metadata_save(
+                                                Err(error),
+                                                refresh,
+                                                true,
+                                            );
+                                        }
+                                        return Err(error);
+                                    }
+                                    Err(error) => return Err(error),
+                                };
+                                saved = true;
+                                if !mapped && self.source.is_some() && !paths.is_empty() {
+                                    self.source
+                                        .as_ref()
+                                        .unwrap()
+                                        .acquire_paths(
+                                            catalog.as_mut().unwrap(),
+                                            &paths,
+                                            None,
+                                            &|| false,
+                                        )
+                                        .await
+                                        .map_err(|error| {
+                                            Error::SavedRefreshFailed(error.to_string())
+                                        })?;
+                                }
+                            }
+                        }
+                        Ok::<_, Error>(())
                     }
+                    .await;
+                    complete(
+                        file.media_uri.clone(),
+                        file_result
+                            .as_ref()
+                            .map(|_| ())
+                            .map_err(ToString::to_string),
+                    )
+                    .await?;
+                    file_result?;
                 }
             }
             Ok::<_, Error>(())
@@ -1147,7 +1297,7 @@ impl Source {
             let (prepared, _) = file
                 .prepare(None)
                 .await?
-                .mutate(TagUpdate::Rating(rating), String::new(), None)
+                .mutate(TagUpdate::Rating(rating), None)
                 .await?;
             prepared
                 .commit(&|| self.is_retired())
@@ -1367,7 +1517,6 @@ impl Source {
                             track: *track,
                             album: *album,
                         },
-                        String::new(),
                         None,
                     )
                     .await

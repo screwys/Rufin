@@ -260,3 +260,44 @@ pub(super) fn apply(
     }
     Ok(())
 }
+
+pub(super) fn project(edit: &MetadataEdit) -> crate::MetadataChanges {
+    let scope = match edit.kind {
+        SourceEntityKind::Track => 1,
+        SourceEntityKind::Album => 2,
+        SourceEntityKind::Artist => 4,
+    };
+    edit.changes
+        .iter()
+        .filter_map(|(key, value)| {
+            let field = FIELDS
+                .iter()
+                .find(|field| field.key == key && field.scopes & scope != 0)?;
+            let track = FIELDS
+                .iter()
+                .find(|track| track.item == field.item && track.scopes & 1 != 0)?;
+            Some((track.key.to_string(), value.clone()))
+        })
+        .collect()
+}
+
+pub(super) fn scope_values(
+    kind: SourceEntityKind,
+    values: &crate::MetadataChanges,
+) -> crate::MetadataChanges {
+    let scope = match kind {
+        SourceEntityKind::Track => 1,
+        SourceEntityKind::Album => 2,
+        SourceEntityKind::Artist => 4,
+    };
+    FIELDS
+        .iter()
+        .filter(|field| field.scopes & scope != 0)
+        .filter_map(|field| {
+            let track = FIELDS
+                .iter()
+                .find(|track| track.item == field.item && track.scopes & 1 != 0)?;
+            Some((field.key.to_string(), values.get(track.key)?.clone()))
+        })
+        .collect()
+}

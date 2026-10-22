@@ -64,22 +64,34 @@ impl MetadataEditor {
         source: Arc<SourceOwner>,
         item: MetadataItemId,
     ) -> Result<Arc<Self>, SourceMetadataError> {
-        let (session, draft) = super::EditSession::open(&source, &item).await?;
-        let state = Mutex::new(Editing::new(&draft));
-        let external_lookup_allowed = source
-            .shared
-            .settings
-            .load()
-            .ui
-            .allows_external_metadata_lookup();
-        Ok(Arc::new(Self {
-            draft: Arc::new(draft),
-            source,
-            session: Some(session),
-            batch: None,
-            external_lookup_allowed,
-            state,
-        }))
+        let runtime = source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            let (session, draft) = super::EditSession::open(&source, &item).await?;
+            if draft.kind != SourceEntityKind::Track
+                && matches!(session.destination, super::EditDestination::Files(_))
+            {
+                return super::MetadataBatch::open_scope(source, session, draft)
+                    .await?
+                    .scope_editor()
+                    .await;
+            }
+            let state = Mutex::new(Editing::new(&draft));
+            let external_lookup_allowed = source
+                .shared
+                .settings
+                .load()
+                .ui
+                .allows_external_metadata_lookup();
+            Ok(Arc::new(Self {
+                draft: Arc::new(draft),
+                source,
+                session: Some(session),
+                batch: None,
+                external_lookup_allowed,
+                state,
+            }))
+        })
+        .await
     }
 }
 
@@ -93,6 +105,10 @@ impl MetadataEditor {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl MetadataEditor {
+    pub fn track_batch(&self) -> Option<Arc<super::MetadataBatch>> {
+        self.batch.as_ref().map(|scope| scope.batch.clone())
+    }
+
     pub fn snapshot(&self) -> MetadataEditorSnapshot {
         let state = self.state();
         let (search_artist, search_album) = state.artwork_search_fields(&self.draft);
@@ -109,10 +125,13 @@ impl MetadataEditor {
                     .is_some_and(|scope| scope.batch.has_changes()),
             committed: state.committed,
             track_count: self.draft.track_count as u64,
-            selected_count: self
-                .batch
-                .as_ref()
-                .map_or(1, |scope| scope.indices.len() as u64),
+            selected_count: self.batch.as_ref().map_or(1, |scope| {
+                if self.draft.kind == SourceEntityKind::Track {
+                    scope.indices.len() as u64
+                } else {
+                    1
+                }
+            }),
             scope_summary: trn_with(
                 "Changes apply to {count} track",
                 "Changes apply to {count} tracks",
@@ -152,40 +171,53 @@ impl MetadataEditor {
     }
 
     pub async fn stage_changes(&self) -> Result<(), SourceMetadataError> {
-        if let Some(scope) = &self.batch {
-            scope.batch.stage(self).await?;
-        }
-        Ok(())
+        let runtime = self.source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            if let Some(scope) = &self.batch {
+                scope.batch.stage(self).await?;
+            }
+            Ok(())
+        })
+        .await
     }
 
     pub async fn reset_field(&self, key: String) -> Result<(), SourceMetadataError> {
-        if let Some(scope) = &self.batch {
-            let mut pending = self.state().clone();
-            pending.touched.remove(&key);
-            scope.batch.reset(&scope.indices, key).await?;
-            self.reload_batch().await?;
-            let mut state = self.state();
-            for key in &pending.touched {
-                if let Some(value) = pending.values.get(key) {
-                    state.set_text(key, value.clone());
+        let runtime = self.source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            if self.draft.kind != SourceEntityKind::Track
+                && let Some(scope) = &self.batch
+            {
+                scope.batch.reset_scope(key.clone()).await?;
+                self.reload_batch().await?;
+            } else if let Some(scope) = &self.batch {
+                let mut pending = self.state().clone();
+                pending.touched.remove(&key);
+                scope.batch.reset(&scope.indices, key).await?;
+                self.reload_batch().await?;
+                let mut state = self.state();
+                for key in &pending.touched {
+                    if let Some(value) = pending.values.get(key) {
+                        state.set_text(key, value.clone());
+                    }
                 }
-            }
-            state.lyrics = pending.lyrics;
-            state.artwork = pending.artwork;
-            state.storage = pending.storage;
-        } else {
-            let mut state = self.state();
-            if !state.undo_identified(&key) {
-                if let Some(field) = self.draft.fields.iter().find(|field| field.key == key) {
-                    state.values.insert(key.clone(), field.value.clone());
-                    state.touched.remove(&key);
-                    if field.mixed {
-                        state.mixed.insert(key);
+                state.lyrics = pending.lyrics;
+                state.artwork = pending.artwork;
+                state.storage = pending.storage;
+            } else {
+                let mut state = self.state();
+                if !state.undo_identified(&key) {
+                    if let Some(field) = self.draft.fields.iter().find(|field| field.key == key) {
+                        state.values.insert(key.clone(), field.value.clone());
+                        state.touched.remove(&key);
+                        if field.mixed {
+                            state.mixed.insert(key);
+                        }
                     }
                 }
             }
-        }
-        Ok(())
+            Ok(())
+        })
+        .await
     }
 
     pub fn set_locked(&self, value: bool) -> Result<(), SourceMetadataError> {
@@ -193,71 +225,83 @@ impl MetadataEditor {
     }
 
     pub async fn prepare_save(&self) -> Result<MetadataSaveSummary, SourceMetadataError> {
-        self.stage_changes().await?;
-        let tracks = if let Some(scope) = &self.batch {
-            scope
-                .batch
-                .work(|records| Ok(records.changed.len() as u64))
-                .await?
-        } else {
-            let state = self.state();
-            if state.has_changes(&self.draft) || state.artwork.is_some() {
-                self.draft.track_count.max(1) as u64
+        let runtime = self.source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            self.stage_changes().await?;
+            let tracks = if let Some(scope) = &self.batch {
+                scope
+                    .batch
+                    .work(|records| Ok(records.changed.len() as u64))
+                    .await?
             } else {
-                0
-            }
-        };
-        Ok(MetadataSaveSummary {
-            tracks,
-            message: trn_with(
-                "Do you want to apply metadata changes to {count} track?",
-                "Do you want to apply metadata changes to {count} tracks?",
+                let state = self.state();
+                if state.has_changes(&self.draft) || state.artwork.is_some() {
+                    self.draft.track_count.max(1) as u64
+                } else {
+                    0
+                }
+            };
+            Ok(MetadataSaveSummary {
                 tracks,
-                &[("count", &tracks.to_string())],
-            ),
+                message: trn_with(
+                    "Do you want to apply metadata changes to {count} track?",
+                    "Do you want to apply metadata changes to {count} tracks?",
+                    tracks,
+                    &[("count", &tracks.to_string())],
+                ),
+            })
         })
+        .await
     }
 
     pub async fn save(&self) -> Result<(), SourceMetadataError> {
-        let edit = self
-            .state()
-            .edit(&self.draft)
-            .map_err(SourceMetadataError::InvalidInput)?;
-        if let Some(scope) = &self.batch {
-            scope.batch.stage(self).await?;
-            let result = scope.batch.clone().save().await;
-            self.reload_batch().await?;
-            return result;
-        }
-        let lyrics = self.state().lyrics.clone();
-        if edit.changes.is_empty() && edit.artwork.is_none() && lyrics.is_none() {
-            return Ok(());
-        }
-        let result = self
-            .session
-            .as_ref()
-            .unwrap()
-            .save(&self.source, edit, lyrics)
-            .await;
-        self.state().record_save_result(&result);
-        result
+        let runtime = self.source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            let edit = self
+                .state()
+                .edit(&self.draft)
+                .map_err(SourceMetadataError::InvalidInput)?;
+            if let Some(scope) = &self.batch {
+                scope.batch.stage(self).await?;
+                let result = scope.batch.clone().save().await;
+                self.reload_batch().await?;
+                return result;
+            }
+            let lyrics = self.state().lyrics.clone();
+            if edit.changes.is_empty() && edit.artwork.is_none() && lyrics.is_none() {
+                return Ok(());
+            }
+            let result = self
+                .session
+                .as_ref()
+                .unwrap()
+                .save(&self.source, edit, lyrics)
+                .await;
+            self.state().record_save_result(&result);
+            result
+        })
+        .await
     }
 
     pub async fn load_current_artwork(
         &self,
     ) -> Result<Option<Arc<ImageBytes>>, SourceMetadataError> {
-        let Some(binding) = self.draft.artwork.binding.clone() else {
-            return Ok(None);
-        };
-        let image = super::current_artwork(&self.source, binding)
-            .recv()
-            .await
-            .map_err(|_| SourceMetadataError::Unavailable)?
-            .map_err(SourceMetadataError::Write)?;
-        let mut state = self.state();
-        state.current = image.clone();
-        state.artwork_revision += 1;
-        Ok(image)
+        let runtime = self.source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            let Some(binding) = self.draft.artwork.binding.clone() else {
+                return Ok(None);
+            };
+            let image = super::current_artwork(&self.source, binding)
+                .recv()
+                .await
+                .map_err(|_| SourceMetadataError::Unavailable)?
+                .map_err(SourceMetadataError::Write)?;
+            let mut state = self.state();
+            state.current = image.clone();
+            state.artwork_revision += 1;
+            Ok(image)
+        })
+        .await
     }
 
     pub fn artwork(&self) -> Option<Arc<ImageBytes>> {
@@ -277,11 +321,15 @@ impl MetadataEditor {
         &self,
         bytes: Vec<u8>,
     ) -> Result<Arc<ImageBytes>, SourceMetadataError> {
-        super::prepare_artwork(&self.source, bytes)
-            .recv()
-            .await
-            .map_err(|_| SourceMetadataError::Unavailable)?
-            .map_err(SourceMetadataError::Write)
+        let runtime = self.source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            super::prepare_artwork(&self.source, bytes)
+                .recv()
+                .await
+                .map_err(|_| SourceMetadataError::Unavailable)?
+                .map_err(SourceMetadataError::Write)
+        })
+        .await
     }
 
     pub fn select_artwork(&self, image: Arc<ImageBytes>) {
@@ -321,23 +369,31 @@ impl MetadataEditor {
         artist: String,
         album: String,
     ) -> Result<Vec<ArtworkResult>, SourceMetadataError> {
-        let query = self.state().artwork_query(&self.draft, artist, album);
-        super::search_artwork(&self.source, query)
-            .recv()
-            .await
-            .map_err(|_| SourceMetadataError::Unavailable)?
-            .map_err(SourceMetadataError::Write)
+        let runtime = self.source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            let query = self.state().artwork_query(&self.draft, artist, album);
+            super::search_artwork(&self.source, query)
+                .recv()
+                .await
+                .map_err(|_| SourceMetadataError::Unavailable)?
+                .map_err(SourceMetadataError::Write)
+        })
+        .await
     }
 
     pub async fn download_artwork(
         &self,
         url: String,
     ) -> Result<Arc<ImageBytes>, SourceMetadataError> {
-        super::download_artwork(&self.source, url)
-            .recv()
-            .await
-            .map_err(|_| SourceMetadataError::Unavailable)?
-            .map_err(SourceMetadataError::Write)
+        let runtime = self.source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            super::download_artwork(&self.source, url)
+                .recv()
+                .await
+                .map_err(|_| SourceMetadataError::Unavailable)?
+                .map_err(SourceMetadataError::Write)
+        })
+        .await
     }
 }
 

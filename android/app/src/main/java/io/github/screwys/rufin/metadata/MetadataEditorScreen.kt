@@ -37,6 +37,7 @@ import io.github.screwys.rufin.ui.decodePlayerArtwork
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsRow
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,16 +51,29 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
     var confirmReload by remember { mutableStateOf(false) }
     val state = connection.state
     val editable = !connection.busy && state?.committed == null
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    LaunchedEffect(state?.selectedCount) { if ((state?.selectedCount ?: 1UL) > 1UL) page = 0 }
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(connection::importArtwork) }
     Dialog(onDismissRequest = { if (!connection.busy) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
             dismissOnBackPress = !connection.busy, dismissOnClickOutside = false)) {
         BackHandler(connection.busy) { }
         Surface(Modifier.fillMaxSize()) {
+            ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = connection.batch != null, drawerContent = {
+                connection.batch?.let { batch -> ModalDrawerSheet {
+                    MetadataTracks(batch, batch.trackCount(), batch.scopeTitle(), connection.scopeActive,
+                        connection.allTracks, connection.selectedTracks, connection.rowsRevision,
+                        load = { offset, limit -> connection.tracks(offset, limit) },
+                        onScope = { connection.selectScope(); scope.launch { drawer.close() } },
+                        onAll = { connection.selectAllTracks(); scope.launch { drawer.close() } },
+                        onTrack = { index, toggle -> connection.selectTrack(index, toggle); if (!toggle) scope.launch { drawer.close() } })
+                } }
+            }) {
             Scaffold(topBar = {
                 TopAppBar(title = { Text(translate("Edit metadata")) }, navigationIcon = {
                     IconButton(onDismiss, enabled = !connection.busy) { RufinIcon("rufin-window-close-symbolic", translate("Close")) }
                 }, actions = {
+                    if (connection.batch != null) TextButton({ scope.launch { drawer.open() } }) { Text(translate("Tracks")) }
                     if (state?.committed == null) TextButton(connection::save,
                         enabled = editable && state?.hasChanges == true) { Text(translate("Save")) }
                 })
@@ -71,7 +85,7 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
                     if (state != null) {
                         PrimaryTabRow(page) {
                             Tab(page == 0, { page = 0 }, text = { Text(translate("Metadata")) })
-                            Tab(page == 1, { page = 1 }, text = { Text(translate("Artwork")) })
+                            if (state.selectedCount == 1UL) Tab(page == 1, { page = 1 }, text = { Text(translate("Artwork")) })
                         }
                         when (page) {
                             0 -> MetadataFields(connection, state, editable, kind)
@@ -81,6 +95,7 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
                 }
             }
         }
+    }
     }
     (connection.failure as? SourceMetadataException.LocalAccessRequired)?.let { failure ->
         io.github.screwys.rufin.sources.LocalAccessDialog(model, failure.sourceId, failure.sourcePath,
@@ -109,7 +124,7 @@ private fun MetadataFields(connection: MetadataConnection, state: MetadataEditor
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             FilledTonalButton(connection::openLookup, enabled = editable && state.externalLookupAllowed) {
                 DetailLinkIcon("io.github.screwys.Rufin.external.musicbrainz", Modifier.size(24.dp))
-                Spacer(Modifier.width(8.dp)); Text(if (kind == "track") translate("Search by AcoustID") else translate("Search MusicBrainz"))
+                Spacer(Modifier.width(8.dp)); Text(if (kind == "track" || connection.batch != null) translate("Search by AcoustID") else translate("Lookup"))
             }
         }
         items(state.fields, key = { it.field.key }) { presented ->

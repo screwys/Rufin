@@ -31,9 +31,14 @@ pub(crate) fn revision(path: &Path) -> Result<String, SourceMetadataError> {
     Ok(format!("{}:{modified}", metadata.len()))
 }
 
+pub(crate) type MetadataImageCache = Option<(
+    std::sync::Arc<crate::ImageBytes>,
+    std::sync::Arc<crate::ImageBytes>,
+)>;
+
 #[derive(Clone)]
 pub(crate) enum TagUpdate {
-    Metadata(crate::MetadataEdit),
+    Metadata(Vec<(crate::MetadataEdit, String)>),
     Rating(Option<u8>),
     Lyrics(String),
     R128 {
@@ -46,8 +51,7 @@ pub(crate) fn edit_copy(
     path: &Path,
     format: Option<&str>,
     update: &TagUpdate,
-    previous_artist: &str,
-    mp4_image: &mut Option<std::sync::Arc<crate::ImageBytes>>,
+    mp4_image: &mut MetadataImageCache,
 ) -> Result<(), SourceMetadataError> {
     let writer = format
         .and_then(MetadataWriter::for_source_format)
@@ -68,8 +72,10 @@ pub(crate) fn edit_copy(
     };
     edit_tag(path, writer, tag_type, |tag, writer| {
         match update {
-            TagUpdate::Metadata(edit) => {
-                apply_metadata(tag, writer, edit, previous_artist, mp4_image)?
+            TagUpdate::Metadata(edits) => {
+                for (edit, artist) in edits {
+                    apply_metadata(tag, writer, edit, artist, mp4_image)?;
+                }
             }
             TagUpdate::Rating(rating) => {
                 tag.remove_key(ItemKey::Popularimeter);
@@ -116,7 +122,7 @@ fn apply_metadata(
     writer: MetadataWriter,
     edit: &crate::MetadataEdit,
     previous_artist: &str,
-    mp4_image: &mut Option<std::sync::Arc<crate::ImageBytes>>,
+    mp4_image: &mut MetadataImageCache,
 ) -> Result<(), SourceMetadataError> {
     let picture = embedded_picture(
         edit.artwork.as_ref(),
@@ -288,7 +294,7 @@ fn embedded_picture(
     writer: MetadataWriter,
     artist_name: Option<&str>,
     previous_artist: &str,
-    mp4_image: &mut Option<std::sync::Arc<crate::ImageBytes>>,
+    mp4_image: &mut MetadataImageCache,
 ) -> Result<Option<Picture>, SourceMetadataError> {
     let Some(edit) = edit else { return Ok(None) };
     match edit.storage {
@@ -331,10 +337,13 @@ fn embedded_picture(
             image.content_type.as_deref(),
             Some("image/jpeg" | "image/png" | "image/gif" | "image/bmp")
         ) {
-        if mp4_image.is_none() {
-            *mp4_image = Some(mp4_compatible_image(image)?);
+        if mp4_image
+            .as_ref()
+            .is_none_or(|(original, _)| !std::sync::Arc::ptr_eq(original, image))
+        {
+            *mp4_image = Some((image.clone(), mp4_compatible_image(image)?));
         }
-        mp4_image.as_ref().unwrap()
+        &mp4_image.as_ref().unwrap().1
     } else {
         image
     };
@@ -592,6 +601,137 @@ fn replace_name(value: &str, previous: &str, replacement: &str) -> String {
         .join("; ")
 }
 
+pub(crate) fn project_edit(
+    values: &crate::MetadataChanges,
+    edit: &MetadataEdit,
+    previous_artist: &str,
+) -> crate::MetadataChanges {
+    let mut changes = fields::project(edit);
+    if edit.kind == SourceEntityKind::Artist {
+        for (names_key, sort_key, id_key) in [
+            ("artist", "artist_sort", "musicbrainz_artist_id"),
+            (
+                "album_artist",
+                "album_artist_sort",
+                "musicbrainz_album_artist_id",
+            ),
+        ] {
+            let names_value = values
+                .get(names_key)
+                .map(String::as_str)
+                .unwrap_or_default();
+            let names = super::media::split_names(names_value);
+            if !names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(previous_artist.trim()))
+            {
+                continue;
+            }
+            if let Some(name) = edit.changes.get("title") {
+                changes.insert(
+                    names_key.into(),
+                    replace_name(names_value, previous_artist, name),
+                );
+            }
+            for (scope_key, track_key) in
+                [("sort_title", sort_key), ("musicbrainz_artist_id", id_key)]
+            {
+                if let Some(value) = edit.changes.get(scope_key) {
+                    changes.insert(
+                        track_key.into(),
+                        artist_values(
+                            values
+                                .get(track_key)
+                                .map(String::as_str)
+                                .unwrap_or_default(),
+                            &names,
+                            previous_artist,
+                            Some(value),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    changes
+}
+
+pub(crate) fn scope_values(
+    kind: SourceEntityKind,
+    artist: &str,
+    original: &crate::MetadataChanges,
+    current: &crate::MetadataChanges,
+) -> crate::MetadataChanges {
+    let mut values = fields::scope_values(kind, current);
+    if kind == SourceEntityKind::Artist {
+        for (names, sort, id) in [
+            ("artist", "artist_sort", "musicbrainz_artist_id"),
+            (
+                "album_artist",
+                "album_artist_sort",
+                "musicbrainz_album_artist_id",
+            ),
+        ] {
+            let names_before = super::media::split_names(
+                original.get(names).map(String::as_str).unwrap_or_default(),
+            );
+            if !names_before
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(artist.trim()))
+            {
+                continue;
+            }
+            let current_names = super::media::split_names(
+                current.get(names).map(String::as_str).unwrap_or_default(),
+            );
+            let index = current_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(artist.trim()))
+                .or_else(|| {
+                    let replacements = current_names
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, name)| {
+                            !names_before.iter().any(|previous| {
+                                !previous.eq_ignore_ascii_case(artist.trim())
+                                    && previous.eq_ignore_ascii_case(name)
+                            })
+                        })
+                        .map(|(index, _)| index)
+                        .collect::<Vec<_>>();
+                    (replacements.len() == 1).then(|| replacements[0])
+                });
+            let Some(index) = index else {
+                continue;
+            };
+            for (scope_key, track_key) in [
+                ("title", names),
+                ("sort_title", sort),
+                ("musicbrainz_artist_id", id),
+            ] {
+                let text = current
+                    .get(track_key)
+                    .map(String::as_str)
+                    .unwrap_or_default();
+                let entries = if scope_key == "title" {
+                    super::media::split_names(text)
+                } else {
+                    text.split([';', '/'])
+                        .map(str::trim)
+                        .map(str::to_string)
+                        .collect()
+                };
+                values.insert(
+                    scope_key.into(),
+                    entries.get(index).cloned().unwrap_or_default(),
+                );
+            }
+            break;
+        }
+    }
+    values
+}
+
 fn set_artist_value(
     tag: &mut Tag,
     key: ItemKey,
@@ -599,13 +739,19 @@ fn set_artist_value(
     selected: &str,
     value: Option<&str>,
 ) {
+    let current = tag.get_strings(key).collect::<Vec<_>>().join("; ");
+    let next = artist_values(&current, names, selected, value);
+    set_text(tag, key, (!next.is_empty()).then_some(next.as_str()));
+}
+
+fn artist_values(current: &str, names: &[String], selected: &str, value: Option<&str>) -> String {
     if names.len() == 1 {
-        set_text(tag, key, value);
-        return;
+        return value.unwrap_or_default().to_string();
     }
-    let mut values = tag
-        .get_strings(key)
-        .flat_map(|value| value.split([';', '/']).map(str::trim).map(str::to_string))
+    let mut values = current
+        .split([';', '/'])
+        .map(str::trim)
+        .map(str::to_string)
         .collect::<Vec<_>>();
     if values.len() < names.len() {
         values.resize(names.len(), String::new());
@@ -615,7 +761,7 @@ fn set_artist_value(
             *current = value.unwrap_or_default().to_string();
         }
     }
-    set_text(tag, key, Some(&values.join("; ")));
+    values.join("; ")
 }
 
 #[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
@@ -724,8 +870,7 @@ mod tests {
             edit_copy(
                 &file,
                 Some("wav"),
-                &TagUpdate::Metadata(edit),
-                "",
+                &TagUpdate::Metadata(vec![(edit, String::new())]),
                 &mut None,
             )
             .unwrap();
@@ -798,8 +943,7 @@ mod tests {
         edit_copy(
             &path,
             Some("wav"),
-            &TagUpdate::Metadata((edit).clone()),
-            "",
+            &TagUpdate::Metadata(vec![((edit).clone(), String::new())]),
             &mut None,
         )
         .expect("write metadata");
@@ -880,8 +1024,10 @@ mod tests {
         edit_copy(
             &path,
             Some("wav"),
-            &TagUpdate::Metadata((track_edit(&[("title", "Track title")])).clone()),
-            "",
+            &TagUpdate::Metadata(vec![(
+                (track_edit(&[("title", "Track title")])).clone(),
+                String::new(),
+            )]),
             &mut None,
         )
         .expect("seed metadata");
@@ -891,7 +1037,6 @@ mod tests {
                 &path,
                 Some("wav"),
                 &TagUpdate::Lyrics("[00:01.000]A line".into()),
-                "",
                 &mut None
             ),
             Err(SourceMetadataError::Unavailable)
@@ -945,18 +1090,20 @@ mod tests {
             edit_copy(
                 path,
                 Some("wav"),
-                &TagUpdate::Metadata(track_edit(&[
-                    ("title", &format!("Track {index}")),
-                    ("album", "Before"),
-                    ("artist", "Guest"),
-                    ("album_artist", "Album Artist"),
-                    ("genre", &format!("Genre {index}")),
-                    (
-                        "musicbrainz_album_id",
-                        "11111111-1111-4111-8111-111111111111",
-                    ),
-                ])),
-                "",
+                &TagUpdate::Metadata(vec![(
+                    track_edit(&[
+                        ("title", &format!("Track {index}")),
+                        ("album", "Before"),
+                        ("artist", "Guest"),
+                        ("album_artist", "Album Artist"),
+                        ("genre", &format!("Genre {index}")),
+                        (
+                            "musicbrainz_album_id",
+                            "11111111-1111-4111-8111-111111111111",
+                        ),
+                    ]),
+                    String::new(),
+                )]),
                 &mut None,
             )
             .unwrap();
@@ -1099,8 +1246,7 @@ mod tests {
             .await
             .unwrap()
             .mutate(
-                TagUpdate::Metadata(track_edit(&[("title", "After")])),
-                String::new(),
+                TagUpdate::Metadata(vec![(track_edit(&[("title", "After")]), String::new())]),
                 None,
             )
             .await
@@ -1110,8 +1256,7 @@ mod tests {
             .await
             .unwrap()
             .mutate(
-                TagUpdate::Metadata(track_edit(&[("title", "After")])),
-                String::new(),
+                TagUpdate::Metadata(vec![(track_edit(&[("title", "After")]), String::new())]),
                 None,
             )
             .await
@@ -1234,10 +1379,10 @@ mod tests {
             edit_copy(
                 path,
                 Some("wav"),
-                &TagUpdate::Metadata(
+                &TagUpdate::Metadata(vec![(
                     (track_edit(&[("album", "Album"), ("artist", "Artist")])).clone(),
-                ),
-                "",
+                    String::new(),
+                )]),
                 &mut None,
             )
             .unwrap();

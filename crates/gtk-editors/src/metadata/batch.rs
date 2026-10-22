@@ -21,6 +21,8 @@ gtk_widgets::composite_box!(pub(crate) MetadataTrackRow, track_row, "RufinMetada
 
 struct BatchView {
     batch: Arc<MetadataBatch>,
+    scope_button: gtk::ToggleButton,
+    scope_selected: Cell<bool>,
     dialog: gtk::glib::WeakRef<adw::Dialog>,
     host: gtk::Box,
     content: gtk::Stack,
@@ -56,7 +58,7 @@ pub fn build_batch_dialog(
         batch_dialog: adw::Dialog, responsive: adw::BreakpointBin, split: adw::NavigationSplitView,
         header: adw::HeaderBar,
         sidebar: gtk::Box, editor_host: gtk::Box, tracks: gtk::ListView, content: gtk::Stack, lookup: gtk::Button,
-        select_all: gtk::ToggleButton, edit_selected: gtk::Button, show_tracks: gtk::Button,
+        scope_button: gtk::ToggleButton, scope_name: gtk::Label, select_all: gtk::ToggleButton, edit_selected: gtk::Button, show_tracks: gtk::Button,
     });
     gtk_widgets::controls::configure_dialog_header(&header);
     let breakpoint = adw::Breakpoint::new(
@@ -112,8 +114,17 @@ pub fn build_batch_dialog(
     super::navigation::connect(&batch_dialog, &tracks, &selection);
     lookup.set_sensitive(batch.external_lookup_allowed());
     let active_selection = RefCell::new(selection.selection());
+    let scope_title = batch.scope_title();
+    scope_name.set_label(scope_title.as_deref().unwrap_or_default());
+    scope_button.set_visible(scope_title.is_some());
+    scope_button.set_active(scope_title.is_some());
+    if scope_title.is_some() {
+        selection.unselect_all();
+    }
     let view = Rc::new(BatchView {
         batch,
+        scope_button,
+        scope_selected: Cell::new(scope_title.is_some()),
         dialog: batch_dialog.downgrade(),
         host: editor_host,
         content,
@@ -137,9 +148,26 @@ pub fn build_batch_dialog(
                 button.set_active(selection.selection().size() == selection.n_items() as u64);
             }
             if let Some(view) = weak.upgrade() {
+                if !selection.selection().is_empty() {
+                    view.scope_selected.set(false);
+                    view.scope_button.set_active(false);
+                }
                 view.change_scope();
             }
         });
+    let weak = Rc::downgrade(&view);
+    view.scope_button.connect_clicked(move |button| {
+        if let Some(view) = weak.upgrade() {
+            button.set_active(true);
+            if view.scope_selected.replace(true) {
+                return;
+            }
+            view.restoring_selection.set(true);
+            view.selection.unselect_all();
+            view.restoring_selection.set(false);
+            view.change_scope();
+        }
+    });
     let weak = Rc::downgrade(&view);
     select_all.connect_clicked(move |button| {
         if let Some(view) = weak.upgrade() {
@@ -182,8 +210,13 @@ impl BatchView {
 
     fn mount(self: &Rc<Self>, model: Arc<MetadataEditor>) {
         if let Some(editor) = self.current() {
-            editor.rebind(model);
-            return;
+            if editor.model().draft.kind == model.draft.kind {
+                editor.rebind(model);
+                return;
+            }
+            if let Some(view) = self.current.borrow_mut().take() {
+                self.host.remove(&view.content);
+            }
         }
         let Some(dialog) = self.dialog.upgrade() else {
             return;
@@ -223,7 +256,7 @@ impl BatchView {
             return;
         }
         let selected = self.selection.selection();
-        if selected.is_empty() {
+        if selected.is_empty() && !self.scope_selected.get() {
             let previous = self.active_selection.borrow().clone();
             self.restore_selection(&previous);
             return;
@@ -232,6 +265,7 @@ impl BatchView {
             task.abort();
         }
         let indices = self.indices();
+        let scope_selected = self.scope_selected.get();
         self.host.set_sensitive(false);
         let previous = self.current().map(|editor| {
             super::lyrics::commit(&editor);
@@ -246,7 +280,11 @@ impl BatchView {
                 if let Some(previous) = previous {
                     previous.stage_changes().await?;
                 }
-                batch.editor(indices).await
+                if scope_selected {
+                    batch.scope_editor().await
+                } else {
+                    batch.editor(indices).await
+                }
             }
             .await;
             if let Some(view) = weak.upgrade() {
@@ -258,7 +296,11 @@ impl BatchView {
                     }
                     Err(error) => {
                         let current = view.current();
-                        if current.is_some() {
+                        if let Some(current) = &current {
+                            let previous_scope =
+                                current.model().draft.kind != sources::SourceEntityKind::Track;
+                            view.scope_selected.set(previous_scope);
+                            view.scope_button.set_active(previous_scope);
                             let active = view.active_selection.borrow().clone();
                             view.restore_selection(&active);
                         }
@@ -268,6 +310,8 @@ impl BatchView {
                             let weak = Rc::downgrade(&view);
                             let retry = Rc::new(move || {
                                 if let Some(view) = weak.upgrade() {
+                                    view.scope_selected.set(scope_selected);
+                                    view.scope_button.set_active(scope_selected);
                                     view.restore_selection(&selected);
                                     view.change_scope();
                                 }

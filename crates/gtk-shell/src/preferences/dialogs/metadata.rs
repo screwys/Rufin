@@ -20,7 +20,21 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
         };
         match editor {
             Ok(editor) => {
-                let dialog = build_dialog(editor, shell.products.runtime.clone());
+                let dialog = if let Some(batch) = editor.track_batch() {
+                    let weak = Rc::downgrade(&shell);
+                    let on_error = Rc::new(move |error, retry| {
+                        if let Some(shell) = weak.upgrade() {
+                            track_metadata_error(&shell, retry, error);
+                        }
+                    });
+                    gtk_editors::metadata::build_batch_dialog(
+                        batch,
+                        shell.products.runtime.clone(),
+                        on_error,
+                    )
+                } else {
+                    build_dialog(editor, shell.products.runtime.clone())
+                };
                 shell.present_selected_dialog(&dialog);
             }
             Err(SourceMetadataError::LocalAccessRequired {

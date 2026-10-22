@@ -109,7 +109,7 @@ fn build_editor_view(
         cancel: gtk::Button,
         save: gtk::Button,
     });
-    if model.draft.kind != sources::SourceEntityKind::Track {
+    if model.draft.kind != sources::SourceEntityKind::Track && model.track_batch().is_none() {
         lookup_content.set_label(&musicbrainz_lookup_label.label());
     }
     editor_header.set_visible(outer.is_none());
@@ -507,7 +507,9 @@ fn connect_save(dialog: &adw::Dialog, editor: &Rc<Editor>) {
         let dialog = dialog.clone();
         gtk::glib::spawn_future_local(async move {
             let response = async {
-                if model.draft.kind == sources::SourceEntityKind::Track {
+                if model.draft.kind == sources::SourceEntityKind::Track
+                    || model.track_batch().is_some()
+                {
                     let summary = model.prepare_save().await?;
                     let Some(current) = editor.upgrade() else {
                         return Ok(false);

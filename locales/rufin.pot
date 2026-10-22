@@ -4356,6 +4356,10 @@ msgid "{stage} ({completed} of {total}, {cached} cached)"
 msgstr ""
 
 #, rust-format
+msgid "{stage} ({count} of {total} tracks)"
+msgstr ""
+
+#, rust-format
 msgid "{stage}: {completed} / {total}"
 msgstr ""
 

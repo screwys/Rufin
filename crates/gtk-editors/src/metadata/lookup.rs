@@ -69,7 +69,7 @@ pub(super) fn present(
     gtk_widgets::objects!(builder, resource, {
         dialog: adw::Dialog, responsive: adw::BreakpointBin, split: adw::NavigationSplitView,
         header: adw::HeaderBar,
-        sidebar: gtk::Box, tracks: gtk::ListView, show_tracks: gtk::Button,
+        scope_title: gtk::Label, track_navigation: gtk::Box, sidebar: gtk::Box, tracks: gtk::ListView, show_tracks: gtk::Button,
         title: gtk::Label, refresh: gtk::Button, query: gtk::SearchEntry, status: gtk::Label, matches: gtk::ListBox,
         original: adw::ActionRow, comparison: gtk::ColumnView,
         field_column: gtk::ColumnViewColumn, original_column: gtk::ColumnViewColumn, suggested_column: gtk::ColumnViewColumn,
@@ -79,15 +79,26 @@ pub(super) fn present(
         review_content: gtk::Box,
     });
     gtk_widgets::controls::configure_dialog_header(&header);
-    let breakpoint = adw::Breakpoint::new(
-        adw::BreakpointCondition::parse("max-width: 760sp").expect("metadata lookup breakpoint"),
-    );
-    breakpoint.add_setter(&split, "collapsed", Some(&true.to_value()));
-    responsive.add_breakpoint(breakpoint);
-    split
-        .bind_property("collapsed", &show_tracks, "visible")
-        .sync_create()
-        .build();
+    let scope = review.scope_title();
+    scope_title.set_label(scope.as_deref().unwrap_or_default());
+    scope_title.set_visible(scope.is_some());
+    if review.progress().total > 1 || scope.is_some() {
+        let breakpoint = adw::Breakpoint::new(
+            adw::BreakpointCondition::parse("max-width: 760sp")
+                .expect("metadata lookup breakpoint"),
+        );
+        breakpoint.add_setter(&split, "collapsed", Some(&true.to_value()));
+        responsive.add_breakpoint(breakpoint);
+        split
+            .bind_property("collapsed", &show_tracks, "visible")
+            .sync_create()
+            .build();
+    } else {
+        split.set_collapsed(true);
+        split.set_show_content(true);
+        track_navigation.set_visible(false);
+        show_tracks.set_visible(false);
+    }
     let weak = split.downgrade();
     show_tracks.connect_clicked(move |_| {
         if let Some(split) = weak.upgrade() {

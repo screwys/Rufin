@@ -37,65 +37,69 @@ impl MetadataEditor {
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl MetadataEditor {
     pub async fn lyrics_settings(&self) -> Result<MetadataLyricsSettings, Error> {
-        let session = self.lyrics_session().await?;
-        let storages = match &session.destination {
-            EditDestination::Files(_) => self
-                .source
-                .shared
-                .runtime
-                .spawn_blocking(move || {
-                    let EditDestination::Files(files) = &session.destination else {
-                        unreachable!()
-                    };
-                    files.lyrics_storage()
-                })
-                .await
-                .map_err(|error| Error::Write(error.to_string()))?,
-            EditDestination::Server { .. } => {
-                if let Some(source) = session.source.clone() {
-                    let database = self.source.shared.database.clone();
-                    let uri = session.media_uri.clone();
-                    self.source
-                        .shared
-                        .runtime
-                        .spawn(async move { source.lyrics_storage(&database, &uri).await })
-                        .await
-                        .map_err(|error| Error::Write(error.to_string()))?
-                } else {
-                    Vec::new()
+        let runtime = self.source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            let session = self.lyrics_session().await?;
+            let storages = match &session.destination {
+                EditDestination::Files(_) => self
+                    .source
+                    .shared
+                    .runtime
+                    .spawn_blocking(move || {
+                        let EditDestination::Files(files) = &session.destination else {
+                            unreachable!()
+                        };
+                        files.lyrics_storage()
+                    })
+                    .await
+                    .map_err(|error| Error::Write(error.to_string()))?,
+                EditDestination::Server { .. } => {
+                    if let Some(source) = session.source.clone() {
+                        let database = self.source.shared.database.clone();
+                        let uri = session.media_uri.clone();
+                        self.source
+                            .shared
+                            .runtime
+                            .spawn(async move { source.lyrics_storage(&database, &uri).await })
+                            .await
+                            .map_err(|error| Error::Write(error.to_string()))?
+                    } else {
+                        Vec::new()
+                    }
                 }
-            }
-        };
-        let settings = self.source.shared.settings.load().ui;
-        let preferred = if settings.lyrics.preferences.save_lyrics_as_sidecar {
-            LyricsStorage::Sidecar
-        } else {
-            LyricsStorage::Embedded
-        };
-        let state = self.state();
-        let storage = state
-            .lyrics
-            .as_ref()
-            .map(|lyrics| lyrics.storage)
-            .filter(|storage| storages.contains(storage))
-            .unwrap_or_else(|| {
-                if storages.contains(&preferred) {
-                    preferred
-                } else {
-                    storages.first().copied().unwrap_or(LyricsStorage::Server)
-                }
-            });
-        Ok(MetadataLyricsSettings {
-            can_search: settings
+            };
+            let settings = self.source.shared.settings.load().ui;
+            let preferred = if settings.lyrics.preferences.save_lyrics_as_sidecar {
+                LyricsStorage::Sidecar
+            } else {
+                LyricsStorage::Embedded
+            };
+            let state = self.state();
+            let storage = state
                 .lyrics
-                .preferences
-                .external_lyrics_network_allowed(settings.application.private_mode),
-            storages,
-            storage,
-            artist: state.values.get("artist").cloned().unwrap_or_default(),
-            title: state.values.get("title").cloned().unwrap_or_default(),
-            text: state.lyrics.as_ref().map(|lyrics| lyrics.text.clone()),
+                .as_ref()
+                .map(|lyrics| lyrics.storage)
+                .filter(|storage| storages.contains(storage))
+                .unwrap_or_else(|| {
+                    if storages.contains(&preferred) {
+                        preferred
+                    } else {
+                        storages.first().copied().unwrap_or(LyricsStorage::Server)
+                    }
+                });
+            Ok(MetadataLyricsSettings {
+                can_search: settings
+                    .lyrics
+                    .preferences
+                    .external_lyrics_network_allowed(settings.application.private_mode),
+                storages,
+                storage,
+                artist: state.values.get("artist").cloned().unwrap_or_default(),
+                title: state.values.get("title").cloned().unwrap_or_default(),
+                text: state.lyrics.as_ref().map(|lyrics| lyrics.text.clone()),
+            })
         })
+        .await
     }
 
     pub async fn search_lyrics(
@@ -103,52 +107,67 @@ impl MetadataEditor {
         artist: String,
         title: String,
     ) -> Result<Vec<::lyrics::LyricsSearchResult>, Error> {
-        let settings = self.source.shared.settings.load().ui;
-        if !settings
-            .lyrics
-            .preferences
-            .external_lyrics_network_allowed(settings.application.private_mode)
-        {
-            return Ok(Vec::new());
-        }
-        if artist.trim().is_empty() && title.trim().is_empty() {
-            return Ok(Vec::new());
-        }
-        let providers = settings.lyrics.preferences.external_lyrics_providers;
-        self.source.shared.runtime.spawn(async move { ::lyrics::search_lyrics(&providers, artist.trim(), title.trim()).await })
-            .await.map_err(|error| Error::Write(error.to_string()))?.map_err(Error::Write)
+        let runtime = self.source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            let settings = self.source.shared.settings.load().ui;
+            if !settings
+                .lyrics
+                .preferences
+                .external_lyrics_network_allowed(settings.application.private_mode)
+            {
+                return Ok(Vec::new());
+            }
+            if artist.trim().is_empty() && title.trim().is_empty() {
+                return Ok(Vec::new());
+            }
+            let providers = settings.lyrics.preferences.external_lyrics_providers;
+            self.source
+                .shared
+                .runtime
+                .spawn(async move {
+                    ::lyrics::search_lyrics(&providers, artist.trim(), title.trim()).await
+                })
+                .await
+                .map_err(|error| Error::Write(error.to_string()))?
+                .map_err(Error::Write)
+        })
+        .await
     }
 
     pub async fn resolve_lyrics(
         &self,
         result: ::lyrics::LyricsSearchResult,
     ) -> Result<Option<String>, Error> {
-        let settings = self.source.shared.settings.load().ui;
-        if !settings
-            .lyrics
-            .preferences
-            .external_lyrics_network_allowed(settings.application.private_mode)
-            || !settings
+        let runtime = self.source.shared.runtime.clone();
+        super::on_runtime(runtime, async {
+            let settings = self.source.shared.settings.load().ui;
+            if !settings
                 .lyrics
                 .preferences
-                .external_lyrics_providers
-                .contains(&result.provider)
-        {
-            return Ok(None);
-        }
-        let bundle = self
-            .source
-            .shared
-            .runtime
-            .spawn(async move { ::lyrics::lyrics_from_search_result(&result).await })
-            .await
-            .map_err(|error| Error::Write(error.to_string()))?
-            .map_err(Error::Write)?;
-        Ok(bundle.and_then(|bundle| {
-            bundle
-                .selected_document(&settings.lyrics.preferences)
-                .map(|document| ::lyrics::lyrics_to_lrc_text(document, 0))
-        }))
+                .external_lyrics_network_allowed(settings.application.private_mode)
+                || !settings
+                    .lyrics
+                    .preferences
+                    .external_lyrics_providers
+                    .contains(&result.provider)
+            {
+                return Ok(None);
+            }
+            let bundle = self
+                .source
+                .shared
+                .runtime
+                .spawn(async move { ::lyrics::lyrics_from_search_result(&result).await })
+                .await
+                .map_err(|error| Error::Write(error.to_string()))?
+                .map_err(Error::Write)?;
+            Ok(bundle.and_then(|bundle| {
+                bundle
+                    .selected_document(&settings.lyrics.preferences)
+                    .map(|document| ::lyrics::lyrics_to_lrc_text(document, 0))
+            }))
+        })
+        .await
     }
 
     pub fn set_lyrics(&self, text: String, storage: LyricsStorage) {
