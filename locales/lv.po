@@ -417,6 +417,21 @@ msgstr "Albuma izpildītājs"
 msgid "Album artists"
 msgstr "Albumu izpildītāji"
 
+#, fuzzy
+#| msgid "Album title"
+msgid "Album details"
+msgstr "Albuma nosaukums"
+
+#, fuzzy
+#| msgid "Album radio"
+msgid "Album gain"
+msgstr "Albūma radio"
+
+#, fuzzy
+#| msgid "Album tracks"
+msgid "Album peak"
+msgstr "Albuma dziesmas"
+
 msgid "Album radio"
 msgstr "Albūma radio"
 
@@ -524,6 +539,11 @@ msgid "April {year}"
 msgstr ""
 
 msgid "Artist albums"
+msgstr "Izpildītāja albumi"
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Artist details"
 msgstr "Izpildītāja albumi"
 
 msgid "Artist name"
@@ -712,6 +732,11 @@ msgstr ""
 
 msgid "Browse"
 msgstr ""
+
+#, fuzzy
+#| msgid "Change Profile"
+msgid "CUE file"
+msgstr "Mainīt profilu"
 
 #, fuzzy
 #| msgid "Cached"
@@ -1345,6 +1370,9 @@ msgstr[2] "Dzēst atskaņošanas sarakstu"
 msgid "Delete"
 msgstr "Dzēst"
 
+msgid "Delivery"
+msgstr ""
+
 msgid "Descending"
 msgstr "Dilstošā secībā"
 
@@ -1352,6 +1380,11 @@ msgid "Detail track columns"
 msgstr "Detalizētas celiņu kolonnas"
 
 msgid "Detail"
+msgstr "Sīkāka informācija"
+
+#, fuzzy
+#| msgid "Detail"
+msgid "Details"
 msgstr "Sīkāka informācija"
 
 msgid "Device invitation"
@@ -1814,6 +1847,11 @@ msgstr "Formāts"
 msgid "File path"
 msgstr "Mape"
 
+#, fuzzy
+#| msgid "Files"
+msgid "File size"
+msgstr "Faili"
+
 msgid "Filename"
 msgstr "Faila nosaukums"
 
@@ -1858,6 +1896,11 @@ msgstr "Faila nosaukums"
 #| msgid "Folder"
 msgid "Folder path"
 msgstr "Mape"
+
+#, fuzzy
+#| msgid "Folders"
+msgid "Folder"
+msgstr "Mapes"
 
 msgid "Folders"
 msgstr "Mapes"
@@ -2130,6 +2173,14 @@ msgstr "Integrācijas"
 msgid "Invite"
 msgstr ""
 
+msgid "Item ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Item is no longer available"
+msgstr "Metadatu rediģēšana vairs nav pieejama"
+
 msgid "January {year}"
 msgstr ""
 
@@ -2281,6 +2332,11 @@ msgstr "ListenBrainz"
 #| msgid "Searching for devices..."
 msgid "Listening overview"
 msgstr "Tiek meklētas ierīces..."
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Listening"
+msgstr "ListenBrainz"
 
 msgid "Load file contents"
 msgstr "Ielādēt faila saturu"
@@ -2997,6 +3053,11 @@ msgid "Orange"
 msgstr "Oranžs"
 
 #, fuzzy
+#| msgid "Original"
+msgid "Original audio"
+msgstr "Oriģināls"
+
+#, fuzzy
 #| msgid "Release date"
 msgid "Original release date"
 msgstr "Izdošanas datums"
@@ -3174,6 +3235,11 @@ msgstr "Atskaņo šajā ierīcē"
 
 msgid "Playing on {device}"
 msgstr "Atskaņo ierīcē {device}"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Playing stream"
+msgstr "Atskaņot nejaušā secībā"
 
 msgid "Playlist File"
 msgstr "Atskaņošanas saraksta fails"
@@ -3483,6 +3549,11 @@ msgstr "Izdevums"
 msgid "Release notifications"
 msgstr "Jaunu izdevumu paziņojumi"
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Release type"
+msgstr "Izdošanas datums"
+
 msgid "Release"
 msgstr "Izdevums"
 
@@ -3623,6 +3694,11 @@ msgstr "Aizstāt faila saturu"
 
 msgid "Replace saved custom headers"
 msgstr "Aizstāt saglabātos pielāgotos virsrakstus"
+
+#, fuzzy
+#| msgid "ReplayGain"
+msgid "ReplayGain tags"
+msgstr "ReplayGain"
 
 msgid "ReplayGain"
 msgstr "ReplayGain"
@@ -3933,6 +4009,16 @@ msgstr "Meklēt atskaņošanā"
 msgid "Seek to {time}"
 msgstr "Pārvietot uz {time}"
 
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Segment end"
+msgstr "Segmentētas joslas"
+
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Segment start"
+msgstr "Segmentētas joslas"
+
 msgid "Segmented bars"
 msgstr "Segmentētas joslas"
 
@@ -4022,6 +4108,11 @@ msgstr ""
 
 msgid "Share"
 msgstr "Dalīties"
+
+#, fuzzy
+#| msgid "Shared secret"
+msgid "Shared file size"
+msgstr "Slepenā atslēga"
 
 msgid "Shared secret"
 msgstr "Slepenā atslēga"
@@ -4198,6 +4289,11 @@ msgstr "Dziesma"
 
 msgid "Sort by"
 msgstr "Kārtot pēc"
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Sort name"
+msgstr "Izpildītāja nosaukums"
 
 msgid "Sort title"
 msgstr "Kārto pēc nosaukuma"
@@ -4457,8 +4553,23 @@ msgstr ""
 msgid "Total tracks"
 msgstr "Noskaņu dziesmas"
 
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track details"
+msgstr "Dziesmas radio"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track gain"
+msgstr "Dziesmas radio"
+
 msgid "Track number"
 msgstr "Dziesmas numurs"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track peak"
+msgstr "Dziesmas radio"
 
 msgid "Track radio"
 msgstr "Dziesmas radio"
@@ -4474,6 +4585,11 @@ msgstr "Pēdējo piecu albumu dziesmas"
 
 msgid "Tracks"
 msgstr "Dziesmas"
+
+#, fuzzy
+#| msgid "Transition mode"
+msgid "Transcoded"
+msgstr "Pārejas režīms"
 
 msgid "Transition mode"
 msgstr "Pārejas režīms"
@@ -5047,11 +5163,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 #~ msgid "Undo identified value"
 #~ msgstr "Atcelt atzīmēto vērtību"
 
-#, fuzzy
-#~| msgid "Folders"
-#~ msgid "Folder"
-#~ msgstr "Mapes"
-
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "Ģenerēt un kešot viļņa formas pašreizējai dziesmai"
 
@@ -5079,9 +5190,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "Connecting"
 #~ msgstr "Savienojas"
-
-#~ msgid "Files"
-#~ msgstr "Faili"
 
 #, fuzzy
 #~| msgid "Artist unavailable"

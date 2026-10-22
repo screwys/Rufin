@@ -427,6 +427,21 @@ msgstr "Albumi esitaja"
 msgid "Album artists"
 msgstr "Albumi esitajad"
 
+#, fuzzy
+#| msgid "Album title"
+msgid "Album details"
+msgstr "Albumi pealkiri"
+
+#, fuzzy
+#| msgid "Album radio"
+msgid "Album gain"
+msgstr "Albumipõhine raadio"
+
+#, fuzzy
+#| msgid "Album tracks"
+msgid "Album peak"
+msgstr "Albumi lood"
+
 msgid "Album radio"
 msgstr "Albumipõhine raadio"
 
@@ -526,6 +541,11 @@ msgid "April {year}"
 msgstr "Aprill {year}"
 
 msgid "Artist albums"
+msgstr "Esitajate albumid"
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Artist details"
 msgstr "Esitajate albumid"
 
 msgid "Artist name"
@@ -704,6 +724,11 @@ msgstr ""
 
 msgid "Browse"
 msgstr "Sirvi"
+
+#, fuzzy
+#| msgid "New file"
+msgid "CUE file"
+msgstr "Uus fail"
 
 #, fuzzy
 #| msgid "Cached"
@@ -1273,6 +1298,9 @@ msgstr[1] "Kustuta esitusloend"
 msgid "Delete"
 msgstr "Kustuta"
 
+msgid "Delivery"
+msgstr ""
+
 msgid "Descending"
 msgstr "Järjesta kahanevalt"
 
@@ -1280,6 +1308,11 @@ msgid "Detail track columns"
 msgstr "Lugude üksikasjade veerud"
 
 msgid "Detail"
+msgstr "Üksikasjad"
+
+#, fuzzy
+#| msgid "Detail"
+msgid "Details"
 msgstr "Üksikasjad"
 
 msgid "Device invitation"
@@ -1701,6 +1734,11 @@ msgstr "Vorming"
 msgid "File path"
 msgstr "Faili asukoht"
 
+#, fuzzy
+#| msgid "Files"
+msgid "File size"
+msgstr "Failid"
+
 msgid "Filename"
 msgstr "Failinimi"
 
@@ -1743,6 +1781,9 @@ msgstr "Failinimi"
 
 msgid "Folder path"
 msgstr "Kausta asukoht"
+
+msgid "Folder"
+msgstr "Kaust"
 
 msgid "Folders"
 msgstr "Kaustad"
@@ -2003,6 +2044,14 @@ msgstr "Lõimingud"
 msgid "Invite"
 msgstr "Kutsu"
 
+msgid "Item ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "Source is no longer available"
+msgid "Item is no longer available"
+msgstr "Allikas pole enam saadaval"
+
 msgid "January {year}"
 msgstr "Jaanuar {year}"
 
@@ -2141,6 +2190,11 @@ msgstr "ListenBrainz"
 
 msgid "Listening overview"
 msgstr "Kuulamiste ülevaade"
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Listening"
+msgstr "ListenBrainz"
 
 msgid "Load file contents"
 msgstr "Laadi faili sisu"
@@ -2809,6 +2863,11 @@ msgstr "Valikud"
 msgid "Orange"
 msgstr "Oranž"
 
+#, fuzzy
+#| msgid "Original"
+msgid "Original audio"
+msgstr "Algne"
+
 msgid "Original release date"
 msgstr "Algne avaldamise kuupäev"
 
@@ -2979,6 +3038,11 @@ msgstr "Esitamisel selles seadmes"
 
 msgid "Playing on {device}"
 msgstr "Esitamisel seadmes: {device}"
+
+#, fuzzy
+#| msgid "Playing from"
+msgid "Playing stream"
+msgstr "Esitamisel seadmest"
 
 msgid "Playlist File"
 msgstr "Esitusloendi fail"
@@ -3270,6 +3334,11 @@ msgstr "Väljalase"
 msgid "Release notifications"
 msgstr "Uute versioonide teave"
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Release type"
+msgstr "Avaldamise kuupäev"
+
 msgid "Release"
 msgstr "Väljalase"
 
@@ -3402,6 +3471,11 @@ msgstr "Asenda faili sisu"
 
 msgid "Replace saved custom headers"
 msgstr "Asenda salvestatud sinumääratud päised"
+
+#, fuzzy
+#| msgid "ReplayGain"
+msgid "ReplayGain tags"
+msgstr "Esitusvaljuse tundlikkus"
 
 msgid "ReplayGain"
 msgstr "Esitusvaljuse tundlikkus"
@@ -3699,6 +3773,16 @@ msgstr "Keri taasesituses"
 msgid "Seek to {time}"
 msgstr "Keri {time} ajapunkti"
 
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Segment end"
+msgstr "Klotsidest ribad"
+
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Segment start"
+msgstr "Klotsidest ribad"
+
 msgid "Segmented bars"
 msgstr "Klotsidest ribad"
 
@@ -3788,6 +3872,11 @@ msgstr ""
 
 msgid "Share"
 msgstr "Jaga"
+
+#, fuzzy
+#| msgid "Shared secret"
+msgid "Shared file size"
+msgstr "Jagatud saladus"
 
 msgid "Shared secret"
 msgstr "Jagatud saladus"
@@ -3950,6 +4039,11 @@ msgstr "Lugu"
 
 msgid "Sort by"
 msgstr "Järjestus"
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Sort name"
+msgstr "Esitaja nimi"
 
 msgid "Sort title"
 msgstr "Järjesta pealkirja alusel"
@@ -4174,8 +4268,23 @@ msgstr "Plaate kokku"
 msgid "Total tracks"
 msgstr "Lugusid kokku"
 
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track details"
+msgstr "Lugudepõhine raadio"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track gain"
+msgstr "Lugudepõhine raadio"
+
 msgid "Track number"
 msgstr "Loo number"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track peak"
+msgstr "Lugudepõhine raadio"
 
 msgid "Track radio"
 msgstr "Lugudepõhine raadio"
@@ -4191,6 +4300,11 @@ msgstr "Lood sinu viimaselt viielt albumilt"
 
 msgid "Tracks"
 msgstr "Lugusid"
+
+#, fuzzy
+#| msgid "Transition mode"
+msgid "Transcoded"
+msgstr "Lugudevahetuse viis"
 
 msgid "Transition mode"
 msgstr "Lugudevahetuse viis"
@@ -4732,9 +4846,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 #~ msgid "Undo identified value"
 #~ msgstr "Tühista kindlaksmääratud väärtus"
 
-#~ msgid "Folder"
-#~ msgstr "Kaust"
-
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "Loob ja salvestab praeguse loo lainekujud"
 
@@ -4780,9 +4891,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Files received: {count}"
 #~ msgstr "Vastuvõetud faile: {count}"
-
-#~ msgid "Files"
-#~ msgstr "Failid"
 
 #~ msgid "Media available"
 #~ msgstr "Meedium on saadaval"
