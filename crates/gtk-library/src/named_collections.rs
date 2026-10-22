@@ -9,10 +9,7 @@ use std::sync::Arc;
 use adw::prelude::*;
 use gtk::gio;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use library::{
-    ArtistKey, ArtistView, GenreKey, GenreView, MoodKey, MoodView, PlaylistKey, PlaylistRow,
-    SmartPlaylistKey, SmartPlaylistRow,
-};
+use library::{ArtistKey, ArtistView, GenreKey, GenreView, MoodKey, MoodView};
 use localization::{album_count_text, msgid, track_count_text};
 
 use crate::CatalogUi;
@@ -576,189 +573,6 @@ impl NamedCollectionRow for MoodView {
     }
 }
 
-impl CollectionRow for PlaylistRow {
-    type Key = PlaylistKey;
-    fn read<'a>(
-        read: &'a library::ListRead,
-        database: &'a library::Database,
-        offset: usize,
-        limit: usize,
-        cancel: &'a library::ReadCancellation,
-    ) -> impl std::future::Future<Output = library::LibraryResult<Vec<Self>>> + Send + 'a {
-        read.playlists(database, offset, limit, cancel)
-    }
-
-    fn page<'a>(
-        read: &'a library::ListRead,
-        database: &'a library::Database,
-        window: library::RouteSeedWindow,
-        cancel: &'a library::ReadCancellation,
-    ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a
-    {
-        read.page_playlists(database, window, cancel)
-    }
-
-    fn set_downloaded(&mut self, downloaded: bool) {
-        self.downloaded_count = if downloaded { self.track_count } else { 0 };
-    }
-
-    fn playback(
-        &self,
-        _key: LibraryListKey,
-        _selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> Option<rufin_core::playback::PlayRequest> {
-        Some(gtk_widgets::selection::collection_play_request(
-            library::Collection::Playlist(self.playlist_key),
-        ))
-    }
-
-    fn downloaded(&self) -> bool {
-        self.track_count > 0 && self.downloaded_count == self.track_count
-    }
-    fn projection(
-        shell: &Rc<CatalogUi>,
-        sparse: Rc<SparseRouteModel<Self::Key, Self>>,
-        key: LibraryListKey,
-    ) -> LibraryCollectionProjection {
-        named_collection_projection(shell, sparse, key)
-    }
-}
-
-impl NamedCollectionRow for PlaylistRow {
-    const MOSAIC: bool = false;
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-    fn route(&self) -> Route {
-        Route::PlaylistDetail(self.playlist_key)
-    }
-    fn artwork(&self) -> Vec<artwork::ArtworkBinding> {
-        playlist_artwork(self)
-    }
-    fn field(&self, field: LibraryField) -> String {
-        playlist_field(self, field)
-    }
-
-    fn present_context(
-        &self,
-        target: &gtk::Widget,
-        shell: &Rc<CatalogUi>,
-        position: Option<(f64, f64)>,
-    ) {
-        (shell.playlist_context_menu)(target, self.clone(), None, position);
-    }
-    fn install_extra(
-        widget: &gtk::Widget,
-        shell: &Rc<CatalogUi>,
-        current: Rc<dyn Fn() -> Option<Self>>,
-    ) {
-        super::collections::install_playlist_drop(widget, shell, current);
-    }
-    fn table(
-        shell: &Rc<CatalogUi>,
-        sparse: &Rc<SparseRouteModel<Self::Key, Self>>,
-        _key: LibraryListKey,
-    ) -> super::collections::CollectionTableProjection {
-        named_collection_table::<Self, _>(shell, sparse.list_model(), LibraryListKey::Playlists)
-    }
-}
-
-impl CollectionRow for SmartPlaylistRow {
-    type Key = SmartPlaylistKey;
-    fn read<'a>(
-        read: &'a library::ListRead,
-        database: &'a library::Database,
-        offset: usize,
-        limit: usize,
-        cancel: &'a library::ReadCancellation,
-    ) -> impl std::future::Future<Output = library::LibraryResult<Vec<Self>>> + Send + 'a {
-        read.smart_playlists(database, offset, limit, cancel)
-    }
-
-    fn page<'a>(
-        read: &'a library::ListRead,
-        database: &'a library::Database,
-        window: library::RouteSeedWindow,
-        cancel: &'a library::ReadCancellation,
-    ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a
-    {
-        read.page_smart_playlists(database, window, cancel)
-    }
-
-    fn set_downloaded(&mut self, downloaded: bool) {
-        self.downloaded_count = if downloaded { self.track_count } else { 0 };
-    }
-
-    fn playback(
-        &self,
-        _key: LibraryListKey,
-        _selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> Option<rufin_core::playback::PlayRequest> {
-        Some(gtk_widgets::selection::smart_play_request(
-            self.smart_playlist_key,
-            _selected,
-        ))
-    }
-
-    fn downloaded(&self) -> bool {
-        self.track_count > 0 && self.downloaded_count == self.track_count
-    }
-    fn projection(
-        shell: &Rc<CatalogUi>,
-        sparse: Rc<SparseRouteModel<Self::Key, Self>>,
-        key: LibraryListKey,
-    ) -> LibraryCollectionProjection {
-        named_collection_projection(shell, sparse, key)
-    }
-}
-
-impl NamedCollectionRow for SmartPlaylistRow {
-    const MOSAIC: bool = false;
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-    fn route(&self) -> Route {
-        Route::SmartPlaylistDetail(self.smart_playlist_key)
-    }
-    fn artwork(&self) -> Vec<artwork::ArtworkBinding> {
-        self.artwork_binding
-            .iter()
-            .map(|binding| artwork::ArtworkBinding::opaque(binding))
-            .collect()
-    }
-    fn field(&self, field: LibraryField) -> String {
-        smart_playlist_field(self, field)
-    }
-
-    fn present_context(
-        &self,
-        target: &gtk::Widget,
-        shell: &Rc<CatalogUi>,
-        position: Option<(f64, f64)>,
-    ) {
-        present_smart_playlist_context_menu(
-            target,
-            &shell.media_menus,
-            self.clone(),
-            None,
-            position,
-        );
-    }
-    fn table(
-        shell: &Rc<CatalogUi>,
-        sparse: &Rc<SparseRouteModel<Self::Key, Self>>,
-        _key: LibraryListKey,
-    ) -> super::collections::CollectionTableProjection {
-        named_collection_table::<Self, _>(
-            shell,
-            sparse.list_model(),
-            LibraryListKey::SmartPlaylists,
-        )
-    }
-}
-
 impl CollectionRow for library::PlaylistListRow {
     type Key = (u8, i64);
     fn read<'a>(
@@ -781,26 +595,37 @@ impl CollectionRow for library::PlaylistListRow {
     }
     fn playback(
         &self,
-        key: LibraryListKey,
+        _key: LibraryListKey,
         selected: Option<&rufin_core::runtime::SelectedLibrary>,
     ) -> Option<rufin_core::playback::PlayRequest> {
         match self {
-            Self::Playlist(row) => row.playback(key, selected),
-            Self::SmartPlaylist(row) => row.playback(key, selected),
+            Self::Playlist(row) => Some(gtk_widgets::selection::collection_play_request(
+                library::Collection::Playlist(row.playlist_key),
+            )),
+            Self::SmartPlaylist(row) => Some(gtk_widgets::selection::smart_play_request(
+                row.smart_playlist_key,
+                selected,
+            )),
             Self::Folder(_) => None,
         }
     }
     fn downloaded(&self) -> bool {
         match self {
-            Self::Playlist(row) => row.downloaded(),
-            Self::SmartPlaylist(row) => row.downloaded(),
+            Self::Playlist(row) => row.track_count > 0 && row.downloaded_count == row.track_count,
+            Self::SmartPlaylist(row) => {
+                row.track_count > 0 && row.downloaded_count == row.track_count
+            }
             Self::Folder(_) => false,
         }
     }
     fn set_downloaded(&mut self, downloaded: bool) {
         match self {
-            Self::Playlist(row) => row.set_downloaded(downloaded),
-            Self::SmartPlaylist(row) => row.set_downloaded(downloaded),
+            Self::Playlist(row) => {
+                row.downloaded_count = if downloaded { row.track_count } else { 0 }
+            }
+            Self::SmartPlaylist(row) => {
+                row.downloaded_count = if downloaded { row.track_count } else { 0 }
+            }
             Self::Folder(_) => {}
         }
     }
@@ -826,8 +651,8 @@ impl NamedCollectionRow for library::PlaylistListRow {
     }
     fn field(&self, field: LibraryField) -> String {
         match self {
-            Self::Playlist(row) => row.field(field),
-            Self::SmartPlaylist(row) => row.field(field),
+            Self::Playlist(row) => playlist_field(row, field),
+            Self::SmartPlaylist(row) => smart_playlist_field(row, field),
             Self::Folder(row) => match field {
                 LibraryField::Title | LibraryField::TitleMerged => row.name.clone(),
                 LibraryField::SongCount => track_count_text(row.track_count.max(0) as u64),
@@ -840,8 +665,8 @@ impl NamedCollectionRow for library::PlaylistListRow {
     }
     fn route(&self) -> Route {
         match self {
-            Self::Playlist(row) => row.route(),
-            Self::SmartPlaylist(row) => row.route(),
+            Self::Playlist(row) => Route::PlaylistDetail(row.playlist_key),
+            Self::SmartPlaylist(row) => Route::SmartPlaylistDetail(row.smart_playlist_key),
             Self::Folder(row) => Route::PlaylistFolder {
                 key: row.folder_key,
                 smart: row.smart,
@@ -849,15 +674,15 @@ impl NamedCollectionRow for library::PlaylistListRow {
         }
     }
     fn artwork(&self) -> Vec<artwork::ArtworkBinding> {
-        match self {
-            Self::Playlist(row) => row.artwork(),
-            Self::SmartPlaylist(row) => row.artwork(),
-            Self::Folder(row) => row
-                .artwork_binding
-                .iter()
-                .map(|binding| artwork::ArtworkBinding::opaque(binding))
-                .collect(),
-        }
+        let binding = match self {
+            Self::Playlist(row) => return playlist_artwork(row),
+            Self::SmartPlaylist(row) => &row.artwork_binding,
+            Self::Folder(row) => &row.artwork_binding,
+        };
+        binding
+            .iter()
+            .map(|binding| artwork::ArtworkBinding::opaque(binding))
+            .collect()
     }
     fn present_context(
         &self,
@@ -866,8 +691,16 @@ impl NamedCollectionRow for library::PlaylistListRow {
         position: Option<(f64, f64)>,
     ) {
         match self {
-            Self::Playlist(row) => row.present_context(target, shell, position),
-            Self::SmartPlaylist(row) => row.present_context(target, shell, position),
+            Self::Playlist(row) => {
+                (shell.playlist_context_menu)(target, row.clone(), None, position)
+            }
+            Self::SmartPlaylist(row) => present_smart_playlist_context_menu(
+                target,
+                &shell.media_menus,
+                row.clone(),
+                None,
+                position,
+            ),
             Self::Folder(row) => gtk_media_menus::playlist_folders::present_folder_context_menu(
                 target,
                 &shell.media_menus,

@@ -39,6 +39,43 @@ pub fn folder_name_dialog(
     name_dialog
 }
 
+pub fn present_new_folder_dialog(
+    menus: &Rc<MediaMenus>,
+    smart: bool,
+    members: Vec<library::PlaylistFolderMember>,
+    dismiss: Rc<dyn Fn()>,
+) {
+    let source = menus.source.clone();
+    let weak = Rc::downgrade(menus);
+    let dialog = folder_name_dialog(None, move |name| {
+        let source = source.clone();
+        let menus = weak.clone();
+        let members = members.clone();
+        let dismiss = Rc::clone(&dismiss);
+        gtk::glib::spawn_future_local(async move {
+            let result = async {
+                let folder =
+                    rufin_core::playlists::create_playlist_folder(&source, name, smart).await?;
+                for member in members {
+                    rufin_core::playlists::move_playlist_to_folder(&source, member, Some(folder))
+                        .await?;
+                }
+                Ok::<_, sources::SourceError>(())
+            }
+            .await;
+            match result {
+                Ok(()) => dismiss(),
+                Err(error) => {
+                    if let Some(menus) = menus.upgrade() {
+                        (menus.show_error)(error.to_string());
+                    }
+                }
+            }
+        });
+    });
+    (menus.present_dialog)(&dialog);
+}
+
 pub fn move_member(
     menus: &Rc<MediaMenus>,
     member: library::PlaylistFolderMember,
@@ -62,17 +99,16 @@ pub fn append_folder_actions(
     members: Vec<library::PlaylistFolderMember>,
     in_folder: bool,
 ) {
-    let resource = crate::ui_resource::PLAYLIST_FOLDER_RESOURCE;
-    let builder = crate::ui_resource::builder(resource);
-    gtk_widgets::objects!(builder, resource, { picker_toolbar: adw::ToolbarView, picker_content: gtk::Box });
-    picker_toolbar.set_content(None::<&gtk::Widget>);
+    let picker_content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    picker_content.add_css_class("context-playlist-submenu");
+    picker_content.set_hexpand(true);
     let popover = surface.popover().downgrade();
     let dismiss = Rc::new(move || {
         if let Some(popover) = popover.upgrade() {
             gtk_widgets::interactions::popdown_native_menu(&popover);
         }
     });
-    populate_folder_picker(&builder, menus, members.clone(), dismiss);
+    populate_folder_picker(&picker_content, menus, members.clone(), dismiss);
     let picker = Rc::clone(menus);
     let picker_members = members.clone();
     surface.append_fixed_widget_submenu(
@@ -98,12 +134,10 @@ pub fn append_folder_actions(
 }
 
 fn present_folder_picker(menus: &Rc<MediaMenus>, members: Vec<library::PlaylistFolderMember>) {
-    let resource = crate::ui_resource::PLAYLIST_FOLDER_RESOURCE;
-    let builder = crate::ui_resource::builder(resource);
-    gtk_widgets::objects!(builder, resource, { picker_dialog: adw::Dialog });
+    let (picker_dialog, picker_content) = crate::playlist_picker::folder_picker_dialog();
     let close = picker_dialog.downgrade();
     populate_folder_picker(
-        &builder,
+        &picker_content,
         menus,
         members,
         Rc::new(move || {
@@ -116,28 +150,11 @@ fn present_folder_picker(menus: &Rc<MediaMenus>, members: Vec<library::PlaylistF
 }
 
 fn populate_folder_picker(
-    builder: &gtk::Builder,
+    root: &gtk::Box,
     menus: &Rc<MediaMenus>,
     members: Vec<library::PlaylistFolderMember>,
     dismiss: Rc<dyn Fn()>,
 ) {
-    let resource = crate::ui_resource::PLAYLIST_FOLDER_RESOURCE;
-    gtk_widgets::objects!(builder, resource, { search: gtk::SearchEntry, folders: gtk::ListBox, create_folder: gtk::Button });
-    gtk_widgets::controls::configure_search_entry(&search);
-    let list = folders.downgrade();
-    search.connect_search_changed(move |search| {
-        let Some(list) = list.upgrade() else { return };
-        let query = search.text().trim().to_lowercase();
-        let mut child = list.first_child();
-        while let Some(row) = child {
-            child = row.next_sibling();
-            if let Some(row) = row.downcast_ref::<gtk::ListBoxRow>()
-                && let Some(label) = row.child().and_downcast::<gtk::Label>()
-            {
-                row.set_visible(label.text().to_lowercase().contains(&query));
-            }
-        }
-    });
     let smart = matches!(
         members.first(),
         Some(library::PlaylistFolderMember::SmartPlaylist { .. })
@@ -145,91 +162,46 @@ fn populate_folder_picker(
     let create_menus = Rc::downgrade(menus);
     let create_members = members.clone();
     let create_dismiss = Rc::clone(&dismiss);
-    create_folder.connect_clicked(move |_| {
-        let Some(menus) = create_menus.upgrade() else {
-            return;
-        };
-        let source = menus.source.clone();
-        let weak = Rc::downgrade(&menus);
-        let members = create_members.clone();
-        let dismiss = Rc::clone(&create_dismiss);
-        let dialog = folder_name_dialog(None, move |name| {
-            let source = source.clone();
-            let menus = weak.clone();
-            let members = members.clone();
-            let dismiss = Rc::clone(&dismiss);
-            gtk::glib::spawn_future_local(async move {
-                let result = async {
-                    let folder =
-                        rufin_core::playlists::create_playlist_folder(&source, name, smart).await?;
-                    for member in members {
-                        rufin_core::playlists::move_playlist_to_folder(
-                            &source,
-                            member,
-                            Some(folder),
-                        )
-                        .await?;
-                    }
-                    Ok::<_, sources::SourceError>(())
+    let choose_menus = Rc::downgrade(menus);
+    let choose_members = members.clone();
+    let choose_dismiss = Rc::clone(&dismiss);
+    let update = crate::playlist_picker::populate_context_picker(
+        root,
+        true,
+        Rc::new(move |folder, _, _| {
+            if let Some(menus) = choose_menus.upgrade() {
+                for member in &choose_members {
+                    move_member(&menus, member.clone(), Some(folder));
                 }
-                .await;
-                match result {
-                    Ok(()) => dismiss(),
-                    Err(error) => {
-                        if let Some(menus) = menus.upgrade() {
-                            (menus.show_error)(error.to_string());
-                        }
-                    }
-                }
-            });
-        });
-        (menus.present_dialog)(&dialog);
-    });
+            }
+            choose_dismiss();
+        }),
+        Rc::new(move |_| {
+            let Some(menus) = create_menus.upgrade() else {
+                return;
+            };
+            present_new_folder_dialog(
+                &menus,
+                smart,
+                create_members.clone(),
+                Rc::clone(&create_dismiss),
+            );
+        }),
+    );
     let database = menus.library.clone();
     let task = menus.runtime.spawn(async move {
         database
-            .playlist_folders(smart, &library::ReadCancellation::new())
+            .playlist_folder_choices(smart, &library::ReadCancellation::new())
             .await
     });
     let menus = Rc::downgrade(menus);
-    let folders = folders.downgrade();
     gtk::glib::spawn_future_local(async move {
-        let (Some(menus), Some(folders)) = (menus.upgrade(), folders.upgrade()) else {
-            return;
-        };
-        let rows = match task.await {
-            Ok(Ok(rows)) => rows,
-            Ok(Err(error)) => {
-                (menus.show_error)(error.to_string());
-                return;
-            }
-            Err(error) => {
-                (menus.show_error)(error.to_string());
-                return;
-            }
-        };
-        for folder in rows {
-            let row = gtk::ListBoxRow::new();
-            let label = gtk::Label::new(Some(&folder.name));
-            label.set_xalign(0.0);
-            label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-            label.set_margin_start(4);
-            label.set_margin_end(4);
-            label.set_margin_top(2);
-            label.set_margin_bottom(2);
-            row.set_child(Some(&label));
-            let members = members.clone();
-            let menus = Rc::downgrade(&menus);
-            let dismiss = Rc::clone(&dismiss);
-            row.connect_activate(move |_| {
-                if let Some(menus) = menus.upgrade() {
-                    for member in &members {
-                        move_member(&menus, member.clone(), Some(folder.folder_key));
-                    }
-                }
-                dismiss();
-            });
-            folders.append(&row);
+        let result = task.await;
+        let Some(menus) = menus.upgrade() else { return };
+        match result {
+            Ok(Ok(rows)) => update(rows),
+            Ok(Err(error)) => (menus.show_error)(error.to_string()),
+            Err(error) => (menus.show_error)(error.to_string()),
         }
     });
 }

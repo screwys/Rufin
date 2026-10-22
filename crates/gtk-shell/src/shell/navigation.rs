@@ -921,7 +921,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
                         .map(SidebarPinItem::Playlist)
                 }
                 SidebarPin::PlaylistFolder { folder_id, .. } => database
-                    .playlist_folder_by_id(&folder_id, &cancellation)
+                    .playlist_folder_by_id(&folder_id, current_source, folder, &cancellation)
                     .await?
                     .map(SidebarPinItem::PlaylistFolder),
                 SidebarPin::SmartPlaylist { playlist_id, .. } => {

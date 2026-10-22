@@ -784,7 +784,14 @@ impl AndroidLibrary {
                             }
                         }
                         SidebarPin::PlaylistFolder { folder_id, .. } => db
-                            .playlist_folder_by_id(folder_id, &cancel)
+                            .playlist_folder_by_id(
+                                folder_id,
+                                selected.as_ref().map(|selected| selected.source_key),
+                                selected
+                                    .as_ref()
+                                    .and_then(|selected| selected.music_folder_key),
+                                &cancel,
+                            )
                             .await
                             .map_err(error)?
                             .map(Into::into),

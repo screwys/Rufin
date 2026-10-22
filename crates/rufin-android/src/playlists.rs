@@ -18,24 +18,39 @@ impl AndroidLibrary {
     pub async fn playlist_choices(
         &self,
         filter: String,
+        folder_kind: Option<bool>,
         offset: u64,
         limit: u32,
     ) -> Result<AndroidPlaylistChoices, AndroidError> {
         let selected = self.source.selected_library();
         let mut read = library::ListRead::new(
-            library::ListKind::Playlists,
+            if folder_kind == Some(true) {
+                library::ListKind::SmartPlaylists {
+                    now: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(error)?
+                        .as_secs() as i64,
+                }
+            } else {
+                library::ListKind::Playlists
+            },
             selected.as_ref().map(|selected| selected.source_key),
             library::CatalogSort::Title,
         );
         read.folder = selected.and_then(|selected| selected.music_folder_key);
         read.filter = filter;
+        read.playlist_scope = if folder_kind.is_some() {
+            library::PlaylistScope::Folders
+        } else {
+            library::PlaylistScope::All
+        };
         let database = self.database.clone();
         self.runtime
             .spawn(async move {
                 let cancel = library::ReadCancellation::new();
                 let count = read.count(&database, &cancel).await.map_err(error)? as u64;
                 let rows = read
-                    .playlists(&database, offset as usize, limit as usize, &cancel)
+                    .playlist_items(&database, offset as usize, limit as usize, &cancel)
                     .await
                     .map_err(error)?
                     .into_iter()
@@ -219,22 +234,6 @@ impl AndroidLibrary {
 
 #[uniffi::export]
 impl AndroidLibrary {
-    pub async fn playlist_folders(
-        &self,
-        smart: bool,
-    ) -> Result<Vec<library::PlaylistFolderRow>, AndroidError> {
-        let database = self.database.clone();
-        self.runtime
-            .spawn(async move {
-                database
-                    .playlist_folders(smart, &library::ReadCancellation::new())
-                    .await
-                    .map_err(error)
-            })
-            .await
-            .map_err(error)?
-    }
-
     pub async fn playlist_member_folder(
         &self,
         member: library::PlaylistFolderMember,
@@ -249,45 +248,6 @@ impl AndroidLibrary {
             })
             .await
             .map_err(error)?
-    }
-
-    pub async fn create_playlist_folder(
-        &self,
-        name: String,
-        smart: bool,
-    ) -> Result<library::PlaylistFolderKey, AndroidError> {
-        playlists::create_playlist_folder(&self.source, name, smart)
-            .await
-            .map_err(error)
-    }
-
-    pub async fn rename_playlist_folder(
-        &self,
-        key: library::PlaylistFolderKey,
-        name: String,
-    ) -> Result<(), AndroidError> {
-        playlists::rename_playlist_folder(&self.source, key, name)
-            .await
-            .map_err(error)
-    }
-
-    pub async fn delete_playlist_folder(
-        &self,
-        key: library::PlaylistFolderKey,
-    ) -> Result<(), AndroidError> {
-        playlists::delete_playlist_folder(&self.source, key)
-            .await
-            .map_err(error)
-    }
-
-    pub async fn move_playlist_to_folder(
-        &self,
-        member: library::PlaylistFolderMember,
-        folder: Option<library::PlaylistFolderKey>,
-    ) -> Result<(), AndroidError> {
-        playlists::move_playlist_to_folder(&self.source, member, folder)
-            .await
-            .map_err(error)
     }
 
     pub async fn save_smart_playlist(

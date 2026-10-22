@@ -26,6 +26,7 @@ pub use metadata::*;
 mod collections;
 pub use query::{
     CatalogIdentity, CatalogKind, Collection, ListKind, ListRead, MemberRead, MemberRow, Page,
+    PlaylistScope,
 };
 pub mod connect;
 pub mod profile;

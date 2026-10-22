@@ -6,7 +6,7 @@ use std::{
     rc::Rc,
 };
 
-use ::library::{AlbumView, ArtistKey, ArtistView, PlaylistRow, TrackView};
+use ::library::{AlbumView, ArtistKey, ArtistView, TrackView};
 use adw::prelude::*;
 use gtk::{gio, glib};
 
@@ -1177,32 +1177,6 @@ fn selected_position(selection: &gtk::SelectionModel) -> u32 {
         positions.minimum()
     }
 }
-pub fn install_playlist_drop(
-    target: &impl IsA<gtk::Widget>,
-    shell: &Rc<CatalogUi>,
-    current: Rc<dyn Fn() -> Option<PlaylistRow>>,
-) {
-    let menus = Rc::downgrade(&shell.media_menus);
-    let drop = gtk::DropTarget::new(
-        glib::BoxedAnyObject::static_type(),
-        gtk::gdk::DragAction::COPY,
-    );
-    drop.connect_drop(move |_, value, _, _| {
-        let (Some(menus), Some(playlist), Some(source)) = (
-            menus.upgrade(),
-            current(),
-            gtk_widgets::media_drag::media_drag_source(value),
-        ) else {
-            return false;
-        };
-        if gtk_media_menus::playlist_folders::single_regular_playlist_drag(&source) {
-            return false;
-        }
-        gtk_media_menus::media_menus::add_drag_to_playlist(&menus, playlist, source)
-    });
-    target.add_controller(drop);
-}
-
 fn collection_grid_field_class(field: LibraryField) -> &'static str {
     match field {
         LibraryField::Artist | LibraryField::AlbumArtist => "artist-label",

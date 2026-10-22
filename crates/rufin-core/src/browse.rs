@@ -792,17 +792,23 @@ impl crate::source::SourceOwner {
             }
             Route::Playlists | Route::PlaylistFolder { smart: false, .. } => {
                 let mut read = list(ListKind::Playlists);
-                if let Route::PlaylistFolder { key, .. } = route {
-                    read.playlist_folder = Some(*key);
-                }
+                read.playlist_scope = match route {
+                    Route::PlaylistFolder { key, .. } => {
+                        library::PlaylistScope::Folder { key: *key }
+                    }
+                    _ => library::PlaylistScope::Root,
+                };
                 let page = read.page_playlist_items(database, window, cancel).await?;
                 OpenedCollection::Playlists { read, page }
             }
             Route::SmartPlaylists | Route::PlaylistFolder { smart: true, .. } => {
                 let mut read = list(ListKind::SmartPlaylists { now });
-                if let Route::PlaylistFolder { key, .. } = route {
-                    read.playlist_folder = Some(*key);
-                }
+                read.playlist_scope = match route {
+                    Route::PlaylistFolder { key, .. } => {
+                        library::PlaylistScope::Folder { key: *key }
+                    }
+                    _ => library::PlaylistScope::Root,
+                };
                 let page = read.page_playlist_items(database, window, cancel).await?;
                 OpenedCollection::SmartPlaylists { read, page }
             }

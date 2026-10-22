@@ -1568,7 +1568,7 @@ mod tests {
             .expect("published source")
             .source;
         let albums = library::ListRead {
-            playlist_folder: None,
+            playlist_scope: Default::default(),
             kind: library::ListKind::Albums,
             source: Some(source_key),
             sort: library::CatalogSort::Title,
@@ -1637,7 +1637,7 @@ mod tests {
             "/srv/navidrome/audio/Artist/Album/Track.flac"
         );
         let artists = library::ListRead {
-            playlist_folder: None,
+            playlist_scope: Default::default(),
             kind: library::ListKind::Artists {
                 album_artist: false,
             },

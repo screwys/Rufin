@@ -21,26 +21,4 @@
     </object></property>
   </object>
   <object class="GtkStringList" id="folder_labels"><items><item translatable="yes">Rename folder</item><item translatable="yes">Apply</item></items></object>
-  <object class="GtkBox" id="picker_content">
-    <property name="orientation">vertical</property>
-    <style><class name="context-playlist-submenu"/></style>
-    <child><object class="GtkSearchEntry" id="search"><property name="placeholder-text" translatable="yes">Search</property><style><class name="context-playlist-submenu-search"/></style></object></child>
-    <child><object class="GtkScrolledWindow"><property name="hscrollbar-policy">never</property><property name="propagate-natural-height">true</property><property name="max-content-height">320</property><property name="child"><object class="GtkListBox" id="folders"><property name="selection-mode">none</property><property name="activate-on-single-click">true</property><style><class name="context-playlist-submenu-list"/></style></object></property></object></child>
-    <child><object class="GtkButton" id="create_folder">
-      <style><class name="flat"/><class name="context-playlist-submenu-create"/></style>
-      <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">start</property>
-        <child><object class="GtkImage"><property name="icon-name">rufin-list-add-symbolic</property></object></child>
-        <child><object class="GtkLabel"><property name="label" translatable="yes">New folder</property></object></child>
-      </object></property>
-    </object></child>
-  </object>
-  <object class="AdwDialog" id="picker_dialog">
-    <style><class name="playlist-folder-dialog"/></style>
-    <property name="title" translatable="yes">Add to folder</property>
-    <property name="content-width">400</property><property name="content-height">420</property>
-    <property name="child"><object class="AdwToolbarView" id="picker_toolbar">
-      <child type="top"><object class="AdwHeaderBar"/></child>
-      <property name="content">picker_content</property>
-    </object></property>
-  </object>
 </interface>

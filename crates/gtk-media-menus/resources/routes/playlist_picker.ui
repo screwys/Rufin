@@ -78,4 +78,5 @@
       </object>
     </property>
   </object>
+<object class="GtkStringList" id="folder_labels"><items><item translatable="yes">Add to folder</item></items></object>
 </interface>

@@ -431,7 +431,7 @@ mod tests {
                 .unwrap();
             }
             let rows = library::ListRead {
-                playlist_folder: None,
+                playlist_scope: Default::default(),
                 kind: library::ListKind::Artists {
                     album_artist: false,
                 },

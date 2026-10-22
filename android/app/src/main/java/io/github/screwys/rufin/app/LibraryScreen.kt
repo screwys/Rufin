@@ -210,7 +210,9 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                         context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     val imported = browse.library?.importPlaylist(uri.toString()) ?: return@forEach
                     playlistFolder?.let { folder ->
-                        imported.row.playlistFolderMember?.let { browse.library?.movePlaylistToFolder(it, folder.key) }
+                        imported.row.playlistFolderMember?.let { member ->
+                            model.sourceOwner?.let { movePlaylistToFolder(it, member, folder.key) }
+                        }
                     }
                     browse.open(BrowseItem(imported.row, 0UL, null))
                     if (imported.skipped > 0UL) model.showFeedback(translate("Some playlist entries could not be imported"))
@@ -564,7 +566,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
             val source = model.sourceOwner ?: return@PlaylistCreateSheet
             io.github.screwys.rufin.shared.rufin_core.createPlaylist(source, sourceId, name, selection, public, null)?.let { created ->
                 playlistFolder?.let { folder ->
-                    created.playlistKey?.let { key -> browse.library?.movePlaylistToFolder(
+                    created.playlistKey?.let { key -> movePlaylistToFolder(source,
                         io.github.screwys.rufin.shared.library.PlaylistFolderMember.Playlist(key), folder.key) }
                 }
                 created.settingsError?.let { error(it) }

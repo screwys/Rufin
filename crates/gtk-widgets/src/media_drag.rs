@@ -84,17 +84,10 @@ async fn selected_parent_collections(
     ranges: &[Range<usize>],
 ) -> Result<Vec<library::Collection>, String> {
     let cancel = library::ReadCancellation::new();
-    if matches!(
-        read.kind,
-        library::ListKind::Playlists | library::ListKind::SmartPlaylists { .. }
-    ) {
-        database
-            .selected_playlist_collections(read, ranges, &cancel)
-            .await
-    } else {
-        database.selected_collections(read, ranges, &cancel).await
-    }
-    .map_err(|error| error.to_string())
+    database
+        .selected_collections(read, ranges, &cancel)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 pub fn install_parent_selection<K, R>(
@@ -558,21 +551,9 @@ impl MediaDragSource {
             } => Ok(library::MemberSelection::Concat(
                 reads
                     .iter()
-                    .map(|(read, ranges)| {
-                        if matches!(
-                            read.kind,
-                            library::ListKind::Playlists | library::ListKind::SmartPlaylists { .. }
-                        ) {
-                            library::MemberSelection::PlaylistItems {
-                                read: read.clone(),
-                                ranges: Some(ranges.clone()),
-                            }
-                        } else {
-                            library::MemberSelection::Parents {
-                                read: read.clone(),
-                                ranges: Some(ranges.clone()),
-                            }
-                        }
+                    .map(|(read, ranges)| library::MemberSelection::Parents {
+                        read: read.clone(),
+                        ranges: Some(ranges.clone()),
                     })
                     .collect(),
             )),

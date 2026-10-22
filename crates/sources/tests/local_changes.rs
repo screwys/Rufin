@@ -270,7 +270,7 @@ async fn local_image_change_updates_artwork_without_changing_metadata() {
         .expect("scan");
     let initial = updates.try_recv().expect("catalog update");
     let album = library::ListRead {
-        playlist_folder: None,
+        playlist_scope: Default::default(),
         kind: library::ListKind::Albums,
         source: Some(initial.0),
         sort: library::CatalogSort::Title,
@@ -857,7 +857,7 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
         .expect("scan");
     let initial = updates.try_recv().expect("catalog update");
     let albums = library::ListRead {
-        playlist_folder: None,
+        playlist_scope: Default::default(),
         kind: library::ListKind::Albums,
         source: Some(initial.0),
         sort: library::CatalogSort::Title,
@@ -1224,7 +1224,7 @@ async fn local_artist_cover_keeps_album_order_across_point_updates() {
         .unwrap();
     let initial = updates.try_recv().expect("catalog update");
     let artist = library::ListRead {
-        playlist_folder: None,
+        playlist_scope: Default::default(),
         kind: library::ListKind::Artists {
             album_artist: false,
         },
@@ -1662,7 +1662,7 @@ async fn local_metadata_save_publishes_album_identity_changes() {
         assert_eq!(album.metadata.year, year);
         for descending in [false, true] {
             let albums = library::ListRead {
-                playlist_folder: None,
+                playlist_scope: Default::default(),
                 kind: library::ListKind::Albums,
                 source: Some(initial.0),
                 sort: library::CatalogSort::ReleaseDate,
@@ -1825,7 +1825,7 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
         .expect("scan");
     let initial = updates.try_recv().expect("catalog update");
     let albums = library::ListRead {
-        playlist_folder: None,
+        playlist_scope: Default::default(),
         kind: library::ListKind::Albums,
         source: Some(initial.0),
         sort: library::CatalogSort::Title,

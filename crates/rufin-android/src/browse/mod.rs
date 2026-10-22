@@ -489,18 +489,7 @@ impl AndroidBrowseQuery {
             self.list(&cancel)
                 .await
                 .map_err(error)?
-                .map(|read| {
-                    Arc::new(
-                        if matches!(
-                            self.route,
-                            Route::Playlists | Route::SmartPlaylists | Route::PlaylistFolder { .. }
-                        ) {
-                            read.playlist_items_selection()
-                        } else {
-                            read.selection()
-                        },
-                    )
-                })
+                .map(|read| Arc::new(read.selection()))
                 .ok_or_else(|| error("Choose a collection"))
         })
         .await

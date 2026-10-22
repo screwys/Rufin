@@ -123,22 +123,11 @@ impl Shell {
             gtk_widgets::route::Route::SmartPlaylists
                 | gtk_widgets::route::Route::PlaylistFolder { smart: true, .. }
         );
-        let source = self.products.source.clone();
-        let shell = Rc::downgrade(self);
-        let dialog = gtk_media_menus::playlist_folders::folder_name_dialog(None, move |name| {
-            let source = source.clone();
-            let shell = shell.clone();
-            gtk::glib::spawn_future_local(async move {
-                if let Err(error) =
-                    rufin_core::playlists::create_playlist_folder(&source, name, smart).await
-                    && let Some(shell) = shell.upgrade()
-                {
-                    shell
-                        .control_feedback
-                        .show_feedback_toast(error.to_string());
-                }
-            });
-        });
-        self.present_selected_dialog(&dialog);
+        gtk_media_menus::playlist_folders::present_new_folder_dialog(
+            &self.media_menus,
+            smart,
+            Vec::new(),
+            Rc::new(|| {}),
+        );
     }
 }

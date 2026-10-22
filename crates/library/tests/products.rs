@@ -27,7 +27,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                 for folder in [None, Some(fixture.folder)] {
                     for filter in ["", "artist"] {
                         let (count, _, rows) = library::ListRead {
-                            playlist_folder: None,
+                            playlist_scope: Default::default(),
                             kind: library::ListKind::Artists {
                                 album_artist: albums,
                             },
@@ -50,7 +50,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                         for offset in 0..=order.len() {
                             actual.extend(
                                 library::ListRead {
-                                    playlist_folder: None,
+                                    playlist_scope: Default::default(),
                                     kind: library::ListKind::Artists {
                                         album_artist: albums,
                                     },
@@ -83,7 +83,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
     ] {
         for folder in [None, Some(fixture.folder)] {
             let (count, _, rows) = library::ListRead {
-                playlist_folder: None,
+                playlist_scope: Default::default(),
                 kind: library::ListKind::Genres,
                 source: Some(fixture.source),
                 sort: sort,
@@ -104,7 +104,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             for offset in 0..=order.len() {
                 actual.extend(
                     library::ListRead {
-                        playlist_folder: None,
+                        playlist_scope: Default::default(),
                         kind: library::ListKind::Genres,
                         source: Some(fixture.source),
                         sort: sort,
@@ -166,7 +166,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             ] {
                 for descending in [false, true] {
                     let (count, _, rows) = library::ListRead {
-                        playlist_folder: None,
+                        playlist_scope: Default::default(),
                         kind: library::ListKind::SmartPlaylists { now: 1000 },
                         source: (source).into(),
                         sort: sort,
@@ -190,7 +190,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                     for offset in 0..=order.len() {
                         actual.extend(
                             library::ListRead {
-                                playlist_folder: None,
+                                playlist_scope: Default::default(),
                                 kind: library::ListKind::SmartPlaylists { now: 1000 },
                                 source: (source).into(),
                                 sort: sort,
@@ -381,7 +381,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
             for folder in [None, Some(fixture.folder)] {
                 for filter in ["", "album"] {
                     let (count, _, rows) = library::ListRead {
-                        playlist_folder: None,
+                        playlist_scope: Default::default(),
                         kind: library::ListKind::Albums,
                         source: Some(fixture.source),
                         sort: sort,
@@ -410,7 +410,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         );
                         assert_eq!(
                             library::ListRead {
-                                playlist_folder: None,
+                                playlist_scope: Default::default(),
                                 kind: library::ListKind::ArtistAlbums {
                                     artist: fixture.artists[0],
                                     album_artist: true,
@@ -436,7 +436,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         );
                         assert_eq!(
                             library::ListRead {
-                                playlist_folder: None,
+                                playlist_scope: Default::default(),
                                 kind: library::ListKind::Albums,
                                 source: Some(fixture.source),
                                 sort: sort,
@@ -470,7 +470,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                     let mut paged = Vec::new();
                     for offset in 0..=order.len() {
                         let page = library::ListRead {
-                            playlist_folder: None,
+                            playlist_scope: Default::default(),
                             kind: library::ListKind::Albums,
                             source: Some(fixture.source),
                             sort: sort,
@@ -570,7 +570,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
             for descending in [false, true] {
                 for filter in ["", "global"] {
                     let (count, _, rows) = library::ListRead {
-                        playlist_folder: None,
+                        playlist_scope: Default::default(),
                         kind: library::ListKind::Playlists,
                         source: (source).into(),
                         sort: sort,
@@ -591,7 +591,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                     for offset in 0..=order.len() {
                         paged.extend(
                             library::ListRead {
-                                playlist_folder: None,
+                                playlist_scope: Default::default(),
                                 kind: library::ListKind::Playlists,
                                 source: (source).into(),
                                 sort: sort,
@@ -1820,7 +1820,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 library::CatalogSort::Duration,
             ] {
                 let (count, _, rows) = library::ListRead {
-                    playlist_folder: None,
+                    playlist_scope: Default::default(),
                     kind: library::ListKind::Playlists,
                     source: (source).into(),
                     sort: sort,
@@ -2378,7 +2378,7 @@ async fn genre_routes_reject_an_artwork_only_identity_without_track_membership()
 
     for sort in [CatalogSort::Title, CatalogSort::TrackCount] {
         let (count, _, rows) = library::ListRead {
-            playlist_folder: None,
+            playlist_scope: Default::default(),
             kind: library::ListKind::Genres,
             source: Some(fixture.source),
             sort: sort,
@@ -2649,7 +2649,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
 
     assert_eq!(
         library::ListRead {
-            playlist_folder: None,
+            playlist_scope: Default::default(),
             kind: library::ListKind::ArtistAlbums {
                 artist: track_artist.artist_key,
                 album_artist: false,
@@ -2675,7 +2675,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
     );
     assert_eq!(
         library::ListRead {
-            playlist_folder: None,
+            playlist_scope: Default::default(),
             kind: library::ListKind::ArtistAlbums {
                 artist: album_artist.artist_key,
                 album_artist: true,
@@ -2813,7 +2813,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
             for favorites_only in [false, true] {
                 for descending in [false, true] {
                     let track_artists = library::ListRead {
-                        playlist_folder: None,
+                        playlist_scope: Default::default(),
                         kind: library::ListKind::Artists {
                             album_artist: false,
                         },
@@ -2839,7 +2839,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
                     assert!(!track_artists.contains(&album_only), "{sort:?}");
 
                     let album_artists = library::ListRead {
-                        playlist_folder: None,
+                        playlist_scope: Default::default(),
                         kind: library::ListKind::Artists { album_artist: true },
                         source: Some(fixture.source),
                         sort: sort,
@@ -2939,7 +2939,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
     );
     assert_eq!(
         library::ListRead {
-            playlist_folder: None,
+            playlist_scope: Default::default(),
             kind: library::ListKind::ArtistAlbums {
                 artist: album_only,
                 album_artist: true,
@@ -2977,7 +2977,7 @@ async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
         .source;
     let cancellation = ReadCancellation::new();
     let (count, _, rows) = library::ListRead {
-        playlist_folder: None,
+        playlist_scope: Default::default(),
         kind: library::ListKind::SmartPlaylists { now: 0 },
         source: (Some(source)).into(),
         sort: CatalogSort::Position,
@@ -3624,7 +3624,7 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
         for descending in [false, true] {
             let window = RouteSeedWindow::relative(1.0);
             let (count, start, rows) = library::ListRead {
-                playlist_folder: None,
+                playlist_scope: Default::default(),
                 kind: library::ListKind::SmartPlaylists { now: 0 },
                 source: (Some(fixture.source)).into(),
                 sort: sort,
@@ -3692,7 +3692,7 @@ async fn smart_playlist_reordering_preserves_unique_positions() {
     );
     assert_eq!(
         library::ListRead {
-            playlist_folder: None,
+            playlist_scope: Default::default(),
             kind: library::ListKind::SmartPlaylists { now: 0 },
             source: (Some(fixture.source)).into(),
             sort: CatalogSort::Position,
@@ -3978,7 +3978,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     );
     assert_eq!(
         library::ListRead {
-            playlist_folder: None,
+            playlist_scope: Default::default(),
             kind: library::ListKind::SmartPlaylists { now: now },
             source: (Some(fixture.source)).into(),
             sort: CatalogSort::TrackCount,
@@ -4001,7 +4001,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     );
     assert_eq!(
         library::ListRead {
-            playlist_folder: None,
+            playlist_scope: Default::default(),
             kind: library::ListKind::SmartPlaylists { now: now },
             source: (Some(fixture.source)).into(),
             sort: CatalogSort::Duration,
@@ -4363,7 +4363,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     );
     for descending in [false, true] {
         let sorted = library::ListRead {
-            playlist_folder: None,
+            playlist_scope: Default::default(),
             kind: library::ListKind::Albums,
             source: Some(fixture.source),
             sort: library::CatalogSort::DateAdded,

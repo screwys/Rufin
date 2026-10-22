@@ -10,10 +10,6 @@ pub enum MemberSelection {
         read: MemberRead,
         ranges: Option<Vec<Range<usize>>>,
     },
-    PlaylistItems {
-        read: ListRead,
-        ranges: Option<Vec<Range<usize>>>,
-    },
     Parents {
         read: ListRead,
         ranges: Option<Vec<Range<usize>>>,
@@ -115,19 +111,8 @@ where
             Pending::Selection(MemberSelection::Parents {
                 read,
                 ranges: parent_ranges,
-            })
-            | Pending::Selection(MemberSelection::PlaylistItems {
-                read,
-                ranges: parent_ranges,
             }) => {
-                let query = if matches!(
-                    next,
-                    Pending::Selection(MemberSelection::PlaylistItems { .. })
-                ) {
-                    crate::playlist_folders::playlist_item_query_on(connection, read).await?
-                } else {
-                    crate::query::list_query_on(connection, read).await?
-                };
+                let query = crate::query::list_query_on(connection, read).await?;
                 let requested = query.requested_ranges(parent_ranges.as_deref());
                 if let ListKind::SmartPlaylists { now } = read.kind {
                     crate::smart_playlists::smart_parent_query(
@@ -245,24 +230,7 @@ impl Database {
                 .await?;
         Ok(rows
             .into_iter()
-            .map(|(key,)| parent_collection(read, key))
-            .collect())
-    }
-
-    pub async fn selected_playlist_collections(
-        &self,
-        read: &ListRead,
-        ranges: &[Range<usize>],
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<Collection>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let query = crate::playlist_folders::playlist_item_query_on(&mut connection, read).await?;
-        let rows: Vec<(i64,)> =
-            crate::query::selected_rows_on(&mut connection, &query, &query.key, Some(ranges), None)
-                .await?;
-        Ok(rows
-            .into_iter()
-            .filter(|(key,)| *key >= 0)
+            .filter(|(key,)| read.playlist_scope == PlaylistScope::All || *key >= 0)
             .map(|(key,)| parent_collection(read, key))
             .collect())
     }
