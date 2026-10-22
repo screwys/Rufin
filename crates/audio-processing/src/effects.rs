@@ -390,7 +390,6 @@ struct Prepared {
     targets: Vec<f64>,
     preamp_db: f64,
     rate: Option<u32>,
-    channel_matrix: Option<gst::Array>,
     bank_shape: Vec<FilterKind>,
 }
 struct EffectsState {
@@ -495,7 +494,6 @@ impl EffectsBin {
             block: None,
         }));
         let input = convert.static_pad("sink").unwrap();
-        let floating_caps = floating.downgrade();
         let weak = Arc::downgrade(&state);
         let probe_slots = slots.clone();
         let probe_channels = channels.clone();
@@ -511,23 +509,14 @@ impl EffectsBin {
                     match event.view() {
                         gst::EventView::Caps(caps) => {
                             if let Ok(info) = audio::AudioInfo::from_caps(caps.caps()) {
-                                if let Some(floating) = floating_caps.upgrade()
-                                    && let Ok(mut caps) = info.to_caps()
-                                {
-                                    caps.make_mut().structure_mut(0).unwrap().set(
-                                        "format",
-                                        if cfg!(target_endian = "little") {
-                                            "F64LE"
-                                        } else {
-                                            "F64BE"
-                                        },
-                                    );
-                                    if floating.property::<gst::Caps>("caps") != caps {
-                                        floating.set_property("caps", caps);
-                                    }
-                                }
                                 if state.info.as_ref() != Some(&info) {
                                     state.started = false;
+                                    state.prepared_rate = None;
+                                    // Match the matrix before converters negotiate the new channels.
+                                    probe_channels.set_property(
+                                        "mix-matrix",
+                                        balance_matrix(&info, state.last_balance),
+                                    );
                                 }
                                 if state.info.as_ref() != Some(&info)
                                     && state.block.is_none()
@@ -537,7 +526,6 @@ impl EffectsBin {
                                         gst::PadProbeType::BLOCK | gst::PadProbeType::BUFFER,
                                         |_, _| gst::PadProbeReturn::Ok,
                                     );
-                                    state.prepared_rate = None;
                                 }
                                 state.info = Some(info);
                             }
@@ -585,14 +573,7 @@ impl EffectsBin {
                         })
                         .unwrap_or(state.frontier);
                     if let Some(prepared) = state.pending.take() {
-                        install(
-                            &mut state,
-                            prepared,
-                            &probe_slots,
-                            &probe_channels,
-                            &probe_mono,
-                            time,
-                        );
+                        install(&mut state, prepared, &probe_slots, &probe_mono, time);
                     }
                     // Equalizer passthrough skips its own controller update. Synchronize before its dirty-coefficient check.
                     for control in &state.controls {
@@ -644,6 +625,8 @@ impl EffectsBin {
             state.started = false;
             state.frontier = gst::ClockTime::ZERO;
         }
+        self.channels
+            .set_property("mix-matrix", gst::Array::new([] as [f32; 0]));
         self.prepare(&self.requested.clone())
     }
     pub fn set_meter(&mut self, enabled: bool) -> Result<(), String> {
@@ -784,9 +767,6 @@ impl EffectsBin {
             targets.push(target);
             next_controls.push(control);
         }
-        let channel_matrix = info
-            .as_ref()
-            .map(|info| balance_matrix(info, config.balance));
         let prepared = Prepared {
             config: config.clone(),
             stages,
@@ -794,11 +774,10 @@ impl EffectsBin {
             targets,
             preamp_db,
             rate,
-            channel_matrix,
             bank_shape: profile.map_or(bank_shape, |p| p.bands.iter().map(|b| b.kind).collect()),
         };
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        if state.info.as_ref().map(audio::AudioInfo::rate) != rate {
+        if state.info != info {
             return Ok(());
         }
         state.pending = None;
@@ -808,14 +787,7 @@ impl EffectsBin {
         }
         if self.root.current_state() < gst::State::Paused || state.block.is_some() {
             let time = state.frontier;
-            install(
-                &mut state,
-                prepared,
-                &self.slots,
-                &self.channels,
-                &self.mono_caps,
-                time,
-            );
+            install(&mut state, prepared, &self.slots, &self.mono_caps, time);
         } else {
             let structural =
                 state.stages != prepared.stages || state.config.mono != prepared.config.mono;
@@ -823,7 +795,6 @@ impl EffectsBin {
             if structural {
                 let weak = Arc::downgrade(&self.state);
                 let slots = self.slots.clone();
-                let channels = self.channels.clone();
                 let mono = self.mono_caps.clone();
                 self.input
                     .add_probe(gst::PadProbeType::BLOCK_DOWNSTREAM, move |pad, _| {
@@ -831,7 +802,7 @@ impl EffectsBin {
                             let mut state = state.lock().unwrap_or_else(|p| p.into_inner());
                             if let Some(prepared) = state.pending.take() {
                                 let time = state.frontier;
-                                install(&mut state, prepared, &slots, &channels, &mono, time);
+                                install(&mut state, prepared, &slots, &mono, time);
                                 pad.mark_reconfigure();
                             }
                         }
@@ -909,7 +880,6 @@ fn install(
     state: &mut EffectsState,
     mut prepared: Prepared,
     slots: &[gst::Element; 5],
-    channels: &gst::Element,
     mono: &gst::Element,
     time: gst::ClockTime,
 ) {
@@ -972,10 +942,6 @@ fn install(
         time + gst::ClockTime::from_mseconds(50),
         prepared.config.balance,
     );
-    if !ramp && let Some(matrix) = prepared.channel_matrix {
-        channels.set_property("mix-matrix", matrix);
-        state.last_balance = prepared.config.balance;
-    }
     if prepared.config.mono != state.config.mono {
         mono.set_property(
             "caps",
