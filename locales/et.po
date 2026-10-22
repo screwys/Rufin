@@ -565,6 +565,9 @@ msgstr ""
 msgid "Audio fade on play/pause"
 msgstr "Esitamisel/peatamisel hajuta heli sujuvalt"
 
+msgid "Audio fingerprints"
+msgstr ""
+
 msgid "Audio output"
 msgstr "Heliväljund"
 
@@ -711,6 +714,9 @@ msgstr "Meediakogu on puhverdamisel"
 msgid "Caching local library..."
 msgstr "Puhverdan kohalikku muusikakogu…"
 
+msgid "Calculating fingerprint..."
+msgstr ""
+
 msgid "Cancel download and clear downloaded items"
 msgstr "Katkesta allalaadimine ja eemalda allalaaditu"
 
@@ -853,6 +859,16 @@ msgstr "Tühjenda kaanepiltide puhver"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Kustuta see loo jaoks laaditud laulusõnad"
+
+#, fuzzy
+#| msgid "Clear lyrics cache"
+msgid "Clear fingerprint cache"
+msgstr "Kustuta laulusõnade vahemälu"
+
+#, fuzzy
+#| msgid "Clear lyrics cache"
+msgid "Clear lookup cache"
+msgstr "Kustuta laulusõnade vahemälu"
 
 msgid "Clear lyrics cache"
 msgstr "Kustuta laulusõnade vahemälu"
@@ -1320,6 +1336,11 @@ msgstr "Ekraan"
 msgid "Do not encrypt"
 msgstr "Ära krüpti"
 
+msgid "Do you want to apply metadata changes to {count} track?"
+msgid_plural "Do you want to apply metadata changes to {count} tracks?"
+msgstr[0] ""
+msgstr[1] ""
+
 msgid "Do you want to use the existing configuration?"
 msgstr "Kas soovid kasutada olemasolevat seadistust?"
 
@@ -1328,6 +1349,9 @@ msgstr "Ära tee koopiat"
 
 msgid "Donate"
 msgstr "Toeta meid rahaliselt"
+
+msgid "Done"
+msgstr ""
 
 msgid "Download Folder"
 msgstr "Allalaadimiste kaust"
@@ -1636,9 +1660,17 @@ msgid "Fetching lyrics"
 msgstr "Otsi laulusõnu"
 
 #, fuzzy
+#| msgid "Search artwork"
+msgid "Fetching metadata..."
+msgstr "Otsi kaanepilte"
+
+#, fuzzy
 #| msgid "Search playlists"
 msgid "Fetching playlists"
 msgstr "Otsi esitusloenditest"
+
+msgid "Field"
+msgstr ""
 
 msgid "File connection"
 msgstr "Failiühendus"
@@ -1879,12 +1911,6 @@ msgstr "Tunde"
 msgid "Hz"
 msgstr ""
 
-msgid "Identify"
-msgstr "Tuvasta"
-
-msgid "Identifying..."
-msgstr "Tuvastan…"
-
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr ""
 "Kui lehe laadimine ei toimi, siis Libre.fm blokeerib sinu IP-aadressi või "
@@ -2099,6 +2125,11 @@ msgstr "Kuulamiste ülevaade"
 msgid "Load file contents"
 msgstr "Laadi faili sisu"
 
+#, fuzzy
+#| msgid "Loading related tracks..."
+msgid "Loading cached lookups..."
+msgstr "Laadin seotud lugusid…"
+
 msgid "Loading related tracks..."
 msgstr "Laadin seotud lugusid…"
 
@@ -2178,6 +2209,9 @@ msgstr "Lukusta metateave"
 msgid "Logs are copied"
 msgstr "Logid on kopeeritud"
 
+msgid "Lookup"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr "Helivaljuse normaliseerimine"
 
@@ -2217,6 +2251,11 @@ msgstr "Vastendatud kohalik kaust"
 msgid "March {year}"
 msgstr "Märts {year}"
 
+#, fuzzy
+#| msgid "Match"
+msgid "Matched"
+msgstr "Sobita"
+
 msgid "Maximum year"
 msgstr "Maksimaalne aasta"
 
@@ -2236,6 +2275,11 @@ msgstr "Metateabe muutmine pole enam saadaval"
 
 msgid "Metadata editing requires Local access"
 msgstr "Metateabe muutmine eeldab ligipääsu kohalikule seadmele"
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata lookups"
+msgstr "Metateabe allikas"
 
 msgid "Metadata source"
 msgstr "Metateabe allikas"
@@ -2327,9 +2371,6 @@ msgstr "Liiguta ülespoole"
 msgid "Multi-selection"
 msgstr "Mitmikvalik"
 
-msgid "Multiple values"
-msgstr "Mitu väärtust"
-
 msgid "Music Folder"
 msgstr "Muusikafailide kaust"
 
@@ -2410,6 +2451,11 @@ msgstr "Tuvastamine lähedusest"
 
 msgid "Needs attention"
 msgstr "Vajab tähelepanu"
+
+#, fuzzy
+#| msgid "Overview"
+msgid "Needs review"
+msgstr "Ülevaade"
 
 msgid "NetEase"
 msgstr "NetEase"
@@ -2511,6 +2557,11 @@ msgstr "Laulusõnu pole saadaval."
 
 msgid "No lyrics"
 msgstr "Laulusõnu pole"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching track in this release"
+msgstr "Sobivaid lugusid pole"
 
 msgid "No matching tracks found"
 msgstr "Sobivaid lugusid ei leidu"
@@ -2640,6 +2691,9 @@ msgstr "Üks kausta asukoht rea kohta; terve kogumiku kaasamiseks jäta tühjaks
 msgid "One path per line"
 msgstr "Üks asukoht rea kohta"
 
+msgid "Only fill missing information"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "Vaid esitatud lood"
 
@@ -2719,6 +2773,11 @@ msgid "Original release date"
 msgstr "Algne avaldamise kuupäev"
 
 msgid "Original"
+msgstr "Algne"
+
+#, fuzzy
+#| msgid "Original"
+msgid "Original: {value}"
 msgstr "Algne"
 
 msgid "Other releases"
@@ -3081,6 +3140,11 @@ msgstr "Vahemiku valik"
 msgid "Rating"
 msgstr "Hinnang"
 
+#, fuzzy
+#| msgid "Loading..."
+msgid "Reading tags..."
+msgstr "Laadin…"
+
 msgid "Ready"
 msgstr "Valmis"
 
@@ -3107,6 +3171,11 @@ msgstr "Ühenda uuesti"
 
 msgid "Record label"
 msgstr "Plaadifirma"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Recording"
+msgstr "Allalaadimisel"
 
 msgid "Red"
 msgstr "Punane"
@@ -3152,6 +3221,11 @@ msgstr "Edastusteenus"
 
 msgid "Release date"
 msgstr "Avaldamise kuupäev"
+
+#, fuzzy
+#| msgid "Release"
+msgid "Release group"
+msgstr "Väljalase"
 
 msgid "Release notifications"
 msgstr "Uute versioonide teave"
@@ -3483,8 +3557,18 @@ msgstr "Otsi uuesti"
 msgid "Search Lyrics"
 msgstr "Otsi laulusõnu"
 
+#, fuzzy
+#| msgid "MusicBrainz"
+msgid "Search MusicBrainz"
+msgstr "MusicBrainz"
+
 msgid "Search artwork"
 msgstr "Otsi kaanepilte"
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search by AcoustID"
+msgstr "Otsi laulusõnu"
 
 msgid "Search current folder"
 msgstr "Otsi sellest kaustas"
@@ -3525,8 +3609,18 @@ msgstr "Otsi"
 msgid "Search..."
 msgstr "Otsi…"
 
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching AcoustID..."
+msgstr "Otsin…"
+
 msgid "Searching Local Network"
 msgstr "Otsin kohtvõrgust"
+
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching MusicBrainz..."
+msgstr "Otsin…"
 
 msgid "Searching for devices..."
 msgstr "Otsin seadmeid…"
@@ -3893,6 +3987,9 @@ msgstr "Stuudiod"
 msgid "Style"
 msgstr "Stiil"
 
+msgid "Suggested"
+msgstr ""
+
 msgid "Sunday"
 msgstr "Pühapäev"
 
@@ -4090,9 +4187,6 @@ msgstr "UPnP"
 #| msgid "Album unavailable"
 msgid "Unavailable"
 msgstr "Album pole saadaval"
-
-msgid "Undo identified value"
-msgstr "Tühista kindlaksmääratud väärtus"
 
 msgid "Undo"
 msgstr "Võta tegevus tagasi"
@@ -4405,6 +4499,9 @@ msgstr "eile"
 msgid "{action} (Shuffle)"
 msgstr "{action} (segatuna)"
 
+msgid "{completed} of {total} ({cached} cached)"
+msgstr ""
+
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] "{count} album"
@@ -4463,6 +4560,21 @@ msgstr ""
 
 msgid "{current} MiB"
 msgstr ""
+
+msgid "{field} · Different across {count} track"
+msgid_plural "{field} · Different across {count} tracks"
+msgstr[0] ""
+msgstr[1] ""
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage} ({completed} of {total}, {cached} cached)"
+msgstr "{status} · {stage} {completed}{total}"
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage} ({count} of {total} tracks)"
+msgstr "{status} · {stage} {completed}{total}"
 
 #, fuzzy
 #| msgid "{status} · {stage} {completed}{total}"
@@ -4557,6 +4669,18 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Identify"
+#~ msgstr "Tuvasta"
+
+#~ msgid "Identifying..."
+#~ msgstr "Tuvastan…"
+
+#~ msgid "Multiple values"
+#~ msgstr "Mitu väärtust"
+
+#~ msgid "Undo identified value"
+#~ msgstr "Tühista kindlaksmääratud väärtus"
 
 #~ msgid "Folder"
 #~ msgstr "Kaust"
@@ -4953,9 +5077,6 @@ msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
 
 #~ msgid "Map server tracks to local files"
 #~ msgstr "Vastenda serveris olevad lood kohalike failidega"
-
-#~ msgid "Match"
-#~ msgstr "Sobita"
 
 #~ msgid "Music Folders"
 #~ msgstr "Muusika kaustad"

@@ -573,6 +573,9 @@ msgstr ""
 msgid "Audio fade on play/pause"
 msgstr "Skaņas pakāpeniska izdzišana atskaņošanā/pauzē"
 
+msgid "Audio fingerprints"
+msgstr ""
+
 msgid "Audio output"
 msgstr "Skaņas izvade"
 
@@ -718,6 +721,9 @@ msgstr "Kešo bibliotēku"
 
 msgid "Caching local library..."
 msgstr "Kešo lokālo bibliotēku…"
+
+msgid "Calculating fingerprint..."
+msgstr ""
 
 msgid "Cancel download and clear downloaded items"
 msgstr "Atcelt lejupielādi un dzēst lejupielādētos elementus"
@@ -872,6 +878,16 @@ msgstr "Rādīt albuma vāciņu"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Notīrīt ielādētos tekstus šai dziesmai"
+
+#, fuzzy
+#| msgid "Clear Cache"
+msgid "Clear fingerprint cache"
+msgstr "Notīrīt kešatmiņu"
+
+#, fuzzy
+#| msgid "Clear Cache"
+msgid "Clear lookup cache"
+msgstr "Notīrīt kešatmiņu"
 
 #, fuzzy
 #| msgid "Clear Cache"
@@ -1406,6 +1422,12 @@ msgstr "Atiestatīt displeju"
 msgid "Do not encrypt"
 msgstr "Nešifrēt"
 
+msgid "Do you want to apply metadata changes to {count} track?"
+msgid_plural "Do you want to apply metadata changes to {count} tracks?"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
 msgid "Do you want to use the existing configuration?"
 msgstr ""
 
@@ -1413,6 +1435,9 @@ msgid "Don't duplicate"
 msgstr "Nedublēt"
 
 msgid "Donate"
+msgstr ""
+
+msgid "Done"
 msgstr ""
 
 msgid "Download Folder"
@@ -1742,9 +1767,17 @@ msgid "Fetching lyrics"
 msgstr "Meklēt tekstus"
 
 #, fuzzy
+#| msgid "Show artwork"
+msgid "Fetching metadata..."
+msgstr "Rādīt albuma vāciņu"
+
+#, fuzzy
 #| msgid "Search playlists"
 msgid "Fetching playlists"
 msgstr "Meklēt atskaņošanas sarakstos"
+
+msgid "Field"
+msgstr ""
 
 #, fuzzy
 #| msgid "Connection"
@@ -2002,12 +2035,6 @@ msgstr "Stunda"
 msgid "Hz"
 msgstr ""
 
-msgid "Identify"
-msgstr "Identificēt"
-
-msgid "Identifying..."
-msgstr "Notiek identificēšana..."
-
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr "Ja lapa neielādējas, tad Libre.fm bloķē jūsu IP adrešu diapazonu/VPN"
 
@@ -2238,6 +2265,11 @@ msgstr "Tiek meklētas ierīces..."
 msgid "Load file contents"
 msgstr "Ielādēt faila saturu"
 
+#, fuzzy
+#| msgid "Loading related tracks..."
+msgid "Loading cached lookups..."
+msgstr "Ielādē saistītās dziesmas..."
+
 msgid "Loading related tracks..."
 msgstr "Ielādē saistītās dziesmas..."
 
@@ -2329,6 +2361,9 @@ msgstr "Bloķēt metadatus"
 msgid "Logs are copied"
 msgstr "Žurnāls ir kopēts"
 
+msgid "Lookup"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr "Skaļuma normalizācija"
 
@@ -2370,6 +2405,11 @@ msgstr "Nokartētais lokālais ceļš"
 msgid "March {year}"
 msgstr ""
 
+#, fuzzy
+#| msgid "Match"
+msgid "Matched"
+msgstr "Atbilstība"
+
 msgid "Maximum year"
 msgstr "Maksimālais gads"
 
@@ -2389,6 +2429,11 @@ msgstr "Metadatu rediģēšana vairs nav pieejama"
 
 msgid "Metadata editing requires Local access"
 msgstr "Metadatu rediģēšanai nepieciešama lokāla piekļuve"
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata lookups"
+msgstr "Metadatu avots"
 
 msgid "Metadata source"
 msgstr "Metadatu avots"
@@ -2479,9 +2524,6 @@ msgstr "Pārvietot augšup"
 msgid "Multi-selection"
 msgstr "Vairāku elementu atlase"
 
-msgid "Multiple values"
-msgstr "Vairākas vērtības"
-
 msgid "Music Folder"
 msgstr "Mūzikas mape"
 
@@ -2570,6 +2612,11 @@ msgstr ""
 
 msgid "Needs attention"
 msgstr "Prasās uzmanība"
+
+#, fuzzy
+#| msgid "Overview"
+msgid "Needs review"
+msgstr "Pārskats"
 
 msgid "NetEase"
 msgstr "NetEase"
@@ -2689,6 +2736,11 @@ msgstr "Nav pieejamu tekstu."
 
 msgid "No lyrics"
 msgstr "Nav teksta"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching track in this release"
+msgstr "Nav atrasts neviens atbilstošs celiņš"
 
 msgid "No matching tracks found"
 msgstr "Nav atrasts neviens atbilstošs celiņš"
@@ -2820,6 +2872,9 @@ msgstr "Viena mape vienā rindā; atstājiet tukšu, lai iekļautu visu kolekcij
 msgid "One path per line"
 msgstr "Viena ceļa adrese katrā rindā"
 
+msgid "Only fill missing information"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "Tikai atskaņotās dziesmas"
 
@@ -2907,6 +2962,11 @@ msgid "Original release date"
 msgstr "Izdošanas datums"
 
 msgid "Original"
+msgstr "Oriģināls"
+
+#, fuzzy
+#| msgid "Original"
+msgid "Original: {value}"
 msgstr "Oriģināls"
 
 msgid "Other releases"
@@ -3279,6 +3339,11 @@ msgstr "Diapazona atlase"
 msgid "Rating"
 msgstr "Vērtējums"
 
+#, fuzzy
+#| msgid "Loading..."
+msgid "Reading tags..."
+msgstr "Ielādē..."
+
 msgid "Ready"
 msgstr "Gatavs"
 
@@ -3311,6 +3376,11 @@ msgstr "Atjaunot savienojumu"
 #| msgid "Grid labels"
 msgid "Record label"
 msgstr "Režģa uzraksti"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Recording"
+msgstr "Lejupielādē"
 
 msgid "Red"
 msgstr "Sarkans"
@@ -3364,6 +3434,11 @@ msgstr "Saistīts"
 
 msgid "Release date"
 msgstr "Izdošanas datums"
+
+#, fuzzy
+#| msgid "Release"
+msgid "Release group"
+msgstr "Izdevums"
 
 msgid "Release notifications"
 msgstr "Jaunu izdevumu paziņojumi"
@@ -3713,9 +3788,19 @@ msgid "Search Lyrics"
 msgstr "Meklēt tekstus"
 
 #, fuzzy
+#| msgid "MusicBrainz"
+msgid "Search MusicBrainz"
+msgstr "MusicBrainz"
+
+#, fuzzy
 #| msgid "Show artwork"
 msgid "Search artwork"
 msgstr "Rādīt albuma vāciņu"
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search by AcoustID"
+msgstr "Meklēt tekstus"
 
 msgid "Search current folder"
 msgstr "Meklēt pašreizējā mapē"
@@ -3758,8 +3843,18 @@ msgstr "Meklēt"
 msgid "Search..."
 msgstr "Meklēt..."
 
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching AcoustID..."
+msgstr "Tiek veikta meklēšana..."
+
 msgid "Searching Local Network"
 msgstr "Meklē lokālajā tīklā"
+
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching MusicBrainz..."
+msgstr "Tiek veikta meklēšana..."
 
 msgid "Searching for devices..."
 msgstr "Tiek meklētas ierīces..."
@@ -4155,6 +4250,9 @@ msgstr "Skaņa"
 msgid "Style"
 msgstr "Stils"
 
+msgid "Suggested"
+msgstr ""
+
 msgid "Sunday"
 msgstr "Svētdiena"
 
@@ -4372,9 +4470,6 @@ msgstr "UPnP"
 #| msgid "Album unavailable"
 msgid "Unavailable"
 msgstr "Albums nav pieejams"
-
-msgid "Undo identified value"
-msgstr "Atcelt atzīmēto vērtību"
 
 msgid "Undo"
 msgstr "Atcelt"
@@ -4706,6 +4801,9 @@ msgstr "vakar"
 msgid "{action} (Shuffle)"
 msgstr "Atskaņot (jauktā secībā)"
 
+msgid "{completed} of {total} ({cached} cached)"
+msgstr ""
+
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] "{count} albumi"
@@ -4777,6 +4875,22 @@ msgstr ""
 
 msgid "{current} MiB"
 msgstr ""
+
+msgid "{field} · Different across {count} track"
+msgid_plural "{field} · Different across {count} tracks"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage} ({completed} of {total}, {cached} cached)"
+msgstr "{statuss} · {posms} {pabeigts}{kopā}"
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage} ({count} of {total} tracks)"
+msgstr "{statuss} · {posms} {pabeigts}{kopā}"
 
 #, fuzzy
 #| msgid "{status} · {stage} {completed}{total}"
@@ -4870,6 +4984,18 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Identify"
+#~ msgstr "Identificēt"
+
+#~ msgid "Identifying..."
+#~ msgstr "Notiek identificēšana..."
+
+#~ msgid "Multiple values"
+#~ msgstr "Vairākas vērtības"
+
+#~ msgid "Undo identified value"
+#~ msgstr "Atcelt atzīmēto vērtību"
 
 #, fuzzy
 #~| msgid "Folders"
@@ -5257,9 +5383,6 @@ msgstr "Laipni lūdzam Rufin instalācijas programmā"
 
 #~ msgid "Map server tracks to local files"
 #~ msgstr "Kartēt servera dziesmas uz lokālajiem failiem"
-
-#~ msgid "Match"
-#~ msgstr "Atbilstība"
 
 #~ msgid "Music Folders"
 #~ msgstr "Mūzikas mapes"
