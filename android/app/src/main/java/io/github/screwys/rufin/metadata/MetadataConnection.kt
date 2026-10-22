@@ -41,6 +41,12 @@ internal class MetadataConnection(
         private set
     var lookupIndex by mutableStateOf(0UL)
         private set
+    var lookupAllTracks by mutableStateOf(true)
+        private set
+    var selectedLookupTracks by mutableStateOf(emptySet<ULong>())
+        private set
+    val lookupSelectedCount: ULong get() = if (lookupAllTracks)
+        (lookupProgress?.total ?: 1UL) - selectedLookupTracks.size.toULong() else selectedLookupTracks.size.toULong()
     val activeTrack: ULong? get() = if (!scopeActive && !allTracks && selectedTracks.size == 1) selectedTracks.first() else null
 
     private val resolver = context.applicationContext.contentResolver
@@ -191,6 +197,8 @@ internal class MetadataConnection(
         val review = MetadataLookupReview.open(editor)
         lookupReview = review
         lookupIndex = 0UL
+        lookupAllTracks = true
+        selectedLookupTracks = emptySet()
         lookupFillMissing = false
         lookupFailure = null
         lookupProgress = review.progress()
@@ -206,9 +214,21 @@ internal class MetadataConnection(
         }
     }
 
-    fun selectLookupTrack(index: ULong) = lookupAction { review ->
+    fun selectAllLookupTracks() {
+        if (lookupAccepting) return
+        lookupAllTracks = true
+        selectedLookupTracks = emptySet()
+    }
+    fun selectLookupTrack(index: ULong, toggle: Boolean) {
+        if (lookupAccepting) return
+        if (toggle) {
+            selectedLookupTracks = selectedLookupTracks.toMutableSet().also { if (!it.add(index)) it.remove(index) }
+        } else {
+            lookupAllTracks = false
+            selectedLookupTracks = setOf(index)
+        }
         lookupIndex = index
-        lookupItem = review.item(index)
+        lookupAction { review -> lookupItem = review.item(index) }
     }
 
     private fun lookupAction(block: suspend (MetadataLookupReview) -> Unit) {
@@ -225,21 +245,28 @@ internal class MetadataConnection(
         }
     }
 
-    fun chooseLookup(candidate: MetadataCandidate?) = lookupAction { it.choose(0UL, candidate) }
+    fun chooseLookup(candidate: MetadataCandidate?) {
+        val index = lookupIndex
+        lookupAction { it.choose(index, candidate) }
+    }
     fun searchLookup(query: String, delayed: Boolean = false) {
         if (lookupAccepting) return
         val text = query.trim()
+        val index = lookupIndex
         lookupAction {
             if (text.isNotEmpty()) {
                 if (delayed) delay(600)
-                it.search(0UL, text)
+                it.search(index, text)
             }
         }
     }
     fun updateLookupFillMissing(value: Boolean) {
         lookupFillMissing = value
     }
-    fun refreshLookup(query: String) = lookupAction { it.refresh(0UL, query.trim()) }
+    fun refreshLookup(query: String) {
+        val index = lookupIndex
+        lookupAction { it.refresh(index, query.trim()) }
+    }
     fun stopLookup() { lookupReview?.cancel() }
     fun cancelLookup() {
         lookupReview?.cancel()
@@ -249,10 +276,20 @@ internal class MetadataConnection(
     }
     fun acceptLookup() {
         val review = lookupReview ?: return
+        val indices = selectedLookupTracks.toList()
+        val exclude = lookupAllTracks
         lookupAction = scope.launch {
             lookupBusy = true; lookupAccepting = true
             try {
-                review.accept(lookupFillMissing)
+                review.accept(lookupFillMissing, indices, exclude)
+                batch?.let { batch ->
+                    val next = if (scopeActive) batch.scopeEditor() else if (allTracks)
+                        batch.editorExcept(selectedTracks.toList()) else batch.editor(selectedTracks.toList())
+                    val previous = bridge
+                    bridge = next
+                    previous?.destroy()
+                    artworkRevision = null
+                }
                 bridge?.let { refresh(it) }
                 rowsRevision++
                 cancelLookup()

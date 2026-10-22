@@ -439,14 +439,23 @@ impl MetadataLookupReview {
         .await
     }
 
-    pub async fn accept(&self, fill_missing: bool) -> Result<(), Error> {
+    /// With `exclude`, accept every track except those in `indices`.
+    pub async fn accept(
+        &self,
+        fill_missing: bool,
+        indices: Vec<u64>,
+        exclude: bool,
+    ) -> Result<(), Error> {
         let runtime = self.source().shared.runtime.clone();
         super::on_runtime(runtime, async {
             self.cancel();
             let _run = self.run_lock.lock().await;
+            let indices = indices
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>();
             match &self.items {
-                Items::Batch(batch) => batch.accept_lookup(fill_missing).await,
-                Items::Single { original, working } => {
+                Items::Batch(batch) => batch.accept_lookup(fill_missing, indices, exclude).await,
+                Items::Single { original, working } if indices.contains(&0) != exclude => {
                     let mut state = working.state().clone();
                     if state.lookup_preview.is_some() {
                         state.apply_lookup_choice(&working.draft, fill_missing);
@@ -454,6 +463,7 @@ impl MetadataLookupReview {
                     }
                     Ok(())
                 }
+                Items::Single { .. } => Ok(()),
             }
         })
         .await

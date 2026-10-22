@@ -43,10 +43,14 @@ internal fun MetadataLookupDialog(connection: MetadataConnection) {
         Surface(Modifier.fillMaxSize()) {
             ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = (progress?.total ?: 0UL) > 1UL, drawerContent = {
                 review?.takeIf { (progress?.total ?: 0UL) > 1UL }?.let { review -> ModalDrawerSheet {
-                    MetadataTracks(review, progress!!.total, review.scopeTitle(), false, false,
-                        setOf(connection.lookupIndex), if (progress.finished) ULong.MAX_VALUE else progress.completed / 64UL,
-                        load = { offset, limit -> connection.lookupTracks(offset, limit) }, onScope = null, onAll = null,
-                        onTrack = { index, _ -> connection.selectLookupTrack(index); scope.launch { drawer.close() } })
+                    MetadataTracks(review, progress!!.total, review.scopeTitle(), false, connection.lookupAllTracks,
+                        connection.selectedLookupTracks, if (progress.finished) ULong.MAX_VALUE else progress.completed / 64UL,
+                        load = { offset, limit -> connection.lookupTracks(offset, limit) }, onScope = null,
+                        onAll = connection::selectAllLookupTracks,
+                        onTrack = { index, toggle ->
+                            connection.selectLookupTrack(index, toggle)
+                            if (!toggle) scope.launch { drawer.close() }
+                        })
                 } }
             }) {
             Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -114,7 +118,7 @@ internal fun MetadataLookupDialog(connection: MetadataConnection) {
                     Spacer(Modifier.weight(1f))
                     if (progress?.finished == false) TextButton(connection::stopLookup) { Text(translate("Stop")) }
                     TextButton(connection::cancelLookup, enabled = !connection.lookupAccepting) { Text(translate("Cancel")) }
-                    Button(connection::acceptLookup, enabled = editable) { Text(translate("Done")) }
+                    Button(connection::acceptLookup, enabled = editable && connection.lookupSelectedCount > 0UL) { Text(translate("Done")) }
                 }
             }
         }

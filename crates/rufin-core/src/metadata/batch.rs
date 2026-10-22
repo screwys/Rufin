@@ -1089,12 +1089,24 @@ impl MetadataBatch {
         .await
     }
 
-    pub(super) async fn accept_lookup(self: &Arc<Self>, fill_missing: bool) -> Result<(), Error> {
-        let Some((parent, indices)) = &self.parent else {
+    pub(super) async fn accept_lookup(
+        self: &Arc<Self>,
+        fill_missing: bool,
+        indices: HashSet<u64>,
+        exclude: bool,
+    ) -> Result<(), Error> {
+        let Some((parent, targets)) = &self.parent else {
             return Ok(());
         };
         let loaded = self
-            .work(|records| Ok(records.offsets.keys().copied().collect::<Vec<_>>()))
+            .work(move |records| {
+                Ok(records
+                    .offsets
+                    .keys()
+                    .copied()
+                    .filter(|index| indices.contains(&(*index as u64)) != exclude)
+                    .collect::<Vec<_>>())
+            })
             .await?;
         for index in loaded {
             let mut reviewed = self.read(index).await?;
@@ -1107,7 +1119,7 @@ impl MetadataBatch {
                     .state
                     .apply_lookup_choice(&reviewed.draft, fill_missing);
             }
-            let target = indices[index];
+            let target = targets[index];
             parent
                 .work(move |records| {
                     let mut original = records.read(target)?;
