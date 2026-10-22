@@ -533,6 +533,9 @@ msgstr ""
 msgid "Audio fade on play/pause"
 msgstr "Äänen häivennys toistossa/keskeytyksessä"
 
+msgid "Audio fingerprints"
+msgstr ""
+
 msgid "Audio output"
 msgstr "Äänen ulostulo"
 
@@ -675,6 +678,9 @@ msgid "Caching Library"
 msgstr ""
 
 msgid "Caching local library..."
+msgstr ""
+
+msgid "Calculating fingerprint..."
 msgstr ""
 
 msgid "Cancel download and clear downloaded items"
@@ -833,6 +839,16 @@ msgstr "Näytä kuvitus"
 
 msgid "Clear fetched lyrics for this track"
 msgstr ""
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear fingerprint cache"
+msgstr "Hae sanoituksia"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear lookup cache"
+msgstr "Hae sanoituksia"
 
 #, fuzzy
 #| msgid "Search lyrics"
@@ -1380,6 +1396,11 @@ msgstr ""
 msgid "Do not encrypt"
 msgstr "Älä salaa"
 
+msgid "Do you want to apply metadata changes to {count} track?"
+msgid_plural "Do you want to apply metadata changes to {count} tracks?"
+msgstr[0] ""
+msgstr[1] ""
+
 msgid "Do you want to use the existing configuration?"
 msgstr ""
 
@@ -1387,6 +1408,9 @@ msgid "Don't duplicate"
 msgstr "Älä kahdenna"
 
 msgid "Donate"
+msgstr ""
+
+msgid "Done"
 msgstr ""
 
 msgid "Download Folder"
@@ -1718,9 +1742,17 @@ msgid "Fetching lyrics"
 msgstr "Hae sanoituksia"
 
 #, fuzzy
+#| msgid "Show artwork"
+msgid "Fetching metadata..."
+msgstr "Näytä kuvitus"
+
+#, fuzzy
 #| msgid "Smart playlists"
 msgid "Fetching playlists"
 msgstr "Älykkäät soittolistat"
+
+msgid "Field"
+msgstr ""
 
 #, fuzzy
 #| msgid "Connection"
@@ -1973,12 +2005,6 @@ msgstr "Tunti"
 msgid "Hz"
 msgstr ""
 
-msgid "Identify"
-msgstr ""
-
-msgid "Identifying..."
-msgstr ""
-
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr "Jos sivu ei avaudu, Libre.fm estää käyttämäsi IP-osoitealueen/VPN:n"
 
@@ -2208,6 +2234,11 @@ msgstr ""
 
 #, fuzzy
 #| msgid "Only played tracks"
+msgid "Loading cached lookups..."
+msgstr "Vain toistetut kappaleet"
+
+#, fuzzy
+#| msgid "Only played tracks"
 msgid "Loading related tracks..."
 msgstr "Vain toistetut kappaleet"
 
@@ -2291,6 +2322,9 @@ msgstr ""
 msgid "Logs are copied"
 msgstr ""
 
+msgid "Lookup"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr ""
 
@@ -2332,6 +2366,11 @@ msgstr ""
 msgid "March {year}"
 msgstr ""
 
+#, fuzzy
+#| msgid "Cached"
+msgid "Matched"
+msgstr "Välimuistissa"
+
 msgid "Maximum year"
 msgstr "Vuosi enintään"
 
@@ -2351,6 +2390,11 @@ msgstr "Metatietojen muokkaaminen ei ole enää saatavilla"
 
 msgid "Metadata editing requires Local access"
 msgstr ""
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata lookups"
+msgstr "Metatietojen lähde"
 
 msgid "Metadata source"
 msgstr "Metatietojen lähde"
@@ -2441,9 +2485,6 @@ msgstr "Siirrä ylös"
 msgid "Multi-selection"
 msgstr "Monivalinta"
 
-msgid "Multiple values"
-msgstr "Useita arvoja"
-
 msgid "Music Folder"
 msgstr "Musiikkikansio"
 
@@ -2532,6 +2573,9 @@ msgstr ""
 
 msgid "Needs attention"
 msgstr "Vaatii huomiota"
+
+msgid "Needs review"
+msgstr ""
 
 msgid "NetEase"
 msgstr ""
@@ -2651,6 +2695,11 @@ msgstr "Tämä ei ole saatavilla"
 
 msgid "No lyrics"
 msgstr "Ei sanoituksia"
+
+#, fuzzy
+#| msgid "Nothing in this folder"
+msgid "No matching track in this release"
+msgstr "Tässä kansiossa ei ole mitään"
 
 #, fuzzy
 #| msgid "Nothing in this folder"
@@ -2791,6 +2840,9 @@ msgstr ""
 msgid "One path per line"
 msgstr ""
 
+msgid "Only fill missing information"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "Vain toistetut kappaleet"
 
@@ -2880,6 +2932,11 @@ msgid "Original release date"
 msgstr "Julkaisupäivä"
 
 msgid "Original"
+msgstr "Alkuperäinen"
+
+#, fuzzy
+#| msgid "Original"
+msgid "Original: {value}"
 msgstr "Alkuperäinen"
 
 msgid "Other releases"
@@ -3266,6 +3323,11 @@ msgstr ""
 msgid "Rating"
 msgstr "Arvio"
 
+#, fuzzy
+#| msgid "Saving..."
+msgid "Reading tags..."
+msgstr "Tallennetaan..."
+
 msgid "Ready"
 msgstr "Valmis"
 
@@ -3296,6 +3358,11 @@ msgstr "Yhdistä uudelleen"
 
 msgid "Record label"
 msgstr ""
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Recording"
+msgstr "Ladataan"
 
 msgid "Red"
 msgstr "Punainen"
@@ -3357,6 +3424,11 @@ msgstr "Mallipohja"
 
 msgid "Release date"
 msgstr "Julkaisupäivä"
+
+#, fuzzy
+#| msgid "Release"
+msgid "Release group"
+msgstr "Julkaisu"
 
 msgid "Release notifications"
 msgstr "Julkaisuilmoitukset"
@@ -3711,9 +3783,19 @@ msgid "Search Lyrics"
 msgstr "Hae sanoituksia"
 
 #, fuzzy
+#| msgid "MusicBrainz"
+msgid "Search MusicBrainz"
+msgstr "MusicBrainz"
+
+#, fuzzy
 #| msgid "Show artwork"
 msgid "Search artwork"
 msgstr "Näytä kuvitus"
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search by AcoustID"
+msgstr "Hae sanoituksia"
 
 msgid "Search current folder"
 msgstr "Hae nykyisestä kansiosta"
@@ -3766,8 +3848,18 @@ msgstr "Hae"
 msgid "Search..."
 msgstr "Haetaan..."
 
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching AcoustID..."
+msgstr "Haetaan..."
+
 msgid "Searching Local Network"
 msgstr "Haetaan paikallisverkkoa"
+
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching MusicBrainz..."
+msgstr "Haetaan..."
 
 msgid "Searching for devices..."
 msgstr "Haetaan laitteita..."
@@ -4175,6 +4267,9 @@ msgstr "Ääni"
 msgid "Style"
 msgstr "Tyyli"
 
+msgid "Suggested"
+msgstr ""
+
 msgid "Sunday"
 msgstr "Sunnuntai"
 
@@ -4388,9 +4483,6 @@ msgstr "UPnP"
 #| msgid "Search is unavailable"
 msgid "Unavailable"
 msgstr "Haku ei ole saatavilla"
-
-msgid "Undo identified value"
-msgstr ""
 
 msgid "Undo"
 msgstr "Kumoa"
@@ -4731,6 +4823,9 @@ msgstr "eilen"
 msgid "{action} (Shuffle)"
 msgstr ""
 
+msgid "{completed} of {total} ({cached} cached)"
+msgstr ""
+
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] "{count} albumi"
@@ -4791,6 +4886,17 @@ msgid "{current} / {total} MiB ({percent}%)"
 msgstr ""
 
 msgid "{current} MiB"
+msgstr ""
+
+msgid "{field} · Different across {count} track"
+msgid_plural "{field} · Different across {count} tracks"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "{stage} ({completed} of {total}, {cached} cached)"
+msgstr ""
+
+msgid "{stage} ({count} of {total} tracks)"
 msgstr ""
 
 msgid "{stage}: {completed} / {total}"
@@ -4883,6 +4989,9 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Multiple values"
+#~ msgstr "Useita arvoja"
 
 #, fuzzy
 #~| msgid "Folders"

@@ -555,6 +555,9 @@ msgstr ""
 msgid "Audio fade on play/pause"
 msgstr "Dissolvenza audio su play/pausa"
 
+msgid "Audio fingerprints"
+msgstr ""
+
 msgid "Audio output"
 msgstr "Output audio"
 
@@ -696,6 +699,9 @@ msgstr "Libreria di Cache"
 
 msgid "Caching local library..."
 msgstr "Memorizzazione nella cache della libreria locale..."
+
+msgid "Calculating fingerprint..."
+msgstr ""
 
 msgid "Cancel download and clear downloaded items"
 msgstr "Annulla download ed elimina gli elementi scaricati"
@@ -845,6 +851,16 @@ msgstr ""
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Rimuovi il testo per questa traccia"
+
+#, fuzzy
+#| msgid "Clear artist"
+msgid "Clear fingerprint cache"
+msgstr "Rimuovi artista"
+
+#, fuzzy
+#| msgid "Clear artist"
+msgid "Clear lookup cache"
+msgstr "Rimuovi artista"
 
 #, fuzzy
 #| msgid "Clear artist"
@@ -1364,6 +1380,11 @@ msgstr ""
 msgid "Do not encrypt"
 msgstr "Non cifrare"
 
+msgid "Do you want to apply metadata changes to {count} track?"
+msgid_plural "Do you want to apply metadata changes to {count} tracks?"
+msgstr[0] ""
+msgstr[1] ""
+
 msgid "Do you want to use the existing configuration?"
 msgstr ""
 
@@ -1371,6 +1392,9 @@ msgid "Don't duplicate"
 msgstr "Non duplicare"
 
 msgid "Donate"
+msgstr ""
+
+msgid "Done"
 msgstr ""
 
 msgid "Download Folder"
@@ -1680,9 +1704,17 @@ msgid "Fetching lyrics"
 msgstr ""
 
 #, fuzzy
+#| msgid "Casting network"
+msgid "Fetching metadata..."
+msgstr "Rete di casting"
+
+#, fuzzy
 #| msgid "Delete Playlist"
 msgid "Fetching playlists"
 msgstr "Cancella Playlist"
+
+msgid "Field"
+msgstr ""
 
 #, fuzzy
 #| msgid "Connection"
@@ -1923,12 +1955,6 @@ msgstr "6 ore"
 msgid "Hz"
 msgstr ""
 
-msgid "Identify"
-msgstr ""
-
-msgid "Identifying..."
-msgstr ""
-
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr ""
 
@@ -2148,6 +2174,9 @@ msgstr "Connettendo a {device}..."
 msgid "Load file contents"
 msgstr ""
 
+msgid "Loading cached lookups..."
+msgstr ""
+
 msgid "Loading related tracks..."
 msgstr ""
 
@@ -2233,6 +2262,9 @@ msgstr ""
 msgid "Logs are copied"
 msgstr ""
 
+msgid "Lookup"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr ""
 
@@ -2274,6 +2306,11 @@ msgstr ""
 msgid "March {year}"
 msgstr ""
 
+#, fuzzy
+#| msgid "Cached"
+msgid "Matched"
+msgstr "In cache"
+
 msgid "Maximum year"
 msgstr ""
 
@@ -2290,6 +2327,9 @@ msgid "Metadata editing is no longer available"
 msgstr ""
 
 msgid "Metadata editing requires Local access"
+msgstr ""
+
+msgid "Metadata lookups"
 msgstr ""
 
 msgid "Metadata source"
@@ -2381,9 +2421,6 @@ msgstr ""
 msgid "Multi-selection"
 msgstr ""
 
-msgid "Multiple values"
-msgstr ""
-
 msgid "Music Folder"
 msgstr ""
 
@@ -2465,6 +2502,9 @@ msgid "Nearby discovery"
 msgstr ""
 
 msgid "Needs attention"
+msgstr ""
+
+msgid "Needs review"
 msgstr ""
 
 msgid "NetEase"
@@ -2572,6 +2612,9 @@ msgid "No lyrics available."
 msgstr ""
 
 msgid "No lyrics"
+msgstr ""
+
+msgid "No matching track in this release"
 msgstr ""
 
 msgid "No matching tracks found"
@@ -2702,6 +2745,9 @@ msgstr ""
 msgid "One path per line"
 msgstr ""
 
+msgid "Only fill missing information"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr ""
 
@@ -2783,6 +2829,9 @@ msgid "Original release date"
 msgstr ""
 
 msgid "Original"
+msgstr ""
+
+msgid "Original: {value}"
 msgstr ""
 
 msgid "Other releases"
@@ -3141,6 +3190,9 @@ msgstr ""
 msgid "Rating"
 msgstr ""
 
+msgid "Reading tags..."
+msgstr ""
+
 msgid "Ready"
 msgstr ""
 
@@ -3169,6 +3221,11 @@ msgstr ""
 
 msgid "Record label"
 msgstr ""
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Recording"
+msgstr "Scaricando"
 
 msgid "Red"
 msgstr ""
@@ -3217,6 +3274,9 @@ msgid "Relay"
 msgstr ""
 
 msgid "Release date"
+msgstr ""
+
+msgid "Release group"
 msgstr ""
 
 msgid "Release notifications"
@@ -3541,7 +3601,13 @@ msgstr ""
 msgid "Search Lyrics"
 msgstr ""
 
+msgid "Search MusicBrainz"
+msgstr ""
+
 msgid "Search artwork"
+msgstr ""
+
+msgid "Search by AcoustID"
 msgstr ""
 
 msgid "Search current folder"
@@ -3585,7 +3651,13 @@ msgstr ""
 msgid "Search..."
 msgstr ""
 
+msgid "Searching AcoustID..."
+msgstr ""
+
 msgid "Searching Local Network"
+msgstr ""
+
+msgid "Searching MusicBrainz..."
 msgstr ""
 
 msgid "Searching for devices..."
@@ -3962,6 +4034,9 @@ msgstr "Audio"
 msgid "Style"
 msgstr ""
 
+msgid "Suggested"
+msgstr ""
+
 msgid "Sunday"
 msgstr ""
 
@@ -4169,9 +4244,6 @@ msgstr ""
 #| msgid "Album unavailable"
 msgid "Unavailable"
 msgstr "Album non disponibile"
-
-msgid "Undo identified value"
-msgstr ""
 
 msgid "Undo"
 msgstr ""
@@ -4484,6 +4556,9 @@ msgstr ""
 msgid "{action} (Shuffle)"
 msgstr ""
 
+msgid "{completed} of {total} ({cached} cached)"
+msgstr ""
+
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] ""
@@ -4538,6 +4613,17 @@ msgid "{current} / {total} MiB ({percent}%)"
 msgstr ""
 
 msgid "{current} MiB"
+msgstr ""
+
+msgid "{field} · Different across {count} track"
+msgid_plural "{field} · Different across {count} tracks"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "{stage} ({completed} of {total}, {cached} cached)"
+msgstr ""
+
+msgid "{stage} ({count} of {total} tracks)"
 msgstr ""
 
 msgid "{stage}: {completed} / {total}"
