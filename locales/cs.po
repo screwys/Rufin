@@ -358,6 +358,11 @@ msgid "Add to Playlist"
 msgstr "Přidat do playlistu"
 
 #, fuzzy
+#| msgid "Add folder"
+msgid "Add to folder"
+msgstr "Přidat složku"
+
+#, fuzzy
 #| msgid "Add to Playlist"
 msgid "Add to library"
 msgstr "Přidat do playlistu"
@@ -1005,6 +1010,11 @@ msgstr ""
 msgid "Composer"
 msgstr ""
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Condition"
+msgstr "Spojení"
+
 msgid "Configure another"
 msgstr ""
 
@@ -1349,6 +1359,11 @@ msgstr "Smazat playlist"
 #, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr ""
+
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Delete folder"
+msgstr "Vybrat složku s hudbou"
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -1904,6 +1919,11 @@ msgstr "Pevná pozice"
 
 msgid "Flat"
 msgstr "Plochý"
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Folder name"
+msgstr "Přejmenovat"
 
 #, fuzzy
 #| msgid "Folder"
@@ -2499,6 +2519,11 @@ msgstr "Maximální rok"
 
 #, fuzzy
 #| msgid "Maximum year"
+msgid "Maximum"
+msgstr "Maximální rok"
+
+#, fuzzy
+#| msgid "Maximum year"
 msgid "May {year}"
 msgstr "Maximální rok"
 
@@ -2534,6 +2559,11 @@ msgid "Minimize overview"
 msgstr ""
 
 msgid "Minimum year"
+msgstr "Minimální rok"
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum"
 msgstr "Minimální rok"
 
 msgid "Mirrored bars"
@@ -2736,6 +2766,16 @@ msgstr "Nové pravidlo stahování"
 #| msgid "Saved Sources"
 msgid "New file"
 msgstr "Uložené zdroje"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "New folder"
+msgstr "Přidat složku"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "New playlist"
+msgstr "Nový playlist"
 
 #, fuzzy
 #| msgid "No network devices found"
@@ -3708,6 +3748,11 @@ msgstr "Odebrat z playlistu"
 msgid "Remove from Queue"
 msgstr "Odebrat z fronty"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove from folder"
+msgstr "Odebrat složku"
+
 msgid "Remove rule"
 msgstr "Odebrat pravidlo"
 
@@ -3736,6 +3781,11 @@ msgstr "Odepnout"
 #| msgid "Rename"
 msgid "Rename file"
 msgstr "Přejmenovat"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Rename folder"
+msgstr "Odebrat složku"
 
 #, fuzzy
 #| msgid "Preset"

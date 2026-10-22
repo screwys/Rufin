@@ -341,6 +341,11 @@ msgid "Add to Playlist"
 msgstr "Lisää soittolistaan"
 
 #, fuzzy
+#| msgid "Add folder"
+msgid "Add to folder"
+msgstr "Lisää kansio"
+
+#, fuzzy
 #| msgid "Add to Playlist"
 msgid "Add to library"
 msgstr "Lisää soittolistaan"
@@ -949,6 +954,11 @@ msgstr ""
 msgid "Composer"
 msgstr ""
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Condition"
+msgstr "Yhteys"
+
 msgid "Configure another"
 msgstr "Määritä toinen"
 
@@ -1283,6 +1293,11 @@ msgstr "Poista soittolista"
 #, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "Poistetaanko \"{name}\"?"
+
+#, fuzzy
+#| msgid "Selected folders"
+msgid "Delete folder"
+msgstr "Valitut kansiot"
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -1810,6 +1825,11 @@ msgstr ""
 
 msgid "Flat"
 msgstr ""
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Folder name"
+msgstr "Nimeä uudelleen"
 
 #, fuzzy
 #| msgid "Folder"
@@ -2376,6 +2396,11 @@ msgstr "Vuosi enintään"
 
 #, fuzzy
 #| msgid "Maximum year"
+msgid "Maximum"
+msgstr "Vuosi enintään"
+
+#, fuzzy
+#| msgid "Maximum year"
 msgid "May {year}"
 msgstr "Vuosi enintään"
 
@@ -2409,6 +2434,11 @@ msgid "Minimize overview"
 msgstr ""
 
 msgid "Minimum year"
+msgstr "Vuosi vähintään"
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum"
 msgstr "Vuosi vähintään"
 
 msgid "Mirrored bars"
@@ -2599,6 +2629,16 @@ msgstr "Uusi lataussääntö"
 #| msgid "Change Profile"
 msgid "New file"
 msgstr "Vaihda profiilia"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "New folder"
+msgstr "Lisää kansio"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "New playlist"
+msgstr "Uusi soittolista"
 
 #, fuzzy
 #| msgid "No network devices found"
@@ -3510,6 +3550,11 @@ msgstr "Poisto soittolistalta"
 msgid "Remove from Queue"
 msgstr "Poista jonosta"
 
+#, fuzzy
+#| msgid "Remove Local Folder"
+msgid "Remove from folder"
+msgstr "Poista paikallinen kansio"
+
 msgid "Remove rule"
 msgstr "Poista sääntö"
 
@@ -3535,6 +3580,11 @@ msgstr ""
 #, fuzzy
 #| msgid "Rename"
 msgid "Rename file"
+msgstr "Nimeä uudelleen"
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Rename folder"
 msgstr "Nimeä uudelleen"
 
 #, fuzzy
@@ -5098,9 +5148,6 @@ msgstr "Tervetuloa Rufinin asennukseen"
 #~ msgstr ""
 #~ "Nämä kansiot on yhdistetty paikalliseksi lähteeksi ja ne näytetään "
 #~ "kansiota selatessa"
-
-#~ msgid "Remove Local Folder"
-#~ msgstr "Poista paikallinen kansio"
 
 #~ msgid "Played"
 #~ msgstr "Toistettu"

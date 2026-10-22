@@ -343,6 +343,11 @@ msgid "Add to Playlist"
 msgstr "加入播放清單"
 
 #, fuzzy
+#| msgid "Add folder"
+msgid "Add to folder"
+msgstr "新增資料夾"
+
+#, fuzzy
 #| msgid "Add to Playlist"
 msgid "Add to library"
 msgstr "加入播放清單"
@@ -970,6 +975,11 @@ msgstr ""
 msgid "Composer"
 msgstr ""
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Condition"
+msgstr "連接"
+
 msgid "Configure another"
 msgstr ""
 
@@ -1310,6 +1320,11 @@ msgstr "刪除播放清單"
 #, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr ""
+
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Delete folder"
+msgstr "選擇音樂資料夾"
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -1853,6 +1868,11 @@ msgstr "固定位置"
 
 msgid "Flat"
 msgstr ""
+
+#, fuzzy
+#| msgid "Rename"
+msgid "Folder name"
+msgstr "重新命名"
 
 #, fuzzy
 #| msgid "Folder"
@@ -2432,6 +2452,11 @@ msgstr "最大年份"
 
 #, fuzzy
 #| msgid "Maximum year"
+msgid "Maximum"
+msgstr "最大年份"
+
+#, fuzzy
+#| msgid "Maximum year"
 msgid "May {year}"
 msgstr "最大年份"
 
@@ -2467,6 +2492,11 @@ msgid "Minimize overview"
 msgstr ""
 
 msgid "Minimum year"
+msgstr "最小年份"
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum"
 msgstr "最小年份"
 
 msgid "Mirrored bars"
@@ -2667,6 +2697,16 @@ msgstr "新增下載規則"
 #| msgid "Change Secret Storage"
 msgid "New file"
 msgstr "變更敏感存儲空間"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "New folder"
+msgstr "新增資料夾"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "New playlist"
+msgstr "新增播放清單"
 
 #, fuzzy
 #| msgid "No network devices found"
@@ -3618,6 +3658,11 @@ msgstr "從播放清單中移除"
 msgid "Remove from Queue"
 msgstr "從佇列中移除"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove from folder"
+msgstr "移除資料夾"
+
 msgid "Remove rule"
 msgstr "移除規則"
 
@@ -3646,6 +3691,11 @@ msgstr "從釘選中移除"
 #| msgid "Rename"
 msgid "Rename file"
 msgstr "重新命名"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Rename folder"
+msgstr "移除資料夾"
 
 #, fuzzy
 #| msgid "Preset"
