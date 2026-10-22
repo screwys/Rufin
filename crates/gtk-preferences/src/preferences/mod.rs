@@ -56,7 +56,7 @@ fn show_discord_flatpak_help(row: &adw::SwitchRow) {
         (copy_user, copy_user_icon, user_command),
         (copy_system, copy_system_icon, system_command),
     ] {
-        let copy = controller::copy_action(button.upcast_ref(), &icon);
+        let copy = gtk_widgets::clipboard::copy_action(button.upcast_ref(), &icon);
         button.connect_clicked(move |_| {
             copy(&command.text());
         });

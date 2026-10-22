@@ -198,6 +198,7 @@ internal fun BrowseMenuSheet(
         }
     }
     var navigation by remember(item.row.key) { mutableStateOf(false) }
+    var details by remember(item.row.key) { mutableStateOf(false) }
     val canRate = item.row.kind in setOf("track", "album", "album_header", "artist")
     var rating by remember(item.row.item) { mutableStateOf(item.row.rating) }
     var ratingVisible by remember { mutableStateOf(false) }
@@ -227,6 +228,10 @@ internal fun BrowseMenuSheet(
             catch (error: Exception) { model.runAction { throw error } }
         }
     }
+    if (details) {
+        MediaDetailsDialog(model, browse, item, player) { details = false }
+        return
+    }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onSurface, contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = null, sheetState = rememberModalBottomSheetState()) {
@@ -248,7 +253,8 @@ internal fun BrowseMenuSheet(
                 MediaMenuDivider()
             }
             BrowseMenuHeader(projected, player,
-                onFavorite = if (item.row.kind in setOf("track", "album", "album_header", "artist")) ({ browse.favorite(projected) }) else null)
+                onFavorite = if (item.row.kind in setOf("track", "album", "album_header", "artist")) ({ browse.favorite(projected) }) else null,
+                onDetails = if (canRate) ({ details = true }) else null)
             val playable = item.row.kind in setOf("track", "album", "album_header", "artist", "genre", "mood", "playlist", "smart_playlist", "folder")
             if (playable) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -366,10 +372,10 @@ internal fun BrowseMenuSheet(
 }
 
 @Composable
-internal fun BrowseMenuHeader(item: BrowseItem, player: PlayerConnection, onFavorite: (() -> Unit)? = null) {
+internal fun BrowseMenuHeader(item: BrowseItem, player: PlayerConnection, onFavorite: (() -> Unit)? = null, onDetails: (() -> Unit)? = null) {
     val subtitle = listOf(item.row.artist, item.row.album.takeIf { item.row.kind == "track" || it != item.row.title }.orEmpty())
         .filter(String::isNotBlank).joinToString(" · ").ifBlank { item.row.subtitle }
-    CompactMediaMenuHeader(item.row.artworkIdentity, subtitle, item.row.favorite, player, onFavorite) {
+    CompactMediaMenuHeader(item.row.artworkIdentity, subtitle, item.row.favorite, player, onFavorite, onDetails) {
         Text(item.row.title, Modifier.fillMaxWidth().rufinMarquee(), maxLines = 1,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface)
@@ -378,7 +384,7 @@ internal fun BrowseMenuHeader(item: BrowseItem, player: PlayerConnection, onFavo
 
 @Composable
 internal fun CompactMediaMenuHeader(identity: ByteArray?, subtitle: String, favorite: Boolean, player: PlayerConnection,
-    onFavorite: (() -> Unit)?, title: @Composable () -> Unit,
+    onFavorite: (() -> Unit)?, onDetails: (() -> Unit)? = null, title: @Composable () -> Unit,
 ) {
     val artwork = rememberArtwork(identity, player, with(LocalDensity.current) { 64.dp.roundToPx() })
     val shade = if (MaterialTheme.colorScheme.surface.luminance() < .5f) Color.Black else Color.White
@@ -396,6 +402,9 @@ internal fun CompactMediaMenuHeader(identity: ByteArray?, subtitle: String, favo
         if (onFavorite != null) IconButton(onFavorite, Modifier.size(40.dp)) {
             RufinIcon(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic", translate("Favorite"), Modifier.size(24.dp),
                 if (favorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+        }
+        if (onDetails != null) IconButton(onDetails, Modifier.size(40.dp)) {
+            RufinIcon("rufin-go-next-symbolic", translate("Details"), Modifier.size(24.dp))
         }
     }
     }

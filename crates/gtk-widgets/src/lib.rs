@@ -1,4 +1,5 @@
 //! Shared GTK presentation owners and primitives.
+pub mod clipboard;
 pub mod edge_fade;
 pub mod field_layout;
 pub mod layout;

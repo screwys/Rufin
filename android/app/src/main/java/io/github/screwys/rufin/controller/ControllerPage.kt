@@ -33,8 +33,6 @@ internal fun ControllerPage(model: RufinConnection, embedded: Boolean = false) {
     var changePort by rememberSaveable { mutableStateOf(false) }
     var port by rememberSaveable { mutableStateOf("") }
     var regenerate by rememberSaveable { mutableStateOf(false) }
-    var tokenCopied by remember { mutableIntStateOf(0) }
-    LaunchedEffect(tokenCopied) { if (tokenCopied > 0) { delay(1500); tokenCopied = 0 } }
     fun copy(text: String, label: String) {
         (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             .setPrimaryClip(ClipData.newPlainText(translate("Controller"), text))
@@ -53,9 +51,9 @@ internal fun ControllerPage(model: RufinConnection, embedded: Boolean = false) {
         SettingsRow(translate("Access token"), trailing = {
             Row {
                 PlayerIconButton("rufin-view-refresh-symbolic", "Regenerate access token", { regenerate = true }, enabled = state != null)
-                PlayerIconButton(if (tokenCopied > 0) "rufin-object-select-symbolic" else "rufin-edit-copy-symbolic", "Copy access token", {
-                    connection.copyToken { copy(it, "Copy access token"); tokenCopied++ }
-                }, enabled = state != null)
+                io.github.screwys.rufin.ui.CopyIconButton("Copy access token", enabled = state != null, clipboardLabel = translate("Controller")) { copy ->
+                    connection.copyToken { copy(it); model.showFeedback(translate("Copy access token")) }
+                }
             }
         })
         }

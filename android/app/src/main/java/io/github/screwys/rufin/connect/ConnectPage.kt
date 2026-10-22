@@ -1,12 +1,7 @@
 package io.github.screwys.rufin.connect
 
-import android.content.ClipData
-import android.content.ClipDescription
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.os.PersistableBundle
-import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -28,7 +23,6 @@ import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.settings.SettingsPage
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsRow
-import kotlinx.coroutines.delay
 import java.text.NumberFormat
 
 @Composable
@@ -67,8 +61,6 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
     var remoteFile by remember { mutableStateOf<Boolean?>(null) }
     var controlDevice by remember { mutableStateOf<Device?>(null) }
     var removeDevice by remember { mutableStateOf<Device?>(null) }
-    var invitationCopied by remember { mutableIntStateOf(0) }
-    LaunchedEffect(invitationCopied) { if (invitationCopied > 0) { delay(1500); invitationCopied = 0 } }
     LaunchedEffect(connect, state != null) {
         if (state?.settings?.nearby == true && state.identity == null) connect.action(ConnectAction.Discover)
     }
@@ -142,14 +134,8 @@ internal fun ConnectPage(model: RufinConnection, embedded: Boolean = false, prog
             if (state.settings.profile != null) {
                 state.invitation?.let { invitation ->
                     SettingsRow(translate("Connect a device"),
-                        trailing = { IconButton({
-                            val clip = ClipData.newPlainText(translate("Device invitation"), invitation)
-                            if (Build.VERSION.SDK_INT >= 33) {
-                                clip.description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }
-                            }
-                            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
-                            invitationCopied++
-                        }) { RufinIcon(if (invitationCopied > 0) "rufin-object-select-symbolic" else "rufin-edit-copy-symbolic", translate("Copy invitation")) } })
+                        trailing = { io.github.screwys.rufin.ui.CopyIconButton("Copy invitation", sensitive = true,
+                            clipboardLabel = translate("Device invitation")) { copy -> copy(invitation) } })
                 }
                 if (state.devices.any { it.enrolled }) SettingsRow(translate("Disconnect this device"),
                     modifier = Modifier.clickable(enabled) { leave = true })

@@ -1,5 +1,6 @@
 //! Reviewed metadata operations and publication.
 mod batch;
+mod details;
 mod editor;
 mod lyrics;
 mod review;
@@ -8,6 +9,10 @@ use crate::runtime::CatalogChange;
 use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
 pub use batch::{MetadataBatch, MetadataTrackSummary};
+pub use details::{
+    MediaDetailField, MediaDetailSection, MediaDetailText, MediaDetails, MediaDetailsItem,
+    media_details,
+};
 pub use editor::{
     MetadataEditor, MetadataEditorSnapshot, MetadataFieldPresentation, MetadataSaveSummary,
     mixed_field_label,

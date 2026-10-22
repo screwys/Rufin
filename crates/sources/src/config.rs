@@ -189,6 +189,38 @@ pub enum EditableSource {
 }
 
 impl SourceConfiguration {
+    pub fn server_address(&self) -> Option<String> {
+        let address = match self.kind.as_str() {
+            "jellyfin" | "emby" => {
+                crate::jellyfin_emby::JellyfinEmbySourceConfig::from_configuration(self)
+                    .ok()?
+                    .base_url
+            }
+            "navidrome" | "subsonic" => {
+                crate::subsonic::SubsonicSourceConfig::from_configuration(self)
+                    .ok()?
+                    .base_url
+            }
+            "plex" => {
+                crate::plex::PlexSourceConfig::from_configuration(self)
+                    .ok()?
+                    .base_url
+            }
+            "smb" | "webdav" => {
+                crate::FileSourceSettings::from_configuration(self)
+                    .ok()?
+                    .url
+            }
+            _ => return None,
+        };
+        let mut url = url::Url::parse(&address).ok()?;
+        let _ = url.set_username("");
+        let _ = url.set_password(None);
+        url.set_query(None);
+        url.set_fragment(None);
+        Some(url.into())
+    }
+
     /// Identify a selected file inside one of the configured local folder grants.
     pub fn local_file_location(&self, path: &std::path::Path) -> Option<(String, PathBuf)> {
         if !self.is_local() {

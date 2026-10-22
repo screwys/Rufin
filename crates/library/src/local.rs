@@ -767,6 +767,20 @@ impl Database {
             .bind(media_uri).fetch_optional(&mut *connection).await?)
     }
 
+    pub async fn media_file_size(&self, media_uri: &str) -> LibraryResult<Option<i64>> {
+        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        Ok(sqlx::query_scalar("SELECT size_bytes FROM (
+            SELECT observed.size_bytes FROM tracks track
+            JOIN local_files file ON file.source_key=track.source_key AND file.path=track.source_path
+            JOIN local_file_observations observed ON observed.local_file_key=file.local_file_key WHERE track.media_uri=?1
+            UNION ALL
+            SELECT metadata.size_bytes FROM local_locators locator
+            JOIN local_access_metadata metadata USING(access_uri)
+            WHERE locator.media_uri=?1 AND locator.origin<>'download'
+        ) WHERE size_bytes IS NOT NULL LIMIT 1")
+            .bind(media_uri).fetch_optional(&mut *connection).await?)
+    }
+
     pub async fn remove_local_access(&self, key: LocalAccessFileKey) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;

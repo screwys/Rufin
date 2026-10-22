@@ -347,6 +347,15 @@ msgstr ""
 msgid "Album artists"
 msgstr ""
 
+msgid "Album details"
+msgstr ""
+
+msgid "Album gain"
+msgstr ""
+
+msgid "Album peak"
+msgstr ""
+
 msgid "Album radio"
 msgstr ""
 
@@ -445,6 +454,9 @@ msgid "April {year}"
 msgstr ""
 
 msgid "Artist albums"
+msgstr ""
+
+msgid "Artist details"
 msgstr ""
 
 msgid "Artist name"
@@ -613,6 +625,9 @@ msgid "Brightness (%)"
 msgstr ""
 
 msgid "Browse"
+msgstr ""
+
+msgid "CUE file"
 msgstr ""
 
 msgid "Cached data"
@@ -1151,6 +1166,9 @@ msgstr[1] ""
 msgid "Delete"
 msgstr ""
 
+msgid "Delivery"
+msgstr ""
+
 msgid "Descending"
 msgstr ""
 
@@ -1158,6 +1176,9 @@ msgid "Detail track columns"
 msgstr ""
 
 msgid "Detail"
+msgstr ""
+
+msgid "Details"
 msgstr ""
 
 msgid "Device invitation"
@@ -1554,6 +1575,9 @@ msgstr ""
 msgid "File path"
 msgstr ""
 
+msgid "File size"
+msgstr ""
+
 msgid "Filename"
 msgstr ""
 
@@ -1841,6 +1865,12 @@ msgstr ""
 msgid "Invite"
 msgstr ""
 
+msgid "Item ID"
+msgstr ""
+
+msgid "Item is no longer available"
+msgstr ""
+
 #, rust-format
 msgid "January {year}"
 msgstr ""
@@ -1977,6 +2007,9 @@ msgid "ListenBrainz"
 msgstr ""
 
 msgid "Listening overview"
+msgstr ""
+
+msgid "Listening"
 msgstr ""
 
 msgid "Load file contents"
@@ -2623,6 +2656,9 @@ msgstr ""
 msgid "Orange"
 msgstr ""
 
+msgid "Original audio"
+msgstr ""
+
 msgid "Original release date"
 msgstr ""
 
@@ -2789,6 +2825,9 @@ msgstr ""
 
 #, rust-format
 msgid "Playing on {device}"
+msgstr ""
+
+msgid "Playing stream"
 msgstr ""
 
 msgid "Playlist File"
@@ -3067,6 +3106,9 @@ msgstr ""
 msgid "Release notifications"
 msgstr ""
 
+msgid "Release type"
+msgstr ""
+
 msgid "Release"
 msgstr ""
 
@@ -3188,6 +3230,9 @@ msgid "Replace file contents"
 msgstr ""
 
 msgid "Replace saved custom headers"
+msgstr ""
+
+msgid "ReplayGain tags"
 msgstr ""
 
 msgid "ReplayGain"
@@ -3466,6 +3511,12 @@ msgstr ""
 msgid "Seek to {time}"
 msgstr ""
 
+msgid "Segment end"
+msgstr ""
+
+msgid "Segment start"
+msgstr ""
+
 msgid "Segmented bars"
 msgstr ""
 
@@ -3558,6 +3609,9 @@ msgid "Shadow"
 msgstr ""
 
 msgid "Share"
+msgstr ""
+
+msgid "Shared file size"
 msgstr ""
 
 msgid "Shared secret"
@@ -3721,6 +3775,9 @@ msgid "Song"
 msgstr ""
 
 msgid "Sort by"
+msgstr ""
+
+msgid "Sort name"
 msgstr ""
 
 msgid "Sort title"
@@ -3941,7 +3998,16 @@ msgstr ""
 msgid "Total tracks"
 msgstr ""
 
+msgid "Track details"
+msgstr ""
+
+msgid "Track gain"
+msgstr ""
+
 msgid "Track number"
+msgstr ""
+
+msgid "Track peak"
 msgstr ""
 
 msgid "Track radio"
@@ -3957,6 +4023,9 @@ msgid "Tracks from your five latest albums"
 msgstr ""
 
 msgid "Tracks"
+msgstr ""
+
+msgid "Transcoded"
 msgstr ""
 
 msgid "Transition mode"

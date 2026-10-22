@@ -5,6 +5,7 @@ pub(super) fn build(
     weak: &Weak<Shell>,
     products: &rufin_core::runtime::ProductHandles,
     settings: Rc<gtk_widgets::settings::SettingsState>,
+    artwork: Rc<gtk_widgets::artwork::ArtworkState>,
 ) -> Rc<MediaMenus> {
     Rc::new(MediaMenus {
         current_route: {
@@ -24,6 +25,7 @@ pub(super) fn build(
             })
         },
         library: products.library.clone(),
+        artwork,
         runtime: products.runtime.clone(),
         source: products.source.clone(),
         playback: products.playback.clone(),
