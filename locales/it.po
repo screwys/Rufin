@@ -372,6 +372,11 @@ msgid "Add to Playlist"
 msgstr "Aggiungi alla Playlist"
 
 #, fuzzy
+#| msgid "Add folder"
+msgid "Add to folder"
+msgstr "Aggiungi cartella"
+
+#, fuzzy
 #| msgid "Add to Playlist"
 msgid "Add to library"
 msgstr "Aggiungi alla Playlist"
@@ -959,6 +964,11 @@ msgstr ""
 msgid "Composer"
 msgstr ""
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Condition"
+msgstr "Connessione"
+
 msgid "Configure another"
 msgstr ""
 
@@ -1275,6 +1285,11 @@ msgstr "Cancella Playlist"
 #, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "Sei sicuro di cancellare \"{name}\"?"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Delete folder"
+msgstr "Aggiungi cartella"
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -1764,6 +1779,11 @@ msgstr ""
 
 msgid "Flat"
 msgstr ""
+
+#, fuzzy
+#| msgid "Backup Folder"
+msgid "Folder name"
+msgstr "Cartella di Backup"
 
 msgid "Folder path"
 msgstr ""
@@ -2314,6 +2334,9 @@ msgstr "In cache"
 msgid "Maximum year"
 msgstr ""
 
+msgid "Maximum"
+msgstr ""
+
 msgid "May {year}"
 msgstr ""
 
@@ -2345,6 +2368,9 @@ msgid "Minimize overview"
 msgstr ""
 
 msgid "Minimum year"
+msgstr ""
+
+msgid "Minimum"
 msgstr ""
 
 msgid "Mirrored bars"
@@ -2529,6 +2555,16 @@ msgstr ""
 #| msgid "Change Profile"
 msgid "New file"
 msgstr "Cambia Profilo"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "New folder"
+msgstr "Aggiungi cartella"
+
+#, fuzzy
+#| msgid "Delete Playlist"
+msgid "New playlist"
+msgstr "Cancella Playlist"
 
 #, fuzzy
 #| msgid "Artist unavailable"
@@ -3351,6 +3387,11 @@ msgstr ""
 msgid "Remove from Queue"
 msgstr ""
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Remove from folder"
+msgstr "Aggiungi cartella"
+
 msgid "Remove rule"
 msgstr ""
 
@@ -3373,6 +3414,11 @@ msgstr ""
 
 msgid "Rename file"
 msgstr ""
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Rename folder"
+msgstr "Aggiungi cartella"
 
 #, fuzzy
 #| msgid "Delete Playlist"
@@ -4702,11 +4748,6 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
-
-#, fuzzy
-#~| msgid "Backup Folder"
-#~ msgid "Folder"
-#~ msgstr "Cartella di Backup"
 
 #~ msgid "Adding source"
 #~ msgstr "Aggiungendo una sorgente"

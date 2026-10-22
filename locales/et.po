@@ -398,6 +398,11 @@ msgstr "Lisa esiletõstetuks"
 msgid "Add to Playlist"
 msgstr "Lisa esitusloendisse"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Add to folder"
+msgstr "Lisa kaust"
+
 msgid "Add to library"
 msgstr "Lisa muusikakogusse"
 
@@ -961,6 +966,11 @@ msgstr "Heliloojate järjestus"
 msgid "Composer"
 msgstr "Helilooja"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Condition"
+msgstr "Ühendus"
+
 msgid "Configure another"
 msgstr "Seadista veel üks"
 
@@ -1239,6 +1249,11 @@ msgstr "Kustuta esitusloend"
 #, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "Kas kustutad: „{name}“?"
+
+#, fuzzy
+#| msgid "Selected folders"
+msgid "Delete folder"
+msgstr "Valitud muusikakaustad"
 
 msgid "Delete playlist file"
 msgstr "Kustuta esitusloendi fail"
@@ -1720,6 +1735,11 @@ msgstr "Fikseeritud asukoht"
 
 msgid "Flat"
 msgstr "Ühetasane"
+
+#, fuzzy
+#| msgid "Filename"
+msgid "Folder name"
+msgstr "Failinimi"
 
 msgid "Folder path"
 msgstr "Kausta asukoht"
@@ -2259,6 +2279,11 @@ msgstr "Sobita"
 msgid "Maximum year"
 msgstr "Maksimaalne aasta"
 
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Maximum"
+msgstr "Maksimaalne aasta"
+
 msgid "May {year}"
 msgstr "Mai {year}"
 
@@ -2295,6 +2320,11 @@ msgid "Minimize overview"
 msgstr "Minimeeri ülevaade"
 
 msgid "Minimum year"
+msgstr "Minimaalne aasta"
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum"
 msgstr "Minimaalne aasta"
 
 msgid "Mirrored bars"
@@ -2479,6 +2509,16 @@ msgstr "Uus allalaadimisreegel"
 
 msgid "New file"
 msgstr "Uus fail"
+
+#, fuzzy
+#| msgid "Use folder"
+msgid "New folder"
+msgstr "Kasuta kausta"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "New playlist"
+msgstr "Uus esitusloend"
 
 msgid "New release is available"
 msgstr "Rakenduse uus versioon on saadaval"
@@ -3301,6 +3341,11 @@ msgstr "Eemalda esitusloendist"
 msgid "Remove from Queue"
 msgstr "Eemalda esitusjärjekorrast"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove from folder"
+msgstr "Eemalda kaust"
+
 msgid "Remove rule"
 msgstr "Eemalda reegel"
 
@@ -3321,6 +3366,11 @@ msgstr "Eemaldatud asukohast"
 
 msgid "Rename file"
 msgstr "Muuda failinime"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Rename folder"
+msgstr "Eemalda kaust"
 
 #, fuzzy
 #| msgid "Paste preset"

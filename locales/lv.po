@@ -385,6 +385,11 @@ msgid "Add to Playlist"
 msgstr "Pievienot atskaņošanas sarakstam"
 
 #, fuzzy
+#| msgid "Add folder"
+msgid "Add to folder"
+msgstr "Pievienot mapi"
+
+#, fuzzy
 #| msgid "Add music library"
 msgid "Add to library"
 msgstr "Pievienot mūzikas bibliotēku"
@@ -991,6 +996,11 @@ msgid "Composer"
 msgstr ""
 
 #, fuzzy
+#| msgid "Connection"
+msgid "Condition"
+msgstr "Savienojums"
+
+#, fuzzy
 #| msgid "Configure columns"
 msgid "Configure another"
 msgstr "Konfigurēt kolonnas"
@@ -1310,6 +1320,11 @@ msgstr "Dzēst atskaņošanas sarakstu"
 #, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "Dzēst \"{name}\"?"
+
+#, fuzzy
+#| msgid "Selected folders"
+msgid "Delete folder"
+msgstr "Atlasītās mapes"
 
 msgid "Delete playlist file"
 msgstr "Dzēst atskaņošanas saraksta failu"
@@ -1833,6 +1848,11 @@ msgstr "Fiksēta pozīcija"
 
 msgid "Flat"
 msgstr "Plakans"
+
+#, fuzzy
+#| msgid "Filename"
+msgid "Folder name"
+msgstr "Faila nosaukums"
 
 #, fuzzy
 #| msgid "Folder"
@@ -2415,6 +2435,11 @@ msgstr "Maksimālais gads"
 
 #, fuzzy
 #| msgid "Maximum year"
+msgid "Maximum"
+msgstr "Maksimālais gads"
+
+#, fuzzy
+#| msgid "Maximum year"
 msgid "May {year}"
 msgstr "Maksimālais gads"
 
@@ -2448,6 +2473,11 @@ msgid "Minimize overview"
 msgstr ""
 
 msgid "Minimum year"
+msgstr "Minimālais gads"
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum"
 msgstr "Minimālais gads"
 
 msgid "Mirrored bars"
@@ -2642,6 +2672,16 @@ msgstr "Jauns lejupielādes noteikums"
 #| msgid "Change Profile"
 msgid "New file"
 msgstr "Mainīt profilu"
+
+#, fuzzy
+#| msgid "folders"
+msgid "New folder"
+msgstr "mapes"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "New playlist"
+msgstr "Jauns atskaņošanas saraksts"
 
 #, fuzzy
 #| msgid "No network address available"
@@ -3518,6 +3558,11 @@ msgstr "Noņemt no atskaņošanas saraksta"
 msgid "Remove from Queue"
 msgstr "Noņemt no rindas"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove from folder"
+msgstr "Dzēst mapi"
+
 msgid "Remove rule"
 msgstr "Noņemt noteikumu"
 
@@ -3542,6 +3587,11 @@ msgstr "Noņemts no"
 
 msgid "Rename file"
 msgstr "Pārdēvēt failu"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Rename folder"
+msgstr "Dzēst mapi"
 
 #, fuzzy
 #| msgid "Paste preset"

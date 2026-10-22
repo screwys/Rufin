@@ -403,6 +403,11 @@ msgstr "Добавить в закрепленные"
 msgid "Add to Playlist"
 msgstr "Добавить в плейлист"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Add to folder"
+msgstr "Добавить папку"
+
 msgid "Add to library"
 msgstr "Добавить в библиотеку"
 
@@ -974,6 +979,11 @@ msgstr "Сортировка по композитору"
 msgid "Composer"
 msgstr "Композитор"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Condition"
+msgstr "Соединение"
+
 msgid "Configure another"
 msgstr "Настроить другие"
 
@@ -1254,6 +1264,11 @@ msgstr "Удалить плейлист"
 #, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "Удалить \"{name}\"?"
+
+#, fuzzy
+#| msgid "Selected folders"
+msgid "Delete folder"
+msgstr "Выбранные папки"
 
 msgid "Delete playlist file"
 msgstr "Удалить файл плейлиста"
@@ -1745,6 +1760,11 @@ msgstr "Фиксированное расположение"
 
 msgid "Flat"
 msgstr "Плоский"
+
+#, fuzzy
+#| msgid "Filename"
+msgid "Folder name"
+msgstr "Имя файла"
 
 msgid "Folder path"
 msgstr "Путь к папке"
@@ -2291,6 +2311,11 @@ msgstr "Соответствие"
 msgid "Maximum year"
 msgstr "Максимальный год"
 
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Maximum"
+msgstr "Максимальный год"
+
 msgid "May {year}"
 msgstr "Май {year}"
 
@@ -2326,6 +2351,11 @@ msgid "Minimize overview"
 msgstr "Свернуть вид"
 
 msgid "Minimum year"
+msgstr "Минимальный год"
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum"
 msgstr "Минимальный год"
 
 msgid "Mirrored bars"
@@ -2512,6 +2542,16 @@ msgstr "Новое правило загрузки"
 #| msgid "Image files"
 msgid "New file"
 msgstr "Файлы изображений"
+
+#, fuzzy
+#| msgid "Use folder"
+msgid "New folder"
+msgstr "Использовать папку"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "New playlist"
+msgstr "Новый плейлист"
 
 msgid "New release is available"
 msgstr "Доступна новая версия"
@@ -3338,6 +3378,11 @@ msgstr "Удалить из плейлиста"
 msgid "Remove from Queue"
 msgstr "Удалить из Очереди"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove from folder"
+msgstr "Удалить папку"
+
 msgid "Remove rule"
 msgstr "Удалить правило"
 
@@ -3358,6 +3403,11 @@ msgstr "Удалено из"
 
 msgid "Rename file"
 msgstr "Переименовать файл"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Rename folder"
+msgstr "Удалить папку"
 
 #, fuzzy
 #| msgid "Paste preset"

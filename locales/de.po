@@ -406,6 +406,11 @@ msgstr "Anheften"
 msgid "Add to Playlist"
 msgstr "Zur Playlist hinzufügen"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Add to folder"
+msgstr "Ordner hinzufügen"
+
 msgid "Add to library"
 msgstr "Zur Bibliothek hinzufügen"
 
@@ -969,6 +974,11 @@ msgstr "Komponist sortieren"
 msgid "Composer"
 msgstr "Komponist"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Condition"
+msgstr "Verbindung"
+
 msgid "Configure another"
 msgstr "Weiteres konfigurieren"
 
@@ -1247,6 +1257,11 @@ msgstr "Playlist löschen"
 #, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "„{name}“ löschen?"
+
+#, fuzzy
+#| msgid "Selected folders"
+msgid "Delete folder"
+msgstr "Ausgewählte Ordner"
 
 msgid "Delete playlist file"
 msgstr "Playlist-Datei löschen"
@@ -1733,6 +1748,11 @@ msgstr "Feste Position"
 
 msgid "Flat"
 msgstr "Neutral"
+
+#, fuzzy
+#| msgid "Filename"
+msgid "Folder name"
+msgstr "Dateiname"
 
 msgid "Folder path"
 msgstr "Ordnerpfad"
@@ -2276,6 +2296,11 @@ msgstr "Übereinstimmung"
 msgid "Maximum year"
 msgstr "Maximaljahr"
 
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Maximum"
+msgstr "Maximaljahr"
+
 msgid "May {year}"
 msgstr "Mai {year}"
 
@@ -2313,6 +2338,11 @@ msgid "Minimize overview"
 msgstr "Übersicht minimieren"
 
 msgid "Minimum year"
+msgstr "Mindestjahr"
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum"
 msgstr "Mindestjahr"
 
 msgid "Mirrored bars"
@@ -2497,6 +2527,16 @@ msgstr "Neue Download-Regel"
 
 msgid "New file"
 msgstr "Neue Datei"
+
+#, fuzzy
+#| msgid "Use folder"
+msgid "New folder"
+msgstr "Ordner verwenden"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "New playlist"
+msgstr "Neue Playlist"
 
 msgid "New release is available"
 msgstr "Neue Veröffentlichung verfügbar"
@@ -3321,6 +3361,11 @@ msgstr "Aus Playlist entfernen"
 msgid "Remove from Queue"
 msgstr "Aus Warteschlange entfernen"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove from folder"
+msgstr "Ordner entfernen"
+
 msgid "Remove rule"
 msgstr "Regel entfernen"
 
@@ -3341,6 +3386,11 @@ msgstr "Entfernt aus"
 
 msgid "Rename file"
 msgstr "Datei umbenennen"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Rename folder"
+msgstr "Ordner entfernen"
 
 #, fuzzy
 #| msgid "Paste preset"
