@@ -400,6 +400,11 @@ msgstr "Añadir a Fijados"
 msgid "Add to Playlist"
 msgstr "Añadir a la lista de reproducción"
 
+#, fuzzy
+#| msgid "Add folder"
+msgid "Add to folder"
+msgstr "Agregar carpeta"
+
 msgid "Add to library"
 msgstr "Añadir a la librería"
 
@@ -965,6 +970,11 @@ msgstr "Ordenar por compositor"
 msgid "Composer"
 msgstr "Compositor"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Condition"
+msgstr "Conexión"
+
 msgid "Configure another"
 msgstr "Configurar otro"
 
@@ -1243,6 +1253,11 @@ msgstr "Eliminar lista de reproducción"
 #, python-brace-format
 msgid "Delete \"{name}\"?"
 msgstr "¿Elminiar \"{name}\"?"
+
+#, fuzzy
+#| msgid "Selected folders"
+msgid "Delete folder"
+msgstr "Carpetas seleccionadas"
 
 msgid "Delete playlist file"
 msgstr "Eliminar archivo de lista de reproducción"
@@ -1727,6 +1742,11 @@ msgstr "Posición fija"
 
 msgid "Flat"
 msgstr "Plano"
+
+#, fuzzy
+#| msgid "Filename"
+msgid "Folder name"
+msgstr "Nombre del archivo"
 
 msgid "Folder path"
 msgstr "Ruta de la carpeta"
@@ -2267,6 +2287,11 @@ msgstr "En caché"
 msgid "Maximum year"
 msgstr "Año máximo"
 
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Maximum"
+msgstr "Año máximo"
+
 msgid "May {year}"
 msgstr "Mayo del {year}"
 
@@ -2302,6 +2327,11 @@ msgid "Minimize overview"
 msgstr "Minimizar la vista general"
 
 msgid "Minimum year"
+msgstr "Año mínimo"
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum"
 msgstr "Año mínimo"
 
 msgid "Mirrored bars"
@@ -2486,6 +2516,16 @@ msgstr "Nueva regla de descargas"
 
 msgid "New file"
 msgstr "Nuevo archivo"
+
+#, fuzzy
+#| msgid "Use folder"
+msgid "New folder"
+msgstr "Usar carpeta"
+
+#, fuzzy
+#| msgid "New Playlist"
+msgid "New playlist"
+msgstr "Nueva lista de reproducción"
 
 msgid "New release is available"
 msgstr "Nuevo lanzamiento está disponible"
@@ -3307,6 +3347,11 @@ msgstr "Quitar de la Lista de reproducción"
 msgid "Remove from Queue"
 msgstr "Quitar de la Cola"
 
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Remove from folder"
+msgstr "Remover carpeta"
+
 msgid "Remove rule"
 msgstr "Remover regla"
 
@@ -3327,6 +3372,11 @@ msgstr "Eliminado de"
 
 msgid "Rename file"
 msgstr "Renombrar archivo"
+
+#, fuzzy
+#| msgid "Remove folder"
+msgid "Rename folder"
+msgstr "Remover carpeta"
 
 #, fuzzy
 #| msgid "Paste preset"
