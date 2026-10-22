@@ -25,7 +25,6 @@ use crate::route_layout::{
 };
 use gtk_media_menus::media_menus::present_smart_playlist_context_menu;
 use gtk_widgets::library_fields::playlist_artwork;
-use gtk_widgets::route::Route;
 
 const PLAYLIST_DETAIL_COMPACT_WIDTH: i32 = 760;
 const PLAYLIST_DETAIL_TINY_COVER_SIZE: i32 = 150;
@@ -628,13 +627,13 @@ impl CatalogUi {
             showcase.append_kind_control(&radio);
         }
         if let PlaylistDetailOwner::Saved { summary, .. } = owner {
-            for genre in &summary.genres {
-                let button = super::detail_showcase::detail_genre_pill_button(&genre.name);
-                let shell = Rc::clone(self);
-                let key = genre.genre_key;
-                button.connect_clicked(move |_| shell.navigate(Route::GenreDetail(key)));
-                showcase.append_kind_control(&button);
-            }
+            showcase.set_genres(
+                self,
+                summary
+                    .genres
+                    .iter()
+                    .map(|genre| (genre.name.as_str(), genre.genre_key)),
+            );
         }
     }
 }
@@ -680,10 +679,8 @@ mod tests {
             assert!(collection >= previous_collection && collection - previous_collection <= 1);
             assert!(media <= media_limit);
             assert!(collection <= collection_limit);
-            if crate::route_layout::detail_showcase_cover_only(width) {
-                assert!(media <= width);
-                assert!(collection <= width);
-            }
+            assert!(media <= width);
+            assert!(collection <= width);
             previous_media = media;
             previous_collection = collection;
         }

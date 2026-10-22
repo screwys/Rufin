@@ -165,14 +165,18 @@ mod surface_imp {
             if width <= 1 || height <= 1 {
                 return;
             }
-            if let (Some(target), Some(adjustment)) = (self.target.take(), self.adjustment.take()) {
-                if let (Some(item), Some(items)) = (target.item, self.items.take()) {
+            if let Some(adjustment) = self.adjustment.take() {
+                // GTK anchors a new sectioned list to its first row, below the header.
+                let target = self.target.take();
+                if let (Some(item), Some(items)) =
+                    (target.and_then(|target| target.item), self.items.take())
+                {
                     items.scroll_to(item.position);
                     child.allocate(width, height, baseline, None);
                     items.restore_offset(item);
                 } else {
                     adjustment.set_value(super::clamp_route_position(
-                        target.value,
+                        target.map_or(adjustment.lower(), |target| target.value),
                         adjustment.lower(),
                         adjustment.upper(),
                         adjustment.page_size(),
