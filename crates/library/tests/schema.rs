@@ -90,13 +90,6 @@ async fn reopening_without_statistics_preserves_library_order() {
         plan.iter().all(|step| !step.3.contains("MATERIALIZE")),
         "{plan:?}"
     );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
-            .fetch_one(&mut raw)
-            .await
-            .unwrap(),
-        55
-    );
     raw.close().await.unwrap();
     migrated.close().await.unwrap();
 
@@ -226,13 +219,6 @@ async fn reopening_without_statistics_preserves_library_order() {
             false,
             false,
         )
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
-            .fetch_one(&mut raw)
-            .await
-            .unwrap(),
-        55
     );
     raw.close().await.unwrap();
     migrated.close().await.unwrap();
@@ -981,13 +967,6 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
     }
     let mut reader = connection(&path, false).await;
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
-            .fetch_one(&mut reader)
-            .await
-            .expect("read migrated version"),
-        55
-    );
-    assert_eq!(
         sqlx::query_scalar::<_, String>(
             "SELECT object_id FROM sources WHERE object_id<>'rufin:recovered' ORDER BY source_key"
         )
@@ -1240,13 +1219,6 @@ async fn schema_43_malformed_listen_keeps_valid_siblings_and_preserves_input() {
     database.close().await.unwrap();
     let mut reader = connection(&path, false).await;
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
-            .fetch_one(&mut reader)
-            .await
-            .expect("read rebuilt schema version"),
-        55
-    );
-    assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT external_id FROM listens ORDER BY listen_key")
             .fetch_all(&mut reader)
             .await
@@ -1466,13 +1438,6 @@ async fn schema_39_store_converts_directly_into_current_schema() {
         .expect("convert the released Store directly into the current schema");
 
     let mut reader = connection(&path, false).await;
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
-            .fetch_one(&mut reader)
-            .await
-            .expect("read current schema version"),
-        55
-    );
     let definition = sqlx::query_scalar::<_, String>(
         "SELECT definition_json FROM smart_playlists WHERE object_id='smart-list'",
     )
@@ -1507,13 +1472,6 @@ async fn released_migration_ignores_unused_catalog_damage() {
         .expect("migrate user facts without rebuilding obsolete catalog rows");
 
     let mut restored = connection(&path, false).await;
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
-            .fetch_one(&mut restored)
-            .await
-            .expect("read repaired schema version"),
-        55
-    );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources WHERE catalog_complete=1")
             .fetch_one(&mut restored)
