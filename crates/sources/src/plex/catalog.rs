@@ -918,6 +918,7 @@ pub(super) mod tests {
         assert_eq!(folders[0].metadata.name.as_deref(), Some("Music"));
         assert_eq!(folders[0].track_count, 2);
         let moods = library::ListRead {
+            playlist_folder: None,
             kind: library::ListKind::Moods,
             source: Some(
                 database

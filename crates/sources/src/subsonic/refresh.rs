@@ -721,6 +721,7 @@ mod tests {
             .unwrap();
             assert_eq!(reads.load(Ordering::Relaxed), expected_reads);
             let rows = library::ListRead {
+                playlist_folder: None,
                 kind: library::ListKind::Playlists,
                 source: (Some(
                     database
@@ -975,6 +976,7 @@ mod tests {
             );
             assert_eq!(
                 library::ListRead {
+                    playlist_folder: None,
                     kind: library::ListKind::Playlists,
                     source: (Some(
                         database
