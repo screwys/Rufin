@@ -13,7 +13,6 @@ use playback::{SourceReportFact, SourceReportPhase, StreamQuality};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::instrument;
 
 mod client;
@@ -276,7 +275,6 @@ pub struct SubsonicSource {
     navidrome_library: bool,
     navidrome_session: navidrome::NavidromeSession,
     trust_invalid_cert: bool,
-    metadata_editing: AtomicBool,
     song_lyrics_version: tokio::sync::OnceCell<u64>,
 }
 impl SubsonicSource {
@@ -318,7 +316,6 @@ impl SubsonicSource {
             navidrome_library,
             navidrome_session: navidrome::NavidromeSession::default(),
             trust_invalid_cert: config.trust_invalid_cert,
-            metadata_editing: AtomicBool::new(false),
             song_lyrics_version: tokio::sync::OnceCell::new(),
         })
     }
@@ -358,7 +355,7 @@ impl SubsonicSource {
                 SubsonicCredential::from_api_key(&password)?
             }
         };
-        let (canonical_username, metadata_editing, provider_name) = match authentication {
+        let (canonical_username, provider_name) = match authentication {
             SubsonicAuthentication::Password | SubsonicAuthentication::LegacyPassword => {
                 let mut ping_url = endpoint(&base_url, "ping")?;
                 ping_url
@@ -381,15 +378,12 @@ impl SubsonicSource {
                     .filter(|value| !value.is_empty())
                     .unwrap_or(username.trim())
                     .to_string();
-                let editing = observed.as_ref().is_some_and(|value| {
-                    json::boolean(&value.body["user"]["adminRole"]).unwrap_or(false)
-                });
                 let name = observed
                     .and_then(|value| value.server_type)
                     .or(response.server_type)
                     .filter(|name| !name.trim().is_empty())
                     .unwrap_or_else(|| flavor.display_name().to_string());
-                (canonical, editing, name)
+                (canonical, name)
             }
             SubsonicAuthentication::ApiKey => {
                 let mut token_url = endpoint(&base_url, "tokenInfo")?;
@@ -403,7 +397,7 @@ impl SubsonicSource {
                     .server_type
                     .filter(|name| !name.trim().is_empty())
                     .unwrap_or_else(|| flavor.display_name().to_string());
-                (canonical, false, name)
+                (canonical, name)
             }
         };
         if canonical_username.trim().is_empty() {
@@ -440,7 +434,6 @@ impl SubsonicSource {
             navidrome_library: flavor == SubsonicFlavor::Navidrome,
             navidrome_session: navidrome::NavidromeSession::default(),
             trust_invalid_cert,
-            metadata_editing: AtomicBool::new(metadata_editing),
             song_lyrics_version: tokio::sync::OnceCell::new(),
         };
         Ok(AuthenticatedSubsonic {
@@ -448,17 +441,5 @@ impl SubsonicSource {
             source,
             credential: serialized_credential,
         })
-    }
-
-    pub(crate) fn metadata_editing_available(&self) -> bool {
-        self.metadata_editing.load(Ordering::Acquire)
-    }
-
-    pub(crate) async fn refresh_metadata_editing(&self) {
-        let available = self
-            .get_json("getUser", &[("username", self.username.clone())])
-            .await
-            .is_ok_and(|body| json::boolean(&body["user"]["adminRole"]).unwrap_or(false));
-        self.metadata_editing.store(available, Ordering::Release);
     }
 }

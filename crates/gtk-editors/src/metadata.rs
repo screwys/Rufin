@@ -28,7 +28,6 @@ struct MetadataEntry {
     entry: adw::EntryRow,
     undo: gtk::Button,
     clear: gtk::Button,
-    original: gtk::Label,
 }
 
 struct Editor {
@@ -272,7 +271,7 @@ fn append_named_entry(
     }
     let resource = crate::ui_resource::METADATA_FIELD_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
-    gtk_widgets::objects!(builder, resource, { entry: adw::EntryRow, clear: gtk::Button, undo: gtk::Button, original: gtk::Label });
+    gtk_widgets::objects!(builder, resource, { entry: adw::EntryRow, clear: gtk::Button, undo: gtk::Button });
     entry.set_title(&title);
     entry.set_text(if mixed { "" } else { value });
     entry.set_sensitive(writable);
@@ -286,7 +285,6 @@ fn append_named_entry(
         entry,
         undo,
         clear,
-        original,
     });
 }
 fn append_lock(
@@ -464,16 +462,8 @@ fn refresh_identified_field(editor: &Editor, field: &str, identified: bool) {
             presented.original_value.clone()
         };
         let label = tr_with("Original: {value}", &[("value", original.as_str())]);
-        row.original.set_label(&label);
-        row.original.set_tooltip_text(Some(&label));
+        row.undo.set_tooltip_text(Some(&label));
     }
-    row.original.set_visible(
-        identified
-            && snapshot.fields.iter().any(|presented| {
-                presented.field.key == field
-                    && (presented.original_mixed || !presented.original_value.is_empty())
-            }),
-    );
     if identified {
         row.entry.add_css_class("metadata-identified-change");
     } else {

@@ -211,7 +211,7 @@ impl EditSession {
                         edit.storage == LyricsStorage::Sidecar,
                     )
                     .await?;
-                source.refresh_written_lyrics().await?;
+                source.refresh_written_lyrics(&owner.shared.database);
             }
         }
         if let Ok(playback) = owner.shared.playback() {

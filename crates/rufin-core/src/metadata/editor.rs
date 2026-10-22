@@ -482,7 +482,10 @@ impl Editing {
                 field.mixed = self.mixed.contains(&field.key);
                 field.label = tr(&field.label);
                 MetadataFieldPresentation {
-                    identified: self.is_identified(&field.key) || self.touched.contains(&field.key),
+                    identified: field.writable
+                        && ((field.mixed && self.is_identified(&field.key))
+                            || field.mixed != original_mixed
+                            || (!field.mixed && field.value.trim() != original_value.trim())),
                     mixed_label: mixed_field_label(&field.label, draft.track_count as u64),
                     field,
                     original_value,
@@ -544,7 +547,7 @@ impl Editing {
         true
     }
 
-    fn field_changed(&self, field: &MetadataField) -> bool {
+    pub(super) fn field_changed(&self, field: &MetadataField) -> bool {
         field.writable
             && self.touched.contains(&field.key)
             && (field.mixed || self.text(&field.key).trim() != field.value.trim())

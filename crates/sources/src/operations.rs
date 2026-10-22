@@ -38,6 +38,13 @@ pub struct MetadataDraft {
 }
 
 impl MetadataDraft {
+    pub fn values(&self) -> MetadataChanges {
+        self.fields
+            .iter()
+            .map(|field| (field.key.clone(), field.value.clone()))
+            .collect()
+    }
+
     pub fn new(kind: SourceEntityKind, mut fields: Vec<MetadataField>) -> Self {
         if kind != SourceEntityKind::Track
             && let Some(field) = fields.iter_mut().find(|field| field.key == "comment")
@@ -58,15 +65,27 @@ impl MetadataDraft {
             if let Some(next) = next.fields.iter().find(|next| next.key == field.key) {
                 field.mixed |= field.value != next.value || next.mixed;
                 field.writable &= next.writable;
-            } else {
+            } else if !(self.kind == SourceEntityKind::Artist
+                && matches!(
+                    field.key.as_str(),
+                    "title" | "sort_title" | "musicbrainz_artist_id"
+                ))
+            {
                 field.mixed |= !field.value.is_empty();
                 field.writable = false;
             }
         }
         for mut field in next.fields {
             if !self.fields.iter().any(|existing| existing.key == field.key) {
-                field.mixed = !field.value.is_empty();
-                field.writable = false;
+                if !(self.kind == SourceEntityKind::Artist
+                    && matches!(
+                        field.key.as_str(),
+                        "title" | "sort_title" | "musicbrainz_artist_id"
+                    ))
+                {
+                    field.mixed = !field.value.is_empty();
+                    field.writable = false;
+                }
                 self.fields.push(field);
             }
         }

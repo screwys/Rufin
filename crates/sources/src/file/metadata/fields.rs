@@ -132,6 +132,16 @@ pub(super) fn read(
                             .or_else(|| tag.get_string(ItemKey::Bpm))
                     })
                     .map(str::to_string),
+                "artist"
+                    if tag.is_some_and(|tag| tag.get_string(ItemKey::TrackArtists).is_some()) =>
+                {
+                    Some(
+                        tag.into_iter()
+                            .flat_map(|tag| tag.get_strings(ItemKey::TrackArtists))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    )
+                }
                 _ => Some(
                     tag.into_iter()
                         .flat_map(|tag| tag.get_strings(field.item))
@@ -277,6 +287,37 @@ pub(super) fn project(edit: &MetadataEdit) -> crate::MetadataChanges {
                 .iter()
                 .find(|track| track.item == field.item && track.scopes & 1 != 0)?;
             Some((track.key.to_string(), value.clone()))
+        })
+        .collect()
+}
+
+pub(super) fn scope_fields(
+    kind: SourceEntityKind,
+    track: &crate::MetadataDraft,
+) -> Vec<MetadataField> {
+    let scope = if kind == SourceEntityKind::Album {
+        2
+    } else {
+        4
+    };
+    FIELDS
+        .iter()
+        .filter(|field| field.scopes & scope != 0)
+        .filter_map(|field| {
+            let canonical = FIELDS
+                .iter()
+                .find(|track| track.item == field.item && track.scopes & 1 != 0)?;
+            let original = track
+                .fields
+                .iter()
+                .find(|track| track.key == canonical.key)?;
+            let mut metadata =
+                MetadataField::new(field.key, original.value.clone(), original.writable);
+            metadata.kind = field.kind;
+            if let Some(label) = field.label {
+                metadata.label = label.into();
+            }
+            Some(metadata)
         })
         .collect()
 }

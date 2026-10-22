@@ -132,7 +132,7 @@ private fun MetadataFields(connection: MetadataConnection, state: MetadataEditor
             OutlinedTextField(value = if (field.mixed) "" else field.value, onValueChange = { connection.setField(field.key, it) },
                 modifier = Modifier.fillMaxWidth(), label = { Text(if (field.mixed) presented.mixedLabel else field.label) }, enabled = editable,
                 readOnly = !field.writable,
-                supportingText = if (presented.identified && (presented.originalMixed || presented.originalValue.isNotEmpty())) ({ Text(translate("Original: {value}").replace("{value}", if (presented.originalMixed) presented.mixedLabel else presented.originalValue)) }) else if (!field.writable) ({ Text(translate("This source cannot edit this field")) }) else null,
+                supportingText = if (!field.writable) ({ Text(translate("This source cannot edit this field")) }) else null,
                 trailingIcon = if (presented.identified) ({ IconButton({ connection.undo(field.key) }, enabled = editable) {
                     RufinIcon("rufin-edit-undo-symbolic", translate("Reset")) } }) else null,
                 singleLine = field.kind == MetadataFieldKind.NUMBER || field.kind == MetadataFieldKind.DATE,
@@ -154,8 +154,8 @@ private fun MetadataFields(connection: MetadataConnection, state: MetadataEditor
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MetadataArtwork(connection: MetadataConnection, state: MetadataEditorSnapshot, editable: Boolean, import: () -> Unit) {
-    var artist by remember { mutableStateOf(state.searchArtist) }
-    var album by remember { mutableStateOf(state.searchAlbum.orEmpty()) }
+    var artist by remember(state.searchArtist) { mutableStateOf(state.searchArtist) }
+    var album by remember(state.searchAlbum) { mutableStateOf(state.searchAlbum.orEmpty()) }
     val context = LocalContext.current
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {

@@ -238,6 +238,7 @@ pub(super) fn connect(editor: &Rc<Editor>) {
     let weak = Rc::downgrade(editor);
     editor.artwork.open_search.connect_clicked(move |button| {
         if let Some(editor) = weak.upgrade() {
+            seed_search(&editor);
             gtk_widgets::popup::present_light_dismiss_dialog(&editor.artwork.search_dialog, button);
             schedule_search(&editor, Duration::from_millis(600));
         }

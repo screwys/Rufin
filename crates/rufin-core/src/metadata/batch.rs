@@ -120,24 +120,7 @@ impl MetadataBatch {
                 .filter(|uri| seen.insert(uri.clone()))
                 .collect::<Vec<_>>();
             drop(seen);
-            if uris.is_empty() {
-                return Err(Error::Unavailable);
-            }
-            let batch = Arc::new(Self {
-                scope: None,
-                source,
-                parent: None,
-                uris,
-                records: Mutex::new(Records {
-                    file: tempfile::tempfile().map_err(error)?,
-                    scope: None,
-                    offsets: HashMap::new(),
-                    artwork: HashMap::new(),
-                    changed: HashSet::new(),
-                }),
-                changed: AtomicBool::new(false),
-            });
-            Ok(batch)
+            Self::from_uris(source, uris)
         })
         .await
     }
@@ -162,19 +145,31 @@ impl MetadataBatch {
                         .unwrap_or_default();
                     let mut combined =
                         (records.offsets.len() < length).then(|| record.draft.clone());
+                    let mut changed = HashSet::new();
                     let indices = records.offsets.keys().copied().collect::<Vec<_>>();
                     for index in indices {
                         let track = records.read(index)?;
-                        let values = sources::FileEditSession::scope_values(
+                        let draft = sources::FileEditSession::scope_metadata(
                             record.draft.kind,
                             artist,
-                            &Editing::new(&track.draft).values(),
+                            &track.draft,
                             &track.state.values(),
                         );
-                        let mut draft = record.draft.clone();
-                        for field in &mut draft.fields {
-                            field.value = values.get(&field.key).cloned().unwrap_or_default();
-                            field.mixed = false;
+                        if track.state.has_changes(&track.draft) {
+                            let before = sources::FileEditSession::scope_metadata(
+                                record.draft.kind,
+                                artist,
+                                &track.draft,
+                                &track.draft.values(),
+                            );
+                            for field in &draft.fields {
+                                if before.fields.iter().any(|original| {
+                                    original.key == field.key
+                                        && original.value.trim() != field.value.trim()
+                                }) {
+                                    changed.insert(field.key.clone());
+                                }
+                            }
                         }
                         if let Some(combined) = &mut combined {
                             combined.merge(draft);
@@ -183,6 +178,7 @@ impl MetadataBatch {
                         }
                     }
                     let mut state = record.state.clone();
+                    state.identified.clear();
                     if let Some(combined) = combined {
                         for field in combined.fields {
                             state.values.insert(field.key.clone(), field.value);
@@ -191,11 +187,12 @@ impl MetadataBatch {
                             } else {
                                 state.mixed.remove(&field.key);
                             }
-                            if let Some(original) = record
-                                .draft
-                                .fields
-                                .iter()
-                                .find(|original| original.key == field.key)
+                            if changed.contains(&field.key)
+                                && let Some(original) = record
+                                    .draft
+                                    .fields
+                                    .iter()
+                                    .find(|original| original.key == field.key)
                             {
                                 state.identified.insert(
                                     field.key,
@@ -438,6 +435,27 @@ impl MetadataBatch {
 }
 
 impl MetadataBatch {
+    fn from_uris(source: Arc<SourceOwner>, uris: Vec<Arc<str>>) -> Result<Arc<Self>, Error> {
+        if uris.is_empty() {
+            return Err(Error::Unavailable);
+        }
+        let batch = Arc::new(Self {
+            scope: None,
+            source,
+            parent: None,
+            uris,
+            records: Mutex::new(Records {
+                file: tempfile::tempfile().map_err(error)?,
+                scope: None,
+                offsets: HashMap::new(),
+                artwork: HashMap::new(),
+                changed: HashSet::new(),
+            }),
+            changed: AtomicBool::new(false),
+        });
+        Ok(batch)
+    }
+
     async fn save_file_scope(self: &Arc<Self>) -> Result<(), Error> {
         let scope = self.scope.as_ref().ok_or(Error::Unavailable)?;
         let super::EditDestination::Files(files) = &scope.session.destination else {
@@ -459,6 +477,10 @@ impl MetadataBatch {
             return Ok(());
         }
         changed.sort_unstable_by(|left, right| self.uri(*left).cmp(self.uri(*right)));
+        let uris = changed
+            .iter()
+            .map(|index| self.uri(*index).to_owned())
+            .collect();
         let changed = Arc::new(changed);
         let batch = self.clone();
         let indexes = changed.clone();
@@ -473,6 +495,7 @@ impl MetadataBatch {
             .save_tracks(
                 &self.source.shared.database,
                 edit,
+                uris,
                 move |uri| {
                     let batch = batch.clone();
                     let indexes = indexes.clone();
@@ -516,23 +539,16 @@ impl MetadataBatch {
                                 .unwrap_or_else(|e| e.into_inner())
                                 .push(binding.clone());
                         }
-                        match super::EditSession::open(&batch.source, &MetadataItemId::Track(uri))
-                            .await
-                        {
-                            Ok((_, current)) if success => {
-                                record.draft = current;
-                                record.state = Editing::new(&record.draft);
-                                record.failure = None;
+                        if let Ok(revision) = &outcome {
+                            for field in &mut record.draft.fields {
+                                if let Some(value) = record.state.values.get(&field.key) {
+                                    field.value = value.trim().to_string();
+                                }
+                                field.mixed = record.state.mixed.contains(&field.key);
+                                field.suggestion = None;
                             }
-                            Ok((_, current)) => {
-                                record.draft.revision = current.revision;
-                            }
-                            Err(_) if success => {
-                                record.state.touched.clear();
-                                record.state.artwork = None;
-                                record.state.lyrics = None;
-                            }
-                            _ => {}
+                            record.draft.revision = revision.clone();
+                            record.state = Editing::new(&record.draft);
                         }
                         if success {
                             record.scope_artwork = false;
@@ -650,13 +666,12 @@ impl MetadataBatch {
                     };
                     identified.extend(
                         record
-                            .state
-                            .identified
-                            .keys()
-                            .filter(|key| record.state.is_identified(key))
-                            .cloned(),
+                            .draft
+                            .fields
+                            .iter()
+                            .filter(|field| record.state.field_changed(field))
+                            .map(|field| field.key.clone()),
                     );
-                    identified.extend(record.state.touched.iter().cloned());
                     match &artwork {
                         None => artwork = Some(record.state.artwork.clone()),
                         Some(current) if current != &record.state.artwork => artwork = Some(None),
@@ -746,6 +761,7 @@ impl MetadataBatch {
         draft: MetadataDraft,
     ) -> Result<Arc<Self>, Error> {
         let mut uris = Vec::new();
+        let mut can_embed_artist = true;
         let mut after = None;
         loop {
             let page = source
@@ -758,18 +774,66 @@ impl MetadataBatch {
                 break;
             }
             after = page.last().map(|row| row.track_key);
-            uris.extend(page.into_iter().map(|row| row.media_uri));
+            can_embed_artist &= page.iter().all(|row| {
+                sources::FileEditSession::can_embed_artist(row.source_format.as_deref())
+            });
+            uris.extend(page.into_iter().map(|row| Arc::<str>::from(row.media_uri)));
         }
-        let batch = Self::open(source, library::MemberSelection::from_uris(uris)).await?;
+        let artist = draft
+            .fields
+            .iter()
+            .find(|field| field.key == "title")
+            .map(|field| field.value.clone())
+            .unwrap_or_default();
+        let batch = Self::from_uris(source, uris)?;
+        let mut combined: Option<MetadataDraft> = None;
+        for index in 0..batch.len() {
+            let track = batch.read(index).await?;
+            let values = track.draft.values();
+            let next = sources::FileEditSession::scope_metadata(
+                draft.kind,
+                &artist,
+                &track.draft,
+                &values,
+            );
+            if let Some(combined) = &mut combined {
+                combined.merge(next);
+            } else {
+                combined = Some(next);
+            }
+        }
+        let mut combined = combined.ok_or(Error::Unavailable)?;
+        if draft.kind == SourceEntityKind::Artist {
+            combined.artwork.can_embed &= can_embed_artist;
+        }
+        combined.artwork = combined
+            .artwork
+            .with_binding(draft.artwork.binding.clone(), false);
+        combined.track_count = batch.len();
+        for field in &draft.fields {
+            if !combined
+                .fields
+                .iter()
+                .any(|current| current.key == field.key)
+            {
+                combined.fields.push(field.clone());
+            }
+        }
+        if draft.kind == SourceEntityKind::Artist {
+            combined
+                .fields
+                .sort_by_key(|field| match field.key.as_str() {
+                    "title" => 0,
+                    "sort_title" => 1,
+                    "musicbrainz_artist_id" => 2,
+                    _ => 3,
+                });
+        }
+        let draft = combined;
         let mut batch = Arc::try_unwrap(batch).map_err(|_| Error::Unavailable)?;
         batch.scope = Some(Arc::new(FileScope {
             session,
-            title: draft
-                .fields
-                .iter()
-                .find(|field| field.key == "title")
-                .map(|field| field.value.clone())
-                .unwrap_or_default(),
+            title: artist,
         }));
         batch
             .records

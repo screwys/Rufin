@@ -150,16 +150,18 @@ pub(crate) async fn read_saved_media(
 }
 
 pub(crate) fn excluded_from_audio_scan(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            [
-                "tmp", "tar", "gz", "bz2", "xz", "tbz", "tgz", "z", "zip", "rar", "wvc", "zst",
-                "lrc",
-            ]
-            .iter()
-            .any(|excluded| extension.eq_ignore_ascii_case(excluded))
-        })
+    super::metadata::is_working_copy(path)
+        || path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                [
+                    "tmp", "tar", "gz", "bz2", "xz", "tbz", "tgz", "z", "zip", "rar", "wvc", "zst",
+                    "lrc",
+                ]
+                .iter()
+                .any(|excluded| extension.eq_ignore_ascii_case(excluded))
+            })
         || path
             .file_name()
             .and_then(|name| name.to_str())

@@ -16,6 +16,14 @@ use crate::{MetadataDraft, MetadataEdit, MetadataField, SourceEntityKind, Source
 
 mod fields;
 
+pub(crate) const WORKING_COPY_PREFIX: &str = ".rufin-metadata-";
+
+pub(crate) fn is_working_copy(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with(WORKING_COPY_PREFIX))
+}
+
 pub(crate) fn revision(path: &Path) -> Result<String, SourceMetadataError> {
     if path.to_string_lossy().starts_with("content:") {
         return super::documents::stat_document(&path.to_string_lossy())
@@ -264,7 +272,9 @@ pub(crate) fn read_embedded_lyrics_input(
 ) -> Result<Option<String>, SourceMetadataError> {
     let tagged = super::lofty::read_lofty_file(
         file,
-        ::lofty::config::ParseOptions::new().read_cover_art(false),
+        ::lofty::config::ParseOptions::new()
+            .read_cover_art(false)
+            .read_properties(false),
     )
     .map_err(write_error)?
     .ok_or(SourceMetadataError::Unavailable)?;
@@ -654,6 +664,42 @@ pub(crate) fn project_edit(
         }
     }
     changes
+}
+
+pub(crate) fn scope_metadata(
+    kind: SourceEntityKind,
+    artist: &str,
+    original: &MetadataDraft,
+    current: &crate::MetadataChanges,
+) -> MetadataDraft {
+    let before = original.values();
+    let values = scope_values(kind, artist, &before, current);
+    let mut fields = fields::scope_fields(kind, original);
+    if kind == SourceEntityKind::Artist && values.contains_key("title") {
+        for key in ["title", "sort_title", "musicbrainz_artist_id"] {
+            let edit = MetadataEdit {
+                kind,
+                changes: [(key.into(), String::new())].into(),
+                artwork: None,
+            };
+            let projected = project_edit(&before, &edit, artist);
+            let writable = projected.keys().all(|key| {
+                original
+                    .fields
+                    .iter()
+                    .any(|field| field.key == *key && field.writable)
+            });
+            fields.push(MetadataField::new(key, "", writable));
+        }
+    }
+    for field in &mut fields {
+        field.value = values.get(&field.key).cloned().unwrap_or_default();
+        field.mixed = false;
+    }
+    let mut draft = MetadataDraft::new(kind, fields);
+    draft.artwork = original.artwork.clone();
+    draft.track_count = 1;
+    draft
 }
 
 pub(crate) fn scope_values(
@@ -1161,19 +1207,24 @@ mod tests {
                 "After",
             ),
         ] {
-            let (editor, draft) =
+            let (editor, _draft) =
                 crate::FileEditSession::open(Some(source.clone()), &database, uri, kind)
                     .await
                     .unwrap();
-            assert_eq!(draft.track_count, 130);
             editor
-                .save(
+                .save_tracks(
                     &database,
                     MetadataEdit {
                         kind,
                         changes: [("title".into(), title.into())].into(),
                         artwork: None,
                     },
+                    paths
+                        .iter()
+                        .map(|path| url::Url::from_file_path(path).unwrap().to_string())
+                        .collect(),
+                    |_| async { Ok(Some((track_edit(&[]), None))) },
+                    |_, _| async { Ok(()) },
                 )
                 .await
                 .unwrap();
@@ -2057,9 +2108,7 @@ pub(crate) fn metadata_file_available(path: &Path, source_format: Option<&str>) 
 
 pub(crate) fn read_metadata_input(
     input: impl std::io::Read + std::io::Seek,
-    kind: SourceEntityKind,
     path: &Path,
-    artist: Option<&str>,
 ) -> Result<MetadataDraft, SourceMetadataError> {
     let tagged = super::lofty::read_lofty_file(
         input,
@@ -2072,15 +2121,8 @@ pub(crate) fn read_metadata_input(
     let tag = tagged
         .as_ref()
         .and_then(|file| file.primary_tag().or_else(|| file.first_tag()));
-    let scope = match kind {
-        SourceEntityKind::Track => 1,
-        SourceEntityKind::Album => 2,
-        SourceEntityKind::Artist => 4,
-    };
-    let mut values = fields::read(tag, writer, scope);
-    if let Some(name) = artist {
-        values.splice(0..0, artist_fields(tag, writer, name));
-    } else if writer.is_none() && kind == SourceEntityKind::Track {
+    let mut values = fields::read(tag, writer, 1);
+    if writer.is_none() {
         if let Some(title) = values
             .iter_mut()
             .find(|field| field.key == "title" && field.value.is_empty())
@@ -2091,7 +2133,7 @@ pub(crate) fn read_metadata_input(
                 .unwrap_or_default();
         }
     }
-    let mut metadata = MetadataDraft::new(kind, values);
+    let mut metadata = MetadataDraft::new(SourceEntityKind::Track, values);
     metadata.track_count = 1;
     metadata.artwork.can_embed = writer.is_some_and(|writer| {
         writer
@@ -2102,7 +2144,7 @@ pub(crate) fn read_metadata_input(
                 ::lofty::tag::TagType::Id3v2
                 | ::lofty::tag::TagType::VorbisComments
                 | ::lofty::tag::TagType::Ape => true,
-                ::lofty::tag::TagType::Mp4Ilst => artist.is_none(),
+                ::lofty::tag::TagType::Mp4Ilst => true,
                 _ => false,
             }
     });
@@ -2114,89 +2156,9 @@ pub(crate) fn read_track_metadata(
     path: &Path,
     _format: Option<&str>,
 ) -> Result<MetadataDraft, SourceMetadataError> {
-    let mut draft = read_metadata_input(
-        fs::File::open(path).map_err(write_error)?,
-        SourceEntityKind::Track,
-        path,
-        None,
-    )?;
+    let mut draft = read_metadata_input(fs::File::open(path).map_err(write_error)?, path)?;
     draft.revision = Some(revision(path)?);
     Ok(draft)
-}
-
-fn artist_fields(
-    tag: Option<&Tag>,
-    writer: Option<MetadataWriter>,
-    name: &str,
-) -> Vec<MetadataField> {
-    let names = |key| {
-        tag.into_iter()
-            .flat_map(|tag| tag.get_strings(key))
-            .flat_map(super::media::split_names)
-            .collect::<Vec<_>>()
-    };
-    let roles = [
-        (
-            ItemKey::TrackArtist,
-            ItemKey::TrackArtistSortOrder,
-            ItemKey::MusicBrainzArtistId,
-        ),
-        (
-            ItemKey::AlbumArtist,
-            ItemKey::AlbumArtistSortOrder,
-            ItemKey::MusicBrainzReleaseArtistId,
-        ),
-    ]
-    .into_iter()
-    .filter_map(|(key, sort, id)| {
-        let mut values = names(key);
-        if key == ItemKey::TrackArtist {
-            let credits = names(ItemKey::TrackArtists);
-            if !credits.is_empty() {
-                values = credits;
-            }
-        }
-        values
-            .iter()
-            .any(|value| value.eq_ignore_ascii_case(name))
-            .then_some((key, sort, id, values))
-    })
-    .collect::<Vec<_>>();
-    let selected_text = |key, names: &[String]| {
-        let position = names
-            .iter()
-            .position(|value| value.eq_ignore_ascii_case(name))?;
-        tag.into_iter()
-            .flat_map(|tag| tag.get_strings(key))
-            .flat_map(|value| value.split([';', '/']).map(str::trim))
-            .nth(position)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    };
-    let can = |key| writer.is_some_and(|writer| writer.metadata_key_is_writable(key));
-    vec![
-        MetadataField::new(
-            "title",
-            name,
-            !roles.is_empty() && roles.iter().all(|(key, _, _, _)| can(*key)),
-        ),
-        MetadataField::new(
-            "sort_title",
-            roles
-                .iter()
-                .find_map(|(_, key, _, names)| selected_text(*key, names))
-                .unwrap_or_default(),
-            !roles.is_empty() && roles.iter().all(|(_, key, _, _)| can(*key)),
-        ),
-        MetadataField::new(
-            "musicbrainz_artist_id",
-            roles
-                .iter()
-                .find_map(|(_, _, key, names)| selected_text(*key, names))
-                .unwrap_or_default(),
-            !roles.is_empty() && roles.iter().all(|(_, _, key, _)| can(*key)),
-        ),
-    ]
 }
 
 pub(crate) fn readonly_track_metadata(

@@ -159,7 +159,11 @@ pub(crate) fn read_lofty_for_edit(
             .preserve_format_specific_items(true),
     );
     let probe = Probe::new(BufReader::new(fs::File::open(path)?))
-        .options(ParseOptions::new().read_cover_art(true))
+        .options(
+            ParseOptions::new()
+                .read_cover_art(true)
+                .read_properties(false),
+        )
         .guess_file_type()?;
     let Some(actual_file_type) = probe.file_type() else {
         return Ok(None);

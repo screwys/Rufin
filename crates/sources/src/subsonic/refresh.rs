@@ -13,12 +13,6 @@ const FRESHNESS_VERSION: u32 = 3;
 const METADATA_SCAN_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const METADATA_SCAN_MAX_POLLS: usize = 120;
 
-#[derive(Clone, Copy)]
-struct ScanWait {
-    interval: Duration,
-    max_polls: usize,
-}
-
 #[derive(Clone, Debug)]
 struct ScanStatus {
     scanning: bool,
@@ -515,38 +509,32 @@ impl SubsonicSource {
         Ok(())
     }
 
-    pub(crate) async fn require_metadata_scan_idle(&self) -> SourceResult<()> {
+    pub(crate) async fn start_metadata_scan_and_wait(
+        &self,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
         let body = self.get_json("getScanStatus", &[]).await?;
-        if json::boolean(&body["scanStatus"]["scanning"]) == Some(true) {
-            return Err(SourceError::Other(
-                "The server is already scanning its library. Wait for it to finish before editing metadata."
-                    .to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    pub(crate) async fn start_metadata_scan_and_wait(&self) -> SourceResult<()> {
-        self.start_metadata_scan_with_wait(ScanWait {
-            interval: METADATA_SCAN_POLL_INTERVAL,
-            max_polls: METADATA_SCAN_MAX_POLLS,
-        })
-        .await
-    }
-
-    async fn start_metadata_scan_with_wait(&self, wait: ScanWait) -> SourceResult<()> {
+        self.wait_metadata_scan(&body, cancelled).await?;
+        check_cancelled(cancelled)?;
         let body = self.get_json("startScan", &[]).await?;
+        scan_finished(self.wait_metadata_scan(&body, cancelled).await?)
+    }
+
+    async fn wait_metadata_scan(
+        &self,
+        body: &Value,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<ScanStatus> {
         let mut status = ScanStatus::from_json(&body["scanStatus"]);
-        for poll in 0..=wait.max_polls {
+        for poll in 0..=METADATA_SCAN_MAX_POLLS {
+            check_cancelled(cancelled)?;
             if let Some(status) = status.take().filter(|status| !status.scanning) {
-                return scan_finished(status);
+                return Ok(status);
             }
-            if poll == wait.max_polls {
+            if poll == METADATA_SCAN_MAX_POLLS {
                 break;
             }
-            if !wait.interval.is_zero() {
-                tokio::time::sleep(wait.interval).await;
-            }
+            tokio::time::sleep(METADATA_SCAN_POLL_INTERVAL).await;
             let body = self.get_json("getScanStatus", &[]).await?;
             status = ScanStatus::from_json(&body["scanStatus"]);
         }

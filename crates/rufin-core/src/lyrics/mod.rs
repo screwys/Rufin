@@ -1384,17 +1384,12 @@ impl LyricsService {
                 .write_lyrics(&service.database, &key.media_uri, &content, sidecar)
                 .await
             {
-                Ok(()) => match source.refresh_written_lyrics().await {
-                    Ok(()) => {
-                        service
-                            .cache_and_accept(request, &key, &context.input_digest, &plan, bundle)
-                            .await;
-                    }
-                    Err(error) => {
-                        warn!(%error, "could not refresh edited lyrics source");
-                        service.publish(LyricsEvent::SourceSaveFailed { media_id, error });
-                    }
-                },
+                Ok(()) => {
+                    source.refresh_written_lyrics(&service.database);
+                    service
+                        .cache_and_accept(request, &key, &context.input_digest, &plan, bundle)
+                        .await;
+                }
                 Err(error) => {
                     warn!(%error, "could not save edited lyrics");
                     service.publish(LyricsEvent::SourceSaveFailed { media_id, error });
