@@ -4078,7 +4078,7 @@ mod tests {
                 crate::schema::pragma(&mut incoming, "user_version")
                     .await
                     .unwrap(),
-                54
+                55
             );
             assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM connect_versions WHERE kind='catalog:track' OR json_type(version,'$.lamport') IS NULL").fetch_one(&mut incoming).await.unwrap(), 0);
             incoming.close().await.unwrap();
