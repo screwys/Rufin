@@ -45,7 +45,7 @@
             <child>
               <object class="GtkBox" id="kind_row">
                 <property name="spacing">2</property>
-                <property name="halign">start</property>
+                <property name="halign">fill</property>
                 <property name="valign">center</property>
                 <style>
                   <class name="album-detail-kind-row"/>
@@ -65,6 +65,43 @@
                   <object class="GtkBox" id="kind_controls">
                     <property name="spacing">2</property>
                     <property name="valign">center</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="RufinAllocationOwner" id="genres">
+                    <property name="hexpand">true</property>
+                    <property name="visible">false</property>
+                    <child>
+                      <object class="GtkBox" id="genre_row">
+                        <property name="spacing">2</property>
+                        <property name="valign">center</property>
+                        <child>
+                          <object class="GtkMenuButton" id="genre_overflow">
+                            <property name="icon-name">rufin-go-next-symbolic</property>
+                            <property name="tooltip-text" translatable="yes">Genres</property>
+                            <style><class name="flat"/><class name="circular"/></style>
+                            <property name="popover">
+                              <object class="GtkPopover">
+                                <property name="child">
+                                  <object class="GtkScrolledWindow">
+                                    <property name="hscrollbar-policy">never</property>
+                                    <property name="vscrollbar-policy">automatic</property>
+                                    <property name="max-content-height">360</property>
+                                    <property name="propagate-natural-height">true</property>
+                                    <property name="child">
+                                      <object class="GtkBox" id="genre_overflow_list">
+                                        <property name="orientation">vertical</property>
+                                        <property name="spacing">4</property>
+                                      </object>
+                                    </property>
+                                  </object>
+                                </property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>

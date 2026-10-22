@@ -45,10 +45,6 @@ pub fn detail_showcase_cover_size(width: i32) -> i32 {
     }
 }
 
-pub fn detail_showcase_cover_only(width: i32) -> bool {
-    width < DETAIL_SHOWCASE_METADATA_MIN_WIDTH
-}
-
 pub fn home_album_content_width_for(width: i32) -> i32 {
     (width.max(1) - PRIMARY_ROUTE_HORIZONTAL_INSET).max(1)
 }

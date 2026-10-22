@@ -16,11 +16,11 @@ use gtk_widgets::artwork::{ArtworkTile, CoverGroupProjection};
 use gtk_widgets::controls::{ActionButtonVariant, configure_action_button, icon_button};
 use gtk_widgets::controls::{PLAY_LATER_ICON, PLAY_NEXT_ICON};
 use gtk_widgets::interactions::{ContextMenuOpen, RADIO_ICON};
-use gtk_widgets::layout::width_allocation_owner;
+use gtk_widgets::layout::{AllocationOwner, width_allocation_owner};
 use gtk_widgets::localization::bind_label_text_with;
 use localization::tr;
 
-use crate::route_layout::{detail_showcase_cover_only, detail_showcase_cover_size};
+use crate::route_layout::detail_showcase_cover_size;
 use gtk_media_menus::media_menus::CollectionPlay;
 use gtk_widgets::cover_controls::{
     CoverHoverControls, cover_hover_controls, cover_play_hover_controls, showcase_cover_overlay,
@@ -50,6 +50,14 @@ mod showcase_imp {
         pub kind: TemplateChild<gtk::Label>,
         #[template_child]
         pub kind_controls: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub genres: TemplateChild<AllocationOwner>,
+        #[template_child]
+        pub genre_row: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub genre_overflow: TemplateChild<gtk::MenuButton>,
+        #[template_child]
+        pub genre_overflow_list: TemplateChild<gtk::Box>,
         #[template_child]
         pub title: TemplateChild<gtk::Label>,
         #[template_child]
@@ -84,7 +92,6 @@ mod showcase_imp {
         pub summary_label_2: TemplateChild<gtk::Label>,
         #[template_child]
         pub actions: TemplateChild<gtk::Box>,
-        pub cover_only: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -94,6 +101,7 @@ mod showcase_imp {
         type ParentType = gtk::Box;
 
         fn class_init(class: &mut Self::Class) {
+            AllocationOwner::static_type();
             class.bind_template();
         }
 
@@ -154,6 +162,78 @@ impl DetailShowcaseView {
         while let Some(child) = self.imp().kind_controls.first_child() {
             self.imp().kind_controls.remove(&child);
         }
+        self.imp().genres.set_visible(false);
+    }
+
+    pub fn set_genres<'a>(
+        &self,
+        shell: &Rc<CatalogUi>,
+        genres: impl IntoIterator<Item = (&'a str, library::GenreKey)>,
+    ) {
+        let imp = self.imp();
+        imp.genres.set_width_callback(None);
+        while let Some(child) = imp.genre_row.first_child() {
+            if child == *imp.genre_overflow {
+                break;
+            }
+            imp.genre_row.remove(&child);
+        }
+        while let Some(child) = imp.genre_overflow_list.first_child() {
+            imp.genre_overflow_list.remove(&child);
+        }
+        let mut buttons = Vec::new();
+        for (name, key) in genres
+            .into_iter()
+            .filter(|(name, _)| !name.trim().is_empty())
+        {
+            let button = detail_genre_pill_button(name.trim());
+            let shell = Rc::downgrade(shell);
+            button.connect_clicked(move |_| {
+                if let Some(shell) = shell.upgrade() {
+                    shell.navigate(Route::GenreDetail(key));
+                }
+            });
+            imp.genre_overflow_list.append(&button);
+            buttons.push(button);
+        }
+        imp.genres.set_visible(!buttons.is_empty());
+        let overflow = imp.genre_overflow.get();
+        let row = imp.genre_row.get();
+        let popup = imp.genre_overflow_list.get();
+        imp.genres.set_width_callback(Some(Rc::new(move |width| {
+            let widths: Vec<_> = buttons
+                .iter()
+                .map(|button| button.measure(gtk::Orientation::Horizontal, -1).1)
+                .collect();
+            let total = widths.iter().sum::<i32>() + 2 * (widths.len() as i32 - 1).max(0);
+            let overflowing = total > width;
+            let available = if overflowing {
+                width - overflow.measure(gtk::Orientation::Horizontal, -1).1 - 2
+            } else {
+                width
+            };
+            let mut used = 0;
+            let count = widths
+                .iter()
+                .take_while(|natural| {
+                    used += **natural + 2;
+                    used - 2 <= available
+                })
+                .count();
+            for (parent, children) in [(&row, &buttons[..count]), (&popup, &buttons[count..])] {
+                let mut previous = None;
+                for button in children {
+                    if button.parent().as_ref() != Some(parent.upcast_ref()) {
+                        if let Some(old) = button.parent().and_downcast::<gtk::Box>() {
+                            old.remove(button);
+                        }
+                        parent.insert_child_after(button, previous);
+                    }
+                    previous = Some(button);
+                }
+            }
+            overflow.set_visible(overflowing);
+        })));
     }
 
     pub fn append_detail(&self, child: &impl IsA<gtk::Widget>) {
@@ -246,7 +326,9 @@ impl DetailShowcaseView {
             links.set_halign(gtk::Align::Center);
             self.imp().external_links.append(&links);
         }
-        self.apply_external_links_visibility();
+        self.imp()
+            .external_links
+            .set_visible(self.imp().external_links.first_child().is_some());
     }
 
     pub fn add_external_links_class(&self, class: &'static str) {
@@ -255,21 +337,6 @@ impl DetailShowcaseView {
 
     fn attach_cover(&self, cover: &impl IsA<gtk::Widget>) {
         self.imp().cover_host.append(cover);
-    }
-
-    fn set_cover_only(&self, cover_only: bool) {
-        self.imp().metadata.set_visible(!cover_only);
-        self.imp().cover_only.set(cover_only);
-        self.apply_external_links_visibility();
-    }
-
-    fn apply_external_links_visibility(&self) {
-        self.imp()
-            .external_links
-            .set_visible(detail_external_links_visible(
-                self.imp().external_links.first_child().is_some(),
-                self.imp().cover_only.get(),
-            ));
     }
 
     fn set_media_layout(&self) {
@@ -296,10 +363,6 @@ pub struct MediaShowcase {
     pub actions_min_cover_size: Option<i32>,
 }
 
-fn detail_external_links_visible(has_links: bool, cover_only: bool) -> bool {
-    has_links && !cover_only
-}
-
 pub struct CollectionDetailShowcase {
     pub view: DetailShowcaseView,
     pub initial_width: i32,
@@ -323,24 +386,20 @@ pub fn media_showcase(config: MediaShowcase) -> gtk::Widget {
         .actions_min_cover_size
         .map(|threshold| (view.actions().upcast(), threshold));
     let presentation = MediaShowcasePresentation {
-        viewport_width: Cell::new(0),
         cover_width: Cell::new(0),
         view: view.clone(),
         cover: config.cover,
         adaptive_actions,
     };
-    presentation.apply_viewport_width(config.initial_width);
-    presentation.resize_cover(config.initial_width);
+    presentation.apply_width(config.initial_width);
     let frame = detail_showcase_frame(view.upcast());
     width_allocation_owner(&frame, move |width| {
-        presentation.apply_viewport_width(width);
-        presentation.resize_cover(width);
+        presentation.apply_width(width);
     })
     .upcast()
 }
 
 struct MediaShowcasePresentation {
-    viewport_width: Cell<i32>,
     cover_width: Cell<i32>,
     view: DetailShowcaseView,
     cover: MediaCoverProjection,
@@ -348,24 +407,16 @@ struct MediaShowcasePresentation {
 }
 
 impl MediaShowcasePresentation {
-    fn apply_viewport_width(&self, width: i32) {
-        if width <= 1 || self.viewport_width.replace(width) == width {
-            return;
-        }
-        let cover_only = detail_showcase_cover_only(width);
-        update_tiny_detail_showcase(&self.view, width);
-        self.view.set_cover_only(cover_only);
-    }
-
-    fn resize_cover(&self, width: i32) {
+    fn apply_width(&self, width: i32) {
         if width <= 1 || self.cover_width.replace(width) == width {
             return;
         }
+        update_tiny_detail_showcase(&self.view, width);
         let cover_size = crate::route_layout::detail_showcase_cover_size(width);
         self.view.imp().cover_column.set_width_request(cover_size);
         self.cover.resize(cover_size);
         if let Some((actions, threshold)) = self.adaptive_actions.as_ref() {
-            actions.set_visible(!detail_showcase_cover_only(width) && cover_size >= *threshold);
+            actions.set_visible(cover_size >= *threshold);
         }
     }
 }
@@ -382,25 +433,21 @@ pub fn collection_detail_showcase(config: CollectionDetailShowcase) -> gtk::Widg
     ));
 
     let presentation = CollectionShowcasePresentation {
-        viewport_width: Cell::new(0),
         cover_width: Cell::new(0),
         view: view.clone(),
         cover: config.cover,
         compact_spacing: config.compact_spacing,
         wide_spacing: config.wide_spacing,
     };
-    presentation.apply_viewport_width(config.initial_width);
-    presentation.resize_cover(config.initial_width);
+    presentation.apply_width(config.initial_width);
     let frame = detail_showcase_frame(view.upcast());
     width_allocation_owner(&frame, move |width| {
-        presentation.apply_viewport_width(width);
-        presentation.resize_cover(width);
+        presentation.apply_width(width);
     })
     .upcast()
 }
 
 struct CollectionShowcasePresentation {
-    viewport_width: Cell<i32>,
     cover_width: Cell<i32>,
     view: DetailShowcaseView,
     cover: CoverGroupProjection,
@@ -409,11 +456,10 @@ struct CollectionShowcasePresentation {
 }
 
 impl CollectionShowcasePresentation {
-    fn apply_viewport_width(&self, width: i32) {
-        if width <= 1 || self.viewport_width.replace(width) == width {
+    fn apply_width(&self, width: i32) {
+        if width <= 1 || self.cover_width.replace(width) == width {
             return;
         }
-        let cover_only = detail_showcase_cover_only(width);
         update_tiny_detail_showcase(&self.view, width);
         self.view.set_spacing(
             if super::playlist_detail::playlist_detail_compact_for_width(width) {
@@ -422,13 +468,6 @@ impl CollectionShowcasePresentation {
                 self.wide_spacing
             },
         );
-        self.view.set_cover_only(cover_only);
-    }
-
-    fn resize_cover(&self, width: i32) {
-        if width <= 1 || self.cover_width.replace(width) == width {
-            return;
-        }
         let cover_size = super::playlist_detail::playlist_cover_size(width);
         self.cover.resize(cover_size);
     }
@@ -517,20 +556,15 @@ fn connect_collection_play(
     button.connect_clicked(move |_| play(placement, false));
 }
 
-pub fn detail_genre_pill_button(label: &str) -> gtk::Button {
+fn detail_genre_pill_button(label: &str) -> gtk::Button {
     let button = gtk::Button::new();
     button.add_css_class("flat");
     button.add_css_class("album-detail-genre-pill");
-    button.set_halign(gtk::Align::Start);
     button.set_valign(gtk::Align::Center);
     button.set_hexpand(false);
     button.set_tooltip_text(Some(label));
     let text = gtk::Label::new(Some(label));
     text.set_xalign(0.0);
-    text.set_halign(gtk::Align::Start);
-    text.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    text.set_width_chars(1);
-    text.set_max_width_chars(28);
     button.set_child(Some(&text));
     button
 }
@@ -656,16 +690,11 @@ pub fn detail_showcase_frame(header: gtk::Widget) -> gtk::Widget {
     header
 }
 
-fn update_tiny_detail_showcase(widget: &impl IsA<gtk::Widget>, width: i32) {
+fn update_tiny_detail_showcase(widget: &DetailShowcaseView, width: i32) {
     if width < 520 {
         widget.add_css_class("detail-showcase-tiny");
     } else {
         widget.remove_css_class("detail-showcase-tiny");
-    }
-    if detail_showcase_cover_only(width) {
-        widget.add_css_class("detail-showcase-cover-only");
-    } else {
-        widget.remove_css_class("detail-showcase-cover-only");
     }
 }
 
@@ -746,13 +775,6 @@ mod tests {
         for width in [240, 360, 520, 760, 1_200, i32::MAX] {
             assert!(render >= detail_showcase_cover_size(width));
         }
-    }
-
-    #[test]
-    fn detail_external_links_need_content_and_metadata_space() {
-        assert!(detail_external_links_visible(true, false));
-        assert!(!detail_external_links_visible(false, false));
-        assert!(!detail_external_links_visible(true, true));
     }
 
     #[test]

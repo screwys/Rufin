@@ -22,9 +22,8 @@ use rufin_core::playback::RadioPlayRequest;
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
-    DetailShowcaseView, MediaShowcase, album_external_links, detail_genre_pill_button,
-    detail_playback_controls, detail_radio_button, detail_showcase_frame, media_cover_projection,
-    media_showcase,
+    DetailShowcaseView, MediaShowcase, album_external_links, detail_playback_controls,
+    detail_radio_button, detail_showcase_frame, media_cover_projection, media_showcase,
 };
 use crate::release_kind::album_release_kind_label;
 use crate::route_layout::{
@@ -33,7 +32,6 @@ use crate::route_layout::{
 use crate::track_model::TrackCollectionModel;
 use gtk_media_menus::media_menus::present_album_context_menu;
 use gtk_widgets::detail_links::{DetailLinkBinding, album_artist_links};
-use gtk_widgets::route::Route;
 
 impl CatalogUi {
     pub fn album_detail_view(self: &Rc<Self>, detail: Option<DetailPage>) -> MountedRoute {
@@ -107,7 +105,14 @@ impl CatalogUi {
             )));
         });
         showcase_view.append_kind_control(&radio);
-        self.append_album_genre_buttons(&showcase_view, &album.links.genres);
+        showcase_view.set_genres(
+            self,
+            album
+                .links
+                .genres
+                .iter()
+                .map(|genre| (genre.name.as_str(), genre.genre_key)),
+        );
 
         let (scroll, artist) = gtk_widgets::text_slide::new_label();
         artist.set_text(&album.metadata.artist);
@@ -264,20 +269,6 @@ impl CatalogUi {
                 let track_projection = track_projection.clone();
                 Rc::new(move || track_projection.resume_initial_demand())
             })
-    }
-
-    fn append_album_genre_buttons(
-        self: &Rc<Self>,
-        showcase: &DetailShowcaseView,
-        genres: &[::library::AlbumGenreLink],
-    ) {
-        for genre in genres.iter().filter(|genre| !genre.name.trim().is_empty()) {
-            let button = detail_genre_pill_button(genre.name.trim());
-            let shell = Rc::clone(self);
-            let genre_id = genre.genre_key;
-            button.connect_clicked(move |_| shell.navigate(Route::GenreDetail(genre_id)));
-            showcase.append_kind_control(&button);
-        }
     }
 }
 
