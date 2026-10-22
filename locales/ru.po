@@ -433,6 +433,21 @@ msgstr "Исполнитель альбома"
 msgid "Album artists"
 msgstr "Авторы альбома"
 
+#, fuzzy
+#| msgid "Album title"
+msgid "Album details"
+msgstr "Название альбома"
+
+#, fuzzy
+#| msgid "Album radio"
+msgid "Album gain"
+msgstr "Радио по альбому"
+
+#, fuzzy
+#| msgid "Album tracks"
+msgid "Album peak"
+msgstr "Треки альбома"
+
 msgid "Album radio"
 msgstr "Радио по альбому"
 
@@ -532,6 +547,11 @@ msgid "April {year}"
 msgstr "Апрель {year}"
 
 msgid "Artist albums"
+msgstr "Альбомы исполнителя"
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Artist details"
 msgstr "Альбомы исполнителя"
 
 msgid "Artist name"
@@ -712,6 +732,11 @@ msgstr ""
 
 msgid "Browse"
 msgstr "Обзор"
+
+#, fuzzy
+#| msgid "Image files"
+msgid "CUE file"
+msgstr "Файлы изображений"
 
 #, fuzzy
 #| msgid "Cached"
@@ -1289,6 +1314,9 @@ msgstr[2] "Удалить плейлист"
 msgid "Delete"
 msgstr "Удалить"
 
+msgid "Delivery"
+msgstr ""
+
 msgid "Descending"
 msgstr "По убыванию"
 
@@ -1296,6 +1324,11 @@ msgid "Detail track columns"
 msgstr "Подробные колонки треков"
 
 msgid "Detail"
+msgstr "Подробности"
+
+#, fuzzy
+#| msgid "Detail"
+msgid "Details"
 msgstr "Подробности"
 
 msgid "Device invitation"
@@ -1726,6 +1759,11 @@ msgstr "Формат"
 msgid "File path"
 msgstr "Путь к файлу"
 
+#, fuzzy
+#| msgid "Files"
+msgid "File size"
+msgstr "Файлы"
+
 msgid "Filename"
 msgstr "Имя файла"
 
@@ -1768,6 +1806,9 @@ msgstr "Имя файла"
 
 msgid "Folder path"
 msgstr "Путь к папке"
+
+msgid "Folder"
+msgstr "Папка"
 
 msgid "Folders"
 msgstr "Папки"
@@ -2028,6 +2069,14 @@ msgstr "Интеграции"
 msgid "Invite"
 msgstr "Пригласить"
 
+msgid "Item ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "Artwork editing is no longer available"
+msgid "Item is no longer available"
+msgstr "Редактирование обложки больше не доступно"
+
 msgid "January {year}"
 msgstr "Январь {year}"
 
@@ -2166,6 +2215,11 @@ msgstr "ListenBrainz"
 
 msgid "Listening overview"
 msgstr "Обзор прослушивания"
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Listening"
+msgstr "ListenBrainz"
 
 msgid "Load file contents"
 msgstr "Загрузить содержимое файла"
@@ -2844,6 +2898,11 @@ msgstr "Параметры"
 msgid "Orange"
 msgstr "Оранжевый"
 
+#, fuzzy
+#| msgid "Original"
+msgid "Original audio"
+msgstr "Оригинал"
+
 msgid "Original release date"
 msgstr "Дата первого выпуска"
 
@@ -3012,6 +3071,11 @@ msgstr "Играет на этом устройстве"
 
 msgid "Playing on {device}"
 msgstr "Играет на {device}"
+
+#, fuzzy
+#| msgid "Playing from"
+msgid "Playing stream"
+msgstr "Воспроизведение с"
 
 msgid "Playlist File"
 msgstr "Файл плейлиста"
@@ -3307,6 +3371,11 @@ msgstr "Выпуск"
 msgid "Release notifications"
 msgstr "Уведомления о новых версиях"
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Release type"
+msgstr "Дата выпуска"
+
 msgid "Release"
 msgstr "Выпуск"
 
@@ -3437,6 +3506,11 @@ msgstr "Заменить содержимое файла"
 
 msgid "Replace saved custom headers"
 msgstr "Заменить сохраненные настраиваемые заголовки"
+
+#, fuzzy
+#| msgid "ReplayGain"
+msgid "ReplayGain tags"
+msgstr "Нормализация громкости"
 
 msgid "ReplayGain"
 msgstr "Нормализация громкости"
@@ -3740,6 +3814,16 @@ msgstr "Переместить по треку"
 msgid "Seek to {time}"
 msgstr "Перейти к {time}"
 
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Segment end"
+msgstr "Сегментированные полосы"
+
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Segment start"
+msgstr "Сегментированные полосы"
+
 msgid "Segmented bars"
 msgstr "Сегментированные полосы"
 
@@ -3829,6 +3913,11 @@ msgstr ""
 
 msgid "Share"
 msgstr "Поделиться"
+
+#, fuzzy
+#| msgid "Shared secret"
+msgid "Shared file size"
+msgstr "Общий секретный ключ"
 
 msgid "Shared secret"
 msgstr "Общий секретный ключ"
@@ -3994,6 +4083,11 @@ msgstr "Песня"
 
 msgid "Sort by"
 msgstr "Сортировать по"
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Sort name"
+msgstr "Имя исполнителя"
 
 msgid "Sort title"
 msgstr "Сортировать по названию"
@@ -4225,8 +4319,23 @@ msgstr "Всего дисков"
 msgid "Total tracks"
 msgstr "Всего треков"
 
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track details"
+msgstr "Радио по треку"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track gain"
+msgstr "Радио по треку"
+
 msgid "Track number"
 msgstr "Номер трека"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track peak"
+msgstr "Радио по треку"
 
 msgid "Track radio"
 msgstr "Радио по треку"
@@ -4242,6 +4351,11 @@ msgstr "Треки из ваших пяти последних альбомов"
 
 msgid "Tracks"
 msgstr "Треки"
+
+#, fuzzy
+#| msgid "Transition mode"
+msgid "Transcoded"
+msgstr "Режим перехода"
 
 msgid "Transition mode"
 msgstr "Режим перехода"
@@ -4792,9 +4906,6 @@ msgstr "Добро пожаловать в программу установки
 #~ msgid "Undo identified value"
 #~ msgstr "Отменить изменение значения"
 
-#~ msgid "Folder"
-#~ msgstr "Папка"
-
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "Создать и сохранить в кэше визуализацию текущего трека"
 
@@ -4842,9 +4953,6 @@ msgstr "Добро пожаловать в программу установки
 
 #~ msgid "Files received: {count}"
 #~ msgstr "Получено файлов: {count}"
-
-#~ msgid "Files"
-#~ msgstr "Файлы"
 
 #~ msgid "Media available"
 #~ msgstr "Доступные медиафайлы"

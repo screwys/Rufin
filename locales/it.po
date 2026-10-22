@@ -405,6 +405,21 @@ msgstr "Artista dell'album"
 msgid "Album artists"
 msgstr "Artisti dell'album"
 
+#, fuzzy
+#| msgid "Album title"
+msgid "Album details"
+msgstr "Titolo dell'album"
+
+#, fuzzy
+#| msgid "Album radio"
+msgid "Album gain"
+msgstr "Radio dell'album"
+
+#, fuzzy
+#| msgid "Album tracks"
+msgid "Album peak"
+msgstr "Tracce dell'album"
+
 msgid "Album radio"
 msgstr "Radio dell'album"
 
@@ -508,6 +523,11 @@ msgid "April {year}"
 msgstr ""
 
 msgid "Artist albums"
+msgstr "Album dell'artista"
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Artist details"
 msgstr "Album dell'artista"
 
 msgid "Artist name"
@@ -690,6 +710,11 @@ msgstr ""
 
 msgid "Browse"
 msgstr ""
+
+#, fuzzy
+#| msgid "Change Profile"
+msgid "CUE file"
+msgstr "Cambia Profilo"
 
 #, fuzzy
 #| msgid "Cached"
@@ -1311,6 +1336,9 @@ msgstr[1] "Cancella Playlist"
 msgid "Delete"
 msgstr "Cancella"
 
+msgid "Delivery"
+msgstr ""
+
 msgid "Descending"
 msgstr "Discendente"
 
@@ -1318,6 +1346,11 @@ msgid "Detail track columns"
 msgstr "Dettagli delle colonne della traccia"
 
 msgid "Detail"
+msgstr "Dettagli"
+
+#, fuzzy
+#| msgid "Detail"
+msgid "Details"
 msgstr "Dettagli"
 
 msgid "Device invitation"
@@ -1747,6 +1780,9 @@ msgstr ""
 msgid "File path"
 msgstr ""
 
+msgid "File size"
+msgstr ""
+
 msgid "Filename"
 msgstr ""
 
@@ -1787,6 +1823,11 @@ msgstr "Cartella di Backup"
 
 msgid "Folder path"
 msgstr ""
+
+#, fuzzy
+#| msgid "Backup Folder"
+msgid "Folder"
+msgstr "Cartella di Backup"
 
 msgid "Folders"
 msgstr ""
@@ -2048,6 +2089,14 @@ msgstr ""
 msgid "Invite"
 msgstr ""
 
+msgid "Item ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "Artist unavailable"
+msgid "Item is no longer available"
+msgstr "Artista non disponibile"
+
 msgid "January {year}"
 msgstr ""
 
@@ -2189,6 +2238,11 @@ msgstr ""
 #, fuzzy
 #| msgid "Connecting to {device}..."
 msgid "Listening overview"
+msgstr "Connettendo a {device}..."
+
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Listening"
 msgstr "Connettendo a {device}..."
 
 msgid "Load file contents"
@@ -2861,6 +2915,9 @@ msgstr "Azioni"
 msgid "Orange"
 msgstr ""
 
+msgid "Original audio"
+msgstr ""
+
 msgid "Original release date"
 msgstr ""
 
@@ -3024,6 +3081,9 @@ msgid "Playing on this device"
 msgstr ""
 
 msgid "Playing on {device}"
+msgstr ""
+
+msgid "Playing stream"
 msgstr ""
 
 msgid "Playlist File"
@@ -3318,6 +3378,9 @@ msgstr ""
 msgid "Release notifications"
 msgstr ""
 
+msgid "Release type"
+msgstr ""
+
 msgid "Release"
 msgstr ""
 
@@ -3447,6 +3510,9 @@ msgid "Replace file contents"
 msgstr ""
 
 msgid "Replace saved custom headers"
+msgstr ""
+
+msgid "ReplayGain tags"
 msgstr ""
 
 msgid "ReplayGain"
@@ -3733,6 +3799,12 @@ msgstr ""
 msgid "Seek to {time}"
 msgstr ""
 
+msgid "Segment end"
+msgstr ""
+
+msgid "Segment start"
+msgstr ""
+
 msgid "Segmented bars"
 msgstr ""
 
@@ -3823,6 +3895,9 @@ msgid "Shadow"
 msgstr ""
 
 msgid "Share"
+msgstr ""
+
+msgid "Shared file size"
 msgstr ""
 
 msgid "Shared secret"
@@ -3990,6 +4065,11 @@ msgstr ""
 
 msgid "Sort by"
 msgstr ""
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Sort name"
+msgstr "Nome dell'artista"
 
 msgid "Sort title"
 msgstr ""
@@ -4229,7 +4309,16 @@ msgstr ""
 msgid "Total tracks"
 msgstr "Tutte le Tracce"
 
+msgid "Track details"
+msgstr ""
+
+msgid "Track gain"
+msgstr ""
+
 msgid "Track number"
+msgstr ""
+
+msgid "Track peak"
 msgstr ""
 
 msgid "Track radio"
@@ -4245,6 +4334,9 @@ msgid "Tracks from your five latest albums"
 msgstr ""
 
 msgid "Tracks"
+msgstr ""
+
+msgid "Transcoded"
 msgstr ""
 
 msgid "Transition mode"

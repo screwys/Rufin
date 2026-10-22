@@ -429,6 +429,21 @@ msgstr "Artista de álbum"
 msgid "Album artists"
 msgstr "Artistas del álbum"
 
+#, fuzzy
+#| msgid "Album title"
+msgid "Album details"
+msgstr "Título de álbum"
+
+#, fuzzy
+#| msgid "Album radio"
+msgid "Album gain"
+msgstr "Radio de álbum"
+
+#, fuzzy
+#| msgid "Album tracks"
+msgid "Album peak"
+msgstr "Pistas de álbum"
+
 msgid "Album radio"
 msgstr "Radio de álbum"
 
@@ -529,6 +544,11 @@ msgid "April {year}"
 msgstr "Abril {year}"
 
 msgid "Artist albums"
+msgstr "Álbumes del artista"
+
+#, fuzzy
+#| msgid "Artist albums"
+msgid "Artist details"
 msgstr "Álbumes del artista"
 
 msgid "Artist name"
@@ -708,6 +728,11 @@ msgstr ""
 
 msgid "Browse"
 msgstr "Navegar"
+
+#, fuzzy
+#| msgid "New file"
+msgid "CUE file"
+msgstr "Nuevo archivo"
 
 #, fuzzy
 #| msgid "Cached"
@@ -1277,6 +1302,9 @@ msgstr[1] "Eliminar lista de reproducción"
 msgid "Delete"
 msgstr "Eliminar"
 
+msgid "Delivery"
+msgstr ""
+
 msgid "Descending"
 msgstr "Descendiente"
 
@@ -1284,6 +1312,11 @@ msgid "Detail track columns"
 msgstr "Columnas del detalle de la pista"
 
 msgid "Detail"
+msgstr "Detalle"
+
+#, fuzzy
+#| msgid "Detail"
+msgid "Details"
 msgstr "Detalle"
 
 msgid "Device invitation"
@@ -1708,6 +1741,11 @@ msgstr "Formato"
 msgid "File path"
 msgstr "Ruta del archivo"
 
+#, fuzzy
+#| msgid "Files"
+msgid "File size"
+msgstr "Archivos"
+
 msgid "Filename"
 msgstr "Nombre del archivo"
 
@@ -1750,6 +1788,9 @@ msgstr "Nombre del archivo"
 
 msgid "Folder path"
 msgstr "Ruta de la carpeta"
+
+msgid "Folder"
+msgstr "Carpeta"
 
 msgid "Folders"
 msgstr "Carpetas"
@@ -2008,6 +2049,14 @@ msgstr "Integraciones"
 msgid "Invite"
 msgstr "Invitar"
 
+msgid "Item ID"
+msgstr ""
+
+#, fuzzy
+#| msgid "Source is no longer available"
+msgid "Item is no longer available"
+msgstr "La fuente ya no está disponible"
+
 msgid "January {year}"
 msgstr "Enero del {year}"
 
@@ -2146,6 +2195,11 @@ msgstr "ListenBrainz"
 
 msgid "Listening overview"
 msgstr "Vista general de escucha"
+
+#, fuzzy
+#| msgid "ListenBrainz"
+msgid "Listening"
+msgstr "ListenBrainz"
 
 msgid "Load file contents"
 msgstr "Cargar los contenidos del archivo"
@@ -2817,6 +2871,11 @@ msgstr "Opciones"
 msgid "Orange"
 msgstr "Naranja"
 
+#, fuzzy
+#| msgid "Original"
+msgid "Original audio"
+msgstr "Original"
+
 msgid "Original release date"
 msgstr "Fecha original de lanzamiento"
 
@@ -2985,6 +3044,11 @@ msgstr "Reproduciendo en este dispositivo"
 
 msgid "Playing on {device}"
 msgstr "Reproduciendo en {device}"
+
+#, fuzzy
+#| msgid "Playing from"
+msgid "Playing stream"
+msgstr "Reproducir a partir de"
 
 msgid "Playlist File"
 msgstr "Archivo de playlist"
@@ -3276,6 +3340,11 @@ msgstr "Versión"
 msgid "Release notifications"
 msgstr "Liberar notificaciones"
 
+#, fuzzy
+#| msgid "Release date"
+msgid "Release type"
+msgstr "Fecha de salida"
+
 msgid "Release"
 msgstr "Versión"
 
@@ -3408,6 +3477,11 @@ msgstr "Reemplazar los contenidos del archivo"
 
 msgid "Replace saved custom headers"
 msgstr "Reemplazar encabezados personalizados guardados"
+
+#, fuzzy
+#| msgid "ReplayGain"
+msgid "ReplayGain tags"
+msgstr "ReplayGain"
 
 msgid "ReplayGain"
 msgstr "ReplayGain"
@@ -3707,6 +3781,16 @@ msgstr "Buscar punto de reproducción"
 msgid "Seek to {time}"
 msgstr "Ir a {time}"
 
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Segment end"
+msgstr "Barras segmentadas"
+
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Segment start"
+msgstr "Barras segmentadas"
+
 msgid "Segmented bars"
 msgstr "Barras segmentadas"
 
@@ -3796,6 +3880,11 @@ msgstr ""
 
 msgid "Share"
 msgstr "Compartir"
+
+#, fuzzy
+#| msgid "Shared secret"
+msgid "Shared file size"
+msgstr "Secreto compartido"
 
 msgid "Shared secret"
 msgstr "Secreto compartido"
@@ -3959,6 +4048,11 @@ msgstr "Canción"
 
 msgid "Sort by"
 msgstr "Ordenar por"
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Sort name"
+msgstr "Nombre del artista"
 
 msgid "Sort title"
 msgstr "Ordenar por título"
@@ -4185,8 +4279,23 @@ msgstr "Total de discos"
 msgid "Total tracks"
 msgstr "Total de las pistas"
 
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track details"
+msgstr "Radio de la pista"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track gain"
+msgstr "Radio de la pista"
+
 msgid "Track number"
 msgstr "Número de pista"
+
+#, fuzzy
+#| msgid "Track radio"
+msgid "Track peak"
+msgstr "Radio de la pista"
 
 msgid "Track radio"
 msgstr "Radio de la pista"
@@ -4202,6 +4311,11 @@ msgstr "Pistas de tus últimos cinco álbumes"
 
 msgid "Tracks"
 msgstr "Pistas"
+
+#, fuzzy
+#| msgid "Transition mode"
+msgid "Transcoded"
+msgstr "Modo de transición"
 
 msgid "Transition mode"
 msgstr "Modo de transición"
@@ -4743,9 +4857,6 @@ msgstr "Bienvenido al instalador de Rufin"
 #~ msgid "Undo identified value"
 #~ msgstr "Deshacer valor identificado"
 
-#~ msgid "Folder"
-#~ msgstr "Carpeta"
-
 #~ msgid "Generate and cache waveforms for the current track"
 #~ msgstr "Generar y guardar en caché las ondas de audio para la pista actual"
 
@@ -4792,9 +4903,6 @@ msgstr "Bienvenido al instalador de Rufin"
 
 #~ msgid "Files received: {count}"
 #~ msgstr "Archivos recibidos: {count}"
-
-#~ msgid "Files"
-#~ msgstr "Archivos"
 
 #~ msgid "Media available"
 #~ msgstr "Medios disponibles"
