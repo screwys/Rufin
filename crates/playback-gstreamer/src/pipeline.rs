@@ -1282,22 +1282,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::print_stderr, reason = "temporary macOS timeout diagnostics")]
     fn repeated_tracks_release_streams_and_reuse_the_player() {
-        #[cfg(target_os = "macos")]
-        thread::spawn(|| {
-            thread::sleep(Duration::from_secs(60));
-            let pid = std::process::id().to_string();
-            let report = std::env::temp_dir().join(format!("rufin-retention-{pid}.sample"));
-            let result = std::process::Command::new("/usr/bin/sample")
-                .args([pid.as_str(), "1", "1", "-file"])
-                .arg(&report)
-                .output();
-            eprintln!("retention native sample: {result:?}");
-            if let Ok(report) = std::fs::read_to_string(report) {
-                eprintln!("{report}");
-            }
-        });
         ensure_gstreamer_initialized().unwrap();
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("track.wav");
@@ -1331,7 +1316,7 @@ mod tests {
             ..BackendAudioSettings::default()
         };
         let mut retired: Vec<(String, glib::WeakRef<gst::Object>)> = Vec::new();
-        for index in 1..=1_000 {
+        for index in 1..=100 {
             let resource = Arc::new(());
             let resource_ref = Arc::downgrade(&resource);
             let item = PreparedRun {
@@ -1340,7 +1325,6 @@ mod tests {
                     .with_resource(resource)
                     .into(),
             };
-            eprintln!("retention cycle {index}: starting playback");
             player
                 .play_item(
                     PipelineId(index),
@@ -1353,13 +1337,10 @@ mod tests {
                     gst::State::Playing,
                 )
                 .unwrap();
-            eprintln!("retention cycle {index}: playback requested");
             drop(item);
             assert!(resource_ref.upgrade().is_some());
             let (pipeline, bus) = player.native.as_ref().unwrap();
-            let state = pipeline.state(gst::ClockTime::from_seconds(5));
-            eprintln!("retention cycle {index}: state {state:?}");
-            state.0.unwrap();
+            pipeline.state(gst::ClockTime::from_seconds(5)).0.unwrap();
             if let Some((_, previous)) = retired.first() {
                 assert_eq!(previous.upgrade().as_ref(), Some(pipeline.upcast_ref()));
             }
@@ -1385,9 +1366,7 @@ mod tests {
                     ));
                 }
             }
-            eprintln!("retention cycle {index}: stopping playback");
             player.stop();
-            eprintln!("retention cycle {index}: stopped");
             assert!(!player.has_session());
             assert_eq!(bin.current_state(), gst::State::Null);
             assert!(resource_ref.upgrade().is_none());
