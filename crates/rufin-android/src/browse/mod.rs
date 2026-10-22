@@ -9,9 +9,9 @@ mod search;
 pub use records::{
     AndroidArtistLink, AndroidArtistReleaseGroup, AndroidBreadcrumb, AndroidBrowseDisplay,
     AndroidBrowseItem, AndroidBrowsePage, AndroidBrowseRow, AndroidCollectionCategory,
-    AndroidDetailSummary, AndroidFieldValue, AndroidMusicFolder, AndroidMusicFolderState,
-    AndroidPinPage, AndroidPlaylistImport, AndroidRouteDescriptor, AndroidRouteSetting,
-    AndroidScrollSection, AndroidSortField,
+    AndroidDetailLink, AndroidDetailSummary, AndroidFieldValue, AndroidMusicFolder,
+    AndroidMusicFolderState, AndroidPinPage, AndroidPlaylistImport, AndroidRouteDescriptor,
+    AndroidRouteSetting, AndroidScrollSection, AndroidSortField,
 };
 
 use library::{Collection, ListRead, MemberRead, MemberRow, MemberSelection, ReadCancellation};

@@ -1617,6 +1617,9 @@ msgstr ""
 msgid "Folder path"
 msgstr ""
 
+msgid "Folder"
+msgstr ""
+
 msgid "Folders"
 msgstr ""
 

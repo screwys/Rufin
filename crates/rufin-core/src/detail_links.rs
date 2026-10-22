@@ -9,6 +9,36 @@ pub struct DetailLink {
     pub url: Option<String>,
 }
 
+pub fn navigation_source_link(
+    source: Option<&sources::SourceConfiguration>,
+    media_uri: &str,
+    album_uri: Option<&str>,
+) -> Option<DetailLink> {
+    let folder = source.map_or_else(
+        || media_uri.starts_with("file:"),
+        |source| matches!(source.kind.as_str(), "local" | "webdav" | "smb"),
+    );
+    if folder {
+        return Some(DetailLink {
+            title: msgid("Folder"),
+            icon_name: "rufin-document-open-symbolic",
+            url: None,
+        });
+    }
+    let source = source?;
+    // Navidrome's player links tracks to their album page.
+    let uri = if source.kind == "navidrome"
+        && library::source_entity_parts(media_uri).is_some_and(|(_, kind, _)| kind == "track")
+    {
+        album_uri?
+    } else {
+        media_uri
+    };
+    let mut link = source_link(source, uri)?;
+    link.title = crate::runtime::source::source_kind_title(&source.kind)?;
+    Some(link)
+}
+
 pub fn source_link(source: &sources::SourceConfiguration, media_uri: &str) -> Option<DetailLink> {
     let (_, kind, object_id) = library::source_entity_parts(media_uri)?;
     let folder = matches!(source.kind.as_str(), "local" | "webdav" | "smb");

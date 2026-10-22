@@ -1888,8 +1888,17 @@ impl SourceOwner {
         folder: Option<library::FolderKey>,
     ) -> Receiver<Result<String, String>> {
         self.reply(move |owner, database| async move {
-            let (source_id, _, _) =
-                library::source_entity_parts(&media_uri).ok_or_else(source_access_unavailable)?;
+            let Some(source_id) = owner.media_source_id(&media_uri).await? else {
+                let path = url::Url::parse(&media_uri)
+                    .ok()
+                    .and_then(|uri| uri.to_file_path().ok())
+                    .ok_or_else(source_access_unavailable)?;
+                return path
+                    .parent()
+                    .and_then(|parent| url::Url::from_directory_path(parent).ok())
+                    .map(String::from)
+                    .ok_or_else(source_access_unavailable);
+            };
             let configuration = owner
                 .configuration(&source_id)
                 .ok_or_else(source_access_unavailable)?;

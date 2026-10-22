@@ -130,7 +130,7 @@ impl SourceConfiguration {
 
 fn entity_id<'a>(source: &str, kind: &str, id: &'a str) -> SourceResult<&'a str> {
     id.strip_prefix(&format!("{source}:{kind}:"))
-        .filter(|id| !id.is_empty() && matches!(kind, "artist" | "album" | "playlist"))
+        .filter(|id| !id.is_empty() && matches!(kind, "track" | "artist" | "album" | "playlist"))
         .ok_or(SourceError::NotFound)
 }
 
@@ -146,6 +146,9 @@ fn web_base(base: &str) -> SourceResult<Url> {
 }
 
 fn subsonic_url(base: &Url, server: &str, kind: &str, id: &str) -> SourceResult<Option<Url>> {
+    if kind == "track" {
+        return Ok(None);
+    }
     let mut url = web_base(base.as_str())?;
     let path = url.path().trim_end_matches('/').to_owned();
     // These API mount points identify the web app even on older saved connections.
@@ -199,7 +202,7 @@ mod tests {
                 kind,
                 json!({"version":1,"base_url":base,"server_id":"server & two","user_id":"listener","username":"listener","trust_invalid_cert":false}),
             );
-            for entity in ["artist", "album"] {
+            for entity in ["track", "artist", "album"] {
                 assert_eq!(
                     source
                         .detail_web_url(entity, &format!("{kind}:{entity}:42&other=1"))
@@ -215,7 +218,7 @@ mod tests {
                 "plex",
                 json!({"version":1,"server_id":"machine","profile_id":"profile","base_url":base,"address_override":null,"local":true,"relay":false,"owned":true,"trust_invalid_cert":false}),
             );
-            for entity in ["artist", "album"] {
+            for entity in ["track", "artist", "album"] {
                 assert_eq!(
                     source
                         .detail_web_url(entity, &format!("plex:{entity}:42"))
