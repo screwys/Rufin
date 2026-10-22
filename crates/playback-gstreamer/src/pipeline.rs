@@ -1282,6 +1282,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::print_stderr, reason = "temporary macOS timeout diagnostics")]
     fn repeated_tracks_release_streams_and_reuse_the_player() {
         ensure_gstreamer_initialized().unwrap();
         let directory = tempfile::tempdir().unwrap();
@@ -1325,6 +1326,7 @@ mod tests {
                     .with_resource(resource)
                     .into(),
             };
+            eprintln!("retention cycle {index}: starting playback");
             player
                 .play_item(
                     PipelineId(index),
@@ -1337,10 +1339,13 @@ mod tests {
                     gst::State::Playing,
                 )
                 .unwrap();
+            eprintln!("retention cycle {index}: playback requested");
             drop(item);
             assert!(resource_ref.upgrade().is_some());
             let (pipeline, bus) = player.native.as_ref().unwrap();
-            pipeline.state(gst::ClockTime::from_seconds(5)).0.unwrap();
+            let state = pipeline.state(gst::ClockTime::from_seconds(5));
+            eprintln!("retention cycle {index}: state {state:?}");
+            state.0.unwrap();
             if let Some((_, previous)) = retired.first() {
                 assert_eq!(previous.upgrade().as_ref(), Some(pipeline.upcast_ref()));
             }
@@ -1366,7 +1371,9 @@ mod tests {
                     ));
                 }
             }
+            eprintln!("retention cycle {index}: stopping playback");
             player.stop();
+            eprintln!("retention cycle {index}: stopped");
             assert!(!player.has_session());
             assert_eq!(bin.current_state(), gst::State::Null);
             assert!(resource_ref.upgrade().is_none());
