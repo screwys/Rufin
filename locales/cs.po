@@ -552,6 +552,9 @@ msgstr ""
 msgid "Audio fade on play/pause"
 msgstr "Ztlumení zvuku při přehrávání/pozastavení"
 
+msgid "Audio fingerprints"
+msgstr ""
+
 msgid "Audio output"
 msgstr "Zvukový výstup"
 
@@ -718,6 +721,9 @@ msgstr "Knihovna pro ukládání do mezipaměti"
 msgid "Caching local library..."
 msgstr "Ukládání lokální knihovny do mezipaměti..."
 
+msgid "Calculating fingerprint..."
+msgstr ""
+
 msgid "Cancel download and clear downloaded items"
 msgstr "Zrušit stahování a vymazat stažené položky"
 
@@ -883,6 +889,16 @@ msgstr "Hledat Texty"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Vymazat načtený text pro tuto skladbu"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear fingerprint cache"
+msgstr "Hledat texty"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear lookup cache"
+msgstr "Hledat texty"
 
 #, fuzzy
 #| msgid "Search lyrics"
@@ -1453,6 +1469,12 @@ msgstr ""
 msgid "Do not encrypt"
 msgstr "není prázdné"
 
+msgid "Do you want to apply metadata changes to {count} track?"
+msgid_plural "Do you want to apply metadata changes to {count} tracks?"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
 msgid "Do you want to use the existing configuration?"
 msgstr ""
 
@@ -1460,6 +1482,9 @@ msgid "Don't duplicate"
 msgstr "Neduplikujte"
 
 msgid "Donate"
+msgstr ""
+
+msgid "Done"
 msgstr ""
 
 msgid "Download Folder"
@@ -1809,9 +1834,17 @@ msgid "Fetching lyrics"
 msgstr "Hledat texty"
 
 #, fuzzy
+#| msgid "Search Lyrics"
+msgid "Fetching metadata..."
+msgstr "Hledat Texty"
+
+#, fuzzy
 #| msgid "Smart playlists"
 msgid "Fetching playlists"
 msgstr "Chytré playlisty"
+
+msgid "Field"
+msgstr ""
 
 #, fuzzy
 #| msgid "Connection"
@@ -2072,12 +2105,6 @@ msgstr ""
 msgid "Hz"
 msgstr ""
 
-msgid "Identify"
-msgstr "Identifikovat"
-
-msgid "Identifying..."
-msgstr "Identifikace..."
-
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr ""
 "Pokud se stránka nenačte, znamená to, že Libre.fm blokuje váš rozsah IP "
@@ -2317,6 +2344,11 @@ msgstr "Přístup k místním souborům"
 
 #, fuzzy
 #| msgid "Loading folders..."
+msgid "Loading cached lookups..."
+msgstr "Načítání složek..."
+
+#, fuzzy
+#| msgid "Loading folders..."
 msgid "Loading related tracks..."
 msgstr "Načítání složek..."
 
@@ -2411,6 +2443,9 @@ msgstr "Uzamknout metadata"
 msgid "Logs are copied"
 msgstr ""
 
+msgid "Lookup"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr "Normalizace hlasitosti"
 
@@ -2454,6 +2489,11 @@ msgstr "Mapovaná lokální cesta"
 msgid "March {year}"
 msgstr ""
 
+#, fuzzy
+#| msgid "Cached"
+msgid "Matched"
+msgstr "V mezipaměti"
+
 msgid "Maximum year"
 msgstr "Maximální rok"
 
@@ -2475,6 +2515,11 @@ msgstr "Úprava metadat již není k dispozici"
 #| msgid "Metadata editing is no longer available"
 msgid "Metadata editing requires Local access"
 msgstr "Úprava metadat již není k dispozici"
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata lookups"
+msgstr "Zdroj metadat"
 
 msgid "Metadata source"
 msgstr "Zdroj metadat"
@@ -2573,9 +2618,6 @@ msgstr "Posunout nahoru"
 msgid "Multi-selection"
 msgstr "Výběr"
 
-msgid "Multiple values"
-msgstr "Více hodnot"
-
 msgid "Music Folder"
 msgstr "Hudební složka"
 
@@ -2666,6 +2708,11 @@ msgstr ""
 
 msgid "Needs attention"
 msgstr "Vyžaduje pozornost"
+
+#, fuzzy
+#| msgid "Overview"
+msgid "Needs review"
+msgstr "Přehled"
 
 msgid "NetEase"
 msgstr "NetEase"
@@ -2793,6 +2840,11 @@ msgstr "Toto není dostupné"
 
 msgid "No lyrics"
 msgstr "Žádné texty skladeb"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching track in this release"
+msgstr "Žádné odpovídající skladby"
 
 #, fuzzy
 #| msgid "No matching tracks"
@@ -2938,6 +2990,9 @@ msgstr ""
 msgid "One path per line"
 msgstr ""
 
+msgid "Only fill missing information"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "Pouze přehrané skladby"
 
@@ -3037,6 +3092,11 @@ msgid "Original release date"
 msgstr "Datum vydání"
 
 msgid "Original"
+msgstr "Originál"
+
+#, fuzzy
+#| msgid "Original"
+msgid "Original: {value}"
 msgstr "Originál"
 
 #, fuzzy
@@ -3457,6 +3517,11 @@ msgstr "Výběr"
 msgid "Rating"
 msgstr "Hodnocení"
 
+#, fuzzy
+#| msgid "Saving..."
+msgid "Reading tags..."
+msgstr "Ukládání..."
+
 msgid "Ready"
 msgstr "Připraveno"
 
@@ -3489,6 +3554,11 @@ msgstr "Znovu se připojit"
 #| msgid "Grid labels"
 msgid "Record label"
 msgstr "Popisky mřížky"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Recording"
+msgstr "Stahování"
 
 msgid "Red"
 msgstr "Červená"
@@ -3548,6 +3618,11 @@ msgstr "Šedá"
 
 msgid "Release date"
 msgstr "Datum vydání"
+
+#, fuzzy
+#| msgid "Release"
+msgid "Release group"
+msgstr "Vydání"
 
 msgid "Release notifications"
 msgstr "Notifikace vydání"
@@ -3917,8 +3992,18 @@ msgid "Search Lyrics"
 msgstr "Hledat Texty"
 
 #, fuzzy
+#| msgid "MusicBrainz"
+msgid "Search MusicBrainz"
+msgstr "MusicBrainz"
+
+#, fuzzy
 #| msgid "Search Lyrics"
 msgid "Search artwork"
+msgstr "Hledat Texty"
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search by AcoustID"
 msgstr "Hledat Texty"
 
 #, fuzzy
@@ -3978,8 +4063,18 @@ msgstr "Hledat"
 msgid "Search..."
 msgstr "Hledání..."
 
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching AcoustID..."
+msgstr "Hledání..."
+
 msgid "Searching Local Network"
 msgstr "Prohledávání místní sítě"
+
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching MusicBrainz..."
+msgstr "Hledání..."
 
 msgid "Searching for devices..."
 msgstr "Hledání zařízení..."
@@ -4399,6 +4494,9 @@ msgstr "Zvuk"
 msgid "Style"
 msgstr ""
 
+msgid "Suggested"
+msgstr ""
+
 msgid "Sunday"
 msgstr ""
 
@@ -4620,9 +4718,6 @@ msgstr "UPnP"
 #| msgid "Album title"
 msgid "Unavailable"
 msgstr "Název alba"
-
-msgid "Undo identified value"
-msgstr "Vrátit zpět určenou hodnotu"
 
 msgid "Undo"
 msgstr "Vrátit zpět"
@@ -4971,6 +5066,9 @@ msgstr "včera"
 msgid "{action} (Shuffle)"
 msgstr "Filtr přehrání"
 
+msgid "{completed} of {total} ({cached} cached)"
+msgstr ""
+
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] "{count} album"
@@ -5041,6 +5139,18 @@ msgid "{current} / {total} MiB ({percent}%)"
 msgstr ""
 
 msgid "{current} MiB"
+msgstr ""
+
+msgid "{field} · Different across {count} track"
+msgid_plural "{field} · Different across {count} tracks"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+
+msgid "{stage} ({completed} of {total}, {cached} cached)"
+msgstr ""
+
+msgid "{stage} ({count} of {total} tracks)"
 msgstr ""
 
 msgid "{stage}: {completed} / {total}"
@@ -5121,6 +5231,18 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid "Identify"
+#~ msgstr "Identifikovat"
+
+#~ msgid "Identifying..."
+#~ msgstr "Identifikace..."
+
+#~ msgid "Multiple values"
+#~ msgstr "Více hodnot"
+
+#~ msgid "Undo identified value"
+#~ msgstr "Vrátit zpět určenou hodnotu"
 
 #, fuzzy
 #~| msgid "Folders"

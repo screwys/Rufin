@@ -570,6 +570,9 @@ msgstr ""
 msgid "Audio fade on play/pause"
 msgstr "Fondu de l'audio lors de lecture/pause"
 
+msgid "Audio fingerprints"
+msgstr ""
+
 msgid "Audio output"
 msgstr "Sortie audio"
 
@@ -716,6 +719,9 @@ msgstr "Bibliothèque de mise en cache"
 msgid "Caching local library..."
 msgstr "Mise en cache de la bibliothèque locale..."
 
+msgid "Calculating fingerprint..."
+msgstr ""
+
 msgid "Cancel download and clear downloaded items"
 msgstr "Annuler les téléchargements et effacer les éléments téléchargés"
 
@@ -860,6 +866,16 @@ msgstr "Rechercher l’illustration"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Effacer les paroles récupérées pour ce morceau"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear fingerprint cache"
+msgstr "Rechercher des paroles"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear lookup cache"
+msgstr "Rechercher des paroles"
 
 #, fuzzy
 #| msgid "Search lyrics"
@@ -1329,6 +1345,11 @@ msgstr "Affichage"
 msgid "Do not encrypt"
 msgstr "Ne pas chiffrer"
 
+msgid "Do you want to apply metadata changes to {count} track?"
+msgid_plural "Do you want to apply metadata changes to {count} tracks?"
+msgstr[0] ""
+msgstr[1] ""
+
 msgid "Do you want to use the existing configuration?"
 msgstr "Voulez-vous utiliser la configuration existante ?"
 
@@ -1337,6 +1358,9 @@ msgstr "Ne pas dupliquer"
 
 msgid "Donate"
 msgstr "Donner"
+
+msgid "Done"
+msgstr ""
 
 msgid "Download Folder"
 msgstr "Dossier de téléchargement"
@@ -1647,9 +1671,17 @@ msgid "Fetching lyrics"
 msgstr "Rechercher des paroles"
 
 #, fuzzy
+#| msgid "Search artwork"
+msgid "Fetching metadata..."
+msgstr "Rechercher l’illustration"
+
+#, fuzzy
 #| msgid "Search playlists"
 msgid "Fetching playlists"
 msgstr "Rechercher des playlists"
+
+msgid "Field"
+msgstr ""
 
 msgid "File connection"
 msgstr "Fichier de connexion"
@@ -1891,12 +1923,6 @@ msgstr "Heures"
 msgid "Hz"
 msgstr ""
 
-msgid "Identify"
-msgstr "Identification"
-
-msgid "Identifying..."
-msgstr "Identification…"
-
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr "Si la page ne se charge pas, Libre.fm bloque sûrement votre IP/VPN"
 
@@ -2111,6 +2137,11 @@ msgstr "Aperçu de l'écoute"
 msgid "Load file contents"
 msgstr "Charger le contenu du fichier"
 
+#, fuzzy
+#| msgid "Loading related tracks..."
+msgid "Loading cached lookups..."
+msgstr "Chargement des morceaux correspondants…"
+
 msgid "Loading related tracks..."
 msgstr "Chargement des morceaux correspondants…"
 
@@ -2195,6 +2226,9 @@ msgstr "Verrouiller les métadonnées"
 msgid "Logs are copied"
 msgstr "Les journaux sont copiés"
 
+msgid "Lookup"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr "Normalisation du volume sonore"
 
@@ -2234,6 +2268,11 @@ msgstr "Chemin local mappé"
 msgid "March {year}"
 msgstr "Mars {year}"
 
+#, fuzzy
+#| msgid "Cached"
+msgid "Matched"
+msgstr "Mise en cache"
+
 msgid "Maximum year"
 msgstr "Année maximale"
 
@@ -2253,6 +2292,11 @@ msgstr "L'édition des métadonnées n'est plus disponible"
 
 msgid "Metadata editing requires Local access"
 msgstr "La modification des métadonnées nécessite l’accès Local"
+
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Metadata lookups"
+msgstr "Source de métadonnées"
 
 msgid "Metadata source"
 msgstr "Source de métadonnées"
@@ -2343,9 +2387,6 @@ msgstr "Déplacer vers le haut"
 msgid "Multi-selection"
 msgstr "Multisélection"
 
-msgid "Multiple values"
-msgstr "Valeurs multiples"
-
 msgid "Music Folder"
 msgstr "Dossier de musique"
 
@@ -2426,6 +2467,11 @@ msgstr "Découverte à proximité"
 
 msgid "Needs attention"
 msgstr "Besoin d'attention"
+
+#, fuzzy
+#| msgid "Overview"
+msgid "Needs review"
+msgstr "Aperçu"
 
 msgid "NetEase"
 msgstr "NetEase"
@@ -2527,6 +2573,11 @@ msgstr "Pas de paroles disponibles."
 
 msgid "No lyrics"
 msgstr "Pas de paroles"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching track in this release"
+msgstr "Aucune piste correspondante"
 
 msgid "No matching tracks found"
 msgstr "Aucun morceau correspondant trouvé"
@@ -2658,6 +2709,9 @@ msgstr ""
 msgid "One path per line"
 msgstr "Un chemin par ligne"
 
+msgid "Only fill missing information"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "Uniquement les morceaux déjà lus"
 
@@ -2737,6 +2791,11 @@ msgid "Original release date"
 msgstr "Date de sortie originale"
 
 msgid "Original"
+msgstr "Original"
+
+#, fuzzy
+#| msgid "Original"
+msgid "Original: {value}"
 msgstr "Original"
 
 msgid "Other releases"
@@ -3101,6 +3160,11 @@ msgstr "Sélection de plage"
 msgid "Rating"
 msgstr "Note"
 
+#, fuzzy
+#| msgid "Loading..."
+msgid "Reading tags..."
+msgstr "Chargement..."
+
 msgid "Ready"
 msgstr "Prêt"
 
@@ -3127,6 +3191,11 @@ msgstr "Reconnecter"
 
 msgid "Record label"
 msgstr "Maison de disques"
+
+#, fuzzy
+#| msgid "Downloading"
+msgid "Recording"
+msgstr "Téléchargement"
 
 msgid "Red"
 msgstr "Rouge"
@@ -3172,6 +3241,11 @@ msgstr "Relais"
 
 msgid "Release date"
 msgstr "Date de sortie"
+
+#, fuzzy
+#| msgid "Release"
+msgid "Release group"
+msgstr "Version"
 
 msgid "Release notifications"
 msgstr "Notifications de nouvelles versions"
@@ -3507,8 +3581,18 @@ msgstr "Rechercher à nouveau"
 msgid "Search Lyrics"
 msgstr "Rechercher des paroles"
 
+#, fuzzy
+#| msgid "MusicBrainz"
+msgid "Search MusicBrainz"
+msgstr "MusicBrainz"
+
 msgid "Search artwork"
 msgstr "Rechercher l’illustration"
+
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search by AcoustID"
+msgstr "Rechercher des paroles"
 
 msgid "Search current folder"
 msgstr "Rechercher dans le dossier actuel"
@@ -3549,8 +3633,18 @@ msgstr "Recherche"
 msgid "Search..."
 msgstr "Recherche..."
 
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching AcoustID..."
+msgstr "Recherche..."
+
 msgid "Searching Local Network"
 msgstr "Recherche du réseau local"
+
+#, fuzzy
+#| msgid "Searching..."
+msgid "Searching MusicBrainz..."
+msgstr "Recherche..."
 
 msgid "Searching for devices..."
 msgstr "Recherche des appareils..."
@@ -3923,6 +4017,9 @@ msgstr "Studios"
 msgid "Style"
 msgstr "Style"
 
+msgid "Suggested"
+msgstr ""
+
 msgid "Sunday"
 msgstr "Dimanche"
 
@@ -4121,9 +4218,6 @@ msgstr "UPnP"
 #| msgid "Album unavailable"
 msgid "Unavailable"
 msgstr "Album non disponible"
-
-msgid "Undo identified value"
-msgstr "Annuler la valeur identifiée"
 
 msgid "Undo"
 msgstr "Annuler"
@@ -4433,6 +4527,9 @@ msgstr "hier"
 msgid "{action} (Shuffle)"
 msgstr "{action} (aléatoire)"
 
+msgid "{completed} of {total} ({cached} cached)"
+msgstr ""
+
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] "{count} album"
@@ -4491,6 +4588,21 @@ msgstr ""
 
 msgid "{current} MiB"
 msgstr ""
+
+msgid "{field} · Different across {count} track"
+msgid_plural "{field} · Different across {count} tracks"
+msgstr[0] ""
+msgstr[1] ""
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage} ({completed} of {total}, {cached} cached)"
+msgstr "{status} {stage} {completed}{total}"
+
+#, fuzzy
+#| msgid "{status} · {stage} {completed}{total}"
+msgid "{stage} ({count} of {total} tracks)"
+msgstr "{status} {stage} {completed}{total}"
 
 #, fuzzy
 #| msgid "{status} · {stage} {completed}{total}"
@@ -4585,6 +4697,18 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue sur l'installateur de Rufin"
+
+#~ msgid "Identify"
+#~ msgstr "Identification"
+
+#~ msgid "Identifying..."
+#~ msgstr "Identification…"
+
+#~ msgid "Multiple values"
+#~ msgstr "Valeurs multiples"
+
+#~ msgid "Undo identified value"
+#~ msgstr "Annuler la valeur identifiée"
 
 #~ msgid "Folder"
 #~ msgstr "Dossier"
