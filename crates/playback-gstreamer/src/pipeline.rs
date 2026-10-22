@@ -1285,31 +1285,41 @@ mod tests {
     fn repeated_tracks_release_streams_and_reuse_the_player() {
         ensure_gstreamer_initialized().unwrap();
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("track.wav");
-        let producer =
-            gst::parse::launch("audiotestsrc num-buffers=100 ! wavenc ! filesink name=output")
+        let formats = [(44_100, 2), (48_000, 1), (96_000, 2), (44_100, 6)];
+        let mut uris = Vec::new();
+        for (index, (rate, channels)) in formats.iter().enumerate() {
+            let path = directory.path().join(format!("track-{index}.wav"));
+            let producer = gst::parse::launch(&format!(
+                "audiotestsrc num-buffers=100 ! audio/x-raw,format=S16LE,rate={rate},channels={channels} ! wavenc ! filesink name=output"
+            ))
                 .unwrap();
-        producer
-            .downcast_ref::<gst::Bin>()
-            .unwrap()
-            .by_name("output")
-            .unwrap()
-            .set_property("location", &path);
-        producer.set_state(gst::State::Playing).unwrap();
-        let done = producer
-            .bus()
-            .unwrap()
-            .timed_pop_filtered(
-                gst::ClockTime::from_seconds(10),
-                &[gst::MessageType::Eos, gst::MessageType::Error],
-            )
-            .unwrap();
-        producer.set_state(gst::State::Null).unwrap();
-        assert!(matches!(done.view(), gst::MessageView::Eos(_)));
-        drop(done);
-        drop(producer);
-        let uri = glib::filename_to_uri(&path, None).unwrap();
+            producer
+                .downcast_ref::<gst::Bin>()
+                .unwrap()
+                .by_name("output")
+                .unwrap()
+                .set_property("location", &path);
+            producer.set_state(gst::State::Playing).unwrap();
+            let done = producer
+                .bus()
+                .unwrap()
+                .timed_pop_filtered(
+                    gst::ClockTime::from_seconds(10),
+                    &[gst::MessageType::Eos, gst::MessageType::Error],
+                )
+                .unwrap();
+            producer.set_state(gst::State::Null).unwrap();
+            assert!(matches!(done.view(), gst::MessageView::Eos(_)));
+            uris.push(glib::filename_to_uri(&path, None).unwrap());
+        }
         let shared = Arc::new(Mutex::new(SharedBackendState::new()));
+        lock_recover(&shared).processing = Some(ProcessingRequest {
+            config: audio_processing::effects::ProcessingConfig {
+                equalizer: Some(audio_processing::effects::EqProfile::default()),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
         let mut player = PlayerPipeline::new("retention-check", shared);
         let settings = BackendAudioSettings {
             audio_output: Some("fakesink".to_string()),
@@ -1317,11 +1327,12 @@ mod tests {
         };
         let mut retired: Vec<(String, glib::WeakRef<gst::Object>)> = Vec::new();
         for index in 1..=100 {
+            let format_index = (index as usize - 1) % formats.len();
             let resource = Arc::new(());
             let resource_ref = Arc::downgrade(&resource);
             let item = PreparedRun {
                 run: RunId::new(index),
-                stream: ResolvedStream::new(uri.as_str())
+                stream: ResolvedStream::new(uris[format_index].as_str())
                     .with_resource(resource)
                     .into(),
             };
@@ -1354,6 +1365,16 @@ mod tests {
                 bus.upcast_ref::<gst::Object>().downgrade(),
             ));
             let bin = pipeline.clone().downcast::<gst::Bin>().unwrap();
+            let caps = player
+                .audio_graph
+                .as_ref()
+                .unwrap()
+                .processing
+                .measurement_pad()
+                .current_caps()
+                .unwrap();
+            let info = gstreamer_audio::AudioInfo::from_caps(&caps).unwrap();
+            assert_eq!((info.rate(), info.channels()), formats[format_index]);
             for element in bin.iterate_recurse().into_iter().map(Result::unwrap) {
                 retired.push((
                     element.name().to_string(),

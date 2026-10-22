@@ -169,6 +169,11 @@ fallible_impl_from = "deny"
 panic_in_result_fn = "deny"
 string_slice = "deny"
 
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
 [profile.dev]
 debug = "line-tables-only"
 
