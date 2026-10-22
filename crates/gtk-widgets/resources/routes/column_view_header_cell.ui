@@ -22,14 +22,13 @@
           </object>
         </child>
         <child>
-          <object class="GtkImage" id="duration">
+          <object class="GtkImage" id="icon">
             <property name="visible">false</property>
             <property name="hexpand">true</property>
             <property name="halign">start</property>
             <property name="margin-start">6</property>
             <property name="margin-end">6</property>
             <property name="pixel-size">16</property>
-            <property name="icon-name">rufin-preferences-system-time-symbolic</property>
             <property name="accessible-role">presentation</property>
           </object>
         </child>

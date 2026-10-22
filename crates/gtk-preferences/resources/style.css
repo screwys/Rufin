@@ -925,7 +925,8 @@ playing-indicator {
   opacity: 0;
 }
 
-.row-actions button { min-width: 30px; min-height: 30px; padding: 0; }
+.row-actions button,
+button.row-favorite-button { min-width: 30px; min-height: 30px; padding: 0; }
 
 .row-menu-button { opacity: 0; }
 
@@ -2569,10 +2570,6 @@ entry.lyrics-offset-value.flat:focus-within {
 .fullscreen-artwork-bars .bottom-player {
   background: color-mix(in srgb, var(--window-bg-color) 88%, var(--fullscreen-artwork-color));
   transition: background 600ms ease;
-}
-
-.fullscreen-player .lyrics-top-controls {
-  margin-top: 8px;
 }
 
 .fullscreen-focus-button:checked:not(:hover):not(:active) {

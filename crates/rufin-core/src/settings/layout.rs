@@ -1,6 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 16;
+pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 17;
 pub const DEFAULT_WINDOW_WIDTH: i32 = 1_500;
 pub const DEFAULT_WINDOW_HEIGHT: i32 = 900;
 pub const MIN_RESTORED_WINDOW_WIDTH: i32 = 450;
@@ -581,7 +581,7 @@ impl LibraryListSettings {
                     LibraryField::Duration,
                 ]
             {
-                self.row_fields = default_row_fields(key);
+                self.row_fields = combined_row_fields(key);
             }
             if self.grid_fields == [LibraryField::SongCount, LibraryField::Duration] {
                 self.grid_fields = default_grid_fields(key);
@@ -622,7 +622,7 @@ impl LibraryListSettings {
                     if self.row_fields == previous_default
                         || self.row_fields == duplicate_artist_default
                     {
-                        self.row_fields = default_row_fields(key);
+                        self.row_fields = combined_row_fields(key);
                     }
                 }
                 LibraryListKey::ArtistTracks => {
@@ -634,7 +634,7 @@ impl LibraryListSettings {
                         LibraryField::Favorite,
                     ];
                     if self.row_fields == previous_default {
-                        self.row_fields = default_row_fields(key);
+                        self.row_fields = combined_row_fields(key);
                     }
                 }
                 LibraryListKey::Queue
@@ -678,7 +678,7 @@ impl LibraryListSettings {
                         LibraryField::Favorite,
                     ];
                     if self.row_fields == previous_default {
-                        self.row_fields = default_row_fields(key);
+                        self.row_fields = combined_row_fields(key);
                     }
                 }
                 LibraryListKey::Queue
@@ -702,7 +702,7 @@ impl LibraryListSettings {
         }
 
         if self.layout_version < 8 {
-            let defaults = default_row_fields(key);
+            let defaults = combined_row_fields(key);
             let standard_track_default = matches!(
                 key,
                 LibraryListKey::Tracks
@@ -741,7 +741,7 @@ impl LibraryListSettings {
                     LibraryField::Favorite,
                 ]
             {
-                self.row_fields = default_row_fields(key);
+                self.row_fields = combined_row_fields(key);
             }
             if self.grid_fields
                 == [
@@ -782,7 +782,7 @@ impl LibraryListSettings {
                     LibraryField::Tools,
                 ]
         {
-            self.row_fields = default_row_fields(key);
+            self.row_fields = combined_row_fields(key);
         }
         if self.layout_version < 12
             && matches!(
@@ -797,7 +797,7 @@ impl LibraryListSettings {
                     | LibraryListKey::SmartPlaylists
             )
         {
-            let defaults = default_row_fields(key);
+            let defaults = combined_row_fields(key);
             if self.row_fields == defaults[1..] {
                 self.row_fields = defaults;
             }
@@ -813,7 +813,7 @@ impl LibraryListSettings {
                     LibraryField::Tools,
                 ]
         {
-            self.row_fields = default_row_fields(key);
+            self.row_fields = combined_row_fields(key);
         }
         if self.layout_version < 14
             && key == LibraryListKey::FavoriteTracks
@@ -827,7 +827,7 @@ impl LibraryListSettings {
                     LibraryField::Tools,
                 ]
         {
-            self.row_fields = default_row_fields(key);
+            self.row_fields = combined_row_fields(key);
         }
         if self.layout_version < 14
             && key == LibraryListKey::SmartPlaylists
@@ -841,7 +841,7 @@ impl LibraryListSettings {
                     LibraryField::Tools,
                 ]
         {
-            self.row_fields = default_row_fields(key);
+            self.row_fields = combined_row_fields(key);
         }
         if self.layout_version < 15 {
             let removed = match key {
@@ -866,7 +866,7 @@ impl LibraryListSettings {
                 _ => None,
             };
             if let Some((index, field)) = removed {
-                let defaults = default_row_fields(key);
+                let defaults = combined_row_fields(key);
                 let mut previous = defaults.clone();
                 previous.insert(index, field);
                 if self.row_fields == previous
@@ -900,6 +900,18 @@ impl LibraryListSettings {
         {
             self.detail_track_fields = default_detail_track_fields();
         }
+        if self.layout_version < 17 {
+            for fields in [&mut self.row_fields, &mut self.detail_track_fields] {
+                if available_row_fields(key).contains(&LibraryField::Favorite)
+                    && !fields.contains(&LibraryField::Favorite)
+                    && let Some(position) = fields
+                        .iter()
+                        .position(|field| *field == LibraryField::Tools)
+                {
+                    fields.insert(position, LibraryField::Favorite);
+                }
+            }
+        }
     }
 }
 pub fn default_library_list_settings() -> Vec<LibraryListSettingsEntry> {
@@ -932,6 +944,7 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::Album,
             LibraryField::Year,
             LibraryField::Duration,
+            LibraryField::Favorite,
             LibraryField::Tools,
         ],
         LibraryListKey::Albums | LibraryListKey::ArtistAlbums => &[
@@ -949,6 +962,7 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::Genre,
             LibraryField::SongCount,
             LibraryField::Duration,
+            LibraryField::Favorite,
             LibraryField::Tools,
         ],
         LibraryListKey::Artists | LibraryListKey::AlbumArtists => &[
@@ -960,6 +974,7 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::LastPlayed,
             LibraryField::PlayCount,
             LibraryField::UserRating,
+            LibraryField::Favorite,
             LibraryField::Tools,
         ],
         LibraryListKey::Genres => &[
@@ -1019,6 +1034,7 @@ pub fn available_row_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::DiscNumber,
             LibraryField::TrackNumber,
             LibraryField::Duration,
+            LibraryField::Favorite,
             LibraryField::Tools,
         ],
     }
@@ -1150,6 +1166,18 @@ pub fn available_sort_fields(key: LibraryListKey) -> &'static [LibraryField] {
     }
 }
 fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
+    let mut fields = combined_row_fields(key);
+    if available_row_fields(key).contains(&LibraryField::Favorite)
+        && let Some(position) = fields
+            .iter()
+            .position(|field| *field == LibraryField::Tools)
+    {
+        fields.insert(position, LibraryField::Favorite);
+    }
+    fields
+}
+
+fn combined_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
     match key {
         LibraryListKey::Queue => vec![LibraryField::TitleMerged, LibraryField::Year],
         LibraryListKey::FullscreenTracks => vec![
@@ -1280,6 +1308,7 @@ pub fn available_detail_track_fields() -> &'static [LibraryField] {
         LibraryField::TrackNumber,
         LibraryField::Title,
         LibraryField::Duration,
+        LibraryField::Favorite,
         LibraryField::Tools,
     ]
 }
@@ -1377,7 +1406,7 @@ mod disc_tests {
     }
 
     #[test]
-    fn history_row_fields_default_to_index_title_last_played_and_tools() {
+    fn history_row_fields_default_to_index_title_last_played_favorite_and_tools() {
         let defaults = default_row_fields(LibraryListKey::History);
         assert_eq!(
             defaults,
@@ -1385,6 +1414,7 @@ mod disc_tests {
                 LibraryField::RowIndex,
                 LibraryField::TitleMerged,
                 LibraryField::LastPlayed,
+                LibraryField::Favorite,
                 LibraryField::Tools,
             ]
         );
@@ -1408,6 +1438,7 @@ mod disc_tests {
                 LibraryField::RowIndex,
                 LibraryField::TitleMerged,
                 LibraryField::LastPlayed,
+                LibraryField::Favorite,
                 LibraryField::Tools,
             ]
         );

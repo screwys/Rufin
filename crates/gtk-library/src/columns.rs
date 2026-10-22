@@ -24,8 +24,8 @@ use rufin_core::playback::PlayRequest;
 use super::table_links::mapped_track_link_column;
 use gtk_widgets::detail_links::{DetailLinks, album_artist_links};
 use gtk_widgets::library_fields::{
-    add_field_skeleton_class, album_field, artist_field, column_width, opaque_artwork,
-    play_count_column_width,
+    add_field_skeleton_class, album_field, artist_field, column_fit_width, column_width,
+    opaque_artwork, play_count_column_width,
 };
 use gtk_widgets::recycled_cells::{
     RecycledArtworkCell, RecycledBadgedTextCell, RecycledMergedCell, RecycledTextCell, list_cell,
@@ -234,6 +234,7 @@ pub(super) enum AlbumCellView {
     Image(RecycledArtworkCell),
     Text(RecycledBadgedTextCell),
     Merged(RecycledMergedCell),
+    Favorite(gtk::Button),
     Tools(gtk_widgets::recycled_cells::RowActions),
 }
 
@@ -244,6 +245,7 @@ impl AlbumCellView {
             Self::Image(cell) => cell.upcast_ref(),
             Self::Text(cell) => cell.upcast_ref(),
             Self::Merged(cell) => cell.upcast_ref(),
+            Self::Favorite(cell) => cell.upcast_ref(),
             Self::Tools(cell) => cell.upcast_ref(),
         }
     }
@@ -311,6 +313,9 @@ impl AlbumTableCell {
                 AlbumCellView::Merged(view)
             }
             LibraryField::Tools => {
+                AlbumCellView::Tools(gtk_widgets::recycled_cells::RowActions::menu_only())
+            }
+            LibraryField::Favorite => {
                 let button = row_favorite_icon_button("Favorite album");
                 let weak = cell.downgrade();
                 shell.register_dynamic_favorite_button(
@@ -338,9 +343,7 @@ impl AlbumTableCell {
                         );
                     }
                 });
-                AlbumCellView::Tools(gtk_widgets::recycled_cells::RowActions::with_favorite(
-                    &button,
-                ))
+                AlbumCellView::Favorite(button)
             }
             _ => {
                 let view = RecycledBadgedTextCell::with_downloads(&shell.downloads);
@@ -479,10 +482,10 @@ impl AlbumTableCell {
                     clear_merged_artwork(&shell, &cover);
                 }
             }
-            AlbumCellView::Tools(cell) => set_placeholder_favorite(
-                &cell.favorite().unwrap(),
-                row.as_ref().map(|row| row.state.favorite),
-            ),
+            AlbumCellView::Favorite(button) => {
+                set_placeholder_favorite(button, row.as_ref().map(|row| row.state.favorite))
+            }
+            AlbumCellView::Tools(cell) => cell.set_sensitive(row.is_some()),
         }
     }
 }
@@ -507,7 +510,9 @@ pub fn artist_column(
                 artist.metadata.name.clone()
             })
         }
-        LibraryField::Tools => artist_favorite_column(shell, album_artist),
+        LibraryField::Favorite | LibraryField::Tools => {
+            artist_actions_column(shell, album_artist, field)
+        }
         _ => artist_text_column(
             shell,
             field,
@@ -593,8 +598,9 @@ pub fn track_column_for_key<T: gtk_widgets::library_fields::TrackPresentation>(
             }
             column
         }
-        LibraryField::Tools => mapped_track_favorite_column(
+        LibraryField::Favorite | LibraryField::Tools => mapped_track_actions_column(
             shell,
+            field,
             |item: &T| Some(item.media_uri().to_string()),
             |item: &T| Some((item.media_uri().to_string(), item.favorite())),
         ),
@@ -708,13 +714,7 @@ pub fn track_column_width(key: LibraryListKey, field: LibraryField) -> i32 {
         LibraryField::Tools => gtk_widgets::recycled_cells::ROW_ACTIONS_WIDTH,
     }
 }
-pub fn column_fit_width(field: LibraryField, width: i32) -> i32 {
-    if field == LibraryField::TitleMerged {
-        width.saturating_add(72)
-    } else {
-        width
-    }
-}
+
 fn track_list_column_width(field: LibraryField) -> i32 {
     match field {
         LibraryField::RowIndex => 54,
@@ -1605,7 +1605,11 @@ fn favorite_cell_button(item: &gtk::ListItem) -> Option<gtk::Button> {
     gtk_widgets::recycled_cells::row_favorite_button(item)
 }
 
-pub fn artist_favorite_column(shell: &Rc<CatalogUi>, album_artist: bool) -> gtk::ColumnViewColumn {
+pub fn artist_actions_column(
+    shell: &Rc<CatalogUi>,
+    album_artist: bool,
+    field: LibraryField,
+) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let shell = Rc::clone(shell);
 
@@ -1613,8 +1617,12 @@ pub fn artist_favorite_column(shell: &Rc<CatalogUi>, album_artist: bool) -> gtk:
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let button = row_favorite_icon_button("Favorite artist");
-        let actions = gtk_widgets::recycled_cells::RowActions::with_favorite(&button);
+        let actions = gtk_widgets::recycled_cells::row_action_cell(field, "Favorite artist");
+        install_artist_list_item_context_menu(&actions, &shell, item, album_artist);
+        item.set_child(Some(&actions));
+        let Some(button) = favorite_cell_button(item) else {
+            return;
+        };
         set_placeholder_favorite(&button, None);
         let favorite_item = item.downgrade();
         shell.register_dynamic_favorite_button(
@@ -1626,7 +1634,6 @@ pub fn artist_favorite_column(shell: &Rc<CatalogUi>, album_artist: bool) -> gtk:
             }),
             &button,
         );
-        install_artist_list_item_context_menu(&actions, &shell, item, album_artist);
         let favorite_shell = Rc::clone(&shell);
         let click_item = item.downgrade();
         button.connect_clicked(move |button| {
@@ -1643,7 +1650,6 @@ pub fn artist_favorite_column(shell: &Rc<CatalogUi>, album_artist: bool) -> gtk:
                 Some(button),
             );
         });
-        item.set_child(Some(&actions));
     });
 
     connect_sparse_bind(&factory, |item| {
@@ -1667,10 +1673,11 @@ pub fn artist_favorite_column(shell: &Rc<CatalogUi>, album_artist: bool) -> gtk:
             set_placeholder_favorite(&button, None);
         }
     });
-    gtk_widgets::recycled_cells::row_actions_column(&factory)
+    gtk_widgets::recycled_cells::row_action_column(field, &factory)
 }
-pub fn mapped_track_favorite_column<T, TrackValue, FavoriteValue>(
+pub fn mapped_track_actions_column<T, TrackValue, FavoriteValue>(
     shell: &Rc<CatalogUi>,
+    field: LibraryField,
     track_value: TrackValue,
     favorite_value: FavoriteValue,
 ) -> gtk::ColumnViewColumn
@@ -1691,17 +1698,18 @@ where
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let button = row_favorite_icon_button("Favorite track");
-        let actions = gtk_widgets::recycled_cells::RowActions::with_favorite(&button);
-        set_placeholder_favorite(&button, None);
-        actions.menu().set_visible(false);
-        actions.menu().set_sensitive(false);
+        let actions = gtk_widgets::recycled_cells::row_action_cell(field, "Favorite track");
         install_track_list_item_context_menu(
             &actions,
             &setup_shell,
             item,
             Rc::clone(&setup_track_value),
         );
+        item.set_child(Some(&actions));
+        let Some(button) = favorite_cell_button(item) else {
+            return;
+        };
+        set_placeholder_favorite(&button, None);
         let favorite_item = item.downgrade();
         let favorite_key_value = Rc::clone(&setup_favorite_value);
         setup_shell.register_dynamic_favorite_button(
@@ -1732,7 +1740,6 @@ where
                 Some(button),
             );
         });
-        item.set_child(Some(&actions));
     });
 
     let bind_shell = Rc::clone(&shell);
@@ -1741,29 +1748,17 @@ where
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(button) = favorite_cell_button(item) else {
-            return;
-        };
-        let actions =
-            gtk_widgets::recycled_cells::list_cell::<gtk_widgets::recycled_cells::RowActions>(item);
-        let Some(favorite) = item
+        let favorite = item
             .item()
             .and_then(|object| object_item::<T, _>(object, |row| bind_favorite_value(row)))
-        else {
-            set_placeholder_favorite(&button, None);
-            if let Some(actions) = actions {
-                actions.menu().set_visible(false);
-                actions.menu().set_sensitive(false);
-            }
-            return;
-        };
-        let favorite =
-            favorite.map(|(track, favorite)| bind_shell.projected_track_favorite(&track, favorite));
-        let ready = favorite.is_some();
-        set_placeholder_favorite(&button, favorite);
-        if let Some(actions) = actions {
-            actions.menu().set_visible(ready);
-            actions.menu().set_sensitive(ready);
+            .flatten()
+            .map(|(track, favorite)| bind_shell.projected_track_favorite(&track, favorite));
+        if let Some(button) = favorite_cell_button(item) {
+            set_placeholder_favorite(&button, favorite);
+        }
+        if let Some(actions) = list_cell::<gtk_widgets::recycled_cells::RowActions>(item) {
+            actions.set_visible(favorite.is_some());
+            actions.set_sensitive(favorite.is_some());
         }
     });
 
@@ -1777,10 +1772,10 @@ where
         if let Some(actions) =
             gtk_widgets::recycled_cells::list_cell::<gtk_widgets::recycled_cells::RowActions>(item)
         {
-            actions.menu().set_visible(false);
-            actions.menu().set_sensitive(false);
+            actions.set_visible(false);
+            actions.set_sensitive(false);
         }
     });
 
-    gtk_widgets::recycled_cells::row_actions_column(&factory)
+    gtk_widgets::recycled_cells::row_action_column(field, &factory)
 }

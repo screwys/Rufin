@@ -14,8 +14,7 @@ use std::sync::Arc;
 use crate::CatalogUi;
 use crate::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
 use gtk_widgets::favorites::{
-    favorite_button_is_active, row_favorite_icon_button, set_favorite_button_active,
-    track_favorite_key,
+    favorite_button_is_active, set_favorite_button_active, track_favorite_key,
 };
 use gtk_widgets::interactions::install_context_menu_openers;
 use gtk_widgets::localization::{bind_search_placeholder, localized_column};
@@ -315,7 +314,9 @@ fn playlist_entry_column(
         LibraryField::RowIndex => playlist_entry_number_column(shell, playlist, width, playing),
         LibraryField::Image => playlist_entry_image_column(shell, playlist, width),
         LibraryField::TitleMerged => playlist_entry_title_column(shell, playlist, width, playing),
-        LibraryField::Tools => playlist_entry_favorite_column(shell, playlist),
+        LibraryField::Favorite | LibraryField::Tools => {
+            playlist_entry_actions_column(shell, playlist, field)
+        }
         _ => playlist_entry_text_column(shell, field, width, playlist, playing),
     }
 }
@@ -417,9 +418,10 @@ fn playlist_entry_image_column(
     column
 }
 
-fn playlist_entry_favorite_column(
+fn playlist_entry_actions_column(
     shell: &Rc<CatalogUi>,
     playlist: PlaylistKey,
+    field: LibraryField,
 ) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let setup_shell = Rc::clone(shell);
@@ -427,10 +429,13 @@ fn playlist_entry_favorite_column(
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let button = row_favorite_icon_button("Favorite track");
-        let actions = gtk_widgets::recycled_cells::RowActions::with_favorite(&button);
+        let actions = gtk_widgets::recycled_cells::row_action_cell(field, "Favorite track");
         let current = list_item_entry(item);
         install_playlist_entry_context(&actions, &setup_shell, playlist, Rc::clone(&current));
+        item.set_child(Some(&actions));
+        let Some(button) = gtk_widgets::recycled_cells::row_favorite_button(item) else {
+            return;
+        };
         let favorite_current = Rc::clone(&current);
         setup_shell.register_dynamic_favorite_button(
             Rc::new(move || {
@@ -452,7 +457,6 @@ fn playlist_entry_favorite_column(
                 Some(button),
             );
         });
-        item.set_child(Some(&actions));
     });
     connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -477,7 +481,7 @@ fn playlist_entry_favorite_column(
             button.set_sensitive(false);
         }
     });
-    gtk_widgets::recycled_cells::row_actions_column(&factory)
+    gtk_widgets::recycled_cells::row_action_column(field, &factory)
 }
 
 fn playlist_entry_title_column(

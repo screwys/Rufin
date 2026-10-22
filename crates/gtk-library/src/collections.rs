@@ -17,8 +17,8 @@ use gtk_widgets::mounted_route::{MountedRouteItemNavigation, item_navigation_ent
 
 use super::album_detail::{AlbumCollectionModels, AlbumDetailVirtualList, album_detail_list};
 use super::columns::{
-    TrackRowPlayingIndicator, album_column, artist_column, column_fit_width,
-    track_column_fit_width, track_column_for_key,
+    TrackRowPlayingIndicator, album_column, artist_column, track_column_fit_width,
+    track_column_for_key,
 };
 use super::grid_cells::{
     AlbumGridCell, ArtistGridCell, CollectionGridProjection, TrackGridCell,
@@ -31,7 +31,7 @@ use crate::track_selection::TrackSelection;
 use crate::track_selection::install_track_drag_source;
 use gtk_widgets::library_fields::TrackPresentation;
 use gtk_widgets::library_fields::{
-    column_width, compact_header_column_width, grid_label_with_label,
+    column_fit_width, column_width, compact_header_column_width, grid_label_with_label,
 };
 use gtk_widgets::route::Route;
 use gtk_widgets::table_header::{ColumnViewHeader, TableFrame};

@@ -1331,6 +1331,7 @@ enum AlbumTrackField {
     Index(gtk::Overlay),
     Image(ArtworkTile),
     Favorite(gtk::Button),
+    Tools,
 }
 
 impl AlbumTrackSlot {
@@ -1394,10 +1395,13 @@ impl AlbumTrackSlot {
             .map(|field| {
                 let (child, binding) = match field {
                     LibraryField::Tools => {
-                        let button = row_favorite_icon_button("Favorite track");
-                        let actions =
-                            gtk_widgets::recycled_cells::RowActions::with_favorite(&button);
+                        let actions = gtk_widgets::recycled_cells::RowActions::menu_only();
                         install_context_menu_openers(&actions, Rc::clone(&menu));
+                        (actions.upcast(), AlbumTrackField::Tools)
+                    }
+                    LibraryField::Favorite => {
+                        let button = row_favorite_icon_button("Favorite track");
+                        install_context_menu_openers(&button, Rc::clone(&menu));
                         let row = Rc::downgrade(&current);
                         shell.register_dynamic_favorite_button(
                             Rc::new(move || {
@@ -1421,7 +1425,7 @@ impl AlbumTrackSlot {
                                 );
                             }
                         });
-                        (actions.upcast(), AlbumTrackField::Favorite(button))
+                        (button.clone().upcast(), AlbumTrackField::Favorite(button))
                     }
                     LibraryField::Image => {
                         let tile = ArtworkTile::new(32);
@@ -1484,6 +1488,7 @@ impl AlbumTrackSlot {
                 widget.remove_css_class("track-skeleton");
             }
             match cell {
+                AlbumTrackField::Tools => widget.set_sensitive(current.is_some()),
                 AlbumTrackField::Text(field, label) => {
                     label.set_text(&current.as_ref().map_or_else(String::new, |track| {
                         album_detail_track_text(track, index, *field)
@@ -1579,9 +1584,16 @@ fn album_track_header(fields: &[LibraryField]) -> (gtk::Box, Vec<gtk::Widget>) {
     let cells = fields
         .iter()
         .map(|field| {
-            let label = if *field == LibraryField::Duration {
-                let image = gtk::Image::from_icon_name("rufin-preferences-system-time-symbolic");
-                image.set_tooltip_text(Some(&localization::tr("Duration")));
+            let label = if matches!(field, LibraryField::Duration | LibraryField::Favorite) {
+                let icon = if *field == LibraryField::Duration {
+                    "rufin-preferences-system-time-symbolic"
+                } else {
+                    gtk_widgets::favorites::FAVORITE_ADD_ICON
+                };
+                let image = gtk::Image::from_icon_name(icon);
+                image.set_tooltip_text(Some(&localization::tr(
+                    gtk_widgets::settings::library_field_title(*field),
+                )));
                 image.upcast()
             } else if *field == LibraryField::Tools {
                 gtk::Box::new(gtk::Orientation::Horizontal, 0).upcast()
@@ -1700,8 +1712,8 @@ fn album_track_column_width(field: LibraryField) -> i32 {
         LibraryField::Year | LibraryField::Bpm => 52,
         LibraryField::PlayCount => 56,
         LibraryField::UserRating | LibraryField::SongCount | LibraryField::AlbumCount => 64,
-        LibraryField::Tools => gtk_widgets::recycled_cells::ROW_ACTIONS_WIDTH,
         LibraryField::Favorite => gtk_widgets::favorites::FAVORITE_COLUMN_WIDTH,
+        LibraryField::Tools => gtk_widgets::recycled_cells::ROW_ACTIONS_WIDTH,
         LibraryField::Image => 56,
         LibraryField::Title | LibraryField::TitleMerged => 320,
         LibraryField::Album

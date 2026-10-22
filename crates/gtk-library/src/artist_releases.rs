@@ -398,7 +398,7 @@ impl ArtistRouteListCell {
         let preferred = fields
             .iter()
             .map(|field| {
-                super::columns::column_fit_width(
+                gtk_widgets::library_fields::column_fit_width(
                     *field,
                     gtk_widgets::library_fields::column_width(*field),
                 )

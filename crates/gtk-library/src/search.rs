@@ -28,7 +28,6 @@ use super::collection_context::present_track_context_menu;
 use super::collections::{
     LibraryCollectionProjection, LibraryPresentationProjection, dynamic_collection_table,
 };
-use super::columns::column_fit_width;
 use super::grid_cells::{
     CollectionGridCardCell, ReusableCollectionGridCell, collection_grid_with_selection_and_demand,
     install_grid_context, install_grid_play,
@@ -36,6 +35,7 @@ use super::grid_cells::{
 use gtk_media_menus::media_menus::{
     present_album_context_menu, present_artist_context_menu, present_collection_selection_menu,
 };
+use gtk_widgets::library_fields::column_fit_width;
 use rufin_core::settings::app::{RecentSearchKind, RecentSearchResult};
 
 use super::route_shell::{LibraryPageShell, LibraryToolbarProjection};
@@ -1010,8 +1010,8 @@ fn search_column(
         };
         return search_merged_column(shell, category, width, playing.cloned());
     }
-    if field == LibraryField::Tools {
-        return search_favorite_column(shell);
+    if matches!(field, LibraryField::Favorite | LibraryField::Tools) {
+        return search_actions_column(shell, field);
     }
     let playing = (field == LibraryField::Title)
         .then(|| playing.cloned())
@@ -1205,15 +1205,14 @@ fn search_merged_column(
     column
 }
 
-fn search_favorite_column(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
+fn search_actions_column(shell: &Rc<CatalogUi>, field: LibraryField) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let setup_shell = Rc::clone(shell);
     factory.connect_setup(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let button = gtk_widgets::favorites::row_favorite_icon_button("Favorite");
-        let actions = gtk_widgets::recycled_cells::RowActions::with_favorite(&button);
+        let actions = gtk_widgets::recycled_cells::row_action_cell(field, "Favorite");
         let context_shell = Rc::downgrade(&setup_shell);
         let context_item = item.downgrade();
         install_context_menu_openers(
@@ -1227,6 +1226,10 @@ fn search_favorite_column(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
                 }
             }),
         );
+        item.set_child(Some(&actions));
+        let Some(button) = gtk_widgets::recycled_cells::row_favorite_button(item) else {
+            return;
+        };
         let click_shell = Rc::clone(&setup_shell);
         let click_item = item.downgrade();
         button.connect_clicked(move |button| {
@@ -1244,7 +1247,6 @@ fn search_favorite_column(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
                 Some(button),
             );
         });
-        item.set_child(Some(&actions));
     });
     connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -1272,7 +1274,7 @@ fn search_favorite_column(shell: &Rc<CatalogUi>) -> gtk::ColumnViewColumn {
             button.set_sensitive(false);
         }
     });
-    gtk_widgets::recycled_cells::row_actions_column(&factory)
+    gtk_widgets::recycled_cells::row_action_column(field, &factory)
 }
 
 fn cached_items(results: SearchResults) -> [Vec<SearchItem>; 3] {

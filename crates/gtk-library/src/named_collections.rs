@@ -21,7 +21,7 @@ use super::collections::{
     LibraryCollectionProjection, LibraryPresentationProjection, collection_column_width,
     dynamic_collection_table,
 };
-use super::columns::{artwork_column, column_fit_width, mapped_row_index_column, text_column};
+use super::columns::{artwork_column, mapped_row_index_column, text_column};
 use super::grid_cells::{
     CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell,
     collection_grid_with_demand, install_grid_context, install_grid_play,
@@ -29,6 +29,7 @@ use super::grid_cells::{
 use gtk_media_menus::media_menus::{
     present_genre_context_menu, present_mood_context_menu, present_smart_playlist_context_menu,
 };
+use gtk_widgets::library_fields::column_fit_width;
 
 use super::route_shell::LibraryPageShellOptions;
 use super::table_sizing::route_column_view_initial_width;

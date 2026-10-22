@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface domain="rufin">
   <requires lib="gtk" version="4.20" />
-  <object class="GtkBox" id="filter">
+  <requires lib="libadwaita" version="1.9" />
+  <object class="AdwWrapBox" id="filter">
     <property name="orientation">horizontal</property>
-    <property name="spacing">4</property>
+    <property name="child-spacing">4</property>
+    <property name="line-spacing">8</property>
+    <property name="wrap-policy">minimum</property>
+    <property name="justify">fill</property>
+    <property name="justify-last-line">true</property>
     <style>
       <class name="card" />
       <class name="equalizer-filter" />
@@ -142,7 +147,7 @@
         <property name="halign">end</property>
         <child>
           <object class="GtkImage" id="inactive">
-            <property name="icon-name">dialog-information-symbolic</property>
+            <property name="icon-name">rufin-dialog-information-symbolic</property>
             <property name="tooltip-text" translatable="yes">Inactive at this sample rate</property>
             <property name="visible">false</property>
           </object>
@@ -150,7 +155,7 @@
         <child>
           <object class="GtkButton" id="remove">
             <property name="valign">center</property>
-            <property name="icon-name">list-remove-symbolic</property>
+            <property name="icon-name">rufin-list-remove-symbolic</property>
             <property name="tooltip-text" translatable="yes">Remove band</property>
             <style>
               <class name="flat" />

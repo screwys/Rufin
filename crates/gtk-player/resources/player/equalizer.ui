@@ -70,7 +70,7 @@
                     </child>
                     <child>
                       <object class="GtkImage">
-                        <property name="icon-name">pan-down-symbolic</property>
+                        <property name="icon-name">rufin-pan-down-symbolic</property>
                       </object>
                     </child>
                   </object>
@@ -359,16 +359,9 @@
               </object>
             </child>
             <child>
-              <object class="GtkScrolledWindow">
-                <property name="hscrollbar-policy">automatic</property>
-                <property name="vscrollbar-policy">never</property>
-                <property name="propagate-natural-height">true</property>
-                <child>
-                  <object class="GtkBox" id="filters">
-                    <property name="orientation">vertical</property>
-                    <property name="spacing">8</property>
-                  </object>
-                </child>
+              <object class="GtkBox" id="filters">
+                <property name="orientation">vertical</property>
+                <property name="spacing">8</property>
               </object>
             </child>
             <child>

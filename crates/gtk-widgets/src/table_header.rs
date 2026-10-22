@@ -17,7 +17,7 @@ mod header_cell_imp {
         #[template_child]
         pub label: TemplateChild<gtk::Label>,
         #[template_child]
-        pub duration: TemplateChild<gtk::Image>,
+        pub icon: TemplateChild<gtk::Image>,
     }
 
     #[glib::object_subclass]
@@ -78,16 +78,27 @@ impl HeaderCell {
         cell.update_property(&[gtk::accessible::Property::Label(title)]);
         cell.update_relation(&[gtk::accessible::Relation::ColIndex(position as i32 + 1)]);
         imp.label.set_label(title);
-        imp.duration.set_tooltip_text(Some(title));
+        imp.icon.set_tooltip_text(Some(title));
         imp.label
             .set_xalign(if field == Some(LibraryField::RowIndex) {
                 0.5
             } else {
                 0.0
             });
-        let show_duration = field == Some(LibraryField::Duration);
-        imp.label.set_visible(!show_duration);
-        imp.duration.set_visible(show_duration);
+        let icon = match field {
+            Some(LibraryField::Duration) => Some("rufin-preferences-system-time-symbolic"),
+            Some(LibraryField::Favorite) => Some(crate::favorites::FAVORITE_ADD_ICON),
+            _ => None,
+        };
+        imp.label.set_visible(icon.is_none());
+        imp.icon
+            .set_halign(if field == Some(LibraryField::Favorite) {
+                gtk::Align::Center
+            } else {
+                gtk::Align::Start
+            });
+        imp.icon.set_icon_name(icon);
+        imp.icon.set_visible(icon.is_some());
         cell
     }
 }
