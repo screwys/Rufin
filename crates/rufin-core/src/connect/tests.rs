@@ -1050,12 +1050,14 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                     .await
                     .is_err()
             );
-            assert!(
-                a.status()
+            // Presence events from pairing can still update reachability after the probe.
+            wait(a, |status| {
+                status
                     .devices
                     .iter()
                     .any(|device| device.id == peer && !device.reachable)
-            );
+            })
+            .await;
             for inputs in [guest, host, former] {
                 inputs.products.connect.leave_profile().await.unwrap();
                 inputs.receivers.visualizer.close();
