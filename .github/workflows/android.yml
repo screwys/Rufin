@@ -28,9 +28,21 @@ jobs:
           java-version: '21'
 
       - name: Set up just
-        uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
-        with:
-          just-version: '1.57.0'
+        env:
+          JUST_VERSION: 1.57.0
+          JUST_SHA256: 45b548094283cb9739af8f13273b8cddeee869f5b4ef2bb631b1f311cb566155
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/just.tar.gz"
+          tool_dir="$RUNNER_TEMP/just"
+          mkdir -p "$tool_dir"
+          curl --fail --location --silent --show-error \
+            "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            --output "$archive"
+          printf '%s  %s\n' "$JUST_SHA256" "$archive" | sha256sum --check
+          tar -xzf "$archive" -C "$tool_dir" just
+          echo "$tool_dir" >> "$GITHUB_PATH"
+          "$tool_dir/just" --version
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
