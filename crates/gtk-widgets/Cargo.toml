@@ -23,6 +23,7 @@ adw = { workspace = true, features = ["v1_9", "gtk_v4_20"] }
 rufin-core.workspace = true
 gtk = { workspace = true, features = ["v4_20"] }
 library.workspace = true
+lyrics.workspace = true
 localization.workspace = true
 serde.workspace = true
 tokio.workspace = true

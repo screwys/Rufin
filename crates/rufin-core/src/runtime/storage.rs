@@ -6,6 +6,8 @@ pub use library::CacheUsage;
 pub enum CacheKind {
     Waveforms,
     Loudness,
+    Fingerprints,
+    MetadataLookups,
     Artwork,
     Lyrics,
     JapaneseDictionary,
@@ -41,6 +43,8 @@ impl ProductHandles {
         for kind in [
             CacheKind::Waveforms,
             CacheKind::Loudness,
+            CacheKind::Fingerprints,
+            CacheKind::MetadataLookups,
             CacheKind::Artwork,
             CacheKind::Lyrics,
             CacheKind::JapaneseDictionary,
@@ -83,6 +87,16 @@ impl ProductHandles {
 
     async fn cache_usage(&self, kind: CacheKind) -> Result<CacheUsage, String> {
         match kind {
+            CacheKind::MetadataLookups => self
+                .library
+                .metadata_lookup_cache_usage()
+                .await
+                .map_err(|error| error.to_string()),
+            CacheKind::Fingerprints => self
+                .library
+                .fingerprint_cache_usage()
+                .await
+                .map_err(|error| error.to_string()),
             CacheKind::JapaneseDictionary => self.lyrics.dictionary_cache_usage().await,
             CacheKind::Waveforms => self.playback.waveform_cache_usage().await,
             CacheKind::Loudness => self
@@ -105,6 +119,16 @@ impl ProductHandles {
 
     async fn clear_cached_data(&self, kind: CacheKind) -> Result<(), String> {
         match kind {
+            CacheKind::MetadataLookups => self
+                .library
+                .clear_metadata_lookup_cache()
+                .await
+                .map_err(|error| error.to_string()),
+            CacheKind::Fingerprints => self
+                .library
+                .clear_fingerprint_cache()
+                .await
+                .map_err(|error| error.to_string()),
             CacheKind::JapaneseDictionary => self.lyrics.clear_dictionary_cache().await,
             CacheKind::Waveforms => self.playback.clear_waveform_cache().await,
             CacheKind::Loudness => self

@@ -1498,14 +1498,16 @@ async fn local_metadata_save_publishes_album_identity_changes() {
     .unwrap();
     {
         editor
-            .save(
+            .save_tracks(
                 &database,
-                (sources::MetadataEdit {
+                Some(sources::MetadataEdit {
                     kind: sources::SourceEntityKind::Album,
                     changes: [("title".into(), "After".into())].into(),
                     artwork: None,
-                })
-                .clone(),
+                }),
+                    [&path, &second_path].into_iter().map(|path| url::Url::from_file_path(path).unwrap().to_string()).collect(),
+                    |_| async { Ok((sources::MetadataEdit { kind: sources::SourceEntityKind::Track, changes: Default::default(), artwork: None }, None, None)) },
+                    |_, _, _| async { Ok(()) },
             )
             .await
             .unwrap();
@@ -1588,9 +1590,9 @@ async fn local_metadata_save_publishes_album_identity_changes() {
         .unwrap();
         {
             editor
-                .save(
+                .save_tracks(
                     &database,
-                    (sources::MetadataEdit {
+                    Some(sources::MetadataEdit {
                         kind: sources::SourceEntityKind::Album,
                         changes: [
                             ("recording_date".to_string(), date.to_string()),
@@ -1599,8 +1601,10 @@ async fn local_metadata_save_publishes_album_identity_changes() {
                         ]
                         .into(),
                         artwork: None,
-                    })
-                    .clone(),
+                    }),
+                    [&path, &second_path].into_iter().map(|path| url::Url::from_file_path(path).unwrap().to_string()).collect(),
+                    |_| async { Ok((sources::MetadataEdit { kind: sources::SourceEntityKind::Track, changes: Default::default(), artwork: None }, None, None)) },
+                    |_, _, _| async { Ok(()) },
                 )
                 .await
                 .unwrap();

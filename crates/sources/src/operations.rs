@@ -4,7 +4,7 @@ use thiserror::Error;
 use crate::{SourceEntityKind, SourceId};
 use localization::msgid;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum MetadataFieldKind {
     Text,
@@ -14,7 +14,7 @@ pub enum MetadataFieldKind {
     List,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct MetadataField {
     pub key: String,
@@ -28,17 +28,23 @@ pub struct MetadataField {
 
 pub type MetadataChanges = std::collections::BTreeMap<String, String>;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MetadataDraft {
     pub kind: SourceEntityKind,
     pub fields: Vec<MetadataField>,
     pub artwork: ArtworkEditing,
-    pub source_search: bool,
     pub revision: Option<String>,
     pub track_count: usize,
 }
 
 impl MetadataDraft {
+    pub fn values(&self) -> MetadataChanges {
+        self.fields
+            .iter()
+            .map(|field| (field.key.clone(), field.value.clone()))
+            .collect()
+    }
+
     pub fn new(kind: SourceEntityKind, mut fields: Vec<MetadataField>) -> Self {
         if kind != SourceEntityKind::Track
             && let Some(field) = fields.iter_mut().find(|field| field.key == "comment")
@@ -49,9 +55,43 @@ impl MetadataDraft {
             kind,
             fields,
             artwork: ArtworkEditing::default(),
-            source_search: false,
             revision: None,
             track_count: 0,
+        }
+    }
+
+    pub fn merge(&mut self, next: Self) {
+        for field in &mut self.fields {
+            if let Some(next) = next.fields.iter().find(|next| next.key == field.key) {
+                field.mixed |= field.value != next.value || next.mixed;
+                field.writable &= next.writable;
+            } else if !(self.kind == SourceEntityKind::Artist
+                && matches!(
+                    field.key.as_str(),
+                    "title" | "sort_title" | "musicbrainz_artist_id"
+                ))
+            {
+                field.mixed |= !field.value.is_empty();
+                field.writable = false;
+            }
+        }
+        for mut field in next.fields {
+            if !self.fields.iter().any(|existing| existing.key == field.key) {
+                if !(self.kind == SourceEntityKind::Artist
+                    && matches!(
+                        field.key.as_str(),
+                        "title" | "sort_title" | "musicbrainz_artist_id"
+                    ))
+                {
+                    field.mixed = !field.value.is_empty();
+                    field.writable = false;
+                }
+                self.fields.push(field);
+            }
+        }
+        self.artwork.can_embed &= next.artwork.can_embed;
+        if self.artwork.binding != next.artwork.binding {
+            self.artwork.binding = None;
         }
     }
 
@@ -129,6 +169,22 @@ pub enum SourceMetadataError {
     Write(String),
 }
 
+impl SourceMetadataError {
+    pub fn combine(mut errors: Vec<Self>) -> Result<(), Self> {
+        match errors.len() {
+            0 => Ok(()),
+            1 => Err(errors.pop().unwrap()),
+            _ => Err(Self::Write(
+                errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )),
+        }
+    }
+}
+
 impl From<crate::SourceError> for SourceMetadataError {
     fn from(error: crate::SourceError) -> Self {
         Self::Write(error.to_string())
@@ -153,13 +209,21 @@ impl ImageBytes {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 pub enum ArtworkStorage {
     Embedded,
     #[default]
     Folder,
     Server,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+pub enum LyricsStorage {
+    Server,
+    Embedded,
+    Sidecar,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -175,7 +239,7 @@ pub enum ArtworkChange {
     Remove,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ArtworkEditing {
     pub binding: Option<Vec<u8>>,
     pub storage: ArtworkStorage,

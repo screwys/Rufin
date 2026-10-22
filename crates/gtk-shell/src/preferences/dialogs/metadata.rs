@@ -20,7 +20,21 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
         };
         match editor {
             Ok(editor) => {
-                let dialog = build_dialog(editor);
+                let dialog = if let Some(batch) = editor.track_batch() {
+                    let weak = Rc::downgrade(&shell);
+                    let on_error = Rc::new(move |error, retry| {
+                        if let Some(shell) = weak.upgrade() {
+                            track_metadata_error(&shell, retry, error);
+                        }
+                    });
+                    gtk_editors::metadata::build_batch_dialog(
+                        batch,
+                        shell.products.runtime.clone(),
+                        on_error,
+                    )
+                } else {
+                    build_dialog(editor, shell.products.runtime.clone())
+                };
                 shell.present_selected_dialog(&dialog);
             }
             Err(SourceMetadataError::LocalAccessRequired {
@@ -58,6 +72,74 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
     });
     shell.selected_ui.metadata_load.replace(Some(load));
 }
+pub(crate) fn present_track_metadata_dialog(
+    shell: &Rc<Shell>,
+    selection: library::MemberSelection,
+) {
+    let source = shell.products.source.clone();
+    if let Some(load) = shell.selected_ui.metadata_load.borrow_mut().take() {
+        load.abort();
+    }
+    let weak = Rc::downgrade(shell);
+    let retry_selection = selection.clone();
+    let load = gtk::glib::spawn_future_local(async move {
+        let result =
+            rufin_core::metadata::MetadataBatch::open(source, std::sync::Arc::new(selection)).await;
+        let Some(shell) = weak.upgrade() else { return };
+        match result {
+            Ok(batch) => {
+                let weak = Rc::downgrade(&shell);
+                let on_error = Rc::new(move |error, retry| {
+                    if let Some(shell) = weak.upgrade() {
+                        track_metadata_error(&shell, retry, error);
+                    }
+                });
+                shell.present_selected_dialog(&gtk_editors::metadata::build_batch_dialog(
+                    batch,
+                    shell.products.runtime.clone(),
+                    on_error,
+                ));
+            }
+            Err(error) => {
+                let weak = Rc::downgrade(&shell);
+                track_metadata_error(
+                    &shell,
+                    Rc::new(move || {
+                        if let Some(shell) = weak.upgrade() {
+                            present_track_metadata_dialog(&shell, retry_selection.clone());
+                        }
+                    }),
+                    error,
+                );
+            }
+        }
+    });
+    shell.selected_ui.metadata_load.replace(Some(load));
+}
+
+fn track_metadata_error(shell: &Rc<Shell>, retry: Rc<dyn Fn()>, error: SourceMetadataError) {
+    match error {
+        SourceMetadataError::LocalAccessRequired {
+            source_id,
+            source_path,
+        } => {
+            if let Some(selected) = shell
+                .selected_library()
+                .as_deref()
+                .filter(|selected| selected.source_id == source_id)
+                .cloned()
+            {
+                present_local_access_recovery(shell, selected, &source_path, retry);
+            } else {
+                shell
+                    .control_feedback
+                    .show_feedback_toast(tr(msgid("Metadata editing requires Local access")));
+            }
+        }
+        error => shell.present_selected_dialog(&metadata_error_dialog(&error.to_string())),
+    }
+}
+
 fn present_local_access_recovery(
     shell: &Rc<Shell>,
     selected: rufin_core::runtime::SelectedLibrary,
@@ -68,8 +150,10 @@ fn present_local_access_recovery(
     let builder = gtk_widgets::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
         recovery_dialog: adw::Dialog,
+        recovery_header: adw::HeaderBar,
         recovery_content: gtk::Box,
     });
+    gtk_widgets::controls::configure_dialog_header(&recovery_header);
     recovery_dialog.set_content_width(large_popup_content_width(650));
     let retry_requested = Rc::new(Cell::new(false));
     recovery_dialog.connect_closed({

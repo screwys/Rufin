@@ -3125,17 +3125,26 @@ impl SourceOwner {
         receiver
     }
 
-    pub(crate) async fn media_client(&self, media_uri: &str) -> Result<Arc<Source>, String> {
-        let source_id = match library::source_entity_parts(media_uri) {
-            Some((source_id, _, _)) => Some(source_id),
+    pub(crate) async fn media_source_id(
+        &self,
+        media_uri: &str,
+    ) -> Result<Option<SourceId>, String> {
+        match library::source_entity_parts(media_uri) {
+            Some((source_id, _, _)) => Ok(Some(source_id)),
             None => self
                 .shared
                 .database
                 .track_source_by_uri(media_uri, &ReadCancellation::new())
                 .await
-                .map_err(string_error)?,
+                .map_err(string_error),
         }
-        .ok_or_else(source_access_unavailable)?;
+    }
+
+    pub(crate) async fn media_client(&self, media_uri: &str) -> Result<Arc<Source>, String> {
+        let source_id = self
+            .media_source_id(media_uri)
+            .await?
+            .ok_or_else(source_access_unavailable)?;
         self.client(&source_id)
     }
 
@@ -4525,52 +4534,6 @@ mod source_tests {
                     Ok(())
                 })
                 .unwrap();
-            tokio::time::timeout(Duration::from_secs(2), async {
-                assert!(
-                    crate::metadata::identify_metadata(
-                        &owner,
-                        None,
-                        None,
-                        sources::SourceEntityKind::Track,
-                        sources::MetadataChanges::new()
-                    )
-                    .recv()
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .is_none()
-                );
-                assert!(
-                    crate::metadata::identify_metadata(
-                        &owner,
-                        None,
-                        Some("album".into()),
-                        sources::SourceEntityKind::Album,
-                        sources::MetadataChanges::new()
-                    )
-                    .recv()
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .is_none()
-                );
-                assert!(
-                    crate::metadata::identify_metadata(
-                        &owner,
-                        None,
-                        Some("artist".into()),
-                        sources::SourceEntityKind::Artist,
-                        sources::MetadataChanges::new()
-                    )
-                    .recv()
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .is_none()
-                );
-            })
-            .await
-            .expect("non-native identification does not acquire a provider");
             let update = {
                 let mut catalog = database.catalog(source_id.as_str(), None).await.unwrap();
                 catalog

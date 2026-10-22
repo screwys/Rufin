@@ -38,6 +38,16 @@ pub(super) fn build(
                 }
             })
         },
+        edit_track_metadata: {
+            let weak = weak.clone();
+            Rc::new(move |selection| {
+                if let Some(shell) = weak.upgrade() {
+                    crate::preferences::dialogs::metadata::present_track_metadata_dialog(
+                        &shell, selection,
+                    );
+                }
+            })
+        },
         set_sidebar_pin: {
             let weak = weak.clone();
             Rc::new(move |pin, pinned| {

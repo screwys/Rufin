@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -30,10 +32,12 @@ import io.github.screwys.rufin.shared.sources.MetadataFieldKind
 import io.github.screwys.rufin.shared.sources.SourceMetadataException
 import io.github.screwys.rufin.ui.Artwork
 import io.github.screwys.rufin.ui.RufinIcon
+import io.github.screwys.rufin.ui.DetailLinkIcon
 import io.github.screwys.rufin.ui.decodePlayerArtwork
 import io.github.screwys.rufin.settings.SettingsGroup
 import io.github.screwys.rufin.settings.SettingsRow
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,16 +51,29 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
     var confirmReload by remember { mutableStateOf(false) }
     val state = connection.state
     val editable = !connection.busy && state?.committed == null
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    LaunchedEffect(state?.selectedCount) { if ((state?.selectedCount ?: 1UL) > 1UL) page = 0 }
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(connection::importArtwork) }
     Dialog(onDismissRequest = { if (!connection.busy) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,
             dismissOnBackPress = !connection.busy, dismissOnClickOutside = false)) {
         BackHandler(connection.busy) { }
         Surface(Modifier.fillMaxSize()) {
+            ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = connection.batch != null, drawerContent = {
+                connection.batch?.let { batch -> ModalDrawerSheet {
+                    MetadataTracks(batch, batch.trackCount(), batch.scopeTitle(), connection.scopeActive,
+                        connection.allTracks, connection.selectedTracks, connection.rowsRevision,
+                        load = { offset, limit -> connection.tracks(offset, limit) },
+                        onScope = { connection.selectScope(); scope.launch { drawer.close() } },
+                        onAll = { connection.selectAllTracks(); scope.launch { drawer.close() } },
+                        onTrack = { index, toggle -> connection.selectTrack(index, toggle); if (!toggle) scope.launch { drawer.close() } })
+                } }
+            }) {
             Scaffold(topBar = {
                 TopAppBar(title = { Text(translate("Edit metadata")) }, navigationIcon = {
                     IconButton(onDismiss, enabled = !connection.busy) { RufinIcon("rufin-window-close-symbolic", translate("Close")) }
                 }, actions = {
+                    if (connection.batch != null) TextButton({ scope.launch { drawer.open() } }) { Text(translate("Tracks")) }
                     if (state?.committed == null) TextButton(connection::save,
                         enabled = editable && state?.hasChanges == true) { Text(translate("Save")) }
                 })
@@ -68,10 +85,10 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
                     if (state != null) {
                         PrimaryTabRow(page) {
                             Tab(page == 0, { page = 0 }, text = { Text(translate("Metadata")) })
-                            Tab(page == 1, { page = 1 }, text = { Text(translate("Artwork")) })
+                            if (state.selectedCount == 1UL) Tab(page == 1, { page = 1 }, text = { Text(translate("Artwork")) })
                         }
                         when (page) {
-                            0 -> MetadataFields(connection, state, editable)
+                            0 -> MetadataFields(connection, state, editable, kind)
                             1 -> MetadataArtwork(connection, state, editable) { import.launch(arrayOf("image/*")) }
                         }
                     } else if (connection.failure == null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -79,9 +96,17 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
             }
         }
     }
+    }
     (connection.failure as? SourceMetadataException.LocalAccessRequired)?.let { failure ->
         io.github.screwys.rufin.sources.LocalAccessDialog(model, failure.sourceId, failure.sourcePath,
             onDismiss = onDismiss, onSaved = { connection.reload() })
+    }
+    if (connection.lookupReview != null) MetadataLookupDialog(connection)
+    connection.saveConfirmation?.let { summary ->
+        AlertDialog(onDismissRequest = connection::cancelSave,
+            title = { Text(summary.message) },
+            confirmButton = { TextButton(connection::confirmSave) { Text(translate("Save")) } },
+            dismissButton = { TextButton(connection::cancelSave) { Text(translate("Cancel")) } })
     }
     if (confirmReload) AlertDialog(onDismissRequest = { confirmReload = false },
         title = { Text(translate("Discard changes?")) },
@@ -92,24 +117,24 @@ internal fun MetadataEditorScreen(model: RufinConnection, kind: String, mediaUri
 }
 
 @Composable
-private fun MetadataFields(connection: MetadataConnection, state: MetadataEditorSnapshot, editable: Boolean) {
+private fun MetadataFields(connection: MetadataConnection, state: MetadataEditorSnapshot, editable: Boolean, kind: String) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             if (state.trackCount > 1UL) Text(state.scopeSummary,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            FilledTonalButton(connection::identify, enabled = editable && state.canIdentify) {
-                RufinIcon("rufin-search-symbolic", null, Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp)); Text(translate("Identify"))
+            FilledTonalButton(connection::openLookup, enabled = editable && state.externalLookupAllowed) {
+                DetailLinkIcon("io.github.screwys.Rufin.external.musicbrainz", Modifier.size(24.dp))
+                Spacer(Modifier.width(8.dp)); Text(if (kind == "track" || connection.batch != null) translate("Search by AcoustID") else translate("Lookup"))
             }
         }
         items(state.fields, key = { it.field.key }) { presented ->
             val field = presented.field
-            OutlinedTextField(value = field.value, onValueChange = { connection.setField(field.key, it) },
-                modifier = Modifier.fillMaxWidth(), label = { Text(field.label) }, enabled = editable,
+            OutlinedTextField(value = if (field.mixed) "" else field.value, onValueChange = { connection.setField(field.key, it) },
+                modifier = Modifier.fillMaxWidth(), label = { Text(if (field.mixed) presented.mixedLabel else field.label) }, enabled = editable,
                 readOnly = !field.writable,
-                supportingText = if (field.mixed || !field.writable) ({ Text(if (field.mixed) translate("Multiple values") else translate("This source cannot edit this field")) }) else null,
+                supportingText = if (!field.writable) ({ Text(translate("This source cannot edit this field")) }) else null,
                 trailingIcon = if (presented.identified) ({ IconButton({ connection.undo(field.key) }, enabled = editable) {
-                    RufinIcon("rufin-edit-undo-symbolic", translate("Undo identified value")) } }) else null,
+                    RufinIcon("rufin-edit-undo-symbolic", translate("Reset")) } }) else null,
                 singleLine = field.kind == MetadataFieldKind.NUMBER || field.kind == MetadataFieldKind.DATE,
                 keyboardOptions = KeyboardOptions(keyboardType = if (field.kind == MetadataFieldKind.NUMBER) KeyboardType.Decimal else KeyboardType.Text),
                 colors = if (presented.identified) OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.primary)
@@ -129,8 +154,8 @@ private fun MetadataFields(connection: MetadataConnection, state: MetadataEditor
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MetadataArtwork(connection: MetadataConnection, state: MetadataEditorSnapshot, editable: Boolean, import: () -> Unit) {
-    var artist by remember { mutableStateOf(state.searchArtist) }
-    var album by remember { mutableStateOf(state.searchAlbum.orEmpty()) }
+    var artist by remember(state.searchArtist) { mutableStateOf(state.searchArtist) }
+    var album by remember(state.searchAlbum) { mutableStateOf(state.searchAlbum.orEmpty()) }
     val context = LocalContext.current
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {

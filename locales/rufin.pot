@@ -486,6 +486,9 @@ msgstr ""
 msgid "Audio fade on play/pause"
 msgstr ""
 
+msgid "Audio fingerprints"
+msgstr ""
+
 msgid "Audio output"
 msgstr ""
 
@@ -621,6 +624,9 @@ msgstr ""
 msgid "Caching local library..."
 msgstr ""
 
+msgid "Calculating fingerprint..."
+msgstr ""
+
 msgid "Cancel download and clear downloaded items"
 msgstr ""
 
@@ -745,6 +751,12 @@ msgid "Clear artwork cache"
 msgstr ""
 
 msgid "Clear fetched lyrics for this track"
+msgstr ""
+
+msgid "Clear fingerprint cache"
+msgstr ""
+
+msgid "Clear lookup cache"
 msgstr ""
 
 msgid "Clear lyrics cache"
@@ -1209,6 +1221,12 @@ msgstr ""
 msgid "Do not encrypt"
 msgstr ""
 
+#, rust-format
+msgid "Do you want to apply metadata changes to {count} track?"
+msgid_plural "Do you want to apply metadata changes to {count} tracks?"
+msgstr[0] ""
+msgstr[1] ""
+
 msgid "Do you want to use the existing configuration?"
 msgstr ""
 
@@ -1216,6 +1234,9 @@ msgid "Don't duplicate"
 msgstr ""
 
 msgid "Donate"
+msgstr ""
+
+msgid "Done"
 msgstr ""
 
 msgid "Download Folder"
@@ -1503,7 +1524,13 @@ msgstr ""
 msgid "Fetching lyrics"
 msgstr ""
 
+msgid "Fetching metadata..."
+msgstr ""
+
 msgid "Fetching playlists"
+msgstr ""
+
+msgid "Field"
 msgstr ""
 
 msgid "File connection"
@@ -1739,12 +1766,6 @@ msgstr ""
 msgid "Hz"
 msgstr ""
 
-msgid "Identify"
-msgstr ""
-
-msgid "Identifying..."
-msgstr ""
-
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr ""
 
@@ -1949,6 +1970,9 @@ msgstr ""
 msgid "Load file contents"
 msgstr ""
 
+msgid "Loading cached lookups..."
+msgstr ""
+
 msgid "Loading related tracks..."
 msgstr ""
 
@@ -2027,6 +2051,9 @@ msgstr ""
 msgid "Logs are copied"
 msgstr ""
 
+msgid "Lookup"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr ""
 
@@ -2067,6 +2094,9 @@ msgstr ""
 msgid "March {year}"
 msgstr ""
 
+msgid "Matched"
+msgstr ""
+
 msgid "Maximum year"
 msgstr ""
 
@@ -2084,6 +2114,9 @@ msgid "Metadata editing is no longer available"
 msgstr ""
 
 msgid "Metadata editing requires Local access"
+msgstr ""
+
+msgid "Metadata lookups"
 msgstr ""
 
 msgid "Metadata source"
@@ -2173,9 +2206,6 @@ msgstr ""
 msgid "Multi-selection"
 msgstr ""
 
-msgid "Multiple values"
-msgstr ""
-
 msgid "Music Folder"
 msgstr ""
 
@@ -2255,6 +2285,9 @@ msgid "Nearby discovery"
 msgstr ""
 
 msgid "Needs attention"
+msgstr ""
+
+msgid "Needs review"
 msgstr ""
 
 msgid "NetEase"
@@ -2354,6 +2387,9 @@ msgid "No lyrics available."
 msgstr ""
 
 msgid "No lyrics"
+msgstr ""
+
+msgid "No matching track in this release"
 msgstr ""
 
 msgid "No matching tracks found"
@@ -2485,6 +2521,9 @@ msgstr ""
 msgid "One path per line"
 msgstr ""
 
+msgid "Only fill missing information"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr ""
 
@@ -2564,6 +2603,10 @@ msgid "Original release date"
 msgstr ""
 
 msgid "Original"
+msgstr ""
+
+#, rust-format
+msgid "Original: {value}"
 msgstr ""
 
 msgid "Other releases"
@@ -2916,6 +2959,9 @@ msgstr ""
 msgid "Rating"
 msgstr ""
 
+msgid "Reading tags..."
+msgstr ""
+
 msgid "Ready"
 msgstr ""
 
@@ -2941,6 +2987,9 @@ msgid "Reconnect"
 msgstr ""
 
 msgid "Record label"
+msgstr ""
+
+msgid "Recording"
 msgstr ""
 
 msgid "Red"
@@ -2986,6 +3035,9 @@ msgid "Relay"
 msgstr ""
 
 msgid "Release date"
+msgstr ""
+
+msgid "Release group"
 msgstr ""
 
 msgid "Release notifications"
@@ -3298,7 +3350,13 @@ msgstr ""
 msgid "Search Lyrics"
 msgstr ""
 
+msgid "Search MusicBrainz"
+msgstr ""
+
 msgid "Search artwork"
+msgstr ""
+
+msgid "Search by AcoustID"
 msgstr ""
 
 msgid "Search current folder"
@@ -3340,7 +3398,13 @@ msgstr ""
 msgid "Search..."
 msgstr ""
 
+msgid "Searching AcoustID..."
+msgstr ""
+
 msgid "Searching Local Network"
+msgstr ""
+
+msgid "Searching MusicBrainz..."
 msgstr ""
 
 msgid "Searching for devices..."
@@ -3710,6 +3774,9 @@ msgstr ""
 msgid "Style"
 msgstr ""
 
+msgid "Suggested"
+msgstr ""
+
 msgid "Sunday"
 msgstr ""
 
@@ -3902,9 +3969,6 @@ msgid "UPnP"
 msgstr ""
 
 msgid "Unavailable"
-msgstr ""
-
-msgid "Undo identified value"
 msgstr ""
 
 msgid "Undo"
@@ -4210,6 +4274,10 @@ msgid "{action} (Shuffle)"
 msgstr ""
 
 #, rust-format
+msgid "{completed} of {total} ({cached} cached)"
+msgstr ""
+
+#, rust-format
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] ""
@@ -4275,6 +4343,20 @@ msgstr ""
 
 #, rust-format
 msgid "{current} MiB"
+msgstr ""
+
+#, rust-format
+msgid "{field} \302\267 Different across {count} track"
+msgid_plural "{field} \302\267 Different across {count} tracks"
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
+msgid "{stage} ({completed} of {total}, {cached} cached)"
+msgstr ""
+
+#, rust-format
+msgid "{stage} ({count} of {total} tracks)"
 msgstr ""
 
 #, rust-format

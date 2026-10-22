@@ -271,7 +271,7 @@ impl WaveformOwner {
         let task_key = key.clone();
         let cache_root = self.cache_root.clone();
         let task = self.runtime.spawn(async move {
-            let analysis_key = input.database.waveform_analysis_key(&task_key.media_uri).await.unwrap_or_else(|error| {
+            let analysis_key = input.database.audio_analysis_key(&task_key.media_uri).await.unwrap_or_else(|error| {
                 warn!(%error, media_uri = %task_key.media_uri, "failed to read waveform analysis key");
                 None
             });

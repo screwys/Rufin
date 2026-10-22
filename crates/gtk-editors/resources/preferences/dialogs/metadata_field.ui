@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwEntryRow" id="entry">
+    <style><class name="metadata-field"/></style>
+    <property name="tooltip-text" translatable="yes">This source cannot edit this field</property>
+    <child type="suffix"><object class="GtkButton" id="clear"><property name="icon-name">rufin-edit-clear-symbolic</property><property name="tooltip-text" translatable="yes">Clear</property><property name="valign">center</property><style><class name="flat"/></style><accessibility><property name="label" translatable="yes">Clear</property></accessibility></object></child>
+    <child type="suffix"><object class="GtkButton" id="undo"><property name="icon-name">rufin-edit-undo-symbolic</property><property name="tooltip-text" translatable="yes">Reset</property><property name="valign">center</property><property name="visible">false</property><style><class name="flat"/></style><accessibility><property name="label" translatable="yes">Reset</property></accessibility></object></child>
+  </object>
+</interface>

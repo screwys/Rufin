@@ -19,7 +19,7 @@ impl Database {
         Ok(())
     }
 
-    pub async fn waveform_analysis_key(&self, uri: &str) -> LibraryResult<Option<[u8; 32]>> {
+    pub async fn audio_analysis_key(&self, uri: &str) -> LibraryResult<Option<[u8; 32]>> {
         let mut connection = self.acquire_reader().await?;
         let key: Option<Vec<u8>> =
             sqlx::query_scalar("SELECT loudness_analysis_key FROM tracks WHERE media_uri=?1")

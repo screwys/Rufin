@@ -1459,11 +1459,11 @@ mod tests {
             })))
             .mount(&server)
             .await;
-        for (admin, expected) in [
-            (serde_json::json!("false"), false),
-            (serde_json::json!(true), true),
-            (serde_json::json!("true"), true),
-            (serde_json::json!({"unexpected":true}), false),
+        for admin in [
+            serde_json::json!("false"),
+            serde_json::json!(true),
+            serde_json::json!("true"),
+            serde_json::json!({"unexpected":true}),
         ] {
             let _user = Mock::given(method("GET")).and(path("/rest/getUser.view"))
                 .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1484,7 +1484,6 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(authenticated.source.username, "canonical");
-            assert_eq!(authenticated.source.metadata_editing_available(), expected);
         }
         let source = source(&server.uri());
         let song = serde_json::json!({

@@ -150,16 +150,18 @@ pub(crate) async fn read_saved_media(
 }
 
 pub(crate) fn excluded_from_audio_scan(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            [
-                "tmp", "tar", "gz", "bz2", "xz", "tbz", "tgz", "z", "zip", "rar", "wvc", "zst",
-                "lrc",
-            ]
-            .iter()
-            .any(|excluded| extension.eq_ignore_ascii_case(excluded))
-        })
+    super::metadata::is_working_copy(path)
+        || path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                [
+                    "tmp", "tar", "gz", "bz2", "xz", "tbz", "tgz", "z", "zip", "rar", "wvc", "zst",
+                    "lrc",
+                ]
+                .iter()
+                .any(|excluded| extension.eq_ignore_ascii_case(excluded))
+            })
         || path
             .file_name()
             .and_then(|name| name.to_str())
@@ -1163,12 +1165,14 @@ mod tests {
             crate::file::metadata::edit_copy(
                 &path,
                 Some("mp3"),
-                &crate::file::metadata::TagUpdate::Metadata(crate::MetadataEdit {
-                    kind: crate::SourceEntityKind::Track,
-                    changes: [("title".into(), "Updated".into())].into(),
-                    artwork: None,
-                }),
-                "",
+                &crate::file::metadata::TagUpdate::Metadata(vec![(
+                    crate::MetadataEdit {
+                        kind: crate::SourceEntityKind::Track,
+                        changes: [("title".into(), "Updated".into())].into(),
+                        artwork: None,
+                    },
+                    String::new(),
+                )]),
                 &mut None,
             )
             .expect("write audio metadata");

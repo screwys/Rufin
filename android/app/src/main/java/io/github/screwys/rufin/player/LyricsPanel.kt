@@ -224,7 +224,7 @@ private fun LyricsOffsetDialog(player: PlayerConnection, onDismiss: () -> Unit) 
 private fun LyricsOffsetControls(value: Long, enabled: Boolean = true, onApply: (Long) -> Unit) {
     var text by remember(value) { mutableStateOf(value.toString()) }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val fieldWidth = (maxWidth - 250.dp).coerceAtLeast(112.dp)
+        val fieldWidth = (maxWidth - 200.dp).coerceAtLeast(160.dp)
         Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             listOf(-100L, -50L).forEach { delta ->
@@ -235,13 +235,14 @@ private fun LyricsOffsetControls(value: Long, enabled: Boolean = true, onApply: 
                 colors = settingsTextFieldColors(),
                 singleLine = true, enabled = enabled,
                 label = { Text(translate("Lyrics offset (ms)"), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                suffix = { Text("ms") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                suffix = { Text("ms") },
+                trailingIcon = { PlayerIconButton("rufin-view-refresh-symbolic", "Reset", { text = "0"; onApply(0L) }, enabled = enabled) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.width(fieldWidth))
             listOf(50L, 100L).forEach { delta ->
                 TextButton({ onApply((text.toLongOrNull() ?: value) + delta) }, Modifier.widthIn(min = 48.dp),
                     contentPadding = PaddingValues(horizontal = 2.dp), enabled = enabled) { Text("+$delta", maxLines = 1) }
             }
-            PlayerIconButton("rufin-edit-undo-symbolic", "Reset", { onApply(0L) }, Modifier.size(48.dp), enabled = enabled)
         }
     }
 }

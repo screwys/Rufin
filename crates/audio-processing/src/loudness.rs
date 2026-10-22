@@ -1,6 +1,6 @@
 //! Cancellable EBU R128 analysis for one prepared audio stream.
 
-use super::{configure_sources, ensure_gstreamer_initialized};
+use super::decode::DecodePipeline;
 use crate::ResolvedStream;
 use ebur128::{Channel, EbuR128, Mode};
 use gst::prelude::*;
@@ -10,7 +10,6 @@ use gstreamer_audio as gst_audio;
 use std::time::{Duration, Instant};
 
 const ANALYSIS_STALL_TIMEOUT: Duration = Duration::from_secs(60);
-const SAMPLE_POLL: gst::ClockTime = gst::ClockTime::from_mseconds(100);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AnalyzedLoudness {
@@ -33,94 +32,36 @@ pub fn analyze_loudness_cancellable(
     stream: &ResolvedStream,
     cancelled: impl Fn() -> bool,
 ) -> Result<LoudnessAnalysis, String> {
-    ensure_gstreamer_initialized()?;
-    check_analysis_progress(&cancelled, Instant::now())?;
-
-    let pipeline = gst::parse::launch(
-        "uridecodebin name=decoder ! audioconvert ! audio/x-raw,format=F32LE,layout=interleaved ! appsink name=sink sync=false",
-    )
-    .map_err(|error| error.to_string())?;
-    let bin = pipeline
-        .downcast_ref::<gst::Bin>()
-        .ok_or_else(|| "loudness pipeline is not a bin".to_string())?;
-    let decoder = bin
-        .by_name("decoder")
-        .ok_or_else(|| "loudness pipeline is missing its decoder".to_string())?;
-    let trust_invalid_certificate = stream.trust_invalid_certificate();
-    configure_sources(&decoder, move || trust_invalid_certificate);
-    decoder.set_property("uri", stream.uri());
-    let sink = bin
-        .by_name("sink")
-        .ok_or_else(|| "loudness pipeline is missing its sample sink".to_string())?
+    let pipeline = DecodePipeline::new(
+        stream,
+        "audio/x-raw,format=F32LE,layout=interleaved ! appsink name=sink sync=false max-buffers=8 drop=false",
+    )?;
+    let sink = pipeline
+        .sink
+        .clone()
         .downcast::<gst_app::AppSink>()
-        .map_err(|_| "loudness sample sink has the wrong type".to_string())?;
-    sink.set_max_buffers(8);
-    sink.set_drop(false);
-    let bus = pipeline
-        .bus()
-        .ok_or_else(|| "loudness pipeline is missing its bus".to_string())?;
-
+        .expect("analysis sample sink");
     let started = Instant::now();
-    let result = (|| {
-        let startup_state = if stream.window().is_some() {
-            gst::State::Paused
-        } else {
-            gst::State::Playing
-        };
-        pipeline
-            .set_state(startup_state)
-            .map_err(|error| error.to_string())?;
-        if let Some(window) = stream.window() {
-            wait_for_preroll(&bus, &cancelled, started)?;
-            let _ = sink.try_pull_preroll(gst::ClockTime::ZERO);
-            pipeline
-                .seek(
-                    1.0,
-                    gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
-                    gst::SeekType::Set,
-                    gst::ClockTime::from_mseconds(window.start_millis),
-                    gst::SeekType::Set,
-                    gst::ClockTime::from_mseconds(window.end_millis),
-                )
-                .map_err(|error| error.to_string())?;
-            pipeline
-                .set_state(gst::State::Playing)
-                .map_err(|error| error.to_string())?;
-        }
-
-        let mut analyzer = None;
-        let mut decoded_samples = Vec::new();
-        let mut last_progress = Instant::now();
-        loop {
-            check_analysis_progress(&cancelled, last_progress)?;
-            if let Some(sample) = sink.try_pull_sample(SAMPLE_POLL) {
-                add_sample(&mut analyzer, &sample, &mut decoded_samples)?;
-                last_progress = Instant::now();
-                continue;
-            }
-            while let Some(message) = bus.pop() {
-                if let gst::MessageView::Error(error) = message.view() {
-                    return Err(error.error().to_string());
-                }
-            }
-            if sink.is_eos() {
-                break;
-            }
-        }
-        let mut analyzer =
-            analyzer.ok_or_else(|| "audio stream produced no samples".to_string())?;
-        let measurement = measurement(&analyzer)?;
-        // Album aggregation reads the completed histogram, not the source-rate signal window.
-        analyzer
-            .change_parameters(1, 16)
-            .map_err(|error| error.to_string())?;
-        Ok(LoudnessAnalysis {
-            analyzer,
-            measurement,
-        })
-    })();
-    let _ = pipeline.set_state(gst::State::Null);
-    result
+    pipeline.start(|| check_analysis_progress(&cancelled, started))?;
+    let mut analyzer = None;
+    let mut decoded_samples = Vec::new();
+    let mut last_progress = Instant::now();
+    while let Some(sample) =
+        pipeline.sample(&sink, || check_analysis_progress(&cancelled, last_progress))?
+    {
+        add_sample(&mut analyzer, &sample, &mut decoded_samples)?;
+        last_progress = Instant::now();
+    }
+    let mut analyzer = analyzer.ok_or_else(|| "audio stream produced no samples".to_string())?;
+    let measurement = measurement(&analyzer)?;
+    // Album aggregation reads the completed histogram, not the source-rate signal window.
+    analyzer
+        .change_parameters(1, 16)
+        .map_err(|error| error.to_string())?;
+    Ok(LoudnessAnalysis {
+        analyzer,
+        measurement,
+    })
 }
 
 pub fn album_loudness(analyses: &[LoudnessAnalysis]) -> Result<AnalyzedLoudness, String> {
@@ -247,27 +188,6 @@ fn measurement(analyzer: &EbuR128) -> Result<AnalyzedLoudness, String> {
         integrated_lufs: integrated_lufs.is_finite().then_some(integrated_lufs),
         true_peak: Some(true_peak),
     })
-}
-
-fn wait_for_preroll(
-    bus: &gst::Bus,
-    cancelled: &impl Fn() -> bool,
-    started: Instant,
-) -> Result<(), String> {
-    loop {
-        check_analysis_progress(cancelled, started)?;
-        let Some(message) = bus.timed_pop(SAMPLE_POLL) else {
-            continue;
-        };
-        match message.view() {
-            gst::MessageView::AsyncDone(..) => return Ok(()),
-            gst::MessageView::Error(error) => return Err(error.error().to_string()),
-            gst::MessageView::Eos(..) => {
-                return Err("audio source ended before its requested window".to_string());
-            }
-            _ => {}
-        }
-    }
 }
 
 fn check_analysis_progress(cancelled: &impl Fn() -> bool, started: Instant) -> Result<(), String> {

@@ -65,7 +65,7 @@ impl LocalChangeFeed {
         on_change: &mut dyn FnMut(LocalLiveChange) -> bool,
         should_stop: &dyn Fn() -> bool,
     ) -> SourceResult<()> {
-        let (messages, receiver) = mpsc::sync_channel(1);
+        let (messages, receiver) = mpsc::sync_channel(LIVE_CHANGE_LIMIT);
         let overflow = Arc::new(AtomicBool::new(false));
         let callback_overflow = Arc::clone(&overflow);
         let roots = self.roots.iter().cloned().collect::<HashSet<_>>();
@@ -81,7 +81,10 @@ impl LocalChangeFeed {
                             return;
                         }
                     }
-                    FeedMessage::Change(event_evidence(event))
+                    let Some(change) = event_evidence(event) else {
+                        return;
+                    };
+                    FeedMessage::Change(change)
                 }
                 Ok(_) => return,
                 Err(error) => FeedMessage::Failed(error.to_string()),
@@ -265,28 +268,38 @@ fn feed_error(error: notify::Error) -> SourceError {
     SourceError::Other(error.to_string())
 }
 
-fn event_evidence(event: Event) -> LocalLiveChange {
+fn event_evidence(mut event: Event) -> Option<LocalLiveChange> {
+    if !event.need_rescan()
+        && event
+            .paths
+            .iter()
+            .any(|path| super::super::metadata::is_working_copy(path))
+    {
+        event
+            .paths
+            .retain(|path| !super::super::metadata::is_working_copy(path));
+        if event.paths.is_empty() {
+            return None;
+        }
+        // Replacing a tag-edit copy changes the original file, not its media URI.
+        event.kind = EventKind::Modify(ModifyKind::Any);
+    }
     let complete_required = event.need_rescan()
         || event.paths.is_empty()
         || event.paths.len() > LIVE_CHANGE_LIMIT
-        || matches!(event.kind, EventKind::Other)
-        || matches!(
-            event.kind,
-            EventKind::Modify(ModifyKind::Name(mode))
-                if mode != RenameMode::Both || event.paths.len() != 2
-        );
+        || matches!(event.kind, EventKind::Other);
     if complete_required {
-        return LocalLiveChange::Rescan;
+        return Some(LocalLiveChange::Rescan);
     }
     let rename = matches!(
         event.kind,
         EventKind::Modify(ModifyKind::Name(RenameMode::Both))
-    )
-    .then(|| (event.paths[0].clone(), event.paths[1].clone()));
-    LocalLiveChange::Paths {
+    ) && event.paths.len() == 2;
+    let rename = rename.then(|| (event.paths[0].clone(), event.paths[1].clone()));
+    Some(LocalLiveChange::Paths {
         paths: event.paths,
         rename,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -300,7 +313,8 @@ mod tests {
         let evidence = event_evidence(
             Event::new(EventKind::Create(CreateKind::File))
                 .add_path(PathBuf::from("/music/one.flac")),
-        );
+        )
+        .unwrap();
         assert_eq!(
             evidence,
             LocalLiveChange::Paths {
@@ -311,13 +325,20 @@ mod tests {
     }
 
     #[test]
-    fn partial_rename_and_rescan_require_complete_inventory() {
+    fn partial_rename_keeps_its_path_and_rescan_requires_complete_inventory() {
         let rename = event_evidence(
             Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::From)))
                 .add_path(PathBuf::from("/music/old.flac")),
+        )
+        .unwrap();
+        let rescan = event_evidence(Event::new(EventKind::Any).set_flag(Flag::Rescan)).unwrap();
+        assert_eq!(
+            rename,
+            LocalLiveChange::Paths {
+                paths: vec![PathBuf::from("/music/old.flac")],
+                rename: None,
+            }
         );
-        let rescan = event_evidence(Event::new(EventKind::Any).set_flag(Flag::Rescan));
-        assert_eq!(rename, LocalLiveChange::Rescan);
         assert_eq!(rescan, LocalLiveChange::Rescan);
     }
 
@@ -329,7 +350,8 @@ mod tests {
             Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
                 .add_path(old.clone())
                 .add_path(new.clone()),
-        );
+        )
+        .unwrap();
         assert_eq!(
             rename,
             LocalLiveChange::Paths {
@@ -360,7 +382,7 @@ mod tests {
         for index in 0..=LIVE_CHANGE_LIMIT {
             event = event.add_path(PathBuf::from(format!("/music/{index}.flac")));
         }
-        assert_eq!(event_evidence(event), LocalLiveChange::Rescan);
+        assert_eq!(event_evidence(event).unwrap(), LocalLiveChange::Rescan);
     }
 
     #[test]

@@ -127,23 +127,13 @@ impl NativeFile {
         }
     }
 
-    async fn read(
-        &self,
-        kind: SourceEntityKind,
-        artist: Option<&str>,
-    ) -> Result<MetadataDraft, Error> {
+    async fn read(&self) -> Result<MetadataDraft, Error> {
         let revision = self.revision().await?;
-        let artist = artist.map(str::to_owned);
         let mut draft = match &self.location {
             FileLocation::Native(path) => {
                 let path = path.clone();
                 tokio::task::spawn_blocking(move || {
-                    tags::read_metadata_input(
-                        std::fs::File::open(&path).map_err(failure)?,
-                        kind,
-                        &path,
-                        artist.as_deref(),
-                    )
+                    tags::read_metadata_input(std::fs::File::open(&path).map_err(failure)?, &path)
                 })
                 .await
                 .map_err(failure)??
@@ -154,9 +144,7 @@ impl NativeFile {
                     let entry = crate::stat_document(&uri).map_err(failure)?;
                     let mut draft = tags::read_metadata_input(
                         crate::open_document_input(&uri).map_err(failure)?,
-                        kind,
                         Path::new(&entry.name),
-                        artist.as_deref(),
                     )?;
                     if !entry.writable {
                         for field in &mut draft.fields {
@@ -197,9 +185,7 @@ impl NativeFile {
                 tokio::task::spawn_blocking(move || {
                     let mut draft = tags::read_metadata_input(
                         reader,
-                        kind,
                         Path::new(&crate::file::documents::display_path(&relative)),
-                        artist.as_deref(),
                     )?;
                     if !writable {
                         for field in &mut draft.fields {
@@ -226,6 +212,79 @@ impl NativeFile {
         Ok(draft)
     }
 
+    fn lyrics_storage(&self) -> Vec<crate::LyricsStorage> {
+        if self.cue {
+            return Vec::new();
+        }
+        let sidecar = match &self.location {
+            FileLocation::Native(path) => path.parent().is_some_and(Path::is_dir),
+            _ => self.folder_identity(None).is_ok(),
+        };
+        let embedded = (|| match &self.location {
+            FileLocation::Native(path) => tags::embedded_lyrics_writable(path),
+            FileLocation::Document { uri, .. } => {
+                crate::stat_document(uri).is_ok_and(|entry| entry.writable)
+                    && self
+                        .format
+                        .as_deref()
+                        .is_some_and(tags::embedded_lyrics_format_writable)
+            }
+            FileLocation::Remote { source, path } => {
+                let Some(files) = source.file_source(Some(path)) else {
+                    return false;
+                };
+                if let Some(access) = files.document_access() {
+                    let Ok(relative) = files.relative(path) else {
+                        return false;
+                    };
+                    if !access.resolve(&relative).is_ok_and(|entry| entry.writable) {
+                        return false;
+                    }
+                }
+                self.format
+                    .as_deref()
+                    .is_some_and(tags::embedded_lyrics_format_writable)
+            }
+        })();
+        let mut options = Vec::new();
+        if embedded {
+            options.push(crate::LyricsStorage::Embedded);
+        }
+        if sidecar {
+            options.push(crate::LyricsStorage::Sidecar);
+        }
+        options
+    }
+
+    async fn save_lyrics(
+        &self,
+        text: &str,
+        sidecar: bool,
+        cancelled: impl Fn() -> bool + Send + Sync,
+    ) -> Result<Option<PreparedFile>, Error> {
+        if sidecar {
+            if cancelled() {
+                return Err(crate::SourceError::Cancelled.into());
+            }
+            self.write_sidecar(text).await?;
+            Ok(None)
+        } else {
+            let (prepared, _) = self
+                .prepare(None)
+                .await?
+                .mutate(TagUpdate::Lyrics(text.into()), None)
+                .await?;
+            Ok(Some(prepared.commit(&cancelled).await?))
+        }
+    }
+
+    fn analysis_key(&self, revision: Option<&str>) -> [u8; 32] {
+        let mut hash = blake3::Hasher::new();
+        hash.update(self.media_uri.as_bytes());
+        hash.update(revision.unwrap_or_default().as_bytes());
+        *hash.finalize().as_bytes()
+    }
+
     pub(crate) async fn prepare(&self, expected: Option<&str>) -> Result<PreparedFile, Error> {
         if self.cue {
             return Err(Error::Unavailable);
@@ -239,7 +298,7 @@ impl NativeFile {
                 let path = path.clone();
                 tokio::task::spawn_blocking(move || {
                     let file = tempfile::Builder::new()
-                        .prefix(".rufin-metadata-")
+                        .prefix(tags::WORKING_COPY_PREFIX)
                         .tempfile_in(path.parent().ok_or(Error::Unavailable)?)
                         .map_err(failure)?;
                     std::fs::copy(&path, file.path()).map_err(failure)?;
@@ -288,20 +347,13 @@ impl PreparedFile {
     pub(crate) async fn mutate(
         self,
         update: TagUpdate,
-        previous_artist: String,
-        mut mp4: Option<Arc<crate::ImageBytes>>,
-    ) -> Result<(Self, Option<Arc<crate::ImageBytes>>), Error> {
+        mut mp4: tags::MetadataImageCache,
+    ) -> Result<(Self, tags::MetadataImageCache), Error> {
         if self.target.cue {
             return Err(Error::Unavailable);
         }
         tokio::task::spawn_blocking(move || {
-            tags::edit_copy(
-                &self.file,
-                self.target.format.as_deref(),
-                &update,
-                &previous_artist,
-                &mut mp4,
-            )?;
+            tags::edit_copy(&self.file, self.target.format.as_deref(), &update, &mut mp4)?;
             std::fs::File::options()
                 .write(true)
                 .open(&self.file)
@@ -363,12 +415,29 @@ impl PreparedFile {
         Ok(self)
     }
 
-    async fn write_catalog(
+    pub(crate) async fn preserve_fingerprint(&self, database: &Database) -> Result<(), Error> {
+        let previous = self.target.analysis_key(self.revision.as_deref());
+        let current = self
+            .target
+            .analysis_key(self.target.revision().await?.as_deref());
+        database
+            .preserve_fingerprint(&self.target.media_uri, &previous, &current)
+            .await
+            .map_err(failure)
+    }
+
+    async fn read_catalog(
         &self,
         source: &Source,
-        catalog: &mut library::Catalog<'_>,
-    ) -> Result<(), Error> {
-        let result: Result<(), Error> = async {
+        catalog: &library::Catalog<'_>,
+    ) -> Result<SavedFile, Error> {
+        self.preserve_fingerprint(catalog.database).await?;
+        let previous = catalog
+            .database
+            .audio_analysis_key(&self.target.media_uri)
+            .await
+            .map_err(failure)?;
+        let result = async {
             let (observation, facts) = match &self.target.location {
                 FileLocation::Remote { source, path } => {
                     let files = source.file_source(Some(path)).ok_or(Error::Unavailable)?;
@@ -403,22 +472,65 @@ impl PreparedFile {
             if source.is_retired() {
                 return Err(crate::SourceError::Cancelled.into());
             }
-            catalog
-                .write_file_observations(
-                    &observation
-                        .map(|file| (file, Vec::new()))
-                        .into_iter()
-                        .collect::<Vec<_>>(),
-                    vec![facts],
-                    true,
-                )
-                .await
-                .map_err(failure)?;
-            Ok(())
+            Ok::<_, Error>(SavedFile {
+                uri: self.target.media_uri.clone(),
+                observation,
+                facts,
+                previous,
+            })
         }
         .await;
         result.map_err(|error| Error::SavedRefreshFailed(error.to_string()))
     }
+
+    async fn write_catalog(
+        &self,
+        source: &Source,
+        catalog: &mut library::Catalog<'_>,
+    ) -> Result<(), Error> {
+        let saved = self.read_catalog(source, catalog).await?;
+        publish_saved_files(catalog, &mut vec![saved]).await
+    }
+}
+
+struct SavedFile {
+    uri: String,
+    observation: Option<library::LocalFileWrite>,
+    facts: library::TrackObservation,
+    previous: Option<[u8; 32]>,
+}
+
+async fn publish_saved_files(
+    catalog: &mut library::Catalog<'_>,
+    pending: &mut Vec<SavedFile>,
+) -> Result<(), Error> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let mut files = Vec::new();
+    let mut tracks = Vec::new();
+    let mut analysis = Vec::new();
+    for saved in pending.drain(..) {
+        if let Some(file) = saved.observation {
+            files.push((file, Vec::new()));
+        }
+        if let Some(previous) = saved.previous {
+            analysis.push((saved.uri, previous));
+        }
+        tracks.push(saved.facts);
+    }
+    catalog
+        .write_file_observations(&files, tracks, true)
+        .await
+        .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
+    for (uri, previous) in analysis {
+        catalog
+            .database
+            .preserve_audio_analysis(&uri, &previous)
+            .await
+            .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
+    }
+    Ok(())
 }
 
 struct SaveWork(sqlx::SqliteConnection);
@@ -439,11 +551,11 @@ impl SaveWork {
         Ok(Self(connection))
     }
 
-    async fn remember(&mut self, page: &[(i64, Option<String>, NativeFile)]) -> Result<(), Error> {
-        let members = page
-            .iter()
-            .filter_map(|(key, id, _)| id.as_ref().map(|id| (*key, id)))
-            .collect::<Vec<_>>();
+    async fn remember<'a>(
+        &mut self,
+        page: impl Iterator<Item = (i64, &'a str)>,
+    ) -> Result<(), Error> {
+        let members = page.collect::<Vec<_>>();
         if members.is_empty() {
             return Ok(());
         }
@@ -467,6 +579,7 @@ impl SaveWork {
     }
 }
 
+#[derive(Clone, Default)]
 pub struct FileEditSession {
     source: Option<Arc<Source>>,
     media_uri: String,
@@ -477,6 +590,60 @@ pub struct FileEditSession {
 }
 
 impl FileEditSession {
+    pub fn for_tracks(source: Option<Arc<Source>>) -> Self {
+        Self {
+            source,
+            ..Self::default()
+        }
+    }
+
+    pub async fn audio_revision(&self) -> Result<Option<[u8; 32]>, Error> {
+        let file = self.single.as_ref().ok_or(Error::Unavailable)?;
+        Ok(file
+            .revision()
+            .await?
+            .map(|revision| file.analysis_key(Some(&revision))))
+    }
+
+    pub fn lyrics_storage(&self) -> Vec<crate::LyricsStorage> {
+        self.single
+            .as_ref()
+            .map(NativeFile::lyrics_storage)
+            .unwrap_or_default()
+    }
+
+    pub async fn save_lyrics(
+        &self,
+        database: &Database,
+        text: &str,
+        sidecar: bool,
+    ) -> Result<Option<String>, Error> {
+        if let Some(source) = &self.source {
+            source
+                .write_lyrics(database, &self.media_uri, text, sidecar)
+                .await?;
+            source.refresh_written_lyrics(database);
+            return self
+                .single
+                .as_ref()
+                .ok_or(Error::Unavailable)?
+                .revision()
+                .await;
+        }
+        let file = self.single.as_ref().ok_or(Error::Unavailable)?;
+        if let Some(saved) = file.save_lyrics(text, sidecar, || false).await? {
+            saved.preserve_fingerprint(database).await?;
+        }
+        if !sidecar {
+            file.publish_direct(database).await?;
+        }
+        database
+            .remove_track_lyrics_by_authority(&self.media_uri, "source")
+            .await
+            .map_err(failure)?;
+        file.revision().await
+    }
+
     pub fn media_uri(&self) -> &str {
         &self.media_uri
     }
@@ -555,13 +722,6 @@ impl FileEditSession {
                 )
             }
         };
-        if let Some(source) = &source {
-            if matches!(source.implementation, Implementation::OpenSubsonic(_))
-                && !source.mapped_metadata_ready().await
-            {
-                return Err(Error::Unavailable);
-            }
-        }
         if binding.is_none() && source.is_none() {
             if let Some(NativeFile {
                 location: FileLocation::Native(path),
@@ -603,139 +763,81 @@ impl FileEditSession {
             single,
             expected: None,
         };
-        let artist = (kind == SourceEntityKind::Artist).then_some(session.previous_artist.as_str());
-        let mut combined = None;
-        let mut count = 0;
-        if let Some(file) = &session.single {
+        let mut draft = if let Some(file) = &session.single {
             let draft = if file.cue {
                 base.clone()
             } else {
-                file.read(kind, artist).await?
+                file.read().await?
             };
             session.expected = draft.revision.clone();
-            combined = Some(
-                if draft.fields.iter().any(|field| field.writable) || base.fields.is_empty() {
-                    draft
-                } else {
-                    base.clone()
-                },
-            );
-            count = 1;
-        } else {
-            let mut after = None;
-            loop {
-                let page = session.file_page(database, after).await?;
-                if page.is_empty() {
-                    break;
-                }
-                for (key, _, file) in page {
-                    after = Some(key);
-                    let next = if file.cue {
-                        base.clone()
-                    } else {
-                        file.read(kind, artist).await?
-                    };
-                    let mut next = next;
-                    if combined.is_none() && kind == SourceEntityKind::Album {
-                        for field in &mut next.fields {
-                            if field.value.is_empty()
-                                && matches!(field.key.as_str(), "title" | "artist" | "album_artist")
-                            {
-                                if let Some(previous) = base
-                                    .fields
-                                    .iter()
-                                    .find(|previous| previous.key == field.key)
-                                {
-                                    field.value = previous.value.clone();
-                                }
-                            }
-                        }
-                    }
-                    if let Some(current) = &mut combined {
-                        tags::merge_draft(current, next);
-                    } else {
-                        combined = Some(next);
-                    }
-                    count += 1;
-                }
+            if draft.fields.iter().any(|field| field.writable) || base.fields.is_empty() {
+                draft
+            } else {
+                base.clone()
             }
-        }
-        let mut draft = combined.ok_or(Error::Unavailable)?;
-        if !draft.fields.iter().any(|field| field.writable) && !base.fields.is_empty() {
-            draft.fields = base.fields.clone();
-        }
+        } else {
+            base.clone()
+        };
         for field in &base.fields {
             if field.key.starts_with("musicbrainz_") {
                 draft.suggest(&field.key, Some(field.value.clone()));
             }
         }
-        draft.track_count = count;
         draft.revision = session.expected.clone();
         draft.artwork = draft.artwork.with_binding(binding, false);
         Ok((session, draft))
-    }
-
-    async fn file_page(
-        &self,
-        database: &Database,
-        after: Option<i64>,
-    ) -> Result<Vec<(i64, Option<String>, NativeFile)>, Error> {
-        if let Some(file) = &self.single {
-            return Ok(if after.is_none() {
-                vec![(
-                    0,
-                    library::source_entity_parts(&file.media_uri).map(|(_, _, id)| id),
-                    file.clone(),
-                )]
-            } else {
-                Vec::new()
-            });
-        }
-        let source = self.source.as_ref().ok_or(Error::Unavailable)?;
-        let rows = database
-            .file_edit_rows(
-                &self.media_uri,
-                after.map(library::TrackKey::from_raw),
-                &ReadCancellation::new(),
-            )
-            .await
-            .map_err(failure)?;
-        let mut originals = database
-            .original_files(
-                &rows
-                    .iter()
-                    .map(|row| row.media_uri.clone())
-                    .collect::<Vec<_>>(),
-            )
-            .await
-            .map_err(failure)?
-            .into_iter()
-            .map(|file| (file.media_uri.clone(), file))
-            .collect::<std::collections::HashMap<_, _>>();
-        rows.into_iter()
-            .map(|row| {
-                let file = NativeFile::resolve(
-                    source,
-                    &row.media_uri,
-                    row.source_path.as_deref(),
-                    row.source_format.as_deref(),
-                    row.cue_path.is_some(),
-                    originals.remove(&row.media_uri),
-                )?;
-                Ok((row.track_key.raw(), row.object_id, file))
-            })
-            .collect()
     }
 
     pub async fn save(&self, database: &Database, edit: MetadataEdit) -> Result<(), Error> {
         if edit.changes.is_empty() && edit.artwork.is_none() {
             return Ok(());
         }
-        if edit
-            .artwork
-            .as_ref()
-            .is_some_and(|art| art.storage == crate::ArtworkStorage::Server)
-        {
+        let file = self.single.as_ref().ok_or(Error::Unavailable)?;
+        self.save_tracks(
+            database,
+            None,
+            vec![file.media_uri.clone()],
+            |_| {
+                let edit = edit.clone();
+                async move { Ok((edit, self.expected.clone(), self.folder_image.clone())) }
+            },
+            |_, _, _| async { Ok(()) },
+        )
+        .await
+    }
+
+    pub async fn save_tracks<F, Fut, C, Done>(
+        &self,
+        database: &Database,
+        edit: Option<MetadataEdit>,
+        tracks: Vec<String>,
+        mut extra: F,
+        mut complete: C,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(usize) -> Fut,
+        Fut: std::future::Future<
+                Output = Result<(MetadataEdit, Option<String>, Option<String>), Error>,
+            >,
+        C: FnMut(usize, Option<String>, Result<(), Error>) -> Done,
+        Done: std::future::Future<Output = Result<(), Error>>,
+    {
+        let edits = edit
+            .into_iter()
+            .map(|edit| {
+                (
+                    edit,
+                    self.previous_artist.clone(),
+                    self.folder_image.clone(),
+                )
+            })
+            .filter(|(edit, _, _)| !edit.changes.is_empty() || edit.artwork.is_some())
+            .collect::<Vec<_>>();
+        if edits.iter().any(|(edit, _, _)| {
+            edit.artwork
+                .as_ref()
+                .is_some_and(|art| art.storage == crate::ArtworkStorage::Server)
+        }) {
             return Err(Error::Unavailable);
         }
         let mut catalog = match &self.source {
@@ -755,127 +857,123 @@ impl FileEditSession {
         if cancelled() {
             return Err(crate::SourceError::Cancelled.into());
         }
-        let mut after = None;
         let mut saved = false;
         let mut mp4 = None;
+        let mut pending = Vec::new();
         let mapped = self
             .source
             .as_ref()
             .is_some_and(|source| matches!(source.implementation, Implementation::OpenSubsonic(_)));
-        let folder_changed = edit
-            .artwork
-            .as_ref()
-            .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
-            || tags::artist_image_needs_rename(
-                &edit,
-                &self.previous_artist,
-                self.folder_image.as_deref().map(Path::new),
-            );
+        let folder_changed = edits.iter().any(|(edit, artist, hint)| {
+            edit.artwork
+                .as_ref()
+                .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
+                || tags::artist_image_needs_rename(edit, artist, hint.as_deref().map(Path::new))
+        });
         let mut work = if mapped || folder_changed {
             Some(SaveWork::new().await?)
         } else {
             None
         };
-        let tags_changed = !edit.changes.is_empty()
-            || edit
-                .artwork
-                .as_ref()
-                .is_some_and(|art| art.storage == crate::ArtworkStorage::Embedded);
+        let scope_tags_changed = edits.iter().any(|(edit, _, _)| {
+            !edit.changes.is_empty()
+                || edit
+                    .artwork
+                    .as_ref()
+                    .is_some_and(|art| art.storage == crate::ArtworkStorage::Embedded)
+        });
+        let mut selected = tracks.chunks(128);
+        let mut ordinal = 0i64;
+        let mut failures = Vec::new();
         let result = async {
             loop {
-                let page = self.file_page(database, after).await?;
-                if page.is_empty() {
-                    break;
+                let Some(uris) = selected.next() else { break };
+                let mut page = Vec::with_capacity(uris.len());
+                for uri in uris {
+                    let resolved = if let Some(file) =
+                        self.single.as_ref().filter(|file| file.media_uri == *uri)
+                    {
+                        Ok((
+                            file.clone(),
+                            library::source_entity_parts(uri).map(|(_, _, id)| id),
+                        ))
+                    } else if let Some(source) = &self.source {
+                        source
+                            .resolved_track(database, uri)
+                            .await
+                            .map(|(file, row)| (file, row.object_id))
+                    } else {
+                        NativeFile::direct(uri).map(|file| (file, None))
+                    };
+                    page.push((ordinal, resolved));
+                    ordinal += 1;
                 }
                 if mapped {
-                    work.as_mut().unwrap().remember(&page).await?;
+                    work.as_mut()
+                        .unwrap()
+                        .remember(page.iter().filter_map(|(key, file)| {
+                            file.as_ref().ok()?.1.as_deref().map(|id| (*key, id))
+                        }))
+                        .await?;
                 }
-                for (key, _, file) in page {
-                    after = Some(key);
-                    if tags_changed {
-                        let prepared = file
-                            .prepare(self.single.as_ref().and(self.expected.as_deref()))
-                            .await?;
-                        let (prepared, next) = prepared
-                            .mutate(
-                                TagUpdate::Metadata(edit.clone()),
-                                self.previous_artist.clone(),
-                                mp4.take(),
-                            )
-                            .await?;
-                        mp4 = next;
-                        let committed = match prepared.commit(&cancelled).await {
-                            Ok(committed) => committed,
-                            Err(error @ Error::PartiallySaved { .. }) => {
-                                saved = true;
-                                if !mapped && self.source.is_some() {
-                                    let path = match &file.location {
-                                        FileLocation::Native(path) => {
-                                            path.to_string_lossy().into_owned()
-                                        }
-                                        FileLocation::Document { uri, .. } => uri.clone(),
-                                        FileLocation::Remote { path, .. } => path.clone(),
-                                    };
-                                    let source = self.source.as_ref().unwrap();
-                                    let refresh = source
-                                        .acquire_paths(
-                                            catalog.as_mut().unwrap(),
-                                            &[path],
-                                            None,
-                                            &|| false,
-                                        )
-                                        .await
-                                        .map_err(|error| {
-                                            Error::SavedRefreshFailed(error.to_string())
-                                        });
-                                    return crate::finish_metadata_save(Err(error), refresh, true);
-                                }
-                                if self.source.is_none() {
-                                    return crate::finish_metadata_save(
-                                        Err(error),
-                                        file.publish_direct(database).await,
-                                        true,
-                                    );
-                                }
-                                return Err(error);
-                            }
-                            Err(error) => return Err(error),
-                        };
-                        saved = true;
-                        if !mapped && let Some(source) = &self.source {
-                            committed
-                                .write_catalog(source, catalog.as_mut().unwrap())
-                                .await?;
-                        } else if self.source.is_none() {
-                            file.publish_direct(database)
-                                .await
-                                .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
+                for (ordinal, resolved) in page {
+                    let file_result = async {
+                        let (file, _) = resolved.as_ref().map_err(Clone::clone)?;
+                        let (track_edit, expected, hint) = extra(ordinal as usize).await?;
+                        let tags_changed = scope_tags_changed
+                            || !track_edit.changes.is_empty()
+                            || track_edit
+                                .artwork
+                                .as_ref()
+                                .is_some_and(|art| art.storage == crate::ArtworkStorage::Embedded);
+                        let mut edits = edits.clone();
+                        if !track_edit.changes.is_empty() || track_edit.artwork.is_some() {
+                            edits.push((track_edit, String::new(), hint));
                         }
-                    }
-                    if folder_changed {
-                        let directory = file.folder_identity(self.folder_image.as_deref())?;
-                        if work.as_mut().unwrap().first_folder(&directory).await? {
-                            if cancelled() {
-                                return Err(crate::SourceError::Cancelled.into());
-                            }
-                            let paths = match file
-                                .write_folder_artwork(
-                                    database,
-                                    &edit,
-                                    self.folder_image.as_deref(),
-                                    &self.previous_artist,
+                        let folder_changed = folder_changed
+                            || edits.iter().any(|(edit, _, _)| {
+                                edit.artwork
+                                    .as_ref()
+                                    .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
+                            });
+                        if folder_changed && work.is_none() {
+                            work = Some(SaveWork::new().await?);
+                        }
+                        if tags_changed {
+                            let prepared =
+                                file.prepare(expected.as_deref().or_else(|| {
+                                    self.single.as_ref().and(self.expected.as_deref())
+                                }))
+                                .await?;
+                            let (prepared, next) = prepared
+                                .mutate(
+                                    TagUpdate::Metadata(
+                                        edits
+                                            .iter()
+                                            .map(|(edit, artist, _)| (edit.clone(), artist.clone()))
+                                            .collect(),
+                                    ),
+                                    mp4.take(),
                                 )
-                                .await
-                            {
-                                Ok(paths) => paths,
+                                .await?;
+                            mp4 = next;
+                            let committed = match prepared.commit(&cancelled).await {
+                                Ok(committed) => committed,
                                 Err(error @ Error::PartiallySaved { .. }) => {
                                     saved = true;
                                     if !mapped && self.source.is_some() {
+                                        let path = match &file.location {
+                                            FileLocation::Native(path) => {
+                                                path.to_string_lossy().into_owned()
+                                            }
+                                            FileLocation::Document { uri, .. } => uri.clone(),
+                                            FileLocation::Remote { path, .. } => path.clone(),
+                                        };
                                         let source = self.source.as_ref().unwrap();
                                         let refresh = source
                                             .acquire_paths(
                                                 catalog.as_mut().unwrap(),
-                                                &[directory],
+                                                &[path],
                                                 None,
                                                 &|| false,
                                             )
@@ -887,48 +985,156 @@ impl FileEditSession {
                                             Err(error),
                                             refresh,
                                             true,
-                                        );
+                                        )
+                                        .map(|()| None);
+                                    }
+                                    if self.source.is_none() {
+                                        return crate::finish_metadata_save(
+                                            Err(error),
+                                            file.publish_direct(database).await,
+                                            true,
+                                        )
+                                        .map(|()| None);
                                     }
                                     return Err(error);
                                 }
                                 Err(error) => return Err(error),
                             };
                             saved = true;
-                            if !mapped && self.source.is_some() && !paths.is_empty() {
-                                self.source
-                                    .as_ref()
-                                    .unwrap()
-                                    .acquire_paths(catalog.as_mut().unwrap(), &paths, None, &|| {
-                                        false
-                                    })
-                                    .await
-                                    .map_err(|error| {
-                                        Error::SavedRefreshFailed(error.to_string())
-                                    })?;
+                            if mapped || self.source.is_none() {
+                                committed.preserve_fingerprint(database).await?;
+                            }
+                            if !mapped && let Some(source) = &self.source {
+                                pending.push(
+                                    committed
+                                        .read_catalog(source, catalog.as_ref().unwrap())
+                                        .await?,
+                                );
+                                if pending.len() == 128 {
+                                    publish_saved_files(catalog.as_mut().unwrap(), &mut pending)
+                                        .await?;
+                                }
+                            } else if self.source.is_none() {
+                                file.publish_direct(database).await.map_err(|error| {
+                                    Error::SavedRefreshFailed(error.to_string())
+                                })?;
                             }
                         }
+                        for (edit, artist, hint) in &edits {
+                            if !(edit
+                                .artwork
+                                .as_ref()
+                                .is_some_and(|art| art.storage == crate::ArtworkStorage::Folder)
+                                || tags::artist_image_needs_rename(
+                                    edit,
+                                    artist,
+                                    hint.as_deref().map(Path::new),
+                                ))
+                            {
+                                continue;
+                            }
+                            let directory = file.folder_identity(hint.as_deref())?;
+                            if work
+                                .as_mut()
+                                .unwrap()
+                                .first_folder(&format!(
+                                    "{}:{directory}:{}",
+                                    edit.kind.as_str(),
+                                    if edit.kind == SourceEntityKind::Track {
+                                        ordinal
+                                    } else {
+                                        -1
+                                    }
+                                ))
+                                .await?
+                            {
+                                if cancelled() {
+                                    return Err(crate::SourceError::Cancelled.into());
+                                }
+                                let paths = match file
+                                    .write_folder_artwork(database, edit, hint.as_deref(), artist)
+                                    .await
+                                {
+                                    Ok(paths) => paths,
+                                    Err(error @ Error::PartiallySaved { .. }) => {
+                                        saved = true;
+                                        if !mapped && self.source.is_some() {
+                                            let source = self.source.as_ref().unwrap();
+                                            let refresh = source
+                                                .acquire_paths(
+                                                    catalog.as_mut().unwrap(),
+                                                    &[directory],
+                                                    None,
+                                                    &|| false,
+                                                )
+                                                .await
+                                                .map_err(|error| {
+                                                    Error::SavedRefreshFailed(error.to_string())
+                                                });
+                                            return crate::finish_metadata_save(
+                                                Err(error),
+                                                refresh,
+                                                true,
+                                            )
+                                            .map(|()| None);
+                                        }
+                                        return Err(error);
+                                    }
+                                    Err(error) => return Err(error),
+                                };
+                                saved = true;
+                                if !mapped && self.source.is_some() && !paths.is_empty() {
+                                    self.source
+                                        .as_ref()
+                                        .unwrap()
+                                        .acquire_paths(
+                                            catalog.as_mut().unwrap(),
+                                            &paths,
+                                            None,
+                                            &|| false,
+                                        )
+                                        .await
+                                        .map_err(|error| {
+                                            Error::SavedRefreshFailed(error.to_string())
+                                        })?;
+                                }
+                            }
+                        }
+                        file.revision().await
+                    }
+                    .await;
+                    let revision = match (&file_result, &resolved) {
+                        (Ok(revision), _) => revision.clone(),
+                        (Err(Error::PartiallySaved { .. }), Ok((file, _))) => {
+                            file.revision().await.ok().flatten()
+                        }
+                        _ => None,
+                    };
+                    complete(
+                        ordinal as usize,
+                        revision,
+                        file_result.as_ref().map(|_| ()).map_err(Clone::clone),
+                    )
+                    .await?;
+                    if let Err(error) = file_result {
+                        failures.push(error);
                     }
                 }
             }
-            Ok::<_, Error>(())
+            Error::combine(failures)
         }
         .await;
-        let publication=async {
-            if mapped && saved {
-                let source=self.source.as_ref().unwrap();
-                source.refresh_remote_metadata_index().await.map_err(failure)?;
-                let mut after=-1i64;
-                loop {
-                    let rows=sqlx::query("SELECT member,object_id FROM members WHERE member>?1 ORDER BY member LIMIT 128")
-                        .bind(after).fetch_all(&mut work.as_mut().unwrap().0).await.map_err(failure)?;
-                    if rows.is_empty() { break; }
-                    after=rows.last().unwrap().get(0);
-                    let ids=rows.into_iter().map(|row|source.item_request_id("track",row.get::<&str,_>(1))).collect();
-                    source.acquire_items(catalog.as_mut().unwrap(),ids,Vec::new()).await.map_err(|error|Error::SavedRefreshFailed(error.to_string()))?;
-                }
-            }
+        let publication = if !pending.is_empty() {
+            publish_saved_files(catalog.as_mut().unwrap(), &mut pending).await
+        } else {
             Ok(())
-        }.await;
+        };
+        if mapped && saved {
+            self.source
+                .as_ref()
+                .unwrap()
+                .refresh_metadata_after_write(database, work.take());
+        }
         if let Some(source) = &self.source
             && !source.is_retired()
             && let Some(catalog) = catalog
@@ -938,6 +1144,38 @@ impl FileEditSession {
                 .await;
         }
         crate::finish_metadata_save(result, publication, saved)
+    }
+
+    pub fn project_edit(
+        values: &crate::MetadataChanges,
+        edit: &MetadataEdit,
+        previous_artist: &str,
+    ) -> crate::MetadataChanges {
+        tags::project_edit(values, edit, previous_artist)
+    }
+
+    pub fn scope_values(
+        kind: SourceEntityKind,
+        artist: &str,
+        original: &crate::MetadataChanges,
+        current: &crate::MetadataChanges,
+    ) -> crate::MetadataChanges {
+        tags::scope_values(kind, artist, original, current)
+    }
+
+    pub fn scope_metadata(
+        kind: SourceEntityKind,
+        artist: &str,
+        original: &MetadataDraft,
+        current: &crate::MetadataChanges,
+    ) -> MetadataDraft {
+        tags::scope_metadata(kind, artist, original, current)
+    }
+
+    pub fn can_embed_artist(format: Option<&str>) -> bool {
+        format
+            .and_then(crate::file::lofty::MetadataWriter::for_source_format)
+            .is_some_and(|writer| writer.file_type() != lofty::file::FileType::Mp4)
     }
 }
 
@@ -963,26 +1201,50 @@ impl Source {
         Ok((file, row))
     }
 
-    async fn mapped_metadata_ready(&self) -> bool {
-        let Implementation::OpenSubsonic(source) = &self.implementation else {
-            return false;
-        };
-        if !source.metadata_editing_available() {
-            source.refresh_metadata_editing().await;
+    fn refresh_metadata_after_write(
+        self: &Arc<Self>,
+        database: &Database,
+        mut work: Option<SaveWork>,
+    ) {
+        if !matches!(self.implementation, Implementation::OpenSubsonic(_)) {
+            return;
         }
-        source.metadata_editing_available()
+        let source = self.clone();
+        let database = database.clone();
+        tokio::spawn(async move {
+            let result: Result<(), Error> = source
+                .catalog_operation(&database, async |catalog| {
+                    let Implementation::OpenSubsonic(provider) = &source.implementation else {
+                        unreachable!()
+                    };
+                    provider.start_metadata_scan_and_wait(&|| source.is_retired()).await?;
+                    if let Some(work) = &mut work {
+                        let mut after = -1i64;
+                        loop {
+                            if source.is_retired() {
+                                return Err(crate::SourceError::Cancelled.into());
+                            }
+                            let rows = sqlx::query("SELECT member,object_id FROM members WHERE member>?1 ORDER BY member LIMIT 128")
+                                .bind(after).fetch_all(&mut work.0).await.map_err(failure)?;
+                            if rows.is_empty() {
+                                break;
+                            }
+                            after = rows.last().unwrap().get(0);
+                            let ids = rows.into_iter().map(|row| source.item_request_id("track", row.get::<&str,_>(1))).collect();
+                            source.acquire_items(catalog, ids, Vec::new()).await?;
+                        }
+                    }
+                    Ok(())
+                })
+                .await;
+            if let Err(error) = result {
+                tracing::warn!(%error, "Could not refresh the server after writing file tags");
+            }
+        });
     }
-    async fn refresh_remote_metadata_index(&self) -> crate::SourceResult<()> {
-        if let Implementation::OpenSubsonic(source) = &self.implementation {
-            source.require_metadata_scan_idle().await?;
-            source.start_metadata_scan_and_wait().await?;
-        }
-        Ok(())
-    }
-    pub async fn refresh_written_lyrics(&self) -> Result<(), Error> {
-        self.refresh_remote_metadata_index()
-            .await
-            .map_err(|error| Error::SavedRefreshFailed(error.to_string()))
+
+    pub fn refresh_written_lyrics(self: &Arc<Self>, database: &Database) {
+        self.refresh_metadata_after_write(database, None);
     }
 
     pub async fn write_file_track_rating(
@@ -1006,7 +1268,7 @@ impl Source {
             let (prepared, _) = file
                 .prepare(None)
                 .await?
-                .mutate(TagUpdate::Rating(rating), String::new(), None)
+                .mutate(TagUpdate::Rating(rating), None)
                 .await?;
             prepared
                 .commit(&|| self.is_retired())
@@ -1017,30 +1279,28 @@ impl Source {
         .await
     }
 
-    pub async fn lyrics_writable(
+    pub async fn lyrics_storage(
         self: &Arc<Self>,
         database: &Database,
         uri: &str,
-        sidecar: bool,
-    ) -> bool {
+    ) -> Vec<crate::LyricsStorage> {
         let Ok(Some(row)) = database.track(&(uri), &ReadCancellation::new()).await else {
-            return false;
+            return Vec::new();
         };
         if row.access.cue_path.is_some() {
-            return false;
+            return Vec::new();
         }
         if let Implementation::JellyfinEmby(provider) = &self.implementation
             && provider.kind == crate::ServerKind::Jellyfin
         {
-            return row.object_id.is_some();
-        }
-        if matches!(self.implementation, Implementation::OpenSubsonic(_))
-            && !self.mapped_metadata_ready().await
-        {
-            return false;
+            return if row.object_id.is_some() {
+                vec![crate::LyricsStorage::Server]
+            } else {
+                Vec::new()
+            };
         }
         let Ok(original) = database.original_file(uri).await else {
-            return false;
+            return Vec::new();
         };
         let Ok(file) = NativeFile::resolve(
             self,
@@ -1050,40 +1310,29 @@ impl Source {
             row.access.cue_path.is_some(),
             original,
         ) else {
-            return false;
+            return Vec::new();
         };
-        if sidecar {
-            return match &file.location {
-                FileLocation::Native(path) => path.parent().is_some_and(Path::is_dir),
-                _ => file.folder_identity(None).is_ok(),
-            };
-        }
-        match &file.location {
-            FileLocation::Native(path) => tags::embedded_lyrics_writable(path),
-            FileLocation::Document { uri, .. } => {
-                crate::stat_document(uri).is_ok_and(|entry| entry.writable)
-                    && file
-                        .format
-                        .as_deref()
-                        .is_some_and(tags::embedded_lyrics_format_writable)
-            }
-            FileLocation::Remote { source, path } => {
-                let Some(files) = source.file_source(Some(path)) else {
-                    return false;
-                };
-                if let Some(access) = files.document_access() {
-                    let Ok(relative) = files.relative(path) else {
-                        return false;
-                    };
-                    if !access.resolve(&relative).is_ok_and(|entry| entry.writable) {
-                        return false;
-                    }
-                }
-                file.format
-                    .as_deref()
-                    .is_some_and(tags::embedded_lyrics_format_writable)
-            }
-        }
+        file.lyrics_storage()
+    }
+
+    pub async fn lyrics_writable(
+        self: &Arc<Self>,
+        database: &Database,
+        uri: &str,
+        sidecar: bool,
+    ) -> bool {
+        self.lyrics_storage(database, uri)
+            .await
+            .into_iter()
+            .any(|storage| {
+                storage == crate::LyricsStorage::Server
+                    || storage
+                        == if sidecar {
+                            crate::LyricsStorage::Sidecar
+                        } else {
+                            crate::LyricsStorage::Embedded
+                        }
+            })
     }
 
     pub async fn write_lyrics(
@@ -1113,11 +1362,6 @@ impl Source {
                     .await
                     .map_err(failure)?;
             } else {
-                if matches!(self.implementation, Implementation::OpenSubsonic(_))
-                    && !self.mapped_metadata_ready().await
-                {
-                    return Err(Error::Unavailable);
-                }
                 let file = NativeFile::resolve(
                     self,
                     &row.media_uri,
@@ -1126,18 +1370,11 @@ impl Source {
                     row.access.cue_path.is_some(),
                     database.original_file(uri).await.map_err(failure)?,
                 )?;
-                if sidecar {
-                    if self.is_retired() {
-                        return Err(crate::SourceError::Cancelled.into());
-                    }
-                    file.write_sidecar(lyrics).await?;
-                } else {
-                    let (prepared, _) = file
-                        .prepare(None)
-                        .await?
-                        .mutate(TagUpdate::Lyrics(lyrics.into()), String::new(), None)
-                        .await?;
-                    let committed = prepared.commit(&|| self.is_retired()).await?;
+                if let Some(committed) = file
+                    .save_lyrics(lyrics, sidecar, || self.is_retired())
+                    .await?
+                {
+                    committed.preserve_fingerprint(database).await?;
                     if matches!(
                         self.implementation,
                         Implementation::Local(_) | Implementation::Files(_)
@@ -1241,7 +1478,6 @@ impl Source {
                             track: *track,
                             album: *album,
                         },
-                        String::new(),
                         None,
                     )
                     .await

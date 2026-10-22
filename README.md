@@ -284,7 +284,7 @@ pacman -S --needed base-devel git \
 
 ```bash
 brew install \
-  rust cmake just pkgconf gettext gtk4 libadwaita gstreamer \
+  rust cmake just pkgconf gettext gtk4 libadwaita gstreamer chromaprint \
   librsvg game-music-emu libnice-gstreamer libopenmpt libsoup meson ninja openssl@3 wavpack
 ```
 

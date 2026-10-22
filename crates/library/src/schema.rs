@@ -14,7 +14,7 @@ pub(crate) async fn pragma(
 }
 pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 54;
+PRAGMA user_version = 55;
 
 CREATE TABLE IF NOT EXISTS queue_contexts (
     context_key INTEGER PRIMARY KEY,
@@ -543,6 +543,18 @@ CREATE TABLE IF NOT EXISTS home_entries (
     PRIMARY KEY (source_key, section_id, position)
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS fingerprint_cache (
+    media_uri TEXT PRIMARY KEY REFERENCES tracks(media_uri) ON DELETE CASCADE,
+    analysis_key BLOB NOT NULL CHECK(length(analysis_key)=32),
+    version TEXT NOT NULL, fingerprint TEXT NOT NULL, duration_seconds INTEGER NOT NULL,
+    lookup_key TEXT NOT NULL DEFAULT ''
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS metadata_lookup_cache (
+    key TEXT PRIMARY KEY, payload BLOB NOT NULL,
+    written_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS waveform_cache (
     media_uri TEXT PRIMARY KEY REFERENCES tracks(media_uri) ON DELETE CASCADE,
     analysis_key BLOB NOT NULL CHECK(length(analysis_key)=32),
@@ -699,7 +711,7 @@ CREATE TABLE IF NOT EXISTS native_playlist_pending (
 
 pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
     let version = pragma(connection, "user_version").await?;
-    if !matches!(version, 0 | 47 | 48 | 49 | 50 | 51 | 53 | 54) {
+    if !matches!(version, 0 | 47 | 48 | 49 | 50 | 51 | 53 | 54 | 55) {
         return Err(crate::LibraryError::Migration(format!(
             "unsupported library schema {version}"
         )));

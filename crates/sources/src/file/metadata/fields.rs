@@ -132,6 +132,16 @@ pub(super) fn read(
                             .or_else(|| tag.get_string(ItemKey::Bpm))
                     })
                     .map(str::to_string),
+                "artist"
+                    if tag.is_some_and(|tag| tag.get_string(ItemKey::TrackArtists).is_some()) =>
+                {
+                    Some(
+                        tag.into_iter()
+                            .flat_map(|tag| tag.get_strings(ItemKey::TrackArtists))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    )
+                }
                 _ => Some(
                     tag.into_iter()
                         .flat_map(|tag| tag.get_strings(field.item))
@@ -154,25 +164,6 @@ pub(super) fn read(
             })
         })
         .collect()
-}
-
-pub(super) fn merge(current: &mut Vec<MetadataField>, next: Vec<MetadataField>) {
-    for field in current.iter_mut() {
-        if let Some(next) = next.iter().find(|next| next.key == field.key) {
-            field.writable &= next.writable;
-            field.mixed |= field.value != next.value;
-        } else {
-            field.writable = false;
-            field.mixed |= !field.value.is_empty();
-        }
-    }
-    for mut field in next {
-        if !current.iter().any(|existing| existing.key == field.key) {
-            field.mixed = !field.value.is_empty();
-            field.writable = false;
-            current.push(field);
-        }
-    }
 }
 
 pub(super) fn apply(
@@ -278,4 +269,76 @@ pub(super) fn apply(
         }
     }
     Ok(())
+}
+
+pub(super) fn project(edit: &MetadataEdit) -> crate::MetadataChanges {
+    let scope = match edit.kind {
+        SourceEntityKind::Track => 1,
+        SourceEntityKind::Album => 2,
+        SourceEntityKind::Artist => 4,
+    };
+    edit.changes
+        .iter()
+        .filter_map(|(key, value)| {
+            let field = FIELDS
+                .iter()
+                .find(|field| field.key == key && field.scopes & scope != 0)?;
+            let track = FIELDS
+                .iter()
+                .find(|track| track.item == field.item && track.scopes & 1 != 0)?;
+            Some((track.key.to_string(), value.clone()))
+        })
+        .collect()
+}
+
+pub(super) fn scope_fields(
+    kind: SourceEntityKind,
+    track: &crate::MetadataDraft,
+) -> Vec<MetadataField> {
+    let scope = if kind == SourceEntityKind::Album {
+        2
+    } else {
+        4
+    };
+    FIELDS
+        .iter()
+        .filter(|field| field.scopes & scope != 0)
+        .filter_map(|field| {
+            let canonical = FIELDS
+                .iter()
+                .find(|track| track.item == field.item && track.scopes & 1 != 0)?;
+            let original = track
+                .fields
+                .iter()
+                .find(|track| track.key == canonical.key)?;
+            let mut metadata =
+                MetadataField::new(field.key, original.value.clone(), original.writable);
+            metadata.kind = field.kind;
+            if let Some(label) = field.label {
+                metadata.label = label.into();
+            }
+            Some(metadata)
+        })
+        .collect()
+}
+
+pub(super) fn scope_values(
+    kind: SourceEntityKind,
+    values: &crate::MetadataChanges,
+) -> crate::MetadataChanges {
+    let scope = match kind {
+        SourceEntityKind::Track => 1,
+        SourceEntityKind::Album => 2,
+        SourceEntityKind::Artist => 4,
+    };
+    FIELDS
+        .iter()
+        .filter(|field| field.scopes & scope != 0)
+        .filter_map(|field| {
+            let track = FIELDS
+                .iter()
+                .find(|track| track.item == field.item && track.scopes & 1 != 0)?;
+            Some((field.key.to_string(), values.get(track.key)?.clone()))
+        })
+        .collect()
 }
