@@ -239,8 +239,8 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
 preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] PlayerDisplayPreferences, player_display, {
     #[serde(default)]
     clear_queue_includes_current: bool = false => set_clear_queue_includes_current;
-    #[serde(default = "default_true")]
-    fullscreen_dynamic_background: bool = true => set_fullscreen_dynamic_background;
+    #[serde(default)]
+    fullscreen_dynamic_background: bool = false => set_fullscreen_dynamic_background;
     #[serde(default = "default_lyrics_panel_visible")]
     fullscreen_background_image: bool = true => set_fullscreen_background_image;
     #[serde(default = "default_lyrics_panel_visible")]
@@ -712,7 +712,7 @@ mod tests {
         let restored: Settings = serde_json::from_value(old).unwrap();
         assert!(restored.player_display.fullscreen_lyrics_visible);
         assert!(restored.player_display.fullscreen_visualizer_visible);
-        assert!(restored.player_display.fullscreen_dynamic_background);
+        assert!(!restored.player_display.fullscreen_dynamic_background);
         for choice in 0..16 {
             let settings = Settings {
                 player_display: PlayerDisplayPreferences {
