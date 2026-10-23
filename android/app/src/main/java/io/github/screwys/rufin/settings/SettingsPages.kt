@@ -61,7 +61,8 @@ internal fun SettingsNumber(title: String, value: Double, range: ClosedFloatingP
 
 @Composable
 internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFloatingPointRange<Double>,
-    step: Double, integer: Boolean = false, unit: String? = null, enabled: Boolean = true, save: (Any) -> Unit) {
+    step: Double, integer: Boolean = false, unit: String? = null, enabled: Boolean = true, continuous: Boolean = false,
+    marks: (@Composable () -> Unit)? = null, save: (Any) -> Unit) {
     var draft by remember(value) { mutableDoubleStateOf(value) }
     val numberFormat = remember(step) {
         java.text.NumberFormat.getNumberInstance().apply {
@@ -88,10 +89,11 @@ internal fun SettingsSliderNumber(title: String, value: Double, range: ClosedFlo
                     .toDouble().coerceIn(range)
             }, Modifier.fillMaxWidth().semantics { contentDescription = title; stateDescription = displayValue },
                 enabled = enabled, valueRange = range.start.toFloat()..range.endInclusive.toFloat(),
-                steps = ((range.endInclusive - range.start) / step).roundToInt().minus(1).coerceAtLeast(0),
+                steps = if (continuous) 0 else ((range.endInclusive - range.start) / step).roundToInt().minus(1).coerceAtLeast(0),
                 colors = SliderDefaults.colors(activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent,
                     disabledActiveTickColor = Color.Transparent, disabledInactiveTickColor = Color.Transparent),
                 onValueChangeFinished = { save(if (integer) draft.toInt() else draft) })
+            marks?.invoke()
         }
     }
 }

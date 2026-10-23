@@ -21,7 +21,7 @@ pub struct TranscodeOptions {
     pub processing: Option<ProcessingConfig>,
     pub start_offset_millis: u64,
     pub duration_millis: Option<u64>,
-    pub visualizer: bool,
+    pub visualizer_fft_size: Option<usize>,
 }
 
 impl From<AudioEncoding> for TranscodeOptions {
@@ -31,7 +31,7 @@ impl From<AudioEncoding> for TranscodeOptions {
             processing: None,
             start_offset_millis: 0,
             duration_millis: None,
-            visualizer: false,
+            visualizer_fft_size: None,
         }
     }
 }
@@ -216,7 +216,7 @@ impl TranscodePipeline {
                 }
                 gst::PadProbeReturn::Ok
             });
-        let visualizer = options.visualizer.then(|| {
+        let visualizer = options.visualizer_fft_size.map(|size| {
             let (send, samples) = sync_channel(8);
             bin.by_name("bounds")
                 .expect("encoder bounds")
@@ -226,7 +226,7 @@ impl TranscodePipeline {
                     if let Some(buffer) = probe.buffer()
                         && let Some(position) = buffer.pts()
                         && let Some((samples, rate)) =
-                            crate::copy_visualizer_samples(pad, buffer, 4096)
+                            crate::copy_visualizer_samples(pad, buffer, size)
                     {
                         let _ = send.try_send((position.mseconds(), samples, rate));
                     }
@@ -234,7 +234,7 @@ impl TranscodePipeline {
                 });
             TranscodeVisualizer {
                 samples,
-                fft: crate::VisualizerFft::new(),
+                fft: crate::VisualizerFft::with_size(size),
                 next_millis: 0,
             }
         });
@@ -641,7 +641,7 @@ mod tests {
                     }),
                     start_offset_millis: 10,
                     duration_millis: None,
-                    visualizer: false,
+                    visualizer_fft_size: None,
                 },
                 || false,
             )

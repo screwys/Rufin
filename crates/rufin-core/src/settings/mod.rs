@@ -227,6 +227,7 @@ impl StoredSettings {
             self.ui.visualizer.migrate_preset_bar_counts();
             self.visualizer_preset_bar_counts_updated = true;
         }
+        self.ui.visualizer.migrate_named_presets();
         self.migrate_home_blocks();
         self.migrate_legacy_track_table();
         self.ui.sanitize();

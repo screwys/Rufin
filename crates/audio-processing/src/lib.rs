@@ -25,6 +25,7 @@ pub use waveform::generate_waveform_peaks_cancellable;
 
 pub use visualizer::{
     VISUALIZER_BAND_COUNT, VisualizerFft, copy_audio_samples, copy_visualizer_samples,
+    visualizer_frequency, visualizer_position,
 };
 
 /// Initialize GStreamer once before playback or waveform work starts.

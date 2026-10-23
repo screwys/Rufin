@@ -27,6 +27,7 @@ pub struct PlayerPreferences {
     pub playback: PlaybackSettings,
     pub lyrics: lyrics::UserPreferences,
     pub visualizer: visualizer::VisualizerSettings,
+    pub visualizer_save_target: Option<PreferenceIndex>,
     pub display: super::PlayerDisplayPreferences,
     pub right_panel: super::right_panel::RightPanelSettings,
 }
@@ -56,12 +57,13 @@ impl SettingsOwner {
         let ui = &stored.ui;
         let playback = ui.playback.clone();
         let mut visualizer = ui.visualizer.clone();
-        visualizer.selected_preset = Some(visualizer.selected_preset());
+        visualizer.selected_preset = visualizer.selected_preset();
         PlayerPreferences {
             application: ui.application.clone(),
             playback,
             lyrics: ui.lyrics.preferences.clone(),
             visualizer,
+            visualizer_save_target: ui.visualizer.save_target(),
             display: ui.player_display.clone(),
             right_panel: ui.right_panel.clone(),
         }
@@ -112,11 +114,11 @@ impl SettingsOwner {
 
     pub fn set_visualizer_appearance(
         &self,
-        value: visualizer::VisualizerAppearance,
+        mut value: visualizer::VisualizerAppearance,
     ) -> Result<(), SettingsError> {
+        value.normalize_analysis();
         self.restore(
             move |stored| {
-                stored.ui.visualizer.selected_preset = Some(stored.ui.visualizer.selected_preset());
                 stored.ui.visualizer.appearance = value;
                 Ok(())
             },
@@ -155,17 +157,46 @@ impl SettingsOwner {
         .map_err(Into::into)
     }
 
-    pub fn copy_visualizer_preset(&self) -> String {
-        visualizer::VisualizerPreset {
-            appearance: self.visualizer_render_settings().1,
-        }
-        .to_json()
+    pub fn save_visualizer_preset(&self, name: String) -> Result<(), SettingsError> {
+        self.update_preferences(move |ui| {
+            ui.visualizer.save_preset_as(name.trim().to_owned());
+            Ok(())
+        })
+        .map_err(Into::into)
     }
 
-    pub fn paste_visualizer_preset(&self, text: String) -> Result<(), SettingsError> {
+    pub fn rename_visualizer_preset(
+        &self,
+        slot: PreferenceIndex,
+        name: String,
+    ) -> Result<(), SettingsError> {
+        self.update_preferences(move |ui| {
+            ui.visualizer.rename_preset(slot, name.trim().to_owned());
+            Ok(())
+        })
+        .map_err(Into::into)
+    }
+
+    pub fn delete_visualizer_preset(&self, slot: PreferenceIndex) -> Result<(), SettingsError> {
+        self.update_preferences(move |ui| {
+            ui.visualizer.delete_preset(slot);
+            Ok(())
+        })
+        .map_err(Into::into)
+    }
+
+    pub fn export_visualizer_preset(&self) -> String {
+        self.load().visualizer.current_preset().to_json()
+    }
+
+    pub fn import_visualizer_preset(&self, text: String) -> Result<(), SettingsError> {
         let preset = visualizer::VisualizerPreset::from_json(&text)
-            .ok_or_else(|| SettingsError::from(localization::tr("This isn't available")))?;
-        self.set_visualizer_appearance(preset.appearance)
+            .ok_or_else(|| SettingsError::from(localization::tr("Not valid")))?;
+        self.update_preferences(move |ui| {
+            ui.visualizer.import_preset(preset);
+            Ok(())
+        })
+        .map_err(Into::into)
     }
 
     pub fn reset_visualizer_appearance(&self) -> Result<(), SettingsError> {
@@ -178,14 +209,14 @@ macro_rules! preference_target {
 }
 
 macro_rules! native_preference_setters {
-    ([$ui:ident $path:tt $before:block]
+    ([$ui:ident $path:tt $after:block]
         $( $(#[$attribute:meta])* $field:ident: $ty:ty = $default:expr $(=> $setter:ident)?; )*) => {
         #[cfg_attr(feature = "bindings", uniffi::export)]
         impl SettingsOwner {
             $($(pub fn $setter(&self, value: $ty) -> Result<(), SettingsError> {
                 self.update_preferences(move |$ui| {
-                    $before;
                     (preference_target!($ui $path)).$field = value;
+                    $after;
                     Ok(())
                 }).map_err(Into::into)
             })?)*
@@ -197,7 +228,9 @@ macro_rules! native_preference_setters {
 }
 
 use lyrics::ExternalLyricsProvider;
-use visualizer::{VisualizerColors, VisualizerStyle};
+use visualizer::{
+    VisualizerColors, VisualizerFrequencyScale, VisualizerStyle, VisualizerWeighting,
+};
 playback::playback_preference_fields!(native_preference_setters, ui, (playback), {});
 lyrics::lyrics_preference_fields!(native_preference_setters, ui, (lyrics.preferences), {});
 visualizer::visualizer_preference_fields!(
@@ -205,6 +238,6 @@ visualizer::visualizer_preference_fields!(
     ui,
     (visualizer.appearance),
     {
-        ui.visualizer.selected_preset = Some(ui.visualizer.selected_preset());
+        ui.visualizer.appearance.normalize_analysis();
     }
 );

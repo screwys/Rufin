@@ -50,12 +50,13 @@ import kotlinx.coroutines.flow.drop
 
 @Composable
 internal fun SettingsPage(modifier: Modifier = Modifier, embedded: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        if (embedded) modifier.fillMaxWidth() else modifier.fillMaxSize().verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + LocalPlayerBottomPadding.current),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
-        content = content,
-    )
+    if (embedded) {
+        Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(24.dp), content = content)
+        return
+    }
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState())
+        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + LocalPlayerBottomPadding.current),
+        verticalArrangement = Arrangement.spacedBy(24.dp), content = content)
 }
 
 @Composable

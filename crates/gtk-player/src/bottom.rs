@@ -8,7 +8,10 @@ use gtk_widgets::{
     layout::{AllocationOwner, allocation_owner},
     localization::{bind_widget_accessible_label, bind_widget_tooltip},
     ratings::RatingControl,
-    scale::{horizontal_scale_value_at_x, install_hover_value_bubble, install_scale_fill_updates},
+    scale::{
+        horizontal_scale_value_at_x, install_pointer_value_bubble, install_scale_fill_updates,
+        install_value_bubble_dismissal, point_value_bubble_at_slider,
+    },
 };
 use localization::{msgid, tr, tr_with};
 use playback::{
@@ -718,7 +721,7 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
     progress_stack.set_visible_child(&progress);
     let weak_scale = progress.downgrade();
     install_scale_fill_updates(&progress);
-    install_hover_value_bubble(
+    install_pointer_value_bubble(
         &progress_stack,
         seek_preview,
         seek_preview_time,
@@ -821,28 +824,50 @@ pub fn build_player_action_controls(
     volume_slot.set_valign(gtk::Align::Fill);
     volume_group.append(&volume_slot);
     install_scale_fill_updates(&volume);
-    let level_for_change = volume_preview_level.clone();
+    volume_preview.set_parent(&volume);
+    volume_preview.set_offset(0, -4);
+    volume
+        .adjustment()
+        .bind_property("value", &volume_preview_level, "label")
+        .transform_to(|_, value: f64| Some(format!("{:.0}", value * 100.0)))
+        .sync_create()
+        .build();
+    let preview = volume_preview.downgrade();
     volume.connect_value_changed(move |scale| {
-        level_for_change.set_text(&format!("{:.0}", scale.value() * 100.0));
-        scale.set_fill_level(scale.value());
+        if let Some(preview) = preview.upgrade() {
+            point_value_bubble_at_slider(scale, &preview);
+        }
     });
-    install_hover_value_bubble(
-        &volume,
-        volume_preview,
-        volume_preview_level,
-        |widget, x, _| {
-            let scale = widget
-                .downcast_ref::<gtk::Scale>()
-                .filter(|scale| scale.is_sensitive())?;
-            let level = horizontal_scale_value_at_x(scale, x);
-            scale.set_fill_level(level);
-            let range = scale.range_rect();
-            Some((
-                format!("{:.0}", level * 100.0),
-                f64::from(range.y()) + f64::from(range.height()) / 2.0,
-            ))
-        },
-    );
+    let motion = gtk::EventControllerMotion::new();
+    motion.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let weak_volume = volume.downgrade();
+    let weak_slot = volume_slot.downgrade();
+    let preview = volume_preview.downgrade();
+    let show_preview = Rc::new(move |x: f64, y: f64| {
+        if let (Some(volume), Some(slot), Some(preview)) = (
+            weak_volume.upgrade(),
+            weak_slot.upgrade(),
+            preview.upgrade(),
+        ) && volume.is_sensitive()
+        {
+            if slot.contains(x, y)
+                && let Some(point) =
+                    slot.compute_point(&volume, &gtk::graphene::Point::new(x as f32, y as f32))
+            {
+                volume.set_fill_level(horizontal_scale_value_at_x(&volume, f64::from(point.x())));
+            }
+            point_value_bubble_at_slider(&volume, &preview);
+            if !preview.is_visible() {
+                preview.popup();
+            }
+        }
+    });
+    let enter_preview = Rc::clone(&show_preview);
+    motion.connect_enter(move |_, x, y| enter_preview(x, y));
+    motion.connect_motion(move |_, x, y| show_preview(x, y));
+    install_value_bubble_dismissal(&motion, &volume_preview);
+    volume_slot.add_controller(motion);
+    volume.connect_destroy(move |_| volume_preview.unparent());
     PlayerActionControls {
         root,
         buttons,

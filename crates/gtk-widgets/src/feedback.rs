@@ -1,6 +1,10 @@
 use crate::settings::SettingsState;
 use gtk::{glib, prelude::*};
-use std::{cell::Cell, rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    time::Duration,
+};
 const CONTROL_TOAST_TIMEOUT: u32 = 2;
 pub struct ControlFeedbackState {
     generation: Rc<Cell<u64>>,
@@ -50,5 +54,43 @@ impl ControlFeedbackState {
                 }
             },
         );
+    }
+}
+
+/// Briefly replace an action icon with a checkmark.
+pub fn icon_action(button: &gtk::Widget, icon: &gtk::Image) -> impl Fn() + use<> {
+    let reset = Rc::new(RefCell::new(None::<gtk::glib::SourceId>));
+    let original = icon.icon_name();
+    let restore = original.clone();
+    let pending = reset.clone();
+    let image = icon.downgrade();
+    button.connect_unrealize(move |_| {
+        if let Some(source) = pending.borrow_mut().take() {
+            source.remove();
+        }
+        if let Some(image) = image.upgrade() {
+            image.set_icon_name(restore.as_deref());
+        }
+    });
+    let icon = icon.downgrade();
+    move || {
+        if let Some(source) = reset.borrow_mut().take() {
+            source.remove();
+        }
+        if let Some(icon) = icon.upgrade() {
+            icon.set_icon_name(Some("rufin-object-select-symbolic"));
+        }
+        let icon = icon.clone();
+        let pending = reset.clone();
+        let original = original.clone();
+        reset.replace(Some(gtk::glib::timeout_add_local_once(
+            std::time::Duration::from_millis(1500),
+            move || {
+                pending.borrow_mut().take();
+                if let Some(icon) = icon.upgrade() {
+                    icon.set_icon_name(original.as_deref());
+                }
+            },
+        )));
     }
 }

@@ -212,7 +212,6 @@
   <object class="GtkPopover" id="seek_preview">
     <property name="autohide">false</property>
     <property name="focusable">false</property>
-    <property name="can-target">false</property>
     <property name="has-arrow">false</property>
     <property name="position">top</property>
     <style><class name="slider-value-popover"/><class name="player-slider-preview"/></style>
@@ -260,7 +259,6 @@
   <object class="GtkPopover" id="volume_preview">
     <property name="autohide">false</property>
     <property name="focusable">false</property>
-    <property name="can-target">false</property>
     <property name="has-arrow">false</property>
     <property name="position">top</property>
     <style><class name="slider-value-popover"/><class name="player-slider-preview"/></style>

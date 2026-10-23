@@ -96,24 +96,44 @@ private fun DrawScope.drawVisualizer(frame: AndroidVisualizerDrawing, height: Fl
         alpha * alphaScale,
     )
     val gradient = Brush.verticalGradient(listOf(color(1f), color(0f)), startY = bottom - graphHeight, endY = bottom)
-    if (frame.style == "line" || frame.style == "filled") {
-        val path = Path()
-        frame.bars.forEachIndexed { index, level ->
-            val x = left + cell / 2 + index * (cell + gap)
-            val y = bottom - level.toFloat() * graphHeight
-            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    if (frame.style in listOf("line", "filled", "ribbon", "halo")) {
+        val ribbon = frame.style == "ribbon"
+        val halo = frame.style == "halo"
+        fun points(inward: Boolean = false) = frame.bars.mapIndexed { index, level ->
+            if (halo) {
+                val radius = min(size.width, height) * .22f + if (inward)
+                    -min(level.toFloat() * frame.inwardShadowScale.toFloat(), frame.inwardShadowLimit.toFloat())
+                    else level.toFloat() * min(size.width, height) * .25f
+                val angle = (index.toDouble() + if (frame.mirrored) .5 else 0.0) / frame.bars.size * 2 * PI - PI / 2
+                Offset(size.width / 2 + radius * cos(angle).toFloat(), height / 2 + radius * sin(angle).toFloat())
+            } else Offset(left + cell / 2 + index * (cell + gap),
+                if (ribbon) height / 2 - level.toFloat() * graphHeight / 2 else bottom - level.toFloat() * graphHeight)
+        }
+        val outline = points()
+        val path = if (ribbon || halo) smoothClosedPath(
+            if (ribbon) outline + outline.asReversed().map { Offset(it.x, height - it.y) } else outline
+        ) else Path().apply {
+            outline.forEachIndexed { index, point ->
+                if (index == 0) moveTo(point.x, point.y) else lineTo(point.x, point.y)
+            }
         }
         if (frame.style == "filled") {
             path.lineTo(left + cell / 2 + (frame.bars.size - 1) * (cell + gap), bottom)
             path.lineTo(left + cell / 2, bottom); path.close()
             drawPath(path, gradient)
-        } else drawPath(path, gradient, style = Stroke(2f))
+        } else if (ribbon) drawPath(path, gradient)
+        else {
+            drawPath(path, gradient, style = Stroke(2f))
+            if (halo && frame.inwardShadowLimit > 0) {
+                drawPath(smoothClosedPath(points(true)), color(.5f, frame.shadowOpacity.toFloat(), frame.shadowBrightness.toFloat()), style = Stroke(2f))
+            }
+        }
     }
     frame.bars.forEachIndexed { column, value ->
         val level = value.toFloat()
         val x = left + column * (cell + gap)
         val barHeight = level * graphHeight
-        if (frame.style == "circular") {
+        if (frame.style == "circular" || frame.style == "halo") {
             val center = Offset(size.width / 2, height / 2)
             val radius = min(size.width, height) * .22f
             val extent = min(size.width, height) * .25f
@@ -122,9 +142,9 @@ private fun DrawScope.drawVisualizer(frame: AndroidVisualizerDrawing, height: Fl
             val thickness = (2 * PI * radius / frame.bars.size - gap).toFloat().coerceAtLeast(1f)
             val shadowLength = min(level * frame.inwardShadowScale.toFloat(), frame.inwardShadowLimit.toFloat())
             val shadowColor = color(level, frame.shadowOpacity.toFloat(), frame.shadowBrightness.toFloat())
-            if (shadowLength > 0) drawLine(shadowColor, center + direction * radius,
+            if (frame.style == "circular" && shadowLength > 0) drawLine(shadowColor, center + direction * radius,
                 center + direction * (radius - shadowLength), strokeWidth = thickness, cap = StrokeCap.Butt)
-            if (level > 0) drawLine(color(level), center + direction * radius,
+            if (frame.style == "circular" && level > 0) drawLine(color(level), center + direction * radius,
                 center + direction * (radius + extent * level), strokeWidth = thickness, cap = StrokeCap.Butt)
             frame.peaks.getOrNull(column)?.takeIf { it > 0 }?.let { peak ->
                 drawCircle(color(level), 1.5f, center + direction * (radius + extent * peak.toFloat()))
@@ -147,7 +167,7 @@ private fun DrawScope.drawVisualizer(frame: AndroidVisualizerDrawing, height: Fl
                     drawRect(color(mix, part * .76f), Offset(x, bottom - rowHeight - full * rowStride), Size(cell, rowHeight))
                 }
             } else if (barHeight > 0) {
-                val y = if (frame.style == "mirrored") height / 2 - barHeight / 2 else bottom - barHeight
+                val y = if (frame.style == "mirrored" || frame.style == "ribbon") height / 2 - barHeight / 2 else bottom - barHeight
                 when (frame.style) {
                     "rounded" -> drawRoundRect(gradient, Offset(x, y), Size(cell, barHeight), CornerRadius(min(cell, barHeight) / 2))
                     "outline" -> drawRect(gradient, Offset(x, y), Size(cell, barHeight), style = Stroke(1f))
@@ -155,10 +175,20 @@ private fun DrawScope.drawVisualizer(frame: AndroidVisualizerDrawing, height: Fl
                 }
             }
             frame.peaks.getOrNull(column)?.takeIf { it > 0 }?.let { peak ->
-                val y = if (frame.style == "mirrored") height / 2 - peak.toFloat() * graphHeight / 2 else bottom - peak.toFloat() * graphHeight
+                val y = if (frame.style == "mirrored" || frame.style == "ribbon") height / 2 - peak.toFloat() * graphHeight / 2 else bottom - peak.toFloat() * graphHeight
                 drawRect(color(1f), Offset(x, y), Size(cell, 2f))
-                if (frame.style == "mirrored") drawRect(color(1f), Offset(x, height - y - 2), Size(cell, 2f))
+                if (frame.style == "mirrored" || frame.style == "ribbon") drawRect(color(1f), Offset(x, height - y - 2), Size(cell, 2f))
             }
         }
     }
+}
+
+private fun smoothClosedPath(points: List<Offset>) = Path().apply {
+    val start = (points.last() + points.first()) / 2f
+    moveTo(start.x, start.y)
+    points.forEachIndexed { index, point ->
+        val end = (point + points[(index + 1) % points.size]) / 2f
+        quadraticTo(point.x, point.y, end.x, end.y)
+    }
+    close()
 }

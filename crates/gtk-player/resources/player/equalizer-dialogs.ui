@@ -60,7 +60,7 @@
               <object class="GtkBox">
                 <property name="spacing">8</property>
                 <child>
-                  <object class="GtkBox">
+                  <object class="GtkBox" id="import_formats">
                     <property name="hexpand">true</property>
                     <style><class name="linked" /></style>
                     <child>
@@ -159,7 +159,7 @@
               <object class="GtkBox">
                 <property name="spacing">8</property>
                 <child>
-                  <object class="GtkBox">
+                  <object class="GtkBox" id="export_formats">
                     <property name="hexpand">true</property>
                     <style><class name="linked" /></style>
                     <child>
@@ -215,14 +215,18 @@
                 <property name="spacing">8</property>
                 <property name="halign">end</property>
                 <child>
-                  <object class="GtkButton" id="export_save">
-                    <property name="label" translatable="yes">Save...</property>
+                  <object class="GtkButton" id="export_accept">
+                    <property name="child"><object class="GtkBox">
+                      <property name="spacing">6</property>
+                      <child><object class="GtkImage" id="export_copy_icon"><property name="icon-name">rufin-edit-copy-symbolic</property></object></child>
+                      <child><object class="GtkLabel"><property name="label" translatable="yes">Copy</property></object></child>
+                    </object></property>
+                    <style><class name="suggested-action" /></style>
                   </object>
                 </child>
                 <child>
-                  <object class="GtkButton" id="export_accept">
-                    <property name="label" translatable="yes">Copy</property>
-                    <style><class name="suggested-action" /></style>
+                  <object class="GtkButton" id="export_save">
+                    <property name="label" translatable="yes">Save</property>
                   </object>
                 </child>
               </object>

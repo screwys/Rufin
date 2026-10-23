@@ -172,3 +172,12 @@ fn quality_button_title(quality: StreamQuality) -> String {
         StreamQuality::MaxBitrateKbps(bitrate) => bitrate.to_string(),
     }
 }
+
+/// Connect the reset icon embedded in an entry.
+pub fn connect_entry_reset(entry: &gtk::Entry, reset: impl Fn(&gtk::Entry) + 'static) {
+    entry.connect_icon_release(move |entry, position| {
+        if position == gtk::EntryIconPosition::Secondary {
+            reset(entry);
+        }
+    });
+}

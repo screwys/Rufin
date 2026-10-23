@@ -178,6 +178,8 @@ pub mod equalizer;
 pub mod fullscreen;
 pub mod fullscreen_background;
 mod icons;
+mod preset_name;
+mod preset_transfer;
 mod progress;
 pub mod visualizer;
 mod visualizer_settings;

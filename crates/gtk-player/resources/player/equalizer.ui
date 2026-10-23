@@ -5,142 +5,137 @@
     <property name="orientation">vertical</property>
     <property name="spacing">8</property>
     <child>
-      <object class="GtkBox" id="header">
-        <property name="orientation">horizontal</property>
-        <property name="spacing">8</property>
+      <object class="GtkListBox" id="header">
+        <property name="selection-mode">none</property>
+        <style><class name="boxed-list" /></style>
         <child>
-          <object class="GtkLabel">
-            <property name="label" translatable="yes">Equalizer</property>
-            <property name="hexpand">true</property>
-            <property name="xalign">0</property>
-          </object>
-        </child>
-        <child>
-          <object class="GtkSwitch" id="enabled">
-            <property name="valign">center</property>
-            <accessibility>
-              <property name="label" translatable="yes">Equalizer</property>
-            </accessibility>
-          </object>
-        </child>
-      </object>
-    </child>
-    <child>
-      <object class="GtkBox" id="output_line">
-        <property name="spacing">8</property>
-        <child>
-          <object class="GtkBox" id="output_host">
-            <property name="orientation">horizontal</property>
-            <property name="spacing">8</property>
-            <property name="hexpand">false</property>
-          </object>
-        </child>
-        <child>
-          <object class="GtkCheckButton" id="assigned">
-            <property name="label" translatable="yes">Use for this output</property>
-            <accessibility>
-              <property name="label" translatable="yes">Use for this output</property>
-            </accessibility>
-          </object>
-        </child>
-      </object>
-    </child>
-    <child>
-      <object class="GtkBox" id="toolbar">
-        <property name="spacing">8</property>
-        <child>
-          <object class="GtkBox">
-            <property name="orientation">horizontal</property>
-            <property name="spacing">4</property>
-            <property name="hexpand">true</property>
-            <child>
-              <object class="GtkMenuButton" id="preset">
-                <property name="hexpand">false</property>
-                <property name="tooltip-text" translatable="yes">Preset</property>
-                <property name="child">
-                  <object class="GtkBox">
-                    <property name="spacing">6</property>
-                    <child>
-                      <object class="GtkLabel" id="preset_title">
-                        <property name="ellipsize">end</property>
-                        <property name="max-width-chars">18</property>
-                        <property name="hexpand">true</property>
-                        <property name="xalign">0</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkImage">
-                        <property name="icon-name">rufin-pan-down-symbolic</property>
-                      </object>
-                    </child>
-                  </object>
-                </property>
-              </object>
-            </child>
-            <child>
-              <object class="GtkBox">
+          <object class="AdwActionRow">
+            <property name="title" translatable="yes">Equalizer</property>
+            <property name="activatable-widget">enabled</property>
+            <child type="suffix">
+              <object class="GtkSwitch" id="enabled">
                 <property name="valign">center</property>
-                <style><class name="equalizer-preset-actions" /></style>
-                <child>
-                  <object class="GtkButton" id="save">
-                    <property name="icon-name">rufin-document-save-symbolic</property>
-                    <property name="tooltip-text" translatable="yes">Save preset</property>
-                    <accessibility><property name="label" translatable="yes">Save preset</property></accessibility>
-                    <style><class name="flat" /></style>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkButton" id="duplicate">
-                    <property name="icon-name">rufin-edit-copy-symbolic</property>
-                    <property name="tooltip-text" translatable="yes">Duplicate preset</property>
-                    <accessibility><property name="label" translatable="yes">Duplicate preset</property></accessibility>
-                    <style><class name="flat" /></style>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkButton" id="rename">
-                    <property name="icon-name">rufin-document-edit-symbolic</property>
-                    <property name="tooltip-text" translatable="yes">Rename preset</property>
-                    <accessibility><property name="label" translatable="yes">Rename preset</property></accessibility>
-                    <style><class name="flat" /></style>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkButton" id="import">
-                    <property name="icon-name">rufin-document-open-symbolic</property>
-                    <property name="tooltip-text" translatable="yes">Import preset</property>
-                    <accessibility><property name="label" translatable="yes">Import preset</property></accessibility>
-                    <style><class name="flat" /></style>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkButton" id="export">
-                    <property name="icon-name">rufin-document-send-symbolic</property>
-                    <property name="tooltip-text" translatable="yes">Export preset</property>
-                    <accessibility><property name="label" translatable="yes">Export preset</property></accessibility>
-                    <style><class name="flat" /></style>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkButton" id="delete">
-                    <property name="icon-name">rufin-user-trash-symbolic</property>
-                    <property name="tooltip-text" translatable="yes">Delete preset</property>
-                    <accessibility><property name="label" translatable="yes">Delete preset</property></accessibility>
-                    <style><class name="flat" /></style>
-                  </object>
-                </child>
+                <accessibility>
+                  <property name="label" translatable="yes">Equalizer</property>
+                </accessibility>
               </object>
             </child>
           </object>
         </child>
-        <child>
-          <object class="GtkToggleButton" id="mode">
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Presets</property>
+        <property name="header-suffix">
+          <object class="GtkBox" id="toolbar">
             <property name="halign">end</property>
             <property name="valign">center</property>
-            <property name="icon-name">rufin-spring-graph-symbolic</property>
-            <property name="tooltip-text" translatable="yes">Parametric</property>
-            <accessibility><property name="label" translatable="yes">Parametric</property></accessibility>
-            <style><class name="equalizer-mode" /></style>
+            <style><class name="preset-actions" /></style>
+            <child>
+              <object class="GtkButton" id="save">
+                <property name="icon-name">rufin-document-save-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Save preset</property>
+                <accessibility><property name="label" translatable="yes">Save preset</property></accessibility>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="duplicate">
+                <property name="icon-name">rufin-edit-copy-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Duplicate preset</property>
+                <accessibility><property name="label" translatable="yes">Duplicate preset</property></accessibility>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="rename">
+                <property name="icon-name">rufin-document-edit-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Rename preset</property>
+                <accessibility><property name="label" translatable="yes">Rename preset</property></accessibility>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="import">
+                <property name="icon-name">rufin-document-open-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Import preset</property>
+                <accessibility><property name="label" translatable="yes">Import preset</property></accessibility>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="export">
+                <property name="icon-name">rufin-document-send-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Export preset</property>
+                <accessibility><property name="label" translatable="yes">Export preset</property></accessibility>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="delete">
+                <property name="icon-name">rufin-user-trash-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Delete preset</property>
+                <accessibility><property name="label" translatable="yes">Delete preset</property></accessibility>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+          </object>
+        </property>
+        <child>
+          <object class="AdwComboRow" id="preset">
+            <property name="title" translatable="yes">Saved preset</property>
+            <property name="enable-search">true</property>
+            <property name="model"><object class="GtkStringList" id="preset_names" /></property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkListBoxRow" id="output_line">
+            <property name="activatable">false</property>
+            <property name="selectable">false</property>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="margin-start">12</property>
+                <property name="margin-end">12</property>
+                <property name="margin-top">6</property>
+                <property name="margin-bottom">6</property>
+                <property name="hexpand">true</property>
+                <property name="spacing">8</property>
+                <child>
+                  <object class="GtkCheckButton" id="assigned">
+                    <property name="valign">center</property>
+                    <property name="child"><object class="GtkLabel">
+                      <property name="label" translatable="yes">Use for this output</property>
+                      <property name="wrap">true</property>
+                      <property name="wrap-mode">word-char</property>
+                      <property name="xalign">0</property>
+                      <property name="natural-wrap-mode">none</property>
+                    </object></property>
+                    <accessibility>
+                      <property name="label" translatable="yes">Use for this output</property>
+                    </accessibility>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox" id="output_host">
+                    <property name="valign">center</property>
+                    <property name="spacing">8</property>
+                    <property name="hexpand">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkToggleButton" id="mode">
+                    <property name="halign">end</property>
+                    <property name="margin-start">12</property>
+                    <property name="valign">center</property>
+                    <property name="icon-name">rufin-spring-graph-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Parametric</property>
+                    <accessibility><property name="label" translatable="yes">Parametric</property></accessibility>
+                    <style><class name="equalizer-mode" /></style>
+                  </object>
+                </child>
+              </object>
+            </property>
           </object>
         </child>
       </object>
@@ -511,7 +506,7 @@
                         <accessibility>
                           <property name="label" translatable="yes">Bass</property>
                         </accessibility>
-                      </object>
+                      <marks><mark value="-12" position="bottom">-12</mark><mark value="-6" position="bottom">-6</mark><mark value="0" position="bottom">0</mark><mark value="6" position="bottom">6</mark><mark value="12" position="bottom">12</mark></marks></object>
                     </child>
                     <child>
                       <object class="GtkEntry" id="bass">
@@ -526,7 +521,7 @@
                         <style>
                           <class name="equalizer-number" />
                         </style>
-                      </object>
+                      <property name="secondary-icon-name">rufin-view-refresh-symbolic</property><property name="secondary-icon-tooltip-text" translatable="yes">Reset</property><property name="secondary-icon-activatable">true</property></object>
                     </child>
                     <property name="hexpand">true</property>
                   </object>
@@ -562,7 +557,7 @@
                         <accessibility>
                           <property name="label" translatable="yes">Treble</property>
                         </accessibility>
-                      </object>
+                      <marks><mark value="-12" position="bottom">-12</mark><mark value="-6" position="bottom">-6</mark><mark value="0" position="bottom">0</mark><mark value="6" position="bottom">6</mark><mark value="12" position="bottom">12</mark></marks></object>
                     </child>
                     <child>
                       <object class="GtkEntry" id="treble">
@@ -577,7 +572,7 @@
                         <style>
                           <class name="equalizer-number" />
                         </style>
-                      </object>
+                      <property name="secondary-icon-name">rufin-view-refresh-symbolic</property><property name="secondary-icon-tooltip-text" translatable="yes">Reset</property><property name="secondary-icon-activatable">true</property></object>
                     </child>
                     <property name="hexpand">true</property>
                   </object>
@@ -626,7 +621,7 @@
                         <accessibility>
                           <property name="label" translatable="yes">Balance</property>
                         </accessibility>
-                      </object>
+                      <marks><mark value="-1" position="bottom">-1</mark><mark value="-0.5" position="bottom">-0.5</mark><mark value="0" position="bottom">0</mark><mark value="0.5" position="bottom">0.5</mark><mark value="1" position="bottom">1</mark></marks></object>
                     </child>
                     <child>
                       <object class="GtkEntry" id="balance">
@@ -641,7 +636,7 @@
                         <style>
                           <class name="equalizer-number" />
                         </style>
-                      </object>
+                      <property name="secondary-icon-name">rufin-view-refresh-symbolic</property><property name="secondary-icon-tooltip-text" translatable="yes">Reset</property><property name="secondary-icon-activatable">true</property></object>
                     </child>
                     <property name="hexpand">true</property>
                   </object>
@@ -708,34 +703,6 @@
     </style>
     <property name="vexpand">false</property>
     <property name="valign">start</property>
-  </object>
-  <object class="GtkPopover" id="preset_popover">
-    <child>
-      <object class="GtkScrolledWindow">
-        <property name="hscrollbar-policy">never</property>
-        <property name="vscrollbar-policy">automatic</property>
-        <property name="min-content-height">180</property>
-        <property name="max-content-height">360</property>
-        <property name="propagate-natural-height">true</property>
-        <child>
-          <object class="GtkBox">
-            <property name="orientation">vertical</property>
-            <property name="spacing">2</property>
-            <child>
-              <object class="GtkBox" id="preset_items">
-                <property name="orientation">vertical</property>
-                <property name="spacing">2</property>
-              </object>
-            </child>
-            <child>
-              <object class="GtkButton" id="custom">
-                <property name="label" translatable="yes">Custom</property>
-              </object>
-            </child>
-          </object>
-        </child>
-      </object>
-    </child>
   </object>
   <object class="GtkLabel" id="custom_title">
     <property name="label" translatable="yes">Custom</property>

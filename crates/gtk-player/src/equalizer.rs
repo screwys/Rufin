@@ -8,11 +8,11 @@ use adw::prelude::*;
 use audio_processing::effects::{
     BandLayout, EqProfile, FilterKind, FilterWidth, response_curve_db,
 };
+use gtk::glib;
 use gtk::subclass::prelude::*;
-use gtk::{gio, glib};
 use localization::tr;
 use rufin_core::playback::PlaybackOwner;
-use rufin_core::{EqCastFormat, EqEdit, EqPresetFormat, EqSubscription, EqView};
+use rufin_core::{EqCastFormat, EqEdit, EqPresetFormat, EqPresetSummary, EqSubscription, EqView};
 
 pub fn equalizer_preset_title(name: &str) -> String {
     match name {
@@ -200,13 +200,14 @@ struct Editor {
     effects: adw::ExpanderRow,
     unavailable: gtk::Label,
     assigned: gtk::CheckButton,
-    preset: gtk::MenuButton,
+    preset: adw::ComboRow,
     save: gtk::Button,
+    preset_indicator: crate::preset_name::PresetIndicator,
     rename: gtk::Button,
     delete: gtk::Button,
     custom_title: String,
-    preset_items: gtk::Box,
-    preset_title: gtk::Label,
+    preset_names: gtk::StringList,
+    preset_items: RefCell<Vec<EqPresetSummary>>,
     output_selector: gtk::DropDown,
     output_name: gtk::Label,
     graphic: gtk::Box,
@@ -285,11 +286,10 @@ impl EqualizerSurface {
             root: gtk::Box, enabled: gtk::Switch, assigned: gtk::CheckButton,
             toolbar: gtk::Box, editor: gtk::Box, effects: adw::ExpanderRow,
             unavailable: gtk::Label,
-            preset: gtk::MenuButton, save: gtk::Button,
+            preset: adw::ComboRow, save: gtk::Button,
             rename: gtk::Button, delete: gtk::Button, duplicate: gtk::Button,
-            import: gtk::Button, export: gtk::Button, custom: gtk::Button,
-            custom_title: gtk::Label, preset_items: gtk::Box, preset_title: gtk::Label,
-            preset_popover: gtk::Popover,
+            import: gtk::Button, export: gtk::Button,
+            custom_title: gtk::Label, preset_names: gtk::StringList,
             output_host: gtk::Box, graphic: gtk::Box, parametric: gtk::Box,
             mode: gtk::ToggleButton, mode_titles: gtk::StringList,
             bands: gtk::Box, filters: gtk::Box, graphic_plot: EqualizerPlot,
@@ -308,9 +308,9 @@ impl EqualizerSurface {
             reset: gtk::Button,
             error: gtk::Label,
         });
-        preset.set_popover(Some(&preset_popover));
         let output_selector = crate::outputs::audio_output_dropdown(player, 1);
-        output_selector.set_halign(gtk::Align::Start);
+        output_selector.set_halign(gtk::Align::Fill);
+        output_selector.set_hexpand(true);
         output_host.append(&output_selector);
         let output_name = gtk::Label::new(None);
         output_name.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -341,11 +341,12 @@ impl EqualizerSurface {
             assigned,
             preset,
             save,
+            preset_indicator: crate::preset_name::PresetIndicator::default(),
             rename,
             delete,
             custom_title: custom_title.text().to_string(),
-            preset_items,
-            preset_title,
+            preset_names,
+            preset_items: RefCell::new(Vec::new()),
             output_selector,
             output_name,
             graphic,
@@ -438,13 +439,22 @@ impl EqualizerSurface {
             }
         });
         let weak = Rc::downgrade(&editor);
-        custom.connect_clicked(move |_| {
-            if let Some(editor) = weak.upgrade() {
-                editor.select_preset(None);
+        editor.preset.connect_selected_notify(move |row| {
+            let Some(editor) = weak.upgrade() else { return };
+            if editor.syncing.get() {
+                return;
             }
+            let preset = row.selected().checked_sub(1).and_then(|index| {
+                editor
+                    .preset_items
+                    .borrow()
+                    .get(index as usize)
+                    .map(|preset| preset.id.clone())
+            });
+            editor.select_preset(preset);
         });
         let weak = Rc::downgrade(&editor);
-        preset_popover.connect_show(move |_| {
+        editor.preset.connect_activated(move |_| {
             if let Some(editor) = weak.upgrade() {
                 editor.refresh_presets();
             }
@@ -576,6 +586,7 @@ impl Editor {
         let subscription = self.owner.clone().subscribe_equalizer(String::new());
         subscription.set_measurement(true, self.spectrum.is_active());
         *self.subscription.borrow_mut() = Some(subscription.clone());
+        self.refresh_presets();
         self.refresh(self.owner.equalizer_view(String::new()));
         self.request_response();
         let weak = Rc::downgrade(self);
@@ -730,6 +741,24 @@ impl Editor {
             |value| EqEdit::Balance { value },
             |view| Some(view.balance),
         );
+        for (entry, reset) in [
+            (&self.bass, EqEdit::Bass { value: 0.0 }),
+            (&self.treble, EqEdit::Treble { value: 0.0 }),
+            (&self.balance, EqEdit::Balance { value: 0.0 }),
+        ] {
+            let icon = entry.secondary_icon_name();
+            entry.connect_changed(move |entry| {
+                let changed = entry.text().trim().replace(',', ".").parse::<f64>() != Ok(0.0);
+                entry.set_secondary_icon_name(if changed { icon.as_deref() } else { None });
+            });
+            let weak = Rc::downgrade(self);
+            gtk_widgets::forms::connect_entry_reset(entry, move |entry| {
+                if let Some(editor) = weak.upgrade() {
+                    entry.set_text("0");
+                    editor.edit(reset.clone());
+                }
+            });
+        }
         for (area, graphic) in [(&self.graphic_plot, true), (&self.parametric_plot, false)] {
             *area.imp().editor.borrow_mut() = Some(Rc::downgrade(self));
             area.imp().graphic.set(graphic);
@@ -1134,13 +1163,15 @@ impl Editor {
         self.cast.set_sensitive(view.available);
         self.unavailable.set_visible(!view.available);
         self.assigned.set_active(view.assigned);
-        self.preset_title.set_text(&if view.preset_builtin {
-            equalizer_preset_title(&view.name)
-        } else if view.preset_id.is_some() {
-            view.name.clone()
-        } else {
-            self.custom_title.clone()
-        });
+        if first
+            || previous.preset_id != view.preset_id
+            || previous.name != view.name
+            || previous.modified != view.modified
+        {
+            self.refresh_presets();
+        }
+        self.preset.set_sensitive(view.available);
+        self.mode.set_sensitive(view.available);
         self.save
             .set_sensitive(view.modified || view.preset_id.is_none());
         let saved = view.preset_id.is_some() && !view.preset_builtin;
@@ -1406,33 +1437,39 @@ impl Editor {
         self.parametric_plot.queue_draw();
     }
 
-    fn refresh_presets(self: &Rc<Self>) {
-        while let Some(child) = self.preset_items.first_child() {
-            self.preset_items.remove(&child);
+    fn refresh_presets(&self) {
+        let presets = self.owner.equalizer_presets();
+        let syncing = self.syncing.replace(true);
+        if *self.preset_items.borrow() != presets || self.preset_names.n_items() == 0 {
+            let mut names = vec![self.custom_title.clone()];
+            names.extend(presets.iter().map(|preset| {
+                if preset.builtin {
+                    equalizer_preset_title(&preset.name)
+                } else {
+                    preset.name.clone()
+                }
+            }));
+            *self.preset_items.borrow_mut() = presets;
+            self.preset_names.splice(
+                0,
+                self.preset_names.n_items(),
+                &names.iter().map(String::as_str).collect::<Vec<_>>(),
+            );
         }
         let selected = self.view.borrow().preset_id.clone();
-        for preset in self.owner.equalizer_presets() {
-            let button = gtk::Button::with_label(&if preset.builtin {
-                equalizer_preset_title(&preset.name)
-            } else {
-                preset.name
-            });
-            button.add_css_class("flat");
-            if selected.as_deref() == Some(preset.id.as_str()) {
-                button.add_css_class("accent");
-            }
-            let weak = Rc::downgrade(self);
-            button.connect_clicked(move |_| {
-                if let Some(editor) = weak.upgrade() {
-                    editor.select_preset(Some(preset.id.clone()));
-                }
-            });
-            self.preset_items.append(&button);
-        }
+        let index = self
+            .preset_items
+            .borrow()
+            .iter()
+            .position(|preset| Some(&preset.id) == selected.as_ref())
+            .map_or(0, |index| index as u32 + 1);
+        self.preset.set_selected(index);
+        self.preset_indicator
+            .update(&self.preset, self.view.borrow().modified);
+        self.syncing.set(syncing);
     }
 
     fn select_preset(self: &Rc<Self>, preset: Option<String>) {
-        self.preset.popdown();
         self.commit_pending();
         let owner = self.owner.clone();
         let output = self.output();
@@ -1440,49 +1477,17 @@ impl Editor {
     }
 }
 
-#[derive(Clone, Copy)]
-enum NameAction {
-    Save,
-    Duplicate,
-    Rename,
-}
+use crate::preset_name::NameAction;
 
 impl Editor {
     fn name_dialog(self: &Rc<Self>, action: NameAction) {
-        let resource = crate::ui_resource::EQUALIZER_DIALOGS_RESOURCE;
-        let builder = gtk_widgets::ui_resource::builder(resource);
-        gtk_widgets::objects!(builder, resource, {
-            name_dialog: adw::Dialog, name: gtk::Entry, name_accept: gtk::Button,
-            duplicate_title: gtk::Label, duplicate_label: gtk::Label,
-            rename_title: gtk::Label, rename_label: gtk::Label,
-        });
+        let Some(root) = self.root.upgrade() else {
+            return;
+        };
         let view = self.view.borrow().clone();
-        match action {
-            NameAction::Save => {}
-            NameAction::Duplicate => {
-                name_dialog.set_title(&duplicate_title.text());
-                name_accept.set_label(&duplicate_label.text());
-                name.set_text(&view.name);
-            }
-            NameAction::Rename => {
-                name_dialog.set_title(&rename_title.text());
-                name_accept.set_label(&rename_label.text());
-                name.set_text(&view.name);
-            }
-        }
-        name_dialog.set_focus(Some(&name));
-        name_accept.set_sensitive(!name.text().trim().is_empty());
-        let accept_weak = name_accept.downgrade();
-        name.connect_changed(move |entry| {
-            if let Some(accept) = accept_weak.upgrade() {
-                accept.set_sensitive(!entry.text().trim().is_empty());
-            }
-        });
-        let dialog_weak = name_dialog.downgrade();
         let weak = Rc::downgrade(self);
-        name_accept.connect_clicked(move |_| {
+        crate::preset_name::present(&root, action, &view.name.clone(), move |name| {
             let Some(editor) = weak.upgrade() else { return };
-            let name = name.text().trim().to_owned();
             let owner = editor.owner.clone();
             let view = view.clone();
             editor.run(async move {
@@ -1501,13 +1506,7 @@ impl Editor {
                     },
                 }
             });
-            if let Some(dialog) = dialog_weak.upgrade() {
-                dialog.close();
-            }
         });
-        if let Some(root) = self.root.upgrade() {
-            gtk_widgets::popup::present_light_dismiss_dialog(&name_dialog, &root);
-        }
     }
 
     fn confirm_delete(self: &Rc<Self>) {
@@ -1531,224 +1530,44 @@ impl Editor {
     }
 
     fn import_dialog(self: &Rc<Self>) {
-        let resource = crate::ui_resource::EQUALIZER_DIALOGS_RESOURCE;
-        let builder = gtk_widgets::ui_resource::builder(resource);
-        gtk_widgets::objects!(builder, resource, {
-            import_dialog: adw::Dialog, import_text: gtk::TextView,
-            import_apo: gtk::ToggleButton, import_accept: gtk::Button, import_error: gtk::Label,
-            choose_file: gtk::Button, paste: gtk::Button,
-            file_open: gtk::FileDialog,
-        });
-        import_dialog.set_focus(Some(&import_text));
-        let buffer = import_text.buffer();
-        import_accept.set_sensitive(false);
-        let accept_weak = import_accept.downgrade();
-        buffer.connect_changed(move |buffer| {
-            if let Some(accept) = accept_weak.upgrade() {
-                accept.set_sensitive(
-                    !buffer
-                        .text(&buffer.start_iter(), &buffer.end_iter(), false)
-                        .trim()
-                        .is_empty(),
-                );
+        let Some(root) = self.root.upgrade() else {
+            return;
+        };
+        let owner = self.owner.clone();
+        let runtime = self.runtime.clone();
+        let output = self.output();
+        crate::preset_transfer::import(&root, true, move |text, apo| {
+            let owner = owner.clone();
+            let output = output.clone();
+            let task = runtime.spawn(async move {
+                owner
+                    .import_equalizer(output, text, preset_format(apo))
+                    .await
+            });
+            async move {
+                task.await
+                    .map_err(|error| error.to_string())?
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
             }
         });
-        let text_weak = import_text.downgrade();
-        let format_weak = import_apo.downgrade();
-        paste.connect_clicked(move |button| {
-            let clipboard = button.clipboard();
-            let text_weak = text_weak.clone();
-            let format_weak = format_weak.clone();
-            glib::spawn_future_local(async move {
-                let Ok(Some(text)) = clipboard.read_text_future().await else {
-                    return;
-                };
-                if let Some(format) = format_weak.upgrade() {
-                    format.set_active(!text.trim_start().starts_with('{'));
-                }
-                if let Some(view) = text_weak.upgrade() {
-                    view.buffer().set_text(&text);
-                }
-            });
-        });
-        let weak = Rc::downgrade(self);
-        let text_weak = import_text.downgrade();
-        let format_weak = import_apo.downgrade();
-        choose_file.connect_clicked(move |_| {
-            let Some(editor) = weak.upgrade() else { return };
-            let Some(root) = editor.root.upgrade() else {
-                return;
-            };
-            let window = root.root().and_downcast::<gtk::Window>();
-            let chooser = file_open.clone();
-            let weak = weak.clone();
-            let text_weak = text_weak.clone();
-            let format_weak = format_weak.clone();
-            glib::spawn_future_local(async move {
-                let Ok(file) = chooser.open_future(window.as_ref()).await else {
-                    return;
-                };
-                match file.load_contents_future().await {
-                    Ok((bytes, _)) => match String::from_utf8(bytes.to_vec()) {
-                        Ok(text) => {
-                            if let Some(format) = format_weak.upgrade() {
-                                format.set_active(!text.trim_start().starts_with('{'));
-                            }
-                            if let Some(view) = text_weak.upgrade() {
-                                view.buffer().set_text(&text);
-                            }
-                        }
-                        Err(error) => {
-                            if let Some(editor) = weak.upgrade() {
-                                editor.feedback.show_feedback_toast(error.to_string());
-                            }
-                        }
-                    },
-                    Err(error) => {
-                        if let Some(editor) = weak.upgrade() {
-                            editor.feedback.show_feedback_toast(error.to_string());
-                        }
-                    }
-                }
-            });
-        });
-        let output = self.output();
-        let weak = Rc::downgrade(self);
-        let dialog_weak = import_dialog.downgrade();
-        import_accept.connect_clicked(move |button| {
-            let Some(editor) = weak.upgrade() else { return };
-            let text = buffer
-                .text(&buffer.start_iter(), &buffer.end_iter(), false)
-                .to_string();
-            let format = preset_format(import_apo.is_active());
-            let owner = editor.owner.clone();
-            let output = output.clone();
-            let task = editor
-                .runtime
-                .spawn(async move { owner.import_equalizer(output, text, format).await });
-            button.set_sensitive(false);
-            import_error.set_visible(false);
-            let button = button.downgrade();
-            let dialog = dialog_weak.clone();
-            let error_label = import_error.downgrade();
-            glib::spawn_future_local(async move {
-                let Some(dialog) = dialog.upgrade() else {
-                    return;
-                };
-                let error = match task.await {
-                    Ok(Ok(_)) => {
-                        dialog.close();
-                        return;
-                    }
-                    Ok(Err(error)) => error.to_string(),
-                    Err(error) => error.to_string(),
-                };
-                if let Some(button) = button.upgrade() {
-                    button.set_sensitive(true);
-                }
-                if let Some(label) = error_label.upgrade() {
-                    label.set_text(&error);
-                    label.set_visible(true);
-                }
-            });
-        });
-        if let Some(root) = self.root.upgrade() {
-            gtk_widgets::popup::present_light_dismiss_dialog(&import_dialog, &root);
-        }
     }
 
     fn export_dialog(self: &Rc<Self>) {
-        let resource = crate::ui_resource::EQUALIZER_DIALOGS_RESOURCE;
-        let builder = gtk_widgets::ui_resource::builder(resource);
-        gtk_widgets::objects!(builder, resource, {
-            export_dialog: adw::Dialog, export_apo: gtk::ToggleButton,
-            export_text: gtk::TextView, export_error: gtk::Label, file_save: gtk::FileDialog,
-            export_accept: gtk::Button, export_save: gtk::Button,
-        });
-        let buffer = export_text.buffer();
-        let preview_buffer = buffer.clone();
-        let copy_weak = export_accept.downgrade();
-        let save_weak = export_save.downgrade();
-        let weak = Rc::downgrade(self);
-        let output = self.output();
-        let preview = move |format: &gtk::ToggleButton| {
-            let Some(editor) = weak.upgrade() else { return };
-            let result = editor
-                .owner
-                .export_equalizer(output.clone(), preset_format(format.is_active()));
-            if let Some(copy) = copy_weak.upgrade() {
-                copy.set_sensitive(result.is_ok());
-            }
-            if let Some(save) = save_weak.upgrade() {
-                save.set_sensitive(result.is_ok());
-            }
-            match result {
-                Ok(text) => {
-                    preview_buffer.set_text(&text);
-                    export_error.set_visible(false);
-                }
-                Err(error) => {
-                    preview_buffer.set_text("");
-                    export_error.set_text(&error.to_string());
-                    export_error.set_visible(true);
-                }
-            }
+        let Some(root) = self.root.upgrade() else {
+            return;
         };
-        preview(&export_apo);
-        export_apo.connect_toggled(preview);
-        let copy_buffer = buffer.clone();
-        let dialog_weak = export_dialog.downgrade();
-        export_accept.connect_clicked(move |button| {
-            let text = copy_buffer.text(&copy_buffer.start_iter(), &copy_buffer.end_iter(), false);
-            button.clipboard().set_text(&text);
-            if let Some(dialog) = dialog_weak.upgrade() {
-                dialog.close();
-            }
-        });
-        let weak = Rc::downgrade(self);
-        let dialog_weak = export_dialog.downgrade();
-        export_save.connect_clicked(move |button| {
-            let text = buffer
-                .text(&buffer.start_iter(), &buffer.end_iter(), false)
-                .to_string();
-            file_save.set_initial_name(Some(if export_apo.is_active() {
-                "equalizer.txt"
-            } else {
-                "equalizer.rufin-eq.json"
-            }));
-            let window = button.root().and_downcast::<gtk::Window>();
-            let chooser = file_save.clone();
-            let weak = weak.clone();
-            let dialog = dialog_weak.clone();
-            glib::spawn_future_local(async move {
-                let Ok(file) = chooser.save_future(window.as_ref()).await else {
-                    return;
-                };
-                match file
-                    .replace_contents_future(
-                        text.into_bytes(),
-                        None,
-                        false,
-                        gio::FileCreateFlags::REPLACE_DESTINATION,
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        if let Some(dialog) = dialog.upgrade() {
-                            dialog.close();
-                        }
-                    }
-                    Err((_, error)) => {
-                        if let Some(editor) = weak.upgrade() {
-                            editor.feedback.show_feedback_toast(error.to_string());
-                        }
-                    }
-                }
-            });
-        });
-        if let Some(root) = self.root.upgrade() {
-            gtk_widgets::popup::present_light_dismiss_dialog(&export_dialog, &root);
-        }
+        let owner = self.owner.clone();
+        let output = self.output();
+        crate::preset_transfer::export(
+            &root,
+            &["equalizer.rufin-eq.json", "equalizer.txt"],
+            move |apo| {
+                owner
+                    .export_equalizer(output.clone(), preset_format(apo))
+                    .map_err(|error| error.to_string())
+            },
+        );
     }
 
     fn snapshot_plot(&self, area: &EqualizerPlot, snapshot: &gtk::Snapshot, graphic: bool) {
