@@ -174,7 +174,7 @@
                 <property name="valign">center</property>
                 <child>
                   <object class="GtkImage">
-                    <property name="icon-name">image-x-generic-symbolic</property>
+                    <property name="icon-name">rufin-image-x-generic-symbolic</property>
                   </object>
                 </child>
                 <child>

@@ -10,35 +10,47 @@ use crate::{downloads::DownloadsState, route::Route};
 
 use crate::detail_links::{DetailLinkBinding, DetailLinks};
 
-pub const ROW_ACTIONS_WIDTH: i32 = 80;
+pub const ROW_ACTIONS_WIDTH: i32 = 44;
 
 crate::composite_box!(
     pub RowActions,
     row_actions_imp,
     "RufinRowActions",
     "/io/github/screwys/Rufin/ui/routes/row_actions.ui",
-    { favorite_slot: gtk::Box, menu: gtk::Button }
+    { menu: gtk::Button }
 );
 
 impl RowActions {
     pub fn menu_only() -> Self {
         Self::new()
     }
-    pub fn with_favorite(button: &gtk::Button) -> Self {
-        let actions = Self::new();
-        actions.imp().favorite_slot.append(button);
-        actions
-    }
-
-    pub fn favorite(&self) -> Option<gtk::Button> {
-        self.imp()
-            .favorite_slot
-            .first_child()
-            .and_downcast::<gtk::Button>()
-    }
 
     pub fn menu(&self) -> gtk::Button {
         self.imp().menu.get()
+    }
+}
+
+pub fn row_action_cell(field: rufin_core::settings::LibraryField, label: &str) -> gtk::Widget {
+    if field == rufin_core::settings::LibraryField::Favorite {
+        crate::favorites::row_favorite_icon_button(label).upcast()
+    } else {
+        RowActions::menu_only().upcast()
+    }
+}
+
+pub fn row_action_column(
+    field: rufin_core::settings::LibraryField,
+    factory: &gtk::SignalListItemFactory,
+) -> gtk::ColumnViewColumn {
+    if field == rufin_core::settings::LibraryField::Favorite {
+        let column = crate::localization::localized_column(
+            crate::settings::library_field_title(field),
+            factory,
+        );
+        column.set_fixed_width(crate::favorites::FAVORITE_COLUMN_WIDTH);
+        column
+    } else {
+        row_actions_column(factory)
     }
 }
 
@@ -49,7 +61,7 @@ pub fn row_actions_column(factory: &gtk::SignalListItemFactory) -> gtk::ColumnVi
 }
 
 pub fn row_favorite_button(item: &gtk::ListItem) -> Option<gtk::Button> {
-    list_cell::<RowActions>(item)?.favorite()
+    list_cell::<gtk::Button>(item)
 }
 
 pub fn list_cell<T: IsA<gtk::Widget>>(item: &gtk::ListItem) -> Option<T> {

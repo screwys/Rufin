@@ -885,7 +885,7 @@ impl Editor {
             let resource = crate::ui_resource::EQUALIZER_FILTER_RESOURCE;
             let builder = gtk_widgets::ui_resource::builder(resource);
             gtk_widgets::objects!(builder, resource, {
-                filter: gtk::Box, enabled: gtk::CheckButton, number: gtk::Label,
+                filter: adw::WrapBox, enabled: gtk::CheckButton, number: gtk::Label,
                 kind: gtk::DropDown, width_unit: gtk::DropDown, width: gtk::Entry,
                 inactive: gtk::Image, remove: gtk::Button,
             });

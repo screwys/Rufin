@@ -379,6 +379,13 @@ pub fn layout_title(layout: LibraryLayout) -> &'static str {
         LibraryLayout::Detail => msgid("Detail"),
     }
 }
+pub fn column_fit_width(field: LibraryField, width: i32) -> i32 {
+    if field == LibraryField::TitleMerged {
+        width.saturating_add(72)
+    } else {
+        width
+    }
+}
 pub fn column_width(field: LibraryField) -> i32 {
     match field {
         LibraryField::Bitrate

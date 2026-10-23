@@ -735,9 +735,10 @@ fn folder_column(
                 },
             );
         }
-        LibraryField::Tools => {
-            return super::columns::mapped_track_favorite_column::<FolderTableRow, _, _>(
+        LibraryField::Favorite | LibraryField::Tools => {
+            return super::columns::mapped_track_actions_column::<FolderTableRow, _, _>(
                 shell,
+                field,
                 |row| match row {
                     FolderTableRow::Track(track) => Some(track.media_uri.clone()),
                     FolderTableRow::Folder(_) => None,
@@ -799,7 +800,10 @@ fn folder_name_field(fields: &[LibraryField]) -> Option<LibraryField> {
             fields.iter().copied().find(|field| {
                 !matches!(
                     field,
-                    LibraryField::RowIndex | LibraryField::Image | LibraryField::Tools
+                    LibraryField::RowIndex
+                        | LibraryField::Image
+                        | LibraryField::Favorite
+                        | LibraryField::Tools
                 )
             })
         })

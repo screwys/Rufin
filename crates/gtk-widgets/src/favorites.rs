@@ -7,8 +7,7 @@ use gtk::glib;
 
 pub const FAVORITE_ADD_ICON: &str = "rufin-heart-outline-symbolic";
 pub const FAVORITE_REMOVE_ICON: &str = "rufin-heart-filled-symbolic";
-pub const FAVORITE_COLUMN_TITLE: &str = " ♡";
-pub const FAVORITE_COLUMN_WIDTH: i32 = 32;
+pub const FAVORITE_COLUMN_WIDTH: i32 = 44;
 
 pub type FavoriteControlKey = FavoriteTarget;
 
@@ -49,6 +48,7 @@ pub fn favorite_icon_button(label: &str) -> gtk::Button {
 pub fn row_favorite_icon_button(label: &str) -> gtk::Button {
     let button = favorite_icon_button(label);
     button.add_css_class("row-favorite-button");
+    button.set_halign(gtk::Align::Center);
     button
 }
 

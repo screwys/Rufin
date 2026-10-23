@@ -3,7 +3,7 @@ use artwork::ArtworkBinding;
 use gtk::{gio, glib};
 use gtk_widgets::{
     artwork::ArtworkTileWeak,
-    favorites::{favorite_button_is_active, row_favorite_icon_button, set_favorite_button_active},
+    favorites::{favorite_button_is_active, set_favorite_button_active},
     interactions::install_context_menu_openers,
     library_fields::TrackPresentation,
     media_drag::{
@@ -22,8 +22,6 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
-
-const ROW_INDEX_COLUMN_TITLE: &str = "\u{2003}#";
 
 pub struct QueueState {
     pub window: RefCell<Vec<Arc<QueueRow>>>,
@@ -486,7 +484,12 @@ fn queue_index_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
             set_track_row_index_text(&cell, "");
         }
     });
-    let column = gtk::ColumnViewColumn::new(Some(ROW_INDEX_COLUMN_TITLE), Some(factory));
+    let column = gtk::ColumnViewColumn::new(
+        Some(gtk_widgets::settings::library_field_title(
+            LibraryField::RowIndex,
+        )),
+        Some(factory),
+    );
     column.set_fixed_width(gtk_widgets::library_fields::column_width(
         LibraryField::RowIndex,
     ));
@@ -632,7 +635,7 @@ fn queue_duration_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
     column
 }
 
-fn queue_favorite_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
+fn queue_actions_column(shell: &Rc<crate::PlayerUi>, field: LibraryField) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let setup_shell = Rc::downgrade(shell);
     factory.connect_setup(move |_, item| {
@@ -642,9 +645,12 @@ fn queue_favorite_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         let Some(shell) = setup_shell.upgrade() else {
             return;
         };
-        let button = row_favorite_icon_button("Favorite track");
-        let actions = gtk_widgets::recycled_cells::RowActions::with_favorite(&button);
-        install_queue_row_interactions(actions.upcast_ref(), &shell, item, None);
+        let actions = gtk_widgets::recycled_cells::row_action_cell(field, "Favorite track");
+        install_queue_row_interactions(&actions, &shell, item, None);
+        item.set_child(Some(&actions));
+        let Some(button) = gtk_widgets::recycled_cells::row_favorite_button(item) else {
+            return;
+        };
         let click_item = item.downgrade();
         let click_shell = Rc::downgrade(&shell);
         button.connect_clicked(move |button| {
@@ -658,7 +664,6 @@ fn queue_favorite_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
             (click_shell.set_track_favorite)(row.track.media_uri.clone(), favorite, button);
             set_favorite_button_active(button, favorite);
         });
-        item.set_child(Some(&actions));
     });
     connect_sparse_bind(&factory, |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -683,7 +688,7 @@ fn queue_favorite_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
             set_favorite_button_active(&button, false);
         }
     });
-    gtk_widgets::recycled_cells::row_actions_column(&factory)
+    gtk_widgets::recycled_cells::row_action_column(field, &factory)
 }
 
 fn queue_year_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
@@ -751,6 +756,7 @@ fn build_queue_table(
     table.add_css_class("track-table");
     table.add_css_class("track-list");
     table.add_css_class("queue-list");
+    table.add_css_class("external-header");
     table.set_single_click_activate(false);
     let row_factory = gtk::SignalListItemFactory::new();
     row_factory.connect_setup(|_, row| {
@@ -824,10 +830,8 @@ pub(super) fn configure_queue_columns(
     table: &gtk::ColumnView,
     key: LibraryListKey,
 ) -> Vec<(gtk::ColumnViewColumn, i32)> {
-    gtk_widgets::display::apply(
-        table,
-        &shell.settings.current.borrow().library_list(key).display,
-    );
+    let settings = shell.settings.current.borrow().library_list(key).clone();
+    gtk_widgets::display::apply(table, &settings.display);
     while let Some(column) = table
         .columns()
         .item(0)
@@ -835,11 +839,7 @@ pub(super) fn configure_queue_columns(
     {
         table.remove_column(&column);
     }
-    shell
-        .settings
-        .current
-        .borrow()
-        .library_list(key)
+    let columns: Vec<_> = settings
         .row_fields
         .iter()
         .map(|field| {
@@ -847,11 +847,16 @@ pub(super) fn configure_queue_columns(
                 LibraryField::TitleMerged => queue_title_column(shell),
                 LibraryField::RowIndex => queue_index_column(shell),
                 LibraryField::Duration => queue_duration_column(shell),
-                LibraryField::Tools => queue_favorite_column(shell),
+                LibraryField::Favorite | LibraryField::Tools => queue_actions_column(shell, *field),
                 LibraryField::Year => queue_year_column(shell),
                 _ => queue_text_column(shell, *field),
             };
-            let width = if *field == LibraryField::Tools {
+            let width = if key == LibraryListKey::FullscreenTracks {
+                gtk_widgets::library_fields::column_fit_width(
+                    *field,
+                    gtk_widgets::library_fields::column_width(*field),
+                )
+            } else if *field == LibraryField::Tools {
                 gtk_widgets::recycled_cells::ROW_ACTIONS_WIDTH
             } else if *field == LibraryField::Year {
                 62
@@ -861,7 +866,31 @@ pub(super) fn configure_queue_columns(
             table.append_column(&column);
             (column, width)
         })
-        .collect()
+        .collect();
+    let header = queue_header(shell, key);
+    header.replace(
+        &columns
+            .iter()
+            .zip(&settings.row_fields)
+            .map(|((column, _), field)| (column.clone(), Some(*field)))
+            .collect::<Vec<_>>(),
+    );
+    header.set_visible(settings.display.show_header && table.is_visible());
+    table.update_relation(&[gtk::accessible::Relation::Owns(&[header
+        .widget()
+        .upcast_ref()])]);
+    columns
+}
+
+fn queue_header(
+    shell: &crate::PlayerUi,
+    key: LibraryListKey,
+) -> &gtk_widgets::table_header::ColumnViewHeader {
+    if key == LibraryListKey::FullscreenTracks {
+        &shell.views.fullscreen_player.queue_header
+    } else {
+        &shell.right_panel.queue_header
+    }
 }
 
 fn queue_text_column(shell: &Rc<crate::PlayerUi>, field: LibraryField) -> gtk::ColumnViewColumn {
@@ -1079,8 +1108,14 @@ impl crate::PlayerUi {
             .as_deref()
             .and_then(|player| player.queue.current_index);
         let Some(queue) = self.selected_queue() else {
-            clear_queue_panel_children(&self.right_panel.queue_panel);
-            clear_queue_panel_children(&self.views.fullscreen_player.queue_panel);
+            clear_queue_panel_children(
+                &self.right_panel.queue_panel,
+                &self.right_panel.queue_header,
+            );
+            clear_queue_panel_children(
+                &self.views.fullscreen_player.queue_panel,
+                &self.views.fullscreen_player.queue_header,
+            );
             return;
         };
         let loading = self
@@ -1256,6 +1291,12 @@ fn render_panel(
             .and_downcast::<gtk::Overlay>()
             .expect("queue overlay");
         panel.remove(&overlay);
+        let key = if fullscreen {
+            LibraryListKey::FullscreenTracks
+        } else {
+            LibraryListKey::Queue
+        };
+        panel.append(&queue_header(shell, key).widget());
         let weak = scroller.downgrade();
         let previous_height = Cell::new(0);
         let resize_offset = Rc::new(Cell::new(None));
@@ -1292,6 +1333,21 @@ fn render_panel(
 
     let has_rows = model.n_items() != 0;
     table.set_visible(has_rows);
+    let key = if fullscreen {
+        LibraryListKey::FullscreenTracks
+    } else {
+        LibraryListKey::Queue
+    };
+    queue_header(shell, key).set_visible(
+        has_rows
+            && shell
+                .settings
+                .current
+                .borrow()
+                .library_list(key)
+                .display
+                .show_header,
+    );
     if let Some(empty) = queue_overlay_empty_label(&scroller, shell) {
         empty.set_visible(!has_rows);
         empty.set_text(&tr(if reorderable {
@@ -1349,7 +1405,11 @@ fn reveal_queue_current_row(scroller: &gtk::ScrolledWindow, position: usize) -> 
     true
 }
 
-pub fn clear_queue_panel_children(panel: &gtk::Box) {
+pub fn clear_queue_panel_children(
+    panel: &gtk::Box,
+    header: &gtk_widgets::table_header::ColumnViewHeader,
+) {
+    header.set_visible(false);
     if let Some(scroller) = queue_panel_scroller(panel) {
         if let Some(table) = scroller.child().and_downcast::<gtk::ColumnView>() {
             table.set_visible(false);

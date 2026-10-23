@@ -54,7 +54,7 @@
       <style><class name="flat"/><class name="row-menu-button"/></style>
     </object></child>
     <child><object class="GtkButton" id="remove">
-      <property name="icon-name">window-close-symbolic</property>
+      <property name="icon-name">rufin-window-close-symbolic</property>
       <property name="tooltip-text" translatable="yes">Remove search</property>
       <property name="focus-on-click">false</property><property name="valign">center</property>
       <property name="visible">false</property>

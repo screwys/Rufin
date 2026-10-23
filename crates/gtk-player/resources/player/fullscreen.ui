@@ -395,7 +395,6 @@
                       </object>
   <object class="GtkBox" id="queue_panel">
     <property name="orientation">vertical</property>
-    <property name="spacing">8</property>
     <property name="hexpand">true</property>
     <property name="vexpand">true</property>
     <style>
@@ -457,6 +456,7 @@
   <object class="GtkScrolledWindow" id="equalizer_panel">
     <property name="hscrollbar-policy">automatic</property>
     <property name="vscrollbar-policy">automatic</property>
+    <property name="overlay-scrolling">false</property>
     <property name="hexpand">true</property>
     <property name="vexpand">true</property>
     <property name="min-content-width">0</property>

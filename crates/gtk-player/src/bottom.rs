@@ -821,6 +821,11 @@ pub fn build_player_action_controls(
     volume_slot.set_valign(gtk::Align::Fill);
     volume_group.append(&volume_slot);
     install_scale_fill_updates(&volume);
+    let level_for_change = volume_preview_level.clone();
+    volume.connect_value_changed(move |scale| {
+        level_for_change.set_text(&format!("{:.0}", scale.value() * 100.0));
+        scale.set_fill_level(scale.value());
+    });
     install_hover_value_bubble(
         &volume,
         volume_preview,
