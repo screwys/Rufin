@@ -254,6 +254,9 @@ msgstr "6 tuntia"
 msgid "A new update is available, restart to apply"
 msgstr ""
 
+msgid "A"
+msgstr ""
+
 #, fuzzy
 #| msgid "API keys"
 msgid "API key (Subsonic)"
@@ -691,6 +694,9 @@ msgstr ""
 msgid "Browse"
 msgstr ""
 
+msgid "C"
+msgstr ""
+
 #, fuzzy
 #| msgid "Change Profile"
 msgid "CUE file"
@@ -727,10 +733,16 @@ msgstr "Peru"
 msgid "Cast format"
 msgstr "Vientimuoto"
 
+msgid "Casting changes apply to the next stream"
+msgstr ""
+
 msgid "Casting network"
 msgstr ""
 
 msgid "Casting"
+msgstr ""
+
+msgid "Centered bars"
 msgstr ""
 
 msgid "Certificate authority (PEM)"
@@ -1117,12 +1129,6 @@ msgid "Copy link"
 msgstr "Kopioi"
 
 msgid "Copy of {name}"
-msgstr ""
-
-msgid "Copy preset"
-msgstr "Kopioi esiasetus"
-
-msgid "Copy the current appearance to the clipboard"
 msgstr ""
 
 msgid "Copy"
@@ -1551,6 +1557,9 @@ msgstr ""
 msgid "EPs"
 msgstr ""
 
+msgid "ERB"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr "Muokkaa sanoituksia"
 
@@ -1727,6 +1736,11 @@ msgstr "Ulkoinen metatietojen nouto"
 
 msgid "External site links"
 msgstr "Ulkoisten sivujen linkit"
+
+#, fuzzy
+#| msgid "Files"
+msgid "FFT size"
+msgstr "Tiedostot"
 
 msgid "FLAC"
 msgstr ""
@@ -1918,6 +1932,9 @@ msgstr "Monivalinta"
 msgid "Frequency · Hz"
 msgstr ""
 
+msgid "Frequency scale"
+msgstr ""
+
 msgid "Frequency"
 msgstr ""
 
@@ -2020,6 +2037,9 @@ msgid "Grouping"
 msgstr ""
 
 msgid "Guest / public access"
+msgstr ""
+
+msgid "Halo"
 msgstr ""
 
 msgid "Height (%)"
@@ -2196,6 +2216,9 @@ msgstr ""
 
 msgid "Keyboard Shortcuts"
 msgstr "Pikanäppäimet"
+
+msgid "LED spectrum"
+msgstr ""
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -2393,6 +2416,9 @@ msgstr "Paikanna kansio"
 msgid "Lock metadata"
 msgstr ""
 
+msgid "Logarithmic"
+msgstr ""
+
 msgid "Logs are copied"
 msgstr ""
 
@@ -2445,6 +2471,14 @@ msgstr ""
 msgid "Matched"
 msgstr "Välimuistissa"
 
+msgid "Maximum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Maximum level (dB)"
+msgstr "Vuosi enintään"
+
 msgid "Maximum year"
 msgstr "Vuosi enintään"
 
@@ -2486,6 +2520,14 @@ msgstr "Metatieto"
 
 msgid "Minimize overview"
 msgstr ""
+
+msgid "Minimum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum level (dB)"
+msgstr "Vuosi vähintään"
 
 msgid "Minimum year"
 msgstr "Vuosi vähintään"
@@ -3059,9 +3101,6 @@ msgstr "Salasana tai poletti"
 msgid "Password"
 msgstr "Salasana"
 
-msgid "Paste preset"
-msgstr "Liitä esiasetus"
-
 msgid "Paste"
 msgstr "Liitä"
 
@@ -3295,27 +3334,9 @@ msgstr "Säilytä sävelkorkeus"
 msgid "Preserve pitch"
 msgstr "Säilytä sävelkorkeus"
 
-msgid "Preset 1"
-msgstr "Esiasetus 1"
-
-msgid "Preset 2"
-msgstr "Esiasetus 2"
-
-msgid "Preset 3"
-msgstr "Esiasetus 3"
-
-msgid "Preset 4"
-msgstr "Esiasetus 4"
-
-msgid "Preset 5"
-msgstr "Esiasetus 5"
-
 #, fuzzy
 #| msgid "Preset saved"
 msgid "Preset name"
-msgstr "Esiasetus tallennettu"
-
-msgid "Preset saved"
 msgstr "Esiasetus tallennettu"
 
 #, fuzzy
@@ -3754,6 +3775,9 @@ msgstr "Synkronoi kirjasto uudelleen"
 msgid "Retry"
 msgstr "Yritä uudelleen"
 
+msgid "Ribbon"
+msgstr ""
+
 msgid "Rise speed (%)"
 msgstr ""
 
@@ -3764,6 +3788,9 @@ msgid "Romaji"
 msgstr ""
 
 msgid "Rounded bars"
+msgstr ""
+
+msgid "Rounded spectrum"
 msgstr ""
 
 msgid "Row borders"
@@ -3841,11 +3868,6 @@ msgstr "Tallennettu esiasetus"
 
 msgid "Save"
 msgstr "Tallenna"
-
-#, fuzzy
-#| msgid "Saved"
-msgid "Save..."
-msgstr "Tallennettu"
 
 msgid "Saved Plex Login"
 msgstr ""
@@ -4283,6 +4305,9 @@ msgstr ""
 
 msgid "Smart playlists"
 msgstr "Älykkäät soittolistat"
+
+msgid "Soft spectrum"
+msgstr ""
 
 msgid "Solid bars"
 msgstr ""
@@ -4767,11 +4792,6 @@ msgstr "Vuosi vähintään"
 
 #, fuzzy
 #| msgid "Lyrics settings"
-msgid "Use output settings"
-msgstr "Sanoitusten asetukset"
-
-#, fuzzy
-#| msgid "Lyrics settings"
 msgid "Use source setting"
 msgstr "Sanoitusten asetukset"
 
@@ -4881,6 +4901,9 @@ msgstr "Viikonpäivä"
 
 msgid "Weekly"
 msgstr "Viikottain"
+
+msgid "Weighting"
+msgstr ""
 
 msgid "Wide"
 msgstr ""
@@ -5149,6 +5172,40 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#~ msgid "Copy preset"
+#~ msgstr "Kopioi esiasetus"
+
+#~ msgid "Paste preset"
+#~ msgstr "Liitä esiasetus"
+
+#~ msgid "Preset 1"
+#~ msgstr "Esiasetus 1"
+
+#~ msgid "Preset 2"
+#~ msgstr "Esiasetus 2"
+
+#~ msgid "Preset 3"
+#~ msgstr "Esiasetus 3"
+
+#~ msgid "Preset 4"
+#~ msgstr "Esiasetus 4"
+
+#~ msgid "Preset 5"
+#~ msgstr "Esiasetus 5"
+
+#~ msgid "Preset saved"
+#~ msgstr "Esiasetus tallennettu"
+
+#, fuzzy
+#~| msgid "Saved"
+#~ msgid "Save..."
+#~ msgstr "Tallennettu"
+
+#, fuzzy
+#~| msgid "Lyrics settings"
+#~ msgid "Use output settings"
+#~ msgstr "Sanoitusten asetukset"
 
 #~ msgid "Multiple values"
 #~ msgstr "Useita arvoja"

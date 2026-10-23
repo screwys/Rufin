@@ -248,6 +248,9 @@ msgstr ""
 msgid "A new update is available, restart to apply"
 msgstr ""
 
+msgid "A"
+msgstr ""
+
 #, fuzzy
 #| msgid "API keys"
 msgid "API key (Subsonic)"
@@ -707,6 +710,9 @@ msgstr ""
 msgid "Browse"
 msgstr ""
 
+msgid "C"
+msgstr ""
+
 #, fuzzy
 #| msgid "Change Secret Storage"
 msgid "CUE file"
@@ -741,11 +747,22 @@ msgstr "取消"
 msgid "Cast format"
 msgstr ""
 
+#, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Casting changes apply to the next stream"
+msgstr "套用變更到 {count} 個曲目"
+
 msgid "Casting network"
 msgstr ""
 
 msgid "Casting"
 msgstr ""
+
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Centered bars"
+msgstr "選擇音樂資料夾"
 
 msgid "Certificate authority (PEM)"
 msgstr ""
@@ -1142,12 +1159,6 @@ msgid "Copy link"
 msgstr "複製"
 
 msgid "Copy of {name}"
-msgstr ""
-
-msgid "Copy preset"
-msgstr ""
-
-msgid "Copy the current appearance to the clipboard"
 msgstr ""
 
 msgid "Copy"
@@ -1576,6 +1587,9 @@ msgstr ""
 msgid "EPs"
 msgstr ""
 
+msgid "ERB"
+msgstr ""
+
 #, fuzzy
 #| msgid "Lyrics"
 msgid "Edit Lyrics"
@@ -1766,6 +1780,9 @@ msgstr "外部元資料查找"
 
 msgid "External site links"
 msgstr "外部網站連結"
+
+msgid "FFT size"
+msgstr ""
 
 msgid "FLAC"
 msgstr ""
@@ -1961,6 +1978,9 @@ msgstr "重新整理區塊"
 msgid "Frequency · Hz"
 msgstr ""
 
+msgid "Frequency scale"
+msgstr ""
+
 msgid "Frequency"
 msgstr ""
 
@@ -2067,6 +2087,9 @@ msgid "Grouping"
 msgstr ""
 
 msgid "Guest / public access"
+msgstr ""
+
+msgid "Halo"
 msgstr ""
 
 msgid "Height (%)"
@@ -2241,6 +2264,9 @@ msgstr "使音樂在離線時仍然可用。資料夾的變更只會影響新的
 
 msgid "Keyboard Shortcuts"
 msgstr "快捷鍵"
+
+msgid "LED spectrum"
+msgstr ""
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -2445,6 +2471,9 @@ msgstr "定位資料夾"
 msgid "Lock metadata"
 msgstr "鎖定元資料"
 
+msgid "Logarithmic"
+msgstr ""
+
 msgid "Logs are copied"
 msgstr ""
 
@@ -2499,6 +2528,14 @@ msgstr ""
 msgid "Matched"
 msgstr "已快取"
 
+msgid "Maximum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Maximum level (dB)"
+msgstr "最大年份"
+
 msgid "Maximum year"
 msgstr "最大年份"
 
@@ -2542,6 +2579,14 @@ msgstr "元資料"
 
 msgid "Minimize overview"
 msgstr ""
+
+msgid "Minimum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum level (dB)"
+msgstr "最小年份"
 
 msgid "Minimum year"
 msgstr "最小年份"
@@ -3145,11 +3190,6 @@ msgstr "密碼"
 msgid "Password"
 msgstr "密碼"
 
-#, fuzzy
-#| msgid "Preset"
-msgid "Paste preset"
-msgstr "預設集"
-
 msgid "Paste"
 msgstr "貼上"
 
@@ -3393,37 +3433,7 @@ msgstr "維持音調"
 
 #, fuzzy
 #| msgid "Preset"
-msgid "Preset 1"
-msgstr "預設集"
-
-#, fuzzy
-#| msgid "Preset"
-msgid "Preset 2"
-msgstr "預設集"
-
-#, fuzzy
-#| msgid "Preset"
-msgid "Preset 3"
-msgstr "預設集"
-
-#, fuzzy
-#| msgid "Preset"
-msgid "Preset 4"
-msgstr "預設集"
-
-#, fuzzy
-#| msgid "Preset"
-msgid "Preset 5"
-msgstr "預設集"
-
-#, fuzzy
-#| msgid "Preset"
 msgid "Preset name"
-msgstr "預設集"
-
-#, fuzzy
-#| msgid "Preset"
-msgid "Preset saved"
 msgstr "預設集"
 
 #, fuzzy
@@ -3862,6 +3872,9 @@ msgstr ""
 msgid "Retry"
 msgstr ""
 
+msgid "Ribbon"
+msgstr ""
+
 msgid "Rise speed (%)"
 msgstr ""
 
@@ -3872,6 +3885,9 @@ msgid "Romaji"
 msgstr "羅馬拼音"
 
 msgid "Rounded bars"
+msgstr ""
+
+msgid "Rounded spectrum"
 msgstr ""
 
 msgid "Row borders"
@@ -3945,11 +3961,6 @@ msgstr "儲存至"
 
 msgid "Save"
 msgstr "儲存"
-
-#, fuzzy
-#| msgid "Saved"
-msgid "Save..."
-msgstr "已儲存"
 
 #, fuzzy
 #| msgid "Saved to"
@@ -4404,6 +4415,9 @@ msgstr "智慧播放清單曲目"
 
 msgid "Smart playlists"
 msgstr "智慧播放清單"
+
+msgid "Soft spectrum"
+msgstr ""
 
 msgid "Solid bars"
 msgstr ""
@@ -4890,11 +4904,6 @@ msgstr "最小年份"
 
 #, fuzzy
 #| msgid "Lyrics settings"
-msgid "Use output settings"
-msgstr "歌詞設定"
-
-#, fuzzy
-#| msgid "Lyrics settings"
 msgid "Use source setting"
 msgstr "歌詞設定"
 
@@ -4995,6 +5004,9 @@ msgid "Weekday"
 msgstr ""
 
 msgid "Weekly"
+msgstr ""
+
+msgid "Weighting"
 msgstr ""
 
 msgid "Wide"
@@ -5243,6 +5255,51 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Paste preset"
+#~ msgstr "預設集"
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Preset 1"
+#~ msgstr "預設集"
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Preset 2"
+#~ msgstr "預設集"
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Preset 3"
+#~ msgstr "預設集"
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Preset 4"
+#~ msgstr "預設集"
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Preset 5"
+#~ msgstr "預設集"
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Preset saved"
+#~ msgstr "預設集"
+
+#, fuzzy
+#~| msgid "Saved"
+#~ msgid "Save..."
+#~ msgstr "已儲存"
+
+#, fuzzy
+#~| msgid "Lyrics settings"
+#~ msgid "Use output settings"
+#~ msgstr "歌詞設定"
 
 #~ msgid "Identify"
 #~ msgstr "認證"

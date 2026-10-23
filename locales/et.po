@@ -316,6 +316,9 @@ msgstr "6 tundi"
 msgid "A new update is available, restart to apply"
 msgstr "Saadaval on uuendus, selle kasutamiseks käivita rakendus uuesti"
 
+msgid "A"
+msgstr ""
+
 msgid "API key (Subsonic)"
 msgstr "API võtmed (Subsonic)"
 
@@ -725,6 +728,9 @@ msgstr ""
 msgid "Browse"
 msgstr "Sirvi"
 
+msgid "C"
+msgstr ""
+
 #, fuzzy
 #| msgid "New file"
 msgid "CUE file"
@@ -761,11 +767,22 @@ msgstr "Katkesta"
 msgid "Cast format"
 msgstr "Asukoha vorming"
 
+#, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Casting changes apply to the next stream"
+msgstr "Muudatused rakenduvad {count}-le loole"
+
 msgid "Casting network"
 msgstr "Meediumilevivõrk"
 
 msgid "Casting"
 msgstr "Meediumilevi"
+
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Centered bars"
+msgstr "Klotsidest ribad"
 
 msgid "Certificate authority (PEM)"
 msgstr "Sertifitseerimiskeskus (PEM)"
@@ -1102,12 +1119,6 @@ msgstr "Kopeeri link"
 
 msgid "Copy of {name}"
 msgstr ""
-
-msgid "Copy preset"
-msgstr "Kopeeri eelseadistus"
-
-msgid "Copy the current appearance to the clipboard"
-msgstr "Kopeeri praegune välimus lõikelauale"
 
 msgid "Copy"
 msgstr "Kopeeri"
@@ -1489,6 +1500,9 @@ msgstr "EP"
 msgid "EPs"
 msgstr "EP-plaadid"
 
+msgid "ERB"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr "Muuda laulusõnu"
 
@@ -1647,6 +1661,11 @@ msgstr "Metateabe otsing välisest teenusest"
 
 msgid "External site links"
 msgstr "Väliste veebisaitide lingid"
+
+#, fuzzy
+#| msgid "Files"
+msgid "FFT size"
+msgstr "Failid"
 
 msgid "FLAC"
 msgstr ""
@@ -1826,6 +1845,9 @@ msgstr "Kaadrit sekundis"
 msgid "Frequency · Hz"
 msgstr ""
 
+msgid "Frequency scale"
+msgstr ""
+
 msgid "Frequency"
 msgstr ""
 
@@ -1929,6 +1951,9 @@ msgstr "Rühmitamine"
 
 msgid "Guest / public access"
 msgstr "Avalik ligipääs, sh külalistele"
+
+msgid "Halo"
+msgstr ""
 
 msgid "Height (%)"
 msgstr ""
@@ -2097,6 +2122,11 @@ msgstr ""
 
 msgid "Keyboard Shortcuts"
 msgstr "Klaviatuuri kiirklahvid"
+
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "LED spectrum"
+msgstr "Spektrijoon"
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -2280,6 +2310,9 @@ msgstr "Tuvasta kausta asukoht"
 msgid "Lock metadata"
 msgstr "Lukusta metateave"
 
+msgid "Logarithmic"
+msgstr ""
+
 msgid "Logs are copied"
 msgstr "Logid on kopeeritud"
 
@@ -2330,6 +2363,14 @@ msgstr "Märts {year}"
 msgid "Matched"
 msgstr "Sobita"
 
+msgid "Maximum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Maximum level (dB)"
+msgstr "Maksimaalne aasta"
+
 msgid "Maximum year"
 msgstr "Maksimaalne aasta"
 
@@ -2372,6 +2413,14 @@ msgstr "Metateave"
 
 msgid "Minimize overview"
 msgstr "Minimeeri ülevaade"
+
+msgid "Minimum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum level (dB)"
+msgstr "Minimaalne aasta"
 
 msgid "Minimum year"
 msgstr "Minimaalne aasta"
@@ -2902,9 +2951,6 @@ msgstr "Salasõna või tunnusluba"
 msgid "Password"
 msgstr "Salasõna"
 
-msgid "Paste preset"
-msgstr "Aseta eelseadistus"
-
 msgid "Paste"
 msgstr "Aseta"
 
@@ -3118,27 +3164,9 @@ msgstr "Säilita kanalid"
 msgid "Preserve pitch"
 msgstr "Säilita helikõrgus"
 
-msgid "Preset 1"
-msgstr "1. eelseadistus"
-
-msgid "Preset 2"
-msgstr "2. eelseadistus"
-
-msgid "Preset 3"
-msgstr "3. eelseadistus"
-
-msgid "Preset 4"
-msgstr "4. eelseadistus"
-
-msgid "Preset 5"
-msgstr "5. eelseadistus"
-
 #, fuzzy
 #| msgid "Preset saved"
 msgid "Preset name"
-msgstr "Eelseadistus on salvestatud"
-
-msgid "Preset saved"
 msgstr "Eelseadistus on salvestatud"
 
 #, fuzzy
@@ -3535,6 +3563,9 @@ msgstr "Sünkrooni muusikakogu uuesti"
 msgid "Retry"
 msgstr "Proovi uuesti"
 
+msgid "Ribbon"
+msgstr ""
+
 msgid "Rise speed (%)"
 msgstr "Tõusu kiirus (%)"
 
@@ -3546,6 +3577,11 @@ msgstr "Rōmaji (jaapani keele romaniseerimine)"
 
 msgid "Rounded bars"
 msgstr "Ümarad ribad"
+
+#, fuzzy
+#| msgid "Filled spectrum"
+msgid "Rounded spectrum"
+msgstr "Täidetud spekter"
 
 msgid "Row borders"
 msgstr "Ridade ääred"
@@ -3618,11 +3654,6 @@ msgstr "Salvestatud eelseadistus"
 
 msgid "Save"
 msgstr "Salvesta"
-
-#, fuzzy
-#| msgid "Saved..."
-msgid "Save..."
-msgstr "Salvestatud..."
 
 msgid "Saved Plex Login"
 msgstr "Salvestatud Plexi sisselogimine"
@@ -4024,6 +4055,11 @@ msgstr "Nutika esitusloendi lood"
 
 msgid "Smart playlists"
 msgstr "Nutikad esitusloendid"
+
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "Soft spectrum"
+msgstr "Spektrijoon"
 
 msgid "Solid bars"
 msgstr "Pidevad/ühtlased ribad"
@@ -4458,11 +4494,6 @@ msgstr "Kasuta maksimaalset aastat"
 msgid "Use minimum year"
 msgstr "Kasuta minimaalset aastat"
 
-#, fuzzy
-#| msgid "Use source setting"
-msgid "Use output settings"
-msgstr "Kasuta allika seadistust"
-
 msgid "Use source setting"
 msgstr "Kasuta allika seadistust"
 
@@ -4563,6 +4594,9 @@ msgstr "Nädalapäev"
 
 msgid "Weekly"
 msgstr "Iganädalaselt"
+
+msgid "Weighting"
+msgstr ""
 
 msgid "Wide"
 msgstr "Lai"
@@ -4833,6 +4867,43 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Copy preset"
+#~ msgstr "Kopeeri eelseadistus"
+
+#~ msgid "Copy the current appearance to the clipboard"
+#~ msgstr "Kopeeri praegune välimus lõikelauale"
+
+#~ msgid "Paste preset"
+#~ msgstr "Aseta eelseadistus"
+
+#~ msgid "Preset 1"
+#~ msgstr "1. eelseadistus"
+
+#~ msgid "Preset 2"
+#~ msgstr "2. eelseadistus"
+
+#~ msgid "Preset 3"
+#~ msgstr "3. eelseadistus"
+
+#~ msgid "Preset 4"
+#~ msgstr "4. eelseadistus"
+
+#~ msgid "Preset 5"
+#~ msgstr "5. eelseadistus"
+
+#~ msgid "Preset saved"
+#~ msgstr "Eelseadistus on salvestatud"
+
+#, fuzzy
+#~| msgid "Saved..."
+#~ msgid "Save..."
+#~ msgstr "Salvestatud..."
+
+#, fuzzy
+#~| msgid "Use source setting"
+#~ msgid "Use output settings"
+#~ msgstr "Kasuta allika seadistust"
 
 #~ msgid "Identify"
 #~ msgstr "Tuvasta"

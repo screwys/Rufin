@@ -321,6 +321,9 @@ msgstr "6 часов"
 msgid "A new update is available, restart to apply"
 msgstr "Доступно новое обновление, перезагрузите, чтобы применить"
 
+msgid "A"
+msgstr ""
+
 msgid "API key (Subsonic)"
 msgstr "Ключ API (Subsonic)"
 
@@ -733,6 +736,9 @@ msgstr ""
 msgid "Browse"
 msgstr "Обзор"
 
+msgid "C"
+msgstr ""
+
 #, fuzzy
 #| msgid "Image files"
 msgid "CUE file"
@@ -769,11 +775,22 @@ msgstr "Отмена"
 msgid "Cast format"
 msgstr "Формат пути"
 
+#, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Casting changes apply to the next stream"
+msgstr "Изменения применяются к {count} треку"
+
 msgid "Casting network"
 msgstr "Сеть для трансляции"
 
 msgid "Casting"
 msgstr "Трансляция"
+
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Centered bars"
+msgstr "Сегментированные полосы"
 
 msgid "Certificate authority (PEM)"
 msgstr "Центр сертификации (PEM)"
@@ -1115,12 +1132,6 @@ msgstr "Копировать ссылку"
 
 msgid "Copy of {name}"
 msgstr ""
-
-msgid "Copy preset"
-msgstr "Скопировать предустановку"
-
-msgid "Copy the current appearance to the clipboard"
-msgstr "Скопировать текущий внешний вид в буфер обмена"
 
 msgid "Copy"
 msgstr "Копировать"
@@ -1512,6 +1523,9 @@ msgstr "EP"
 msgid "EPs"
 msgstr "EP-альбомы"
 
+msgid "ERB"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr "Редактировать текст песни"
 
@@ -1670,6 +1684,11 @@ msgstr "Поиск метаданных в интернете"
 
 msgid "External site links"
 msgstr "Ссылки на внешние сайты"
+
+#, fuzzy
+#| msgid "Files"
+msgid "FFT size"
+msgstr "Файлы"
 
 msgid "FLAC"
 msgstr ""
@@ -1851,6 +1870,9 @@ msgstr "Кадры в секунду"
 msgid "Frequency · Hz"
 msgstr ""
 
+msgid "Frequency scale"
+msgstr ""
+
 msgid "Frequency"
 msgstr ""
 
@@ -1954,6 +1976,9 @@ msgstr "Группировка"
 
 msgid "Guest / public access"
 msgstr "Гостевой / публичный доступ"
+
+msgid "Halo"
+msgstr ""
 
 msgid "Height (%)"
 msgstr ""
@@ -2122,6 +2147,11 @@ msgstr ""
 
 msgid "Keyboard Shortcuts"
 msgstr "Сочетания клавиш"
+
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "LED spectrum"
+msgstr "Линия спектра"
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -2310,6 +2340,9 @@ msgstr "Найти папку"
 msgid "Lock metadata"
 msgstr "Заблокировать метаданные"
 
+msgid "Logarithmic"
+msgstr ""
+
 msgid "Logs are copied"
 msgstr "Журналы скопированы"
 
@@ -2362,6 +2395,14 @@ msgstr "Март {year}"
 msgid "Matched"
 msgstr "Соответствие"
 
+msgid "Maximum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Maximum level (dB)"
+msgstr "Максимальный год"
+
 msgid "Maximum year"
 msgstr "Максимальный год"
 
@@ -2403,6 +2444,14 @@ msgstr "Метаданные"
 
 msgid "Minimize overview"
 msgstr "Свернуть вид"
+
+msgid "Minimum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum level (dB)"
+msgstr "Минимальный год"
 
 msgid "Minimum year"
 msgstr "Минимальный год"
@@ -2935,9 +2984,6 @@ msgstr "Пароль или токен"
 msgid "Password"
 msgstr "Пароль"
 
-msgid "Paste preset"
-msgstr "Вставить предустановку"
-
 msgid "Paste"
 msgstr "Вставить"
 
@@ -3153,27 +3199,9 @@ msgstr "Сохранить высоту звука"
 msgid "Preserve pitch"
 msgstr "Сохранить высоту звука"
 
-msgid "Preset 1"
-msgstr "Предустановка 1"
-
-msgid "Preset 2"
-msgstr "Предустановка 2"
-
-msgid "Preset 3"
-msgstr "Предустановка 3"
-
-msgid "Preset 4"
-msgstr "Предустановка 4"
-
-msgid "Preset 5"
-msgstr "Предустановка 5"
-
 #, fuzzy
 #| msgid "Preset saved"
 msgid "Preset name"
-msgstr "Предустановка сохранена"
-
-msgid "Preset saved"
 msgstr "Предустановка сохранена"
 
 #, fuzzy
@@ -3571,6 +3599,9 @@ msgstr "Синхронизировать библиотеку"
 msgid "Retry"
 msgstr "Повторить"
 
+msgid "Ribbon"
+msgstr ""
+
 msgid "Rise speed (%)"
 msgstr "Скорость увеличения (%)"
 
@@ -3582,6 +3613,11 @@ msgstr "Ромадзи"
 
 msgid "Rounded bars"
 msgstr "Закруглённые полосы"
+
+#, fuzzy
+#| msgid "Filled spectrum"
+msgid "Rounded spectrum"
+msgstr "Заполненный спектр"
 
 msgid "Row borders"
 msgstr "Границы строк"
@@ -3655,11 +3691,6 @@ msgstr "Сохраненная предустановка"
 
 msgid "Save"
 msgstr "Сохранить"
-
-#, fuzzy
-#| msgid "Saved..."
-msgid "Save..."
-msgstr "Сохранено..."
 
 msgid "Saved Plex Login"
 msgstr "Сохраненные данные для входа в Plex"
@@ -4068,6 +4099,11 @@ msgstr "Треки умного плейлиста"
 
 msgid "Smart playlists"
 msgstr "Умные плейлисты"
+
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "Soft spectrum"
+msgstr "Линия спектра"
 
 msgid "Solid bars"
 msgstr "Сплошные полосы"
@@ -4510,11 +4546,6 @@ msgstr "Использовать максимальный год"
 msgid "Use minimum year"
 msgstr "Использовать минимальный год"
 
-#, fuzzy
-#| msgid "Use source setting"
-msgid "Use output settings"
-msgstr "Использовать настройки источника"
-
 msgid "Use source setting"
 msgstr "Использовать настройки источника"
 
@@ -4612,6 +4643,9 @@ msgstr "День недели"
 
 msgid "Weekly"
 msgstr "Еженедельно"
+
+msgid "Weighting"
+msgstr ""
 
 msgid "Wide"
 msgstr "Широкий"
@@ -4893,6 +4927,43 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Copy preset"
+#~ msgstr "Скопировать предустановку"
+
+#~ msgid "Copy the current appearance to the clipboard"
+#~ msgstr "Скопировать текущий внешний вид в буфер обмена"
+
+#~ msgid "Paste preset"
+#~ msgstr "Вставить предустановку"
+
+#~ msgid "Preset 1"
+#~ msgstr "Предустановка 1"
+
+#~ msgid "Preset 2"
+#~ msgstr "Предустановка 2"
+
+#~ msgid "Preset 3"
+#~ msgstr "Предустановка 3"
+
+#~ msgid "Preset 4"
+#~ msgstr "Предустановка 4"
+
+#~ msgid "Preset 5"
+#~ msgstr "Предустановка 5"
+
+#~ msgid "Preset saved"
+#~ msgstr "Предустановка сохранена"
+
+#, fuzzy
+#~| msgid "Saved..."
+#~ msgid "Save..."
+#~ msgstr "Сохранено..."
+
+#, fuzzy
+#~| msgid "Use source setting"
+#~ msgid "Use output settings"
+#~ msgstr "Использовать настройки источника"
 
 #~ msgid "Identify"
 #~ msgstr "Идентифицировать"
