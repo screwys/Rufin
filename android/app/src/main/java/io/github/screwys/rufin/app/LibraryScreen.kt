@@ -66,8 +66,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.SeekableTransitionState
-import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -123,7 +121,6 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.PagingData
 import io.github.screwys.rufin.core.translate
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import io.github.screwys.rufin.ui.pageMotion
@@ -162,7 +159,6 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     val browse = model.browse
     SideEffect {
         browse.homeBlocksFingerprint = preferences.applicationSettings?.homeBlocks?.toString()
-        browse.showDownloadedBadges = preferences.applicationSettings?.showDownloadedBadges != false
     }
     val player = rememberPlayerConnection(model)
     FeedbackToast(model, player)
@@ -265,19 +261,6 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     }
     LaunchedEffect(pinsPage) { pinsPage.observe() }
     val destination = BrowseDestination(browse.rootId, browse.details.size, browse.details.lastOrNull())
-    val destinationPage = if (destination.location != null) detailPages[destination.location]
-        else rootPages[destination.root]?.takeIf {
-            browse.library != null && browse.routes.any { it.id == destination.root } &&
-                (model.sources?.sources?.isEmpty() != true || destination.root in listOf("History", "Playlists", "SmartPlaylists"))
-        }
-    val navigation = remember(browse.section) { SeekableTransitionState(destination) }
-    val navigationTransition = rememberTransition(navigation, label = "libraryNavigation")
-    LaunchedEffect(destination, destinationPage, browse.section, reduceMotion) {
-        if (browse.section != AppSection.Browse) return@LaunchedEffect
-        navigation.seekTo(0f, destination)
-        destinationPage?.let { page -> snapshotFlow { !page.loading }.first { it } }
-        if (reduceMotion) navigation.snapTo(destination) else navigation.animateTo(destination)
-    }
     val hasMedia by remember(player) { derivedStateOf { player.currentId?.mediaUri != null } }
     val density = LocalDensity.current
     val playerPadding = if (hasMedia) maxOf(52.dp, with(density) {
@@ -419,7 +402,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                 FloatingActionButton({ random = true }, Modifier.padding(bottom = playerPadding)) { RufinIcon("rufin-random-symbolic", label("Play random")) }
         }) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
-            CompositionLocalProvider(LocalPlayerBottomPadding provides playerPadding) {
+            CompositionLocalProvider(LocalPlayerBottomPadding provides playerPadding, io.github.screwys.rufin.ui.LocalDownloadBadges provides model) {
             Column(Modifier.fillMaxSize()) {
                 if (!model.connect.operationActive && connectState?.let { it.connecting } == true) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -460,8 +443,8 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     browse.section != AppSection.More && !fullPlayer
                 Box(Modifier.weight(1f).pullToRefresh(isRefreshing = refreshing, state = refreshState,
                     enabled = canRefresh && !model.sourceBusy, onRefresh = model::refresh)) {
-                    if (browse.section == AppSection.Browse) navigationTransition.AnimatedContent(
-                        Modifier.fillMaxSize(), transitionSpec = {
+                    if (browse.section == AppSection.Browse) AnimatedContent(
+                        targetState = destination, modifier = Modifier.fillMaxSize(), label = "libraryNavigation", transitionSpec = {
                             if (initialState.depth == 0 && targetState.depth == 0)
                                 fadeIn(tween(if (reduceMotion) 0 else 180)) togetherWith fadeOut(tween(if (reduceMotion) 0 else 180))
                             else pageMotion(targetState.depth > initialState.depth, reduceMotion)
@@ -661,7 +644,7 @@ private fun BrowsePageContent(model: RufinConnection, browse: BrowseConnection, 
         if (location.kind in listOf("Folders", "folder")) FolderNavigation(model, browse, page)
         if (summary != null) {
             val context = androidx.compose.ui.platform.LocalContext.current
-            DetailContent(summary, page, player, page.favoritesPage, page.releasePages,
+            DetailContent(summary, page, rows, player, page.favoritesPage, page.releaseGroups,
                 browse::open, onMenu, { item, placement, shuffled -> browse.play(item, placement, shuffled) }, browse::favorite,
                 onPlaylist, { route, title -> browse.openRoute(route, title, route.kind, summary.row.title) },
                 onLink = { link -> model.runAction {

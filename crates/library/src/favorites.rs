@@ -399,4 +399,4 @@ pub(crate) async fn write_user_media_state(
     cleanup_empty_state(connection, &state.media_uri).await
 }
 
-pub(crate) const FAVORITE_URIS: &str = "SELECT media_uri FROM user_media_state WHERE favorite=1 UNION SELECT native.media_uri FROM native_media_state native WHERE native.favorite=1 AND COALESCE((SELECT favorite FROM user_media_state WHERE media_uri=native.media_uri),1)=1";
+pub(crate) const FAVORITE_URIS: &str = "SELECT media_uri FROM user_media_state WHERE favorite=1 UNION ALL SELECT native.media_uri FROM native_media_state native WHERE native.favorite=1 AND NOT EXISTS(SELECT 1 FROM user_media_state WHERE media_uri=native.media_uri AND favorite IS NOT NULL)";

@@ -608,7 +608,7 @@ async fn generate_artwork(
     let mut images = futures_util::stream::iter(bindings)
         .map(|binding| {
             let request =
-                artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&binding), 512, 512)
+                artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&binding), 512)
                     .with_external(policy.clone());
             owner.shared.artwork.image_bytes(request)
         })

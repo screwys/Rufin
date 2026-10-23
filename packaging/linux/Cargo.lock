@@ -3362,6 +3362,7 @@ dependencies = [
  "playback",
  "presence",
  "pulldown-cmark",
+ "roxmltree 0.21.1",
  "rufin-core",
  "secrets",
  "sources",

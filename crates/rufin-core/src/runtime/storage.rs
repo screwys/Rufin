@@ -77,6 +77,11 @@ impl ProductHandles {
         self.connect.close_storage().await?;
         self.source.close_storage().await;
         self.downloads.shutdown().await?;
+        let settings = self.settings.clone();
+        self.runtime
+            .spawn_blocking(move || settings.flush())
+            .await
+            .map_err(|e| e.to_string())??;
         self.library
             .as_ref()
             .clone()

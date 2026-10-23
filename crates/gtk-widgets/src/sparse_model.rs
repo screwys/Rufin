@@ -1143,7 +1143,7 @@ where
         });
     }
 
-    fn cancel(&self) {
+    pub fn cancel(&self) {
         if let Some(source) = self.demand_source.borrow_mut().take() {
             source.abort();
         }

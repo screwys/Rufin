@@ -300,25 +300,10 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
 
     let edits = Rc::new(VisualizerEdits {
         shell: Rc::downgrade(shell),
-        pending: Cell::new(0),
-        catalog_pending: Cell::new(0),
-        catalog_controls: [
-            presets.clone().upcast::<gtk::Widget>(),
-            save.clone().upcast(),
-            duplicate.clone().upcast(),
-            rename.clone().upcast(),
-            delete.clone().upcast(),
-            import.clone().upcast(),
-            export.clone().upcast(),
-        ]
-        .map(|widget| widget.downgrade()),
         refresh_catalog: refresh_presets,
         refresh,
     });
-    let ready = edits.commit("load visualizer preferences", true, |_| false);
-    gtk::glib::spawn_future_local(async move {
-        ready.await;
-    });
+    (edits.refresh_catalog)();
     let editor = Rc::clone(&edits);
     let changing = Rc::clone(&syncing);
     ignore_volume.connect_active_notify(move |row| {
@@ -557,12 +542,9 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
                         false
                     }
                 });
-                let feedback = Rc::clone(&feedback);
-                gtk::glib::spawn_future_local(async move {
-                    if saved.await {
-                        feedback();
-                    }
-                });
+                if saved {
+                    feedback();
+                }
                 return;
             }
             let Some(window) = shell.window.upgrade() else {
@@ -601,12 +583,9 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
                         }
                         true
                     });
-                    let feedback = Rc::clone(&feedback);
-                    gtk::glib::spawn_future_local(async move {
-                        if saved.await && action == 0 {
-                            feedback();
-                        }
-                    });
+                    if saved && action == 0 {
+                        feedback();
+                    }
                 },
             );
         });
@@ -642,12 +621,10 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         let editor = Rc::clone(&editor);
         gtk::glib::spawn_future_local(async move {
             if dialog.choose_future(Some(&window)).await == "accept" {
-                editor
-                    .commit("delete visualizer preset", true, move |settings| {
-                        settings.visualizer.delete_preset(slot);
-                        true
-                    })
-                    .await;
+                editor.commit("delete visualizer preset", true, move |settings| {
+                    settings.visualizer.delete_preset(slot);
+                    true
+                });
             }
         });
     });
@@ -674,26 +651,21 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
     });
     let editor = Rc::clone(&edits);
     export.connect_clicked(move |_| {
-        let ready = editor.commit("export visualizer preset", false, |_| false);
-        let editor = Rc::clone(&editor);
-        gtk::glib::spawn_future_local(async move {
-            ready.await;
-            let Some(shell) = editor.shell.upgrade() else {
-                return;
-            };
-            let Some(window) = shell.window.upgrade() else {
-                return;
-            };
-            let text = shell
-                .settings
-                .current
-                .borrow()
-                .visualizer
-                .current_preset()
-                .to_json();
-            crate::preset_transfer::export(&window, &["visualizer.rufin.json"], move |_| {
-                Ok(text.clone())
-            });
+        let Some(shell) = editor.shell.upgrade() else {
+            return;
+        };
+        let Some(window) = shell.window.upgrade() else {
+            return;
+        };
+        let text = shell
+            .settings
+            .current
+            .borrow()
+            .visualizer
+            .current_preset()
+            .to_json();
+        crate::preset_transfer::export(&window, &["visualizer.rufin.json"], move |_| {
+            Ok(text.clone())
         });
     });
     let editor = Rc::clone(&edits);
@@ -714,7 +686,7 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
             });
             async move {
                 let result = result.ok_or_else(|| localization::tr("Not valid"))?;
-                if !result.await {
+                if !result {
                     return Err(localization::tr("This isn't available"));
                 }
                 Ok(())
@@ -726,80 +698,35 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
 
 struct VisualizerEdits {
     shell: std::rc::Weak<PlayerUi>,
-    pending: Cell<usize>,
-    catalog_pending: Cell<usize>,
-    catalog_controls: [gtk::glib::WeakRef<gtk::Widget>; 7],
     refresh_catalog: Rc<dyn Fn()>,
     refresh: Rc<dyn Fn()>,
 }
 
 impl VisualizerEdits {
-    fn commit<F>(
-        self: &Rc<Self>,
+    fn commit(
+        &self,
         action: &'static str,
         catalog: bool,
-        edit: F,
-    ) -> impl std::future::Future<Output = bool> + use<F>
-    where
-        F: FnOnce(&mut rufin_core::settings::app::Settings) -> bool + Send + 'static,
-    {
-        let shell = self.shell.upgrade();
-        let result = shell.as_ref().map(|shell| {
-            shell
-                .settings
-                .update_app_settings_async(&shell.runtime, action, edit)
-        });
-        self.pending.set(self.pending.get() + 1);
+        edit: impl FnOnce(&mut rufin_core::settings::app::Settings) -> bool,
+    ) -> bool {
+        let Some(shell) = self.shell.upgrade() else {
+            return false;
+        };
+        let changed = shell.settings.update_app_settings(action, edit).is_some();
+        shell.apply_visualizer_appearance();
         if catalog {
-            self.catalog_pending.set(self.catalog_pending.get() + 1);
-            for widget in self
-                .catalog_controls
-                .iter()
-                .filter_map(|widget| widget.upgrade())
-            {
-                widget.set_sensitive(false);
-            }
+            (self.refresh_catalog)();
         }
-        let editor = Rc::clone(self);
-        async move {
-            let saved = match result {
-                Some(result) => result.await.is_some(),
-                None => false,
-            };
-            if let Some(shell) = shell {
-                shell.apply_visualizer_appearance();
-            }
-            editor.pending.set(editor.pending.get() - 1);
-            if catalog {
-                editor.catalog_pending.set(editor.catalog_pending.get() - 1);
-                if editor.catalog_pending.get() == 0 {
-                    for widget in editor
-                        .catalog_controls
-                        .iter()
-                        .filter_map(|widget| widget.upgrade())
-                    {
-                        widget.set_sensitive(true);
-                    }
-                    (editor.refresh_catalog)();
-                }
-            }
-            // Keep newer slider and preset choices visible until their queued edits finish.
-            if editor.pending.get() == 0 {
-                (editor.refresh)();
-            }
-            saved
-        }
+        (self.refresh)();
+        changed
     }
 
     fn apply(
-        self: &Rc<Self>,
+        &self,
         action: &'static str,
-        edit: impl FnOnce(&mut rufin_core::settings::app::Settings) -> bool + Send + 'static,
+        edit: impl FnOnce(&mut rufin_core::settings::app::Settings) -> bool,
     ) {
-        let result = self.commit(action, false, edit);
-        gtk::glib::spawn_future_local(async move {
-            result.await;
-        });
+        self.commit(action, false, edit);
     }
 
     fn appearance(self: &Rc<Self>, edit: impl FnOnce(&mut VisualizerAppearance) + Send + 'static) {

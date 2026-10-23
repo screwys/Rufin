@@ -177,7 +177,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                                 try {
                                     event.dictionaryStatus()?.let { status ->
                                         dictionaryState = status
-                                        if (status is JapaneseDictionaryStatus.Ready) refreshLyrics(player)
                                     }
                                     val media = event.mediaId()
                                     val query = event.query()
@@ -216,7 +215,6 @@ internal class PlayerConnection(private val connection: RufinConnection) {
                     }
                 } finally {
                     bridge = null
-                    withContext(NonCancellable + readings) { player.releaseLyricsReader() }
                     settingsOwner = null
                     owner.destroy()
                     settings = null
@@ -260,11 +258,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     }
     fun refreshSettings() = action { changeSettings {} }
     fun editPreferences(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }
-    fun lyricsPreference(edit: SettingsOwner.() -> Unit) = action {
-        val current = bridge ?: return@action
-        changeSettings(edit)
-        refreshLyrics(current)
-    }
+    fun lyricsPreference(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }
     fun visualizerAppearance(edit: SettingsOwner.() -> Unit) = action { changeSettings(edit) }
     fun visualizerFrameLimit(value: Int) = action { changeSettings { it.setVisualizerFrameLimit(value.toUInt()) } }
     fun visualizerPreset(slot: ULong, save: Boolean) = action { changeSettings { it.updateVisualizerPreset(slot, save) } }
@@ -292,6 +286,7 @@ internal class PlayerConnection(private val connection: RufinConnection) {
         changeSettings { it.suppressFetchedLyrics(token.mediaUri) }
         bridge?.let { refreshLyrics(it) }
     }
+    fun requestLyrics() { currentId?.let { lyricsOwner?.load(it) } }
     fun prepareDictionary() = action { lyricsOwner?.japaneseDictionary(true) }
     suspend fun lyricsText(token: CurrentMediaId, offset: Long = lyricsOffset): String = withContext(readings) {
         check(currentId == token) { translate("This isn't available") }

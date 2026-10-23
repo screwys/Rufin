@@ -391,7 +391,7 @@ pub fn prepare_artwork(
     })
 }
 
-/// Use the cached image the user has seen before asking its source for an original.
+/// Read the original artwork for editing.
 pub fn current_artwork(
     owner: &SourceOwner,
     binding: Vec<u8>,

@@ -60,18 +60,14 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 @Composable
 internal fun DetailContent(
-    summary: AndroidDetailSummary?, page: BrowsePage, player: PlayerConnection,
-    favoritesPage: BrowsePage?, releasePages: List<Pair<AndroidArtistReleaseGroup, BrowsePage>>,
+    summary: AndroidDetailSummary?, page: BrowsePage, rows: LazyPagingItems<BrowseItem>, player: PlayerConnection,
+    favoritesPage: BrowsePage?, releaseGroups: List<AndroidArtistReleaseGroup>,
     onActivate: (BrowseItem) -> Unit, onMenu: (BrowseItem) -> Unit,
     onPlay: (BrowseItem, String, Boolean) -> Unit, onFavorite: (BrowseItem) -> Unit,
     onAddToPlaylist: (BrowseItem) -> Unit, onOpenRoute: (Route, String) -> Unit,
     onLink: (AndroidDetailLink) -> Unit, onScrolled: (Boolean) -> Unit, onRadio: (BrowseItem) -> Unit,
 ) {
-    val tracks = page.pages.collectAsLazyPagingItems()
     val favorites = favoritesPage?.pages?.collectAsLazyPagingItems()
-    val releases = releasePages.filter { it.first.total > 0UL }.map { (group, owner) ->
-        Triple(group, owner, key(group.id) { owner.pages.collectAsLazyPagingItems() })
-    }
     val state = rememberLazyListState()
     LaunchedEffect(state) {
         snapshotFlow { state.firstVisibleItemIndex > 0 || state.firstVisibleItemScrollOffset > 0 }
@@ -83,7 +79,7 @@ internal fun DetailContent(
         }
         return
     }
-    val headerItem = remember(summary, page.displaySettings) { BrowseItem(summary.row, 0UL, null, page.displaySettings) }
+    val headerItem = remember(summary, page.displaySettings, page.downloadRevision) { BrowseItem(summary.row, 0UL, null, page.displaySettings, downloadRevision = page.downloadRevision) }
     val artist = summary.mode.kind == "ArtistDetail" || summary.mode.kind == "AlbumArtistDetail"
     val releasesVisible = summary.showsReleases
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -118,36 +114,34 @@ internal fun DetailContent(
                 }
             }
             if (releasesVisible) {
-                releases.forEach { (group, owner, albums) ->
-                    val display = owner.displaySettings
+                releaseGroups.filter { it.total > 0UL }.forEach { group ->
+                    val display = page.options.displaySettings ?: page.displaySettings
                     val grid = display?.layout == LibraryLayout.GRID
                     val cardSize = when (display?.size) { DisplaySize.COMPACT -> 104.dp; DisplaySize.LARGE -> 176.dp; else -> 128.dp }
                     val gap = when (display?.gridSpacing) { DisplaySize.COMPACT -> 4.dp; DisplaySize.LARGE -> 16.dp; else -> 12.dp }
                     val columns = if (grid) ((width - 32.dp + gap) / (cardSize + gap)).toInt().coerceAtLeast(1) else 1
-                    val loading = owner.loading || albums.loadState.refresh is LoadState.Loading
-                    val count = if (loading && albums.itemCount == 0) group.total.toInt() else albums.itemCount
+                    val count = group.total.toInt()
                     item("release-heading:${group.id}") { DetailSectionHeading(translate(group.title)) }
                     items((count + columns - 1) / columns, key = { "release:${group.id}:$it" }) { rowIndex ->
                             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
                                 repeat(columns) { column ->
                                     val position = rowIndex * columns + column
                                     if (position >= count) Spacer(Modifier.weight(1f)) else {
-                                        val item = if (position < albums.itemCount) albums[position] else null
+                                        val index = group.index.toInt() + position
+                                        val item = if (index < rows.itemCount) rows[index] else null
                                         Box(Modifier.weight(1f)) {
                                             if (item == null) Spacer(Modifier.height(if (grid) cardSize + 64.dp else 76.dp))
-                                            else if (grid) CoverCard(item.copy(displaySettings = owner.options.displaySettings ?: owner.displaySettings), player, Modifier.fillMaxWidth().padding(bottom = 12.dp), onActivate, onMenu)
-                                            else DetailAlbumRow(item.copy(displaySettings = owner.options.displaySettings ?: owner.displaySettings), player, onActivate, onMenu, onFavorite)
+                                            else if (grid) CoverCard(item.copy(displaySettings = display), player, Modifier.fillMaxWidth().padding(bottom = 12.dp), onActivate, onMenu)
+                                            else DetailAlbumRow(item.copy(displaySettings = display), player, onActivate, onMenu, onFavorite)
                                         }
                                     }
                                 }
                             }
                         }
-                    item("release-state:${group.id}") {
-                        DetailLoadState(albums.loadState.refresh, albums::retry)
-                        DetailLoadState(albums.loadState.append, albums::retry)
-                        if (count == 0 && albums.loadState.refresh is LoadState.NotLoading)
-                            BrowseEmptyState(owner.hasActiveFilters, resetFilters = page::resetFilters)
-                    }
+                }
+                item("release-state") {
+                    DetailLoadState(rows.loadState.refresh, rows::retry)
+                    DetailLoadState(rows.loadState.append, rows::retry)
                 }
             } else {
                 val display = page.options.displaySettings ?: page.displaySettings
@@ -155,12 +149,12 @@ internal fun DetailContent(
                     val cardSize = when (display.size) { DisplaySize.COMPACT -> 104.dp; DisplaySize.LARGE -> 176.dp; else -> 128.dp }
                     val gap = when (display.gridSpacing) { DisplaySize.COMPACT -> 4.dp; DisplaySize.LARGE -> 16.dp; else -> 12.dp }
                     val columns = ((width - 32.dp + gap) / (cardSize + gap)).toInt().coerceAtLeast(1)
-                    items((tracks.itemCount + columns - 1) / columns, key = { "detail-grid:$it" }) { rowIndex ->
+                    items((rows.itemCount + columns - 1) / columns, key = { "detail-grid:$it" }) { rowIndex ->
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
                             repeat(columns) { column ->
                                 val position = rowIndex * columns + column
-                                if (position >= tracks.itemCount) Spacer(Modifier.weight(1f)) else Box(Modifier.weight(1f)) {
-                                    val item = tracks[position]
+                                if (position >= rows.itemCount) Spacer(Modifier.weight(1f)) else Box(Modifier.weight(1f)) {
+                                    val item = rows[position]
                                     if (item == null) Spacer(Modifier.height(cardSize + 48.dp))
                                     else CoverCard(item.copy(displaySettings = display), player, Modifier.fillMaxWidth(), onActivate, onMenu)
                                 }
@@ -169,15 +163,15 @@ internal fun DetailContent(
                     }
                 } else {
                     if (summary.showTrackHeader) item("detail-track-header") { DetailTrackHeader(page.detailTrackFields, display?.size) }
-                    items(tracks.itemCount, key = tracks.itemKey { "${it.row.key}:${it.index}" }) { index ->
-                        val item = tracks[index]
+                    items(rows.itemCount, key = rows.itemKey { "${it.row.key}:${it.index}" }) { index ->
+                        val item = rows[index]
                         if (item == null) Spacer(Modifier.height(48.dp))
                         else DetailTrackRow(item.copy(displaySettings = display), player,
                             summary.showTrackImages, page.detailTrackFields, onActivate, onMenu, onFavorite, onAddToPlaylist, allowSwipe = true)
                     }
                 }
-                item { DetailLoadState(tracks.loadState.refresh, tracks::retry); DetailLoadState(tracks.loadState.append, tracks::retry) }
-                if (tracks.itemCount == 0 && tracks.loadState.refresh is LoadState.NotLoading) item {
+                item { DetailLoadState(rows.loadState.refresh, rows::retry); DetailLoadState(rows.loadState.append, rows::retry) }
+                if (rows.itemCount == 0 && rows.loadState.refresh is LoadState.NotLoading) item {
                     BrowseEmptyState(page.hasActiveFilters, resetFilters = page::resetFilters)
                 }
             }

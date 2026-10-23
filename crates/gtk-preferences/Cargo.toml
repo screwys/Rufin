@@ -31,6 +31,7 @@ sources.workspace = true
 playback.workspace = true
 downloads.workspace = true
 tracing.workspace = true
+roxmltree.workspace = true
 
 [build-dependencies]
 glib-build-tools.workspace = true

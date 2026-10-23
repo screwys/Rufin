@@ -157,32 +157,6 @@ impl AndroidPlayer {
     }
 }
 
-fn reading_for(
-    text: &str,
-    language: Option<&str>,
-    supplied: Option<&str>,
-    settings: &lyrics::Settings,
-) -> Option<lyrics::JapaneseReading> {
-    if !settings.preferences.show_furigana && !settings.preferences.show_romanization {
-        return None;
-    }
-    let reading = if settings.preferences.show_furigana {
-        supplied.and_then(|pronunciation| {
-            lyrics::japanese_reading_from_romanization(text, pronunciation)
-        })
-    } else {
-        None
-    };
-    reading.or_else(|| {
-        lyrics::japanese_reading_for_language_options(
-            text,
-            language,
-            settings.preferences.show_furigana,
-            settings.preferences.show_romanization,
-        )
-    })
-}
-
 #[uniffi::export]
 impl AndroidPlayer {
     pub async fn metadata_links(
@@ -358,9 +332,6 @@ impl AndroidPlayer {
             .and_then(|view| view.transport.current.clone());
         let stored = self.products.settings.load();
         let settings = stored.lyrics;
-        if !settings.preferences.show_furigana && !settings.preferences.show_romanization {
-            lyrics::release_japanese_reader();
-        }
         let mut state = AndroidLyricsState {
             snapshot: None,
             current_media_id: media.as_ref().map(|media| media.id.clone()),
@@ -393,147 +364,16 @@ impl AndroidPlayer {
         state.media_id = Some(media_id.clone());
         state.instrumental = matches!(content, Some(CurrentLyricsContent::Instrumental));
         let Some(CurrentLyricsContent::Document {
-            document,
-            pronunciation,
+            document, prepared, ..
         }) = content
         else {
             return state;
         };
-        let readings = document.is_japanese_for_readings();
-        if readings
-            && (settings.preferences.show_furigana || settings.preferences.show_romanization)
-        {
-            if let lyrics::JapaneseDictionaryStatus::Ready(path) =
-                self.products.lyrics.japanese_dictionary(false)
-            {
-                lyrics::prepare_japanese_reader(&path);
-            }
-        }
-        let mut projected = AndroidLyricsDocument::from(document.as_ref());
-        let mut highlight_timings: Vec<Vec<_>> = if settings.preferences.karaoke_mode {
-            document.lines.iter().map(|_| Vec::new()).collect()
-        } else {
-            Vec::new()
-        };
-        for (index, line) in document.lines.iter().enumerate() {
-            let supplied = lyrics::pronunciation_line_for(line, pronunciation.as_deref());
-            let output = &mut projected.lines[index];
-            output.pronunciation = supplied.map(|line| line.text.clone());
-            if readings {
-                output.reading = reading_for(
-                    &line.text,
-                    document.language.as_deref(),
-                    supplied.map(|line| line.text.as_str()),
-                    &settings,
-                )
-                .map(Into::into);
-            }
-            for (cue_index, cue_line) in line.cue_lines.iter().enumerate() {
-                let supplied = if line.cue_lines.len() == 1 {
-                    supplied.map(|line| line.text.as_str())
-                } else {
-                    None
-                };
-                let cues: Vec<_> = if settings.preferences.karaoke_mode {
-                    cue_line
-                        .cues
-                        .iter()
-                        .enumerate()
-                        .map(|(cue_index, cue)| {
-                            (
-                                cue,
-                                lyrics::effective_cue_end(
-                                    &document.lines,
-                                    index,
-                                    cue_line,
-                                    cue_index,
-                                ),
-                            )
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-                for (cue_part, (cue, end)) in cues.iter().enumerate() {
-                    if let Some(timing) = lyrics::KaraokeTiming::for_text_range(
-                        &cue_line.text,
-                        cue.byte_start..cue.byte_end_exclusive,
-                        cue,
-                        *end,
-                    ) {
-                        highlight_timings[index].push(LyricsHighlightTiming {
-                            cue_line: cue_index,
-                            target: AndroidLyricsHighlightTarget::Cue {
-                                index: cue_part as u32,
-                            },
-                            timings: vec![timing],
-                        });
-                    }
-                }
-                let mut add_timing = |range: std::ops::Range<usize>, target| {
-                    let timings: Vec<_> = cues
-                        .iter()
-                        .filter_map(|(cue, end)| {
-                            lyrics::KaraokeTiming::for_text_range(
-                                &cue_line.text,
-                                range.clone(),
-                                cue,
-                                *end,
-                            )
-                        })
-                        .collect();
-                    if !timings.is_empty() {
-                        highlight_timings[index].push(LyricsHighlightTiming {
-                            cue_line: cue_index,
-                            target,
-                            timings,
-                        });
-                    }
-                };
-                if readings {
-                    let reading = reading_for(
-                        &cue_line.text,
-                        document.language.as_deref(),
-                        supplied,
-                        &settings,
-                    );
-                    if let Some(reading) = reading {
-                        if settings.preferences.karaoke_mode {
-                            let mut cursor = 0;
-                            for (segment_index, segment) in reading.segments.iter().enumerate() {
-                                let range = cursor..cursor + segment.surface.len();
-                                cursor = range.end;
-                                if segment.furigana.is_some() {
-                                    add_timing(
-                                        range,
-                                        AndroidLyricsHighlightTarget::Furigana {
-                                            index: segment_index as u32,
-                                        },
-                                    );
-                                }
-                            }
-                            for (span_index, (range, _)) in
-                                reading.romanization_spans.iter().enumerate()
-                            {
-                                add_timing(
-                                    range.clone(),
-                                    AndroidLyricsHighlightTarget::Romanization {
-                                        index: span_index as u32,
-                                    },
-                                );
-                            }
-                        }
-                        output.cue_lines[cue_index].reading = Some(reading.into());
-                    }
-                }
-            }
-        }
         state.snapshot = Some(Arc::new(AndroidLyricsSnapshot {
             document: Arc::clone(document),
-            timing: lyrics::LyricsTiming::new(&document.lines),
-            highlight_timings,
+            prepared: Arc::clone(prepared),
         }));
-        state.document = Some(projected);
+        state.document = Some(AndroidLyricsDocument::from_prepared(document, prepared));
         state
     }
 
@@ -542,10 +382,6 @@ impl AndroidPlayer {
             .into_iter()
             .map(Into::into)
             .collect()
-    }
-
-    pub fn release_lyrics_reader(&self) {
-        lyrics::release_japanese_reader();
     }
 
     pub fn visualizer_drawing(
@@ -663,7 +499,7 @@ impl AndroidPlayer {
             .to_owned()
     }
 
-    pub fn artwork_preview(&self, identity: Vec<u8>) -> Option<Vec<u8>> {
+    pub fn artwork_preview(&self, identity: Vec<u8>) -> Option<AndroidArtwork> {
         self.products
             .artwork
             .preview(
@@ -674,38 +510,42 @@ impl AndroidPlayer {
                     .application
                     .external_metadata_enabled,
             )
-            .map(|preview| preview.png.as_ref().clone())
+            .map(|preview| AndroidArtwork::from(&preview.image))
     }
 
     pub async fn artwork(
         &self,
         identity: Vec<u8>,
         size: u32,
-    ) -> Result<Option<Vec<u8>>, AndroidError> {
+    ) -> Result<Option<AndroidArtwork>, AndroidError> {
         let stored = self.products.settings.load();
         let request =
-            artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&identity), size, size)
+            artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&identity), size)
                 .with_external(artwork::ExternalPolicy::new(
                     stored.application.external_metadata_enabled,
                     stored.allows_external_metadata_lookup(),
                     stored.lastfm_api_key,
                 ));
         let artwork = self.products.artwork.clone();
-        let bytes = self
-            .products
+        self.products
             .runtime
-            .spawn(async move { artwork.image_bytes(request).await })
+            .spawn(async move {
+                let image = match artwork.load(request).finish().await {
+                    artwork::ArtworkOutcome::Ready(image) => image,
+                    artwork::ArtworkOutcome::Missing | artwork::ArtworkOutcome::Invalidated => {
+                        return Ok(None);
+                    }
+                    artwork::ArtworkOutcome::Failed(message) => return Err(error(message)),
+                };
+                Ok(Some(AndroidArtwork::from(image.pixels())))
+            })
             .await
             .map_err(error)?
-            .map_err(error)?;
-        Ok(bytes)
     }
 
     pub fn subscribe_lyrics(&self) -> Arc<AndroidLyricsSubscription> {
-        self.products.lyrics.load_current();
         Arc::new(AndroidLyricsSubscription {
             current: tokio::sync::Mutex::new((self.products.lyrics.current(), true)),
-            lyrics: self.products.lyrics.clone(),
         })
     }
 
@@ -730,6 +570,38 @@ impl AndroidPlayer {
             updates: self.products.playback.updates.clone(),
         })
     }
+}
+
+#[derive(uniffi::Record)]
+pub struct AndroidArtwork {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+impl From<&artwork::RgbaImage> for AndroidArtwork {
+    fn from(image: &artwork::RgbaImage) -> Self {
+        let mut rgba = image.rgba().to_vec();
+        // Android bitmap buffers use premultiplied color channels.
+        for pixel in rgba.chunks_exact_mut(4) {
+            let alpha = u16::from(pixel[3]);
+            for channel in &mut pixel[..3] {
+                *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
+            }
+        }
+        Self {
+            width: image.width(),
+            height: image.height(),
+            rgba,
+        }
+    }
+}
+
+#[uniffi::export]
+pub fn decode_artwork(bytes: Vec<u8>, size: u32) -> Result<AndroidArtwork, AndroidError> {
+    artwork::decode_cover(&bytes, size)
+        .map(|image| AndroidArtwork::from(&image))
+        .map_err(error)
 }
 
 #[derive(uniffi::Record)]
@@ -765,19 +637,11 @@ pub struct AndroidRomanizationSpan {
     pub end: u32,
 }
 
-#[derive(Clone, uniffi::Enum)]
-pub enum AndroidLyricsHighlightTarget {
-    Cue { index: u32 },
-    Furigana { index: u32 },
-    Romanization { index: u32 },
-}
-
 #[derive(uniffi::Record)]
 pub struct AndroidLyricsHighlight {
-    pub line: u32,
-    pub cue_line: u32,
-    pub target: AndroidLyricsHighlightTarget,
-    pub progress: f64,
+    pub cues: Vec<f64>,
+    pub furigana: Vec<f64>,
+    pub romanization: Vec<f64>,
 }
 
 #[derive(uniffi::Record)]
@@ -785,12 +649,12 @@ pub struct AndroidLyricsFrame {
     pub active_line: Option<u32>,
     pub scroll_line: Option<u32>,
     pub highlight_all: bool,
-    pub highlights: Vec<AndroidLyricsHighlight>,
+    pub highlights: std::collections::HashMap<u32, Vec<AndroidLyricsHighlight>>,
     pub update_after_millis: Option<u64>,
 }
 
-impl From<lyrics::JapaneseReading> for AndroidJapaneseReading {
-    fn from(reading: lyrics::JapaneseReading) -> Self {
+impl From<&lyrics::JapaneseReading> for AndroidJapaneseReading {
+    fn from(reading: &lyrics::JapaneseReading) -> Self {
         let mut remaining = reading.romanization.as_str();
         let mut cursor = 0;
         let romanization_spans = reading
@@ -807,8 +671,8 @@ impl From<lyrics::JapaneseReading> for AndroidJapaneseReading {
             })
             .collect();
         Self {
-            segments: reading.segments,
-            romanization: reading.romanization,
+            segments: reading.segments.clone(),
+            romanization: reading.romanization.clone(),
             romanization_spans,
         }
     }
@@ -832,8 +696,8 @@ pub struct AndroidLyricsDocument {
     pub agents: Vec<lyrics::LyricsAgent>,
 }
 
-impl From<&lyrics::LyricsDocument> for AndroidLyricsDocument {
-    fn from(document: &lyrics::LyricsDocument) -> Self {
+impl AndroidLyricsDocument {
+    fn from_prepared(document: &lyrics::LyricsDocument, prepared: &lyrics::PreparedLyrics) -> Self {
         Self {
             role: document.role,
             language: document.language.clone(),
@@ -841,21 +705,23 @@ impl From<&lyrics::LyricsDocument> for AndroidLyricsDocument {
             lines: document
                 .lines
                 .iter()
-                .map(|line| AndroidLyricsLine {
+                .zip(&prepared.lines)
+                .map(|(line, prepared)| AndroidLyricsLine {
                     text: line.text.clone(),
                     start_millis: line.start_millis,
                     end_millis: line.end_millis,
-                    pronunciation: None,
-                    reading: None,
+                    pronunciation: prepared.pronunciation.clone(),
+                    reading: prepared.reading.as_deref().map(Into::into),
                     cue_lines: line
                         .cue_lines
                         .iter()
-                        .map(|line| AndroidLyricsCueLine {
+                        .zip(&prepared.cue_lines)
+                        .map(|(line, prepared)| AndroidLyricsCueLine {
                             text: line.text.clone(),
                             start_millis: line.start_millis,
                             end_millis: line.end_millis,
                             agent_id: line.agent_id.clone(),
-                            reading: None,
+                            reading: prepared.reading.as_deref().map(Into::into),
                             cues: line
                                 .cues
                                 .iter()
@@ -885,14 +751,7 @@ impl From<&lyrics::LyricsDocument> for AndroidLyricsDocument {
 #[derive(uniffi::Object)]
 pub struct AndroidLyricsSnapshot {
     document: Arc<lyrics::LyricsDocument>,
-    timing: lyrics::LyricsTiming,
-    highlight_timings: Vec<Vec<LyricsHighlightTiming>>,
-}
-
-struct LyricsHighlightTiming {
-    cue_line: usize,
-    target: AndroidLyricsHighlightTarget,
-    timings: Vec<lyrics::KaraokeTiming>,
+    prepared: Arc<lyrics::PreparedLyrics>,
 }
 
 #[uniffi::export]
@@ -913,28 +772,43 @@ impl AndroidLyricsSnapshot {
         } else {
             Some(first_line as usize..=last_line as usize)
         };
-        let mut highlights = Vec::new();
+        let mut highlights = std::collections::HashMap::new();
         if karaoke && let Some(range) = range {
-            for (line, timings) in self
-                .highlight_timings
+            let progress = |timings: &Vec<lyrics::KaraokeTiming>| {
+                timings
+                    .iter()
+                    .map(|timing| timing.progress(position))
+                    .sum::<f64>()
+                    .clamp(0.0, 1.0)
+            };
+            for (line, prepared) in self
+                .prepared
+                .lines
                 .iter()
                 .enumerate()
                 .take(range.end().saturating_add(1))
                 .skip(*range.start())
             {
-                for timing in timings {
-                    highlights.push(AndroidLyricsHighlight {
-                        line: line as u32,
-                        cue_line: timing.cue_line as u32,
-                        target: timing.target.clone(),
-                        progress: timing
-                            .timings
-                            .iter()
-                            .map(|timing| timing.progress(position))
-                            .sum::<f64>()
-                            .clamp(0.0, 1.0),
-                    });
-                }
+                highlights.insert(
+                    line as u32,
+                    prepared
+                        .cue_lines
+                        .iter()
+                        .map(|cue| AndroidLyricsHighlight {
+                            cues: cue
+                                .cues
+                                .iter()
+                                .map(|timing| {
+                                    timing
+                                        .as_ref()
+                                        .map_or(0.0, |timing| timing.progress(position))
+                                })
+                                .collect(),
+                            furigana: cue.furigana.iter().map(progress).collect(),
+                            romanization: cue.romanization.iter().map(progress).collect(),
+                        })
+                        .collect(),
+                );
             }
         }
         AndroidLyricsFrame {
@@ -945,6 +819,7 @@ impl AndroidLyricsSnapshot {
             highlight_all: lyrics::should_highlight_all_lyrics_lines(&self.document.lines),
             highlights,
             update_after_millis: self
+                .prepared
                 .timing
                 .next_after(position, karaoke)
                 .and_then(|next| u64::try_from(i128::from(next) - position).ok()),
@@ -970,7 +845,6 @@ pub struct AndroidLyricsSubscription {
         tokio::sync::watch::Receiver<rufin_core::lyrics::CurrentLyrics>,
         bool,
     )>,
-    lyrics: rufin_core::lyrics::LyricsHandle,
 }
 
 #[uniffi::export]
@@ -983,7 +857,6 @@ impl AndroidLyricsSubscription {
             current.0.changed().await.map_err(error)?;
         }
         let snapshot = current.0.borrow_and_update().clone();
-        self.lyrics.load_current();
         Ok(Arc::new(snapshot))
     }
 }

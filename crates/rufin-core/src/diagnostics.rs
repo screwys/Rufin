@@ -35,7 +35,6 @@ impl Drop for PersistentGuard {
             .unwrap_or_else(|p| p.into_inner())
             .closed = true;
         self.0.ready.notify_all();
-        self.0.space.notify_all();
         if let Some(worker) = self.1.take() {
             let _ = worker.join();
         }
@@ -45,7 +44,7 @@ impl Drop for PersistentGuard {
 struct DiagnosticState {
     output: Mutex<DiagnosticOutput>,
     ready: Condvar,
-    space: Condvar,
+    drained: Condvar,
 }
 
 impl DiagnosticState {
@@ -54,7 +53,7 @@ impl DiagnosticState {
         let state = Arc::new(Self {
             output: Mutex::new(output),
             ready: Condvar::new(),
-            space: Condvar::new(),
+            drained: Condvar::new(),
         });
         let worker_state = Arc::clone(&state);
         let worker = std::thread::Builder::new()
@@ -67,64 +66,60 @@ impl DiagnosticState {
 
     fn append(&self, text: String) {
         let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
-        // A full queue applies backpressure without holding the snapshot mutex.
-        // Keeping every record and bounded memory requires waiting if disk stalls.
-        let bytes = text.len().min(BUFFER_MAX_BYTES);
-        while output.pending_bytes + bytes > BUFFER_MAX_BYTES && !output.closed {
-            output = self.space.wait(output).unwrap_or_else(|p| p.into_inner());
-        }
-        let record = output.push_bounded(text);
         if !output.closed {
-            output.pending_bytes += record.len();
-            output.pending.push_back(record);
+            output.append(text);
             self.ready.notify_one();
         }
-        output.revision = output.revision.wrapping_add(1);
     }
 
     fn flush(&self) {
         let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
-        while !output.pending.is_empty() || output.writing {
-            output = self.space.wait(output).unwrap_or_else(|p| p.into_inner());
+        while output.written < output.end() {
+            output = self.drained.wait(output).unwrap_or_else(|p| p.into_inner());
         }
     }
 
     fn run(&self, mut file: Option<RotatingLog>) {
         loop {
-            let record = {
+            let update = {
                 let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
-                while output.pending.is_empty() && !output.closed {
+                while output.written == output.end() && !output.closed {
                     output = self.ready.wait(output).unwrap_or_else(|p| p.into_inner());
                 }
-                let Some(record) = output.pending.pop_front() else {
+                if output.written == output.end() {
                     return;
-                };
-                output.pending_bytes -= record.len();
-                output.writing = true;
-                self.space.notify_all();
-                record
+                }
+                if output.written < output.start_bytes {
+                    output.append(OMITTED_RECORDS.into());
+                }
+                output.updates(output.written)
             };
             if let Some(log) = &mut file
-                && let Err(error) = log.append(record.as_bytes())
+                && let Err(error) = update
+                    .text
+                    .split_inclusive('\n')
+                    .try_for_each(|line| log.append(line.as_bytes()))
             {
                 file = None;
-                let warning = sanitize_free_text(&format!(
-                    "WARN rufin::diagnostics: local log file is unavailable: {error}\n"
-                ));
-                let mut output = self.output.lock().unwrap_or_else(|p| p.into_inner());
-                output.push_bounded(warning);
-                output.revision = output.revision.wrapping_add(1);
+                self.output
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .append(sanitize_free_text(&format!(
+                        "WARN rufin::diagnostics: local log file is unavailable: {error}\n"
+                    )));
             }
             self.output
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .writing = false;
-            self.space.notify_all();
+                .written = update.end;
+            self.drained.notify_all();
         }
     }
 }
 
 const BUFFER_MAX_BYTES: usize = 2 * 1024 * 1024;
+const OMITTED_RECORDS: &str =
+    "WARN rufin::diagnostics: older log records omitted while the file writer was busy\n";
 const LOG_SEGMENT_MAX_BYTES: u64 = 2 * 1024 * 1024;
 const LOG_SEGMENTS: usize = 3;
 const LOG_FILE: &str = "rufin.log";
@@ -230,19 +225,15 @@ impl Diagnostics {
     }
 
     pub fn snapshot(&self) -> String {
-        self.output
-            .output
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .snapshot()
+        self.updates(0).text
     }
 
-    pub fn revision(&self) -> u64 {
+    pub fn updates(&self, cursor: u64) -> DiagnosticUpdate {
         self.output
             .output
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .revision
+            .unwrap_or_else(|p| p.into_inner())
+            .updates(cursor)
     }
 }
 
@@ -320,16 +311,22 @@ fn profile_filter(debug_enabled: bool) -> EnvFilter {
     })
 }
 
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct DiagnosticUpdate {
+    pub end: u64,
+    pub start_character: u64,
+    pub text: String,
+}
+
 #[derive(Default)]
 struct DiagnosticOutput {
-    entries: VecDeque<usize>,
+    entries: VecDeque<(usize, usize)>,
     // Keep history together instead of retaining allocations from playback and decode workers.
     bytes: VecDeque<u8>,
-    revision: u64,
-    pending: VecDeque<String>,
-    pending_bytes: usize,
+    start_bytes: u64,
+    start_characters: u64,
+    written: u64,
     closed: bool,
-    writing: bool,
 }
 
 impl DiagnosticOutput {
@@ -346,26 +343,22 @@ impl DiagnosticOutput {
         };
         import_previous_panic_report(log_dir, &mut output);
         if let Some(log) = &mut file
-            && let Err(error) = log.append(output.snapshot().as_bytes())
+            && let Err(error) = log.append(output.updates(0).text.as_bytes())
         {
             output.append(sanitize_free_text(&format!(
                 "WARN rufin::diagnostics: local log file is unavailable: {error}\n"
             )));
             file = None;
         }
+        output.written = output.end();
         (output, file)
-    }
-
-    fn append(&mut self, text: String) {
-        self.push_bounded(text);
-        self.revision = self.revision.wrapping_add(1);
     }
 
     #[expect(
         clippy::string_slice,
         reason = "the buffer boundary is advanced to a UTF-8 character boundary before slicing"
     )]
-    fn push_bounded(&mut self, mut text: String) -> String {
+    fn append(&mut self, mut text: String) {
         if text.len() > BUFFER_MAX_BYTES {
             let mut start = text.len() - BUFFER_MAX_BYTES;
             while !text.is_char_boundary(start) {
@@ -374,19 +367,31 @@ impl DiagnosticOutput {
             text = text[start..].to_string();
         }
         while self.bytes.len() + text.len() > BUFFER_MAX_BYTES {
-            let Some(removed) = self.entries.pop_front() else {
+            let Some((bytes, characters)) = self.entries.pop_front() else {
                 break;
             };
-            self.bytes.drain(..removed);
+            self.bytes.drain(..bytes);
+            self.start_bytes += bytes as u64;
+            self.start_characters += characters as u64;
         }
         self.bytes.extend(text.bytes());
-        self.entries.push_back(text.len());
-        text
+        self.entries.push_back((text.len(), text.chars().count()));
     }
 
-    fn snapshot(&self) -> String {
-        String::from_utf8(self.bytes.iter().copied().collect())
-            .expect("diagnostic records contain valid UTF-8")
+    fn end(&self) -> u64 {
+        self.start_bytes + self.bytes.len() as u64
+    }
+
+    fn updates(&self, cursor: u64) -> DiagnosticUpdate {
+        let skip = cursor
+            .saturating_sub(self.start_bytes)
+            .min(self.bytes.len() as u64) as usize;
+        DiagnosticUpdate {
+            end: self.end(),
+            start_character: self.start_characters,
+            text: String::from_utf8(self.bytes.range(skip..).copied().collect())
+                .expect("diagnostic cursors end at UTF-8 boundaries"),
+        }
     }
 }
 
@@ -916,12 +921,21 @@ mod tests {
             }
         });
         drop(guard);
-        let snapshot = output.output.lock().unwrap().snapshot();
+        let snapshot = output.output.lock().unwrap().updates(0).text;
         let mut persisted = String::new();
         for name in ["rufin.log.2", "rufin.log.1", LOG_FILE] {
-            persisted.push_str(&fs::read_to_string(directory.path().join(name)).unwrap());
+            if let Ok(contents) = fs::read_to_string(directory.path().join(name)) {
+                persisted.push_str(&contents);
+            }
         }
-        assert_eq!(persisted.lines().count(), 1024);
+        let records = persisted
+            .lines()
+            .filter(|line| !line.starts_with("WARN "))
+            .count();
+        assert!(records <= 1024);
+        if records < 1024 {
+            assert!(persisted.contains(OMITTED_RECORDS));
+        }
         assert!(persisted.ends_with(&snapshot));
         assert!(snapshot.len() <= BUFFER_MAX_BYTES);
     }
@@ -933,9 +947,10 @@ mod tests {
         // A directory at the rotation destination makes rotation fail on all platforms.
         fs::create_dir(directory.path().join("rufin.log.2")).unwrap();
         output.append("x".repeat(BUFFER_MAX_BYTES));
+        output.flush();
         output.append("rotation triggers here\n".into());
         drop(guard);
-        let snapshot = output.output.lock().unwrap().snapshot();
+        let snapshot = output.output.lock().unwrap().updates(0).text;
         assert!(snapshot.contains("rotation triggers here"));
         assert!(snapshot.contains("local log file is unavailable"));
     }
@@ -999,7 +1014,8 @@ mod tests {
                 .output
                 .lock()
                 .unwrap()
-                .snapshot()
+                .updates(0)
+                .text
                 .contains("local log still available")
         );
         assert!(
@@ -1014,7 +1030,7 @@ mod tests {
         let output = Arc::new(DiagnosticState {
             output: Mutex::new(DiagnosticOutput::default()),
             ready: Condvar::new(),
-            space: Condvar::new(),
+            drained: Condvar::new(),
         });
         let subscriber = Registry::default().with(profile_filter(true)).with(
             tracing_fmt::layer()
@@ -1047,7 +1063,8 @@ mod tests {
             .output
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .snapshot();
+            .updates(0)
+            .text;
         assert!(snapshot.contains("source request"));
         assert!(snapshot.contains("navigate route=Home"));
         assert!(snapshot.contains("route rows ready"));
@@ -1116,13 +1133,28 @@ mod tests {
 
     #[test]
     fn diagnostic_buffer_keeps_a_bounded_tail() {
-        let mut output = DiagnosticOutput::default();
-        output.push_bounded("a".repeat(BUFFER_MAX_BYTES));
-        output.push_bounded("tail".to_string());
-
-        let snapshot = output.snapshot();
-        assert!(snapshot.len() <= BUFFER_MAX_BYTES);
-        assert!(snapshot.ends_with("tail"));
+        let output = DiagnosticState {
+            output: Mutex::new(DiagnosticOutput::default()),
+            ready: Condvar::new(),
+            drained: Condvar::new(),
+        };
+        // The producer completes even before a file writer can run.
+        output.append("猫".repeat(BUFFER_MAX_BYTES / 3));
+        let first = output.output.lock().unwrap().updates(0);
+        output.append("tail\n".to_string());
+        let update = output.output.lock().unwrap().updates(first.end);
+        assert_eq!(update.text, "tail\n");
+        assert_eq!(update.start_character, (BUFFER_MAX_BYTES / 3) as u64);
+        {
+            let mut buffer = output.output.lock().unwrap();
+            assert!(buffer.bytes.len() <= BUFFER_MAX_BYTES);
+            buffer.closed = true;
+        }
+        output.run(None);
+        output.flush();
+        let buffer = output.output.lock().unwrap();
+        assert!(buffer.updates(0).text.contains(OMITTED_RECORDS));
+        assert!(buffer.updates(buffer.end()).text.is_empty());
     }
 
     #[test]
@@ -1135,7 +1167,7 @@ mod tests {
 
         import_previous_panic_report(directory.path(), &mut output);
 
-        let snapshot = output.snapshot();
+        let snapshot = output.updates(0).text;
         assert!(snapshot.contains("Previous Rufin crash report"));
         assert!(snapshot.contains("<local>/main.rs:20"));
         assert!(!panic_path.exists());

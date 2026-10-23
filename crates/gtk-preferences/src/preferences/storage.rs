@@ -89,47 +89,58 @@ pub(super) fn page(
             }
         });
     }
-    let mut updates = shell.products.source.operation();
+    let source = shell.products.source.clone();
     let status = download_status.downgrade();
-    let task = gtk::glib::spawn_future_local(async move {
-        use rufin_core::runtime::source::{SourceOperation, source_download_text};
-        let mut downloading = false;
-        loop {
-            let operation = updates.borrow_and_update().clone();
-            let Some(status) = status.upgrade() else {
-                return;
-            };
-            match &operation {
-                SourceOperation::Downloading {
-                    source_id,
-                    progress,
-                } => {
-                    let text = source_download_text(progress);
-                    let name = sources
-                        .iter()
-                        .find(|source| &source.id == source_id)
-                        .map(gtk_widgets::source_labels::configured_source_display_name);
-                    status.set_label(
-                        &name.map_or_else(|| text.clone(), |name| format!("{name} · {text}")),
-                    );
-                    status.remove_css_class("error");
-                    status.set_visible(true);
+    let task = Rc::new(std::cell::RefCell::new(None::<gtk::glib::JoinHandle<()>>));
+    let running = task.clone();
+    storage_page.connect_map(move |_| {
+        let mut updates = source.operation();
+        let status = status.clone();
+        let sources = sources.clone();
+        *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
+            use rufin_core::runtime::source::{SourceOperation, source_download_text};
+            let mut downloading = false;
+            loop {
+                let operation = updates.borrow_and_update().clone();
+                let Some(status) = status.upgrade() else {
+                    return;
+                };
+                match &operation {
+                    SourceOperation::Downloading {
+                        source_id,
+                        progress,
+                    } => {
+                        let text = source_download_text(progress);
+                        let name = sources
+                            .iter()
+                            .find(|source| &source.id == source_id)
+                            .map(gtk_widgets::source_labels::configured_source_display_name);
+                        status.set_label(
+                            &name.map_or_else(|| text.clone(), |name| format!("{name} · {text}")),
+                        );
+                        status.remove_css_class("error");
+                        status.set_visible(true);
+                    }
+                    SourceOperation::Failed { message, .. } if downloading => {
+                        status.set_label(message);
+                        status.add_css_class("error");
+                        status.set_visible(true);
+                    }
+                    _ => status.set_visible(false),
                 }
-                SourceOperation::Failed { message, .. } if downloading => {
-                    status.set_label(message);
-                    status.add_css_class("error");
-                    status.set_visible(true);
+                downloading = matches!(operation, SourceOperation::Downloading { .. });
+                drop(status);
+                if updates.changed().await.is_err() {
+                    return;
                 }
-                _ => status.set_visible(false),
             }
-            downloading = matches!(operation, SourceOperation::Downloading { .. });
-            drop(status);
-            if updates.changed().await.is_err() {
-                return;
-            }
+        }));
+    });
+    storage_page.connect_unmap(move |_| {
+        if let Some(task) = task.borrow_mut().take() {
+            task.abort();
         }
     });
-    storage_page.connect_destroy(move |_| task.abort());
 
     let controls = [
         (
@@ -244,12 +255,19 @@ pub(super) fn page(
             });
         });
     }
-    view.load(None);
+    storage_page.connect_map(move |_| view.load(None));
     navigation.upcast()
 }
 
 impl StorageView {
     fn load(self: &Rc<Self>, clear: Option<CacheKind>) {
+        if self
+            .spinner
+            .upgrade()
+            .is_some_and(|spinner| spinner.is_spinning())
+        {
+            return;
+        }
         self.set_busy(true);
         let view = self.clone();
         let products = self.products.clone();

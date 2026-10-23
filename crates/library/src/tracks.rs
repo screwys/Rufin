@@ -135,7 +135,10 @@ impl CatalogSort {
                         "ASC"
                     };
                 let column = column(field);
-                if matches!(field, "album_artist_sort" | "album_year" | "album_key") {
+                if matches!(
+                    field,
+                    "album_artist_sort" | "album_year" | "album_key" | "date_added"
+                ) {
                     return vec![
                         format!("({column} IS NULL) ASC"),
                         format!("{column} {direction}"),
@@ -143,13 +146,7 @@ impl CatalogSort {
                 }
                 let nulls = if matches!(
                     field,
-                    "year"
-                        | "release_date"
-                        | "date_added"
-                        | "last_played"
-                        | "rating"
-                        | "genre"
-                        | "bpm"
+                    "year" | "release_date" | "last_played" | "rating" | "genre" | "bpm"
                 ) {
                     " NULLS LAST"
                 } else {

@@ -48,11 +48,14 @@ impl PlayerUi {
             .lyrics
             .preferences
             .karaoke_mode;
-        let Some(next_position_millis) = lyrics
-            .timing
-            .borrow()
-            .next_after(lyrics_position_millis, karaoke)
-        else {
+        let next_position = match &*lyrics.projection.borrow() {
+            rufin_core::lyrics::CurrentLyrics::Ready {
+                content: Some(rufin_core::lyrics::CurrentLyricsContent::Document { prepared, .. }),
+                ..
+            } => prepared.timing.next_after(lyrics_position_millis, karaoke),
+            _ => None,
+        };
+        let Some(next_position_millis) = next_position else {
             return;
         };
         let Ok(delay_millis) =

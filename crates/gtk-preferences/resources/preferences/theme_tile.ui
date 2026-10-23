@@ -9,77 +9,10 @@
       <property name="vexpand">false</property>
       <property name="valign">start</property>
       <style><class name="theme-select"/><class name="flat"/></style>
-      <property name="child"><object class="GtkBox" id="preview">
-        <property name="orientation">vertical</property>
-        <property name="height-request">96</property>
-        <property name="overflow">hidden</property>
+      <property name="child"><object class="GtkDrawingArea" id="preview">
+        <property name="content-width">124</property>
+        <property name="content-height">96</property>
         <property name="can-target">false</property>
-        <style><class name="theme-preview"/></style>
-        <child><object class="GtkCenterBox">
-          <style><class name="theme-header"/></style>
-          <property name="start-widget"><object class="GtkBox">
-            <property name="spacing">3</property>
-            <child><object class="GtkImage"><property name="icon-name">rufin-go-previous-symbolic</property><property name="pixel-size">4</property></object></child>
-            <child><object class="GtkImage"><property name="icon-name">rufin-go-next-symbolic</property><property name="pixel-size">4</property></object></child>
-          </object></property>
-          <property name="center-widget"><object class="GtkBox"><property name="width-request">44</property><style><class name="theme-search"/></style></object></property>
-          <property name="end-widget"><object class="GtkImage"><property name="icon-name">rufin-open-menu-symbolic</property><property name="pixel-size">4</property></object></property>
-        </object></child>
-        <child><object class="GtkBox">
-          <property name="vexpand">true</property>
-          <property name="spacing">2</property>
-          <child><object class="GtkBox">
-            <property name="width-request">24</property>
-            <style><class name="theme-sidebar"/></style>
-          </object></child>
-          <child><object class="GtkBox">
-            <property name="hexpand">true</property>
-            <property name="orientation">vertical</property>
-            <property name="spacing">5</property>
-            <style><class name="theme-content"/></style>
-            <child><object class="GtkBox">
-              <property name="spacing">4</property>
-              <style><class name="theme-showcase"/></style>
-              <child><object class="GtkBox"><property name="width-request">12</property><property name="height-request">12</property><style><class name="theme-cover"/></style></object></child>
-              <child><object class="GtkBox">
-                <property name="orientation">vertical</property><property name="spacing">3</property>
-                <property name="hexpand">true</property><property name="valign">center</property>
-                <child><object class="GtkBox"><style><class name="theme-line"/></style></object></child>
-                <child><object class="GtkBox"><property name="margin-end">5</property><style><class name="theme-line"/></style></object></child>
-              </object></child>
-            </object></child>
-            <child><object class="GtkBox"><property name="width-request">16</property><property name="halign">start</property><style><class name="theme-line"/></style></object></child>
-            <child><object class="GtkBox">
-              <property name="homogeneous">true</property><property name="spacing">3</property>
-              <child><object class="GtkAspectFrame"><property name="ratio">1</property><property name="obey-child">false</property><property name="child"><object class="GtkBox"><style><class name="theme-cover"/></style></object></property></object></child>
-              <child><object class="GtkAspectFrame"><property name="ratio">1</property><property name="obey-child">false</property><property name="child"><object class="GtkBox"><style><class name="theme-cover"/></style></object></property></object></child>
-              <child><object class="GtkAspectFrame"><property name="ratio">1</property><property name="obey-child">false</property><property name="child"><object class="GtkBox"><style><class name="theme-cover"/></style></object></property></object></child>
-            </object></child>
-            <child><object class="GtkBox">
-              <property name="homogeneous">true</property><property name="spacing">3</property>
-              <child><object class="GtkAspectFrame"><property name="ratio">1</property><property name="obey-child">false</property><property name="child"><object class="GtkBox"><style><class name="theme-cover"/></style></object></property></object></child>
-              <child><object class="GtkAspectFrame"><property name="ratio">1</property><property name="obey-child">false</property><property name="child"><object class="GtkBox"><style><class name="theme-cover"/></style></object></property></object></child>
-              <child><object class="GtkAspectFrame"><property name="ratio">1</property><property name="obey-child">false</property><property name="child"><object class="GtkBox"><style><class name="theme-cover"/></style></object></property></object></child>
-            </object></child>
-          </object></child>
-          <child><object class="GtkBox">
-            <property name="width-request">30</property>
-            <style><class name="theme-right-sidebar"/></style>
-          </object></child>
-        </object></child>
-        <child><object class="GtkBox">
-          <property name="spacing">4</property>
-          <property name="halign">center</property>
-          <style><class name="theme-player"/></style>
-          <child><object class="GtkImage"><property name="icon-name">rufin-go-previous-symbolic</property><property name="pixel-size">5</property></object></child>
-          <child><object class="GtkImage">
-            <property name="icon-name">rufin-media-playback-start-symbolic</property>
-            <property name="pixel-size">5</property>
-            <property name="halign">center</property>
-            <style><class name="theme-play"/></style>
-          </object></child>
-          <child><object class="GtkImage"><property name="icon-name">rufin-go-next-symbolic</property><property name="pixel-size">5</property></object></child>
-        </object></child>
       </object></property>
     </object></child>
     <child><object class="GtkBox">

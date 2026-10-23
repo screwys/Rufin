@@ -178,7 +178,7 @@ impl TextureCache {
         if let Some(texture) = self.cached_texture(&identity) {
             return Some(texture);
         }
-        let bytes = image.rgba().len() + image.original().map_or(0, |bytes| bytes.len());
+        let bytes = image.rgba().len() + image.animation_bytes().map_or(0, |bytes| bytes.len());
         let texture = texture_from_decoded(image)?;
         self.insert(identity, texture.clone(), bytes);
         Some(texture)
@@ -244,12 +244,8 @@ mod tests {
                 )
                 .unwrap();
                 artwork.key(
-                    &artwork::ArtworkRequest::new(
-                        artwork::ArtworkBinding::opaque(&binding),
-                        32,
-                        32,
-                    )
-                    .cache_only(),
+                    &artwork::ArtworkRequest::new(artwork::ArtworkBinding::opaque(&binding), 32)
+                        .cache_only(),
                 )
             })
         })

@@ -14,59 +14,39 @@ fn route_descriptor(item: SidebarRouteItem) -> AndroidRouteDescriptor {
 
 #[uniffi::export]
 impl AndroidLibrary {
-    pub async fn target_download_status(
+    pub async fn item_download_status(
         &self,
-        route: Option<Route>,
-        media_uri: String,
-        source_id: Option<String>,
-    ) -> Result<records::AndroidTargetDownloadStatus, AndroidError> {
-        let _ = source_id;
-        let query = route
-            .as_ref()
-            .map(|route| self.target_query(route.clone()))
-            .transpose()?;
+        item: library::DownloadItem,
+    ) -> Result<library::DownloadStatus, AndroidError> {
         let database = self.database.clone();
-        self.runtime
-            .spawn(async move {
-                let cancel = ReadCancellation::new();
-                let (total, downloaded) = if let Some(query) = query {
-                    let selection = query.selection().await?.as_ref().clone();
-                    if let MemberSelection::Members { mut read, .. } = selection {
-                        let total = read.count(&database, &cancel).await.map_err(error)? as i64;
-                        read.downloaded_only = true;
-                        (
-                            total,
-                            read.count(&database, &cancel).await.map_err(error)? as i64,
-                        )
-                    } else {
-                        let uris = database
-                            .selected_track_uris(&selection, None, &cancel)
-                            .await
-                            .map_err(error)?;
-                        (
-                            uris.len() as i64,
-                            database
-                                .downloaded_media_count(&uris, &cancel)
-                                .await
-                                .map_err(error)?,
-                        )
-                    }
-                } else {
-                    (
-                        1,
-                        database
-                            .downloaded_media_count(&[media_uri], &cancel)
-                            .await
-                            .map_err(error)?,
-                    )
-                };
-                Ok(records::AndroidTargetDownloadStatus {
-                    total: total.max(0) as u64,
-                    downloaded: downloaded.max(0) as u64,
-                })
-            })
-            .await
-            .map_err(error)?
+        run_read(&self.runtime, move |cancel| async move {
+            database
+                .item_download_status(&item, &cancel)
+                .await
+                .map_err(error)
+        })
+        .await
+    }
+
+    pub async fn folder_download_status(
+        &self,
+        path: Vec<rufin_core::route::FolderPathItem>,
+    ) -> Result<library::DownloadStatus, AndroidError> {
+        let query = self.target_query(Route::Folders { path })?;
+        let database = self.database.clone();
+        run_read(&self.runtime, move |cancel| async move {
+            let mut read = query
+                .members(&cancel)
+                .await
+                .map_err(error)?
+                .expect("Folder query has members")
+                .clone();
+            let total = read.count(&database, &cancel).await.map_err(error)? as u64;
+            read.downloaded_only = true;
+            let downloaded = read.count(&database, &cancel).await.map_err(error)? as u64;
+            Ok(library::DownloadStatus { total, downloaded })
+        })
+        .await
     }
 
     pub async fn download_target(
@@ -154,7 +134,6 @@ impl AndroidLibrary {
             artist_tracks: settings.library_list(LibraryListKey::ArtistTracks),
             source: self.source.clone(),
             settings: self.settings.clone(),
-            release_section: None,
             opened: tokio::sync::OnceCell::new(),
             filter,
             sort,

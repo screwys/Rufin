@@ -451,7 +451,7 @@ async fn validate_database(connection: &mut SqliteConnection) -> Result<()> {
     let version: i64 = sqlx::query_scalar("PRAGMA user_version")
         .fetch_one(&mut *connection)
         .await?;
-    if !matches!(version, 48 | 49 | 50 | 51 | 53 | 54 | 55 | 56) {
+    if !matches!(version, 48 | 49 | 50 | 51 | 53 | 54 | 55 | 56 | 57) {
         bail!(INCOMPATIBLE_PROFILE);
     }
     let profile: i64 =

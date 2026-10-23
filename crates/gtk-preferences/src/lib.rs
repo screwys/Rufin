@@ -1,6 +1,5 @@
 //! Preferences, source setup, Connect and desktop appearance presentation.
 pub mod appearance;
-mod download_presentation;
 mod download_quality;
 pub mod preferences;
 pub mod ui_resource;

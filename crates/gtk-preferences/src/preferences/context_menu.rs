@@ -1,15 +1,9 @@
 use std::rc::Rc;
 
-use adw::prelude::*;
-
 use crate::Preferences;
 use rufin_core::settings::ContextMenuItem;
 
-pub fn configure_context_menus_expander(
-    shell: &Rc<Preferences>,
-    builder: &gtk::Builder,
-    expander: &adw::ExpanderRow,
-) {
+pub fn configure_context_menus(shell: &Rc<Preferences>, builder: &gtk::Builder) {
     let resource = crate::ui_resource::APPEARANCE_PREFERENCES_RESOURCE;
     for (item, id) in [
         (ContextMenuItem::Play, "context_menu_play"),
@@ -52,7 +46,6 @@ pub fn configure_context_menus_expander(
                 true
             });
         });
-        expander.add_row(&row);
     }
 
     let rating: adw::SwitchRow =
@@ -72,5 +65,4 @@ pub fn configure_context_menus_expander(
             &mut settings.application.context_menu.rating_visible
         });
     });
-    expander.add_row(&rating);
 }

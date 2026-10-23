@@ -1,7 +1,6 @@
 use gtk_widgets::downloads::{OperationArtwork, OperationFeedback, OperationFeedbackKind};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
 
 use adw::prelude::*;
@@ -16,15 +15,8 @@ const OPERATION_FEEDBACK_DURATION: Duration = Duration::from_secs(3);
 impl Shell {
     pub(crate) fn apply_download_event(self: &Rc<Self>, event: DownloadEvent) {
         match event {
-            DownloadEvent::Queue {
-                source_id,
-                snapshot,
-            } => {
-                self.downloads
-                    .snapshots
-                    .borrow_mut()
-                    .insert(source_id, Arc::clone(&snapshot));
-                self.downloads.refresh_queue();
+            DownloadEvent::Queue { summary, .. } => {
+                self.downloads.refresh_queue(summary.source_id.as_ref())
             }
             event @ (DownloadEvent::Changed { .. } | DownloadEvent::SubjectChanged { .. }) => {
                 self.apply_download_change_to_mounted_route(&event);

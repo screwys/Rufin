@@ -311,6 +311,17 @@ impl ListRead {
             256
         })
     }
+    fn requested_rows(&self, query: &OrderedQuery, offset: usize, limit: usize) -> RequestedKeys {
+        let totals = if matches!(self.kind, ListKind::SmartPlaylists { .. })
+            && matches!(self.sort, CatalogSort::TrackCount | CatalogSort::Duration)
+        {
+            ",track_count,duration_millis,downloaded_count"
+        } else {
+            ""
+        };
+        query.requested_rows(offset, limit, &format!("{} value{totals}", query.key))
+    }
+
     pub fn activity_sensitive(&self) -> bool {
         self.activity
             || self.sort.activity_sensitive()
@@ -350,8 +361,12 @@ impl ListRead {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<usize> {
         let (_permit, mut connection) = database.acquire_general(cancellation).await?;
-        let query = list_query_on(&mut connection, self).await?;
-        list_count(&mut connection, self, &query).await
+        let mut read = self.clone();
+        if matches!(read.kind, ListKind::SmartPlaylists { .. }) {
+            read.sort = CatalogSort::Title;
+        }
+        let query = list_query_on(&mut connection, &read).await?;
+        list_count(&mut connection, &read, &query).await
     }
     pub async fn sections(
         &self,
@@ -383,7 +398,7 @@ macro_rules! list_windows {
                 let rows = {
                     let $connection = &mut *transaction;
                     let $read = self;
-                    let $requested = query.requested_keys(offset, self.window_limit(limit));
+                    let $requested = self.requested_rows(&query, offset, self.window_limit(limit));
                     ($projection).await?
                 };
                 transaction.commit().await?;
@@ -403,7 +418,7 @@ macro_rules! list_windows {
                 let rows = {
                     let $connection = &mut *transaction;
                     let $read = self;
-                    let $requested = query.requested_keys(range.start, range.len());
+                    let $requested = self.requested_rows(&query, range.start, range.len());
                     ($projection).await?
                 };
                 transaction.commit().await?;
@@ -443,7 +458,7 @@ list_windows!(smart_playlists, page_smart_playlists, SmartPlaylistRow, connectio
         unreachable!()
     };
     crate::smart_playlists::load_smart_playlist_requested(
-        connection, requested, now,
+        connection, requested, now, matches!(read.sort, CatalogSort::TrackCount | CatalogSort::Duration),
     )
 });
 
@@ -541,8 +556,19 @@ async fn list_count(
         .unwrap_or(0)
         .max(0) as usize);
     }
+    if matches!(read.kind, ListKind::SmartPlaylists { .. })
+        && matches!(read.sort, CatalogSort::TrackCount | CatalogSort::Duration)
+    {
+        let mut read = read.clone();
+        read.sort = CatalogSort::Title;
+        return Ok(list_query_on(connection, &read)
+            .await?
+            .count(connection)
+            .await? as usize);
+    }
     Ok(query.count(connection).await?.max(0) as usize)
 }
+
 async fn member_rows(
     connection: &mut SqliteConnection,
     read: &MemberRead,
@@ -728,10 +754,13 @@ impl OrderedQuery {
         )
     }
     pub fn requested_keys(&self, offset: usize, limit: usize) -> RequestedKeys {
+        self.requested_rows(offset, limit, &format!("{} value", self.key))
+    }
+    fn requested_rows(&self, offset: usize, limit: usize, columns: &str) -> RequestedKeys {
         RequestedKeys {
             sql: format!(
-                "SELECT value,row_number() OVER ()-1 ordinal FROM ({} LIMIT {} OFFSET {})",
-                self.select(&format!("{} value", self.key)),
+                "SELECT *,row_number() OVER ()-1 ordinal FROM ({} LIMIT {} OFFSET {})",
+                self.select(columns),
                 limit.min(i64::MAX as usize),
                 offset.min(i64::MAX as usize)
             ),

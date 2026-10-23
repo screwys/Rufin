@@ -340,7 +340,6 @@ pub fn bind_integrations(
             rows.borrow_mut().push((id, row));
         }
     });
-    refresh();
     for (button, kind) in [(add_webdav, "webdav"), (add_smb, "smb")] {
         let weak = Rc::downgrade(shell);
         let parent = page.downgrade();
@@ -353,13 +352,25 @@ pub fn bind_integrations(
             present_integration(&shell, &parent, kind, None, Rc::new(move |_| refresh()));
         });
     }
-    let page = page.downgrade();
-    gtk::glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
-        if page.upgrade().is_none() {
-            return gtk::glib::ControlFlow::Break;
+    let task = Rc::new(RefCell::new(None::<gtk::glib::JoinHandle<()>>));
+    let running = task.clone();
+    let owner = shell.products.source.clone();
+    page.connect_map(move |_| {
+        let mut changes = owner.configuration_changes();
+        let refresh = refresh.clone();
+        *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
+            loop {
+                refresh();
+                if changes.changed().await.is_err() {
+                    break;
+                }
+            }
+        }));
+    });
+    page.connect_unmap(move |_| {
+        if let Some(task) = task.borrow_mut().take() {
+            task.abort();
         }
-        refresh();
-        gtk::glib::ControlFlow::Continue
     });
 }
 

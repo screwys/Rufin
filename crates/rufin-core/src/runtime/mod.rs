@@ -15,9 +15,7 @@ mod storage;
 mod waveform;
 pub use backup::{BackupHandle, BackupPreview, BackupSettings};
 pub use diagnostics::DiagnosticsHandle;
-pub use downloads::{
-    DownloadEvent, DownloadQueueItem, DownloadQueueSnapshot, DownloadQueueState, DownloadSubject,
-};
+pub use downloads::{DownloadEvent, DownloadQueueItem, DownloadQueueState, DownloadSubject};
 pub use events::ProductReceivers;
 pub use inputs::{
     CatalogChange, CatalogPublication, CatalogRevision, FavoriteSettlement, RuntimeInputs,

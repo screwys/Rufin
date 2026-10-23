@@ -6,8 +6,7 @@ impl SettingsOwner {
         key: LibraryListKey,
         update: impl FnOnce(&mut LibraryListSettings),
     ) -> Result<Option<super::app::Settings>, String> {
-        let previous = self.file.load();
-        let changed = self.file.update(move |stored| {
+        let changed = self.file.edit(move |stored| {
             let previous = stored.ui.library_list(key);
             let mut next = previous.clone();
             update(&mut next);
@@ -33,8 +32,6 @@ impl SettingsOwner {
         if !changed {
             return Ok(None);
         }
-        let current = self.file.load();
-        (self.on_change)(&previous, &current, false);
-        Ok(Some(current.ui))
+        Ok(Some(self.load()))
     }
 }

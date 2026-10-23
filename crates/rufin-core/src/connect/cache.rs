@@ -113,10 +113,9 @@ impl ConnectOwner {
                             serde_json::to_vec(&super::media::ByteRequest::Artwork {
                                 family: query.family.clone(),
                                 size: match query.size {
-                                    artwork::ImageSize::Original => None,
-                                    artwork::ImageSize::Thumbnail(size) => Some(size),
+                                    sources::ImageSize::Original => None,
+                                    sources::ImageSize::Thumbnail(size) => Some(size),
                                 },
-                                fallback: query.fallback,
                                 offset,
                                 validator,
                             })

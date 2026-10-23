@@ -1003,13 +1003,9 @@ pub fn transport_button_position(width: i32, slot: f64, size: i32) -> (f64, f64)
 
 use crate::{progress::seekbar_target_seconds, state::NowPlayingPresentation};
 use gtk_widgets::{controls::set_active_class, format_duration, route::Route};
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::TryRecvError,
-    },
-    thread,
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
 };
 impl crate::PlayerUi {
     pub fn update_bottom_player(self: &Rc<Self>) {
@@ -1367,7 +1363,7 @@ fn replace_discovered_remote_outputs(
     cached: &mut Vec<RemoteOutput>,
     mut discovered: Vec<RemoteOutput>,
     selected: &PlaybackOutput,
-) {
+) -> bool {
     if let PlaybackOutput::Remote(selected) = selected
         && !discovered
             .iter()
@@ -1375,7 +1371,11 @@ fn replace_discovered_remote_outputs(
     {
         discovered.push(selected.clone());
     }
+    if *cached == discovered {
+        return false;
+    }
     *cached = discovered;
+    true
 }
 
 #[derive(Clone)]
@@ -1465,104 +1465,68 @@ pub fn present_output_popover(anchor: &gtk::Button, shell: &Rc<crate::PlayerUi>)
             &status,
             shell,
         );
-        remote_rows.push((output.clone(), row));
+        remote_rows.push(row);
     }
-    let shown = Rc::new(RefCell::new(shown));
-    let remote_rows = Rc::new(RefCell::new(remote_rows));
-
-    let (sender, receiver) = std::sync::mpsc::channel();
     let transport = shell.playback_owner.clone();
-    let discovery_running = Arc::new(AtomicBool::new(true));
-    let worker_running = Arc::clone(&discovery_running);
-    thread::spawn(move || {
-        while worker_running.load(Ordering::Acquire) {
-            if sender.send(transport.discover_remote_outputs()).is_err() {
+    let runtime = shell.runtime.clone();
+    let weak_popover = popover.downgrade();
+    let weak_shell = Rc::downgrade(shell);
+    let discovery = gtk::glib::spawn_future_local(async move {
+        loop {
+            let transport = transport.clone();
+            let Ok(result) = runtime
+                .spawn_blocking(move || transport.discover_remote_outputs())
+                .await
+            else {
                 break;
-            }
-            let slices = OUTPUT_DISCOVERY_REFRESH_INTERVAL.as_millis() / 100;
-            for _ in 0..slices {
-                if !worker_running.load(Ordering::Acquire) {
-                    return;
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-        }
-    });
-    let outputs_for_discovery = outputs.clone();
-    let selected_for_discovery = selected.clone();
-    let popover_for_discovery = popover.clone();
-    let shell_for_discovery = Rc::clone(shell);
-    let status_for_discovery = status.clone();
-    let shown_for_discovery = Rc::clone(&shown);
-    let rows_for_discovery = Rc::clone(&remote_rows);
-    let poll_running = Arc::clone(&discovery_running);
-    gtk::glib::timeout_add_local(Duration::from_millis(50), move || {
-        if !popover_for_discovery.is_visible() {
-            poll_running.store(false, Ordering::Release);
-            return glib::ControlFlow::Break;
-        }
-        match receiver.try_recv() {
-            Ok(Ok(discovered)) => {
-                status_for_discovery.finish_search(discovered.is_empty());
-                let shown = {
-                    let mut shown = shown_for_discovery.borrow_mut();
-                    let previous = shown.clone();
-                    replace_discovered_remote_outputs(
-                        &mut shown,
-                        discovered,
-                        &selected_for_discovery,
-                    );
-                    if *shown == previous {
-                        return glib::ControlFlow::Continue;
-                    }
-                    shown.clone()
+            };
+            {
+                let (Some(popover), Some(shell)) = (weak_popover.upgrade(), weak_shell.upgrade())
+                else {
+                    break;
                 };
-                for (_, row) in rows_for_discovery.take() {
-                    outputs_for_discovery.remove(&row);
+                if !popover.is_visible() {
+                    break;
                 }
-                let mut rows = Vec::with_capacity(shown.len());
-                for output in shown.iter() {
-                    let row = add_output_row(
-                        &outputs_for_discovery,
-                        PlaybackOutput::Remote(output.clone()),
-                        &selected_for_discovery,
-                        &popover_for_discovery,
-                        &status_for_discovery,
-                        &shell_for_discovery,
-                    );
-                    rows.push((output.clone(), row));
+                match result {
+                    Ok(discovered) => {
+                        status.finish_search(discovered.is_empty());
+                        if replace_discovered_remote_outputs(&mut shown, discovered, &selected) {
+                            for row in remote_rows.drain(..) {
+                                outputs.remove(&row);
+                            }
+                            for output in &shown {
+                                remote_rows.push(add_output_row(
+                                    &outputs,
+                                    PlaybackOutput::Remote(output.clone()),
+                                    &selected,
+                                    &popover,
+                                    &status,
+                                    &shell,
+                                ));
+                            }
+                            shell.controls.remote_output_options.replace(shown.clone());
+                        }
+                    }
+                    Err(error) => {
+                        if !status.selection_started.get() {
+                            status.spinner.stop();
+                            status.spinner.set_visible(false);
+                            status.root.set_visible(true);
+                            status.label.add_css_class("error");
+                            status.label.set_text(&error);
+                        }
+                    }
                 }
-                rows_for_discovery.replace(rows);
-                shell_for_discovery
-                    .controls
-                    .remote_output_options
-                    .replace(shown);
-                glib::ControlFlow::Continue
             }
-            Ok(Err(error)) => {
-                if !status_for_discovery.selection_started.get() {
-                    status_for_discovery.spinner.stop();
-                    status_for_discovery.spinner.set_visible(false);
-                    status_for_discovery.root.set_visible(true);
-                    status_for_discovery.label.add_css_class("error");
-                    status_for_discovery.label.set_text(&error);
-                }
-                glib::ControlFlow::Continue
-            }
-            Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(TryRecvError::Disconnected) => {
-                status_for_discovery.finish_search(shown_for_discovery.borrow().is_empty());
-                glib::ControlFlow::Break
-            }
+            gtk::glib::timeout_future(OUTPUT_DISCOVERY_REFRESH_INTERVAL).await;
         }
+        status.finish_search(shown.is_empty());
     });
 
     popover.set_child(Some(&content));
-    let close_running = Arc::clone(&discovery_running);
-    popover.connect_closed(move |popover| {
-        close_running.store(false, Ordering::Release);
-        popover.unparent();
-    });
+    popover.connect_closed(|popover| popover.unparent());
+    let _ = popover.add_weak_ref_notify_local(move || discovery.abort());
     popover.popup();
 }
 
@@ -1647,21 +1611,27 @@ fn select_output_async(
         "Connecting to {device}...",
         &[("device", device.as_str())],
     ));
-    let (sender, receiver) = std::sync::mpsc::channel();
     let transport = shell.playback_owner.clone();
     let selected = output.clone();
     let cancelled = Arc::new(AtomicBool::new(false));
     let closing = Arc::clone(&cancelled);
-    popover.connect_closed(move |_| closing.store(true, Ordering::Release));
-    thread::spawn(move || {
-        let _ = sender.send(transport.select_playback_output(selected, cancelled));
+    popover.connect_closed(move |_| {
+        closing.store(true, Ordering::Release);
     });
+    let destroying = Arc::clone(&cancelled);
+    let _ = popover.add_weak_ref_notify_local(move || {
+        destroying.store(true, Ordering::Release);
+    });
+    let selection_cancelled = Arc::clone(&cancelled);
+    let selection = shell
+        .runtime
+        .spawn_blocking(move || transport.select_playback_output(selected, cancelled));
     let shell = Rc::downgrade(shell);
     let outputs = outputs.downgrade();
     let popover = popover.downgrade();
     let spinner = status.spinner.downgrade();
     let status_label = status.label.downgrade();
-    let fail_connection: Rc<dyn Fn()> = Rc::new({
+    let fail_connection = {
         let spinner = spinner.clone();
         let status_label = status_label.clone();
         move || {
@@ -1674,12 +1644,19 @@ fn select_output_async(
                 label.set_text(&tr("Connection failed"));
             }
         }
-    });
-    gtk::glib::timeout_add_local(Duration::from_millis(50), move || {
-        match receiver.try_recv() {
+    };
+    gtk::glib::spawn_future_local(async move {
+        let result = selection.await;
+        if selection_cancelled.load(Ordering::Acquire) {
+            return;
+        }
+        if let Some(outputs) = outputs.upgrade() {
+            outputs.set_sensitive(true);
+        }
+        match result {
             Ok(Ok(())) => {
                 let Some(shell) = shell.upgrade() else {
-                    return glib::ControlFlow::Break;
+                    return;
                 };
                 if let PlaybackOutput::Remote(remote) = &output {
                     remember_remote_output(&shell, remote);
@@ -1700,34 +1677,20 @@ fn select_output_async(
                     }
                 };
                 shell.control_feedback.show_feedback_toast(message.clone());
-                if let Some(outputs) = outputs.upgrade() {
-                    outputs.set_sensitive(true);
-                }
                 if let Some(spinner) = spinner.upgrade() {
                     spinner.stop();
                 }
                 if let Some(popover) = popover.upgrade() {
                     popover.popdown();
                 }
-                glib::ControlFlow::Break
             }
-            Ok(Err(error)) => {
-                if let Some(outputs) = outputs.upgrade() {
-                    outputs.set_sensitive(true);
-                }
+            result => {
                 fail_connection();
-                if let Some(shell) = shell.upgrade() {
+                if let Ok(Err(error)) = result
+                    && let Some(shell) = shell.upgrade()
+                {
                     shell.control_feedback.show_feedback_toast(error);
                 }
-                glib::ControlFlow::Break
-            }
-            Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(TryRecvError::Disconnected) => {
-                if let Some(outputs) = outputs.upgrade() {
-                    outputs.set_sensitive(true);
-                }
-                fail_connection();
-                glib::ControlFlow::Break
             }
         }
     });

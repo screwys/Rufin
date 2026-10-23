@@ -12,6 +12,9 @@ import io.github.screwys.rufin.shared.rufin_core.deletePlaylistFolder
 import io.github.screwys.rufin.shared.rufin_core.movePlaylistToFolder
 import io.github.screwys.rufin.shared.library.PlaylistFolderMember
 import io.github.screwys.rufin.core.AndroidBrowseItem
+import io.github.screwys.rufin.shared.library.DownloadItem
+import io.github.screwys.rufin.shared.library.DownloadStatus
+import io.github.screwys.rufin.shared.rufin_core.RecentSearchKind
 import io.github.screwys.rufin.shared.library.MemberSelection
 import io.github.screwys.rufin.ui.ErrorRow
 import io.github.screwys.rufin.ui.RufinIcon
@@ -79,6 +82,24 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.setProgress
+
+internal val AndroidBrowseRow.downloadItem: DownloadItem?
+    get() = when (val item = item) {
+        is AndroidBrowseItem.Track -> DownloadItem.Track(item.row.mediaUri)
+        is AndroidBrowseItem.PlaylistEntry -> DownloadItem.Track(item.row.track.mediaUri)
+        is AndroidBrowseItem.Album -> DownloadItem.Album(item.row.mediaUri)
+        is AndroidBrowseItem.Artist -> DownloadItem.Artist(item.row.mediaUri, item.albumArtist)
+        is AndroidBrowseItem.Genre -> DownloadItem.Genre(item.row.genreKey)
+        is AndroidBrowseItem.Mood -> DownloadItem.Mood(item.row.moodKey)
+        is AndroidBrowseItem.Playlist -> DownloadItem.Playlist(item.row.playlistKey)
+        is AndroidBrowseItem.SmartPlaylist -> DownloadItem.SmartPlaylist(item.row.smartPlaylistKey)
+        is AndroidBrowseItem.Recent -> when (item.row.kind) {
+            RecentSearchKind.TRACK -> DownloadItem.Track(item.row.mediaUri)
+            RecentSearchKind.ALBUM -> DownloadItem.Album(item.row.mediaUri)
+            RecentSearchKind.ARTIST -> DownloadItem.Artist(item.row.mediaUri, false)
+        }
+        else -> null
+    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -213,13 +234,18 @@ internal fun BrowseMenuSheet(
             catch (error: Exception) { model.runAction { throw error } }
         }
     }
-    var downloaded by remember(item.row.key) { mutableStateOf<io.github.screwys.rufin.core.AndroidTargetDownloadStatus?>(null) }
-    LaunchedEffect(item.row.key, browse.library, model.downloads.state?.revision) {
-        if (item.row.kind in setOf("track", "album", "album_header", "artist", "genre", "mood", "playlist", "smart_playlist", "folder")) {
-            try { downloaded = browse.library?.targetDownloadStatus(item.row.detailRoute, item.row.mediaUri, item.row.sourceId) }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { model.runAction { throw error } }
-        }
+    val downloadItem = item.row.downloadItem
+    val downloadFolder = (item.row.item as? AndroidBrowseItem.Folder)?.route as? Route.Folders
+    var downloaded by remember(downloadItem, downloadFolder, browse.library) { mutableStateOf<DownloadStatus?>(null) }
+    LaunchedEffect(downloadItem, downloadFolder, browse.library, model.downloads.state?.revision) {
+        try {
+            downloaded = when {
+                downloadItem != null -> browse.library?.itemDownloadStatus(downloadItem)
+                downloadFolder != null -> browse.library?.folderDownloadStatus(downloadFolder.path)
+                else -> null
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { model.runAction { throw error } }
     }
     LaunchedEffect(item.row.pin, browse.library) {
         item.row.pin?.let { pin ->
@@ -508,7 +534,7 @@ internal fun PlaylistPickerSheet(
     val library = browse.library
     val pages = remember(library, filter, folderKind) {
         Pager(PagingConfig(pageSize = 64, initialLoadSize = 64, prefetchDistance = 24,
-            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, Route.Playlists, filter, folderKind) }.flow
+            maxSize = 192, enablePlaceholders = true)) { BrowseChoiceSource(library, Route.Playlists, filter, folderKind, model.downloads) }.flow
     }.collectAsLazyPagingItems()
     val loadError = (pages.loadState.refresh as? LoadState.Error)?.error ?: (pages.loadState.append as? LoadState.Error)?.error
     LaunchedEffect(loadError) { loadError?.let { error -> model.runAction { throw error } } }
@@ -526,12 +552,13 @@ internal fun PlaylistPickerSheet(
             if (pages.itemCount == 0 && pages.loadState.refresh is LoadState.NotLoading) item {
                 BrowseEmptyState(filter.isNotBlank()) { filter = "" }
             }
-            items(pages.itemCount, key = pages.itemKey { it.key }) { index ->
-                val playlist = pages[index]
-                if (playlist == null) Spacer(Modifier.height(72.dp))
+            items(pages.itemCount, key = pages.itemKey { it.row.key }) { index ->
+                val choice = pages[index]
+                if (choice == null) Spacer(Modifier.height(72.dp))
                 else {
+                    val playlist = choice.row
                     val artwork = rememberArtwork(playlist.artworkIdentity, player, with(LocalDensity.current) { 50.dp.roundToPx() })
-                    ListItem(headlineContent = { BrowseTitle(BrowseItem(playlist, index.toULong(), null), player = player) },
+                    ListItem(headlineContent = { BrowseTitle(choice, player = player) },
                         supportingContent = { Text(playlist.subtitle, maxLines = 1) },
                         leadingContent = { Artwork(artwork, Modifier.size(50.dp).clip(RoundedCornerShape(8.dp))) },
                         modifier = Modifier.clickable {
@@ -627,17 +654,22 @@ internal fun PlaylistCreateSheet(
 internal class BrowseChoiceSource(
     private val library: AndroidLibrary?, private val route: Route?, private val filter: String,
     private val folderKind: Boolean? = null,
-) : PagingSource<Int, AndroidBrowseRow>() {
-    override suspend fun load(params: LoadParams<Int>): LoadResult<Int, AndroidBrowseRow> = try {
+    private val downloads: io.github.screwys.rufin.downloads.DownloadsConnection,
+) : PagingSource<Int, BrowseItem>() {
+    override suspend fun load(params: LoadParams<Int>): LoadResult<Int, BrowseItem> = try {
         withContext(Dispatchers.Default) {
             val offset = params.key ?: 0
+            val downloadRevision = downloads.state?.revision
+            fun items(rows: List<AndroidBrowseRow>) = rows.mapIndexed { index, row ->
+                BrowseItem(row, (offset + index).toULong(), null, downloadRevision = downloadRevision)
+            }
             if (library == null || route == null) LoadResult.Page(emptyList(), null, null)
             else {
                 if (route == Route.Playlists) {
                     val page = library.playlistChoices(filter, folderKind, offset.toULong(), params.loadSize.toUInt())
                     val count = page.count.toInt()
                     val rows = page.rows
-                    return@withContext LoadResult.Page(rows,
+                    return@withContext LoadResult.Page(items(rows),
                         if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
                         if (offset + rows.size >= count) null else offset + rows.size,
                         itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))
@@ -653,7 +685,7 @@ internal class BrowseChoiceSource(
                 try {
                     val count = query.count().toInt()
                     val rows = query.page(offset.toULong(), params.loadSize.toUInt())
-                    LoadResult.Page(rows, if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
+                    LoadResult.Page(items(rows), if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
                         if (offset + rows.size >= count) null else offset + rows.size,
                         itemsBefore = offset, itemsAfter = (count - offset - rows.size).coerceAtLeast(0))
                 } finally { query.destroy() }
@@ -661,5 +693,5 @@ internal class BrowseChoiceSource(
         }
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (error: Exception) { LoadResult.Error(error) }
-    override fun getRefreshKey(state: PagingState<Int, AndroidBrowseRow>): Int? = state.anchorPosition
+    override fun getRefreshKey(state: PagingState<Int, BrowseItem>): Int? = state.anchorPosition
 }

@@ -66,7 +66,7 @@ impl Iterator for ArtworkCacheEntries {
                     .ok()
                     .and_then(|path| path.components().next())
                     .is_some_and(|part| {
-                        part.as_os_str() == "ready" || part.as_os_str() == "originals"
+                        part.as_os_str() == "originals" || part.as_os_str() == "displays"
                     });
                 if image_directory && self.directories.len() < 5 {
                     match fs::read_dir(path) {
@@ -91,44 +91,9 @@ impl Iterator for ArtworkCacheEntries {
 }
 
 pub(crate) fn current_layout(root: &Path) -> io::Result<PathBuf> {
-    fs::create_dir_all(root)?;
     let current = root.join(CACHE_LAYOUT);
     fs::create_dir_all(&current)?;
-    let root = root.to_path_buf();
-    if root
-        .read_dir()?
-        .flatten()
-        .any(|entry| entry.path() != current)
-    {
-        let cleanup = root.clone();
-        if let Err(error) = thread::Builder::new()
-            .name("artwork-cache-migration".to_string())
-            .spawn(move || remove_legacy_layout(&cleanup))
-        {
-            tracing::warn!(%error, path = %root.display(), "failed to start legacy artwork cache cleanup");
-        }
-    }
     Ok(current)
-}
-
-fn remove_legacy_layout(root: &Path) {
-    let Ok(entries) = root.read_dir() else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.file_name().is_some_and(|name| name == CACHE_LAYOUT) {
-            continue;
-        }
-        let result = if path.is_dir() {
-            fs::remove_dir_all(&path)
-        } else {
-            fs::remove_file(&path)
-        };
-        if let Err(error) = result {
-            tracing::warn!(%error, path = %path.display(), "failed to remove legacy artwork cache entry");
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -222,33 +187,31 @@ impl FilesystemCache {
         &self,
         request: &crate::CacheImageRequest,
     ) -> io::Result<Option<ArtworkCacheEntry>> {
-        self.path_for_key(&format!("ready/{}/1.png", request.family))?;
-        let mut keys = Vec::new();
-        for state in ["ready", "originals"] {
-            let directory = match fs::read_dir(self.root.join(state).join(&request.family)) {
-                Ok(directory) => directory,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error),
-            };
-            for entry in directory {
-                let entry = entry?;
-                if entry.metadata()?.is_file()
-                    && entry.metadata()?.len() > 0
-                    && let Some(key) = cache_key(&self.root, &entry.path())
-                {
-                    keys.push(key);
-                }
+        self.path_for_key(&format!("originals/{}/original.png", request.family))?;
+        if let ImageSize::Thumbnail(size) = request.size
+            && let Some(entry) = self.display_file(&request.family, size)?
+        {
+            return Ok(Some(entry));
+        }
+        let directory = match fs::read_dir(self.root.join("originals").join(&request.family)) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        for entry in directory {
+            let entry = entry?;
+            let metadata = entry.metadata()?;
+            if metadata.is_file()
+                && metadata.len() > 0
+                && let Some(key) = cache_key(&self.root, &entry.path())
+            {
+                return Ok(Some(ArtworkCacheEntry {
+                    key,
+                    path: entry.path(),
+                }));
             }
         }
-        request
-            .select_key(keys.iter().map(String::as_str))
-            .map(|key| {
-                Ok(ArtworkCacheEntry {
-                    key: key.to_owned(),
-                    path: self.path_for_key(key)?,
-                })
-            })
-            .transpose()
+        Ok(None)
     }
 
     pub(crate) fn import_missing(&self, key: &str, source: &Path) -> io::Result<bool> {
@@ -306,56 +269,22 @@ impl FilesystemCache {
         remove_dir_if_present(&self.root.join("missing"))
     }
 
-    pub(crate) fn ready_entry(
-        &self,
-        candidate: &Candidate,
-        requested_size: ImageSize,
-    ) -> Option<CacheEntry> {
-        self.ready_entries(candidate, requested_size).next()
-    }
-
-    pub(crate) fn ready_entries(
-        &self,
-        candidate: &Candidate,
-        requested_size: ImageSize,
-    ) -> impl Iterator<Item = CacheEntry> + '_ {
-        let paths = match requested_size {
-            ImageSize::Original => self
-                .candidate_directory("originals", candidate)
-                .read_dir()
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|entry| entry.path())
-                .filter(|path| path.file_stem().is_some_and(|name| name == "original"))
-                .collect::<Vec<_>>(),
-            ImageSize::Thumbnail(requested) => {
-                let mut entries = self
-                    .candidate_directory("ready", candidate)
-                    .read_dir()
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .filter_map(|entry| {
-                        let path = entry.path();
-                        let size = thumbnail_size(path.file_name()?.to_str()?)?;
-                        (size >= requested).then_some((size, path))
-                    })
-                    .collect::<Vec<_>>();
-                entries.sort_unstable_by(|left, right| {
-                    left.0.cmp(&right.0).then(left.1.cmp(&right.1))
-                });
-                entries.into_iter().map(|(_, path)| path).collect()
-            }
-        };
-        paths.into_iter().filter_map(|path| {
-            let metadata = fs::metadata(&path).ok()?;
-            if metadata.is_file() && metadata.len() > 0 {
-                return Some(CacheEntry { path });
-            }
-            self.remove_file_tracked(&path);
-            None
-        })
+    pub(crate) fn ready_entry(&self, candidate: &Candidate) -> Option<CacheEntry> {
+        self.candidate_directory("originals", candidate)
+            .read_dir()
+            .ok()?
+            .filter_map(Result::ok)
+            .find_map(|entry| {
+                let path = entry.path();
+                cache_key(&self.root, &path)?;
+                let metadata = entry.metadata().ok()?;
+                if metadata.is_file() && metadata.len() > 0 {
+                    Some(CacheEntry { path })
+                } else {
+                    self.remove_file_tracked(&path);
+                    None
+                }
+            })
     }
 
     pub(crate) fn write_ready(
@@ -364,12 +293,6 @@ impl FilesystemCache {
         size: ImageSize,
         bytes: &[u8],
     ) -> io::Result<PathBuf> {
-        if bytes.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "artwork response was empty",
-            ));
-        }
         let path = match size {
             ImageSize::Original => {
                 let extension = crate::decode::original_extension(bytes)
@@ -378,38 +301,83 @@ impl FilesystemCache {
                     .join(format!("original.{extension}"))
             }
             ImageSize::Thumbnail(size) => self
-                .candidate_directory("ready", candidate)
-                .join(format!("{size}.png")),
+                .candidate_directory("displays", candidate)
+                .join(format!("{size}.image")),
         };
-        if same_file_bytes(&path, bytes)? {
-            return Ok(path);
-        }
-        if candidate.is_external() || size == ImageSize::Original {
+        if is_budgeted_path(&self.root, &path) {
             self.write_tracked(&path, bytes)?;
-            self.remove_file_tracked(&self.missing_path(candidate, size));
         } else {
             atomic_write(&path, bytes)?;
-            remove_file_if_present(&self.missing_path(candidate, size))?;
         }
+        self.remove_file_tracked(&self.missing_path(candidate));
         Ok(path)
+    }
+
+    pub(crate) fn display_path(&self, candidate: &Candidate, size: u32) -> Option<PathBuf> {
+        self.display_file(&candidate.key, size)
+            .ok()?
+            .map(|entry| entry.path)
+    }
+
+    fn display_file(&self, family: &str, size: u32) -> io::Result<Option<ArtworkCacheEntry>> {
+        let key = format!("displays/{family}/{size}.image");
+        if let Some(path) = self.file(&key)? {
+            return Ok(Some(ArtworkCacheEntry { key, path }));
+        }
+        let directory = match fs::read_dir(self.root.join("displays").join(family)) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        Ok(directory
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let path = entry.path();
+                let available = entry
+                    .file_name()
+                    .to_str()?
+                    .strip_suffix(".image")?
+                    .parse::<u32>()
+                    .ok()?;
+                if available < size || file_usage(&path).bytes == 0 {
+                    return None;
+                }
+                let key = cache_key(&self.root, &path)?;
+                Some((available, ArtworkCacheEntry { key, path }))
+            })
+            .min_by_key(|(size, _)| *size)
+            .map(|(_, entry)| entry))
+    }
+
+    pub(crate) fn best_display(&self, candidate: &Candidate) -> Option<PathBuf> {
+        self.candidate_directory("displays", candidate)
+            .read_dir()
+            .ok()?
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let size = entry
+                    .file_name()
+                    .to_str()?
+                    .strip_suffix(".image")?
+                    .parse::<u32>()
+                    .ok()?;
+                let path = entry.path();
+                (size > 0 && file_usage(&path).bytes > 0).then_some((size, path))
+            })
+            .max_by_key(|(size, _)| *size)
+            .map(|(_, path)| path)
     }
 
     pub(crate) fn remove_ready(&self, path: &Path) {
         self.remove_file_tracked(path);
     }
 
-    pub(crate) fn is_missing(&self, candidate: &Candidate, size: ImageSize) -> bool {
-        match size {
-            ImageSize::Original => self.missing_path(candidate, size).is_file(),
-            ImageSize::Thumbnail(size) => reusable_sizes(size).into_iter().any(|size| {
-                self.missing_path(candidate, ImageSize::Thumbnail(size))
-                    .is_file()
-            }),
-        }
+    pub(crate) fn is_missing(&self, candidate: &Candidate) -> bool {
+        self.missing_path(candidate).is_file()
     }
 
-    pub(crate) fn mark_missing(&self, candidate: &Candidate, size: ImageSize) -> io::Result<()> {
-        let path = self.missing_path(candidate, size);
+    pub(crate) fn mark_missing(&self, candidate: &Candidate) -> io::Result<()> {
+        let path = self.missing_path(candidate);
         if candidate.is_external() {
             self.write_tracked(&path, &b"missing\n"[..])
         } else {
@@ -423,24 +391,26 @@ impl FilesystemCache {
 
     pub(crate) fn invalidate_source(&self, source_id: &SourceId) -> io::Result<()> {
         let source = digest(source_id.as_str());
-        self.remove_dir_notified(&self.root.join("ready/native").join(&source))?;
         remove_dir_if_present(&self.root.join("missing/native").join(&source))?;
-        self.remove_dir_budgeted(&self.root.join("originals/native").join(source))
+        remove_dir_if_present(&self.root.join("originals/native").join(&source))?;
+        self.remove_dir_budgeted(&self.root.join("displays/native").join(source))
     }
 
     pub(crate) fn invalidate_image(&self, candidate: &Candidate) -> io::Result<()> {
-        self.remove_dir_notified(&self.candidate_directory("ready", candidate))?;
-        remove_dir_if_present(&self.candidate_directory("missing", candidate))?;
-        self.remove_dir_budgeted(&self.candidate_directory("originals", candidate))
+        for state in ["missing", "originals", "displays"] {
+            let path = self.candidate_directory(state, candidate);
+            if is_budgeted_path(&self.root, &path) {
+                self.remove_dir_budgeted(&path)?;
+            } else {
+                remove_dir_if_present(&path)?;
+            }
+        }
+        Ok(())
     }
 
-    fn missing_path(&self, candidate: &Candidate, size: ImageSize) -> PathBuf {
-        let name = match size {
-            ImageSize::Original => "original".to_string(),
-            ImageSize::Thumbnail(size) => size.to_string(),
-        };
+    fn missing_path(&self, candidate: &Candidate) -> PathBuf {
         self.candidate_directory("missing", candidate)
-            .join(format!("{name}.missing"))
+            .join("original.missing")
     }
 
     fn candidate_directory(&self, state: &str, candidate: &Candidate) -> PathBuf {
@@ -454,6 +424,7 @@ impl FilesystemCache {
     }
 
     fn initialize_usage(&self) -> io::Result<()> {
+        remove_dir_if_present(&self.root.join("ready"))?;
         let mut state = lock(&self.maintenance.state)?;
         let usage = prune_cache(
             &self.root,
@@ -525,32 +496,12 @@ impl FilesystemCache {
     fn remove_dir_budgeted(&self, path: &Path) -> io::Result<()> {
         let mut state = lock(&self.maintenance.state)?;
         let previous = path_usage(path)?;
-        self.remove_dir_notified(path)?;
+        remove_dir_if_present(path)?;
         if let Some(usage) = state.as_mut() {
             usage.bytes = usage.bytes.saturating_sub(previous.bytes);
             usage.files = usage.files.saturating_sub(previous.files);
         }
         Ok(())
-    }
-
-    fn remove_dir_notified(&self, path: &Path) -> io::Result<()> {
-        let directory = match fs::read_dir(path) {
-            Ok(directory) => directory,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error),
-        };
-        for entry in (ArtworkCacheEntries {
-            root: self.root.clone(),
-            directories: vec![directory],
-        }) {
-            let entry = entry?;
-            match fs::remove_file(&entry.path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
-            }
-        }
-        remove_dir_if_present(path)
     }
 }
 
@@ -597,9 +548,9 @@ fn prune_cache(
 
 fn collect_discretionary_files(root: &Path, files: &mut Vec<CacheFile>) -> io::Result<()> {
     for path in [
-        root.join("ready/external"),
         root.join("missing/external"),
-        root.join("originals"),
+        root.join("originals/external"),
+        root.join("displays"),
     ] {
         if path.is_dir() {
             collect_cache_files(&path, files)?;
@@ -649,22 +600,15 @@ fn path_usage(path: &Path) -> io::Result<CacheUsage> {
 }
 
 fn is_budgeted_path(root: &Path, path: &Path) -> bool {
-    path.starts_with(root.join("ready/external"))
-        || path.starts_with(root.join("missing/external"))
-        || path.starts_with(root.join("originals"))
+    path.starts_with(root.join("missing/external"))
+        || path.starts_with(root.join("originals/external"))
+        || path.starts_with(root.join("displays"))
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> io::Result<MutexGuard<'_, T>> {
     mutex
         .lock()
         .map_err(|_| io::Error::other("artwork cache maintenance lock was poisoned"))
-}
-
-pub(crate) fn thumbnail_size(name: &str) -> Option<u32> {
-    let (size, extension) = name.split_once('.')?;
-    let parsed = size.parse::<u32>().ok()?;
-    (parsed > 0 && parsed.to_string() == size && matches!(extension, "png" | "img"))
-        .then_some(parsed)
 }
 
 pub(crate) fn valid_cache_key(key: &str) -> bool {
@@ -678,7 +622,9 @@ pub(crate) fn valid_cache_key(key: &str) -> bool {
     };
     is_digest(identity)
         && match state {
-            "ready" => thumbnail_size(name).is_some(),
+            "displays" => name
+                .strip_suffix(".image")
+                .is_some_and(|size| size.parse::<u32>().is_ok_and(|size| size > 0)),
             "originals" => name.strip_prefix("original.").is_some_and(|extension| {
                 matches!(
                     extension,
@@ -707,39 +653,9 @@ fn cache_key(root: &Path, path: &Path) -> Option<String> {
     valid_cache_key(&key).then_some(key)
 }
 
-fn same_file_bytes(path: &Path, bytes: &[u8]) -> io::Result<bool> {
-    let mut file = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error),
-    };
-    if file.metadata()?.len() != bytes.len() as u64 {
-        return Ok(false);
-    }
-    let mut buffer = [0; 16 * 1024];
-    for expected in bytes.chunks(buffer.len()) {
-        file.read_exact(&mut buffer[..expected.len()])?;
-        if &buffer[..expected.len()] != expected {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct CacheEntry {
     pub(crate) path: PathBuf,
-}
-
-fn reusable_sizes(requested: u32) -> Vec<u32> {
-    let mut sizes = vec![requested.max(1)];
-    for standard in [96, 256, 512] {
-        if standard >= requested && !sizes.contains(&standard) {
-            sizes.push(standard);
-        }
-    }
-    sizes.sort_unstable();
-    sizes
 }
 
 fn digest(value: &str) -> String {
@@ -790,22 +706,77 @@ mod tests {
     }
 
     #[test]
-    fn a_ready_larger_cover_is_reused_for_a_smaller_preview() {
+    fn cached_original_is_returned_for_its_binding() {
         let directory = tempfile::tempdir().expect("temporary artwork cache");
         let cache = FilesystemCache::new(directory.path().to_path_buf()).expect("open cache");
-        cache
-            .write_ready(&native(), ImageSize::Thumbnail(256), b"normalized")
-            .expect("cache cover");
-
-        assert!(
-            cache
-                .ready_entry(&native(), ImageSize::Thumbnail(96))
-                .is_some()
+        let bytes = b"\x89PNG\r\n\x1a\n";
+        cache.mark_missing(&native()).unwrap();
+        let path = cache
+            .write_ready(&native(), ImageSize::Original, bytes)
+            .expect("cache original");
+        assert_eq!(cache.ready_entry(&native()).unwrap().path, path);
+        assert_eq!(fs::read(path).unwrap(), bytes);
+        assert!(!cache.is_missing(&native()));
+        let request = crate::CacheImageRequest {
+            family: native().key,
+            size: ImageSize::Original,
+        };
+        let display = cache
+            .write_ready(&native(), ImageSize::Thumbnail(540), bytes)
+            .unwrap();
+        let smaller = cache
+            .write_ready(&native(), ImageSize::Thumbnail(256), bytes)
+            .unwrap();
+        assert_eq!(cache.display_path(&native(), 540), Some(display.clone()));
+        assert_eq!(cache.display_path(&native(), 512), Some(display.clone()));
+        assert_eq!(cache.display_path(&native(), 96), Some(smaller.clone()));
+        assert!(cache.display_path(&native(), 768).is_none());
+        assert_eq!(
+            cache.family_file(&request).unwrap().unwrap().path,
+            cache.ready_entry(&native()).unwrap().path
         );
-        assert!(
-            cache
-                .ready_entry(&native(), ImageSize::Thumbnail(512))
-                .is_none()
+        let display_request = crate::CacheImageRequest {
+            size: ImageSize::Thumbnail(540),
+            ..request.clone()
+        };
+        assert_eq!(
+            cache.family_file(&display_request).unwrap().unwrap().path,
+            display
+        );
+        let keys = [
+            format!("originals/{}/original.png", request.family),
+            format!("displays/{}/540.image", request.family),
+            format!("displays/{}/256.image", request.family),
+        ];
+        assert_eq!(
+            request.select_key(keys.iter().map(String::as_str)),
+            Some(keys[0].as_str())
+        );
+        assert_eq!(
+            display_request.select_key(keys.iter().map(String::as_str)),
+            Some(keys[1].as_str())
+        );
+        assert_eq!(request.select_key([keys[1].as_str()]), None);
+        let other_size = crate::CacheImageRequest {
+            size: ImageSize::Thumbnail(96),
+            ..request.clone()
+        };
+        assert_eq!(
+            other_size.select_key(keys.iter().map(String::as_str)),
+            Some(keys[2].as_str())
+        );
+        assert_eq!(
+            cache.family_file(&other_size).unwrap().unwrap().path,
+            smaller
+        );
+        let larger = crate::CacheImageRequest {
+            size: ImageSize::Thumbnail(768),
+            ..request.clone()
+        };
+        assert_eq!(larger.select_key([keys[1].as_str()]), None);
+        assert_eq!(
+            cache.family_file(&larger).unwrap().unwrap().path,
+            cache.ready_entry(&native()).unwrap().path
         );
         let external = Candidate::new(
             ArtworkImage::Artist {
@@ -815,67 +786,18 @@ mod tests {
             None,
         );
         cache
-            .write_ready(&external, ImageSize::Thumbnail(256), b"normalized")
+            .write_ready(&external, ImageSize::Original, bytes)
             .unwrap();
-        assert!(
-            cache
-                .ready_entry(&external, ImageSize::Thumbnail(512))
-                .is_none()
-        );
-        assert!(
-            cache
-                .ready_entry(&external, ImageSize::Thumbnail(96))
-                .is_some()
-        );
-        let request = crate::CacheImageRequest {
-            family: external.key.clone(),
-            size: ImageSize::Thumbnail(700),
-            fallback: false,
-        };
-        let keys = [
-            format!("ready/{}/512.png", external.key),
-            format!("ready/{}/800.png", external.key),
-            format!("ready/{}/1024.png", external.key),
-        ];
-        assert_eq!(
-            request.select_key(keys.iter().map(String::as_str)),
-            Some(keys[1].as_str())
-        );
-        let original = crate::CacheImageRequest {
-            size: ImageSize::Original,
-            ..request.clone()
-        };
-        assert!(
-            original
-                .select_key(keys.iter().map(String::as_str))
-                .is_none()
-        );
-        assert_eq!(
-            crate::CacheImageRequest {
-                fallback: true,
-                ..original
-            }
-            .select_key(keys.iter().map(String::as_str)),
-            Some(keys[2].as_str())
-        );
         cache
-            .write_ready(&external, ImageSize::Thumbnail(4096), b"large")
+            .write_ready(&external, ImageSize::Thumbnail(512), bytes)
             .unwrap();
-        assert!(
-            cache
-                .ready_entry(&external, ImageSize::Thumbnail(96))
-                .unwrap()
-                .path
-                .ends_with("256.png")
-        );
-        assert!(
-            cache
-                .ready_entries(&external, ImageSize::Thumbnail(1))
-                .last()
-                .unwrap()
-                .path
-                .ends_with("4096.png")
-        );
+        let empty = CacheLimits { bytes: 0, files: 0 };
+        let usage = prune_cache(directory.path(), empty, empty, None).unwrap();
+        assert_eq!((usage.bytes, usage.files), (0, 0));
+        assert!(cache.ready_entry(&external).is_none());
+        assert!(cache.ready_entry(&native()).is_some());
+        assert!(cache.display_path(&external, 512).is_none());
+        assert!(cache.best_display(&native()).is_none());
     }
 
     #[test]
@@ -892,23 +814,26 @@ mod tests {
             None,
         );
         cache
-            .write_ready(&native(), ImageSize::Thumbnail(256), b"source")
+            .write_ready(&native(), ImageSize::Original, b"\x89PNG\r\n\x1a\n")
             .expect("cache source cover");
         cache
-            .write_ready(&other, ImageSize::Thumbnail(256), b"other")
+            .write_ready(&other, ImageSize::Original, b"\x89PNG\r\n\x1a\n")
             .expect("cache other cover");
+        cache
+            .write_ready(&native(), ImageSize::Thumbnail(512), b"\x89PNG\r\n\x1a\n")
+            .unwrap();
+        cache
+            .write_ready(&other, ImageSize::Thumbnail(512), b"\x89PNG\r\n\x1a\n")
+            .unwrap();
 
         cache.invalidate_source(&source).expect("invalidate source");
-        assert!(
-            cache
-                .ready_entry(&native(), ImageSize::Thumbnail(256))
-                .is_none()
-        );
-        assert!(
-            cache
-                .ready_entry(&other, ImageSize::Thumbnail(256))
-                .is_some()
-        );
+        assert!(cache.ready_entry(&native()).is_none());
+        assert!(cache.ready_entry(&other).is_some());
+        assert!(cache.display_path(&native(), 512).is_none());
+        assert!(cache.display_path(&other, 512).is_some());
+        cache.invalidate_image(&other).expect("invalidate image");
+        assert!(cache.ready_entry(&other).is_none());
+        assert!(cache.display_path(&other, 512).is_none());
     }
 }
 

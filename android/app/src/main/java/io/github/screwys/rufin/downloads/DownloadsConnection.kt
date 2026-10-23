@@ -55,7 +55,7 @@ internal class DownloadsConnection(private val model: RufinConnection, scope: Co
                 override suspend fun load(params: LoadParams<Int>): LoadResult<Int, DownloadRow> = try {
                     withContext(Dispatchers.Default) {
                         val offset = params.key ?: 0
-                        val page = owner.queuePage(offset.toULong(), params.loadSize.toUInt())
+                        val page = owner.queuePage(DownloadQueueScope.All, offset.toULong(), params.loadSize.toUInt())
                         LoadResult.Page(page.jobs.map { job -> DownloadRow(job, page.previews.find { it.mediaUri == job.previewUris.firstOrNull() }) }, if (offset == 0) null else (offset - params.loadSize).coerceAtLeast(0),
                             if (offset.toULong() + page.jobs.size.toULong() >= page.total) null else offset + page.jobs.size)
                     }

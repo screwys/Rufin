@@ -68,36 +68,6 @@ const ARTIST_RELEASE_GROUPS: [(&str, &str); 6] = [
     ("AppearsOn", "Appears On"),
 ];
 
-#[derive(Clone, Copy)]
-enum ArtistReleaseSection {
-    Class(library::AlbumReleaseClass),
-    AppearsOn,
-}
-
-fn release_section(id: &str) -> Result<ArtistReleaseSection, AndroidError> {
-    use library::AlbumReleaseClass;
-    Ok(ArtistReleaseSection::Class(match id {
-        "Album" => AlbumReleaseClass::Album,
-        "Ep" => AlbumReleaseClass::Ep,
-        "Single" => AlbumReleaseClass::Single,
-        "Collection" => AlbumReleaseClass::Collection,
-        "Other" => AlbumReleaseClass::Other,
-        "AppearsOn" => return Ok(ArtistReleaseSection::AppearsOn),
-        _ => return Err(error("Unknown release section")),
-    }))
-}
-
-fn release_index(class: library::AlbumReleaseClass) -> usize {
-    use library::AlbumReleaseClass;
-    match class {
-        AlbumReleaseClass::Album => 0,
-        AlbumReleaseClass::Ep => 1,
-        AlbumReleaseClass::Single => 2,
-        AlbumReleaseClass::Collection => 3,
-        AlbumReleaseClass::Other => 4,
-    }
-}
-
 fn release_row(album: library::AlbumView, class: usize) -> AndroidBrowseRow {
     let mut row: AndroidBrowseRow = album.into();
     let (id, title) = ARTIST_RELEASE_GROUPS[class];
@@ -210,7 +180,6 @@ pub struct AndroidBrowseQuery {
     artist_tracks: LibraryListSettings,
     source: rufin_core::runtime::SourceHandle,
     settings: rufin_core::SettingsHandle,
-    release_section: Option<ArtistReleaseSection>,
     opened: tokio::sync::OnceCell<OpenedCollection>,
 }
 
@@ -338,124 +307,6 @@ impl AndroidBrowseQuery {
 
 #[uniffi::export]
 impl AndroidBrowseQuery {
-    pub async fn release_query(
-        self: Arc<Self>,
-        section_id: String,
-        filter: String,
-        sort: Option<LibraryField>,
-        descending: bool,
-    ) -> Result<Arc<Self>, AndroidError> {
-        let section = release_section(&section_id)?;
-        let runtime = self.runtime.clone();
-        run_read(&runtime, move |cancel| async move {
-            let OpenedCollection::Detail(Some(detail)) =
-                self.opened(&cancel).await.map_err(error)?
-            else {
-                return Err(error("Choose an artist"));
-            };
-            let DetailContent::Releases { page, .. } = &detail.content else {
-                return Err(error("Choose an artist"));
-            };
-            let display = self
-                .settings
-                .load()
-                .library_list(LibraryListKey::ArtistAlbums);
-            let (sort, descending) = sort.map_or((display.sort_key, display.descending), |sort| {
-                (sort, descending)
-            });
-            let mut read = page.query.clone();
-            let mut selected = library::Page {
-                count: 0,
-                first_row_position: 0,
-                rows: Vec::new(),
-            };
-            if let ArtistReleaseSection::Class(class) = section {
-                let index = release_index(class);
-                let library::ListKind::ArtistAlbums {
-                    release_class,
-                    filters,
-                    ..
-                } = &mut read.kind
-                else {
-                    unreachable!("Artist albums")
-                };
-                let same_filter = filters
-                    .as_ref()
-                    .map_or(read.filter.as_str(), |filters| &filters[index])
-                    .trim()
-                    == filter.trim();
-                *release_class = Some(class);
-                *filters = None;
-                let same_order = read.sort == sort.catalog_sort() && read.descending == descending;
-                read.filter.clone_from(&filter);
-                read.sort = sort.catalog_sort();
-                read.descending = descending;
-                if same_filter {
-                    selected.count = page.counts[index];
-                    if same_order {
-                        let start: usize = page.counts[..index].iter().sum();
-                        let first = page.page.first_row_position.max(start);
-                        let last = (page.page.first_row_position + page.page.rows.len())
-                            .min(start + selected.count);
-                        if first < last {
-                            selected.rows = page.page.rows[first - page.page.first_row_position
-                                ..last - page.page.first_row_position]
-                                .to_vec();
-                            selected.first_row_position = first - start;
-                        }
-                    } else {
-                        let range = library::RouteSeedWindow::top().range(selected.count);
-                        selected.rows = read
-                            .albums(&self.database, range.start, range.len(), &cancel)
-                            .await
-                            .map_err(error)?;
-                    }
-                } else {
-                    selected = read
-                        .page_albums(&self.database, library::RouteSeedWindow::top(), &cancel)
-                        .await
-                        .map_err(error)?;
-                }
-            }
-            let opened = OpenedCollection::Albums(rufin_core::browse::AlbumListPage {
-                read,
-                content: rufin_core::browse::AlbumListContent::Rows(selected),
-            });
-            Ok(Arc::new(Self {
-                selected: self.selected.clone(),
-                database: self.database.clone(),
-                runtime: self.runtime.clone(),
-                playback: self.playback.clone(),
-                route: match &self.route {
-                    Route::ArtistDetail(uri) | Route::ArtistDiscography(uri) => {
-                        Route::ArtistDiscography(uri.clone())
-                    }
-                    Route::AlbumArtistDetail(uri) | Route::AlbumArtistDiscography(uri) => {
-                        Route::AlbumArtistDiscography(uri.clone())
-                    }
-                    _ => unreachable!("Artist releases"),
-                },
-                category: CollectionCategory::Albums,
-                filter,
-                sort,
-                descending,
-                blocks: self.blocks.clone(),
-                history_current_only: false,
-                favorites_only: false,
-                downloaded_only: false,
-                home_snapshot: tokio::sync::OnceCell::new(),
-                display,
-                album_tracks: self.album_tracks.clone(),
-                artist_tracks: self.artist_tracks.clone(),
-                source: self.source.clone(),
-                settings: self.settings.clone(),
-                release_section: Some(section),
-                opened: tokio::sync::OnceCell::new_with(Some(opened)),
-            }))
-        })
-        .await
-    }
-
     pub async fn selection(self: Arc<Self>) -> Result<Arc<MemberSelection>, AndroidError> {
         let runtime = self.runtime.clone();
         run_read(&runtime, move |cancel| async move {
@@ -475,16 +326,12 @@ impl AndroidBrowseQuery {
                 ..
             })) = self.opened(&cancel).await.map_err(error)?
             {
-                if self.release_section.is_none() {
-                    return Ok(Arc::new(MemberSelection::Collections(vec![
-                        Collection::Artist {
-                            key: artist.artist_key,
-                            album_artist: self
-                                .artist_release_identity()
-                                .is_some_and(|(_, role)| role),
-                        },
-                    ])));
-                }
+                return Ok(Arc::new(MemberSelection::Collections(vec![
+                    Collection::Artist {
+                        key: artist.artist_key,
+                        album_artist: self.artist_release_identity().is_some_and(|(_, role)| role),
+                    },
+                ])));
             }
             self.list(&cancel)
                 .await

@@ -1,5 +1,5 @@
 //! Listening report formatting and screen-independent PNG export.
-use artwork::{Artwork, ArtworkBinding};
+use artwork::{Artwork, ArtworkBinding, ArtworkOutcome, ArtworkRequest, ExternalPolicy};
 use library::{ActivityOverview, CalendarActivityPeriod};
 use localization::{msgid, tr_with};
 
@@ -52,16 +52,27 @@ pub async fn export_png(
     }
     bindings.sort();
     bindings.dedup();
+    let mut loaded = Vec::with_capacity(bindings.len());
+    for binding in bindings {
+        let request = ArtworkRequest::new(ArtworkBinding::opaque(&binding), 512)
+            .cache_only()
+            .with_external(ExternalPolicy::new(true, false, ""));
+        match artwork.load(request).finish().await {
+            ArtworkOutcome::Ready(image) => loaded.push((binding, image.pixels().clone())),
+            ArtworkOutcome::Missing | ArtworkOutcome::Invalidated => {}
+            ArtworkOutcome::Failed(error) => {
+                tracing::debug!(%error, "Could not read report artwork")
+            }
+        }
+    }
     tokio::task::spawn_blocking(move || {
-        let images = bindings
+        let images = loaded
             .into_iter()
-            .filter_map(|binding| {
-                match artwork.cached_image(&ArtworkBinding::opaque(&binding), 512) {
-                    Ok(image) => image.map(|image| (binding, image)),
-                    Err(error) => {
-                        tracing::debug!(%error, "Could not read report artwork");
-                        None
-                    }
+            .filter_map(|(binding, image)| match image.resized_to_fit(512) {
+                Ok(image) => Some((binding, image)),
+                Err(error) => {
+                    tracing::debug!(%error, "Could not read report artwork");
+                    None
                 }
             })
             .collect();

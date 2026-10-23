@@ -4,8 +4,6 @@ use localization::tr;
 use playback::AudioOutput;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::mpsc::TryRecvError;
-use std::thread;
 use std::time::{Duration, Instant};
 
 type AudioOutputOptions = Vec<(Option<String>, String)>;
@@ -95,16 +93,8 @@ pub fn audio_output_dropdown(shell: &Rc<PlayerUi>, width: i32) -> gtk::DropDown 
         output_shell.update_playback_settings(|settings| settings.audio_output = id);
     });
 
-    let seen_generation = shell.controls.audio_output_refresh_generation.get();
     request_audio_output_refresh(shell);
-    watch_audio_output_dropdown_refresh(
-        shell,
-        &dropdown,
-        seen_generation,
-        options,
-        selected,
-        syncing,
-    );
+    watch_audio_output_dropdown_refresh(shell, &dropdown, options, selected, syncing);
     dropdown
 }
 
@@ -216,7 +206,7 @@ fn refresh_audio_output_dropdown(
 }
 
 fn request_audio_output_refresh(shell: &Rc<PlayerUi>) {
-    if shell.controls.audio_output_refresh_running.get() {
+    if *shell.controls.audio_output_refresh_running.borrow() {
         return;
     }
     if shell
@@ -227,72 +217,59 @@ fn request_audio_output_refresh(shell: &Rc<PlayerUi>) {
     {
         return;
     }
-    shell.controls.audio_output_refresh_running.set(true);
+    shell
+        .controls
+        .audio_output_refresh_running
+        .send_replace(true);
 
-    let (sender, receiver) = std::sync::mpsc::channel();
     let transport = shell.playback_owner.clone();
-    thread::spawn(move || {
-        let _sent = sender.send(transport.available_audio_outputs());
-    });
+    let refresh = shell
+        .runtime
+        .spawn_blocking(move || transport.available_audio_outputs());
 
-    let shell = Rc::clone(shell);
-    gtk::glib::timeout_add_local(Duration::from_millis(50), move || {
-        match receiver.try_recv() {
-            Ok(outputs) => {
-                let options = playback_output_options(outputs);
-                let mut cached = shell.controls.audio_output_options.borrow_mut();
-                if *cached != options {
-                    *cached = options;
-                    shell
-                        .controls
-                        .audio_output_refresh_generation
-                        .set(shell.controls.audio_output_refresh_generation.get() + 1);
-                }
-                shell.controls.audio_output_refresh_running.set(false);
-                shell
-                    .controls
-                    .audio_output_refreshed_at
-                    .set(Some(Instant::now()));
-                gtk::glib::ControlFlow::Break
-            }
-            Err(TryRecvError::Empty) => gtk::glib::ControlFlow::Continue,
-            Err(TryRecvError::Disconnected) => {
-                shell.controls.audio_output_refresh_running.set(false);
-                shell
-                    .controls
-                    .audio_output_refreshed_at
-                    .set(Some(Instant::now()));
-                gtk::glib::ControlFlow::Break
-            }
+    let shell = Rc::downgrade(shell);
+    gtk::glib::spawn_future_local(async move {
+        let result = refresh.await;
+        let Some(shell) = shell.upgrade() else { return };
+        if let Ok(outputs) = result {
+            shell
+                .controls
+                .audio_output_options
+                .replace(playback_output_options(outputs));
         }
+        shell
+            .controls
+            .audio_output_refreshed_at
+            .set(Some(Instant::now()));
+        shell
+            .controls
+            .audio_output_refresh_running
+            .send_replace(false);
     });
 }
 
 fn watch_audio_output_dropdown_refresh(
     shell: &Rc<PlayerUi>,
     dropdown: &gtk::DropDown,
-    seen_generation: u64,
     options: Rc<RefCell<AudioOutputOptions>>,
     selected: Rc<RefCell<Option<String>>>,
     syncing: Rc<Cell<bool>>,
 ) {
-    let dropdown = dropdown.downgrade();
-    let shell = Rc::clone(shell);
-    gtk::glib::timeout_add_local(Duration::from_millis(50), move || {
-        let Some(dropdown) = dropdown.upgrade() else {
-            return gtk::glib::ControlFlow::Break;
-        };
-        let current_generation = shell.controls.audio_output_refresh_generation.get();
-        if current_generation != seen_generation {
-            refresh_audio_output_dropdown(&dropdown, &shell, &options, &selected, &syncing);
-            return gtk::glib::ControlFlow::Break;
+    let mut refresh = shell.controls.audio_output_refresh_running.subscribe();
+    if !*refresh.borrow() {
+        return;
+    }
+    let weak_dropdown = dropdown.downgrade();
+    let shell = Rc::downgrade(shell);
+    let task = gtk::glib::spawn_future_local(async move {
+        if refresh.wait_for(|running| !running).await.is_err() {
+            return;
         }
-        if shell.controls.audio_output_refresh_running.get() {
-            gtk::glib::ControlFlow::Continue
-        } else {
-            gtk::glib::ControlFlow::Break
+        if let (Some(dropdown), Some(shell)) = (weak_dropdown.upgrade(), shell.upgrade()) {
+            refresh_audio_output_dropdown(&dropdown, &shell, &options, &selected, &syncing);
         }
     });
+    let _ = dropdown.add_weak_ref_notify_local(move || task.abort());
 }
 
 fn playback_output_options(discovered: Vec<AudioOutput>) -> AudioOutputOptions {

@@ -1,3 +1,6 @@
+pub const CROSSFADE_DURATION_TITLE: &str = localization::msgid("Crossfade duration");
+pub const PLAYBACK_SPEED_TITLE: &str = localization::msgid("Playback speed");
+pub const PRESERVE_PITCH_TITLE: &str = localization::msgid("Preserve pitch");
 use gtk_widgets::scale::{install_scale_scroll_forwarding, install_sliding_value_bubble};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -203,7 +206,7 @@ fn crossfade_duration_row(
     scale_width: i32,
 ) -> adw::ActionRow {
     let row = adw::ActionRow::builder()
-        .title(tr("Crossfade duration"))
+        .title(tr(CROSSFADE_DURATION_TITLE))
         .build();
     let scale = gtk::Scale::with_range(
         gtk::Orientation::Horizontal,
@@ -239,7 +242,7 @@ pub fn playback_rate_row(
     initial_rate: f64,
     scale_width: i32,
 ) -> adw::ActionRow {
-    let title_text = tr("Playback speed");
+    let title_text = tr(PLAYBACK_SPEED_TITLE);
     let row = adw::ActionRow::builder().title(&title_text).build();
     let scale = gtk::Scale::with_range(
         gtk::Orientation::Horizontal,
@@ -284,7 +287,7 @@ pub fn playback_rate_row(
 
 pub fn preserve_pitch_row(shell: &Rc<PlayerUi>, active: bool) -> adw::SwitchRow {
     let row = adw::SwitchRow::builder()
-        .title(tr("Preserve pitch"))
+        .title(tr(PRESERVE_PITCH_TITLE))
         .active(active)
         .build();
     let pitch_shell = Rc::clone(shell);

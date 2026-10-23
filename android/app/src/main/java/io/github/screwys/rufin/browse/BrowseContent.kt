@@ -391,7 +391,7 @@ internal fun BrowseTitle(item: BrowseItem, modifier: Modifier = Modifier,
         Text(title, Modifier.weight(1f, fill = false).then(if (marquee) Modifier.rufinMarquee() else Modifier),
             maxLines = maxLines, overflow = TextOverflow.Ellipsis, style = style,
             color = if (playing) MaterialTheme.colorScheme.secondary else LocalContentColor.current)
-        if (showDownloadBadge) io.github.screwys.rufin.ui.DownloadBadge(row)
+        if (showDownloadBadge) io.github.screwys.rufin.ui.DownloadBadge(item)
     }
 }
 

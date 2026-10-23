@@ -46,7 +46,7 @@ pub struct ScrobblingOwner {
     runtime: tokio::runtime::Handle,
     scrobbler: Arc<Scrobbler>,
     settings_committed: Arc<dyn Fn(&crate::settings::Settings) + Send + Sync>,
-    credential_work: Arc<Mutex<()>>,
+    credential_work: Arc<Mutex<bool>>,
 }
 
 impl ScrobblingOwner {
@@ -63,7 +63,7 @@ impl ScrobblingOwner {
             runtime,
             scrobbler,
             settings_committed,
-            credential_work: Arc::new(Mutex::new(())),
+            credential_work: Arc::new(Mutex::new(false)),
         })
     }
 
@@ -77,25 +77,30 @@ impl ScrobblingOwner {
         }
         if credentials_changed {
             let owner = self.clone();
-            self.runtime.spawn(async move {
-                let _ = owner.load_preferences().await;
-            });
+            self.runtime
+                .spawn_blocking(move || owner.load_credentials(true));
         }
     }
 
     pub(crate) fn start(self: &Arc<Self>) {
         let owner = Arc::clone(self);
-        self.runtime.spawn_blocking(move || {
-            let _work = owner
-                .credential_work
-                .lock()
-                .unwrap_or_else(|p| p.into_inner());
-            if let Err(error) = owner.scrobbler.load_credentials(|| {
-                crate::settings::startup_scrobbling_settings(&owner.settings, &owner.secrets)
+        self.runtime
+            .spawn_blocking(move || owner.load_credentials(false));
+    }
+
+    fn load_credentials(&self, reload: bool) {
+        let mut loaded = self
+            .credential_work
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if reload || !*loaded {
+            if let Err(error) = self.scrobbler.load_credentials(|| {
+                crate::settings::startup_scrobbling_settings(&self.settings, &self.secrets)
             }) {
                 warn!(%error, "could not load saved scrobbling credentials");
             }
-        });
+            *loaded = true;
+        }
     }
 
     fn commit(
@@ -308,7 +313,7 @@ impl ScrobblingOwner {
         preferences: ScrobblingPreferences,
     ) -> Result<ScrobblingPreferences, crate::settings::SettingsError> {
         self.settings
-            .update(|stored| {
+            .edit(|stored| {
                 stored.scrobbling.lastfm.enabled = preferences.lastfm.enabled;
                 stored.scrobbling.lastfm.now_playing_enabled =
                     preferences.lastfm.now_playing_enabled;
@@ -363,13 +368,7 @@ impl ScrobblingOwner {
         let owner = self.clone();
         self.runtime
             .spawn_blocking(move || {
-                let _work = owner
-                    .credential_work
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner());
-                if let Err(error) = owner.scrobbler.load_credentials(|| owner.loaded_settings()) {
-                    warn!(%error, "could not load scrobbling credentials");
-                }
+                owner.load_credentials(false);
                 owner.preferences()
             })
             .await

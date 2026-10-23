@@ -1,3 +1,7 @@
+pub const DEFAULT_LEFT_TITLE: &str = localization::msgid("Default left sidebar");
+pub const DEFAULT_RIGHT_TITLE: &str = localization::msgid("Default right sidebar");
+pub const NARROW_LEFT_TITLE: &str = localization::msgid("Narrow left sidebar");
+pub const NARROW_RIGHT_TITLE: &str = localization::msgid("Narrow right sidebar");
 mod activity;
 pub mod backup;
 use crate::Preferences;
@@ -23,6 +27,7 @@ mod layout;
 mod library;
 pub mod persistence;
 mod privacy;
+mod search;
 pub mod source;
 mod storage;
 mod themes;
@@ -264,6 +269,11 @@ impl PreferencesNavigationControls {
 
     pub fn set_navigation(&self, navigation: &adw::NavigationView) {
         self.navigation.set(Some(navigation));
+        let controls = self.clone();
+        navigation.connect_map(move |navigation| {
+            controls.navigation.set(Some(navigation));
+            controls.set_nested_page_visible(navigation.navigation_stack().n_items() > 1);
+        });
     }
 
     pub fn set_nested_page_visible(&self, visible: bool) {
@@ -292,53 +302,42 @@ fn present_preferences_dialog_with_page(
     if !open_add_server {
         shell.clear_retained_add_server_form();
     }
-    if let Some(dialog) = shell.state.active_dialog() {
-        rebuild_preferences_dialog(
-            shell,
-            &dialog,
-            initial_page,
-            open_add_server,
-            focus_download_queue,
-        );
-        present_light_dismiss_dialog(&dialog, &shell.window);
-        return;
-    }
-
-    let dialog = adw::Dialog::builder()
-        .title(tr("Preferences"))
-        .content_width(900)
-        .content_height(large_popup_content_height(
-            shell.window.height(),
-            LARGE_POPUP_BASE_HEIGHT,
-        ))
-        .build();
-    dialog.add_css_class("preferences");
-    shell.state.set_active_dialog(&dialog);
-    let close_shell = Rc::downgrade(shell);
-    dialog.connect_closed(move |_| {
-        if let Some(shell) = close_shell.upgrade() {
-            shell.release_inactive_add_server_form();
-        }
+    let dialog = shell.state.active_dialog().unwrap_or_else(|| {
+        let dialog = adw::Dialog::builder()
+            .title(tr("Preferences"))
+            .content_width(900)
+            .content_height(large_popup_content_height(
+                shell.window.height(),
+                LARGE_POPUP_BASE_HEIGHT,
+            ))
+            .build();
+        dialog.add_css_class("preferences");
+        shell.state.set_active_dialog(&dialog);
+        let close_shell = Rc::downgrade(shell);
+        dialog.connect_closed(move |dialog| {
+            dialog.set_child(None::<&gtk::Widget>);
+            dialog.insert_action_group("preferences", None::<&gtk::gio::SimpleActionGroup>);
+            if let Some(shell) = close_shell.upgrade() {
+                shell.state.dialog.set(None::<&adw::Dialog>);
+                shell.release_inactive_add_server_form();
+            }
+        });
+        build_preferences_dialog(shell, &dialog, initial_page);
+        dialog
     });
-    rebuild_preferences_dialog(
-        shell,
-        &dialog,
-        initial_page,
-        open_add_server,
-        focus_download_queue,
-    );
 
     present_light_dismiss_dialog(&dialog, &shell.window);
+    let _ = dialog.activate_action(
+        "preferences.show",
+        Some(&(initial_page.name(), open_add_server, focus_download_queue).to_variant()),
+    );
 }
 
-fn rebuild_preferences_dialog(
+fn build_preferences_dialog(
     shell: &Rc<Preferences>,
     dialog: &adw::Dialog,
     initial_page: PreferencesPageKind,
-    open_add_server: bool,
-    focus_download_queue: bool,
 ) {
-    dialog.set_title(&tr("Preferences"));
     let credential_drafts = Rc::new(RefCell::new(shell.products.scrobbling.preferences()));
     let resource = crate::ui_resource::PREFERENCES_DIALOG_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
@@ -436,6 +435,35 @@ fn rebuild_preferences_dialog(
                 let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
                 slot.set_hexpand(true);
                 slot.set_vexpand(true);
+                if matches!(
+                    kind,
+                    PreferencesPageKind::Library
+                        | PreferencesPageKind::Downloads
+                        | PreferencesPageKind::Storage
+                ) {
+                    let changes = RefCell::new(shell.products.source.configuration_changes());
+                    let weak = Rc::downgrade(shell);
+                    let dialog = dialog.downgrade();
+                    let controls = navigation_controls.clone();
+                    let drafts = credential_drafts.clone();
+                    slot.connect_map(move |slot| {
+                        let changed = changes.borrow().has_changed().unwrap_or(false);
+                        if !changed {
+                            return;
+                        }
+                        changes.borrow_mut().borrow_and_update();
+                        let (Some(shell), Some(dialog)) = (weak.upgrade(), dialog.upgrade()) else {
+                            return;
+                        };
+                        controls.return_to_root();
+                        while let Some(child) = slot.first_child() {
+                            slot.remove(&child);
+                        }
+                        slot.append(&build_preferences_page(
+                            &shell, &dialog, &controls, &drafts, kind,
+                        ));
+                    });
+                }
                 let title = kind.title();
                 stack.add_titled_with_icon(&slot, Some(kind.name()), &title, kind.icon_name());
                 (kind, slot)
@@ -449,8 +477,6 @@ fn rebuild_preferences_dialog(
         &navigation_controls,
         &credential_drafts,
         initial_page,
-        open_add_server,
-        focus_download_queue,
     );
     stack.set_visible_child_name(initial_page.name());
     content_page.set_title(&initial_page.title());
@@ -525,22 +551,61 @@ fn rebuild_preferences_dialog(
             &navigation_controls_for_switch,
             &credential_drafts_for_switch,
             kind,
-            false,
-            false,
         );
     });
+
+    let actions = gtk::gio::SimpleActionGroup::new();
+    let show =
+        gtk::gio::SimpleAction::new("show", Some(gtk::glib::VariantTy::new("(sbb)").unwrap()));
+    let show_stack = stack.downgrade();
+    let show_search = search_button.downgrade();
+    let show_dialog = dialog.downgrade();
+    let show_shell = Rc::downgrade(shell);
+    let show_navigation = navigation_controls.clone();
+    show.connect_activate(move |_, value| {
+        let Some((name, add_server, downloads)) =
+            value.and_then(|value| value.get::<(String, bool, bool)>())
+        else {
+            return;
+        };
+        let (Some(stack), Some(dialog), Some(shell)) = (
+            show_stack.upgrade(),
+            show_dialog.upgrade(),
+            show_shell.upgrade(),
+        ) else {
+            return;
+        };
+        if let Some(search) = show_search.upgrade() {
+            search.set_active(false);
+        }
+        show_navigation.return_to_root();
+        stack.set_visible_child_name(&name);
+        if add_server {
+            if let Some(navigation) = show_navigation.navigation.upgrade() {
+                navigation.push(&shell.add_server_navigation_page(&dialog));
+                show_navigation.set_nested_page_visible(true);
+            }
+        } else if downloads {
+            if let Some(slot) = stack.visible_child() {
+                let slot = slot.downgrade();
+                gtk::glib::idle_add_local_once(move || {
+                    if let Some(slot) = slot.upgrade() {
+                        focus_named_widget(&slot, "download-queue");
+                    }
+                });
+            }
+        }
+    });
+    actions.add_action(&show);
+    dialog.insert_action_group("preferences", Some(&actions));
 
     let search_items = Rc::new(RefCell::new(Vec::<PreferencesSearchItem>::new()));
     let rendered_search_rows = Rc::new(RefCell::new(Vec::<gtk::Widget>::new()));
     let search_shell = Rc::clone(shell);
-    let search_dialog = dialog.downgrade();
-    let search_slots = Rc::clone(&page_slots);
-    let search_drafts = credential_drafts.clone();
     let search_items_for_button = Rc::clone(&search_items);
     let search_entry_for_button = search_entry.downgrade();
     let header_for_search = header_content.downgrade();
     let content_for_search = content_stack.downgrade();
-    let page_stack_for_button = stack.downgrade();
     search_button.connect_toggled(move |button| {
         let Some(search_entry) = search_entry_for_button.upgrade() else {
             return;
@@ -556,25 +621,8 @@ fn rebuild_preferences_dialog(
             }
             return;
         }
-        let Some(search_dialog) = search_dialog.upgrade() else {
-            return;
-        };
-        let Some(page_stack) = page_stack_for_button.upgrade() else {
-            return;
-        };
         if search_items_for_button.borrow().is_empty() {
-            let retained = page_stack
-                .visible_child_name()
-                .and_then(|name| PreferencesPageKind::from_name(name.as_str()))
-                .unwrap_or(PreferencesPageKind::General);
-            let items = build_preferences_search_index(
-                &search_shell,
-                &search_dialog,
-                &search_slots,
-                &search_drafts,
-                retained,
-            );
-            *search_items_for_button.borrow_mut() = items;
+            *search_items_for_button.borrow_mut() = search::items(&search_shell);
         }
         search_entry.grab_focus();
     });
@@ -664,73 +712,6 @@ fn rebuild_preferences_dialog(
     });
 }
 
-fn collect_preferences_search_items(
-    widget: &gtk::Widget,
-    page: PreferencesPageKind,
-    group_title: &str,
-    expander_title: Option<String>,
-    items: &mut Vec<PreferencesSearchItem>,
-) {
-    let group_title = widget
-        .clone()
-        .downcast::<adw::PreferencesGroup>()
-        .ok()
-        .map(|group| group.title().to_string())
-        .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| group_title.to_owned());
-    let (group_title, expander_title) = widget
-        .clone()
-        .downcast::<adw::ExpanderRow>()
-        .ok()
-        .map(|row| {
-            let title = row.title().to_string();
-            let title = if title.is_empty() {
-                group_title.clone()
-            } else {
-                title
-            };
-            (title.clone(), Some(title))
-        })
-        .unwrap_or((group_title, expander_title));
-
-    if let Ok(row) = widget.clone().downcast::<adw::PreferencesRow>() {
-        let title = row.title().to_string();
-        if !title.is_empty() {
-            let page_title = page.title();
-            let context = if group_title.is_empty() {
-                page_title.clone()
-            } else {
-                format!("{page_title} · {group_title}")
-            };
-            let subtitle = row
-                .clone()
-                .downcast::<adw::ActionRow>()
-                .ok()
-                .and_then(|row| row.subtitle())
-                .unwrap_or_default();
-            items.push(PreferencesSearchItem {
-                page,
-                searchable_text: format!("{title} {subtitle} {context}").to_lowercase(),
-                title,
-                context,
-                expander_title: expander_title.clone(),
-            });
-        }
-    }
-
-    let mut child = widget.first_child();
-    while let Some(current) = child {
-        child = current.next_sibling();
-        collect_preferences_search_items(
-            &current,
-            page,
-            &group_title,
-            expander_title.clone(),
-            items,
-        );
-    }
-}
-
 fn focus_preferences_search_item(root: &gtk::Widget, item: &PreferencesSearchItem) {
     focus_preferences_search_descendant(root, item, "");
 }
@@ -764,7 +745,7 @@ fn focus_preferences_search_descendant(
         } else {
             format!("{} · {group_title}", item.page.title())
         };
-        if title == item.title && context == item.context {
+        if title == item.title && (item.context == item.page.title() || context == item.context) {
             return widget.grab_focus();
         }
     }
@@ -777,83 +758,6 @@ fn focus_preferences_search_descendant(
         }
     }
     false
-}
-
-fn materialize_preferences_expanders(widget: &gtk::Widget) {
-    if let Ok(expander) = widget.clone().downcast::<adw::ExpanderRow>() {
-        let expanded = expander.is_expanded();
-        if !expanded {
-            expander.set_expanded(true);
-            expander.set_expanded(false);
-        }
-    }
-    let mut child = widget.first_child();
-    while let Some(current) = child {
-        materialize_preferences_expanders(&current);
-        child = current.next_sibling();
-    }
-}
-
-fn build_preferences_search_index(
-    shell: &Rc<Preferences>,
-    dialog: &adw::Dialog,
-    page_slots: &[(PreferencesPageKind, gtk::Box)],
-    credential_drafts: &ScrobblingCredentialDrafts,
-    retained: PreferencesPageKind,
-) -> Vec<PreferencesSearchItem> {
-    let mut items = Vec::new();
-    for kind in PreferencesPageKind::ALL {
-        let page = if kind == retained {
-            page_slots
-                .iter()
-                .find(|(page, _)| *page == kind)
-                .and_then(|(_, slot)| slot.first_child())
-                .unwrap()
-        } else if matches!(
-            kind,
-            PreferencesPageKind::Connect | PreferencesPageKind::Storage
-        ) {
-            let (resource, id) = if kind == PreferencesPageKind::Connect {
-                (crate::ui_resource::CONNECT_RESOURCE, "connect_content")
-            } else {
-                (
-                    crate::ui_resource::STORAGE_PREFERENCES_RESOURCE,
-                    "storage_page",
-                )
-            };
-            let builder = gtk_widgets::ui_resource::builder(resource);
-            let page: gtk::Widget = gtk_widgets::ui_resource::object(&builder, resource, id);
-            if kind == PreferencesPageKind::Storage {
-                let storage = page.clone().downcast::<adw::PreferencesPage>().unwrap();
-                let backup_resource = crate::ui_resource::BACKUP_PREFERENCES_RESOURCE;
-                let backup_builder = gtk_widgets::ui_resource::builder(backup_resource);
-                let backups: adw::PreferencesGroup = gtk_widgets::ui_resource::object(
-                    &backup_builder,
-                    backup_resource,
-                    "backup_group",
-                );
-                let reset: adw::PreferencesGroup =
-                    gtk_widgets::ui_resource::object(&builder, resource, "reset_group");
-                storage.add(&backups);
-                storage.add(&reset);
-            }
-            page
-        } else {
-            let navigation = PreferencesNavigationControls::new(gtk::Button::new());
-            build_preferences_page(
-                shell,
-                dialog,
-                &navigation,
-                credential_drafts,
-                kind,
-                false,
-                false,
-            )
-        };
-        materialize_preferences_expanders(&page);
-        collect_preferences_search_items(&page, kind, "", None, &mut items);
-    }
-    items
 }
 
 pub(super) fn populate_expander_once(
@@ -902,25 +806,8 @@ fn mount_preferences_page(
     navigation_controls: &PreferencesNavigationControls,
     credential_drafts: &ScrobblingCredentialDrafts,
     kind: PreferencesPageKind,
-    open_add_server: bool,
-    focus_download_queue: bool,
 ) {
-    for (slot_kind, slot) in page_slots {
-        if *slot_kind == kind || slot.first_child().is_none() {
-            continue;
-        }
-        if matches!(
-            slot_kind,
-            PreferencesPageKind::Library
-                | PreferencesPageKind::General
-                | PreferencesPageKind::Storage
-        ) {
-            navigation_controls.return_to_root();
-        }
-        while let Some(page) = slot.first_child() {
-            slot.remove(&page);
-        }
-    }
+    navigation_controls.return_to_root();
     let Some((_, slot)) = page_slots.iter().find(|(slot_kind, _)| *slot_kind == kind) else {
         return;
     };
@@ -933,8 +820,6 @@ fn mount_preferences_page(
         navigation_controls,
         credential_drafts,
         kind,
-        open_add_server,
-        focus_download_queue,
     ));
 }
 
@@ -944,8 +829,6 @@ fn build_preferences_page(
     navigation_controls: &PreferencesNavigationControls,
     credential_drafts: &ScrobblingCredentialDrafts,
     kind: PreferencesPageKind,
-    open_add_server: bool,
-    focus_download_queue: bool,
 ) -> gtk::Widget {
     match kind {
         PreferencesPageKind::General => general_page(shell, navigation_controls),
@@ -953,17 +836,13 @@ fn build_preferences_page(
         PreferencesPageKind::Theme => themes::page(shell).upcast(),
         PreferencesPageKind::Privacy => privacy::page(shell, dialog).upcast(),
         PreferencesPageKind::Equalizer => equalizer_page(shell).upcast(),
-        PreferencesPageKind::Downloads => {
-            library::downloads_page(shell, dialog, focus_download_queue).upcast()
-        }
+        PreferencesPageKind::Downloads => library::downloads_page(shell, dialog).upcast(),
         PreferencesPageKind::Storage => storage::page(shell, navigation_controls),
         PreferencesPageKind::Controller => controller::page(shell).upcast(),
         PreferencesPageKind::Connect => connect::page(shell, dialog),
         PreferencesPageKind::Integrations => scrobbling_page(shell, credential_drafts).upcast(),
         PreferencesPageKind::Playback => playback_page(shell).upcast(),
-        PreferencesPageKind::Library => {
-            library::library_page(shell, dialog, navigation_controls, open_add_server)
-        }
+        PreferencesPageKind::Library => library::library_page(shell, dialog, navigation_controls),
     }
 }
 fn general_page(
@@ -1237,7 +1116,7 @@ fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
 
     let default_left_shell = Rc::clone(shell);
     let default_left_row = left_sidebar_row(
-        &tr("Default left sidebar"),
+        &tr(DEFAULT_LEFT_TITLE),
         settings.layout.default_profile.left_sidebar,
         move |selected| {
             let mode = left_sidebar_mode_from_index(selected);
@@ -1257,7 +1136,7 @@ fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
 
     let default_right_shell = Rc::clone(shell);
     let default_right_row = right_sidebar_row(
-        &tr("Default right sidebar"),
+        &tr(DEFAULT_RIGHT_TITLE),
         settings.layout.default_profile.right_sidebar,
         move |selected| {
             let mode = right_sidebar_mode_from_index(selected);
@@ -1346,7 +1225,7 @@ fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
 
     let narrow_left_shell = Rc::clone(shell);
     let narrow_left_row = left_sidebar_row(
-        &tr("Narrow left sidebar"),
+        &tr(NARROW_LEFT_TITLE),
         settings.layout.narrow_profile.left_sidebar,
         move |selected| {
             let mode = left_sidebar_mode_from_index(selected);
@@ -1367,7 +1246,7 @@ fn populate_layout_group(shell: &Rc<Preferences>, builder: &gtk::Builder) {
 
     let narrow_right_shell = Rc::clone(shell);
     let narrow_right_row = right_sidebar_row(
-        &tr("Narrow right sidebar"),
+        &tr(NARROW_RIGHT_TITLE),
         settings.layout.narrow_profile.right_sidebar,
         move |selected| {
             let mode = right_sidebar_mode_from_index(selected);
@@ -1590,4 +1469,18 @@ fn open_folder(shell: &Rc<Preferences>, folder: gtk::gio::File) {
             }
         }
     });
+}
+
+fn focus_named_widget(widget: &gtk::Widget, name: &str) -> bool {
+    if widget.widget_name() == name {
+        return widget.grab_focus();
+    }
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        child = current.next_sibling();
+        if focus_named_widget(&current, name) {
+            return true;
+        }
+    }
+    false
 }

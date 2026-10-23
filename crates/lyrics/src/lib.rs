@@ -1,13 +1,16 @@
 #[cfg(feature = "bindings")]
 uniffi::setup_scaffolding!();
 
-use lindera::{dictionary::load_fs_dictionary, mode::Mode, segmenter::Segmenter};
+use lindera::segmenter::Segmenter;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 use wana_kana::ConvertJapanese;
+
+mod prepared;
+pub use prepared::{PreparedCueLine, PreparedLyrics, PreparedLyricsLine};
 
 mod timing;
 pub use timing::{
@@ -612,30 +615,17 @@ enum JapaneseReaderState {
 
 static JAPANESE_READER: Mutex<Option<JapaneseReaderState>> = Mutex::new(None);
 
-pub fn japanese_reading(text: &str) -> Option<JapaneseReading> {
-    japanese_reading_for_language(text, None)
-}
-
-pub fn japanese_reading_for_language(
-    text: &str,
-    language: Option<&str>,
-) -> Option<JapaneseReading> {
-    japanese_reading_for_language_options(text, language, true, true)
-}
-
-pub fn japanese_reading_for_language_options(
+fn japanese_reading_for_language_options(
     text: &str,
     language: Option<&str>,
     show_furigana: bool,
     show_romanization: bool,
+    tokenizer: Option<&Segmenter>,
 ) -> Option<JapaneseReading> {
     if !japanese_reader_needed(text, language, show_furigana, show_romanization) {
         return None;
     }
-    let reader = JAPANESE_READER.lock().unwrap_or_else(|e| e.into_inner());
-    let JapaneseReaderState::Ready(tokenizer) = reader.as_ref()? else {
-        return None;
-    };
+    let tokenizer = tokenizer?;
     let mut tokens = tokenizer.segment(Cow::Borrowed(text)).ok()?;
     let source_tokens = tokens
         .iter_mut()
@@ -748,26 +738,6 @@ pub fn clear_japanese_dictionary(directory: &Path) -> std::io::Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
-}
-
-pub fn prepare_japanese_reader(path: &Path) {
-    let mut reader = JAPANESE_READER.lock().unwrap_or_else(|e| e.into_inner());
-    if reader.is_some() {
-        return;
-    }
-    *reader = Some(match load_fs_dictionary(path) {
-        Ok(dictionary) => JapaneseReaderState::Ready(Box::new(
-            Segmenter::new(Mode::Normal, dictionary, None).keep_whitespace(true),
-        )),
-        Err(error) => {
-            tracing::warn!(
-                path = %path.display(),
-                %error,
-                "could not load Japanese readings dictionary"
-            );
-            JapaneseReaderState::Unavailable
-        }
-    });
 }
 
 pub fn contains_japanese_kana(text: &str) -> bool {
@@ -1167,6 +1137,7 @@ mod tests {
                 Some("ja"),
                 false,
                 true,
+                None,
             )
             .is_none()
         );
@@ -1177,13 +1148,16 @@ mod tests {
         release_japanese_reader();
 
         assert!(
-            japanese_reading_for_language_options("한국어 가사", Some("ko"), true, true).is_none()
+            japanese_reading_for_language_options("한국어 가사", Some("ko"), true, true, None)
+                .is_none()
         );
         assert!(
-            japanese_reading_for_language_options("中文歌词", Some("zh"), true, true).is_none()
+            japanese_reading_for_language_options("中文歌词", Some("zh"), true, true, None)
+                .is_none()
         );
         assert!(
-            japanese_reading_for_language_options("君の名は", Some("ja"), false, false).is_none()
+            japanese_reading_for_language_options("君の名は", Some("ja"), false, false, None)
+                .is_none()
         );
         assert!(JAPANESE_READER.lock().unwrap().is_none());
     }

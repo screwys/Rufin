@@ -1,3 +1,7 @@
+pub const DOWNLOAD_QUEUE_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/download_queue.ui";
+pub const DOWNLOAD_QUEUE_ROW_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/download_queue_row.ui";
 pub const DOWNLOAD_QUALITY_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/download_quality.ui";
 pub const BACKUP_PREFERENCES_RESOURCE: &str = "/io/github/screwys/Rufin/ui/preferences/backup.ui";
@@ -64,6 +68,8 @@ pub const CONTROLLER_POPOVER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell
 pub const BASE_CSS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/style.css";
 
 pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
+    DOWNLOAD_QUEUE_RESOURCE,
+    DOWNLOAD_QUEUE_ROW_RESOURCE,
     DOWNLOAD_QUALITY_RESOURCE,
     BACKUP_PREFERENCES_RESOURCE,
     PLAYBACK_PREFERENCES_RESOURCE,

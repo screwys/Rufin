@@ -22,18 +22,10 @@ const SERVER_PROVIDER_ICON_SIZE: i32 = 28;
 const DOWNLOAD_JOB_DRAG_PREFIX: &str = "rufin-download-job:";
 const DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE: &str = msgid("Default");
 
-struct DownloadQueueRow {
-    row: adw::ActionRow,
-    job: Option<downloads::DownloadQueueItem>,
-    up: Option<gtk::Button>,
-    down: Option<gtk::Button>,
-}
-
 pub(super) fn library_page(
     shell: &Rc<Preferences>,
     dialog: &adw::Dialog,
     navigation_controls: &PreferencesNavigationControls,
-    open_add_server: bool,
 ) -> gtk::Widget {
     let navigation = adw::NavigationView::new();
     navigation_controls.set_navigation(&navigation);
@@ -45,11 +37,6 @@ pub(super) fn library_page(
     navigation.connect_popped(move |_, _| {
         shell_for_pop.release_inactive_add_server_form();
     });
-    if open_add_server || shell.has_retained_add_server_form() {
-        let page = shell.add_server_navigation_page(dialog);
-        navigation.push(&page);
-        navigation_controls.set_nested_page_visible(true);
-    }
     navigation.upcast::<gtk::Widget>()
 }
 
@@ -264,7 +251,6 @@ fn library_sources_page(
 pub(super) fn downloads_page(
     shell: &Rc<Preferences>,
     dialog: &adw::Dialog,
-    focus_download_queue: bool,
 ) -> adw::PreferencesPage {
     let resource = crate::ui_resource::LIBRARY_PREFERENCES_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
@@ -284,7 +270,7 @@ pub(super) fn downloads_page(
     let weak = Rc::downgrade(shell);
     let page = downloads_page.downgrade();
     let dialog = dialog.downgrade();
-    let render = move |row: &gtk::SingleSelection, focus| {
+    let render = move |row: &gtk::SingleSelection| {
         let (Some(shell), Some(page), Some(dialog), Some(source)) = (
             weak.upgrade(),
             page.upgrade(),
@@ -297,12 +283,12 @@ pub(super) fn downloads_page(
         if let Some(previous) = previous {
             page.remove(&previous);
         }
-        let group = source_downloads_group(&shell, &dialog, source, focus);
+        let group = source_downloads_group(&shell, &dialog, source);
         page.add(&group);
         *current_group.borrow_mut() = Some(group);
     };
-    render(&selection, focus_download_queue);
-    selection.connect_selected_notify(move |row| render(row, false));
+    render(&selection);
+    selection.connect_selected_notify(render);
     downloads_page
 }
 
@@ -310,7 +296,6 @@ fn source_downloads_group(
     shell: &Rc<Preferences>,
     dialog: &adw::Dialog,
     server: &SourceSummary,
-    focus_download_queue: bool,
 ) -> adw::PreferencesGroup {
     let resource = crate::ui_resource::LIBRARY_PREFERENCES_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
@@ -470,12 +455,7 @@ fn source_downloads_group(
     downloads_group.add(&download_actions_row);
 
     downloads_group.add(&download_queue_header);
-    let queue_focus = add_download_queue(&downloads_group, shell, &server.id, &pause_downloads);
-    if focus_download_queue {
-        gtk::glib::idle_add_local_once(move || {
-            queue_focus.grab_focus();
-        });
-    }
+    add_download_queue(&downloads_group, shell, &server.id, &pause_downloads);
     downloads_group
 }
 
@@ -859,7 +839,7 @@ fn confirm_remove_download_rule(
     );
 }
 
-fn download_rule_title(rule: DownloadRule) -> &'static str {
+pub(super) fn download_rule_title(rule: DownloadRule) -> &'static str {
     match rule {
         DownloadRule::EntireLibrary => msgid("Entire Library"),
         DownloadRule::Favorites => msgid("Favorites"),
@@ -868,7 +848,7 @@ fn download_rule_title(rule: DownloadRule) -> &'static str {
     }
 }
 
-fn download_rule_subtitle(rule: DownloadRule) -> &'static str {
+pub(super) fn download_rule_subtitle(rule: DownloadRule) -> &'static str {
     match rule {
         DownloadRule::EntireLibrary => msgid("Everything, including new tracks"),
         DownloadRule::Favorites => {
@@ -889,252 +869,292 @@ fn download_rule_action_name(rule: DownloadRule) -> &'static str {
 }
 
 fn add_download_queue(
-    queue: &adw::PreferencesGroup,
+    group: &adw::PreferencesGroup,
     shell: &Rc<Preferences>,
     source_id: &sources::SourceId,
-    pause_downloads: &gtk::Button,
-) -> gtk::Widget {
-    let queue_rows = Rc::new(RefCell::new(Vec::<DownloadQueueRow>::new()));
-    let focus_rows = Rc::clone(&queue_rows);
+    pause: &gtk::Button,
+) {
+    let resource = crate::ui_resource::DOWNLOAD_QUEUE_RESOURCE;
+    let builder = gtk_widgets::ui_resource::builder(resource);
+    gtk_widgets::objects!(builder, resource, { scroll: gtk::ScrolledWindow, queue: gtk::ListView, empty: adw::ActionRow });
+    use gtk_widgets::sparse_model::{
+        SparseRouteModel, SparseSource, bind_sparse_item, item_at_from_item, unbind_sparse_item,
+    };
+    let owner = shell.products.downloads.clone();
+    let source = source_id.clone();
+    let jobs = SparseRouteModel::<String, downloads::DownloadQueueItem>::new(
+        SparseSource::Query { count: 0 },
+        64,
+        shell.products.runtime.clone(),
+        Rc::new(move |_, range, _| {
+            let owner = owner.clone();
+            let source_id = source.clone();
+            Box::pin(async move {
+                owner
+                    .queue_page(
+                        downloads::DownloadQueueScope::Source { source_id },
+                        range.start as u64,
+                        range.len() as u32,
+                    )
+                    .await
+                    .map(|page| page.jobs)
+                    .map_err(|error| error.to_string())
+            })
+        }),
+    );
+    queue.set_model(Some(&gtk::NoSelection::new(Some(jobs.list_model()))));
+    let factory = gtk::SignalListItemFactory::new();
     let weak_shell = Rc::downgrade(shell);
-    let weak_queue = queue.downgrade();
-    let source_id = source_id.clone();
-    let downloads = shell.products.downloads.clone();
-    let pause_shell = Rc::downgrade(shell);
-    let pause_source_id = source_id.clone();
-    pause_downloads.connect_clicked(move |_| {
-        let Some(shell) = pause_shell.upgrade() else {
-            return;
-        };
-        let paused = shell
-            .downloads
-            .snapshots
-            .borrow()
-            .get(&Some(pause_source_id.clone()))
-            .is_some_and(|snapshot| snapshot.paused);
-        downloads.set_paused(!paused);
+    let source = source_id.clone();
+    factory.connect_setup(move |_, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let resource = crate::ui_resource::DOWNLOAD_QUEUE_ROW_RESOURCE;
+        let builder = gtk_widgets::ui_resource::builder(resource);
+        gtk_widgets::objects!(builder, resource, {
+            row: adw::ActionRow, artwork: gtk::Box, drag: gtk::Image,
+            up: gtk::Button, down: gtk::Button, cancel: gtk::Button, clear: gtk::Button,
+        });
+        let current = Rc::new(RefCell::new(None::<downloads::DownloadQueueItem>));
+        for (button, after) in [(&up, false), (&down, true)] {
+            let weak = weak_shell.clone();
+            let item = item.downgrade();
+            let source = source.clone();
+            button.connect_clicked(move |_| {
+                let (Some(shell), Some(item)) = (weak.upgrade(), item.upgrade()) else {
+                    return;
+                };
+                let Some(job) = item_at_from_item::<downloads::DownloadQueueItem>(&item) else {
+                    return;
+                };
+                shell.products.downloads.move_job(
+                    source.clone(),
+                    job.id,
+                    if after {
+                        downloads::DownloadQueueMove::Down
+                    } else {
+                        downloads::DownloadQueueMove::Up
+                    },
+                );
+            });
+        }
+        for (button, remove_files) in [(cancel, false), (clear, true)] {
+            let weak = weak_shell.clone();
+            let current = current.clone();
+            button.connect_clicked(move |_| {
+                let Some(shell) = weak.upgrade() else { return };
+                let current = current.borrow();
+                let Some(job) = current.as_ref() else { return };
+                let Some(source) = job.source_id.clone() else {
+                    return;
+                };
+                if remove_files {
+                    shell.products.downloads.clear_job(source, job.id.clone());
+                } else {
+                    shell.products.downloads.cancel(source, job.id.clone());
+                }
+            });
+        }
+        let drag_source = gtk::DragSource::builder()
+            .actions(gtk::gdk::DragAction::MOVE)
+            .build();
+        let drag_job = current.clone();
+        drag_source.connect_prepare(move |_, _, _| {
+            let current = drag_job.borrow();
+            current.as_ref().map(|job| {
+                gtk::gdk::ContentProvider::for_value(
+                    &format!("{DOWNLOAD_JOB_DRAG_PREFIX}{}", job.id).to_value(),
+                )
+            })
+        });
+        drag.add_controller(drag_source);
+        let target = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
+        let weak = weak_shell.clone();
+        let drop_job = current.clone();
+        let drop_row = row.downgrade();
+        target.connect_drop(move |_, value, _, y| {
+            let (Some(shell), Some(row), Ok(id)) =
+                (weak.upgrade(), drop_row.upgrade(), value.get::<String>())
+            else {
+                return false;
+            };
+            let Some(id) = id.strip_prefix(DOWNLOAD_JOB_DRAG_PREFIX) else {
+                return false;
+            };
+            let Some(job) = drop_job.borrow().clone() else {
+                return false;
+            };
+            let Some(source) = job.source_id else {
+                return false;
+            };
+            if id == job.id {
+                return false;
+            }
+            let movement = if y > f64::from(row.height()) / 2.0 {
+                downloads::DownloadQueueMove::After { job_id: job.id }
+            } else {
+                downloads::DownloadQueueMove::Before { job_id: job.id }
+            };
+            shell
+                .products
+                .downloads
+                .move_job(source, id.into(), movement);
+            true
+        });
+        row.add_controller(target);
+        item.set_child(Some(&row));
+        let weak = weak_shell.clone();
+        let source = source.clone();
+        row.set_sensitive(false);
+        let row = row.downgrade();
+        let artwork = artwork.downgrade();
+        let up = up.downgrade();
+        let down = down.downgrade();
+        let refresh: Rc<dyn Fn(&gtk::ListItem)> = Rc::new(move |item| {
+            let (Some(shell), Some(row), Some(artwork), Some(up), Some(down)) = (
+                weak.upgrade(),
+                row.upgrade(),
+                artwork.upgrade(),
+                up.upgrade(),
+                down.upgrade(),
+            ) else {
+                return;
+            };
+            let position = item.position() as usize;
+            let job = item_at_from_item::<downloads::DownloadQueueItem>(item);
+            row.set_sensitive(job.is_some());
+            let Some(job) = job else {
+                current.borrow_mut().take();
+                while let Some(child) = artwork.first_child() {
+                    artwork.remove(&child);
+                }
+                return;
+            };
+            let changed = current.borrow().as_ref().is_none_or(|old| {
+                old.id != job.id
+                    || old.subject != job.subject
+                    || old.preview_uris != job.preview_uris
+            });
+            if changed {
+                while let Some(child) = artwork.first_child() {
+                    artwork.remove(&child);
+                }
+                artwork.append(&gtk_widgets::downloads::media_artwork(
+                    &shell.artwork,
+                    &shell.products.library,
+                    &shell.products.runtime,
+                    &job.preview_uris,
+                    48,
+                ));
+                row.set_title(&gtk_widgets::downloads::download_subject_title(
+                    &job.subject,
+                ));
+            }
+            row.set_subtitle(&download_queue_item_subtitle(&job));
+            up.set_sensitive(position > 0);
+            down.set_sensitive(
+                shell
+                    .products
+                    .downloads
+                    .status()
+                    .queues
+                    .iter()
+                    .find(|queue| queue.source_id.as_ref() == Some(&source))
+                    .is_some_and(|queue| (position as u64 + 1) < queue.total_jobs),
+            );
+            *current.borrow_mut() = Some(job.clone());
+        });
+        let update = refresh.clone();
+        item.connect_item_notify(move |item| bind_sparse_item(item, update.clone()));
+        item.connect_position_notify(move |item| refresh(item));
     });
-    let weak_pause_downloads = pause_downloads.downgrade();
+    factory.connect_unbind(|_, item| {
+        unbind_sparse_item(item.downcast_ref::<gtk::ListItem>().unwrap())
+    });
+    queue.set_factory(Some(&factory));
+    group.add(&scroll);
+    group.add(&empty);
+    let owner = shell.products.downloads.clone();
+    pause.connect_clicked(move |_| owner.set_paused(!owner.status().paused));
+    let task = Rc::new(RefCell::new(None::<gtk::glib::JoinHandle<()>>));
+    let running = task.clone();
+    let visible = group.downgrade();
+    let pause = pause.downgrade();
+    let scroll = scroll.downgrade();
+    let empty = empty.downgrade();
+    let owner = shell.products.downloads.clone();
+    let refresh_source = source_id.clone();
+    let source_id = source_id.clone();
+    let rows = jobs.clone();
     let refresh: Rc<dyn Fn()> = Rc::new(move || {
-        let (Some(shell), Some(queue), Some(pause_downloads)) = (
-            weak_shell.upgrade(),
-            weak_queue.upgrade(),
-            weak_pause_downloads.upgrade(),
+        let (Some(group), Some(pause), Some(scroll), Some(empty)) = (
+            visible.upgrade(),
+            pause.upgrade(),
+            scroll.upgrade(),
+            empty.upgrade(),
         ) else {
             return;
         };
-        let snapshot = shell
-            .downloads
-            .snapshots
-            .borrow()
-            .get(&Some(source_id.clone()))
-            .cloned()
-            .unwrap_or_default();
-        pause_downloads.set_visible(!snapshot.jobs.is_empty());
-        let (icon, label) = if snapshot.paused {
+        if !group.is_mapped() {
+            return;
+        }
+        let state = owner.status();
+        let count = state
+            .queues
+            .iter()
+            .find(|queue| queue.source_id.as_ref() == Some(&source_id))
+            .map_or(0, |queue| queue.total_jobs as usize);
+        pause.set_visible(count > 0);
+        let (icon, label) = if state.paused {
             ("rufin-media-playback-start-symbolic", tr("Continue"))
         } else {
             ("rufin-media-playback-pause-symbolic", tr("Pause"))
         };
-        pause_downloads.set_icon_name(icon);
-        pause_downloads.set_tooltip_text(Some(&label));
-        pause_downloads.update_property(&[gtk::accessible::Property::Label(&label)]);
-        {
-            let mut rows = queue_rows.borrow_mut();
-            let same_jobs = rows.len() == snapshot.jobs.len()
-                && rows.iter().zip(snapshot.jobs.iter()).all(|(row, job)| {
-                    row.job.as_ref().is_some_and(|rendered| {
-                        rendered.id == job.id
-                            && rendered.source_id == job.source_id
-                            && rendered.subject == job.subject
-                    })
-                });
-            if same_jobs && !rows.is_empty() {
-                for (index, (rendered, job)) in
-                    rows.iter_mut().zip(snapshot.jobs.iter()).enumerate()
-                {
-                    rendered
-                        .row
-                        .set_subtitle(&download_queue_item_subtitle(job));
-                    if let Some(up) = &rendered.up {
-                        up.set_sensitive(index > 0);
-                    }
-                    if let Some(down) = &rendered.down {
-                        down.set_sensitive(index + 1 < snapshot.jobs.len());
-                    }
-                    rendered.job = Some(job.clone());
-                }
-                return;
-            }
-            if snapshot.jobs.is_empty()
-                && rows.len() == 1
-                && rows.first().is_some_and(|row| row.job.is_none())
-            {
-                return;
-            }
-            for row in rows.drain(..) {
-                queue.remove(&row.row);
-            }
+        pause.set_icon_name(icon);
+        pause.set_tooltip_text(Some(&label));
+        pause.update_property(&[gtk::accessible::Property::Label(&label)]);
+        scroll.set_visible(count > 0);
+        empty.set_visible(count == 0);
+        if let Some(task) = running.borrow_mut().take() {
+            task.abort();
         }
-        if snapshot.jobs.is_empty() {
-            let row = adw::ActionRow::builder()
-                .title(tr("Nothing queued"))
-                .build();
-            row.set_focusable(true);
-            queue.add(&row);
-            queue_rows.borrow_mut().push(DownloadQueueRow {
-                row,
-                job: None,
-                up: None,
-                down: None,
-            });
-            return;
-        }
-        for (index, job) in snapshot.jobs.iter().enumerate() {
-            let Some(queue_source_id) = job.source_id.clone() else {
-                continue;
-            };
-            let row = adw::ActionRow::builder()
-                .title(gtk_widgets::downloads::download_subject_title(&job.subject))
-                .subtitle(download_queue_item_subtitle(job))
-                .build();
-            row.set_focusable(true);
-            let drag = gtk::Image::from_icon_name("rufin-list-drag-handle-symbolic");
-            drag.add_css_class("dim-label");
-            drag.set_tooltip_text(Some(&tr("Drag to reorder")));
-            let artwork = gtk_widgets::downloads::media_artwork(
-                &shell.artwork,
-                &shell.products.library,
-                &shell.products.runtime,
-                &job.preview_uris,
-                48,
-            );
-            artwork.set_margin_top(6);
-            artwork.set_margin_bottom(6);
-            row.add_prefix(&artwork);
-            row.add_prefix(&drag);
-            let up = gtk::Button::from_icon_name("rufin-go-up-symbolic");
-            up.add_css_class("flat");
-            up.set_valign(gtk::Align::Center);
-            up.set_tooltip_text(Some(&tr("Move up")));
-            up.set_sensitive(index > 0);
-            let move_shell = Rc::clone(&shell);
-            let job_source_id = queue_source_id.clone();
-            let job_id = job.id.clone();
-            let target_job_id = (index > 0).then(|| snapshot.jobs[index - 1].id.clone());
-            up.connect_clicked(move |_| {
-                if let Some(target_job_id) = target_job_id.clone() {
-                    move_shell.move_download_job(
-                        job_source_id.clone(),
-                        job_id.clone(),
-                        target_job_id,
-                        false,
-                    );
-                }
-            });
-            row.add_suffix(&up);
-            let down = gtk::Button::from_icon_name("rufin-go-down-symbolic");
-            down.add_css_class("flat");
-            down.set_valign(gtk::Align::Center);
-            down.set_tooltip_text(Some(&tr("Move down")));
-            down.set_sensitive(index + 1 < snapshot.jobs.len());
-            let move_shell = Rc::clone(&shell);
-            let job_source_id = queue_source_id.clone();
-            let job_id = job.id.clone();
-            let target_job_id = snapshot.jobs.get(index + 1).map(|job| job.id.clone());
-            down.connect_clicked(move |_| {
-                if let Some(target_job_id) = target_job_id.clone() {
-                    move_shell.move_download_job(
-                        job_source_id.clone(),
-                        job_id.clone(),
-                        target_job_id,
-                        true,
-                    );
-                }
-            });
-            row.add_suffix(&down);
-            let cancel = gtk::Button::from_icon_name("rufin-window-close-symbolic");
-            cancel.add_css_class("flat");
-            cancel.set_valign(gtk::Align::Center);
-            cancel.set_tooltip_text(Some(&tr("Cancel download")));
-            let downloads = shell.products.downloads.clone();
-            let job_source_id = queue_source_id.clone();
-            let job_id = job.id.clone();
-            cancel.connect_clicked(move |_| {
-                downloads.cancel(job_source_id.clone(), job_id.clone());
-            });
-            row.add_suffix(&cancel);
-            let clear = gtk::Button::from_icon_name("rufin-user-trash-symbolic");
-            clear.add_css_class("flat");
-            clear.add_css_class("destructive-action");
-            clear.set_valign(gtk::Align::Center);
-            clear.set_tooltip_text(Some(&tr("Cancel download and clear downloaded items")));
-            let downloads = shell.products.downloads.clone();
-            let job_source_id = queue_source_id.clone();
-            let job_id = job.id.clone();
-            clear.connect_clicked(move |_| {
-                downloads.clear_job(job_source_id.clone(), job_id.clone());
-            });
-            row.add_suffix(&clear);
-
-            let drag_source = gtk::DragSource::builder()
-                .actions(gtk::gdk::DragAction::MOVE)
-                .build();
-            let drag_id = format!("{DOWNLOAD_JOB_DRAG_PREFIX}{}", job.id);
-            drag_source.connect_prepare(move |_, _, _| {
-                Some(gtk::gdk::ContentProvider::for_value(&drag_id.to_value()))
-            });
-            drag.add_controller(drag_source);
-
-            let drop_target =
-                gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
-            let move_shell = Rc::clone(&shell);
-            let job_source_id = queue_source_id.clone();
-            let target_job_id = job.id.clone();
-            let row_for_drop = row.downgrade();
-            drop_target.connect_drop(move |_, value, _, y| {
-                let Ok(drag_id) = value.get::<String>() else {
-                    return false;
-                };
-                let Some(job_id) = drag_id.strip_prefix(DOWNLOAD_JOB_DRAG_PREFIX) else {
-                    return false;
-                };
-                if job_id == target_job_id {
-                    return false;
-                }
-                let Some(row) = row_for_drop.upgrade() else {
-                    return false;
-                };
-                let after = y > f64::from(row.height()) / 2.0;
-                move_shell.move_download_job(
-                    job_source_id.clone(),
-                    job_id.to_string(),
-                    target_job_id.clone(),
-                    after,
+        let offset = (rows.first_live_position().unwrap_or_default() / 64 * 64)
+            .min(count.saturating_sub(1) / 64 * 64);
+        let owner = owner.clone();
+        let source_id = source_id.clone();
+        let rows = rows.clone();
+        *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
+            if let Ok(page) = owner
+                .queue_page(
+                    downloads::DownloadQueueScope::Source { source_id },
+                    offset as u64,
+                    128,
                 )
-            });
-            row.add_controller(drop_target);
-
-            queue.add(&row);
-            queue_rows.borrow_mut().push(DownloadQueueRow {
-                row,
-                job: Some(job.clone()),
-                up: Some(up),
-                down: Some(down),
-            });
+                .await
+            {
+                rows.replace_prepared_at(
+                    SparseSource::Query {
+                        count: page.total as usize,
+                    },
+                    offset,
+                    page.jobs,
+                    Vec::new(),
+                    |job| job.id.clone(),
+                );
+                rows.resume_initial_demand();
+            }
+        }));
+    });
+    let downloads = shell.downloads.clone();
+    group.connect_map(move |_| {
+        downloads.set_queue_refresh(refresh_source.clone(), &refresh);
+        refresh();
+    });
+    group.connect_unmap(move |_| {
+        if let Some(task) = task.borrow_mut().take() {
+            task.abort();
         }
+        jobs.cancel();
     });
-    shell.downloads.set_queue_refresh(&refresh);
-    refresh();
-    let focus = focus_rows
-        .borrow()
-        .first()
-        .map(|row| row.row.clone().upcast())
-        .expect("the download queue always renders one row");
-    queue.connect_root_notify(move |_| {
-        let _ = &refresh;
-    });
-    focus
 }
 
 fn download_queue_item_subtitle(job: &downloads::DownloadQueueItem) -> String {

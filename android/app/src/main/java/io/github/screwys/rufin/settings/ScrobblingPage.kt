@@ -117,7 +117,7 @@ internal fun ScrobblingPage(preferences: PreferencesConnection, embedded: Boolea
                         is ScrobblingConnectionEvent.Failed -> error(event.v1)
                         ScrobblingConnectionEvent.TimedOut -> error(translate("Authorization timed out"))
                     } } finally { session.destroy() }
-                    owner.loadPreferences()
+                    owner.preferences()
                     }
                 }, enabled = pending == null && state != null) { Text(translate(if (connected) "Reconnect" else "Connect")) } })
             }
