@@ -289,6 +289,9 @@ msgstr "6 ore"
 msgid "A new update is available, restart to apply"
 msgstr ""
 
+msgid "A"
+msgstr ""
+
 msgid "API key (Subsonic)"
 msgstr "Chiave API (Subsonic)"
 
@@ -711,6 +714,9 @@ msgstr ""
 msgid "Browse"
 msgstr ""
 
+msgid "C"
+msgstr ""
+
 #, fuzzy
 #| msgid "Change Profile"
 msgid "CUE file"
@@ -745,11 +751,20 @@ msgstr "Annulla"
 msgid "Cast format"
 msgstr ""
 
+#, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Casting changes apply to the next stream"
+msgstr "I cambiamenti si applicano a {count} traccia"
+
 msgid "Casting network"
 msgstr "Rete di casting"
 
 msgid "Casting"
 msgstr "Casting"
+
+msgid "Centered bars"
+msgstr ""
 
 msgid "Certificate authority (PEM)"
 msgstr "Autorità di certificazione (PEM)"
@@ -1117,12 +1132,6 @@ msgid "Copy link"
 msgstr "Copia link"
 
 msgid "Copy of {name}"
-msgstr ""
-
-msgid "Copy preset"
-msgstr ""
-
-msgid "Copy the current appearance to the clipboard"
 msgstr ""
 
 msgid "Copy"
@@ -1533,6 +1542,9 @@ msgstr ""
 msgid "EPs"
 msgstr ""
 
+msgid "ERB"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr ""
 
@@ -1694,6 +1706,9 @@ msgid "External metadata lookup"
 msgstr ""
 
 msgid "External site links"
+msgstr ""
+
+msgid "FFT size"
 msgstr ""
 
 msgid "FLAC"
@@ -1868,6 +1883,9 @@ msgstr ""
 msgid "Frequency · Hz"
 msgstr ""
 
+msgid "Frequency scale"
+msgstr ""
+
 msgid "Frequency"
 msgstr ""
 
@@ -1970,6 +1988,9 @@ msgid "Grouping"
 msgstr ""
 
 msgid "Guest / public access"
+msgstr ""
+
+msgid "Halo"
 msgstr ""
 
 msgid "Height (%)"
@@ -2141,6 +2162,9 @@ msgid "Keep music available offline. Folder changes only affect new downloads"
 msgstr ""
 
 msgid "Keyboard Shortcuts"
+msgstr ""
+
+msgid "LED spectrum"
 msgstr ""
 
 msgid "LRCLIB"
@@ -2333,6 +2357,9 @@ msgstr ""
 msgid "Lock metadata"
 msgstr ""
 
+msgid "Logarithmic"
+msgstr ""
+
 msgid "Logs are copied"
 msgstr ""
 
@@ -2385,6 +2412,12 @@ msgstr ""
 msgid "Matched"
 msgstr "In cache"
 
+msgid "Maximum frequency (Hz)"
+msgstr ""
+
+msgid "Maximum level (dB)"
+msgstr ""
+
 msgid "Maximum year"
 msgstr ""
 
@@ -2419,6 +2452,12 @@ msgid "Metadata"
 msgstr ""
 
 msgid "Minimize overview"
+msgstr ""
+
+msgid "Minimum frequency (Hz)"
+msgstr ""
+
+msgid "Minimum level (dB)"
 msgstr ""
 
 msgid "Minimum year"
@@ -2948,9 +2987,6 @@ msgstr ""
 msgid "Password"
 msgstr ""
 
-msgid "Paste preset"
-msgstr ""
-
 msgid "Paste"
 msgstr ""
 
@@ -3162,28 +3198,10 @@ msgstr ""
 msgid "Preserve pitch"
 msgstr ""
 
-msgid "Preset 1"
-msgstr ""
-
-msgid "Preset 2"
-msgstr ""
-
-msgid "Preset 3"
-msgstr ""
-
-msgid "Preset 4"
-msgstr ""
-
-msgid "Preset 5"
-msgstr ""
-
 #, fuzzy
 #| msgid "Artist name"
 msgid "Preset name"
 msgstr "Nome dell'artista"
-
-msgid "Preset saved"
-msgstr ""
 
 #, fuzzy
 #| msgid "Comment text"
@@ -3575,6 +3593,9 @@ msgstr ""
 msgid "Retry"
 msgstr ""
 
+msgid "Ribbon"
+msgstr ""
+
 msgid "Rise speed (%)"
 msgstr ""
 
@@ -3585,6 +3606,9 @@ msgid "Romaji"
 msgstr ""
 
 msgid "Rounded bars"
+msgstr ""
+
+msgid "Rounded spectrum"
 msgstr ""
 
 msgid "Row borders"
@@ -3655,9 +3679,6 @@ msgid "Save preset"
 msgstr ""
 
 msgid "Save"
-msgstr ""
-
-msgid "Save..."
 msgstr ""
 
 msgid "Saved Plex Login"
@@ -4049,6 +4070,9 @@ msgid "Smart playlist tracks"
 msgstr ""
 
 msgid "Smart playlists"
+msgstr ""
+
+msgid "Soft spectrum"
 msgstr ""
 
 msgid "Solid bars"
@@ -4492,11 +4516,6 @@ msgstr ""
 msgid "Use minimum year"
 msgstr ""
 
-#, fuzzy
-#| msgid "App settings"
-msgid "Use output settings"
-msgstr "Impostazioni dell'app"
-
 msgid "Use source setting"
 msgstr ""
 
@@ -4593,6 +4612,9 @@ msgid "Weekday"
 msgstr ""
 
 msgid "Weekly"
+msgstr ""
+
+msgid "Weighting"
 msgstr ""
 
 msgid "Wide"
@@ -4840,6 +4862,11 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "App settings"
+#~ msgid "Use output settings"
+#~ msgstr "Impostazioni dell'app"
 
 #~ msgid "Adding source"
 #~ msgstr "Aggiungendo una sorgente"
