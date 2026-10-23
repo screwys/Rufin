@@ -90,48 +90,52 @@
           </object>
         </child>
         <child>
-          <object class="AdwActionRow" id="output_line">
-            <child type="prefix">
-              <object class="GtkCheckButton" id="assigned">
-                <property name="valign">center</property>
-                <property name="child"><object class="GtkLabel">
-                  <property name="label" translatable="yes">Use for this output</property>
-                  <property name="wrap">true</property>
-                  <property name="wrap-mode">word-char</property>
-                  <property name="xalign">0</property>
-                  <property name="natural-wrap-mode">none</property>
-                </object></property>
-                <accessibility>
-                  <property name="label" translatable="yes">Use for this output</property>
-                </accessibility>
-              </object>
-            </child>
-            <child type="suffix">
-              <object class="AdwClamp" id="output_field">
-                <property name="maximum-size">180</property>
-                <property name="tightening-threshold">180</property>
-                <property name="width-request">180</property>
-                <property name="halign">end</property>
+          <object class="GtkListBoxRow" id="output_line">
+            <property name="activatable">false</property>
+            <property name="selectable">false</property>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="margin-start">12</property>
+                <property name="margin-end">12</property>
+                <property name="margin-top">6</property>
+                <property name="margin-bottom">6</property>
+                <property name="hexpand">true</property>
+                <property name="spacing">8</property>
+                <child>
+                  <object class="GtkCheckButton" id="assigned">
+                    <property name="valign">center</property>
+                    <property name="child"><object class="GtkLabel">
+                      <property name="label" translatable="yes">Use for this output</property>
+                      <property name="wrap">true</property>
+                      <property name="wrap-mode">word-char</property>
+                      <property name="xalign">0</property>
+                      <property name="natural-wrap-mode">none</property>
+                    </object></property>
+                    <accessibility>
+                      <property name="label" translatable="yes">Use for this output</property>
+                    </accessibility>
+                  </object>
+                </child>
                 <child>
                   <object class="GtkBox" id="output_host">
                     <property name="valign">center</property>
-                    <property name="orientation">horizontal</property>
                     <property name="spacing">8</property>
-                    <property name="hexpand">false</property>
+                    <property name="hexpand">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkToggleButton" id="mode">
+                    <property name="halign">end</property>
+                    <property name="margin-start">12</property>
+                    <property name="valign">center</property>
+                    <property name="icon-name">rufin-spring-graph-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Parametric</property>
+                    <accessibility><property name="label" translatable="yes">Parametric</property></accessibility>
+                    <style><class name="equalizer-mode" /></style>
                   </object>
                 </child>
               </object>
-            </child>
-            <child type="suffix">
-              <object class="GtkToggleButton" id="mode">
-                <property name="halign">end</property>
-                <property name="valign">center</property>
-                <property name="icon-name">rufin-spring-graph-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Parametric</property>
-                <accessibility><property name="label" translatable="yes">Parametric</property></accessibility>
-                <style><class name="equalizer-mode" /></style>
-              </object>
-            </child>
+            </property>
           </object>
         </child>
       </object>

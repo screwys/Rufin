@@ -192,25 +192,25 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
 
                     }
                 }
-                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    val deviceWidth = if (maxWidth < 360.dp) 132.dp else 160.dp
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Row(Modifier.weight(1f).toggleable(view.assigned, role = Role.Checkbox) { assigned -> operation { owner.assignEqualizer(output, assigned) } },
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.width(IntrinsicSize.Max).toggleable(view.assigned, role = Role.Checkbox) { assigned -> operation { owner.assignEqualizer(output, assigned) } },
                             verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(view.assigned, null, modifier = Modifier.size(40.dp))
                             Text(translate("Use for this output"), Modifier.weight(1f), maxLines = 2,
                                 style = MaterialTheme.typography.bodySmall, overflow = TextOverflow.Ellipsis)
                         }
-                        FilledTonalButton({ outputOpen = true }, Modifier.width(deviceWidth), colors = equalizerButtonColors()) {
+                        FilledTonalButton({ outputOpen = true }, Modifier.weight(1f), colors = equalizerButtonColors()) {
                             Text(remote?.name ?: routes.firstOrNull { it.selected }?.name ?: translate("This device"),
                                 Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             io.github.screwys.rufin.ui.RufinIcon("rufin-go-down-symbolic", null, Modifier.size(18.dp))
                         }
-                        FilledTonalIconToggleButton(checked = editingParametric, onCheckedChange = { parametric = it },
-                            modifier = Modifier.size(48.dp).semantics { stateDescription = translate(if (editingParametric) "Parametric" else "Graphic") }) {
-                            io.github.screwys.rufin.ui.RufinIcon(if (editingParametric) "rufin-sliders-vertical-symbolic" else "rufin-spring-graph-symbolic",
-                                translate(if (editingParametric) "Graphic" else "Parametric"), Modifier.size(24.dp))
-                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    FilledTonalIconToggleButton(checked = editingParametric, onCheckedChange = { parametric = it },
+                        modifier = Modifier.size(48.dp).semantics { stateDescription = translate(if (editingParametric) "Parametric" else "Graphic") }) {
+                        io.github.screwys.rufin.ui.RufinIcon(if (editingParametric) "rufin-sliders-vertical-symbolic" else "rufin-spring-graph-symbolic",
+                            translate(if (editingParametric) "Graphic" else "Parametric"), Modifier.size(24.dp))
                     }
                 }
             }
