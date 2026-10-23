@@ -2658,8 +2658,8 @@ entry.lyrics-offset-value.flat:focus-within {
 .equalizer-surface { padding: 0; }
 .equalizer-surface flowboxchild { padding: 0; background: none; }
 .equalizer-editor { padding: 12px; }
-.equalizer-preset-actions > button, button.equalizer-mode { min-width: 32px; min-height: 32px; padding: 0; }
-.equalizer-preset-actions image, button.equalizer-mode image { -gtk-icon-size: 20px; }
+.preset-actions > button, button.equalizer-mode { min-width: 32px; min-height: 32px; padding: 0; }
+.preset-actions image, button.equalizer-mode image { -gtk-icon-size: 20px; }
 .equalizer-filter { padding: 6px 8px; }
 .equalizer-filter entry, entry.equalizer-number {
   min-width: 0;

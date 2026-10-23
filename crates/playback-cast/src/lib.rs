@@ -401,6 +401,9 @@ fn run_controller(
         }
         match command {
             Ok(WorkerCommand::Backend(command)) => {
+                if let BackendCommand::ConfigureAudio(settings) = command.as_ref() {
+                    relay.visualizer_fft_size = settings.visualizer_fft_size as usize;
+                }
                 let run = command.run().or_else(|| controller.current_run());
                 let requested_playing = match command.as_ref() {
                     BackendCommand::Play { .. } => Some(true),

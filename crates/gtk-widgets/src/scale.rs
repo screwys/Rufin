@@ -27,7 +27,7 @@ pub fn horizontal_scale_value_at_x(scale: &gtk::Scale, x: f64) -> f64 {
         + fraction * (adjustment.upper() - adjustment.page_size() - adjustment.lower())
 }
 
-pub fn install_hover_value_bubble(
+pub fn install_pointer_value_bubble(
     widget: &impl IsA<gtk::Widget>,
     bubble: gtk::Popover,
     label: gtk::Label,
@@ -57,10 +57,26 @@ pub fn install_hover_value_bubble(
         )));
         preview.popup();
     });
-    let preview = bubble.clone();
-    motion.connect_leave(move |_| preview.popdown());
+    install_value_bubble_dismissal(&motion, &bubble);
     widget.add_controller(motion);
     widget.connect_destroy(move |_| bubble.unparent());
+}
+
+pub fn install_value_bubble_dismissal(motion: &gtk::EventControllerMotion, bubble: &gtk::Popover) {
+    motion.set_propagation_limit(gtk::PropagationLimit::None);
+    let preview = bubble.downgrade();
+    motion.connect_leave(move |motion| {
+        let motion = motion.downgrade();
+        let preview = preview.clone();
+        // Native popup crossings deliver leave before enter and update pointer state afterward.
+        glib::idle_add_local_once(move || {
+            if let (Some(motion), Some(preview)) = (motion.upgrade(), preview.upgrade())
+                && !motion.contains_pointer()
+            {
+                preview.popdown();
+            }
+        });
+    });
 }
 
 pub fn install_scale_scroll_forwarding(scale: &gtk::Scale) {
@@ -181,16 +197,50 @@ pub fn install_sliding_value_bubble(
     scale.connect_destroy(move |_| bubble.unparent());
 }
 
-fn point_value_bubble_at_slider(scale: &gtk::Scale, bubble: &gtk::Popover) {
-    let (slider_start, slider_end) = scale.slider_range();
-    let range = scale.range_rect();
-    let slider_center = slider_start.saturating_add(slider_end.saturating_sub(slider_start) / 2);
-    bubble.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
-        slider_center,
-        range.y(),
-        1,
-        1,
-    )));
+pub fn point_value_bubble_at_slider(scale: &gtk::Scale, bubble: &gtk::Popover) {
+    let trough = std::iter::successors(scale.first_child(), gtk::Widget::next_sibling)
+        .find(|child| child.css_name() == "trough")
+        .expect("GtkScale trough");
+    let slider = std::iter::successors(trough.first_child(), gtk::Widget::next_sibling)
+        .find(|child| child.css_name() == "slider")
+        .expect("GtkScale slider");
+    let orientation = scale.orientation();
+    let adjustment = scale.adjustment();
+    let span = adjustment.upper() - adjustment.page_size() - adjustment.lower();
+    let mut fraction = if span == 0.0 {
+        0.0
+    } else {
+        (scale.value() - adjustment.lower()) / span
+    };
+    if scale.is_inverted()
+        ^ (orientation == gtk::Orientation::Horizontal
+            && scale.is_flippable()
+            && scale.direction() == gtk::TextDirection::Rtl)
+    {
+        fraction = 1.0 - fraction;
+    }
+    let horizontal = orientation == gtk::Orientation::Horizontal;
+    let length = if horizontal {
+        trough.width()
+    } else {
+        trough.height()
+    };
+    let slider_length = slider.measure(orientation, -1).0.min(length);
+    // value-changed runs before GTK allocates the thumb at its new position.
+    let center = ((length - slider_length) as f64 * fraction) as i32 + slider_length / 2;
+    let local_point = if horizontal {
+        gtk::graphene::Point::new(center as f32, 0.0)
+    } else {
+        gtk::graphene::Point::new(0.0, center as f32)
+    };
+    if let Some(point) = trough.compute_point(scale, &local_point) {
+        bubble.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
+            point.x().round() as i32,
+            point.y().round() as i32,
+            1,
+            1,
+        )));
+    }
 }
 
 #[cfg(test)]

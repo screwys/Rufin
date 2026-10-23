@@ -3,12 +3,12 @@ package io.github.screwys.rufin.player
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,20 +49,21 @@ import io.github.screwys.rufin.shared.rufin_core.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.*
 
 private enum class PresetNameAction { Save, Duplicate, Rename }
+internal fun presetDisplayName(name: String, modified: Boolean): String = if (modified) "$name *" else name
+
 private enum class PresetTransfer { Import, Export }
-private data class EqDocument(val output: String, val format: EqPresetFormat)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
     val owner = player.playbackOwner ?: return
-    val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val subscription = remember(owner) { owner.subscribeEqualizer("") }
     var view by remember(owner) { mutableStateOf(owner.equalizerView("")) }
@@ -80,10 +80,6 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
     var transferError by remember { mutableStateOf<String?>(null) }
     var nameAction by rememberSaveable { mutableStateOf<PresetNameAction?>(null) }
     var name by rememberSaveable { mutableStateOf("") }
-    var document by rememberSaveable(stateSaver = listSaver<EqDocument?, String>(
-        save = { request -> request?.let { listOf(it.output, it.format.name) }.orEmpty() },
-        restore = { values -> values.takeIf { it.size == 2 }?.let { EqDocument(it[0], EqPresetFormat.valueOf(it[1])) } },
-    )) { mutableStateOf<EqDocument?>(null) }
     val remote = (player.playback?.controls?.playbackOutput as? PlaybackOutput.Remote)?.v1
     val routes = player.service?.outputs?.routes?.collectAsState()?.value.orEmpty()
     val receiverProcessing = !view.available
@@ -136,31 +132,6 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
     }
     fun commit() = operation { owner.commitEqualizer(output) }
     fun change(edit: EqEdit) { preview(edit); commit() }
-    fun exportTo(uri: Uri?) {
-        val request = document
-        document = null
-        if (uri != null && request != null) operation {
-            withContext(Dispatchers.IO) {
-                val text = owner.exportEqualizer(request.output, request.format)
-                val stream = context.contentResolver.openOutputStream(uri, "wt") ?: error(translate("Export"))
-                stream.bufferedWriter().use { it.write(text) }
-            }
-        }
-    }
-    val exportJson = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json"), ::exportTo)
-    val exportApo = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain"), ::exportTo)
-    val importPreset = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val request = document
-        document = null
-        if (uri != null && request != null) operation {
-            val text = withContext(Dispatchers.IO) {
-                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                    ?: error(translate("Import"))
-            }
-            transferText = text
-            transferFormat = if (text.trimStart().startsWith("{")) EqPresetFormat.JSON else EqPresetFormat.APO
-        }
-    }
     fun openTransfer(kind: PresetTransfer) {
         transferOutput = output
         transferFormat = EqPresetFormat.JSON
@@ -180,23 +151,37 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
         }
     }
     val displayName = if (view.presetBuiltin || view.presetId == null && view.saveTarget == null) translate(view.name) else view.name
+    fun savePreset() {
+        if (view.saveTarget != null) operation { owner.saveEqualizerPreset(output, null) }
+        else { name = displayName; nameAction = PresetNameAction.Save }
+    }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(translate("Equalizer"), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-            Switch(view.enabled, { enabled ->
-                preview(EqEdit.Enabled(enabled))
-                operation {
-                    if (view.cast) owner.applyEqualizer(output)
-                    owner.commitEqualizer(output)
-                }
-            }, enabled = !receiverProcessing, modifier = Modifier.semantics { contentDescription = translate("Equalizer") })
+        SettingsGroup {
+            SettingsRow(translate("Equalizer"), trailing = { Switch(view.enabled, null, enabled = !receiverProcessing) },
+                modifier = Modifier.toggleable(view.enabled, enabled = !receiverProcessing, role = Role.Switch) { enabled ->
+                    preview(EqEdit.Enabled(enabled))
+                    operation {
+                        if (view.cast) owner.applyEqualizer(output)
+                        owner.commitEqualizer(output)
+                    }
+                })
         }
         if (!receiverProcessing) {
             Column(Modifier.fillMaxWidth()) {
+                PresetActions(
+                    saveEnabled = view.modified || view.presetId == null,
+                    editEnabled = !view.presetBuiltin && (view.presetId ?: view.saveTarget) != null,
+                    save = ::savePreset,
+                    duplicate = { name = displayName; nameAction = PresetNameAction.Duplicate },
+                    rename = { name = displayName; nameAction = PresetNameAction.Rename },
+                    importPreset = { openTransfer(PresetTransfer.Import) },
+                    exportPreset = { openTransfer(PresetTransfer.Export) },
+                    delete = { (view.presetId ?: view.saveTarget)?.let { operation { owner.deleteEqualizerPreset(it) } } },
+                )
                 Box(Modifier.fillMaxWidth()) {
                     var picker by remember { mutableStateOf(false) }
                     FilledTonalButton({ picker = true }, Modifier.fillMaxWidth(), colors = equalizerButtonColors()) {
-                        Text(displayName, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(presetDisplayName(displayName, view.modified), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         io.github.screwys.rufin.ui.RufinIcon("rufin-go-down-symbolic", null, Modifier.size(18.dp))
                     }
                     DropdownMenu(picker, { picker = false }, Modifier.heightIn(max = 400.dp)) {
@@ -204,33 +189,28 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
                         presets.forEach { preset -> DropdownMenuItem(
                             text = { Text(if (preset.builtin) translate(preset.name) else preset.name) },
                             onClick = { picker = false; operation { owner.selectEqualizerPreset(output, preset.id) } }) }
-                        HorizontalDivider()
-                        DropdownMenuItem(text = { Text(translate("Duplicate")) }, onClick = { picker = false; name = displayName; nameAction = PresetNameAction.Duplicate })
-                        DropdownMenuItem(text = { Text(translate("Rename")) }, enabled = !view.presetBuiltin && (view.presetId ?: view.saveTarget) != null,
-                            onClick = { picker = false; name = displayName; nameAction = PresetNameAction.Rename })
-                        DropdownMenuItem(text = { Text(translate("Delete")) }, enabled = !view.presetBuiltin && (view.presetId ?: view.saveTarget) != null,
-                            onClick = { picker = false; (view.presetId ?: view.saveTarget)?.let { operation { owner.deleteEqualizerPreset(it) } } })
+
                     }
                 }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    PlayerIconButton("rufin-document-save-symbolic", "Save", {
-                        if (view.saveTarget != null) operation { owner.saveEqualizerPreset(output, null) }
-                        else { name = displayName; nameAction = PresetNameAction.Save }
-                    }, modifier = Modifier.size(48.dp), enabled = view.modified || view.presetId == null)
-                    PlayerIconButton("rufin-document-open-symbolic", "Import", {
-                        openTransfer(PresetTransfer.Import)
-                    }, modifier = Modifier.size(48.dp))
-                    PlayerIconButton("rufin-document-send-symbolic", "Export", {
-                        openTransfer(PresetTransfer.Export)
-                    }, modifier = Modifier.size(48.dp))
-                    Spacer(Modifier.weight(1f))
-                    FilledTonalIconToggleButton(checked = editingParametric, onCheckedChange = { parametric = it },
-                        modifier = Modifier.size(48.dp).semantics {
-                            stateDescription = translate(if (editingParametric) "Parametric" else "Graphic")
-                        }) {
-                        io.github.screwys.rufin.ui.RufinIcon(
-                            if (editingParametric) "rufin-sliders-vertical-symbolic" else "rufin-spring-graph-symbolic",
-                            translate(if (editingParametric) "Graphic" else "Parametric"), Modifier.size(24.dp))
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val deviceWidth = if (maxWidth < 360.dp) 132.dp else 160.dp
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.weight(1f).toggleable(view.assigned, role = Role.Checkbox) { assigned -> operation { owner.assignEqualizer(output, assigned) } },
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(view.assigned, null, modifier = Modifier.size(40.dp))
+                            Text(translate("Use for this output"), Modifier.weight(1f), maxLines = 2,
+                                style = MaterialTheme.typography.bodySmall, overflow = TextOverflow.Ellipsis)
+                        }
+                        FilledTonalButton({ outputOpen = true }, Modifier.width(deviceWidth), colors = equalizerButtonColors()) {
+                            Text(remote?.name ?: routes.firstOrNull { it.selected }?.name ?: translate("This device"),
+                                Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            io.github.screwys.rufin.ui.RufinIcon("rufin-go-down-symbolic", null, Modifier.size(18.dp))
+                        }
+                        FilledTonalIconToggleButton(checked = editingParametric, onCheckedChange = { parametric = it },
+                            modifier = Modifier.size(48.dp).semantics { stateDescription = translate(if (editingParametric) "Parametric" else "Graphic") }) {
+                            io.github.screwys.rufin.ui.RufinIcon(if (editingParametric) "rufin-sliders-vertical-symbolic" else "rufin-spring-graph-symbolic",
+                                translate(if (editingParametric) "Graphic" else "Parametric"), Modifier.size(24.dp))
+                        }
                     }
                 }
             }
@@ -251,18 +231,15 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
                 })
             }
         } else Text(translate("Equalizer is controlled by the receiver"))
-        SettingsGroup {
-            SettingsRow(translate("Audio output"), modifier = Modifier.clickable { outputOpen = true },
-                trailing = { Text(remote?.name ?: routes.firstOrNull { it.selected }?.name ?: translate("This device"),
-                    Modifier.widthIn(max = 180.dp), maxLines = 1, overflow = TextOverflow.Ellipsis) })
-            if (!receiverProcessing) SettingsSwitch(translate("Use output settings"), view.assigned) { operation { owner.assignEqualizer(output, it) } }
+        if (receiverProcessing) FilledTonalButton({ outputOpen = true }, Modifier.fillMaxWidth(), colors = equalizerButtonColors()) {
+            Text(remote?.name ?: translate("This device"), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (!receiverProcessing) SettingsExpander(translate("Audio effects")) {
             Column {
-                EqNumber(translate("Bass"), profile.bassDb, -12.0..12.0, "dB", .1, preview = { preview(EqEdit.Bass(it)) }, commit = ::commit)
-                EqNumber(translate("Treble"), profile.trebleDb, -12.0..12.0, "dB", .1, preview = { preview(EqEdit.Treble(it)) }, commit = ::commit)
+                EqNumber(translate("Bass"), profile.bassDb, -12.0..12.0, "dB", .1, reset = true, preview = { preview(EqEdit.Bass(it)) }, commit = ::commit)
+                EqNumber(translate("Treble"), profile.trebleDb, -12.0..12.0, "dB", .1, reset = true, preview = { preview(EqEdit.Treble(it)) }, commit = ::commit)
                 SettingsSwitch(translate("Crossfeed"), view.crossfeed) { change(EqEdit.Crossfeed(it)) }
-                EqNumber(translate("Balance"), view.balance, -1.0..1.0, "", .01, preview = { preview(EqEdit.Balance(it)) }, commit = ::commit)
+                EqNumber(translate("Balance"), view.balance, -1.0..1.0, "", .01, reset = true, preview = { preview(EqEdit.Balance(it)) }, commit = ::commit)
                 SettingsSwitch(translate("Mono"), view.mono) { change(EqEdit.Mono(it)) }
             }
         }
@@ -274,10 +251,8 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
         view.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
     if (outputOpen) PlayerOutputSheet(player) { outputOpen = false }
-    if (nameAction != null) AlertDialog(onDismissRequest = { nameAction = null },
-        title = { Text(translate(nameAction!!.name)) }, text = {
-            OutlinedTextField(name, { name = it }, label = { Text(translate("Name")) }, singleLine = true, colors = settingsTextFieldColors())
-        }, confirmButton = { TextButton({ operation {
+    if (nameAction != null) PresetNameDialog(nameAction!!.name, name, { name = it }, { nameAction = null }) {
+        operation {
             when (nameAction) {
                 PresetNameAction.Save -> owner.saveEqualizerPreset(output, name)
                 PresetNameAction.Duplicate -> owner.duplicateEqualizerPreset(output, name)
@@ -285,43 +260,27 @@ internal fun EqualizerSettings(player: PlayerConnection, active: Boolean) {
                 null -> Unit
             }
             nameAction = null
-        } }, enabled = name.isNotBlank()) { Text(translate("Save")) } },
-        dismissButton = { TextButton({ nameAction = null }) { Text(translate("Cancel")) } })
+        }
+    }
     transfer?.let { kind ->
         val importing = kind == PresetTransfer.Import
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        AlertDialog(onDismissRequest = { transfer = null }, title = { Text(translate(if (importing) "Import preset" else "Export preset")) }, text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(transferFormat == EqPresetFormat.JSON, { transferFormat = EqPresetFormat.JSON }, label = { Text("JSON") }, colors = equalizerChipColors())
-                    FilterChip(transferFormat == EqPresetFormat.APO, { transferFormat = EqPresetFormat.APO }, label = { Text("AutoEQ / APO") }, colors = equalizerChipColors())
-                    if (importing) PlayerIconButton("rufin-document-open-symbolic", "Open", {
-                        document = EqDocument(transferOutput, transferFormat)
-                        importPreset.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
-                    })
-                }
-                OutlinedTextField(transferText, { transferText = it; transferError = null }, readOnly = !importing,
-                    modifier = Modifier.fillMaxWidth().height(200.dp), colors = settingsTextFieldColors(),
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace))
-                transferError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            }
-        }, confirmButton = {
-            if (importing) TextButton({ operation {
+        PresetTransferDialog(importing, transferText, { text ->
+            transferText = text
+            transferError = null
+            if (importing) transferFormat = if (text.trimStart().startsWith("{")) EqPresetFormat.JSON else EqPresetFormat.APO
+        }, transferError, { transferError = it },
+            "$displayName.${if (transferFormat == EqPresetFormat.JSON) "json" else "txt"}",
+            if (transferFormat == EqPresetFormat.JSON) "application/json" else "text/plain",
+            { operation {
                 try { owner.importEqualizer(transferOutput, transferText, transferFormat); transfer = null }
+                catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { transferError = error.message }
-            } }, enabled = transferText.isNotBlank()) { Text(translate("Import")) }
-            else TextButton({ clipboard.setPrimaryClip(ClipData.newPlainText(displayName, transferText)); transfer = null }, enabled = transferError == null) { Text(translate("Copy")) }
-        }, dismissButton = {
-            if (importing) TextButton({
-                transferText = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
-                transferFormat = if (transferText.trimStart().startsWith("{")) EqPresetFormat.JSON else EqPresetFormat.APO
-            }) { Text(translate("Paste")) }
-            else TextButton({
-                document = EqDocument(transferOutput, transferFormat)
-                if (transferFormat == EqPresetFormat.JSON) exportJson.launch("$displayName.json") else exportApo.launch("$displayName.txt")
-            }, enabled = transferError == null) { Text(translate("Save")) }
-        })
+            } }, { transfer = null }) {
+            FilterChip(transferFormat == EqPresetFormat.JSON, { transferFormat = EqPresetFormat.JSON }, label = { Text("JSON") }, colors = equalizerChipColors())
+            FilterChip(transferFormat == EqPresetFormat.APO, { transferFormat = EqPresetFormat.APO }, label = { Text("AutoEQ / APO") }, colors = equalizerChipColors())
+        }
     }
+
 }
 
 @Composable
@@ -449,20 +408,35 @@ private fun filterName(kind: FilterKind) = when (kind) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EqNumber(title: String, value: Double, range: ClosedFloatingPointRange<Double>, unit: String, step: Double,
+private fun EqNumber(title: String, value: Double, range: ClosedFloatingPointRange<Double>, unit: String, step: Double, reset: Boolean = false,
     preview: (Double) -> Unit, commit: () -> Unit) {
     var draft by remember(value) { mutableDoubleStateOf(value) }
-    Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, Modifier.widthIn(min = 48.dp), style = MaterialTheme.typography.bodyMedium)
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            if (reset) {
+                var text by remember(value) { mutableStateOf(number(value)) }
+                OutlinedTextField(text, { input ->
+                    text = input
+                    input.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it in range }?.let { preview(it); commit() }
+                }, singleLine = true, colors = settingsTextFieldColors(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    suffix = if (unit.isEmpty()) null else { { Text(unit) } },
+                    trailingIcon = if (value == 0.0) null else { {
+                        PlayerIconButton("rufin-view-refresh-symbolic", "Reset", { text = "0"; preview(0.0); commit() })
+                    } },
+                    modifier = Modifier.width(132.dp).semantics { contentDescription = title })
+            } else EqValue(title, draft, range, unit) { preview(it); commit() }
+        }
         Slider(draft.toFloat(), {
             draft = (round(it / step) * step).coerceIn(range)
             preview(draft)
         }, valueRange = range.start.toFloat()..range.endInclusive.toFloat(), onValueChangeFinished = commit,
             thumb = { Box(Modifier.size(16.dp).background(MaterialTheme.colorScheme.primary, androidx.compose.foundation.shape.CircleShape)) },
             track = { state -> SliderDefaults.Track(state, modifier = Modifier.height(4.dp), thumbTrackGapSize = 0.dp, drawStopIndicator = null) },
-            modifier = Modifier.weight(1f).semantics { contentDescription = title; stateDescription = "${number(draft)} $unit" })
-        EqValue(title, draft, range, unit) { preview(it); commit() }
+            modifier = Modifier.fillMaxWidth().semantics { contentDescription = title; stateDescription = "${number(draft)} $unit" })
+        if (reset) SliderMarks(range.start.toFloat()..range.endInclusive.toFloat(),
+            listOf(range.start.toFloat(), (range.start / 2).toFloat(), 0f, (range.endInclusive / 2).toFloat(), range.endInclusive.toFloat()))
     }
 }
 
@@ -640,6 +614,108 @@ private fun EqualizerPlot(view: EqView, parametric: Boolean, frequencies: List<D
         else listOf(lowHz, 100.0, 1000.0, highHz).distinct().filter { it in lowHz..highHz }.forEach { hz ->
             val text = textMeasurer.measure(frequency(hz), labelStyle)
             drawText(text, topLeft = Offset((x(hz) - text.size.width / 2).coerceIn(left, (size.width - text.size.width).coerceAtLeast(left)), top + height + 6.dp.toPx()))
+        }
+    }
+}
+
+@Composable
+internal fun PresetNameDialog(title: String, name: String, onName: (String) -> Unit, dismiss: () -> Unit, save: () -> Unit) {
+    AlertDialog(onDismissRequest = dismiss,
+        title = { Text(translate(title)) }, text = {
+            OutlinedTextField(name, onName, label = { Text(translate("Name")) }, singleLine = true, colors = settingsTextFieldColors())
+        }, confirmButton = { TextButton(save, enabled = name.isNotBlank()) { Text(translate("Save")) } },
+        dismissButton = { TextButton(dismiss) { Text(translate("Cancel")) } })
+}
+
+@Composable
+internal fun PresetTransferDialog(importing: Boolean, text: String, onText: (String) -> Unit,
+    error: String?, onError: (String?) -> Unit, filename: String, mimeType: String,
+    importPreset: () -> Unit, dismiss: () -> Unit, formats: @Composable RowScope.() -> Unit = {}) {
+    val context = LocalContext.current
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val scope = rememberCoroutineScope()
+    var documentText by rememberSaveable { mutableStateOf("") }
+    fun operation(block: suspend () -> Unit) = scope.launch {
+        try { block() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { onError(failure.message) }
+    }
+    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) operation {
+            val contents = withContext(Dispatchers.IO) {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: kotlin.error(translate("Import"))
+            }
+            onText(contents)
+        }
+    }
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(mimeType)) { uri ->
+        if (uri != null) operation {
+            withContext(Dispatchers.IO) {
+                val stream = context.contentResolver.openOutputStream(uri, "wt") ?: kotlin.error(translate("Export"))
+                stream.bufferedWriter().use { it.write(documentText) }
+            }
+        }
+    }
+    AlertDialog(onDismissRequest = dismiss, title = { Text(translate(if (importing) "Import preset" else "Export preset")) }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                formats()
+                if (importing) PlayerIconButton("rufin-document-open-symbolic", "Open", {
+                    open.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+                })
+            }
+            OutlinedTextField(text, onText, readOnly = !importing,
+                modifier = Modifier.fillMaxWidth().height(200.dp), colors = settingsTextFieldColors(),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace))
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+    }, confirmButton = {
+        if (importing) TextButton(importPreset, enabled = text.isNotBlank()) { Text(translate("Import")) }
+        else TextButton({ documentText = text; save.launch(filename) },
+            enabled = error == null && text.isNotBlank()) { Text(translate("Save")) }
+    }, dismissButton = {
+        if (importing) TextButton({
+            onText(clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty())
+        }) { Text(translate("Paste")) }
+        else TextButton({ clipboard.setPrimaryClip(ClipData.newPlainText(filename, text)); dismiss() },
+            enabled = error == null && text.isNotBlank()) { Text(translate("Copy")) }
+
+    })
+}
+
+@Composable
+internal fun SliderMarks(range: ClosedFloatingPointRange<Float>, labels: List<Float>) {
+    val measurer = rememberTextMeasurer()
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    val style = MaterialTheme.typography.labelSmall.copy(color = color)
+    Canvas(Modifier.fillMaxWidth().height(26.dp)) {
+        val inset = 10.dp.toPx()
+        fun x(value: Float) = inset + (size.width - 2 * inset) * (value - range.start) / (range.endInclusive - range.start)
+        val ticks = labels.zipWithNext().flatMap { (start, end) -> (0..3).map { start + (end - start) * it / 4 } } + labels.last()
+        ticks.forEach { drawLine(color.copy(alpha = .45f), Offset(x(it), 0f), Offset(x(it), (if (it in labels) 5.dp else 3.dp).toPx()), 1.dp.toPx()) }
+        labels.forEach {
+            val label = measurer.measure(number(it.toDouble()), style)
+            drawText(label, topLeft = Offset((x(it) - label.size.width / 2).coerceIn(0f, (size.width - label.size.width).coerceAtLeast(0f)), 5.dp.toPx()))
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun PresetActions(save: () -> Unit, duplicate: () -> Unit, rename: () -> Unit,
+    importPreset: () -> Unit, exportPreset: () -> Unit, delete: () -> Unit,
+    saveEnabled: Boolean = true, editEnabled: Boolean = true, modifier: Modifier = Modifier) {
+    FlowRow(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(translate("Presets"), Modifier.align(Alignment.CenterVertically), style = MaterialTheme.typography.titleSmall)
+        FlowRow(Modifier.widthIn(max = 288.dp), horizontalArrangement = Arrangement.End) {
+            PlayerIconButton("rufin-document-save-symbolic", "Save", save, modifier = Modifier.size(48.dp), enabled = saveEnabled)
+            PlayerIconButton("rufin-edit-copy-symbolic", "Duplicate", duplicate, modifier = Modifier.size(48.dp))
+            PlayerIconButton("rufin-document-edit-symbolic", "Rename", rename, modifier = Modifier.size(48.dp), enabled = editEnabled)
+            PlayerIconButton("rufin-document-open-symbolic", "Import", importPreset, modifier = Modifier.size(48.dp))
+            PlayerIconButton("rufin-document-send-symbolic", "Export", exportPreset, modifier = Modifier.size(48.dp))
+            PlayerIconButton("rufin-user-trash-symbolic", "Delete", delete, modifier = Modifier.size(48.dp), enabled = editEnabled)
         }
     }
 }

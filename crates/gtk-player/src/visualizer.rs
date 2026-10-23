@@ -8,7 +8,7 @@ use rufin_core::settings::visualizer::{
     VisualizerPeak as Peak, VisualizerStyle, visualizer_accent_gradient, visualizer_bar_levels,
     visualizer_column_geometry, visualizer_lerp as lerp, visualizer_radial_shadow_geometry,
     visualizer_row_geometry, visualizer_shadow_geometry, visualizer_smoothed_level,
-    visualizer_smoothing_weights,
+    visualizer_smoothing_weights, visualizer_spectrum_levels,
 };
 
 pub struct VisualizerParts {
@@ -171,7 +171,7 @@ fn draw_visualizer(
     let left = width * 0.008;
     let (columns, cell) = visualizer_column_geometry(
         width,
-        appearance.bar_count.clamp(8, 128) as usize,
+        appearance.bar_count.clamp(8, 256) as usize,
         column_gap,
     );
     let (rows, row_height) = visualizer_row_geometry(height, cell, row_gap);
@@ -208,9 +208,22 @@ fn draw_visualizer(
             ],
         );
     };
+    let center = (width / 2.0, height / 2.0);
+    let radius = width.min(height) * 0.22;
+    let extent = width.min(height) * 0.25;
+    let (shadow_scale, shadow_limit) =
+        visualizer_radial_shadow_geometry(radius, extent, appearance);
+    let angle = |column: usize| {
+        (column as f64 + if appearance.mirrored { 0.5 } else { 0.0 }) / columns as f64
+            * std::f64::consts::TAU
+            - std::f64::consts::FRAC_PI_2
+    };
     if matches!(
         appearance.style,
-        VisualizerStyle::Line | VisualizerStyle::Filled
+        VisualizerStyle::Line
+            | VisualizerStyle::Filled
+            | VisualizerStyle::Ribbon
+            | VisualizerStyle::Halo
     ) {
         // These styles need one joined path. GTK also rasterizes GSK paths,
         // but caches each new animated path, so keep this single Cairo node.
@@ -220,13 +233,50 @@ fn draw_visualizer(
             gradient.add_color_stop_rgb(offset, color[0].into(), color[1].into(), color[2].into());
         }
         let _ = context.set_source(&gradient);
-        for (column, level) in bars.iter().enumerate() {
-            let x = left + cell / 2.0 + column as f64 * (cell + column_gap);
-            let y = bottom - level * graph_height;
-            if column == 0 {
-                context.move_to(x, y);
-            } else {
-                context.line_to(x, y);
+        let ribbon = appearance.style == VisualizerStyle::Ribbon;
+        let halo = appearance.style == VisualizerStyle::Halo;
+        let points = |inward: bool| {
+            bars.iter()
+                .enumerate()
+                .map(|(column, level)| {
+                    if halo {
+                        let radius = radius
+                            + if inward {
+                                -(level * shadow_scale).min(shadow_limit)
+                            } else {
+                                level * extent
+                            };
+                        let (sin, cos) = angle(column).sin_cos();
+                        (center.0 + radius * cos, center.1 + radius * sin)
+                    } else {
+                        (
+                            left + cell / 2.0 + column as f64 * (cell + column_gap),
+                            if ribbon {
+                                height / 2.0 - level * graph_height / 2.0
+                            } else {
+                                bottom - level * graph_height
+                            },
+                        )
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut outline = points(false);
+        if ribbon {
+            for index in (0..outline.len()).rev() {
+                let (x, y) = outline[index];
+                outline.push((x, height - y));
+            }
+        }
+        if ribbon || halo {
+            smooth_closed_path(&context, &outline);
+        } else {
+            for (index, (x, y)) in outline.into_iter().enumerate() {
+                if index == 0 {
+                    context.move_to(x, y);
+                } else {
+                    context.line_to(x, y);
+                }
             }
         }
         if appearance.style == VisualizerStyle::Filled {
@@ -237,31 +287,39 @@ fn draw_visualizer(
             context.line_to(left + cell / 2.0, bottom);
             context.close_path();
             let _ = context.fill();
+        } else if ribbon {
+            let _ = context.fill();
         } else {
             context.set_line_width(2.0);
             let _ = context.stroke();
+            if halo && shadow_limit > 0.0 {
+                smooth_closed_path(&context, &points(true));
+                let color = color(shadow_colors, 0.5, appearance.shadow_opacity);
+                context.set_source_rgba(
+                    color.red().into(),
+                    color.green().into(),
+                    color.blue().into(),
+                    color.alpha().into(),
+                );
+                let _ = context.stroke();
+            }
         }
     }
     for (column, level) in bars.iter().copied().enumerate() {
         let scaled = level * rows as f64;
         let x = left + column as f64 * (cell + column_gap);
         let bar_height = level * graph_height;
-        if appearance.style == VisualizerStyle::Circular {
-            let center = (width / 2.0, height / 2.0);
-            let radius = width.min(height) * 0.22;
-            let extent = width.min(height) * 0.25;
-            let angle = (column as f64 + if appearance.mirrored { 0.5 } else { 0.0 })
-                / columns as f64
-                * std::f64::consts::TAU
-                - std::f64::consts::FRAC_PI_2;
+        if matches!(
+            appearance.style,
+            VisualizerStyle::Circular | VisualizerStyle::Halo
+        ) {
+            let angle = angle(column);
             let (sin, cos) = angle.sin_cos();
-            let (shadow_scale, shadow_limit) =
-                visualizer_radial_shadow_geometry(radius, extent, appearance);
             let shadow_length = (level * shadow_scale).min(shadow_limit);
             let shadow_color = color(shadow_colors, level, appearance.shadow_opacity);
             let color = color(colors, level, 1.0);
             let thickness = (std::f64::consts::TAU * radius / columns as f64 - column_gap).max(1.0);
-            if level > 0.0 {
+            if level > 0.0 && appearance.style == VisualizerStyle::Circular {
                 snapshot.save();
                 snapshot.translate(&gtk::graphene::Point::new(center.0 as f32, center.1 as f32));
                 snapshot.rotate(angle.to_degrees() as f32);
@@ -379,18 +437,43 @@ fn draw_visualizer(
             && let Some(peak) = peak_bars.get(column).filter(|peak| **peak > 0.0)
         {
             let color = color(colors, 1.0, 1.0);
-            let y = if appearance.style == VisualizerStyle::Mirrored {
+            let y = if matches!(
+                appearance.style,
+                VisualizerStyle::Mirrored | VisualizerStyle::Ribbon
+            ) {
                 height / 2.0 - peak * graph_height / 2.0
             } else {
                 bottom - peak * graph_height
             };
             snapshot.append_color(&color, &rect(x, y, cell, 2.0));
-            if appearance.style == VisualizerStyle::Mirrored {
+            if matches!(
+                appearance.style,
+                VisualizerStyle::Mirrored | VisualizerStyle::Ribbon
+            ) {
                 snapshot.append_color(&color, &rect(x, height - y - 2.0, cell, 2.0));
             }
         }
     }
     snapshot.pop();
+}
+
+fn smooth_closed_path(context: &gtk::cairo::Context, points: &[(f64, f64)]) {
+    let midpoint = |a: (f64, f64), b: (f64, f64)| ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
+    let mut start = midpoint(points[points.len() - 1], points[0]);
+    context.move_to(start.0, start.1);
+    for (index, point) in points.iter().enumerate() {
+        let end = midpoint(*point, points[(index + 1) % points.len()]);
+        context.curve_to(
+            start.0 + (point.0 - start.0) * 2.0 / 3.0,
+            start.1 + (point.1 - start.1) * 2.0 / 3.0,
+            end.0 + (point.0 - end.0) * 2.0 / 3.0,
+            end.1 + (point.1 - end.1) * 2.0 / 3.0,
+            end.0,
+            end.1,
+        );
+        start = end;
+    }
+    context.close_path();
 }
 
 fn rect(x: f64, y: f64, width: f64, height: f64) -> gtk::graphene::Rect {
@@ -648,7 +731,7 @@ impl crate::PlayerUi {
                 targets.borrow_mut().fill(0.0);
             }
             let mut current = levels.borrow_mut();
-            let target = targets.borrow();
+            let target = visualizer_spectrum_levels(&targets.borrow(), &appearance);
             let len = target.len().max(current.len());
             current.resize(len, 0.0);
             let mut changed = false;

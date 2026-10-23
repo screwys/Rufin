@@ -141,6 +141,7 @@ pub struct SavedPreset {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EqDraft {
     pub profile: EqProfile,
+    /// Preset the draft was edited from, including read-only built-ins.
     pub save_target: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -323,26 +324,18 @@ impl EqualizerState {
         let entry = self.preferences.output(&output);
         let profile = self.preferences.profile(entry);
         let facts = self.facts.get(&output);
-        let target = match &entry.selection {
-            Some(id) => self
-                .preferences
-                .presets
-                .iter()
-                .any(|p| &p.id == id)
-                .then(|| id.clone()),
-            None => entry.draft.save_target.clone(),
-        };
+        let preset_id = entry
+            .selection
+            .as_ref()
+            .or(entry.draft.save_target.as_ref());
+        let selected = preset_id.and_then(|id| self.preferences.preset(id));
+        let preset_builtin = preset_id.is_some_and(|id| builtin(id).is_some());
+        let target = preset_id
+            .filter(|id| self.preferences.presets.iter().any(|p| &p.id == *id))
+            .cloned();
         let saved = target.as_ref().and_then(|id| settings.equalizer_preset(id));
-        let selected = entry
-            .selection
-            .as_deref()
-            .and_then(|id| self.preferences.preset(id));
-        let preset_builtin = entry
-            .selection
-            .as_deref()
-            .is_some_and(|id| builtin(id).is_some());
         let modified = if preset_builtin {
-            false
+            selected.as_ref().is_some_and(|p| p.profile != profile)
         } else if entry.selection.is_some() {
             selected.as_ref() != saved.as_ref()
         } else {
@@ -361,7 +354,7 @@ impl EqualizerState {
             output: output.clone(),
             enabled: entry.enabled,
             profile: profile.clone(),
-            preset_id: entry.selection.clone(),
+            preset_id: preset_id.cloned(),
             save_target: target,
             name: selected
                 .map(|p| p.name)
@@ -527,7 +520,7 @@ impl EqualizerPreferences {
         let entry = self.output(output);
         if let Some(id) = entry.selection.clone() {
             let profile = self.profile(entry);
-            let save_target = self.presets.iter().any(|p| p.id == id).then_some(id);
+            let save_target = Some(id);
             let entry = self.output_mut(output);
             entry.selection = None;
             entry.draft = EqDraft {
@@ -761,11 +754,7 @@ impl PlaybackOwner {
         if is_profile && entry.selection.is_some() {
             entry.draft = EqDraft {
                 profile: state.preferences.profile(&entry),
-                save_target: entry
-                    .selection
-                    .as_ref()
-                    .filter(|id| state.preferences.presets.iter().any(|p| &p.id == *id))
-                    .cloned(),
+                save_target: entry.selection.clone(),
             };
             entry.selection = None;
         }
@@ -844,7 +833,6 @@ impl PlaybackOwner {
                 }
                 profile.layout = value;
                 profile.bands = template(value).bands;
-                entry.draft.save_target = None;
             }
             EqEdit::Preamp { value } => {
                 profile.manual_preamp_db = value;
@@ -914,7 +902,7 @@ impl PlaybackOwner {
             let previous_processing = state.preferences.config(&active);
             state.preferences.begin_edit(&output);
             let draft = state.preferences.output(&output).draft.clone();
-            let id = match draft.save_target {
+            let id = match draft.save_target.filter(|id| builtin(id).is_none()) {
                 Some(id) => {
                     let p = state
                         .preferences

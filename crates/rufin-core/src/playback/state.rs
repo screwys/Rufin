@@ -779,9 +779,7 @@ impl Player {
         current.backend_loaded = true;
         let next = self.prepared_next(run);
 
-        if self.playback_output.is_local() {
-            self.send_backend(BackendCommand::ConfigureAudio(self.settings.clone().into()));
-        }
+        self.send_backend(BackendCommand::ConfigureAudio(self.settings.clone().into()));
         self.send_backend(BackendCommand::Start {
             run,
             current: stream,
@@ -1780,11 +1778,9 @@ impl Player {
                         let run_id = run.id;
                         let next = self.prepared_next(run_id);
 
-                        if self.playback_output.is_local() {
-                            self.send_backend(BackendCommand::ConfigureAudio(
-                                self.settings.clone().into(),
-                            ));
-                        }
+                        self.send_backend(BackendCommand::ConfigureAudio(
+                            self.settings.clone().into(),
+                        ));
                         self.send_backend(BackendCommand::Start {
                             run: run_id,
                             current: stream,
@@ -2040,6 +2036,8 @@ impl Player {
             || settings.preserve_pitch != self.settings.preserve_pitch
             || settings.audio_fade_on_status_change != self.settings.audio_fade_on_status_change
             || settings.visualizer_ignore_volume != self.settings.visualizer_ignore_volume;
+        let visualizer_fft_changed =
+            settings.visualizer_fft_size != self.settings.visualizer_fft_size;
         self.settings = settings.clone();
         self.dirty = true;
         if self.playback_output.is_local() {
@@ -2056,7 +2054,9 @@ impl Player {
                 self.resolve_loudness(current.id, stream.clone());
             }
         }
-        if self.playback_output.is_local() && audio_configuration_changed {
+        if visualizer_fft_changed
+            || (self.playback_output.is_local() && audio_configuration_changed)
+        {
             self.send_backend(BackendCommand::ConfigureAudio(self.settings.clone().into()));
         } else if self.playback_output.is_local() && output_changed {
             self.send_backend(BackendCommand::SetOutputVolume {
@@ -2099,9 +2099,7 @@ impl Player {
         current.backend_loaded = true;
         let next = self.prepared_next(run);
 
-        if self.playback_output.is_local() {
-            self.send_backend(BackendCommand::ConfigureAudio(self.settings.clone().into()));
-        }
+        self.send_backend(BackendCommand::ConfigureAudio(self.settings.clone().into()));
         self.send_backend(BackendCommand::Start {
             run,
             current: stream,

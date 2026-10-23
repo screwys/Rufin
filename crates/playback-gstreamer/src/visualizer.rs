@@ -15,7 +15,8 @@ use std::thread;
 use tracing::{debug, warn};
 
 const VISUALIZER_CHANNEL_CAPACITY: usize = 2;
-const VISUALIZER_COPY_FRAMES: usize = 4_096;
+const VISUALIZER_COPY_FRAMES: usize = 32_768;
+const MEASUREMENT_COPY_FRAMES: usize = 4_096;
 #[derive(Clone)]
 pub(super) struct VisualizerTap {
     pub(super) ignore_volume: bool,
@@ -71,7 +72,7 @@ impl VisualizerTap {
         let pool = Arc::new(Mutex::new(Vec::<Vec<f32>>::new()));
         if let Some(info) = &info {
             *lock_recover(&pool) = (0..3)
-                .map(|_| Vec::with_capacity(VISUALIZER_COPY_FRAMES * info.channels() as usize))
+                .map(|_| Vec::with_capacity(MEASUREMENT_COPY_FRAMES * info.channels() as usize))
                 .collect();
         }
         let info = Mutex::new(info);
@@ -87,7 +88,7 @@ impl VisualizerTap {
                         *lock_recover(&pool) = (0..3)
                             .map(|_| {
                                 Vec::with_capacity(
-                                    VISUALIZER_COPY_FRAMES * info.channels() as usize,
+                                    MEASUREMENT_COPY_FRAMES * info.channels() as usize,
                                 )
                             })
                             .collect();
@@ -102,14 +103,14 @@ impl VisualizerTap {
                 let Some(mut samples) = pool.try_lock().ok().and_then(|mut pool| pool.pop()) else {
                     return gst::PadProbeReturn::Ok;
                 };
-                if samples.capacity() < VISUALIZER_COPY_FRAMES * info.channels() as usize {
+                if samples.capacity() < MEASUREMENT_COPY_FRAMES * info.channels() as usize {
                     return gst::PadProbeReturn::Ok;
                 }
                 samples.clear();
                 if let Ok(map) = buffer.map_readable() {
                     let sample_size = (info.width() / 8) as usize;
                     let count = (map.len() / sample_size)
-                        .min(VISUALIZER_COPY_FRAMES * info.channels() as usize);
+                        .min(MEASUREMENT_COPY_FRAMES * info.channels() as usize);
                     for bytes in map.as_slice()[..count * sample_size].chunks_exact(sample_size) {
                         let value = match info.format() {
                             gst_audio::AudioFormat::F64le => {
@@ -276,6 +277,7 @@ fn run_visualizer_worker(
             fft.clear();
             current_stream = Some(stream);
         }
+        fft.set_size(lock_recover(&shared).settings.visualizer_fft_size as usize);
         fft.push_samples(&frame.samples);
         let Some(levels) = fft.maybe_levels(frame.sample_rate) else {
             continue;

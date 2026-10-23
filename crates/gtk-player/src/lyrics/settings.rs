@@ -125,8 +125,11 @@ pub fn present_lyrics_settings_dialog(
     let builder = gtk_widgets::ui_resource::builder(resource);
     let dialog: adw::PreferencesDialog =
         gtk_widgets::ui_resource::object(&builder, resource, "dialog");
-    dialog.set_content_width(lyrics_popup_content_width());
-    dialog.set_content_height(lyrics_popup_content_height(window.height()));
+    dialog.set_content_width(gtk_widgets::layout::large_popup_content_width(760));
+    dialog.set_content_height(gtk_widgets::layout::large_popup_content_height(
+        window.height(),
+        720,
+    ));
     if matches!(
         pages,
         MediaSettingsPages::Lyrics | MediaSettingsPages::Combined
@@ -162,8 +165,6 @@ use localization::{
 };
 
 use gtk_widgets::popup::present_light_dismiss_dialog;
-
-use crate::lyrics::{lyrics_popup_content_height, lyrics_popup_content_width};
 
 fn build_lyrics_settings(
     shell: &Rc<crate::PlayerUi>,

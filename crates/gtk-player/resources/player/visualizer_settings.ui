@@ -8,57 +8,319 @@
     <child>
       <object class="AdwPreferencesGroup">
         <property name="title" translatable="yes">Presets</property>
-        <property name="header-suffix">
-          <object class="GtkLabel" id="saved_message">
-            <property name="label" translatable="yes">Preset saved</property>
-            <property name="visible">false</property>
-            <property name="wrap">true</property>
-            <style>
-              <class name="success" />
-            </style>
-          </object>
-        </property>
         <child>
           <object class="AdwComboRow" id="presets">
+            <property name="enable-search">true</property>
             <property name="title" translatable="yes">Saved preset</property>
+          </object>
+        </child>
+        <property name="header-suffix">
+          <object class="GtkBox">
+            <property name="halign">end</property>
+            <property name="valign">center</property>
+            <style><class name="preset-actions" /></style>
+            <child>
+              <object class="GtkButton" id="save">
+                <property name="child"><object class="GtkImage" id="save_icon"><property name="icon-name">rufin-document-save-symbolic</property></object></property>
+                <property name="tooltip-text" translatable="yes">Save</property>
+                <accessibility><property name="label" translatable="yes">Save</property></accessibility>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="duplicate">
+                <property name="icon-name">rufin-edit-copy-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Duplicate preset</property>
+                <accessibility><property name="label" translatable="yes">Duplicate preset</property></accessibility>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="rename">
+                <property name="icon-name">rufin-document-edit-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Rename</property>
+                <accessibility><property name="label" translatable="yes">Rename</property></accessibility>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="import">
+                <property name="icon-name">rufin-document-open-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Import preset</property>
+                <accessibility><property name="label" translatable="yes">Import preset</property></accessibility>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="export">
+                <property name="icon-name">rufin-document-send-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Export preset</property>
+                <accessibility><property name="label" translatable="yes">Export preset</property></accessibility>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="delete">
+                <property name="icon-name">rufin-user-trash-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Delete</property>
+                <accessibility><property name="label" translatable="yes">Delete</property></accessibility>
+                <style><class name="flat" /></style>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Spectrum</property>
+        <child>
+          <object class="AdwComboRow" id="fft_size">
+            <property name="title" translatable="yes">FFT size</property>
+            <property name="subtitle" translatable="yes">Casting changes apply to the next stream</property>
             <property name="model">
               <object class="GtkStringList">
                 <items>
-                  <item translatable="yes">Preset 1</item>
-                  <item translatable="yes">Preset 2</item>
-                  <item translatable="yes">Preset 3</item>
-                  <item translatable="yes">Preset 4</item>
-                  <item translatable="yes">Preset 5</item>
+                  <item>1024</item>
+                  <item>2048</item>
+                  <item>4096</item>
+                  <item>8192</item>
+                  <item>16384</item>
+                  <item>32768</item>
                 </items>
               </object>
             </property>
-            <child type="suffix">
-              <object class="GtkButton" id="save">
-                <property name="label" translatable="yes">Save</property>
-                <property name="valign">center</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="ignore_volume">
+            <property name="title" translatable="yes">Ignore playback volume</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwComboRow" id="frequency_scale">
+            <property name="title" translatable="yes">Frequency scale</property>
+            <property name="model">
+              <object class="GtkStringList">
+                <items>
+                  <item translatable="yes">ERB</item>
+                  <item translatable="yes">Logarithmic</item>
+                  <item translatable="yes">Linear</item>
+                </items>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPreferencesRow">
+            <property name="activatable">false</property>
+            <property name="selectable">false</property>
+            <child>
+              <object class="GtkBox">
+                <property name="homogeneous">true</property>
+                <property name="spacing">0</property>
+                <child>
+                  <object class="GtkBox" id="min_frequency_row">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">2</property>
+                    <child>
+                      <object class="GtkLabel" id="min_frequency_label">
+                        <property name="label" translatable="yes">Minimum frequency (Hz)</property>
+                        <property name="xalign">0</property>
+                        <property name="wrap">true</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkScale" id="min_frequency">
+                        <property name="round-digits">0</property>
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
+                        <property name="hexpand">true</property>
+                        <property name="digits">0</property>
+                        <property name="adjustment">
+                          <object class="GtkAdjustment">
+                            <property name="lower">20</property>
+                            <property name="upper">20000</property>
+                            <property name="step-increment">1</property>
+                            <property name="page-increment">10</property>
+                          </object>
+                        </property>
+                        <accessibility>
+                          <relation name="labelled-by">min_frequency_label</relation>
+                        </accessibility>
+                        <marks>
+                          <mark value="20" position="bottom">20</mark>
+                          <mark value="10000" position="bottom">10000</mark>
+                          <mark value="20000" position="bottom">20000</mark>
+                        </marks>
+                      </object>
+                    </child>
+                    <style>
+                      <class name="visualizer-setting-cell" />
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox" id="max_frequency_row">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">2</property>
+                    <child>
+                      <object class="GtkLabel" id="max_frequency_label">
+                        <property name="label" translatable="yes">Maximum frequency (Hz)</property>
+                        <property name="xalign">0</property>
+                        <property name="wrap">true</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkScale" id="max_frequency">
+                        <property name="round-digits">0</property>
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
+                        <property name="hexpand">true</property>
+                        <property name="digits">0</property>
+                        <property name="adjustment">
+                          <object class="GtkAdjustment">
+                            <property name="lower">20</property>
+                            <property name="upper">20000</property>
+                            <property name="step-increment">1</property>
+                            <property name="page-increment">10</property>
+                          </object>
+                        </property>
+                        <accessibility>
+                          <relation name="labelled-by">max_frequency_label</relation>
+                        </accessibility>
+                        <marks>
+                          <mark value="20" position="bottom">20</mark>
+                          <mark value="10000" position="bottom">10000</mark>
+                          <mark value="20000" position="bottom">20000</mark>
+                        </marks>
+                      </object>
+                    </child>
+                    <style>
+                      <class name="visualizer-setting-cell" />
+                    </style>
+                  </object>
+                </child>
                 <style>
-                  <class name="suggested-action" />
+                  <class name="visualizer-setting-pair" />
                 </style>
               </object>
             </child>
           </object>
         </child>
         <child>
-          <object class="GtkBox">
-            <property name="spacing">8</property>
-            <property name="homogeneous">true</property>
-            <property name="margin-top">8</property>
+          <object class="AdwPreferencesRow">
+            <property name="activatable">false</property>
+            <property name="selectable">false</property>
             <child>
-              <object class="GtkButton" id="copy">
-                <property name="label" translatable="yes">Copy preset</property>
-                <property name="tooltip-text" translatable="yes">Copy the current appearance to the clipboard</property>
+              <object class="GtkBox">
+                <property name="homogeneous">true</property>
+                <property name="spacing">0</property>
+                <child>
+                  <object class="GtkBox" id="min_decibels_row">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">2</property>
+                    <child>
+                      <object class="GtkLabel" id="min_decibels_label">
+                        <property name="label" translatable="yes">Minimum level (dB)</property>
+                        <property name="xalign">0</property>
+                        <property name="wrap">true</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkScale" id="min_decibels">
+                        <property name="round-digits">0</property>
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
+                        <property name="hexpand">true</property>
+                        <property name="digits">0</property>
+                        <property name="adjustment">
+                          <object class="GtkAdjustment">
+                            <property name="lower">-120</property>
+                            <property name="upper">0</property>
+                            <property name="step-increment">1</property>
+                            <property name="page-increment">10</property>
+                          </object>
+                        </property>
+                        <accessibility>
+                          <relation name="labelled-by">min_decibels_label</relation>
+                        </accessibility>
+                        <marks>
+                          <mark value="-120" position="bottom">-120</mark>
+                          <mark value="-60" position="bottom">-60</mark>
+                          <mark value="0" position="bottom">0</mark>
+                        </marks>
+                      </object>
+                    </child>
+                    <style>
+                      <class name="visualizer-setting-cell" />
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox" id="max_decibels_row">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">2</property>
+                    <child>
+                      <object class="GtkLabel" id="max_decibels_label">
+                        <property name="label" translatable="yes">Maximum level (dB)</property>
+                        <property name="xalign">0</property>
+                        <property name="wrap">true</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkScale" id="max_decibels">
+                        <property name="round-digits">0</property>
+                        <style>
+                          <class name="playback-setting-scale" />
+                        </style>
+                        <property name="hexpand">true</property>
+                        <property name="digits">0</property>
+                        <property name="adjustment">
+                          <object class="GtkAdjustment">
+                            <property name="lower">-120</property>
+                            <property name="upper">0</property>
+                            <property name="step-increment">1</property>
+                            <property name="page-increment">10</property>
+                          </object>
+                        </property>
+                        <accessibility>
+                          <relation name="labelled-by">max_decibels_label</relation>
+                        </accessibility>
+                        <marks>
+                          <mark value="-120" position="bottom">-120</mark>
+                          <mark value="-60" position="bottom">-60</mark>
+                          <mark value="0" position="bottom">0</mark>
+                        </marks>
+                      </object>
+                    </child>
+                    <style>
+                      <class name="visualizer-setting-cell" />
+                    </style>
+                  </object>
+                </child>
+                <style>
+                  <class name="visualizer-setting-pair" />
+                </style>
               </object>
             </child>
-            <child>
-              <object class="GtkButton" id="paste">
-                <property name="label" translatable="yes">Paste preset</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwComboRow" id="weighting">
+            <property name="title" translatable="yes">Weighting</property>
+            <property name="model">
+              <object class="GtkStringList">
+                <items>
+                  <item translatable="yes">None</item>
+                  <item translatable="yes">A</item>
+                  <item translatable="yes">C</item>
+                </items>
               </object>
-            </child>
+            </property>
           </object>
         </child>
       </object>
@@ -80,16 +342,15 @@
                   <item translatable="yes">Filled spectrum</item>
                   <item translatable="yes">Mirrored bars</item>
                   <item translatable="yes">Circular spectrum</item>
+                  <item translatable="yes">Ribbon</item>
+                  <item translatable="yes">Halo</item>
                 </items>
               </object>
             </property>
           </object>
         </child>
-        <child>
-          <object class="AdwSwitchRow" id="ignore_volume">
-            <property name="title" translatable="yes">Ignore playback volume</property>
-          </object>
-        </child>
+
+
         <child>
           <object class="AdwActionRow" id="bar_count_row">
             <property name="title" translatable="yes">Bar count</property>
@@ -102,26 +363,31 @@
                 <property name="digits">0</property>
                 <property name="round-digits">0</property>
                 <property name="adjustment">
-                  <object class="GtkAdjustment">
+                  <object class="GtkAdjustment" id="bar_count_adjustment">
                     <property name="lower">8</property>
-                    <property name="upper">128</property>
+                    <property name="upper">256</property>
                     <property name="step-increment">1</property>
                     <property name="page-increment">8</property>
                     <property name="value">52</property>
                   </object>
                 </property>
+
                 <marks>
                   <mark value="8" position="bottom">8</mark>
-                  <mark value="32" position="bottom">32</mark>
-                  <mark value="52" position="bottom">52</mark>
-                  <mark value="80" position="bottom">80</mark>
-                  <mark value="104" position="bottom">104</mark>
+                  <mark value="32" position="bottom"></mark>
+                  <mark value="64" position="bottom">64</mark>
+                  <mark value="96" position="bottom"></mark>
                   <mark value="128" position="bottom">128</mark>
+                  <mark value="160" position="bottom"></mark>
+                  <mark value="192" position="bottom">192</mark>
+                  <mark value="224" position="bottom"></mark>
+                  <mark value="256" position="bottom">256</mark>
                 </marks>
                 <style><class name="playback-setting-scale" /></style>
                 <accessibility><relation name="labelled-by">bar_count_row</relation></accessibility>
               </object>
             </child>
+
           </object>
         </child>
         <child>
@@ -139,6 +405,11 @@
                 <property name="activatable-widget">shadow_ratio</property>
                 <child type="suffix">
                   <object class="GtkScale" id="shadow_ratio">
+                    <marks>
+                      <mark value="0" position="bottom">0</mark>
+                      <mark value="50" position="bottom">50</mark>
+                      <mark value="95" position="bottom">95</mark>
+                    </marks>
                     <property name="orientation">horizontal</property>
                     <property name="width-request">180</property>
                     <property name="valign">center</property>
@@ -164,6 +435,11 @@
                 <property name="activatable-widget">shadow_opacity</property>
                 <child type="suffix">
                   <object class="GtkScale" id="shadow_opacity">
+                    <marks>
+                      <mark value="0" position="bottom">0</mark>
+                      <mark value="50" position="bottom">50</mark>
+                      <mark value="100" position="bottom">100</mark>
+                    </marks>
                     <property name="orientation">horizontal</property>
                     <property name="width-request">180</property>
                     <property name="valign">center</property>
@@ -189,6 +465,11 @@
                 <property name="activatable-widget">shadow_brightness</property>
                 <child type="suffix">
                   <object class="GtkScale" id="shadow_brightness">
+                    <marks>
+                      <mark value="0" position="bottom">0</mark>
+                      <mark value="100" position="bottom">100</mark>
+                      <mark value="200" position="bottom">200</mark>
+                    </marks>
                     <property name="orientation">horizontal</property>
                     <property name="width-request">180</property>
                     <property name="valign">center</property>
@@ -322,9 +603,13 @@
             <property name="activatable">false</property>
             <property name="selectable">false</property>
             <child>
-              <object class="GtkBox">
+              <object class="GtkFlowBox">
+                <property name="row-spacing">0</property>
+                <property name="column-spacing">0</property>
+                <property name="min-children-per-line">1</property>
+                <property name="max-children-per-line">3</property>
+                <property name="selection-mode">none</property>
                 <property name="homogeneous">true</property>
-                <property name="spacing">0</property>
                 <child>
                   <object class="GtkBox" id="spacing_row">
                     <property name="orientation">vertical</property>
@@ -338,6 +623,11 @@
                     </child>
                     <child>
                       <object class="GtkScale" id="spacing">
+                        <marks>
+                          <mark value="0" position="bottom">0</mark>
+                          <mark value="6" position="bottom">6</mark>
+                          <mark value="12" position="bottom">12</mark>
+                        </marks>
                         <style>
                           <class name="playback-setting-scale" />
                         </style>
@@ -374,6 +664,11 @@
                     </child>
                     <child>
                       <object class="GtkScale" id="opacity">
+                        <marks>
+                          <mark value="0" position="bottom">0</mark>
+                          <mark value="50" position="bottom">50</mark>
+                          <mark value="100" position="bottom">100</mark>
+                        </marks>
                         <style>
                           <class name="playback-setting-scale" />
                         </style>
@@ -397,18 +692,7 @@
                     </style>
                   </object>
                 </child>
-                <style>
-                  <class name="visualizer-setting-pair" />
-                </style>
-              </object>
-            </child>
-          </object>
-        </child>
-        <child>
-          <object class="AdwPreferencesRow">
-            <property name="activatable">false</property>
-            <property name="selectable">false</property>
-            <child>
+                <child>
               <object class="GtkBox">
                 <property name="orientation">vertical</property>
                 <property name="spacing">2</property>
@@ -425,10 +709,7 @@
                     <marks>
                       <mark value="30" position="bottom">30</mark>
                       <mark value="60" position="bottom">60</mark>
-                      <mark value="90" position="bottom">90</mark>
                       <mark value="120" position="bottom">120</mark>
-                      <mark value="144" position="bottom">144</mark>
-                      <mark value="165" position="bottom">165</mark>
                       <mark value="180" position="bottom">180</mark>
                     </marks>
                     <property name="hexpand">true</property>
@@ -449,8 +730,14 @@
                 <style><class name="visualizer-setting-cell" /></style>
               </object>
             </child>
+          <style>
+                  <class name="visualizer-setting-pair" />
+                </style>
+              </object>
+            </child>
           </object>
         </child>
+
       </object>
     </child>
     <child>
@@ -477,6 +764,11 @@
                     </child>
                     <child>
                       <object class="GtkScale" id="sidebar_opacity">
+                        <marks>
+                          <mark value="0" position="bottom">0</mark>
+                          <mark value="50" position="bottom">50</mark>
+                          <mark value="100" position="bottom">100</mark>
+                        </marks>
                         <style>
                           <class name="playback-setting-scale" />
                         </style>
@@ -513,6 +805,11 @@
                     </child>
                     <child>
                       <object class="GtkScale" id="fullscreen_opacity">
+                        <marks>
+                          <mark value="0" position="bottom">0</mark>
+                          <mark value="50" position="bottom">50</mark>
+                          <mark value="100" position="bottom">100</mark>
+                        </marks>
                         <style>
                           <class name="playback-setting-scale" />
                         </style>
@@ -569,6 +866,11 @@
                     </child>
                     <child>
                       <object class="GtkScale" id="rise">
+                        <marks>
+                          <mark value="1" position="bottom">1</mark>
+                          <mark value="50" position="bottom">50</mark>
+                          <mark value="100" position="bottom">100</mark>
+                        </marks>
                         <style>
                           <class name="playback-setting-scale" />
                         </style>
@@ -605,6 +907,11 @@
                     </child>
                     <child>
                       <object class="GtkScale" id="fall">
+                        <marks>
+                          <mark value="1" position="bottom">1</mark>
+                          <mark value="50" position="bottom">50</mark>
+                          <mark value="100" position="bottom">100</mark>
+                        </marks>
                         <style>
                           <class name="playback-setting-scale" />
                         </style>
@@ -660,6 +967,11 @@
                         </child>
                         <child>
                           <object class="GtkScale" id="peak_hold">
+                            <marks>
+                              <mark value="0" position="bottom">0</mark>
+                              <mark value="2.5" position="bottom">2.5</mark>
+                              <mark value="5" position="bottom">5</mark>
+                            </marks>
                             <style>
                               <class name="playback-setting-scale" />
                             </style>
@@ -696,6 +1008,11 @@
                         </child>
                         <child>
                           <object class="GtkScale" id="peak_fall">
+                            <marks>
+                              <mark value="1" position="bottom">1</mark>
+                              <mark value="100" position="bottom">100</mark>
+                              <mark value="200" position="bottom">200</mark>
+                            </marks>
                             <style>
                               <class name="playback-setting-scale" />
                             </style>
@@ -774,5 +1091,19 @@
       <widget name="peak_hold_label" />
       <widget name="peak_fall_label" />
     </widgets>
+  </object>
+  <object class="GtkStringList" id="builtin_names"><items>
+    <item translatable="yes">Rounded spectrum</item><item translatable="yes">Circular spectrum</item>
+    <item translatable="yes">Soft spectrum</item><item translatable="yes">Centered bars</item>
+    <item translatable="yes">LED spectrum</item><item translatable="yes">Ribbon</item><item translatable="yes">Halo</item>
+  </items></object>
+  <object class="GtkLabel" id="custom_title"><property name="label" translatable="yes">Custom</property></object>
+  <object class="GtkSizeGroup">
+    <property name="mode">vertical</property>
+    <widgets><widget name="min_frequency_label" /><widget name="max_frequency_label" /></widgets>
+  </object>
+  <object class="GtkSizeGroup">
+    <property name="mode">vertical</property>
+    <widgets><widget name="min_decibels_label" /><widget name="max_decibels_label" /></widgets>
   </object>
 </interface>

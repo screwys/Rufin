@@ -269,11 +269,11 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     fun visualizerFrameLimit(value: Int) = action { changeSettings { it.setVisualizerFrameLimit(value.toUInt()) } }
     fun visualizerPreset(slot: ULong, save: Boolean) = action { changeSettings { it.updateVisualizerPreset(slot, save) } }
     fun resetVisualizer() = action { changeSettings { it.resetVisualizerAppearance() } }
-    fun pasteVisualizer(text: String) = action { changeSettings { it.pasteVisualizerPreset(text) } }
-    fun copyVisualizer(copy: (String) -> Unit) = action {
+    suspend fun importVisualizer(text: String) = changeSettings { it.importVisualizerPreset(text) }
+    fun exportVisualizer(export: (String) -> Unit) = action {
         val current = settingsOwner ?: return@action
-        val text = withContext(Dispatchers.IO) { current.copyVisualizerPreset() }
-        copy(text)
+        val text = withContext(Dispatchers.IO) { current.exportVisualizerPreset() }
+        export(text)
     }
     fun searchLyrics(token: CurrentMediaId, artist: String, title: String) = action {
         val query = LyricsQuery(artist.trim(), title.trim())

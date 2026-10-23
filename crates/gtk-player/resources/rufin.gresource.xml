@@ -19,7 +19,6 @@
     <file compressed="true">player/sidebar_split.ui</file>
     <file compressed="true">player/lyrics/settings.ui</file>
     <file compressed="true">player/visualizer_settings.ui</file>
-    <file compressed="true">player/visualizer_paste.ui</file>
     <file compressed="true">player/color_chooser.ui</file>
     <file compressed="true">player/playback_settings.ui</file>
     <file compressed="true">player/transition_settings.ui</file>

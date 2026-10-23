@@ -1108,16 +1108,17 @@ async fn stream_access_and_visualizer_settings_leave_the_audible_run_untouched()
         assert_eq!(session.sequence.selected().unwrap().position, position);
         assert_eq!(session.sequence.progress_millis(), 42_000);
     }
-    for ignore_volume in [false, true] {
+    for (ignore_volume, fft_size) in [(false, 8_192), (true, 16_384), (true, 32_768)] {
         commands.lock().unwrap().clear();
         let mut settings = session.settings.clone();
         settings.visualizer_ignore_volume = ignore_volume;
+        settings.visualizer_fft_size = fft_size;
         session
             .handle_command(Command::UpdateSettings(settings), &sample)
             .unwrap();
         let commands = commands.lock().unwrap();
         assert!(commands.iter().any(|command| matches!(command,
-            BackendCommand::ConfigureAudio(settings) if settings.visualizer_ignore_volume == ignore_volume)));
+            BackendCommand::ConfigureAudio(settings) if settings.visualizer_ignore_volume == ignore_volume && settings.visualizer_fft_size == fft_size)));
         assert!(commands.iter().all(|command| matches!(
             command,
             BackendCommand::ConfigureAudio(_) | BackendCommand::PrepareNext { .. }

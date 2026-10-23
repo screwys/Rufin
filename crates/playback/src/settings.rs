@@ -115,6 +115,8 @@ macro_rules! playback_preference_fields {
                 muted: bool = false;
                 #[serde(default = "default_true")]
                 visualizer_ignore_volume: bool = true => set_visualizer_ignore_volume;
+                #[serde(default = "default_visualizer_fft_size")]
+                visualizer_fft_size: u32 = default_visualizer_fft_size() => set_visualizer_fft_size;
             }
             migrated {
                 loudness_normalization: LoudnessNormalization = LoudnessNormalization::ReplayGain => set_loudness_normalization;
@@ -205,6 +207,10 @@ impl PlaybackSettings {
             .crossfade_seconds
             .clamp(MIN_CROSSFADE_SECONDS, MAX_CROSSFADE_SECONDS);
         self.playback_rate = sanitize_playback_rate(self.playback_rate);
+        self.visualizer_fft_size = self
+            .visualizer_fft_size
+            .clamp(1_024, 32_768)
+            .next_power_of_two();
         self.ebu_r128_target_lufs = sanitize_ebu_r128_target(self.ebu_r128_target_lufs);
         self.volume = sanitize_volume(self.volume);
         if self.audio_output.as_deref().is_some_and(|output| {
@@ -263,6 +269,10 @@ fn sanitize_ebu_r128_target(target: f64) -> f64 {
     } else {
         DEFAULT_EBU_R128_TARGET_LUFS
     }
+}
+
+fn default_visualizer_fft_size() -> u32 {
+    4_096
 }
 
 fn default_true() -> bool {
@@ -386,10 +396,12 @@ mod tests {
             .expect("restore playback settings without pitch preservation");
         assert!(restored.preserve_pitch);
         assert!(restored.visualizer_ignore_volume);
+        assert_eq!(restored.visualizer_fft_size, 4_096);
 
         let settings = PlaybackSettings {
             preserve_pitch: false,
             visualizer_ignore_volume: false,
+            visualizer_fft_size: 16_384,
             ..PlaybackSettings::default()
         };
         let restored = serde_json::from_value::<PlaybackSettings>(
@@ -398,6 +410,7 @@ mod tests {
         .expect("restore pitch preservation");
         assert!(!restored.preserve_pitch);
         assert!(!restored.visualizer_ignore_volume);
+        assert_eq!(restored.visualizer_fft_size, 16_384);
     }
 
     #[test]

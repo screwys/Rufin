@@ -1,7 +1,7 @@
 use rufin_core::settings::visualizer::{
     VisualizerPeak, visualizer_accent_gradient, visualizer_bar_levels, visualizer_column_geometry,
     visualizer_radial_shadow_geometry, visualizer_row_geometry, visualizer_shadow_geometry,
-    visualizer_smoothed_level, visualizer_smoothing_weights,
+    visualizer_smoothed_level, visualizer_smoothing_weights, visualizer_spectrum_levels,
 };
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -557,6 +557,7 @@ impl AndroidPlayer {
         accent: AndroidRgb,
     ) -> AndroidVisualizerDrawing {
         let (fps_limit, appearance) = self.products.settings.visualizer_render_settings();
+        let targets = visualizer_spectrum_levels(&targets, &appearance);
         let mut state = self
             .drawing
             .lock()
@@ -599,17 +600,20 @@ impl AndroidPlayer {
         }
         let (columns, cell) = visualizer_column_geometry(
             width,
-            appearance.bar_count.clamp(8, 128) as usize,
+            appearance.bar_count.clamp(8, 256) as usize,
             appearance.spacing,
         );
         let (main_height, shadow_height) = visualizer_shadow_geometry(height, &appearance);
-        let (inward_shadow_scale, inward_shadow_limit) =
-            if appearance.style == rufin_core::settings::visualizer::VisualizerStyle::Circular {
-                let size = width.min(main_height);
-                visualizer_radial_shadow_geometry(size * 0.22, size * 0.25, &appearance)
-            } else {
-                (0.0, 0.0)
-            };
+        let (inward_shadow_scale, inward_shadow_limit) = if matches!(
+            appearance.style,
+            rufin_core::settings::visualizer::VisualizerStyle::Circular
+                | rufin_core::settings::visualizer::VisualizerStyle::Halo
+        ) {
+            let size = width.min(main_height);
+            visualizer_radial_shadow_geometry(size * 0.22, size * 0.25, &appearance)
+        } else {
+            (0.0, 0.0)
+        };
         let (rows, row_height) = visualizer_row_geometry(main_height, cell, 2.0);
         let peak_levels = state
             .peaks

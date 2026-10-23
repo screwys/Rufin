@@ -153,6 +153,7 @@ pub struct BackendAudioSettings {
     pub muted: bool,
     pub fade_on_status_change: bool,
     pub visualizer_ignore_volume: bool,
+    pub visualizer_fft_size: u32,
 }
 
 impl Default for BackendAudioSettings {
@@ -181,6 +182,7 @@ impl From<PlaybackSettings> for BackendAudioSettings {
             muted: settings.muted,
             fade_on_status_change: settings.audio_fade_on_status_change,
             visualizer_ignore_volume: settings.visualizer_ignore_volume,
+            visualizer_fft_size: settings.visualizer_fft_size,
         }
     }
 }

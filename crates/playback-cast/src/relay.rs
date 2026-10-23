@@ -84,6 +84,7 @@ impl PublishedResource {
 }
 
 pub(crate) struct RelayServer {
+    pub(crate) visualizer_fft_size: usize,
     base_url: String,
     target_is_local: bool,
     proxy_media: Arc<AtomicBool>,
@@ -145,6 +146,7 @@ impl RelayServer {
             IpAddr::V6(ip) => format!("[{ip}]"),
         };
         Ok(Self {
+            visualizer_fft_size: 4_096,
             base_url: format!("http://{host}:{}", address.port()),
             target_is_local: target_is_local(target),
             proxy_media,
@@ -196,7 +198,7 @@ impl RelayServer {
                     processing: Some(request.processing),
                     start_offset_millis: logical_offset_millis,
                     duration_millis: resource_duration_millis,
-                    visualizer: true,
+                    visualizer_fft_size: Some(self.visualizer_fft_size),
                 },
                 cancelled: Arc::new(AtomicBool::new(false)),
                 generated: OnceCell::new(),

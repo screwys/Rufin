@@ -1,6 +1,9 @@
 use crate::PlayerUi;
 use adw::prelude::*;
-use rufin_core::settings::visualizer::{VisualizerAppearance, VisualizerPreset, VisualizerStyle};
+use rufin_core::settings::visualizer::{
+    VisualizerAppearance, VisualizerFrequencyScale, VisualizerPreset, VisualizerStyle,
+    VisualizerWeighting,
+};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -9,6 +12,8 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
     let builder = gtk_widgets::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
         page: adw::PreferencesPage,
+        builtin_names: gtk::StringList,
+        custom_title: gtk::Label,
         fps_limit: gtk::Scale,
         ignore_volume: adw::SwitchRow,
         bar_count: gtk::Scale,
@@ -19,6 +24,12 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         shadow_brightness: gtk::Scale,
         shadow_fit: adw::SwitchRow,
         style: adw::ComboRow,
+        frequency_scale: adw::ComboRow,
+        weighting: adw::ComboRow,
+        min_frequency: gtk::Scale,
+        max_frequency: gtk::Scale,
+        min_decibels: gtk::Scale,
+        max_decibels: gtk::Scale,
         accent: adw::SwitchRow,
         start_color: gtk::Button,
         end_color: gtk::Button,
@@ -37,13 +48,21 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
         peak_fall: gtk::Scale,
         presets: adw::ComboRow,
         save: gtk::Button,
+        duplicate: gtk::Button,
+        save_icon: gtk::Image,
+        rename: gtk::Button,
+        delete: gtk::Button,
+        fft_size: adw::ComboRow,
         reset: gtk::Button,
-        copy: gtk::Button,
-        paste: gtk::Button,
-        saved_message: gtk::Label,
+        export: gtk::Button,
+        import: gtk::Button,
     });
 
     for scale in [
+        &min_frequency,
+        &max_frequency,
+        &min_decibels,
+        &max_decibels,
         &fps_limit,
         &bar_count,
         &shadow_ratio,
@@ -72,45 +91,100 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
             .playback
             .visualizer_ignore_volume,
     );
-    let weak_shell = Rc::downgrade(shell);
-    ignore_volume.connect_active_notify(move |row| {
-        if let Some(shell) = weak_shell.upgrade() {
-            shell
-                .settings
-                .set_app_setting("visualizer volume", row.is_active(), |settings| {
-                    &mut settings.playback.visualizer_ignore_volume
-                });
-        }
-    });
 
     let limit = shell.settings.current.borrow().visualizer.fps_limit;
     fps_limit.set_value(limit as f64);
     gtk_widgets::scale::install_scale_scroll_forwarding(&fps_limit);
-    let weak_shell = Rc::downgrade(shell);
-    fps_limit.connect_value_changed(move |row| {
-        if let Some(shell) = weak_shell.upgrade() {
-            shell
-                .settings
-                .update_app_settings("visualizer frame rate", |settings| {
-                    let limit = row.value() as u32;
-                    let changed = settings.visualizer.fps_limit != limit;
-                    settings.visualizer.fps_limit = limit;
-                    changed
-                });
-        }
-    });
 
-    presets.set_selected(shell.settings.current.borrow().visualizer.selected_preset() as u32);
+    fft_size.set_selected(
+        shell
+            .settings
+            .current
+            .borrow()
+            .playback
+            .visualizer_fft_size
+            .ilog2()
+            .saturating_sub(10),
+    );
+    let indicator = crate::preset_name::PresetIndicator::default();
+    let preset_names = gtk::StringList::new(&[]);
+    presets.set_model(Some(&preset_names));
     let syncing = Rc::new(Cell::new(false));
     // The dialog owns the controls. Refresh callbacks retain only weak references to them.
+    let refresh_presets: Rc<dyn Fn()> = {
+        let shell = Rc::downgrade(shell);
+        let syncing = Rc::clone(&syncing);
+        let save = save.downgrade();
+        let presets = presets.downgrade();
+        let rename = rename.downgrade();
+        let delete = delete.downgrade();
+        Rc::new(move || {
+            let Some(shell) = shell.upgrade() else { return };
+            let settings = shell.settings.current.borrow().visualizer.clone();
+            let previous = syncing.replace(true);
+            let selected = settings.selected_preset();
+            if let Some(row) = presets.upgrade() {
+                let mut names = settings
+                    .presets
+                    .iter()
+                    .enumerate()
+                    .map(|(index, preset)| {
+                        builtin_names
+                            .string(index as u32)
+                            .map(|name| name.to_string())
+                            .unwrap_or_else(|| preset.name.clone())
+                    })
+                    .collect::<Vec<_>>();
+                names.insert(0, custom_title.text().to_string());
+                // Rebuilding the list during selection queues another selection notification.
+                if preset_names.n_items() as usize != names.len()
+                    || names.iter().enumerate().any(|(index, name)| {
+                        preset_names.string(index as u32).as_deref() != Some(name.as_str())
+                    })
+                {
+                    preset_names.splice(
+                        0,
+                        preset_names.n_items(),
+                        &names.iter().map(String::as_str).collect::<Vec<_>>(),
+                    );
+                }
+                row.set_selected(selected.map_or(0, |index| index as u32 + 1));
+                indicator.update(&row, settings.modified());
+            }
+            if let Some(button) = save.upgrade() {
+                button.set_sensitive(settings.modified());
+            }
+            let custom = selected.is_some_and(|index| {
+                index >= rufin_core::settings::visualizer::BUILTIN_PRESET_COUNT
+                    && index < settings.presets.len()
+            });
+            if let Some(button) = rename.upgrade() {
+                button.set_sensitive(custom);
+            }
+            if let Some(button) = delete.upgrade() {
+                button.set_sensitive(custom);
+            }
+            syncing.set(previous);
+        })
+    };
     let refresh: Rc<dyn Fn()> = {
+        let refresh_presets = Rc::clone(&refresh_presets);
         let shell = Rc::downgrade(shell);
         let syncing = Rc::clone(&syncing);
         let style = style.downgrade();
+        let fps_limit = fps_limit.downgrade();
+        let fft_size = fft_size.downgrade();
+        let ignore_volume = ignore_volume.downgrade();
+        let frequency_scale = frequency_scale.downgrade();
+        let weighting = weighting.downgrade();
         let accent = accent.downgrade();
         let colors = [start_color_swatch.downgrade(), end_color_swatch.downgrade()];
         let color_rows = [start_color_row.downgrade(), end_color_row.downgrade()];
         let scales = [
+            &min_frequency,
+            &max_frequency,
+            &min_decibels,
+            &max_decibels,
             &bar_count,
             &shadow_ratio,
             &shadow_opacity,
@@ -134,8 +208,19 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
                 return;
             };
             let settings = shell.settings.current.borrow().visualizer.clone();
-            let appearance = settings.appearance;
+            let playback = shell.settings.current.borrow().playback.clone();
+            refresh_presets();
             syncing.set(true);
+            if let Some(row) = fps_limit.upgrade() {
+                row.set_value(settings.fps_limit as f64);
+            }
+            if let Some(row) = fft_size.upgrade() {
+                row.set_selected(playback.visualizer_fft_size.ilog2().saturating_sub(10));
+            }
+            if let Some(row) = ignore_volume.upgrade() {
+                row.set_active(playback.visualizer_ignore_volume);
+            }
+            let appearance = settings.appearance;
             if let Some(style) = style.upgrade() {
                 style.set_selected(
                     VisualizerStyle::ALL
@@ -143,6 +228,20 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
                         .position(|style| *style == appearance.style)
                         .unwrap() as u32,
                 );
+            }
+            if let Some(row) = frequency_scale.upgrade() {
+                row.set_selected(match appearance.frequency_scale {
+                    VisualizerFrequencyScale::Erb => 0,
+                    VisualizerFrequencyScale::Logarithmic => 1,
+                    VisualizerFrequencyScale::Linear => 2,
+                });
+            }
+            if let Some(row) = weighting.upgrade() {
+                row.set_selected(match appearance.weighting {
+                    VisualizerWeighting::None => 0,
+                    VisualizerWeighting::A => 1,
+                    VisualizerWeighting::C => 2,
+                });
             }
             if let Some(accent) = accent.upgrade() {
                 accent.set_active(appearance.colors.is_none());
@@ -158,6 +257,10 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
                 }
             }
             let values = [
+                appearance.min_frequency,
+                appearance.max_frequency,
+                appearance.min_decibels,
+                appearance.max_decibels,
                 f64::from(appearance.bar_count),
                 appearance.shadow_ratio * 100.0,
                 appearance.shadow_opacity * 100.0,
@@ -195,36 +298,118 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
     };
     refresh();
 
-    let weak_shell = Rc::downgrade(shell);
+    let edits = Rc::new(VisualizerEdits {
+        shell: Rc::downgrade(shell),
+        pending: Cell::new(0),
+        catalog_pending: Cell::new(0),
+        catalog_controls: [
+            presets.clone().upcast::<gtk::Widget>(),
+            save.clone().upcast(),
+            duplicate.clone().upcast(),
+            rename.clone().upcast(),
+            delete.clone().upcast(),
+            import.clone().upcast(),
+            export.clone().upcast(),
+        ]
+        .map(|widget| widget.downgrade()),
+        refresh_catalog: refresh_presets,
+        refresh,
+    });
+    let ready = edits.commit("load visualizer preferences", true, |_| false);
+    gtk::glib::spawn_future_local(async move {
+        ready.await;
+    });
+    let editor = Rc::clone(&edits);
     let changing = Rc::clone(&syncing);
-    style.connect_selected_notify(move |row| {
+    ignore_volume.connect_active_notify(move |row| {
         if changing.get() {
             return;
         }
-        if let (Some(shell), Some(style)) = (
-            weak_shell.upgrade(),
-            VisualizerStyle::ALL.get(row.selected() as usize),
-        ) {
-            update_appearance(&shell, |appearance| appearance.style = *style);
+        let value = row.is_active();
+        editor.apply("visualizer volume", move |settings| {
+            let changed = settings.playback.visualizer_ignore_volume != value;
+            settings.playback.visualizer_ignore_volume = value;
+            changed
+        });
+    });
+    let editor = Rc::clone(&edits);
+    let changing = Rc::clone(&syncing);
+    fps_limit.connect_value_changed(move |row| {
+        if changing.get() {
+            return;
+        }
+        let value = row.value() as u32;
+        editor.apply("visualizer frame rate", move |settings| {
+            let changed = settings.visualizer.fps_limit != value;
+            settings.visualizer.fps_limit = value;
+            changed
+        });
+    });
+    let editor = Rc::clone(&edits);
+    let changing = Rc::clone(&syncing);
+    fft_size.connect_selected_notify(move |row| {
+        if changing.get() {
+            return;
+        }
+        let value = 1_u32 << (row.selected() + 10);
+        editor.apply("visualizer FFT", move |settings| {
+            let changed = settings.playback.visualizer_fft_size != value;
+            settings.playback.visualizer_fft_size = value;
+            changed
+        });
+    });
+    let editor = Rc::clone(&edits);
+    let changing = Rc::clone(&syncing);
+    style.connect_selected_notify(move |row| {
+        if !changing.get()
+            && let Some(style) = VisualizerStyle::ALL.get(row.selected() as usize).copied()
+        {
+            editor.appearance(move |appearance| appearance.style = style);
         }
     });
+    for (row, weighting_choice) in [(frequency_scale, false), (weighting, true)] {
+        let editor = Rc::clone(&edits);
+        let syncing = Rc::clone(&syncing);
+        row.connect_selected_notify(move |row| {
+            if syncing.get() {
+                return;
+            }
+            let selected = row.selected() as usize;
+            editor.appearance(move |appearance| {
+                if weighting_choice {
+                    appearance.weighting = [
+                        VisualizerWeighting::None,
+                        VisualizerWeighting::A,
+                        VisualizerWeighting::C,
+                    ][selected];
+                } else {
+                    appearance.frequency_scale = [
+                        VisualizerFrequencyScale::Erb,
+                        VisualizerFrequencyScale::Logarithmic,
+                        VisualizerFrequencyScale::Linear,
+                    ][selected];
+                }
+            });
+        });
+    }
     macro_rules! slider {
         ($row:ident, $field:ident, $scale:expr) => {{
-            let shell = Rc::downgrade(shell);
+            let editor = Rc::clone(&edits);
             let syncing = Rc::clone(&syncing);
             gtk_widgets::scale::install_scale_scroll_forwarding(&$row);
             $row.connect_value_changed(move |row| {
                 if syncing.get() {
                     return;
                 }
-                if let Some(shell) = shell.upgrade() {
-                    update_appearance(&shell, |appearance| {
-                        appearance.$field = (row.value() / $scale) as _
-                    });
-                }
+                let value = row.value() / $scale;
+                editor.appearance(move |appearance| appearance.$field = value as _);
             });
         }};
     }
+    slider!(min_frequency, min_frequency, 1.0);
+    slider!(max_frequency, max_frequency, 1.0);
+    slider!(min_decibels, min_decibels, 1.0);
+    slider!(max_decibels, max_decibels, 1.0);
     slider!(bar_count, bar_count, 1.0);
     slider!(shadow_ratio, shadow_ratio, 100.0);
     slider!(shadow_opacity, shadow_opacity, 100.0);
@@ -237,55 +422,51 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
     slider!(fall, fall, 100.0);
     slider!(peak_hold, peak_hold, 1.0);
     slider!(peak_fall, peak_fall, 100.0);
-
     macro_rules! switch {
         ($row:ident, $field:ident) => {{
-            let weak_shell = Rc::downgrade(shell);
-            let changing = Rc::clone(&syncing);
+            let editor = Rc::clone(&edits);
+            let syncing = Rc::clone(&syncing);
             $row.connect_active_notify(move |row| {
-                if changing.get() {
+                if syncing.get() {
                     return;
                 }
-                if let Some(shell) = weak_shell.upgrade() {
-                    update_appearance(&shell, |appearance| appearance.$field = row.is_active());
-                }
+                let active = row.is_active();
+                editor.appearance(move |appearance| appearance.$field = active);
             });
         }};
     }
     switch!(mirrored, mirrored);
     switch!(shadow_fit, shadow_fit);
-    let weak_shell = Rc::downgrade(shell);
-    let changing = Rc::clone(&syncing);
-    shadow.connect_enable_expansion_notify(move |row| {
-        if changing.get() {
-            return;
-        }
-        if let Some(shell) = weak_shell.upgrade() {
-            update_appearance(&shell, |appearance| {
-                appearance.shadow = row.enables_expansion()
+    for (row, peak_choice) in [(shadow, false), (peaks, true)] {
+        let editor = Rc::clone(&edits);
+        let syncing = Rc::clone(&syncing);
+        row.connect_enable_expansion_notify(move |row| {
+            if syncing.get() {
+                return;
+            }
+            let active = row.enables_expansion();
+            editor.appearance(move |appearance| {
+                if peak_choice {
+                    appearance.peaks = active;
+                } else {
+                    appearance.shadow = active;
+                }
             });
-        }
-    });
-
-    let weak_shell = Rc::downgrade(shell);
+        });
+    }
+    let editor = Rc::clone(&edits);
     let changing = Rc::clone(&syncing);
-    let refresh_colors = Rc::clone(&refresh);
     accent.connect_active_notify(move |row| {
         if changing.get() {
             return;
         }
-        let Some(shell) = weak_shell.upgrade() else {
+        let Some(shell) = editor.shell.upgrade() else {
             return;
         };
-        let colors = if row.is_active() {
-            None
-        } else {
-            Some(crate::visualizer::accent_gradient(
-                shell.views.visualizer.sidebar_area.color(),
-            ))
-        };
-        update_appearance(&shell, |appearance| appearance.colors = colors);
-        refresh_colors();
+        let colors = (!row.is_active()).then(|| {
+            crate::visualizer::accent_gradient(shell.views.visualizer.sidebar_area.color())
+        });
+        editor.appearance(move |appearance| appearance.colors = colors);
     });
     for (index, (button, swatch)) in [
         (start_color, start_color_swatch),
@@ -305,11 +486,10 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
             context.rectangle(0.0, 0.0, width.into(), height.into());
             let _ = context.fill();
         });
-        let weak_shell = Rc::downgrade(shell);
-        let refresh_colors = Rc::clone(&refresh);
+        let editor = Rc::clone(&edits);
         let title = button.tooltip_text().unwrap();
         button.connect_clicked(move |_| {
-            let Some(shell) = weak_shell.upgrade() else {
+            let Some(shell) = editor.shell.upgrade() else {
                 return;
             };
             let Some(window) = shell.window.upgrade() else {
@@ -326,175 +506,308 @@ pub(super) fn build_visualizer_settings(shell: &Rc<PlayerUi>) -> adw::Preference
                 .colors
                 .unwrap_or(default_colors);
             let rgba = |rgb: [f32; 3]| gtk::gdk::RGBA::new(rgb[0], rgb[1], rgb[2], 1.0);
-            let initial = rgba(colors[index]);
-            let default = rgba(default_colors[index]);
-            let weak = Rc::downgrade(&shell);
-            let refresh = Rc::clone(&refresh_colors);
+            let editor = Rc::clone(&editor);
             crate::color_chooser::present_color_chooser(
                 &window,
                 &title,
-                initial,
-                move || default,
+                rgba(colors[index]),
+                move || rgba(default_colors[index]),
                 move |color| {
-                    if let Some(shell) = weak.upgrade() {
-                        update_appearance(&shell, |appearance| {
-                            let colors = appearance.colors.get_or_insert(default_colors);
-                            colors[index] = [color.red(), color.green(), color.blue()];
-                        });
-                        refresh();
-                    }
+                    let color = [color.red(), color.green(), color.blue()];
+                    editor.appearance(move |appearance| {
+                        appearance.colors.get_or_insert(default_colors)[index] = color;
+                    });
                 },
             );
         });
     }
-    let weak_shell = Rc::downgrade(shell);
+    let feedback: Rc<dyn Fn()> = Rc::new(gtk_widgets::feedback::icon_action(
+        save.upcast_ref(),
+        &save_icon,
+    ));
+    for (button, action) in [(save, 0), (duplicate, 1), (rename, 2)] {
+        let editor = Rc::clone(&edits);
+        let presets = presets.downgrade();
+        let feedback = Rc::clone(&feedback);
+        button.connect_clicked(move |_| {
+            let Some(shell) = editor.shell.upgrade() else {
+                return;
+            };
+            let slot = presets
+                .upgrade()
+                .and_then(|row| row.selected().checked_sub(1))
+                .map(|slot| slot as usize);
+            if action == 2
+                && !slot.is_some_and(|slot| {
+                    slot >= rufin_core::settings::visualizer::BUILTIN_PRESET_COUNT
+                })
+            {
+                return;
+            }
+            if action == 0
+                && slot.is_some_and(|slot| {
+                    slot >= rufin_core::settings::visualizer::BUILTIN_PRESET_COUNT
+                })
+            {
+                let saved = editor.commit("save visualizer preset", false, |settings| {
+                    if let Some(slot) = settings.visualizer.save_target() {
+                        settings.visualizer.save_preset(slot);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                let feedback = Rc::clone(&feedback);
+                gtk::glib::spawn_future_local(async move {
+                    if saved.await {
+                        feedback();
+                    }
+                });
+                return;
+            }
+            let Some(window) = shell.window.upgrade() else {
+                return;
+            };
+            let name = slot
+                .and_then(|slot| {
+                    shell
+                        .settings
+                        .current
+                        .borrow()
+                        .visualizer
+                        .presets
+                        .get(slot)
+                        .map(|preset| preset.name.clone())
+                })
+                .unwrap_or_default();
+            let editor = Rc::clone(&editor);
+            let feedback = Rc::clone(&feedback);
+            crate::preset_name::present(
+                &window,
+                match action {
+                    2 => crate::preset_name::NameAction::Rename,
+                    1 => crate::preset_name::NameAction::Duplicate,
+                    _ => crate::preset_name::NameAction::Save,
+                },
+                &name,
+                move |name| {
+                    let saved = editor.commit("name visualizer preset", true, move |settings| {
+                        if action == 2 {
+                            if let Some(slot) = slot {
+                                settings.visualizer.rename_preset(slot, name);
+                            }
+                        } else {
+                            settings.visualizer.save_preset_as(name);
+                        }
+                        true
+                    });
+                    let feedback = Rc::clone(&feedback);
+                    gtk::glib::spawn_future_local(async move {
+                        if saved.await && action == 0 {
+                            feedback();
+                        }
+                    });
+                },
+            );
+        });
+    }
+    let editor = Rc::clone(&edits);
+    let preset_row = presets.downgrade();
+    delete.connect_clicked(move |_| {
+        let Some(shell) = editor.shell.upgrade() else {
+            return;
+        };
+        let resource = crate::ui_resource::EQUALIZER_DIALOGS_RESOURCE;
+        let builder = gtk_widgets::ui_resource::builder(resource);
+        let dialog: adw::AlertDialog =
+            gtk_widgets::ui_resource::object(&builder, resource, "confirm");
+        let Some(slot) = preset_row
+            .upgrade()
+            .and_then(|row| row.selected().checked_sub(1))
+            .map(|slot| slot as usize)
+        else {
+            return;
+        };
+        if slot < rufin_core::settings::visualizer::BUILTIN_PRESET_COUNT {
+            return;
+        }
+        let settings = shell.settings.current.borrow().visualizer.clone();
+        let Some(preset) = settings.presets.get(slot) else {
+            return;
+        };
+        dialog.set_body(&preset.name);
+        let Some(window) = shell.window.upgrade() else {
+            return;
+        };
+        let editor = Rc::clone(&editor);
+        gtk::glib::spawn_future_local(async move {
+            if dialog.choose_future(Some(&window)).await == "accept" {
+                editor
+                    .commit("delete visualizer preset", true, move |settings| {
+                        settings.visualizer.delete_preset(slot);
+                        true
+                    })
+                    .await;
+            }
+        });
+    });
+    let editor = Rc::clone(&edits);
     let changing = Rc::clone(&syncing);
-    peaks.connect_enable_expansion_notify(move |row| {
+    presets.connect_selected_notify(move |row| {
         if changing.get() {
             return;
         }
-        if let Some(shell) = weak_shell.upgrade() {
-            update_appearance(&shell, |appearance| {
-                appearance.peaks = row.enables_expansion()
-            });
-        }
+        let selected = row.selected();
+        editor.apply("select visualizer preset", move |settings| {
+            let previous = settings.visualizer.clone();
+            if selected == 0 {
+                settings.visualizer.selected_preset = None;
+            } else {
+                settings.visualizer.select_preset(selected as usize - 1);
+            }
+            settings.visualizer != previous
+        });
     });
-
-    let weak_shell = Rc::downgrade(shell);
-    let preset_row = presets.downgrade();
-    let feedback = gtk_widgets::feedback::ControlFeedbackState::new(
-        &saved_message,
-        Rc::clone(&shell.settings),
-    );
-    let saved_message = saved_message.text();
-    save.connect_clicked(move |_| {
-        let (Some(shell), Some(row)) = (weak_shell.upgrade(), preset_row.upgrade()) else {
-            return;
-        };
-        let slot = row.selected() as usize;
-        if shell
-            .settings
-            .update_app_settings("save visualizer preset", |settings| {
-                settings.visualizer.save_preset(slot);
-                true
-            })
-            .is_some()
-        {
-            feedback.show_feedback_toast(saved_message.to_string());
-        }
-    });
-    let weak_shell = Rc::downgrade(shell);
-    let refresh_applied = Rc::clone(&refresh);
-    presets.connect_selected_notify(move |row| {
-        let Some(shell) = weak_shell.upgrade() else {
-            return;
-        };
-        shell
-            .settings
-            .update_app_settings("select visualizer preset", |settings| {
-                let previous = settings.visualizer.clone();
-                settings.visualizer.select_preset(row.selected() as usize);
-                settings.visualizer != previous
-            });
-        shell.apply_visualizer_appearance();
-        refresh_applied();
-    });
-    let weak_shell = Rc::downgrade(shell);
-    let refresh_reset = Rc::clone(&refresh);
+    let editor = Rc::clone(&edits);
     reset.connect_clicked(move |_| {
-        if let Some(shell) = weak_shell.upgrade() {
-            update_appearance(&shell, |appearance| {
-                *appearance = VisualizerAppearance::default()
-            });
-            refresh_reset();
-        }
+        editor.appearance(|appearance| *appearance = VisualizerAppearance::default())
     });
-    let weak_shell = Rc::downgrade(shell);
-    copy.connect_clicked(move |button| {
-        let Some(shell) = weak_shell.upgrade() else {
-            return;
-        };
-        let preset = VisualizerPreset {
-            appearance: shell
+    let editor = Rc::clone(&edits);
+    export.connect_clicked(move |_| {
+        let ready = editor.commit("export visualizer preset", false, |_| false);
+        let editor = Rc::clone(&editor);
+        gtk::glib::spawn_future_local(async move {
+            ready.await;
+            let Some(shell) = editor.shell.upgrade() else {
+                return;
+            };
+            let Some(window) = shell.window.upgrade() else {
+                return;
+            };
+            let text = shell
                 .settings
                 .current
                 .borrow()
                 .visualizer
-                .appearance
-                .clone(),
-        };
-        button.clipboard().set_text(&preset.to_json());
+                .current_preset()
+                .to_json();
+            crate::preset_transfer::export(&window, &["visualizer.rufin.json"], move |_| {
+                Ok(text.clone())
+            });
+        });
     });
-    let weak_shell = Rc::downgrade(shell);
-    paste.connect_clicked(move |button| {
-        if let Some(shell) = weak_shell.upgrade() {
-            present_paste_dialog(&shell, Rc::clone(&refresh), button.clipboard());
-        }
+    let editor = Rc::clone(&edits);
+    import.connect_clicked(move |_| {
+        let Some(shell) = editor.shell.upgrade() else {
+            return;
+        };
+        let Some(window) = shell.window.upgrade() else {
+            return;
+        };
+        let editor = Rc::clone(&editor);
+        crate::preset_transfer::import(&window, false, move |text, _| {
+            let result = VisualizerPreset::from_json(&text).map(|preset| {
+                editor.commit("import visualizer preset", true, move |settings| {
+                    settings.visualizer.import_preset(preset);
+                    true
+                })
+            });
+            async move {
+                let result = result.ok_or_else(|| localization::tr("Not valid"))?;
+                if !result.await {
+                    return Err(localization::tr("This isn't available"));
+                }
+                Ok(())
+            }
+        });
     });
     page
 }
 
-fn present_paste_dialog(
-    shell: &Rc<PlayerUi>,
+struct VisualizerEdits {
+    shell: std::rc::Weak<PlayerUi>,
+    pending: Cell<usize>,
+    catalog_pending: Cell<usize>,
+    catalog_controls: [gtk::glib::WeakRef<gtk::Widget>; 7],
+    refresh_catalog: Rc<dyn Fn()>,
     refresh: Rc<dyn Fn()>,
-    clipboard: gtk::gdk::Clipboard,
-) {
-    let Some(window) = shell.window.upgrade() else {
-        return;
-    };
-    let resource = crate::ui_resource::VISUALIZER_PASTE_RESOURCE;
-    let builder = gtk_widgets::ui_resource::builder(resource);
-    gtk_widgets::objects!(builder, resource, {
-        dialog: adw::Dialog,
-        text: gtk::TextView,
-        apply: gtk::Button,
-        error: gtk::Label,
-    });
-    let buffer = text.buffer();
-    let weak_buffer = buffer.downgrade();
-    gtk::glib::spawn_future_local(async move {
-        if let Ok(Some(contents)) = clipboard.read_text_future().await
-            && let Some(buffer) = weak_buffer.upgrade()
-            && buffer.char_count() == 0
-        {
-            buffer.set_text(&contents);
-        }
-    });
-    let weak_shell = Rc::downgrade(shell);
-    let close = dialog.downgrade();
-    let error_for_edit = error.downgrade();
-    buffer.connect_changed(move |_| {
-        if let Some(error) = error_for_edit.upgrade() {
-            error.set_visible(false);
-        }
-    });
-    apply.connect_clicked(move |_| {
-        let contents = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
-        let Some(preset) = VisualizerPreset::from_json(&contents) else {
-            error.set_visible(true);
-            return;
-        };
-        let Some(shell) = weak_shell.upgrade() else {
-            return;
-        };
-        update_appearance(&shell, |appearance| *appearance = preset.appearance);
-        refresh();
-        if let Some(dialog) = close.upgrade() {
-            dialog.close();
-        }
-    });
-    dialog.set_focus(Some(&text));
-    gtk_widgets::popup::present_light_dismiss_dialog(&dialog, &window);
 }
 
-fn update_appearance(shell: &PlayerUi, update: impl FnOnce(&mut VisualizerAppearance)) {
-    shell
-        .settings
-        .update_app_settings("visualizer appearance", |settings| {
+impl VisualizerEdits {
+    fn commit<F>(
+        self: &Rc<Self>,
+        action: &'static str,
+        catalog: bool,
+        edit: F,
+    ) -> impl std::future::Future<Output = bool> + use<F>
+    where
+        F: FnOnce(&mut rufin_core::settings::app::Settings) -> bool + Send + 'static,
+    {
+        let shell = self.shell.upgrade();
+        let result = shell.as_ref().map(|shell| {
+            shell
+                .settings
+                .update_app_settings_async(&shell.runtime, action, edit)
+        });
+        self.pending.set(self.pending.get() + 1);
+        if catalog {
+            self.catalog_pending.set(self.catalog_pending.get() + 1);
+            for widget in self
+                .catalog_controls
+                .iter()
+                .filter_map(|widget| widget.upgrade())
+            {
+                widget.set_sensitive(false);
+            }
+        }
+        let editor = Rc::clone(self);
+        async move {
+            let saved = match result {
+                Some(result) => result.await.is_some(),
+                None => false,
+            };
+            if let Some(shell) = shell {
+                shell.apply_visualizer_appearance();
+            }
+            editor.pending.set(editor.pending.get() - 1);
+            if catalog {
+                editor.catalog_pending.set(editor.catalog_pending.get() - 1);
+                if editor.catalog_pending.get() == 0 {
+                    for widget in editor
+                        .catalog_controls
+                        .iter()
+                        .filter_map(|widget| widget.upgrade())
+                    {
+                        widget.set_sensitive(true);
+                    }
+                    (editor.refresh_catalog)();
+                }
+            }
+            // Keep newer slider and preset choices visible until their queued edits finish.
+            if editor.pending.get() == 0 {
+                (editor.refresh)();
+            }
+            saved
+        }
+    }
+
+    fn apply(
+        self: &Rc<Self>,
+        action: &'static str,
+        edit: impl FnOnce(&mut rufin_core::settings::app::Settings) -> bool + Send + 'static,
+    ) {
+        let result = self.commit(action, false, edit);
+        gtk::glib::spawn_future_local(async move {
+            result.await;
+        });
+    }
+
+    fn appearance(self: &Rc<Self>, edit: impl FnOnce(&mut VisualizerAppearance) + Send + 'static) {
+        self.apply("visualizer appearance", move |settings| {
             let previous = settings.visualizer.clone();
-            settings.visualizer.selected_preset = Some(settings.visualizer.selected_preset());
-            update(&mut settings.visualizer.appearance);
+            edit(&mut settings.visualizer.appearance);
+            settings.visualizer.appearance.normalize_analysis();
             previous != settings.visualizer
         });
-    shell.apply_visualizer_appearance();
+    }
 }

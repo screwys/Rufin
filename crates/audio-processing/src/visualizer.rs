@@ -9,17 +9,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const VISUALIZER_FFT_SIZE: usize = 2_048;
-pub const VISUALIZER_BAND_COUNT: usize = 52;
-const VISUALIZER_MIN_FREQUENCY_HZ: f32 = 30.0;
-const VISUALIZER_MAX_FREQUENCY_HZ: f32 = 12_000.0;
-const VISUALIZER_VISIBLE_FLOOR: f64 = 0.28;
-const VISUALIZER_VISIBLE_CEILING: f64 = 0.95;
-const VISUALIZER_NORMALIZED_PEAK: f64 = 0.90;
-const VISUALIZER_MAX_GAIN: f64 = 2.35;
-const VISUALIZER_HIGH_BAND_TILT: f64 = 0.65;
+pub const VISUALIZER_BAND_COUNT: usize = 256;
+const VISUALIZER_MIN_FREQUENCY_HZ: f64 = 20.0;
+const VISUALIZER_MAX_FREQUENCY_HZ: f64 = 20_000.0;
 const VISUALIZER_MIN_EMIT_INTERVAL: Duration = Duration::from_millis(33);
-const VISUALIZER_NOISE_FLOOR_DB: f32 = -72.0;
-const VISUALIZER_CEILING_DB: f32 = -6.0;
 
 pub struct VisualizerFft {
     samples: VecDeque<f32>,
@@ -32,22 +25,32 @@ pub struct VisualizerFft {
 }
 impl VisualizerFft {
     pub fn new() -> Self {
+        Self::with_size(VISUALIZER_FFT_SIZE)
+    }
+
+    pub fn with_size(size: usize) -> Self {
         let mut planner = FftPlanner::<f32>::new();
-        let fft = planner.plan_fft_forward(VISUALIZER_FFT_SIZE);
-        let window = (0..VISUALIZER_FFT_SIZE)
+        let fft = planner.plan_fft_forward(size);
+        let window = (0..size)
             .map(|index| {
-                let position = index as f32 / (VISUALIZER_FFT_SIZE - 1) as f32;
+                let position = index as f32 / (size - 1) as f32;
                 0.5 - 0.5 * (2.0 * std::f32::consts::PI * position).cos()
             })
             .collect();
         Self {
-            samples: VecDeque::with_capacity(VISUALIZER_FFT_SIZE),
-            input: vec![Complex::new(0.0, 0.0); VISUALIZER_FFT_SIZE],
+            samples: VecDeque::with_capacity(size),
+            input: vec![Complex::new(0.0, 0.0); size],
             window,
             fft,
             last_emit: None,
             band_sample_rate: 0,
             band_ranges: Vec::new(),
+        }
+    }
+
+    pub fn set_size(&mut self, size: usize) {
+        if self.input.len() != size {
+            *self = Self::with_size(size);
         }
     }
 
@@ -57,9 +60,9 @@ impl VisualizerFft {
     }
 
     pub fn push_samples(&mut self, samples: &[f32]) {
-        let start = samples.len().saturating_sub(VISUALIZER_FFT_SIZE);
+        let start = samples.len().saturating_sub(self.input.len());
         for sample in &samples[start..] {
-            if self.samples.len() == VISUALIZER_FFT_SIZE {
+            if self.samples.len() == self.input.len() {
                 self.samples.pop_front();
             }
             self.samples.push_back(*sample);
@@ -68,7 +71,7 @@ impl VisualizerFft {
 
     pub fn push_channel_samples(&mut self, samples: &[f32], channels: usize, channel: usize) {
         for frame in samples.chunks_exact(channels) {
-            if self.samples.len() == VISUALIZER_FFT_SIZE {
+            if self.samples.len() == self.input.len() {
                 self.samples.pop_front();
             }
             self.samples.push_back(frame[channel]);
@@ -77,17 +80,17 @@ impl VisualizerFft {
 
     /// One-sided power at each FFT frequency, normalized by the window's coherent gain.
     pub fn spectrum_power(&mut self) -> Option<Vec<f64>> {
-        if self.samples.len() < VISUALIZER_FFT_SIZE {
+        if self.samples.len() < self.input.len() {
             return None;
         }
         self.transform();
         let coherent_gain = self.window.iter().map(|v| f64::from(*v)).sum::<f64>();
         Some(
-            self.input[..=VISUALIZER_FFT_SIZE / 2]
+            self.input[..=self.input.len() / 2]
                 .iter()
                 .enumerate()
                 .map(|(i, value)| {
-                    let factor = if i == 0 || i == VISUALIZER_FFT_SIZE / 2 {
+                    let factor = if i == 0 || i == self.input.len() / 2 {
                         1.0
                     } else {
                         2.0
@@ -111,7 +114,7 @@ impl VisualizerFft {
     }
 
     pub fn maybe_levels(&mut self, sample_rate: u32) -> Option<Vec<f64>> {
-        if self.samples.len() < VISUALIZER_FFT_SIZE {
+        if self.samples.len() < self.input.len() {
             return None;
         }
         let now = Instant::now();
@@ -125,16 +128,22 @@ impl VisualizerFft {
         self.levels(sample_rate)
     }
 
+    /// Linear amplitudes in canonical ERB bands; bands above Nyquist remain silent.
     pub fn levels(&mut self, sample_rate: u32) -> Option<Vec<f64>> {
-        if self.samples.len() < VISUALIZER_FFT_SIZE {
+        if self.samples.len() < self.input.len() {
             return None;
         }
         self.transform();
-        if self.band_sample_rate != sample_rate {
-            self.band_ranges = visualizer_band_ranges(sample_rate);
+        if self.band_sample_rate != sample_rate || self.band_ranges.is_empty() {
+            self.band_ranges = visualizer_band_ranges(sample_rate, self.input.len());
             self.band_sample_rate = sample_rate;
         }
-        Some(fft_band_levels(&self.input, &self.band_ranges))
+        let coherent_gain = self.window.iter().map(|v| f64::from(*v)).sum::<f64>();
+        Some(fft_band_levels(
+            &self.input,
+            &self.band_ranges,
+            coherent_gain,
+        ))
     }
 }
 
@@ -197,82 +206,75 @@ pub fn copy_audio_samples(
     )
 }
 
-fn visualizer_band_ranges(sample_rate: u32) -> Vec<(usize, usize)> {
-    if sample_rate == 0 {
-        return Vec::new();
-    }
-    let half = VISUALIZER_FFT_SIZE / 2;
-    let maximum = VISUALIZER_MAX_FREQUENCY_HZ.min(sample_rate as f32 / 2.0);
-    let min_erb = frequency_to_erb(VISUALIZER_MIN_FREQUENCY_HZ.min(maximum));
-    let max_erb = frequency_to_erb(maximum);
+/// Frequency at an ERB position on the canonical 20 Hz to 20 kHz spectrum.
+/// Band `i` has its center at `(i + 0.5) / VISUALIZER_BAND_COUNT`.
+pub fn visualizer_frequency(position: f64) -> f64 {
+    let minimum = frequency_to_erb(VISUALIZER_MIN_FREQUENCY_HZ);
+    let maximum = frequency_to_erb(VISUALIZER_MAX_FREQUENCY_HZ);
+    (10.0_f64.powf((minimum + (maximum - minimum) * position.clamp(0.0, 1.0)) / 21.4) - 1.0)
+        / 0.00437
+}
+
+/// ERB position of a frequency on the canonical 20 Hz to 20 kHz spectrum.
+pub fn visualizer_position(frequency: f64) -> f64 {
+    let minimum = frequency_to_erb(VISUALIZER_MIN_FREQUENCY_HZ);
+    let maximum = frequency_to_erb(VISUALIZER_MAX_FREQUENCY_HZ);
+    (frequency_to_erb(frequency.clamp(VISUALIZER_MIN_FREQUENCY_HZ, VISUALIZER_MAX_FREQUENCY_HZ))
+        - minimum)
+        / (maximum - minimum)
+}
+
+fn frequency_to_erb(frequency: f64) -> f64 {
+    21.4 * (1.0 + 0.00437 * frequency).log10()
+}
+
+fn visualizer_band_ranges(sample_rate: u32, size: usize) -> Vec<(usize, usize)> {
+    let half = size / 2;
+    let nyquist = f64::from(sample_rate) / 2.0;
     (0..VISUALIZER_BAND_COUNT)
         .map(|band| {
-            let lower_t = band as f32 / VISUALIZER_BAND_COUNT as f32;
-            let upper_t = (band + 1) as f32 / VISUALIZER_BAND_COUNT as f32;
-            let lower_hz = erb_to_frequency(min_erb + (max_erb - min_erb) * lower_t);
-            let upper_hz = erb_to_frequency(min_erb + (max_erb - min_erb) * upper_t);
-            let lower = ((lower_hz * VISUALIZER_FFT_SIZE as f32 / sample_rate as f32).floor()
-                as usize)
-                .clamp(1, half - 1);
-            let upper = ((upper_hz * VISUALIZER_FFT_SIZE as f32 / sample_rate as f32).ceil()
-                as usize)
-                .clamp(lower + 1, half);
+            let lower_hz = visualizer_frequency(band as f64 / VISUALIZER_BAND_COUNT as f64);
+            if lower_hz >= nyquist {
+                return (0, 0);
+            }
+            let upper_hz = visualizer_frequency((band + 1) as f64 / VISUALIZER_BAND_COUNT as f64);
+            let bins_per_hz = size as f64 / f64::from(sample_rate);
+            let lower = ((lower_hz * bins_per_hz).floor() as usize).max(1);
+            let upper = ((upper_hz * bins_per_hz).ceil() as usize)
+                .max(lower + 1)
+                .min(half + 1);
             (lower, upper)
         })
         .collect()
 }
 
-fn fft_band_levels(input: &[Complex<f32>], ranges: &[(usize, usize)]) -> Vec<f64> {
-    let mut levels = ranges
+fn fft_band_levels(
+    input: &[Complex<f32>],
+    ranges: &[(usize, usize)],
+    coherent_gain: f64,
+) -> Vec<f64> {
+    ranges
         .iter()
         .map(|&(lower, upper)| {
+            if lower == upper {
+                return 0.0;
+            }
             let mut total = 0.0;
             let mut peak = 0.0_f64;
-            for value in &input[lower..upper] {
-                let level = fft_magnitude_level(value);
-                total += level;
-                peak = peak.max(level);
+            for (index, value) in input[lower..upper].iter().enumerate() {
+                let factor = if lower + index == input.len() / 2 {
+                    1.0
+                } else {
+                    2.0
+                };
+                let amplitude = f64::from(value.norm()) * factor / coherent_gain;
+                total += amplitude;
+                peak = peak.max(amplitude);
             }
             let average = total / (upper - lower) as f64;
-            average * 0.4 + peak * 0.6
+            (average * 0.4 + peak * 0.6).clamp(0.0, 1.0)
         })
-        .collect::<Vec<_>>();
-    let last = levels.len().saturating_sub(1).max(1) as f64;
-    for (index, level) in levels.iter_mut().enumerate() {
-        *level *= 1.0 + VISUALIZER_HIGH_BAND_TILT * index as f64 / last;
-    }
-    let peak = levels.iter().copied().fold(0.0_f64, f64::max);
-    if peak < 0.08 {
-        levels.fill(0.0);
-        return levels;
-    }
-    let gain = (VISUALIZER_NORMALIZED_PEAK / peak).min(VISUALIZER_MAX_GAIN);
-    for level in &mut levels {
-        *level = visible_visualizer_level((*level * gain).clamp(0.0, 1.0));
-    }
-    levels
-}
-
-fn fft_magnitude_level(value: &Complex<f32>) -> f64 {
-    let magnitude = value.norm() / VISUALIZER_FFT_SIZE as f32;
-    let db = 20.0 * magnitude.max(1.0e-6).log10();
-    let level = ((db - VISUALIZER_NOISE_FLOOR_DB)
-        / (VISUALIZER_CEILING_DB - VISUALIZER_NOISE_FLOOR_DB))
-        .clamp(0.0, 1.0);
-    f64::from(level.powf(1.25))
-}
-
-fn visible_visualizer_level(level: f64) -> f64 {
-    ((level - VISUALIZER_VISIBLE_FLOOR) / (VISUALIZER_VISIBLE_CEILING - VISUALIZER_VISIBLE_FLOOR))
-        .clamp(0.0, 1.0)
-}
-
-fn frequency_to_erb(frequency: f32) -> f32 {
-    21.4 * (1.0 + 0.00437 * frequency).log10()
-}
-
-fn erb_to_frequency(erb: f32) -> f32 {
-    (10.0_f32.powf(erb / 21.4) - 1.0) / 0.00437
+        .collect()
 }
 
 #[cfg(test)]
@@ -280,23 +282,30 @@ mod visualizer_tests {
     use super::*;
     #[test]
     fn visualizer_fft_distinguishes_silence_from_bounded_energy() {
-        let mut fft = VisualizerFft::new();
-        fft.push_samples(&vec![0.0; VISUALIZER_FFT_SIZE]);
-        let silence = fft.levels(48_000).expect("full FFT window");
-        assert_eq!(silence, vec![0.0; VISUALIZER_BAND_COUNT]);
+        for size in [1_024, 2_048, 4_096, 8_192, 16_384, 32_768] {
+            let mut fft = VisualizerFft::new();
+            fft.set_size(size);
+            fft.push_samples(&vec![0.0; size]);
+            let silence = fft.levels(48_000).expect("full FFT window");
+            assert_eq!(silence, vec![0.0; VISUALIZER_BAND_COUNT]);
 
-        fft.clear();
-        let samples = (0..VISUALIZER_FFT_SIZE)
-            .map(|index| {
-                let phase =
-                    2.0 * std::f32::consts::PI * 16.0 * index as f32 / VISUALIZER_FFT_SIZE as f32;
-                phase.sin() * 0.8
-            })
-            .collect::<Vec<_>>();
-        fft.push_samples(&samples);
-        let levels = fft.levels(48_000).expect("full FFT window");
-        assert!(levels.iter().copied().fold(0.0_f64, f64::max) > 0.3);
-        assert!(levels.iter().all(|level| (0.0..=1.0).contains(level)));
+            fft.clear();
+            let bin = (1_000.0 * size as f64 / 48_000.0).round() as usize;
+            let samples = (0..size)
+                .map(|index| {
+                    let phase =
+                        2.0 * std::f32::consts::PI * bin as f32 * index as f32 / size as f32;
+                    phase.sin() * 0.8
+                })
+                .collect::<Vec<_>>();
+            fft.push_samples(&samples);
+            let power = fft.spectrum_power().expect("full FFT window");
+            assert!((power[bin].sqrt() - 0.8).abs() < 1e-4);
+            let levels = fft.levels(48_000).expect("full FFT window");
+            let peak = levels.iter().copied().fold(0.0_f64, f64::max);
+            assert!((0.48..=0.801).contains(&peak), "{size}: {peak}");
+            assert!(levels.iter().all(|level| (0.0..=1.0).contains(level)));
+        }
     }
 
     #[test]
@@ -326,17 +335,37 @@ mod visualizer_tests {
         let at_48k = peak_band(&tone(48_000, 1_000.0));
         assert!(at_44k.abs_diff(at_48k) <= 1);
         assert!(peak_band(&tone(48_000, 8_000.0)) > at_48k);
+        for sample_rate in [8_000, 16_000, 22_050, 32_000, 44_100, 48_000, 96_000] {
+            let levels = tone(sample_rate, 1_000.0);
+            let band = peak_band(&levels);
+            let frequency =
+                visualizer_frequency((band as f64 + 0.5) / VISUALIZER_BAND_COUNT as f64);
+            assert!(
+                (frequency - 1_000.0).abs() < 60.0,
+                "{sample_rate}: {frequency}"
+            );
+            for (band, level) in levels.iter().enumerate() {
+                if visualizer_frequency(band as f64 / VISUALIZER_BAND_COUNT as f64)
+                    >= f64::from(sample_rate) / 2.0
+                {
+                    assert_eq!(*level, 0.0);
+                }
+            }
+        }
     }
 
     #[test]
-    fn visualizer_gate_drops_residual_energy() {
-        assert_eq!(visible_visualizer_level(VISUALIZER_VISIBLE_FLOOR), 0.0);
-        assert_eq!(visible_visualizer_level(0.0), 0.0);
-        assert_eq!(visible_visualizer_level(VISUALIZER_VISIBLE_CEILING), 1.0);
+    fn visualizer_axis_round_trips_band_centers() {
+        for band in 0..VISUALIZER_BAND_COUNT {
+            let position = (band as f64 + 0.5) / VISUALIZER_BAND_COUNT as f64;
+            assert!((visualizer_position(visualizer_frequency(position)) - position).abs() < 1e-12);
+        }
+        assert!((visualizer_frequency(0.0) - 20.0).abs() < 1e-12);
+        assert!((visualizer_frequency(1.0) - 20_000.0).abs() < 1e-9);
     }
 
     #[test]
-    fn visualizer_normalizes_quiet_bounded_energy() {
+    fn visualizer_preserves_relative_amplitude() {
         let mut fft = VisualizerFft::new();
         let samples = (0..VISUALIZER_FFT_SIZE)
             .map(|index| {
@@ -349,8 +378,17 @@ mod visualizer_tests {
         let levels = fft.levels(48_000).expect("full FFT window");
         let peak = levels.iter().copied().fold(0.0_f64, f64::max);
 
-        assert!(peak > 0.5);
-        assert!(peak < 0.95);
-        assert!(levels.contains(&0.0));
+        assert!(peak > 0.01 && peak <= 0.0201);
+        fft.clear();
+        fft.push_samples(
+            &samples
+                .iter()
+                .map(|sample| sample * 10.0)
+                .collect::<Vec<_>>(),
+        );
+        let loud = fft.levels(48_000).expect("full FFT window");
+        for (quiet, loud) in levels.iter().zip(loud) {
+            assert!((loud - quiet * 10.0).abs() < 1e-6);
+        }
     }
 }
