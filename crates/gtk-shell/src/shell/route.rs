@@ -25,7 +25,7 @@ use gtk_widgets::mounted_route::*;
 use gtk_widgets::route::{CollectionCategory, Route};
 use gtk_widgets::selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
 
-const SLOW_ROUTE_REVEAL_MS: u64 = 250;
+const SLOW_ROUTE_LOAD_MS: u64 = 250;
 
 type RouteTiming = Option<Instant>;
 
@@ -93,7 +93,7 @@ pub(crate) struct RouteViewport {
     position_memory: RefCell<RoutePositionMemory>,
     catalog: RefCell<Option<Rc<gtk_library::CatalogUi>>>,
     order_read_generation: Cell<u64>,
-    order_cancellation: RefCell<Option<(u64, library::ReadCancellation)>>,
+    pub(super) order_cancellation: RefCell<Option<(u64, library::ReadCancellation)>>,
 }
 
 struct MountedRouteEntry {
@@ -192,11 +192,16 @@ impl Shell {
         route: Route,
         selected: Option<rufin_core::runtime::SelectedLibrary>,
         options: OpenOptions,
-        source_scoped: bool,
+        refresh_home: bool,
         render_started: RouteTiming,
     ) {
         let source = self.products.source.clone();
-        let window = self.route_seed_window(&route);
+        let source_scoped = route.uses_selected_source();
+        let window = if refresh_home {
+            library::RouteSeedWindow::top()
+        } else {
+            self.route_seed_window(&route)
+        };
         let (generation, cancellation) = self.begin_root_order_read();
         let load_route = route.clone();
         let load_selected = selected.clone();
@@ -240,9 +245,26 @@ impl Shell {
                     return;
                 }
             };
-            shell.replace_mounted_route(route.clone(), source_id, render_started, move |catalog| {
-                catalog.opened_collection_view(route, opened, selected)
-            });
+            let apply_home = if refresh_home && shell.mounted_catalog_is_current() {
+                shell
+                    .route_viewport
+                    .mounted_route
+                    .borrow()
+                    .as_ref()
+                    .filter(|entry| !entry.load_failed)
+                    .and_then(|entry| entry.view.home_page_apply.clone())
+            } else {
+                None
+            };
+            match (opened, apply_home) {
+                (OpenedCollection::Home(home), Some(apply)) => apply(*home),
+                (opened, _) => shell.replace_mounted_route(
+                    route.clone(),
+                    source_id,
+                    render_started,
+                    move |catalog| catalog.opened_collection_view(route, opened, selected),
+                ),
+            }
         });
     }
 
@@ -253,60 +275,13 @@ impl Shell {
         let Some(selected) = self.selected_library().as_deref().cloned() else {
             return;
         };
-        let source = selected.source_key;
-        let (generation, cancellation) = self.begin_root_order_read();
-        let owner = self.products.source.clone();
-        let load_selected = selected.clone();
-        let task = self.products.runtime.spawn(async move {
-            owner
-                .open_collection(
-                    &Route::Home,
-                    Some(&load_selected),
-                    &OpenOptions::default(),
-                    library::RouteSeedWindow::top(),
-                    &cancellation,
-                )
-                .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let result = task.await;
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(generation)
-                || !route_is_current(&shell, &Route::Home, source)
-            {
-                return;
-            }
-            let home = match result {
-                Ok(Ok(OpenedCollection::Home(home))) => *home,
-                Ok(Ok(_)) => unreachable!("Home operation"),
-                Ok(Err(error)) => {
-                    warn!(%error, "failed to refresh Home route");
-                    shell.show_route_load_error(Route::Home, Some(selected.source_id), None);
-                    return;
-                }
-                Err(error) => {
-                    warn!(%error, "Home refresh task failed");
-                    shell.show_route_load_error(Route::Home, Some(selected.source_id), None);
-                    return;
-                }
-            };
-            let view = shell
-                .route_viewport
-                .mounted_route
-                .borrow()
-                .as_ref()
-                .filter(|entry| entry.route == Route::Home && !entry.load_failed)
-                .map(|entry| entry.view.clone());
-            if let Some(view) = view {
-                view.apply_home_page(home);
-            } else {
-                let source_id = selected.source_id.clone();
-                shell.replace_mounted_route(Route::Home, Some(source_id), None, move |catalog| {
-                    catalog.home_route(selected, home)
-                });
-            }
-        });
+        self.queue_collection_route(
+            Route::Home,
+            Some(selected),
+            OpenOptions::default(),
+            true,
+            None,
+        );
     }
 
     pub(crate) fn refresh_mounted_catalog(&self) {
@@ -421,14 +396,6 @@ impl Shell {
     }
 
     pub(crate) fn render_current_route(self: &Rc<Self>) {
-        if !self.startup.route_revealed.get() {
-            self.render_startup_loading_view();
-            return;
-        }
-        self.render_current_route_content();
-    }
-
-    pub(crate) fn render_current_route_content(self: &Rc<Self>) {
         self.render_current_route_content_inner(false);
     }
 
@@ -444,15 +411,11 @@ impl Shell {
             .mounted_route
             .borrow()
             .as_ref()
-            .is_some_and(|entry| entry.route == route && !entry.load_failed);
+            .is_some_and(|entry| entry.route == route && !entry.load_failed)
+            && self.mounted_catalog_is_current();
         if !force && mounted_current {
             self.cancel_root_order_read();
-            let current = self.route_viewport.mounted_route.borrow();
-            self.route_viewport.route_loading.set_visible(
-                current
-                    .as_ref()
-                    .is_some_and(|entry| !entry.surface.is_ready()),
-            );
+            self.cancel_route_loading();
             return;
         }
 
@@ -462,6 +425,7 @@ impl Shell {
         let source_scoped = route.uses_selected_source();
         let selected = self.selected_library().as_deref().cloned();
         if route.requires_selected_source() && selected.is_none() {
+            self.cancel_root_order_read();
             self.replace_mounted_route(route, None, render_started, |_| {
                 MountedRoute::static_widget(gtk_library::route_layout::route_empty_view(
                     localization::msgid("Nothing here yet"),
@@ -491,7 +455,7 @@ impl Shell {
                 category,
                 ..Default::default()
             },
-            source_scoped,
+            false,
             render_started,
         );
     }
@@ -587,7 +551,6 @@ impl Shell {
                 .restore(key)
         });
         let boundary = route_boundary(widget);
-        let ready_shell = Rc::downgrade(self);
         let ready_view = view.clone();
         let surface = mount_route_surface(
             &boundary,
@@ -595,11 +558,6 @@ impl Shell {
             restore_position,
             view.item_scroll(),
             move || ready_view.resume_initial_demand(),
-            move |surface| {
-                if let Some(shell) = ready_shell.upgrade() {
-                    shell.finish_route_loading(surface, render_started);
-                }
-            },
         );
         self.route_viewport.route_host.add_child(&surface);
         let displaced = self
@@ -615,7 +573,8 @@ impl Shell {
             }));
         debug_assert!(displaced.is_none());
         self.route_viewport.route_host.set_visible_child(&surface);
-        self.prepare_startup_content_readiness();
+        self.cancel_route_loading();
+        self.finish_startup_route();
         if let (Some(render_started), Some(teardown_ms), Some(model_ms), Some(mount_started)) =
             (render_started, teardown_ms, model_ms, mount_started)
         {
@@ -625,6 +584,9 @@ impl Shell {
                 ?route,
                 teardown_ms, model_ms, mount_ms, total_ms, "route render timing"
             );
+            if total_ms >= SLOW_ROUTE_LOAD_MS {
+                warn!(?route, total_ms, "slow route load");
+            }
         }
     }
 
@@ -646,9 +608,8 @@ impl Shell {
             .mounted_route
             .borrow()
             .as_ref()
-            .is_some_and(|entry| {
-                entry.route == route && !entry.load_failed && entry.surface.is_ready()
-            });
+            .is_some_and(|entry| entry.route == route && !entry.load_failed)
+            && self.mounted_catalog_is_current();
         if keep_content {
             self.cancel_route_loading();
             self.control_feedback
@@ -673,31 +634,6 @@ impl Shell {
 
     fn show_route_loading(&self) {
         self.route_viewport.route_loading.set_visible(true);
-    }
-
-    fn finish_route_loading(self: &Rc<Self>, surface: &gtk::Widget, started: RouteTiming) {
-        if self.route_viewport.order_cancellation.borrow().is_some() {
-            return;
-        }
-        let route = self
-            .route_viewport
-            .mounted_route
-            .borrow()
-            .as_ref()
-            .filter(|entry| {
-                entry.surface.upcast_ref::<gtk::Widget>() == surface
-                    && entry.route == *self.navigation.routes.borrow().current()
-            })
-            .map(|entry| entry.route.clone());
-        if let Some(route) = route {
-            self.route_viewport.route_loading.set_visible(false);
-            self.try_reveal_startup_route();
-            let total_ms = started.map(elapsed_ms);
-            debug!(?route, total_ms, "visible route window ready");
-            if let Some(total_ms) = total_ms.filter(|elapsed| *elapsed >= SLOW_ROUTE_REVEAL_MS) {
-                warn!(?route, total_ms, "slow route reveal");
-            }
-        }
     }
 
     fn cancel_route_loading(&self) {
@@ -747,12 +683,25 @@ impl Shell {
         self.route_viewport.mounted_route.borrow().is_some()
     }
 
-    pub(super) fn mounted_route_is_ready(&self) -> bool {
+    fn mounted_catalog_is_current(&self) -> bool {
+        let scope = |selected: &rufin_core::runtime::SelectedLibrary| {
+            (selected.source_key, selected.music_folder_key)
+        };
+        let source_scoped = self
+            .navigation
+            .routes
+            .borrow()
+            .current()
+            .uses_selected_source();
+        let selected_scope = self.selected_library().as_deref().map(scope);
         self.route_viewport
-            .mounted_route
+            .catalog
             .borrow()
             .as_ref()
-            .is_some_and(|entry| entry.surface.is_ready())
+            .is_some_and(|catalog| {
+                (catalog.is_current)()
+                    && (!source_scoped || catalog.selected.as_ref().map(scope) == selected_scope)
+            })
     }
 
     fn begin_mounted_route_replacement(&self) -> Option<MountedRouteEntry> {

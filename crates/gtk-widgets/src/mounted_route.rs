@@ -483,12 +483,6 @@ impl MountedRoute {
         }
     }
 
-    pub fn apply_home_page(&self, home: library::HomePage) {
-        if let Some(apply) = &self.home_page_apply {
-            apply(home);
-        }
-    }
-
     pub fn widget(&self) -> gtk::Widget {
         self.widget.clone()
     }

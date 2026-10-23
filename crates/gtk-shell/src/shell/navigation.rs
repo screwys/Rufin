@@ -70,9 +70,6 @@ impl NavigationState {
             pin_cancellation: RefCell::new(None),
         }
     }
-    pub(super) fn pins_ready(&self) -> bool {
-        !self.pin_items.borrow().is_empty() || self.pin_cancellation.borrow().is_none()
-    }
 }
 
 pub(crate) struct NavigationWidgets {
@@ -840,7 +837,6 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
     if pins.is_empty() {
         shell.navigation.pin_items.borrow_mut().clear();
         reconcile_sidebar_pin_widgets(shell, &[]);
-        shell.try_reveal_startup_route();
         return;
     }
 
@@ -873,7 +869,6 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
             current.navigation.pin_identity.borrow_mut().take();
             current.navigation.pin_cancellation.borrow_mut().take();
             warn!("failed to load sidebar Pins");
-            current.try_reveal_startup_route();
             return;
         };
         let mut pending = Vec::new();
@@ -908,10 +903,8 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
 
         if pending.is_empty() {
             current.navigation.pin_cancellation.borrow_mut().take();
-            current.try_reveal_startup_route();
             return;
         }
-        current.try_reveal_startup_route();
         let task = runtime.spawn(async move {
             database
                 .sidebar_pin_totals(
@@ -965,8 +958,6 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
             warn!("failed to load sidebar Pin totals");
         }
         current.navigation.pin_cancellation.borrow_mut().take();
-
-        current.try_reveal_startup_route();
     });
 }
 
@@ -1947,28 +1938,9 @@ mod tests {
     }
 
     #[test]
-    fn pin_rows_are_ready_before_totals_and_old_reads_cannot_replace_them() {
+    fn stale_sidebar_pin_reads_cannot_replace_current_rows() {
         assert!(sidebar_pin_publication_is_current(2, 2));
         assert!(!sidebar_pin_publication_is_current(1, 2));
-        let state = NavigationState::new(Route::Home);
-        assert!(state.pins_ready());
-        state
-            .pin_cancellation
-            .replace(Some(library::ReadCancellation::new()));
-        assert!(!state.pins_ready());
-        state
-            .pin_items
-            .borrow_mut()
-            .push(SidebarPinItem(library::SidebarPinRow {
-                pin: SidebarPin::SmartPlaylist {
-                    playlist_id: "smart".into(),
-                },
-                key: 1,
-                name: "Smart".into(),
-                totals: None,
-                artwork: Vec::new(),
-            }));
-        assert!(state.pins_ready());
     }
 }
 
