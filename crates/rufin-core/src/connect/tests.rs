@@ -211,11 +211,21 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 files.push(uri);
             }
             guest.products.downloads.remove(files, false);
-            guest.products.downloads.queue_page(0, 1).await.unwrap();
+            guest
+                .products
+                .downloads
+                .queue_page(downloads::DownloadQueueScope::All, 0, 1)
+                .await
+                .unwrap();
             assert!(source.is_file());
             assert!(host.products.source.list_sources().sources.is_empty());
             guest.products.downloads.set_paused(true);
-            guest.products.downloads.queue_page(0, 1).await.unwrap();
+            guest
+                .products
+                .downloads
+                .queue_page(downloads::DownloadQueueScope::All, 0, 1)
+                .await
+                .unwrap();
             let mut shared = Vec::new();
             for index in 0..2 {
                 let path = root.path().join(format!("outside-{index}.flac"));
@@ -823,8 +833,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
             let image_key = format!("originals/native/{:032x}/{:032x}/original.png", 1, 2);
             let image_query = artwork::CacheImageRequest {
                 family: format!("native/{:032x}/{:032x}", 1, 2),
-                size: artwork::ImageSize::Original,
-                fallback: false,
+                size: sources::ImageSize::Original,
             };
             let image = image::RgbaImage::from_fn(3072, 2048, |x, y| {
                 let value = (x + y * 3072 + 1).wrapping_mul(0x9e3779b9);
@@ -871,29 +880,6 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                     .import_missing_cache_file(&image_key, &image_file)
                     .unwrap()
             );
-            for (size, requested, fallback) in [(800, 700, false), (512, 0, true)] {
-                let family = format!("native/{:032x}/{:032x}", 3, size);
-                let key = format!("ready/{family}/{size}.png");
-                a.source
-                    .shared
-                    .artwork
-                    .import_missing_cache_file(&key, &image_file)
-                    .unwrap();
-                let (selected, file) = b
-                    .fetch_cached_artwork(artwork::CacheImageRequest {
-                        family,
-                        size: if requested == 0 {
-                            artwork::ImageSize::Original
-                        } else {
-                            artwork::ImageSize::Thumbnail(requested)
-                        },
-                        fallback,
-                    })
-                    .await
-                    .unwrap();
-                assert_eq!(selected, key);
-                assert_eq!(std::fs::read(file).unwrap(), encoded);
-            }
             let audio = root.path().join("transferred.flac");
             std::fs::write(&audio, b"audio").unwrap();
             std::fs::write(audio.with_extension("lrc"), "[00:00.00]Source only").unwrap();

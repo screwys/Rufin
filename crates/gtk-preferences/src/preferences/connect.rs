@@ -915,151 +915,183 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
         });
     });
 
-    let mut updates = shell.products.connect.subscribe();
     let weak = Rc::downgrade(shell);
     let parent = connect_dialog.downgrade();
-    let device_rows = RefCell::new(Vec::new());
-    let nearby_rows = RefCell::new(Vec::new());
+    let device_rows = Rc::new(RefCell::new(Vec::new()));
+    let nearby_rows = Rc::new(RefCell::new(Vec::new()));
     load_folders();
-    let task = gtk::glib::spawn_future_local(async move {
-        let mut previous_devices = None;
-        let mut previous_profile = initial.settings.profile;
-        let mut previous_working = initial.connecting;
-        let mut completed_pairings = initial.completed_pairings;
-        let mut previous_network = (
-            initial.settings.nearby,
-            initial.settings.relay,
-            initial.settings.public_relay,
-        );
-        loop {
-            let state = updates.borrow_and_update().clone();
-            let (Some(shell), Some(parent)) = (weak.upgrade(), parent.upgrade()) else {
-                return;
-            };
-            if state.completed_pairings != completed_pairings {
-                parent.set_can_close(true);
-                parent.close();
-                show_connected(&shell, &localization::tr("Connected"));
-                return;
-            }
-            completed_pairings = state.completed_pairings;
-            let network = (
-                state.settings.nearby,
-                state.settings.relay.clone(),
-                state.settings.public_relay,
+    let task = Rc::new(RefCell::new(None::<gtk::glib::JoinHandle<()>>));
+    let running = task.clone();
+    connect_content.connect_map(move |_| {
+        let Some(shell) = weak.upgrade() else { return };
+        let mut updates = shell.products.connect.subscribe();
+        let initial = shell.products.connect.status();
+        let parent = parent.clone();
+        let weak = weak.clone();
+        let device_rows = device_rows.clone();
+        let nearby_rows = nearby_rows.clone();
+        let load_folders = load_folders.clone();
+        let update_view = update_view.clone();
+        let updating_network = updating_network.clone();
+        let nearby = nearby.clone();
+        let relay = relay.clone();
+        let relay_enabled = relay_enabled.clone();
+        let connecting_status = connecting_status.clone();
+        let collection_progress = collection_progress.clone();
+        let collection_spinner = collection_spinner.clone();
+        let collection_counter = collection_counter.clone();
+        let connection_error = connection_error.clone();
+        let retry_label = retry_label.clone();
+        let create = create.clone();
+        let copy_invitation = copy_invitation.clone();
+        let pair_name = pair_name.clone();
+        let emoji = emoji.clone();
+        let devices = devices.clone();
+        let nearby_devices = nearby_devices.clone();
+        *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
+            let mut previous_devices = None;
+            let mut previous_profile = initial.settings.profile;
+            let mut previous_working = initial.connecting;
+            let mut completed_pairings = initial.completed_pairings;
+            let mut previous_network = (
+                initial.settings.nearby,
+                initial.settings.relay,
+                initial.settings.public_relay,
             );
-            if previous_network != network {
-                updating_network.set(true);
-                nearby.set_active(network.0);
-                if let Some(address) = network.1.as_deref() {
-                    relay.set_text(address);
-                } else if network.2 {
-                    relay.set_text("https://euc1-1.relay.n0.iroh.link/");
+            loop {
+                let state = updates.borrow_and_update().clone();
+                let (Some(shell), Some(parent)) = (weak.upgrade(), parent.upgrade()) else {
+                    return;
+                };
+                if state.completed_pairings != completed_pairings {
+                    parent.set_can_close(true);
+                    parent.close();
+                    show_connected(&shell, &localization::tr("Connected"));
+                    return;
                 }
-                relay_enabled.set_active(network.1.is_some() || network.2);
-                updating_network.set(false);
-                previous_network = network;
-            }
-            connecting_status.set_text(&state.profile_status);
-            let progress = state.collection_progress.as_ref();
-            let fraction = progress.and_then(|progress| {
-                progress
-                    .total
-                    .filter(|total| *total > 0)
-                    .map(|total| (progress.completed as f64 / total as f64).clamp(0.0, 1.0))
-            });
-            collection_progress.set_visible(fraction.is_some());
-            collection_progress.set_fraction(fraction.unwrap_or_default());
-            collection_spinner.set_visible(fraction.is_none());
-            let counter = progress.map(collection_progress_text).unwrap_or_default();
-            collection_counter.set_visible(!counter.is_empty());
-            collection_counter.set_text(&counter);
-            connection_error.set_title(state.error.as_deref().unwrap_or_default());
-            connection_error.set_revealed(state.error.is_some());
-            connection_error.set_button_label(
-                if (state.settings.profile.is_some() || state.settings.pending_import.is_some())
-                    && !state.connecting
-                {
-                    retry_label.as_deref()
-                } else {
-                    None
-                },
-            );
-            create.set_visible(
-                (!state.settings.enabled || state.settings.profile.is_none())
-                    && !state.connecting
-                    && state.pairing.is_none(),
-            );
-            copy_invitation
-                .set_visible(state.invitation.is_some() && state.settings.profile.is_some());
-            if let Some(pairing) = &state.pairing {
-                pair_name.set_text(&pairing.name);
-                emoji.set_text(&pairing.emoji.join(" "));
-            }
-            let working = state.connecting;
-            if previous_profile != state.settings.profile || (previous_working && !working) {
-                previous_profile = state.settings.profile.clone();
-                load_folders();
-            }
-            previous_working = working;
-            let membership: Vec<_> = state
-                .devices
-                .iter()
-                .map(|device| (device.id.clone(), device.enrolled))
-                .collect();
-            if previous_devices.as_ref() != Some(&membership) {
-                for row in device_rows.borrow_mut().drain(..) {
-                    devices.remove(&row);
-                }
-                for row in nearby_rows.borrow_mut().drain(..) {
-                    nearby_devices.remove(&row);
-                }
-                render_devices(
-                    &shell,
-                    &parent,
-                    &devices,
-                    &nearby_devices,
-                    &state,
-                    &device_rows,
-                    &nearby_rows,
+                completed_pairings = state.completed_pairings;
+                let network = (
+                    state.settings.nearby,
+                    state.settings.relay.clone(),
+                    state.settings.public_relay,
                 );
-                previous_devices = Some(membership);
-            }
-            for (enrolled, rows) in [(true, &device_rows), (false, &nearby_rows)] {
-                for (device, row) in state
+                if previous_network != network {
+                    updating_network.set(true);
+                    nearby.set_active(network.0);
+                    if let Some(address) = network.1.as_deref() {
+                        relay.set_text(address);
+                    } else if network.2 {
+                        relay.set_text("https://euc1-1.relay.n0.iroh.link/");
+                    }
+                    relay_enabled.set_active(network.1.is_some() || network.2);
+                    updating_network.set(false);
+                    previous_network = network;
+                }
+                connecting_status.set_text(&state.profile_status);
+                let progress = state.collection_progress.as_ref();
+                let fraction = progress.and_then(|progress| {
+                    progress
+                        .total
+                        .filter(|total| *total > 0)
+                        .map(|total| (progress.completed as f64 / total as f64).clamp(0.0, 1.0))
+                });
+                collection_progress.set_visible(fraction.is_some());
+                collection_progress.set_fraction(fraction.unwrap_or_default());
+                collection_spinner.set_visible(fraction.is_none());
+                let counter = progress.map(collection_progress_text).unwrap_or_default();
+                collection_counter.set_visible(!counter.is_empty());
+                collection_counter.set_text(&counter);
+                connection_error.set_title(state.error.as_deref().unwrap_or_default());
+                connection_error.set_revealed(state.error.is_some());
+                connection_error.set_button_label(
+                    if (state.settings.profile.is_some() || state.settings.pending_import.is_some())
+                        && !state.connecting
+                    {
+                        retry_label.as_deref()
+                    } else {
+                        None
+                    },
+                );
+                create.set_visible(
+                    (!state.settings.enabled || state.settings.profile.is_none())
+                        && !state.connecting
+                        && state.pairing.is_none(),
+                );
+                copy_invitation
+                    .set_visible(state.invitation.is_some() && state.settings.profile.is_some());
+                if let Some(pairing) = &state.pairing {
+                    pair_name.set_text(&pairing.name);
+                    emoji.set_text(&pairing.emoji.join(" "));
+                }
+                let working = state.connecting;
+                if previous_profile != state.settings.profile || (previous_working && !working) {
+                    previous_profile = state.settings.profile.clone();
+                    load_folders();
+                }
+                previous_working = working;
+                let membership: Vec<_> = state
                     .devices
                     .iter()
-                    .filter(|device| device.enrolled == enrolled)
-                    .zip(rows.borrow().iter())
-                {
-                    row.set_title(&device.name);
-                    row.set_subtitle(&device.connection);
-                    row.remove_css_class(if device.reachable {
-                        "connect-device-offline"
-                    } else {
-                        "connect-device-online"
-                    });
-                    if device.enrolled {
-                        row.add_css_class(if device.reachable {
-                            "connect-device-online"
-                        } else {
+                    .map(|device| (device.id.clone(), device.enrolled))
+                    .collect();
+                if previous_devices.as_ref() != Some(&membership) {
+                    for row in device_rows.borrow_mut().drain(..) {
+                        devices.remove(&row);
+                    }
+                    for row in nearby_rows.borrow_mut().drain(..) {
+                        nearby_devices.remove(&row);
+                    }
+                    render_devices(
+                        &shell,
+                        &parent,
+                        &devices,
+                        &nearby_devices,
+                        &state,
+                        &device_rows,
+                        &nearby_rows,
+                    );
+                    previous_devices = Some(membership);
+                }
+                for (enrolled, rows) in [(true, &device_rows), (false, &nearby_rows)] {
+                    for (device, row) in state
+                        .devices
+                        .iter()
+                        .filter(|device| device.enrolled == enrolled)
+                        .zip(rows.borrow().iter())
+                    {
+                        row.set_title(&device.name);
+                        row.set_subtitle(&device.connection);
+                        row.remove_css_class(if device.reachable {
                             "connect-device-offline"
+                        } else {
+                            "connect-device-online"
                         });
+                        if device.enrolled {
+                            row.add_css_class(if device.reachable {
+                                "connect-device-online"
+                            } else {
+                                "connect-device-offline"
+                            });
+                        }
                     }
                 }
+                update_view();
+                drop(shell);
+                drop(parent);
+                if updates.changed().await.is_err() {
+                    return;
+                }
             }
-            update_view();
-            drop(shell);
-            drop(parent);
-            if updates.changed().await.is_err() {
-                return;
-            }
+        }));
+    });
+    connect_content.connect_unmap(move |_| {
+        if let Some(task) = task.borrow_mut().take() {
+            task.abort();
         }
     });
     let weak = Rc::downgrade(shell);
     let parent = connect_dialog.downgrade();
     connect_content.connect_destroy(move |_| {
-        task.abort();
         if let Some(parent) = parent.upgrade() {
             parent.set_can_close(true);
         }

@@ -7,15 +7,13 @@ impl AndroidBrowseQuery {
         let display = settings.library_list(library_list_key(&self.route, self.category));
         rufin_core::browse::uses_activity(&self.route, &display)
             || self.sort.catalog_sort().activity_sensitive()
-            || (self.release_section.is_none()
-                && matches!(
-                    self.route,
-                    Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
-                )
-                && rufin_core::browse::uses_activity(
-                    &self.route,
-                    &settings.library_list(LibraryListKey::ArtistTracks),
-                ))
+            || (matches!(
+                self.route,
+                Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
+            ) && rufin_core::browse::uses_activity(
+                &self.route,
+                &settings.library_list(LibraryListKey::ArtistTracks),
+            ))
     }
 
     pub fn context_id(&self) -> String {
@@ -112,7 +110,7 @@ impl AndroidBrowseQuery {
             } else if let Some(read) = self.members(&cancel).await.map_err(error)? {
                 read.sections(&self.database, &cancel).await
             } else if let Some(read) = self.list(&cancel).await.map_err(error)? {
-                if self.artist_release_identity().is_some() && self.release_section.is_none() {
+                if self.artist_release_identity().is_some() {
                     return Ok(Vec::new());
                 }
                 read.sections(&self.database, &cancel).await

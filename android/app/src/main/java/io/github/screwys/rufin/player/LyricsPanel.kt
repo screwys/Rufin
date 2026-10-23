@@ -35,9 +35,12 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -65,6 +68,7 @@ import kotlin.math.ceil
 
 @Composable
 internal fun LyricsPanel(player: PlayerConnection, state: LazyListState) {
+    LaunchedEffect(player.currentId, player.bridge, player.lyrics?.mediaId) { player.requestLyrics() }
     val current = player.currentLyrics
     val document = current?.document
     val preferences = player.settings?.lyrics
@@ -132,6 +136,7 @@ internal fun LyricsActions(player: PlayerConnection) {
 
 @Composable
 internal fun CurrentLyricsPreview(player: PlayerConnection) {
+    LaunchedEffect(player.currentId, player.bridge, player.lyrics?.mediaId) { player.requestLyrics() }
     val current = player.currentLyrics
     val document = current?.document
     val snapshot = current?.snapshot
@@ -156,16 +161,16 @@ internal fun CurrentLyricsPreview(player: PlayerConnection) {
                 if (it.cueLines.isNotEmpty()) it.cueLines.forEachIndexed { cueIndex, cueLine ->
                     val color = if (document?.agents?.firstOrNull { voice -> voice.id == cueLine.agentId }?.role == LyricsAgentRole.BACKGROUND)
                         MaterialTheme.colorScheme.secondary else selected
-                    val cueHighlights = highlights.filter { part -> part.line.toInt() == index && part.cueLine.toInt() == cueIndex }
-                    LyricsText(cueText(cueLine, cueHighlights, color, normal), cueLine.reading, preferences,
-                        FontFamily.Default, fontSize, normal, false, shadow, cueHighlights, color, centered = false, maxLines = 1)
+                    val cueHighlights = index?.let { highlights[it.toUInt()] }?.getOrNull(cueIndex)
+                    LyricsText(cueLine.text, cueLine.reading, preferences,
+                        FontFamily.Default, fontSize, normal, false, shadow, cueHighlights, color, cueRanges(cueLine), centered = false, maxLines = 1)
                     if (karaoke && preferences?.showRomanization == true) {
                         cueLine.reading?.takeIf { reading -> reading.romanization.isNotBlank() }?.let { reading ->
-                            Text(romanizationText(reading, cueHighlights, color, normal), maxLines = 1,
+                            HighlightedLyricsText(reading.romanization, romanizationRanges(reading), cueHighlights?.romanization.orEmpty(), color, maxLines = 1,
                                 fontSize = 12.sp, color = normal, style = MaterialTheme.typography.bodyMedium.copy(shadow = shadow))
                         }
                     }
-                } else LyricsText(AnnotatedString(it.text), it.reading, preferences, FontFamily.Default, fontSize, normal,
+                } else LyricsText(it.text, it.reading, preferences, FontFamily.Default, fontSize, normal,
                     false, shadow, centered = false, maxLines = 1)
                 if (preferences?.showRomanization == true &&
                     (!karaoke || it.cueLines.none { cue -> cue.reading?.romanization?.isNotBlank() == true })) {
@@ -322,17 +327,16 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
                     val voice = document.agents.firstOrNull { it.id == cueLine.agentId }
                     val voiceColor = if (voice?.role == LyricsAgentRole.BACKGROUND) MaterialTheme.colorScheme.secondary else selectedColor
                     voice?.name?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = normal) }
-                    val cueHighlights = highlights.filter { it.line.toInt() == index && it.cueLine.toInt() == cueIndex }
-                    val text = cueText(cueLine, cueHighlights, voiceColor, color)
-                    LyricsText(text, cueLine.reading, preferences, family, fontSize, color, lineActive, shadow, cueHighlights, voiceColor)
+                    val cueHighlights = highlights[index.toUInt()]?.getOrNull(cueIndex)
+                    LyricsText(cueLine.text, cueLine.reading, preferences, family, fontSize, color, lineActive, shadow, cueHighlights, voiceColor, cueRanges(cueLine))
                     if (karaoke && preferences?.showRomanization == true) {
                         cueLine.reading?.takeIf { it.romanization.isNotBlank() }?.let { reading ->
-                            Text(romanizationText(reading, cueHighlights, voiceColor, color), Modifier.fillMaxWidth().padding(top = 6.dp),
+                            HighlightedLyricsText(reading.romanization, romanizationRanges(reading), cueHighlights?.romanization.orEmpty(), voiceColor, Modifier.fillMaxWidth().padding(top = 6.dp),
                                 fontFamily = family, fontSize = (fontSize * .7f).sp, color = color, textAlign = TextAlign.Center,
                                 style = MaterialTheme.typography.bodyMedium.copy(shadow = shadow))
                         }
                     }
-                } else LyricsText(AnnotatedString(line.text), line.reading, preferences, family, fontSize, color, lineActive, shadow)
+                } else LyricsText(line.text, line.reading, preferences, family, fontSize, color, lineActive, shadow)
                 if (preferences?.showRomanization == true &&
                     (!karaoke || line.cueLines.none { it.reading?.romanization?.isNotBlank() == true })) {
                     val romanization = line.pronunciation ?: line.reading?.romanization
@@ -346,69 +350,82 @@ private fun LyricsDocumentView(player: PlayerConnection, current: AndroidLyricsS
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+private data class LyricsTextRange(val start: Int, val end: Int, val index: Int)
+
 @Composable
-private fun LyricsText(text: AnnotatedString, reading: AndroidJapaneseReading?, preferences: UserPreferences?,
-    family: FontFamily, size: Int, color: Color, active: Boolean, shadow: Shadow,
-    highlights: List<AndroidLyricsHighlight> = emptyList(), highlightColor: Color = color,
-    centered: Boolean = true, maxLines: Int = Int.MAX_VALUE,
+private fun cueRanges(line: AndroidLyricsCueLine): List<LyricsTextRange> = remember(line) {
+    line.cues.mapIndexedNotNull { index, cue ->
+        val start = cue.utf16Start?.toInt() ?: return@mapIndexedNotNull null
+        val end = cue.utf16End?.toInt() ?: return@mapIndexedNotNull null
+        LyricsTextRange(start, end, index)
+    }
+}
+
+@Composable
+private fun romanizationRanges(reading: AndroidJapaneseReading): List<LyricsTextRange> = remember(reading) {
+    reading.romanizationSpans.mapIndexed { index, span -> LyricsTextRange(span.start.toInt(), span.end.toInt(), index) }
+}
+
+@Composable
+private fun HighlightedLyricsText(text: String, ranges: List<LyricsTextRange>, progress: List<Double>, highlightColor: Color,
+    modifier: Modifier = Modifier, color: Color, style: TextStyle, fontFamily: FontFamily? = null,
+    fontSize: TextUnit, fontWeight: FontWeight? = null, textAlign: TextAlign? = null, maxLines: Int = Int.MAX_VALUE,
 ) {
-    if (preferences?.showFurigana == true && reading != null) {
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp,
-            if (centered) Alignment.CenterHorizontally else Alignment.Start), maxLines = maxLines) {
-            var cursor = 0
-            reading.segments.forEachIndexed { index, segment ->
-                val start = cursor
-                val end = start + segment.surface.length
-                cursor = end
-                val surface = buildAnnotatedString {
-                    append(segment.surface)
-                    text.spanStyles.forEach { span ->
-                        val from = maxOf(start, span.start)
-                        val to = minOf(end, span.end)
-                        if (from < to) addStyle(span.item, from - start, to - start)
-                    }
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    val progress = highlights.firstOrNull {
-                        (it.target as? AndroidLyricsHighlightTarget.Furigana)?.index?.toInt() == index
-                    }?.progress
-                    Text(segment.furigana.orEmpty(), fontFamily = family, fontSize = (size * .5f).sp,
-                        color = progress?.let { lerp(color, highlightColor, it.toFloat()) } ?: color,
-                        style = MaterialTheme.typography.bodyMedium.copy(shadow = shadow))
-                    Text(surface, fontFamily = family, fontSize = size.sp, color = color,
-                        style = MaterialTheme.typography.bodyMedium.copy(shadow = shadow),
-                        fontWeight = if (active) FontWeight.ExtraBold else FontWeight.SemiBold)
+    var layout by remember(text) { mutableStateOf<TextLayoutResult?>(null) }
+    val paths = remember(layout, ranges) { layout?.let { result -> ranges.map { result.getPathForRange(it.start, it.end) } }.orEmpty() }
+    Text(text, modifier.drawWithContent {
+        drawContent()
+        layout?.let { result ->
+            ranges.forEachIndexed { index, range ->
+                val amount = progress.getOrNull(range.index) ?: return@forEachIndexed
+                if (amount > 0.0) paths.getOrNull(index)?.let { path ->
+                    clipPath(path) { drawText(result, color = lerp(color, highlightColor, amount.toFloat())) }
                 }
             }
         }
-    } else Text(text, Modifier.fillMaxWidth(), fontFamily = family, fontSize = size.sp, color = color,
-        textAlign = if (centered) TextAlign.Center else TextAlign.Start, maxLines = maxLines,
-        style = MaterialTheme.typography.bodyMedium.copy(shadow = shadow),
-        fontWeight = if (active) FontWeight.ExtraBold else FontWeight.SemiBold)
+    }, color = color, style = style, fontFamily = fontFamily, fontSize = fontSize,
+        fontWeight = fontWeight, textAlign = textAlign, maxLines = maxLines, onTextLayout = { layout = it })
 }
 
-private fun cueText(line: AndroidLyricsCueLine, highlights: List<AndroidLyricsHighlight>, active: Color, normal: Color): AnnotatedString =
-    buildAnnotatedString {
-        append(line.text)
-        highlights.forEach { highlight ->
-            val index = (highlight.target as? AndroidLyricsHighlightTarget.Cue)?.index ?: return@forEach
-            val cue = line.cues[index.toInt()]
-            val start = cue.utf16Start?.toInt()
-            val end = cue.utf16End?.toInt()
-            if (start != null && end != null) addStyle(SpanStyle(color = lerp(normal, active, highlight.progress.toFloat())), start, end)
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LyricsText(text: String, reading: AndroidJapaneseReading?, preferences: UserPreferences?,
+    family: FontFamily, size: Int, color: Color, active: Boolean, shadow: Shadow,
+    highlights: AndroidLyricsHighlight? = null, highlightColor: Color = color,
+    ranges: List<LyricsTextRange> = emptyList(), centered: Boolean = true, maxLines: Int = Int.MAX_VALUE,
+) {
+    val style = MaterialTheme.typography.bodyMedium.copy(shadow = shadow)
+    val weight = if (active) FontWeight.ExtraBold else FontWeight.SemiBold
+    if (preferences?.showFurigana == true && reading?.segments?.isNotEmpty() == true) {
+        val segmentRanges = remember(reading, ranges) {
+            var cursor = 0
+            reading.segments.map { segment ->
+                val start = cursor
+                cursor += segment.surface.length
+                ranges.mapNotNull { range ->
+                    val from = maxOf(start, range.start)
+                    val to = minOf(cursor, range.end)
+                    if (from < to) LyricsTextRange(from - start, to - start, range.index) else null
+                }
+            }
         }
-    }
-
-private fun romanizationText(reading: AndroidJapaneseReading, highlights: List<AndroidLyricsHighlight>, active: Color, normal: Color): AnnotatedString =
-    buildAnnotatedString {
-        append(reading.romanization)
-        highlights.forEach { highlight ->
-            val index = (highlight.target as? AndroidLyricsHighlightTarget.Romanization)?.index ?: return@forEach
-            val span = reading.romanizationSpans[index.toInt()]
-            addStyle(SpanStyle(color = lerp(normal, active, highlight.progress.toFloat())), span.start.toInt(), span.end.toInt())
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp,
+            if (centered) Alignment.CenterHorizontally else Alignment.Start), maxLines = maxLines) {
+            reading.segments.forEachIndexed { index, segment ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val progress = highlights?.furigana?.getOrNull(index)
+                    Text(segment.furigana.orEmpty(), fontFamily = family, fontSize = (size * .5f).sp,
+                        color = progress?.let { lerp(color, highlightColor, it.toFloat()) } ?: color, style = style)
+                    HighlightedLyricsText(segment.surface, segmentRanges[index], highlights?.cues.orEmpty(), highlightColor,
+                        fontFamily = family, fontSize = size.sp, color = color, style = style, fontWeight = weight)
+                }
+            }
         }
-    }
+    } else HighlightedLyricsText(text, ranges, highlights?.cues.orEmpty(), highlightColor,
+        Modifier.fillMaxWidth(), fontFamily = family, fontSize = size.sp, color = color,
+        textAlign = if (centered) TextAlign.Center else TextAlign.Start, maxLines = maxLines,
+        style = style, fontWeight = weight)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

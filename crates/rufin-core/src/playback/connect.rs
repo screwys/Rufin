@@ -186,10 +186,12 @@ impl RufinPlayback {
 
 impl PlaybackOwner {
     pub(crate) fn send_cast_auto_dj(&self, enabled: bool) {
-        let _ = self.settings.update(|stored| {
+        if let Err(error) = self.settings.edit(|stored| {
             stored.ui.auto_dj_enabled = enabled;
             Ok(())
-        });
+        }) {
+            warn!(%error, "could not save Auto DJ setting");
+        }
         self.send(Command::SetAutoDj {
             enabled,
             refill_threshold: usize::from(

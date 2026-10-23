@@ -47,6 +47,7 @@ pub struct AndroidPreferences {
     runtime: tokio::runtime::Handle,
     directory: PathBuf,
     custom_changes: tokio::sync::watch::Sender<()>,
+    themes: Arc<tokio::sync::Mutex<Option<(Vec<rufin_core::themes::Theme>, Vec<String>)>>>,
 }
 
 impl AndroidPreferences {
@@ -56,6 +57,7 @@ impl AndroidPreferences {
             runtime: products.runtime.clone(),
             directory,
             custom_changes: tokio::sync::watch::channel(()).0,
+            themes: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 }
@@ -77,12 +79,10 @@ fn accent_id(accent: AccentPreference) -> &'static str {
 
 fn state(
     settings: &AppearancePreferences,
-    directory: &std::path::Path,
+    themes: &[rufin_core::themes::Theme],
+    errors: &[String],
     languages: &[String],
 ) -> AndroidPreferencesState {
-    let mut themes = rufin_core::themes::builtins();
-    let (custom, errors) = rufin_core::themes::custom(directory);
-    themes.extend(custom);
     let theme_id = match &settings.theme_preference {
         ThemePreference::System => "system".into(),
         ThemePreference::Light => "light".into(),
@@ -140,7 +140,7 @@ fn state(
                 title: option.title,
             })
             .collect(),
-        errors,
+        errors: errors.to_vec(),
     }
 }
 
@@ -158,6 +158,7 @@ impl AndroidPreferences {
             directory: self.directory.clone(),
             languages: packaged_languages,
             custom_changes: tokio::sync::Mutex::new(self.custom_changes.subscribe()),
+            themes: self.themes.clone(),
         })
     }
 
@@ -173,6 +174,7 @@ impl AndroidPreferences {
             .await
             .map_err(error)?
             .map_err(error)?;
+        *self.themes.lock().await = None;
         self.custom_changes.send_replace(());
         Ok(())
     }
@@ -185,6 +187,7 @@ pub struct AndroidPreferencesSubscription {
     directory: PathBuf,
     languages: Vec<String>,
     custom_changes: tokio::sync::Mutex<tokio::sync::watch::Receiver<()>>,
+    themes: Arc<tokio::sync::Mutex<Option<(Vec<rufin_core::themes::Theme>, Vec<String>)>>>,
 }
 
 #[uniffi::export]
@@ -198,11 +201,22 @@ impl AndroidPreferencesSubscription {
         }
         custom.borrow_and_update();
         let settings = changes.borrow_and_update().clone();
-        let directory = self.directory.clone();
-        let languages = self.languages.clone();
-        self.runtime
-            .spawn_blocking(move || state(&settings, &directory, &languages))
-            .await
-            .map_err(error)
+        let mut loaded = self.themes.lock().await;
+        if loaded.is_none() {
+            let directory = self.directory.clone();
+            *loaded = Some(
+                self.runtime
+                    .spawn_blocking(move || {
+                        let mut themes = rufin_core::themes::builtins();
+                        let (custom, errors) = rufin_core::themes::custom(&directory);
+                        themes.extend(custom);
+                        (themes, errors)
+                    })
+                    .await
+                    .map_err(error)?,
+            );
+        }
+        let (themes, errors) = loaded.as_ref().unwrap();
+        Ok(state(&settings, themes, errors, &self.languages))
     }
 }

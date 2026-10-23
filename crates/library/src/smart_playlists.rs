@@ -3,7 +3,7 @@
 
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
-use sqlx::{AssertSqlSafe, Connection, FromRow, SqliteConnection};
+use sqlx::{AssertSqlSafe, Connection, FromRow, Row, SqliteConnection};
 
 use crate::{
     CatalogSort, Database, FolderKey, LibraryError, LibraryResult, ReadCancellation,
@@ -389,49 +389,88 @@ pub(crate) async fn load_smart_playlist_requested(
     connection: &mut SqliteConnection,
     requested: crate::query::RequestedKeys,
     now: i64,
+    calculated: bool,
 ) -> LibraryResult<Vec<SmartPlaylistRow>> {
+    Ok(load_smart_items_on(connection, requested, now, calculated)
+        .await?
+        .into_iter()
+        .filter_map(|row| match row {
+            crate::PlaylistListRow::SmartPlaylist(row) => Some(row),
+            _ => None,
+        })
+        .collect())
+}
+
+pub(crate) async fn load_smart_items_on(
+    connection: &mut SqliteConnection,
+    requested: crate::query::RequestedKeys,
+    now: i64,
+    calculated: bool,
+) -> LibraryResult<Vec<crate::PlaylistListRow>> {
+    let selected = if calculated {
+        format!("WITH displayed AS ({})", requested.sql)
+    } else {
+        let definitions = sqlx::query_as_with::<_, (i64, String), _>(AssertSqlSafe(format!(
+            "WITH requested AS ({}) SELECT playlist.smart_playlist_key,playlist.definition_json FROM smart_playlists playlist WHERE EXISTS(SELECT 1 FROM requested WHERE requested.value=playlist.smart_playlist_key OR -requested.value=playlist.playlist_folder_key)",
+            requested.sql
+        )), requested.arguments.clone()).fetch_all(&mut *connection).await?
+            .into_iter().map(|(key,json)| Ok((key,serde_json::from_str(&json)?)))
+            .collect::<LibraryResult<Vec<_>>>()?;
+        let membership = smart_membership_from_definitions(connection, now, &definitions).await?;
+        format!(
+            "{membership}, totals AS ({}), requested AS ({}), displayed AS (
+             SELECT requested.value,requested.ordinal,coalesce(sum(totals.track_count),0) track_count,
+             coalesce(sum(totals.duration_millis),0) duration_millis,coalesce(sum(totals.downloaded_count),0) downloaded_count
+             FROM requested LEFT JOIN smart_playlists child ON child.smart_playlist_key=requested.value OR child.playlist_folder_key=-requested.value
+             LEFT JOIN totals ON totals.definition_key=child.smart_playlist_key GROUP BY requested.ordinal)",
+            smart_totals_sql(), requested.sql
+        )
+    };
     let sql = format!(
-        "WITH requested AS ({}) SELECT playlist.smart_playlist_key,playlist.object_id,playlist.name,
-         playlist.definition_json,playlist.position,{} artwork_binding,
-         0 track_count,0 duration_millis,0 downloaded_count
-         FROM requested JOIN smart_playlists playlist ON playlist.smart_playlist_key=requested.value
-         ORDER BY requested.ordinal",
-        requested.sql, crate::artwork::preview_sql("playlist.artwork_binding")
+        "{selected} SELECT displayed.value smart_playlist_key,-displayed.value folder_key,1 smart,
+         coalesce(playlist.object_id,folder.object_id) object_id,coalesce(playlist.name,folder.name) name,
+         playlist.definition_json,playlist.position,{} artwork_binding,displayed.track_count,displayed.duration_millis,displayed.downloaded_count,
+         coalesce(playlist.object_id,cover.object_id) artwork_object_id
+         FROM displayed LEFT JOIN smart_playlists playlist ON playlist.smart_playlist_key=displayed.value
+         LEFT JOIN playlist_folders folder ON folder.folder_key=-displayed.value AND folder.smart
+         LEFT JOIN smart_playlists cover ON cover.smart_playlist_key=folder.smart_cover_key
+         WHERE playlist.smart_playlist_key IS NOT NULL OR folder.folder_key IS NOT NULL ORDER BY displayed.ordinal",
+        crate::artwork::preview_sql("CASE WHEN displayed.value<0 THEN cover.artwork_binding ELSE playlist.artwork_binding END")
     );
-    let mut result =
-        sqlx::query_as_with::<_, SmartPlaylistRow, _>(AssertSqlSafe(sql), requested.arguments)
-            .persistent(false)
-            .fetch_all(&mut *connection)
-            .await?;
-    if result.is_empty() {
-        return Ok(result);
-    }
-    let definitions = result
-        .iter()
-        .map(|row| (row.smart_playlist_key.raw(), row.definition.clone()))
-        .collect::<Vec<_>>();
-    let membership = smart_membership_from_definitions(connection, now, &definitions).await?;
-    let totals = sqlx::query_as::<_,(i64,i64,i64,i64)>(AssertSqlSafe(format!(
-        "{membership} SELECT selected.definition_key,count(*),COALESCE(sum(track.duration_millis),0),
-         count(CASE WHEN track.is_downloaded THEN 1 END)
-         FROM selected JOIN tracks track USING(track_key) GROUP BY selected.definition_key"
-    ))).fetch_all(&mut *connection).await?.into_iter().map(|(key,count,duration,downloaded)| (key,(count,duration,downloaded))).collect::<std::collections::HashMap<_,_>>();
-    for row in &mut result {
-        if let Some(&(count, duration, downloaded)) = totals.get(&row.smart_playlist_key.raw()) {
-            row.track_count = count;
-            row.duration_millis = duration;
-            row.downloaded_count = downloaded;
-        }
-    }
-    for row in &mut result {
-        normalize_definition(&mut row.definition)?;
-        row.artwork_binding = Some(crate::artwork::playlist_artwork(
-            row.artwork_binding.take(),
-            (true, None, row.object_id.clone()),
-            (None, None),
-        )?);
-    }
-    Ok(result)
+    let rows = sqlx::query_with(AssertSqlSafe(sql), requested.arguments)
+        .persistent(false)
+        .fetch_all(connection)
+        .await?;
+    rows.into_iter()
+        .map(|row| {
+            let binding = row
+                .get::<Option<String>, _>("artwork_object_id")
+                .map(|id| {
+                    crate::artwork::playlist_artwork(
+                        row.get("artwork_binding"),
+                        (true, None, id),
+                        (None, None),
+                    )
+                })
+                .transpose()?;
+            if row.get::<i64, _>("smart_playlist_key") < 0 {
+                let mut folder = crate::PlaylistFolderRow::from_row(&row)?;
+                folder.artwork_binding = binding;
+                Ok(crate::PlaylistListRow::Folder(folder))
+            } else {
+                let mut playlist = SmartPlaylistRow::from_row(&row)?;
+                normalize_definition(&mut playlist.definition)?;
+                playlist.artwork_binding = binding;
+                Ok(crate::PlaylistListRow::SmartPlaylist(playlist))
+            }
+        })
+        .collect()
+}
+
+fn smart_totals_sql() -> &'static str {
+    "SELECT selected.definition_key,count(*) track_count,coalesce(sum(track.duration_millis),0) duration_millis,
+     count(CASE WHEN track.is_downloaded THEN 1 END) downloaded_count
+     FROM selected JOIN tracks track USING(track_key) GROUP BY selected.definition_key"
 }
 
 pub(crate) async fn create_default_smart_playlists(
@@ -537,6 +576,7 @@ impl Database {
             &mut transaction,
             crate::query::RequestedKeys::batch(keys)?,
             now,
+            false,
         )
         .await?;
         transaction.commit().await?;
@@ -1310,6 +1350,12 @@ async fn smart_membership_from_definitions(
     if members.is_empty() {
         members.push("SELECT NULL definition_key,NULL track_key,NULL media_uri,0 descending,NULL sort_text,NULL sort_value WHERE 0".into());
     }
+    while members.len() > SMART_PLAYLIST_ROW_LIMIT {
+        members = members
+            .chunks(SMART_PLAYLIST_ROW_LIMIT)
+            .map(|batch| format!("SELECT * FROM ({})", batch.join(" UNION ALL ")))
+            .collect();
+    }
     sql.push_str(&format!(
         ",selected AS NOT MATERIALIZED ({})",
         members.join(" UNION ALL ")
@@ -1525,21 +1571,19 @@ pub(crate) async fn smart_list_query(
     let from = if matches!(sort, CatalogSort::Position | CatalogSort::Title) {
         "smart_playlists playlist".into()
     } else {
-        let keys = if let Some(key) = playlist_folder {
-            Some(
-                sqlx::query_scalar(
-                    "SELECT smart_playlist_key FROM smart_playlists WHERE playlist_folder_key=?1",
-                )
-                .bind(key)
-                .fetch_all(&mut *connection)
-                .await?,
-            )
-        } else {
-            None
-        };
-        let policy = smart_membership_sql(connection, now, keys.as_deref()).await?;
+        let scope = playlist_folder
+            .map(|key| format!(" AND playlist_folder_key={}", key.raw()))
+            .unwrap_or_default();
+        let definitions = sqlx::query_as::<_, (i64, String)>(AssertSqlSafe(format!(
+            "SELECT smart_playlist_key,definition_json FROM smart_playlists WHERE instr(normalized_name,{})>0{scope}",
+            crate::query::quote(&filter.trim().to_lowercase())
+        ))).fetch_all(&mut *connection).await?.into_iter()
+            .map(|(key,json)| Ok((key,serde_json::from_str(&json)?)))
+            .collect::<LibraryResult<Vec<_>>>()?;
+        let policy = smart_membership_from_definitions(connection, now, &definitions).await?;
         format!(
-            "({policy}, totals AS (SELECT definition_key,count(*) track_count,COALESCE(sum(track.duration_millis),0) duration_millis FROM selected JOIN tracks track INDEXED BY tracks_duration_idx USING(track_key) GROUP BY definition_key) SELECT definitions.*,definition_key smart_playlist_key,COALESCE(track_count,0) track_count,COALESCE(duration_millis,0) duration_millis FROM definitions LEFT JOIN totals USING(definition_key)) playlist"
+            "({policy}, totals AS ({}) SELECT playlist.*,coalesce(totals.track_count,0) track_count,coalesce(totals.duration_millis,0) duration_millis,coalesce(totals.downloaded_count,0) downloaded_count FROM definitions JOIN smart_playlists playlist ON playlist.smart_playlist_key=definitions.definition_key LEFT JOIN totals USING(definition_key)) playlist",
+            smart_totals_sql()
         )
     };
     let direction = if descending { "DESC" } else { "ASC" };

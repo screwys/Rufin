@@ -1,7 +1,7 @@
 //! Selects, fetches, caches, and decodes artwork.
 //!
 //! The caller owns final decoded results. This crate chooses the image source,
-//! avoids duplicate work, prioritizes requests, and caches originals and thumbnails.
+//! avoids duplicate work, prioritizes requests, and caches original files.
 
 use std::path::{Path, PathBuf};
 #[cfg(test)]
@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::{future::Future, pin::Pin};
 
 use md5_digest::{Digest, Md5};
-use sources::{Source, SourceId};
+use sources::{ImageSize, Source, SourceId};
 use thiserror::Error;
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
@@ -25,10 +25,10 @@ mod selection;
 pub use animation::{Animation, AnimationFrame};
 pub use cache::{ArtworkCacheEntries, ArtworkCacheEntry};
 pub use decode::{
-    DecodedImage, RgbaImage, collage_png, decode_rgba, image_mime, square_thumbnail_png,
+    DecodedImage, RgbaImage, collage_png, decode_cover, decode_rgba, image_mime,
+    square_thumbnail_png,
 };
 pub use selection::ArtworkBinding;
-pub use sources::ImageSize;
 
 pub(crate) type SourceResolver = dyn Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync;
 pub(crate) type CacheResolver = dyn Fn(
@@ -41,7 +41,6 @@ pub(crate) type CacheResolver = dyn Fn(
 pub struct CacheImageRequest {
     pub family: String,
     pub size: ImageSize,
-    pub fallback: bool,
 }
 
 impl CacheImageRequest {
@@ -52,26 +51,20 @@ impl CacheImageRequest {
                     return None;
                 }
                 let (state, rest) = key.split_once('/')?;
-                let (family, file) = rest.rsplit_once('/')?;
+                let (family, name) = rest.rsplit_once('/')?;
                 if family != self.family {
                     return None;
                 }
                 let rank = if state == "originals" {
-                    (
-                        u8::from(self.size != ImageSize::Original && !self.fallback),
-                        0,
-                    )
-                } else {
-                    let size = cache::thumbnail_size(file)?;
-                    if self.fallback {
-                        (1, u32::MAX - size)
-                    } else if let ImageSize::Thumbnail(requested) = self.size
-                        && size >= requested
-                    {
-                        (0, size)
-                    } else {
+                    (1, 0)
+                } else if let ImageSize::Thumbnail(requested) = self.size {
+                    let size = name.strip_suffix(".image")?.parse::<u32>().ok()?;
+                    if size < requested {
                         return None;
                     }
+                    (0, size)
+                } else {
+                    return None;
                 };
                 Some((rank, key))
             })
@@ -123,10 +116,10 @@ pub struct ArtworkRequest {
 }
 
 impl ArtworkRequest {
-    pub fn new(binding: ArtworkBinding, fetch_size: u32, render_size: u32) -> Self {
+    pub fn new(binding: ArtworkBinding, render_size: u32) -> Self {
         Self {
             binding,
-            fetch_size: ImageSize::Thumbnail(fetch_size.max(1)),
+            fetch_size: ImageSize::Thumbnail(render_size.max(1)),
             render_size: render_size.max(1),
             external: ExternalPolicy::disabled(),
             cache_only: false,
@@ -136,7 +129,7 @@ impl ArtworkRequest {
     pub fn original(binding: ArtworkBinding, render_size: u32) -> Self {
         Self {
             fetch_size: ImageSize::Original,
-            ..Self::new(binding, render_size, render_size)
+            ..Self::new(binding, render_size)
         }
     }
 
@@ -174,11 +167,7 @@ impl ArtworkKey {
         Self {
             asset: Self::binding_digest(binding.asset_identity()),
             binding: Self::binding_digest(binding.stable_identity()),
-            variant: Self::binding_digest(&format!(
-                "{policy}\0{allow_fetch}\0{}\0{}",
-                epochs.0,
-                sizes.0 == ImageSize::Original
-            )),
+            variant: Self::binding_digest(&format!("{policy}\0{allow_fetch}\0{}", epochs.0)),
             fetch_size: sizes.0,
             render_size: sizes.1,
         }
@@ -190,7 +179,9 @@ impl ArtworkKey {
 
     /// The same revision and source policy, independent of display size.
     pub fn same_image(&self, other: &Self) -> bool {
-        self.binding == other.binding && self.variant == other.variant
+        self.binding == other.binding
+            && self.variant == other.variant
+            && (self.fetch_size == ImageSize::Original) == (other.fetch_size == ImageSize::Original)
     }
 
     /// Whether an existing image can stay visible while this request refreshes it.
@@ -206,6 +197,16 @@ pub enum ArtworkLoad {
     Ready(Arc<DecodedImage>),
     Missing,
     Pending(PendingArtwork),
+}
+
+impl ArtworkLoad {
+    pub async fn finish(self) -> ArtworkOutcome {
+        match self {
+            Self::Ready(image) => ArtworkOutcome::Ready(image),
+            Self::Missing => ArtworkOutcome::Missing,
+            Self::Pending(pending) => pending.finish().await,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -226,11 +227,13 @@ pub struct PendingArtwork {
 impl PendingArtwork {
     pub async fn finish(self) -> ArtworkOutcome {
         match self.finish_resolution().await {
-            pipeline::Resolution::Ready { image, .. } => ArtworkOutcome::Ready(image),
+            pipeline::Resolution::Ready {
+                image: Some(image), ..
+            } => ArtworkOutcome::Ready(image),
             pipeline::Resolution::Missing => ArtworkOutcome::Missing,
             pipeline::Resolution::Failed(error) => ArtworkOutcome::Failed(error),
             pipeline::Resolution::Invalidated => ArtworkOutcome::Invalidated,
-            pipeline::Resolution::Cached => {
+            pipeline::Resolution::Ready { image: None, .. } => {
                 unreachable!("foreground requests finish after decoding")
             }
         }
@@ -446,70 +449,33 @@ impl Artwork {
     }
 
     pub async fn cache_source(&self, binding: &[u8]) -> Result<bool, ArtworkError> {
-        self.pipeline
-            .cache_source(ArtworkBinding::opaque(binding))
+        match self
+            .pipeline
+            .cache_image(
+                ArtworkRequest::original(ArtworkBinding::opaque(binding), 512),
+                true,
+            )
             .await
+        {
+            pipeline::Resolution::Ready { .. } => Ok(true),
+            pipeline::Resolution::Missing => Ok(false),
+            pipeline::Resolution::Failed(error) => Err(ArtworkError::FetchSetup(error.to_string())),
+            pipeline::Resolution::Invalidated => Err(ArtworkError::Cancelled),
+        }
     }
 
     pub fn cache_only_file(&self, request: &ArtworkRequest) -> Option<PathBuf> {
-        self.pipeline
-            .cache_only_file(request, &[request.fetch_size])
+        self.pipeline.cache_only_file(request)
     }
 
-    /// Read existing artwork for a binding without fetching or selecting a network policy.
-    /// Disk access and decoding are synchronous; callers should use a worker thread.
-    pub fn cached_image(
-        &self,
-        binding: &ArtworkBinding,
-        render_size: u32,
-    ) -> Result<Option<RgbaImage>, ArtworkError> {
-        self.pipeline
-            .cached_binding_file(binding, render_size)
-            .map(|path| {
-                decode_rgba(
-                    &std::fs::read(path).map_err(ArtworkError::Cache)?,
-                    render_size,
-                )
-            })
-            .transpose()
-    }
-
-    /// Reuse cached image bytes before asking the source for the requested size.
+    /// Return the selected encoded image.
     pub async fn image_bytes(&self, request: ArtworkRequest) -> Result<Option<Vec<u8>>, String> {
-        let pipeline = self.pipeline.clone();
-        let cached_request = request.clone();
-        let cached = tokio::task::spawn_blocking(move || {
-            pipeline
-                .cache_only_file(
-                    &cached_request,
-                    &[cached_request.fetch_size, ImageSize::Original],
-                )
-                .map(std::fs::read)
-                .transpose()
-        })
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())?;
-        if cached.is_some() {
-            return Ok(cached);
-        }
-        let mut request = request;
-        if let ImageSize::Thumbnail(size) = request.fetch_size {
-            request.render_size = request.render_size.max(size);
-        }
-        let loaded = match self.load(request.clone()) {
-            ArtworkLoad::Ready(loaded) => loaded,
-            ArtworkLoad::Missing => return Ok(None),
-            ArtworkLoad::Pending(pending) => match pending.finish().await {
-                ArtworkOutcome::Ready(loaded) => loaded,
-                ArtworkOutcome::Missing | ArtworkOutcome::Invalidated => return Ok(None),
-                ArtworkOutcome::Failed(error) => return Err(error.to_string()),
-            },
+        let path = match self.pipeline.cache_image(request, false).await {
+            pipeline::Resolution::Ready { path, .. } => path,
+            pipeline::Resolution::Missing | pipeline::Resolution::Invalidated => return Ok(None),
+            pipeline::Resolution::Failed(error) => return Err(error.to_string()),
         };
-        if let Some(bytes) = loaded.original() {
-            return Ok(Some(bytes.to_vec()));
-        }
-        tokio::task::spawn_blocking(move || loaded.pixels.encode_png().map(Some))
+        tokio::task::spawn_blocking(move || std::fs::read(path).map(Some))
             .await
             .map_err(|error| error.to_string())?
             .map_err(|error| error.to_string())
@@ -539,11 +505,7 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let artwork = Artwork::new(directory.path(), runtime.handle().clone()).unwrap();
         let key = |encoded: Vec<u8>| {
-            artwork.key(&ArtworkRequest::new(
-                ArtworkBinding::opaque(&encoded),
-                128,
-                64,
-            ))
+            artwork.key(&ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 64))
         };
         let native = |source: &str, image: &str, revision: &str| {
             sources::native_artwork_binding(
@@ -558,6 +520,12 @@ mod tests {
         assert!(first.same_asset(&revised));
         assert!(!first.same_asset(&key(native("source", "other-cover", "one"))));
         assert!(!first.same_asset(&key(native("other-source", "cover", "one"))));
+        let binding = ArtworkBinding::opaque(&native("source", "cover", "one"));
+        let larger = artwork.key(&ArtworkRequest::new(binding.clone(), 256));
+        let original = artwork.key(&ArtworkRequest::original(binding, 64));
+        assert!(first.same_image(&larger));
+        assert!(!first.same_image(&original));
+        assert!(first.same_asset(&original));
 
         let local = |source: &str, revision: &str, picture_index: Option<u32>| {
             let source_id = SourceId::new(source);
@@ -604,7 +572,7 @@ mod tests {
         let encoded =
             sources::native_artwork_binding("source", &sources::NativeImageRef::new("cover", None))
                 .unwrap();
-        let request = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 128, 64);
+        let request = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 64);
         let identity_without_resolver = artwork.key(&request);
         let resolutions = Arc::new(AtomicUsize::new(0));
         let observed = Arc::clone(&resolutions);
@@ -624,7 +592,7 @@ mod tests {
         let prepared = sources::native_artwork_binding("source", &native).unwrap();
         let binding = ArtworkBinding::opaque(&prepared);
         assert_eq!(
-            artwork.key(&ArtworkRequest::new(binding.clone(), 128, 64)),
+            artwork.key(&ArtworkRequest::new(binding.clone(), 64)),
             identity_without_resolver
         );
         let preview = artwork.preview(binding.clone(), false).unwrap();
@@ -694,7 +662,7 @@ mod tests {
         cache
             .write_ready(
                 binding.candidates.first().unwrap(),
-                ImageSize::Thumbnail(256),
+                ImageSize::Original,
                 png.get_ref(),
             )
             .unwrap();
@@ -721,7 +689,7 @@ mod tests {
         );
         assert_eq!(resolutions.load(Ordering::Relaxed), 0);
 
-        let request = ArtworkRequest::new(binding.clone(), 256, 128);
+        let request = ArtworkRequest::new(binding.clone(), 128);
         let key = artwork.key(&request);
         let ArtworkLoad::Pending(pending) = artwork.load(request.clone()) else {
             panic!("disk cache requires worker decoding");
@@ -730,17 +698,13 @@ mod tests {
             panic!("cached image must decode");
         };
         assert_eq!(image.key(), &key);
-        let ArtworkLoad::Ready(smaller) =
-            artwork.load(ArtworkRequest::new(binding.clone(), 96, 64))
+        let ArtworkLoad::Ready(smaller) = artwork.load(ArtworkRequest::new(binding.clone(), 64))
         else {
             panic!("live pixels must be reused");
         };
         assert!(Arc::ptr_eq(&smaller, &image));
         assert_eq!(resolutions.load(Ordering::Relaxed), 0);
-        assert_eq!(
-            artwork.key(&ArtworkRequest::new(binding.clone(), 256, 128)),
-            key
-        );
+        assert_eq!(artwork.key(&ArtworkRequest::new(binding.clone(), 128)), key);
         let preview = artwork.preview(binding.clone(), false).unwrap();
         assert_eq!((preview.image.width(), preview.image.height()), (32, 32));
         assert!(Arc::ptr_eq(
@@ -755,15 +719,15 @@ mod tests {
         assert_eq!(resolutions.load(Ordering::Relaxed), 0);
         assert!(
             artwork
-                .image_bytes(ArtworkRequest::new(binding.clone(), 1024, 512))
+                .image_bytes(ArtworkRequest::new(binding.clone(), 512))
                 .await
                 .unwrap()
                 .is_some()
         );
         assert_eq!(
             resolutions.load(Ordering::Relaxed),
-            1,
-            "a small cached cover is a fallback after the larger request fails"
+            0,
+            "display size does not trigger another source request"
         );
 
         database
@@ -844,9 +808,6 @@ mod tests {
             Some(&before)
         );
         let candidate = binding.candidates.first().unwrap();
-        let large = cache
-            .write_ready(candidate, ImageSize::Thumbnail(731), png.get_ref())
-            .unwrap();
         let original = cache
             .write_ready(candidate, ImageSize::Original, png.get_ref())
             .unwrap();
@@ -858,15 +819,9 @@ mod tests {
             .unwrap(),
         );
         let discarded = cache
-            .write_ready(
-                &ordinary.candidates[0],
-                ImageSize::Thumbnail(512),
-                png.get_ref(),
-            )
+            .write_ready(&ordinary.candidates[0], ImageSize::Original, png.get_ref())
             .unwrap();
-        cache
-            .mark_missing(candidate, ImageSize::Thumbnail(1024))
-            .unwrap();
+        cache.mark_missing(candidate).unwrap();
         artwork
             .clear_cache(
                 &database,
@@ -878,13 +833,11 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(large.is_file());
         assert!(original.is_file());
         assert!(!discarded.exists());
-        assert!(!cache.is_missing(candidate, ImageSize::Thumbnail(1024)));
+        assert!(!cache.is_missing(candidate));
         assert_eq!(artwork.key(&request), key);
         artwork.clear_cache(&database, &[]).await.unwrap();
-        assert!(!large.exists());
         assert!(!original.exists());
         let reopened = Artwork::new(&root, Handle::current()).unwrap();
         reopened
@@ -915,7 +868,7 @@ mod tests {
         );
 
         artwork.invalidate_source(&SourceId::new("source")).unwrap();
-        let invalidated = ArtworkRequest::new(binding, 256, 128);
+        let invalidated = ArtworkRequest::new(binding, 128);
         assert_ne!(artwork.key(&invalidated), key);
         assert!(matches!(artwork.load(invalidated), ArtworkLoad::Pending(_)));
     }
@@ -940,7 +893,7 @@ mod tests {
         );
         assert_eq!(resolutions.load(Ordering::Relaxed), 0);
         assert!(!directory.path().join("covers/v1/previews.sqlite3").exists());
-        let request = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 128, 64);
+        let request = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 64);
         assert_eq!(resolutions.load(Ordering::Relaxed), 0);
 
         let ArtworkLoad::Pending(pending) = artwork.load(request.clone()) else {
@@ -955,25 +908,22 @@ mod tests {
         artwork.install_cache_resolver(move |request| {
             let bytes = png.get_ref().clone();
             async move {
-                if !request.fallback {
-                    return None;
-                }
                 let file = tempfile::NamedTempFile::new().unwrap();
                 std::fs::write(file.path(), bytes).unwrap();
                 Some((
-                    format!("ready/{}/512.png", request.family),
+                    format!("originals/{}/original.png", request.family),
                     file.into_temp_path(),
                 ))
             }
         });
         let ArtworkLoad::Pending(pending) =
-            artwork.load(ArtworkRequest::original(request.binding, 1024))
+            artwork.load(ArtworkRequest::new(request.binding, 1024))
         else {
             panic!("uncached original must request artwork");
         };
         assert!(
             matches!(pending.finish().await, ArtworkOutcome::Ready(_)),
-            "offline original keeps an available peer thumbnail"
+            "offline artwork uses the available peer original"
         );
     }
 
@@ -990,7 +940,7 @@ mod tests {
         let encoded =
             sources::native_artwork_binding("source", &sources::NativeImageRef::new("cover", None))
                 .unwrap();
-        let request = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 128, 64).cache_only();
+        let request = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 64).cache_only();
 
         let ArtworkLoad::Pending(pending) = artwork.load(request.clone()) else {
             panic!("uncached artwork should check the cache worker");
@@ -1002,11 +952,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_local_binding_reads_its_locator_without_a_source() {
         let directory = tempfile::tempdir().unwrap();
-        let image = directory.path().join("cover.png");
+        let image = directory.path().join("cover.jpg");
         let mut encoded_image = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(1, 1, image::Rgb([255, 0, 0])))
-            .write_to(&mut encoded_image, image::ImageFormat::Png)
-            .unwrap();
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            64,
+            64,
+            image::Rgb([255, 0, 0]),
+        ))
+        .write_to(&mut encoded_image, image::ImageFormat::Jpeg)
+        .unwrap();
         std::fs::write(&image, encoded_image.into_inner()).unwrap();
         let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
         let resolutions = Arc::new(AtomicUsize::new(0));
@@ -1021,7 +975,7 @@ mod tests {
             revision: "fixture".to_string(),
         }
         .artwork_binding();
-        let request = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 128, 64);
+        let request = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 64);
         let key = artwork.key(&request);
 
         let ArtworkLoad::Pending(pending) = artwork.load(request.clone()) else {
@@ -1036,14 +990,22 @@ mod tests {
         assert!(Arc::ptr_eq(&reused, &decoded));
         let cached = artwork.cache_only_file(&request).unwrap();
         assert!(cached.is_file());
+        assert_eq!(
+            std::fs::read(&cached).unwrap(),
+            std::fs::read(&image).unwrap()
+        );
         let prepared = encoded.clone();
         let preview = artwork
             .preview(ArtworkBinding::opaque(&prepared), false)
             .unwrap();
         let mut updated = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(1, 1, image::Rgb([0, 0, 255])))
-            .write_to(&mut updated, image::ImageFormat::Png)
-            .unwrap();
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            64,
+            64,
+            image::Rgb([0, 0, 255]),
+        ))
+        .write_to(&mut updated, image::ImageFormat::Jpeg)
+        .unwrap();
         std::fs::write(&image, updated.into_inner()).unwrap();
         artwork.invalidate_image(&request.binding).unwrap();
         let ArtworkLoad::Pending(pending) = artwork.load(request.clone()) else {
@@ -1061,7 +1023,7 @@ mod tests {
         );
         assert!(artwork.cache_source(&encoded).await.unwrap());
         std::fs::remove_file(&image).unwrap();
-        let offline = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 512, 512).cache_only();
+        let offline = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 512).cache_only();
         assert!(artwork.cache_only_file(&offline).is_some());
         let ArtworkLoad::Pending(pending) = artwork.load(offline) else {
             panic!("offline artwork must read the downloaded rendition");

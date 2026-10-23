@@ -183,8 +183,7 @@ pub async fn build(
         seek_pointer_active: Cell::new(false),
         volume_persist_source: RefCell::new(None),
         audio_output_options: RefCell::new(default_audio_output_options()),
-        audio_output_refresh_running: Cell::new(false),
-        audio_output_refresh_generation: Cell::new(0),
+        audio_output_refresh_running: Default::default(),
         audio_output_refreshed_at: Cell::new(None),
         remote_output_options: RefCell::new(Vec::new()),
     };
@@ -494,13 +493,27 @@ pub async fn build(
     });
 
     shell.connect_operation_feedback();
+    let mut settings_errors = shell.products.settings.persistence_errors();
+    let weak = Rc::downgrade(&shell);
+    let settings_errors_task = gtk::glib::spawn_future_local(async move {
+        while settings_errors.changed().await.is_ok() {
+            let Some(shell) = weak.upgrade() else { break };
+            if let Some(error) = settings_errors.borrow_and_update().clone() {
+                shell.control_feedback.show_feedback_toast(error);
+            }
+        }
+    });
     shell.preferences.bind_controller_appearance();
     shell.bind_sidebar_settings();
     let weak = Rc::downgrade(&shell);
     app.connect_shutdown(move |_| {
+        settings_errors_task.abort();
         if let Some(shell) = weak.upgrade() {
             shell.web_controller.stop();
             shell.products.scrobbling.shutdown();
+            if let Err(error) = shell.products.settings.flush() {
+                tracing::warn!(%error, "could not finish saving settings");
+            }
             shell.close_activity();
             if shell.storage_reset.borrow().is_none()
                 && let Err(error) = shell.products.release_updates.install_on_exit()

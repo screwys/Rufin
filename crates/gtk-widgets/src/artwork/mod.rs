@@ -6,6 +6,7 @@ use std::sync::Arc;
 use adw::prelude::*;
 use artwork::{ArtworkBinding, ArtworkRequest};
 use gtk::glib;
+use sources::ImageSize;
 use tracing::warn;
 
 use rufin_core::settings::app::Settings as UiSettings;
@@ -13,8 +14,6 @@ use rufin_core::settings::app::Settings as UiSettings;
 use crate::settings::SettingsState;
 
 pub const THUMB_COVER_SIZE: u32 = 96;
-const MEDIUM_COVER_SIZE: u32 = 256;
-const LARGE_COVER_SIZE: u32 = 512;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlaybackArtworkPath {
     pub path: PathBuf,
@@ -40,22 +39,13 @@ pub fn cover_decode_size(display_size: i32, scale: f64) -> u32 {
     (display_size * scale).ceil().min(f64::from(u32::MAX)) as u32
 }
 
-fn cover_fetch_size_for_display(display_size: i32) -> u32 {
-    if display_size <= THUMB_COVER_SIZE as i32 {
-        THUMB_COVER_SIZE
-    } else if display_size <= MEDIUM_COVER_SIZE as i32 {
-        MEDIUM_COVER_SIZE
-    } else if display_size <= LARGE_COVER_SIZE as i32 {
-        LARGE_COVER_SIZE
-    } else {
-        display_size as u32
+fn cover_fetch_size(render_size: u32) -> u32 {
+    match render_size {
+        0..=96 => 96,
+        97..=256 => 256,
+        257..=512 => 512,
+        _ => render_size,
     }
-}
-
-fn cover_request_sizes(display_size: i32, scale: f64) -> (u32, u32) {
-    let render_size = cover_decode_size(display_size, scale);
-    let fetch_size = cover_fetch_size_for_display(render_size as i32);
-    (fetch_size, render_size)
 }
 
 pub struct ArtworkState {
@@ -130,7 +120,7 @@ impl ArtworkState {
             return;
         }
         let display_size = render_size;
-        let (fetch_size, render_size) = cover_request_sizes(render_size, self.artwork_scale());
+        let render_size = cover_decode_size(render_size, self.artwork_scale());
         let external = if cache_only {
             cache_only_artwork_external_policy()
         } else {
@@ -139,7 +129,10 @@ impl ArtworkState {
         let request = if refresh_desktop_on_ready {
             ArtworkRequest::original(artwork, render_size)
         } else {
-            ArtworkRequest::new(artwork, fetch_size, render_size)
+            ArtworkRequest {
+                fetch_size: ImageSize::Thumbnail(cover_fetch_size(render_size)),
+                ..ArtworkRequest::new(artwork, render_size)
+            }
         }
         .with_external(external);
         let request = if cache_only {
@@ -315,9 +308,12 @@ impl ArtworkState {
         if binding.stable_identity().is_empty() {
             return None;
         }
-        let (fetch_size, render_size) = cover_request_sizes(display_size, self.artwork_scale());
-        let request = ArtworkRequest::new(binding, fetch_size, render_size)
-            .with_external(artwork_external_policy(&self.settings.current.borrow()));
+        let render_size = cover_decode_size(display_size, self.artwork_scale());
+        let request = ArtworkRequest {
+            fetch_size: ImageSize::Thumbnail(cover_fetch_size(render_size)),
+            ..ArtworkRequest::new(binding, render_size)
+        }
+        .with_external(artwork_external_policy(&self.settings.current.borrow()));
         let outcome = match self.service.load(request) {
             artwork::ArtworkLoad::Ready(image) => artwork::ArtworkOutcome::Ready(image),
             artwork::ArtworkLoad::Missing => artwork::ArtworkOutcome::Missing,
@@ -351,8 +347,7 @@ impl ArtworkState {
             .unwrap_or_default();
         let settings = self.settings.current.borrow().clone();
         let external = artwork_external_policy(&settings);
-        let request =
-            ArtworkRequest::new(candidates, preferred_size, preferred_size).with_external(external);
+        let request = ArtworkRequest::new(candidates, preferred_size).with_external(external);
         let path = self.service.cache_only_file(&request)?;
         Some(PlaybackArtworkPath { path })
     }
@@ -372,16 +367,19 @@ fn cache_only_artwork_external_policy() -> artwork::ExternalPolicy {
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_only_artwork_external_policy, cover_request_sizes};
+    use super::{cache_only_artwork_external_policy, cover_decode_size, cover_fetch_size};
 
     #[test]
-    fn artwork_requests_use_physical_size_and_canonical_fetch_tiers() {
-        assert_eq!(cover_request_sizes(200, 1.0), (256, 200));
-        assert_eq!(cover_request_sizes(200, 1.25), (256, 250));
-        assert_eq!(cover_request_sizes(200, 1.5), (512, 300));
-        assert_eq!(cover_request_sizes(200, 2.0), (512, 400));
-        assert_eq!(cover_request_sizes(512, 2.0), (1024, 1024));
-        assert_eq!(cover_request_sizes(48, 2.0), (96, 96));
+    fn artwork_decoding_uses_physical_size() {
+        assert_eq!(cover_decode_size(200, 1.0), 200);
+        assert_eq!(cover_decode_size(200, 1.25), 250);
+        assert_eq!(cover_decode_size(200, 1.5), 300);
+        assert_eq!(cover_decode_size(200, 2.0), 400);
+        assert_eq!(cover_decode_size(512, 2.0), 1024);
+        assert_eq!(cover_decode_size(48, 2.0), 96);
+        for (physical, requested) in [(48, 96), (96, 96), (100, 256), (300, 512), (1024, 1024)] {
+            assert_eq!(cover_fetch_size(physical), requested);
+        }
     }
 
     #[test]

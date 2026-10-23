@@ -3,7 +3,7 @@
 #[cfg(feature = "bindings")]
 uniffi::setup_scaffolding!();
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -64,6 +64,7 @@ enum Command {
     ClearArtworkCache(Sender<Result<(), String>>),
     ClearLyricsCache(Sender<Result<(), String>>),
     Page {
+        scope: DownloadQueueScope,
         offset: u64,
         limit: u32,
         response: Sender<Result<DownloadPage, String>>,
@@ -110,8 +111,7 @@ enum Command {
     Move {
         source_id: SourceId,
         job_id: String,
-        target_job_id: String,
-        after: bool,
+        movement: DownloadQueueMove,
     },
     Clear {
         source_id: SourceId,
@@ -168,14 +168,14 @@ struct DownloadJob {
     completed: Vec<String>,
     #[serde(default)]
     failed: bool,
-    remaining: Vec<String>,
+    remaining: VecDeque<String>,
     state: DownloadQueueState,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct QueueFile {
+struct QueueFile<T = Vec<DownloadJob>> {
     version: u32,
-    jobs: Vec<DownloadJob>,
+    jobs: T,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
@@ -239,7 +239,7 @@ async fn persist_queue(
     }
     let encoded = serde_json::to_vec(&QueueFile {
         version: QUEUE_VERSION,
-        jobs: jobs.to_vec(),
+        jobs,
     })
     .map_err(|error| format!("could not encode the download queue: {error}"))?;
     tokio::fs::write(&part, encoded)
@@ -332,7 +332,7 @@ async fn load_queue(
                     replace_unknown: false,
                     completed,
                     failed: false,
-                    remaining,
+                    remaining: remaining.into(),
                     state: job.state,
                 });
             }
@@ -378,7 +378,7 @@ async fn load_direct_queue(
             if completed {
                 part.completed.push(uri);
             } else {
-                part.remaining.push(uri);
+                part.remaining.push_back(uri);
             }
         }
         for (source, job) in split {
@@ -749,11 +749,21 @@ pub struct DownloadQueueItem {
     pub state: DownloadQueueState,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct DownloadQueueSnapshot {
-    pub jobs: Arc<[DownloadQueueItem]>,
-    pub downloaded_tracks: usize,
-    pub paused: bool,
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+pub enum DownloadQueueMove {
+    Up,
+    Down,
+    Before { job_id: String },
+    After { job_id: String },
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+pub enum DownloadQueueScope {
+    All,
+    Source { source_id: SourceId },
+    Direct,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -781,8 +791,8 @@ pub enum DownloadEvent {
         downloaded: bool,
     },
     Queue {
-        source_id: Option<SourceId>,
-        snapshot: Arc<DownloadQueueSnapshot>,
+        summary: DownloadQueueSummary,
+        paused: bool,
     },
     Feedback(DownloadFeedback),
     Notice(String),
@@ -839,6 +849,7 @@ impl Downloads {
                 events: DownloadEvents {
                     sender: events,
                     status,
+                    counts_dirty: Mutex::new(HashSet::new()),
                 },
                 transfers: Arc::new(TransferClients::default()),
                 peer: downloads.peer.clone(),
@@ -969,18 +980,11 @@ impl Downloads {
 
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl Downloads {
-    pub fn move_job(
-        &self,
-        source_id: SourceId,
-        job_id: String,
-        target_job_id: String,
-        after: bool,
-    ) {
+    pub fn move_job(&self, source_id: SourceId, job_id: String, movement: DownloadQueueMove) {
         self.send(Command::Move {
             source_id,
             job_id,
-            target_job_id,
-            after,
+            movement,
         });
     }
 }
@@ -1007,11 +1011,11 @@ async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiv
     match load_direct_queue(&actor.root, &actor.database, &actor.settings).await {
         Ok(jobs) if !jobs.is_empty() => {
             actor.jobs.insert(None, jobs);
-            actor.publish(None).await;
         }
         Ok(_) => {}
         Err(error) => warn!(%error, "could not load the direct download queue"),
     }
+    actor.publish(None).await;
     let mut retry = tokio::time::interval(RETRY_INTERVAL);
     retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut active = Vec::new();
@@ -1111,11 +1115,14 @@ impl Actor {
                 let _ = response.send(result).await;
             }
             Command::Page {
+                scope,
                 offset,
                 limit,
                 response,
             } => {
-                let _ = response.send(self.queue_page(offset, limit).await).await;
+                let _ = response
+                    .send(self.queue_page(scope, offset, limit).await)
+                    .await;
             }
             Command::Attach {
                 source_id,
@@ -1259,11 +1266,9 @@ impl Actor {
             Command::Move {
                 source_id,
                 job_id,
-                target_job_id,
-                after,
+                movement,
             } => {
-                self.move_job(&source_id, &job_id, &target_job_id, after)
-                    .await;
+                self.move_job(&source_id, &job_id, movement).await;
             }
             Command::Clear { source_id, notify } => {
                 if let Some(settings) = self.settings.get_mut(&source_id) {
@@ -1339,7 +1344,7 @@ impl Actor {
                 for job in jobs {
                     job.quality = quality;
                     job.replace_unknown = true;
-                    job.remaining.append(&mut job.completed);
+                    job.remaining.extend(job.completed.drain(..));
                     job.failed = false;
                     job.state = DownloadQueueState::Queued;
                 }
@@ -1519,6 +1524,11 @@ impl Actor {
         {
             attachment_error = Some(error);
         }
+        self.events
+            .counts_dirty
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(group.clone());
         let source_available = source.as_ref().and_then(Weak::upgrade).is_some();
         let mut jobs = if let Some(jobs) = self.jobs.get(&group) {
             jobs.clone()
@@ -1544,7 +1554,7 @@ impl Actor {
             if job.quality != quality {
                 job.quality = quality;
                 job.replace_unknown = true;
-                job.remaining.append(&mut job.completed);
+                job.remaining.extend(job.completed.drain(..));
             }
             job.state = if source_available {
                 DownloadQueueState::Queued
@@ -1826,7 +1836,7 @@ impl Actor {
                     replace_unknown,
                     completed,
                     failed: false,
-                    remaining,
+                    remaining: remaining.into(),
                     state: if source_available {
                         DownloadQueueState::Queued
                     } else {
@@ -1985,7 +1995,7 @@ impl Actor {
                 replace_unknown,
                 completed,
                 failed: false,
-                remaining,
+                remaining: remaining.into(),
                 state,
             };
             jobs.insert(existing_index.unwrap_or(jobs.len()).min(jobs.len()), job);
@@ -2024,8 +2034,7 @@ impl Actor {
 
     async fn start_next(&mut self, active: &[ActiveDownload]) -> Option<ActiveDownload> {
         loop {
-            let (source_id, job_id, subject, quality, media_uri, state) =
-                self.next_candidate(active)?;
+            let (source_id, job_id, subject, quality, media_uri) = self.next_candidate(active)?;
             let attached = source_id
                 .as_ref()
                 .and_then(|source_id| self.attached.get(source_id))
@@ -2038,7 +2047,7 @@ impl Actor {
                 if let Some(job) = self.find_job_mut(&source_id, &job_id) {
                     job.state = DownloadQueueState::WaitingForConnection;
                 }
-                self.persist_and_publish(source_id.as_ref()).await;
+                self.publish(source_id.as_ref()).await;
                 continue;
             }
             let replace_unknown = self
@@ -2176,15 +2185,10 @@ impl Actor {
                     *path = path.with_file_name(format!("{key}.{extension}"));
                 }
             }
-            let entering_download = state != DownloadQueueState::Downloading;
             if let Some(job) = self.find_job_mut(&source_id, &job_id) {
                 job.state = DownloadQueueState::Downloading;
             }
-            if entering_download {
-                self.persist_and_publish(source_id.as_ref()).await;
-            } else {
-                self.publish(source_id.as_ref()).await;
-            }
+            self.publish(source_id.as_ref()).await;
             let task_paths = paths.clone();
             let transfers = Arc::clone(&self.transfers);
             let (cancellation, cancelled) = tokio::sync::oneshot::channel();
@@ -2305,7 +2309,6 @@ impl Actor {
         DownloadSubject,
         DownloadQuality,
         String,
-        DownloadQueueState,
     )> {
         for (source_id, jobs) in &self.jobs {
             for job in jobs {
@@ -2332,7 +2335,6 @@ impl Actor {
                         job.subject.clone(),
                         job.quality,
                         media_uri.clone(),
-                        job.state,
                     ));
                 }
             }
@@ -2374,24 +2376,28 @@ impl Actor {
                 "download task failed: {error}"
             ))),
         };
-        match result {
+        let persist = match result {
             Ok(()) => {
                 self.remove_job_track(&source_id, &job_id, &media_uri, true);
+                true
             }
             Err(DownloadFailure::Item(error)) => {
                 warn!(%error, source_id=?source_id, %media_uri, "could not download track");
                 self.mark_subject_incomplete(&subject).await;
                 self.remove_job_track(&source_id, &job_id, &media_uri, false);
+                true
             }
             Err(DownloadFailure::Retry(error)) => {
                 warn!(%error, source_id=?source_id, "download is waiting for the server");
-                self.abort_matching(remaining_active, true, |download| {
-                    download.source_id == source_id && download.job_id == job_id
-                })
-                .await;
+                let completed = self
+                    .abort_matching(remaining_active, true, |download| {
+                        download.source_id == source_id && download.job_id == job_id
+                    })
+                    .await;
                 if let Some(job) = self.find_job_mut(&source_id, &job_id) {
                     job.state = DownloadQueueState::WaitingForConnection;
                 }
+                !completed.is_empty()
             }
             Err(DownloadFailure::NeedsAttention(error)) => {
                 warn!(%error, source_id=?source_id, "download needs attention");
@@ -2402,9 +2408,14 @@ impl Actor {
                 if let Some(job) = self.find_job_mut(&source_id, &job_id) {
                     job.state = DownloadQueueState::NeedsAttention;
                 }
+                true
             }
+        };
+        if persist {
+            self.persist_and_publish(source_id.as_ref()).await;
+        } else {
+            self.publish(source_id.as_ref()).await;
         }
-        self.persist_and_publish(source_id.as_ref()).await;
     }
 
     async fn commit_transfer(
@@ -2487,6 +2498,11 @@ impl Actor {
             .commit_download(&file, source, &access)
             .await
             .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
+        self.events
+            .counts_dirty
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(source_id.clone());
         let _ = self
             .events
             .send(DownloadEvent::Changed {
@@ -2722,7 +2738,13 @@ impl Actor {
             return;
         };
         let job = &mut jobs[job_index];
-        job.remaining.retain(|candidate| candidate != media_uri);
+        if let Some(position) = job
+            .remaining
+            .iter()
+            .position(|candidate| candidate == media_uri)
+        {
+            job.remaining.remove(position);
+        }
         if completed {
             job.completed.push(media_uri.to_string());
         }
@@ -2891,6 +2913,11 @@ impl Actor {
             .await
             .map_err(|error| error.to_string())?
             .is_empty();
+        self.events
+            .counts_dirty
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(file.source_id.clone().map(SourceId::new));
         let _ = self
             .events
             .send(DownloadEvent::Changed {
@@ -3063,20 +3090,28 @@ impl Actor {
         }
     }
 
-    async fn move_job(
-        &mut self,
-        source_id: &SourceId,
-        job_id: &str,
-        target_job_id: &str,
-        after: bool,
-    ) {
-        let group = Some(source_id.clone());
-        let changed = reorder_jobs(
-            self.jobs.entry(group).or_default(),
-            job_id,
-            target_job_id,
-            after,
-        );
+    async fn move_job(&mut self, source_id: &SourceId, job_id: &str, movement: DownloadQueueMove) {
+        let jobs = self.jobs.entry(Some(source_id.clone())).or_default();
+        let (target, after) = match movement {
+            DownloadQueueMove::Before { job_id } => (job_id, false),
+            DownloadQueueMove::After { job_id } => (job_id, true),
+            direction => {
+                let Some(position) = jobs.iter().position(|job| job.id == job_id) else {
+                    return;
+                };
+                let after = matches!(direction, DownloadQueueMove::Down);
+                let target = if after {
+                    position.checked_add(1)
+                } else {
+                    position.checked_sub(1)
+                };
+                let Some(target) = target.and_then(|position| jobs.get(position)) else {
+                    return;
+                };
+                (target.id.clone(), after)
+            }
+        };
+        let changed = reorder_jobs(jobs, job_id, &target, after);
         if changed {
             self.persist_and_publish(Some(source_id)).await;
         } else {
@@ -3188,27 +3223,37 @@ impl Actor {
 
     async fn publish(&self, source_id: Option<&SourceId>) {
         let group = source_id.cloned();
-        let downloaded_tracks = self
-            .database
-            .downloaded_count(source_id.map(SourceId::as_str))
-            .await
-            .unwrap_or_default();
-        let jobs = self
-            .jobs
-            .get(&group)
-            .into_iter()
-            .flatten()
-            .map(|job| job.queue_item(group.clone()))
-            .collect::<Vec<_>>();
+        let previous = self
+            .events
+            .status
+            .borrow()
+            .queues
+            .iter()
+            .find(|queue| queue.source_id == group)
+            .map(|queue| queue.downloaded_tracks);
+        let changed = self
+            .events
+            .counts_dirty
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&group);
+        let downloaded_tracks = if changed || previous.is_none() {
+            self.database
+                .downloaded_count(source_id.map(SourceId::as_str))
+                .await
+                .unwrap_or_default() as u64
+        } else {
+            previous.unwrap()
+        };
         let _ = self
             .events
             .send(DownloadEvent::Queue {
-                source_id: group,
-                snapshot: Arc::new(DownloadQueueSnapshot {
-                    jobs: jobs.into(),
+                summary: DownloadQueueSummary {
+                    source_id: group.clone(),
+                    total_jobs: self.jobs.get(&group).map_or(0, |jobs| jobs.len() as u64),
                     downloaded_tracks,
-                    paused: self.paused,
-                }),
+                },
+                paused: self.paused,
             })
             .await;
     }
@@ -3416,7 +3461,7 @@ mod tests {
                 replace_unknown: false,
                 completed: Vec::new(),
                 failed: false,
-                remaining: vec![media_uri.clone(), direct.clone()],
+                remaining: vec![media_uri.clone(), direct.clone()].into(),
                 state: DownloadQueueState::Queued,
             }],
         };
@@ -3431,7 +3476,7 @@ mod tests {
             .await
             .unwrap();
         let mut already_saved = restored.jobs[0].clone();
-        already_saved.remaining = vec![media_uri.clone()];
+        already_saved.remaining = vec![media_uri.clone()].into();
         persist_queue(root.path(), Some(&source_id), &[already_saved])
             .await
             .unwrap();
@@ -3551,18 +3596,15 @@ mod tests {
             .expect("read direct Queue");
         let queue: QueueFile = serde_json::from_slice(&queue).expect("decode direct Queue");
         assert_eq!(queue.jobs[0].remaining, std::slice::from_ref(&media_uri));
-        let DownloadEvent::Queue {
-            source_id,
-            snapshot,
-        } = received.recv().await.unwrap()
-        else {
+        let DownloadEvent::Queue { summary, .. } = received.recv().await.unwrap() else {
             panic!("Queue event")
         };
-        assert!(source_id.is_none());
-        assert_eq!(
-            snapshot.jobs[0].preview_uris,
-            std::slice::from_ref(&media_uri)
-        );
+        assert!(summary.source_id.is_none());
+        let page = actor
+            .queue_page(DownloadQueueScope::Direct, 0, 1)
+            .await
+            .unwrap();
+        assert_eq!(page.jobs[0].preview_uris, std::slice::from_ref(&media_uri));
         let DownloadEvent::Feedback(feedback) = received.recv().await.unwrap() else {
             panic!("feedback event")
         };
@@ -3613,11 +3655,11 @@ mod tests {
                 downloaded: true,
             }
         );
-        let DownloadEvent::Queue { snapshot, .. } = received.recv().await.unwrap() else {
+        let DownloadEvent::Queue { summary, .. } = received.recv().await.unwrap() else {
             panic!("completed Queue event")
         };
-        assert!(snapshot.jobs.is_empty());
-        assert_eq!(snapshot.downloaded_tracks, 1);
+        assert_eq!(summary.total_jobs, 0);
+        assert_eq!(summary.downloaded_tracks, 1);
         for source_id in ["unused", "missing"] {
             let count = actor
                 .database
@@ -3658,10 +3700,10 @@ mod tests {
                 downloaded: false,
             }
         );
-        let DownloadEvent::Queue { snapshot, .. } = received.recv().await.unwrap() else {
+        let DownloadEvent::Queue { summary, .. } = received.recv().await.unwrap() else {
             panic!("removed Queue event")
         };
-        assert_eq!(snapshot.downloaded_tracks, 0);
+        assert_eq!(summary.downloaded_tracks, 0);
     }
 
     #[tokio::test]
@@ -4383,6 +4425,7 @@ mod tests {
             events: DownloadEvents {
                 sender: events,
                 status: tokio::sync::watch::channel(DownloadStatus::default()).0,
+                counts_dirty: Mutex::new(HashSet::new()),
             },
             transfers: Arc::new(TransferClients::default()),
             prepared_rules,
@@ -4422,7 +4465,7 @@ mod tests {
             replace_unknown: false,
             completed: Vec::new(),
             failed: false,
-            remaining: vec![media_uri],
+            remaining: vec![media_uri].into(),
             state: DownloadQueueState::Downloading,
         }
     }
@@ -4639,7 +4682,7 @@ pub struct DownloadStatus {
     pub notice: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct DownloadQueueSummary {
     pub source_id: Option<SourceId>,
@@ -4657,6 +4700,7 @@ pub struct DownloadPage {
 struct DownloadEvents {
     sender: Sender<DownloadEvent>,
     status: tokio::sync::watch::Sender<DownloadStatus>,
+    counts_dirty: Mutex<HashSet<Option<SourceId>>>,
 }
 
 impl DownloadEvents {
@@ -4665,25 +4709,17 @@ impl DownloadEvents {
             match event {
                 DownloadEvent::Changed { .. } => state.revision += 1,
                 DownloadEvent::Notice(message) => state.notice = Some(message.clone()),
-                DownloadEvent::Queue {
-                    source_id,
-                    snapshot,
-                } => {
-                    state.paused = snapshot.paused;
+                DownloadEvent::Queue { summary, paused } => {
+                    state.paused = *paused;
                     state.queue_revision += 1;
-                    let summary = DownloadQueueSummary {
-                        source_id: source_id.clone(),
-                        downloaded_tracks: snapshot.downloaded_tracks as u64,
-                        total_jobs: snapshot.jobs.len() as u64,
-                    };
                     if let Some(previous) = state
                         .queues
                         .iter_mut()
-                        .find(|queue| &queue.source_id == source_id)
+                        .find(|queue| queue.source_id == summary.source_id)
                     {
-                        *previous = summary;
+                        *previous = summary.clone();
                     } else {
-                        state.queues.push(summary);
+                        state.queues.push(summary.clone());
                         state.queues.sort_by(|a, b| a.source_id.cmp(&b.source_id));
                     }
                 }
@@ -4730,8 +4766,21 @@ impl DownloadJob {
 }
 
 impl Actor {
-    async fn queue_page(&self, offset: u64, limit: u32) -> Result<DownloadPage, String> {
-        let mut groups = self.jobs.iter().collect::<Vec<_>>();
+    async fn queue_page(
+        &self,
+        scope: DownloadQueueScope,
+        offset: u64,
+        limit: u32,
+    ) -> Result<DownloadPage, String> {
+        let mut groups = self
+            .jobs
+            .iter()
+            .filter(|(source, _)| match &scope {
+                DownloadQueueScope::All => true,
+                DownloadQueueScope::Source { source_id } => source.as_ref() == Some(source_id),
+                DownloadQueueScope::Direct => source.is_none(),
+            })
+            .collect::<Vec<_>>();
         groups.sort_by(|(a, _), (b, _)| a.cmp(b));
         let total = groups.iter().map(|(_, jobs)| jobs.len() as u64).sum();
         let mut offset = usize::try_from(offset).unwrap_or(usize::MAX);
@@ -4800,9 +4849,19 @@ impl Downloads {
             changes: tokio::sync::Mutex::new(changes),
         })
     }
-    pub async fn queue_page(&self, offset: u64, limit: u32) -> sources::SourceResult<DownloadPage> {
+    pub fn status(&self) -> DownloadStatus {
+        self.status.borrow().clone()
+    }
+
+    pub async fn queue_page(
+        &self,
+        scope: DownloadQueueScope,
+        offset: u64,
+        limit: u32,
+    ) -> sources::SourceResult<DownloadPage> {
         let (response, receive) = async_channel::bounded(1);
         self.send(Command::Page {
+            scope,
             offset,
             limit,
             response,

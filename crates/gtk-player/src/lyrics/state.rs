@@ -2,7 +2,7 @@ use super::{search::LyricsSearchDialog, view::LyricsPane};
 use adw::prelude::*;
 use gtk::glib;
 use gtk_widgets::lyrics_editor::parse_lyrics_offset_millis;
-use lyrics::{LyricsTiming, playback_position_for_lyrics_position};
+use lyrics::playback_position_for_lyrics_position;
 use std::cell::{Cell, RefCell};
 pub struct LyricsState {
     pub panel_visible: Cell<bool>,
@@ -13,7 +13,6 @@ pub struct SelectedLyricsState {
     pub projection: RefCell<CurrentLyrics>,
     pub offset_millis: Cell<i64>,
     pub timing_source: RefCell<Option<glib::SourceId>>,
-    pub timing: RefCell<LyricsTiming>,
     pub right_pane_dirty: Cell<bool>,
     pub fullscreen_pane_dirty: Cell<bool>,
     pub search_dialog: RefCell<Option<LyricsSearchDialog>>,
@@ -37,7 +36,6 @@ impl SelectedLyricsState {
             projection: RefCell::new(CurrentLyrics::Cleared),
             offset_millis: Cell::new(0),
             timing_source: RefCell::new(None),
-            timing: RefCell::new(LyricsTiming::default()),
             right_pane_dirty: Cell::new(true),
             fullscreen_pane_dirty: Cell::new(true),
             search_dialog: RefCell::new(None),
@@ -118,20 +116,6 @@ impl PlayerUi {
                 ..
             } if current_media.as_ref() == Some(media_id)
         )
-    }
-
-    pub fn visible_lyrics_pronunciation(&self) -> Option<Arc<LyricsDocument>> {
-        let current_media = current_playback_media_id(self.selected_playback().as_deref());
-        let lyrics = self.selected_lyrics()?;
-        match &*lyrics.projection.borrow() {
-            CurrentLyrics::Ready {
-                media_id, content, ..
-            } if current_media.as_ref() == Some(media_id) => match content {
-                Some(CurrentLyricsContent::Document { pronunciation, .. }) => pronunciation.clone(),
-                Some(CurrentLyricsContent::Instrumental) | None => None,
-            },
-            _ => None,
-        }
     }
 
     pub fn current_lyrics_loading(&self) -> bool {
@@ -422,19 +406,6 @@ impl SelectedLyricsState {
             self.right_pane.restart_follow_tracking();
             self.fullscreen_pane.restart_follow_tracking();
             self.offset_millis.set(0);
-        }
-        match &projection {
-            CurrentLyrics::Ready {
-                content: Some(CurrentLyricsContent::Document { document, .. }),
-                ..
-            } if document_changed => {
-                *self.timing.borrow_mut() = LyricsTiming::new(&document.lines);
-            }
-            CurrentLyrics::Ready {
-                content: Some(CurrentLyricsContent::Document { .. }),
-                ..
-            } => {}
-            _ => *self.timing.borrow_mut() = LyricsTiming::default(),
         }
         *self.projection.borrow_mut() = projection;
         document_changed || media_changed

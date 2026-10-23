@@ -43,7 +43,7 @@ pub use sidebar::{SidebarPin, SidebarRouteItem, SidebarRouteItemSettings, Sideba
 use std::fs;
 use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use app::Settings as UiSettings;
 use playback::StreamQuality;
@@ -230,6 +230,7 @@ impl StoredSettings {
         self.ui.visualizer.migrate_named_presets();
         self.migrate_home_blocks();
         self.migrate_legacy_track_table();
+        app::migrate_library_lists(&mut self.ui.library_lists);
         self.ui.sanitize();
     }
 
@@ -315,7 +316,9 @@ pub struct SettingsFile {
     path: Option<PathBuf>,
     config_dir: PathBuf,
     value: Arc<Mutex<StoredSettings>>,
-    persistence: Arc<Mutex<()>>,
+    persistence: Arc<Mutex<StoredSettings>>,
+    edits: Arc<OnceLock<Result<mpsc::SyncSender<Self>, String>>>,
+    persistence_error: tokio::sync::watch::Sender<Option<String>>,
     pub(crate) secret_storage_fallbacks: (
         async_channel::Sender<KeyringSecretStore>,
         async_channel::Receiver<KeyringSecretStore>,
@@ -352,7 +355,12 @@ impl SettingsFile {
                 Err(error) => warn!(%error, "could not create a Jellyfin device identity"),
             }
         }
-        let file = Self {
+        if changed {
+            if let Err(error) = write_settings(&path, &value) {
+                warn!(%error, "could not save startup settings");
+            }
+        }
+        Ok(Self {
             shared: tokio::sync::watch::channel(value.shared_settings.revision()).0,
             sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
             appearance: tokio::sync::watch::channel(value.ui.appearance.clone()).0,
@@ -362,17 +370,12 @@ impl SettingsFile {
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf(),
             path: Some(path),
-            value: Arc::new(Mutex::new(value)),
-            persistence: Arc::new(Mutex::new(())),
+            value: Arc::new(Mutex::new(value.clone())),
+            persistence: Arc::new(Mutex::new(value)),
+            edits: Arc::new(OnceLock::new()),
+            persistence_error: tokio::sync::watch::channel(None).0,
             secret_storage_fallbacks: async_channel::unbounded(),
-        };
-        if changed {
-            let current = file.load();
-            if let Err(error) = file.write(&current) {
-                warn!(%error, "could not save startup settings");
-            }
-        }
-        Ok(file)
+        })
     }
 
     #[cfg(test)]
@@ -391,8 +394,10 @@ impl SettingsFile {
             appearance: tokio::sync::watch::channel(value.ui.appearance.clone()).0,
             web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
             config_dir,
-            value: Arc::new(Mutex::new(value)),
-            persistence: Arc::new(Mutex::new(())),
+            value: Arc::new(Mutex::new(value.clone())),
+            persistence: Arc::new(Mutex::new(value)),
+            edits: Arc::new(OnceLock::new()),
+            persistence_error: tokio::sync::watch::channel(None).0,
             secret_storage_fallbacks: async_channel::unbounded(),
         }
     }
@@ -450,69 +455,137 @@ impl SettingsFile {
             .map(|source| source.configuration.clone())
     }
 
+    /// Apply preferences immediately. The shared writer reports durable failures separately.
+    pub(crate) fn edit<T>(
+        &self,
+        operation: impl FnOnce(&mut StoredSettings) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let writer = if self.path.is_some() {
+            Some(
+                self.edits
+                    .get_or_init(|| {
+                        let (sender, receiver) = mpsc::sync_channel::<Self>(1);
+                        std::thread::Builder::new()
+                            .name("rufin-settings".into())
+                            .spawn(move || {
+                                while let Ok(file) = receiver.recv() {
+                                    if let Err(error) = file.flush() {
+                                        warn!(%error, "could not save settings");
+                                    }
+                                }
+                            })
+                            .map_err(|error| error.to_string())?;
+                        Ok(sender)
+                    })
+                    .as_ref()
+                    .map_err(Clone::clone)?,
+            )
+        } else {
+            None
+        };
+        let mut current = self.value.lock().unwrap_or_else(|p| p.into_inner());
+        let mut next = current.clone();
+        let output = operation(&mut next)?;
+        next.prepare()?;
+        if next != *current {
+            if let Some(writer) = writer {
+                match writer.try_send(self.clone()) {
+                    Ok(()) | Err(mpsc::TrySendError::Full(_)) => {}
+                    Err(mpsc::TrySendError::Disconnected(_)) => {
+                        return Err("Settings writer stopped".into());
+                    }
+                }
+            }
+            *current = next;
+            self.publish_changes(&current);
+        }
+        Ok(output)
+    }
+
     pub(crate) fn update<T>(
         &self,
         operation: impl FnOnce(&mut StoredSettings) -> Result<T, String>,
     ) -> Result<T, String> {
-        // Serialize saves while readers keep using the last committed settings.
-        let _persistence = self
-            .persistence
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut next = self.load();
+        let mut saved = self.persistence.lock().unwrap_or_else(|p| p.into_inner());
+        let previous = self.load();
+        let mut next = previous.clone();
         let output = operation(&mut next)?;
-        next.migrate_defaults();
-        connect::stamp_changes(&self.load(), &mut next)?;
-        if next.ui.application.backup.schedule.frequency != backup::BackupFrequency::Off
-            && next.ui.application.backup.schedule.schedule_id.is_empty()
-        {
-            next.ui.application.backup.schedule.schedule_id = random_identity("schedule-")?;
+        next.prepare()?;
+        connect::stamp_changes(&saved, &mut next)?;
+        if next != *saved {
+            self.persist(&next)?;
         }
-        next.ui.application.backup.schedule.retention = 2;
-        if next.ui.application.backup.enabled
-            && next.ui.application.backup.schedule.frequency == backup::BackupFrequency::Off
-        {
-            next.ui.application.backup.schedule.frequency = backup::BackupFrequency::Daily;
-            if next.ui.application.backup.schedule.schedule_id.is_empty() {
-                next.ui.application.backup.schedule.schedule_id = random_identity("schedule-")?;
-            }
-        }
-        next.ui.application.backup.schedule.hour = next.ui.application.backup.schedule.hour.min(23);
-        next.ui.application.backup.schedule.weekday =
-            next.ui.application.backup.schedule.weekday.min(6);
-        if next
-            == *self
-                .value
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-        {
-            return Ok(output);
-        }
-        if let Some(path) = &self.path {
-            write_settings(path, &next)?;
-        }
-        let mut current = self
-            .value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *saved = next.clone();
+        let mut current = self.value.lock().unwrap_or_else(|p| p.into_inner());
+        // Preference edits can arrive while a background transaction writes to disk.
+        // Keep those newer edits when publishing the committed source or configuration.
+        merge_preference_edits(&mut next.ui, &previous.ui, &current.ui)?;
+        merge_preference_edits(
+            &mut next.scrobbling,
+            &previous.scrobbling,
+            &current.scrobbling,
+        )?;
         *current = next;
         self.publish_changes(&current);
         Ok(output)
     }
 
-    fn write(&self, value: &StoredSettings) -> Result<(), String> {
-        let _persistence = self
-            .persistence
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(path) = &self.path {
-            write_settings(path, value)?;
+    pub(crate) fn flush(&self) -> Result<(), String> {
+        let mut saved = self.persistence.lock().unwrap_or_else(|p| p.into_inner());
+        let result = (|| {
+            let mut next = self.load();
+            connect::stamp_changes(&saved, &mut next)?;
+            if next != *saved {
+                self.persist(&next)?;
+                let mut current = self.value.lock().unwrap_or_else(|p| p.into_inner());
+                current.shared_settings = next.shared_settings.clone();
+                *saved = next;
+                self.publish_changes(&current);
+            }
+            Ok(())
+        })();
+        self.persistence_error
+            .send_replace(result.as_ref().err().cloned());
+        result
+    }
+
+    fn persist(&self, value: &StoredSettings) -> Result<(), String> {
+        self.path
+            .as_ref()
+            .map_or(Ok(()), |path| write_settings(path, value))
+    }
+}
+
+fn merge_preference_edits<T: Serialize + serde::de::DeserializeOwned + PartialEq>(
+    next: &mut T,
+    previous: &T,
+    current: &T,
+) -> Result<(), String> {
+    if previous != current {
+        let mut merged = serde_json::to_value(&*next).map_err(|e| e.to_string())?;
+        let previous = serde_json::to_value(previous).map_err(|e| e.to_string())?;
+        let current = serde_json::to_value(current).map_err(|e| e.to_string())?;
+        merge_settings(&mut merged, &previous, &current);
+        *next = serde_json::from_value(merged).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+impl StoredSettings {
+    fn prepare(&mut self) -> Result<(), String> {
+        self.ui.sanitize();
+        let backup = &mut self.ui.application.backup;
+        if backup.enabled && backup.schedule.frequency == backup::BackupFrequency::Off {
+            backup.schedule.frequency = backup::BackupFrequency::Daily;
         }
-        *self
-            .value
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = value.clone();
-        self.publish_changes(value);
+        if backup.schedule.frequency != backup::BackupFrequency::Off
+            && backup.schedule.schedule_id.is_empty()
+        {
+            backup.schedule.schedule_id = random_identity("schedule-")?;
+        }
+        backup.schedule.retention = 2;
+        backup.schedule.hour = backup.schedule.hour.min(23);
+        backup.schedule.weekday = backup.schedule.weekday.min(6);
         Ok(())
     }
 }
@@ -540,22 +613,6 @@ impl SettingsOwner {
             secrets,
             on_change: Arc::new(on_change),
         })
-    }
-
-    fn save_ui(&self, settings: &UiSettings) -> Result<UiSettings, String> {
-        let previous = self.file.load();
-        self.file.update(|stored| {
-            let secret_storage_mode = stored.ui.application.secret_storage_mode;
-            let lastfm_api_key = stored.ui.lastfm_api_key.clone();
-            stored.ui = settings.clone();
-            // These settings are committed together with their credentials.
-            stored.ui.application.secret_storage_mode = secret_storage_mode;
-            stored.ui.lastfm_api_key = lastfm_api_key;
-            Ok(())
-        })?;
-        let current = self.file.load();
-        (self.on_change)(&previous, &current, false);
-        Ok(current.ui)
     }
 
     pub(crate) fn restore(
@@ -617,12 +674,26 @@ impl SettingsFile {
 }
 
 impl SettingsOwner {
+    pub fn persistence_errors(&self) -> tokio::sync::watch::Receiver<Option<String>> {
+        self.file.persistence_error.subscribe()
+    }
+
+    /// Finish pending preference saves before shutdown or export.
+    pub fn flush(&self) -> Result<(), String> {
+        self.file.flush()
+    }
+
     pub fn appearance_changes(&self) -> tokio::sync::watch::Receiver<AppearancePreferences> {
         self.file.appearance.subscribe()
     }
 
     pub fn load(&self) -> UiSettings {
-        self.file.load().ui
+        self.file
+            .value
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .ui
+            .clone()
     }
 
     pub fn visualizer_render_settings(&self) -> (u32, visualizer::VisualizerAppearance) {
@@ -696,15 +767,15 @@ impl SettingsOwner {
         })
     }
 
-    pub fn save(&self, settings: &UiSettings) -> Result<UiSettings, String> {
-        self.save_ui(settings)
-    }
-
+    /// Apply an edit now; durable failures are published through `persistence_errors`.
     pub fn update_preferences(
         &self,
         edit: impl FnOnce(&mut UiSettings) -> Result<(), String>,
     ) -> Result<(), String> {
-        self.restore(move |stored| edit(&mut stored.ui), false)
+        let previous = self.file.load();
+        self.file.edit(move |stored| edit(&mut stored.ui))?;
+        (self.on_change)(&previous, &self.file.load(), false);
+        Ok(())
     }
 }
 
@@ -715,13 +786,10 @@ impl SettingsOwner {
         source_id: SourceId,
         location: Option<downloads::DownloadDirectory>,
     ) -> Result<(), SettingsError> {
-        self.restore(
-            move |stored| {
-                stored.ui.set_download_location(source_id, location);
-                Ok(())
-            },
-            false,
-        )
+        self.update_preferences(move |ui| {
+            ui.set_download_location(source_id, location);
+            Ok(())
+        })
         .map_err(Into::into)
     }
 }
@@ -736,15 +804,12 @@ impl SettingsOwner {
         rule: DownloadRule,
         enabled: bool,
     ) -> Result<(), SettingsError> {
-        self.restore(
-            move |stored| {
-                let mut rules = stored.ui.download_rules(&source_id);
-                rules.set(rule, enabled);
-                stored.ui.set_download_rules(source_id, rules);
-                Ok(())
-            },
-            false,
-        )
+        self.update_preferences(move |ui| {
+            let mut rules = ui.download_rules(&source_id);
+            rules.set(rule, enabled);
+            ui.set_download_rules(source_id, rules);
+            Ok(())
+        })
         .map_err(Into::into)
     }
 }
@@ -756,13 +821,10 @@ impl SettingsOwner {
         source_id: SourceId,
         quality: sources::DownloadQuality,
     ) -> Result<(), SettingsError> {
-        self.restore(
-            move |stored| {
-                stored.ui.set_download_quality(source_id, quality);
-                Ok(())
-            },
-            false,
-        )
+        self.update_preferences(move |ui| {
+            ui.set_download_quality(source_id, quality);
+            Ok(())
+        })
         .map_err(Into::into)
     }
 }
@@ -770,15 +832,10 @@ impl SettingsOwner {
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
     pub fn clear_download_rules(&self, source_id: SourceId) -> Result<(), SettingsError> {
-        self.restore(
-            move |stored| {
-                stored
-                    .ui
-                    .set_download_rules(source_id, DownloadRules::default());
-                Ok(())
-            },
-            false,
-        )
+        self.update_preferences(move |ui| {
+            ui.set_download_rules(source_id, DownloadRules::default());
+            Ok(())
+        })
         .map_err(Into::into)
     }
 }
@@ -1284,14 +1341,17 @@ pub(crate) fn write_settings(path: &Path, value: &StoredSettings) -> Result<(), 
                     before[key] = saved[key].clone();
                 }
             }
-            previous.migrate_defaults();
-            let defaults = serde_json::to_value(&previous).map_err(|error| error.to_string())?;
-            // Sanitizing a runtime default must not overwrite an unsupported saved value.
-            for path in unsupported {
-                let default = path
-                    .iter()
-                    .try_fold(&defaults, |parent, key| parent.get(key));
-                replace_setting(&mut before, &path, default.cloned());
+            if !unsupported.is_empty() {
+                previous.migrate_defaults();
+                let defaults =
+                    serde_json::to_value(&previous).map_err(|error| error.to_string())?;
+                // Sanitizing a runtime default must not overwrite an unsupported saved value.
+                for path in unsupported {
+                    let default = path
+                        .iter()
+                        .try_fold(&defaults, |parent, key| parent.get(key));
+                    replace_setting(&mut before, &path, default.cloned());
+                }
             }
             merge_settings(&mut saved, &before, &next);
             saved
@@ -1382,16 +1442,27 @@ mod tests {
                 Ok(previous_shuffle)
             })
         });
+        // Editing preferences must not wait for a background save to finish.
+        file.edit(|stored| {
+            stored.ui.window_width = Some(1234);
+            stored.ui.window_height = Some(800);
+            Ok(())
+        })
+        .unwrap();
+        let edited_width = file.load().ui.window_width;
         // Always release the writer, including when a blocked reader times out.
         release.send(()).unwrap();
         writer.join().unwrap().unwrap();
         reader.join().unwrap();
         assert!(next_writer.join().unwrap().unwrap());
         assert_eq!(observed.unwrap(), initial);
+        assert_eq!(edited_width, Some(1234));
         let committed = file.load();
         assert!(committed.ui.shuffle_enabled);
         assert!(committed.ui.application.private_mode);
-        assert_eq!(read_startup_settings(&path).unwrap().0, committed);
+        assert_eq!(committed.ui.window_width, Some(1234));
+        file.flush().unwrap();
+        assert_eq!(read_startup_settings(&path).unwrap().0, file.load());
     }
 
     #[test]
@@ -1629,13 +1700,10 @@ impl SettingsOwner {
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
     pub fn suppress_fetched_lyrics(&self, media_uri: String) -> Result<(), SettingsError> {
-        self.restore(
-            move |stored| {
-                stored.ui.lyrics.suppress_auto_lyrics(&media_uri);
-                Ok(())
-            },
-            false,
-        )
+        self.update_preferences(move |ui| {
+            ui.lyrics.suppress_auto_lyrics(&media_uri);
+            Ok(())
+        })
         .map_err(Into::into)
     }
 }
@@ -1643,14 +1711,11 @@ impl SettingsOwner {
 #[cfg_attr(feature = "bindings", uniffi::export)]
 impl SettingsOwner {
     pub fn set_theme_accent(&self, theme: String, accent: String) -> Result<(), SettingsError> {
-        self.restore(
-            move |stored| {
-                stored.ui.appearance.theme_preference = ThemePreference::Named(theme.clone());
-                stored.ui.appearance.theme_accents.insert(theme, accent);
-                Ok(())
-            },
-            false,
-        )
+        self.update_preferences(move |ui| {
+            ui.appearance.theme_preference = ThemePreference::Named(theme.clone());
+            ui.appearance.theme_accents.insert(theme, accent);
+            Ok(())
+        })
         .map_err(Into::into)
     }
 }

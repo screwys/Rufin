@@ -498,6 +498,7 @@ impl SettingsOwner {
                 }
             }
             stored.ui = merge_ui(&stored.ui, &preferences)?;
+            stored.migrate_defaults();
             if stored
                 .sources
                 .selected_source_id

@@ -82,9 +82,8 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
             let settings = inputs.settings.clone();
             runtime
                 .block_on(runtime.spawn_blocking(move || {
-                    let mut saved = settings.load();
-                    saved.application.private_mode = true;
-                    settings.save(&saved).unwrap();
+                    settings.set_private_mode(true).unwrap();
+                    settings.flush().unwrap();
                 }))
                 .unwrap();
             inputs.products.playback.set_muted(true);

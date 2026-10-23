@@ -77,31 +77,23 @@ impl AndroidBrowseQuery {
                     (page.page.count as u64, rows)
                 }
                 rufin_core::browse::DetailContent::Releases { page, favorites } => {
-                    let (_, album_artist) =
-                        self.artist_release_identity().expect("artist releases");
-                    let (uri, _) = self.artist_release_identity().unwrap();
-                    let route = if album_artist {
-                        Route::AlbumArtistDiscography(uri.to_string())
-                    } else {
-                        Route::ArtistDiscography(uri.to_string())
-                    };
                     let mut first_rows = page.page.rows.into_iter();
+                    let mut rows = Vec::new();
                     let mut index = 0;
                     for (class, ((id, title), total)) in
                         ARTIST_RELEASE_GROUPS.iter().zip(page.counts).enumerate()
                     {
-                        let rows = first_rows
-                            .by_ref()
-                            .take(total)
-                            .map(|album| release_row(album, class))
-                            .collect();
+                        rows.extend(
+                            first_rows
+                                .by_ref()
+                                .take(total)
+                                .map(|album| release_row(album, class)),
+                        );
                         groups.push(AndroidArtistReleaseGroup {
                             id: (*id).into(),
                             title: (*title).into(),
                             total: total as u64,
                             index,
-                            route: route.clone(),
-                            first_rows: rows,
                         });
                         index += total as u64;
                     }
@@ -110,7 +102,7 @@ impl AndroidBrowseQuery {
                         favorite_rows =
                             self.member_rows(page.page.rows, page.page.first_row_position);
                     }
-                    (index, Vec::new())
+                    (index, rows)
                 }
             };
             let summary = if embedded {

@@ -42,11 +42,12 @@ internal fun SourcesPage(model: RufinConnection, onAdd: () -> Unit, onEdit: (Str
         val runtime = model.service?.runtime?.value?.getOrNull() ?: return@LaunchedEffect
         val setup = runtime.source()
         bridge = setup
-        try { if (connectionsOnly) connections = withContext(Dispatchers.IO) { setup.fileIntegrations().filter { !it.musicSource } } }
+    }
+    LaunchedEffect(state, bridge) {
+        try { if (connectionsOnly) bridge?.let { setup -> connections = withContext(Dispatchers.IO) { setup.fileIntegrations().filter { !it.musicSource } } } }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { model.runAction { throw error } }
     }
-    LaunchedEffect(state, bridge) { if (connectionsOnly) bridge?.let { setup -> connections = withContext(Dispatchers.IO) { setup.fileIntegrations().filter { !it.musicSource } } } }
     DisposableEffect(bridge) { val owned = bridge; onDispose { owned?.destroy() } }
     SettingsPage(embedded = embedded) {
         if (!connectionsOnly) {

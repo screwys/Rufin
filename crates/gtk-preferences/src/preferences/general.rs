@@ -1,3 +1,7 @@
+pub const NORMALIZATION_SCOPE_TITLE: &str = localization::msgid("Normalization scope");
+pub const NORMALIZATION_TITLE: &str = localization::msgid("Loudness normalization");
+pub const VOLUME_SCALE_TITLE: &str = localization::msgid("Volume scale");
+pub const STREAM_QUALITY_TITLE: &str = localization::msgid("Stream quality");
 use gtk_player::equalizer::EqualizerSurface;
 use gtk_player::outputs::audio_output_dropdown;
 use gtk_player::playback_settings::{
@@ -13,7 +17,7 @@ use std::{
 
 use super::{
     LASTFM_API_CREATE_URL, LISTENBRAINZ_TOKEN_URL, configure_sidebar_items_expander,
-    context_menu::configure_context_menus_expander,
+    context_menu::configure_context_menus,
     layout::populate_home_block_rows,
     layout::{
         discord_display_from_index, discord_display_index, discord_link_from_index,
@@ -627,7 +631,7 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
 
     let loudness_scope_shell = Rc::clone(shell);
     let loudness_scope_row = selection_row(
-        &tr("Normalization scope"),
+        &tr(NORMALIZATION_SCOPE_TITLE),
         &[tr("Track"), tr("Album")],
         loudness_scope_index(settings.loudness_normalization_scope),
         move |selected| {
@@ -671,7 +675,7 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
 
     let mode_titles = [tr("Off"), tr("ReplayGain"), tr("EBU R128")];
     let (loudness_normalization_row, mode_buttons) = controlled_selection_row(
-        &tr("Loudness normalization"),
+        &tr(NORMALIZATION_TITLE),
         &mode_titles,
         loudness_normalization_index(settings.loudness_normalization),
     );
@@ -772,7 +776,7 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
 
     let volume_scale_shell = Rc::clone(shell);
     let volume_scale_row = selection_row(
-        &tr("Volume scale"),
+        &tr(VOLUME_SCALE_TITLE),
         &[tr("Perceptual"), tr("Linear")],
         volume_scale_index(settings.volume_scale),
         move |selected| {
@@ -790,7 +794,7 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
 
     let quality_shell = Rc::clone(shell);
     let quality_row = quality_selection_row(
-        &tr("Stream quality"),
+        &tr(STREAM_QUALITY_TITLE),
         &[
             StreamQuality::Original,
             StreamQuality::MaxBitrateKbps(320),
@@ -839,7 +843,6 @@ pub fn appearance_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
         sidebar_items: adw::ExpanderRow,
         sidebar_pins_row: adw::SwitchRow,
         home_blocks: adw::ExpanderRow,
-        context_menus: adw::ExpanderRow,
     });
 
     reduce_motion.set_active(shell.settings.current.borrow().application.reduce_motion);
@@ -865,7 +868,7 @@ pub fn appearance_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
         populate_home_block_rows(&home_shell, home_blocks, &rows);
     });
 
-    configure_context_menus_expander(shell, &builder, &context_menus);
+    configure_context_menus(shell, &builder);
 
     page
 }

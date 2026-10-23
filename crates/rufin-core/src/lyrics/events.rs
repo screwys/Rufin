@@ -12,6 +12,7 @@ pub enum CurrentLyricsContent {
     Document {
         document: Arc<LyricsDocument>,
         pronunciation: Option<Arc<LyricsDocument>>,
+        prepared: Arc<::lyrics::PreparedLyrics>,
     },
 }
 

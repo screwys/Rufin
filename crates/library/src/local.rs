@@ -19,6 +19,40 @@ pub(crate) fn whole_file_cue_sql(alias: &str) -> String {
               AND sibling.cue_path={alias}.cue_path AND sibling.indexed=1 AND sibling.track_key<>{alias}.track_key)")
 }
 
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+pub enum DownloadItem {
+    Track {
+        media_uri: String,
+    },
+    Album {
+        media_uri: String,
+    },
+    Artist {
+        media_uri: String,
+        album_artist: bool,
+    },
+    Genre {
+        key: crate::GenreKey,
+    },
+    Mood {
+        key: crate::MoodKey,
+    },
+    Playlist {
+        key: crate::PlaylistKey,
+    },
+    SmartPlaylist {
+        key: crate::SmartPlaylistKey,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct DownloadStatus {
+    pub total: u64,
+    pub downloaded: u64,
+}
+
 #[derive(Clone, Debug)]
 pub enum LocalMediaLocation {
     File(std::path::PathBuf),
@@ -377,6 +411,56 @@ impl Database {
             ))
         })
         .transpose()
+    }
+
+    pub async fn item_download_status(
+        &self,
+        item: &DownloadItem,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<DownloadStatus> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let (total, downloaded): (i64, i64) = match item {
+            DownloadItem::Track { media_uri } => {
+                sqlx::query_as("SELECT 1,EXISTS(SELECT 1 FROM local_locators WHERE media_uri=?1 AND origin='download')")
+                    .bind(media_uri).fetch_one(&mut *connection).await?
+            }
+            DownloadItem::Album { media_uri } => {
+                sqlx::query_as("SELECT track_count,downloaded_count FROM albums WHERE media_uri=?1")
+                    .bind(media_uri).fetch_optional(&mut *connection).await?.unwrap_or_default()
+            }
+            DownloadItem::Artist { media_uri, album_artist } => {
+                sqlx::query_as("SELECT totals.track_count,totals.downloaded_count FROM artists artist JOIN collection_totals totals ON totals.entity_key=artist.artist_key AND totals.kind='artist' AND totals.role=?2 AND coalesce(totals.folder_key,'')='' WHERE artist.media_uri=?1")
+                    .bind(media_uri).bind(album_artist).fetch_optional(&mut *connection).await?.unwrap_or_default()
+            }
+            DownloadItem::Genre { .. } | DownloadItem::Mood { .. } | DownloadItem::Playlist { .. } => {
+                let (kind, key) = match item {
+                    DownloadItem::Genre { key } => ("genre", key.raw()),
+                    DownloadItem::Mood { key } => ("mood", key.raw()),
+                    DownloadItem::Playlist { key } => ("playlist", key.raw()),
+                    _ => unreachable!(),
+                };
+                sqlx::query_as("SELECT track_count,downloaded_count FROM collection_totals WHERE kind=?1 AND entity_key=?2 AND role=0 AND coalesce(folder_key,'')=''")
+                    .bind(kind).bind(key).fetch_optional(&mut *connection).await?.unwrap_or_default()
+            }
+            DownloadItem::SmartPlaylist { key } => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64;
+                let membership = crate::smart_playlists::smart_membership_sql(
+                    &mut connection,
+                    now,
+                    Some(&[*key]),
+                )
+                .await?;
+                sqlx::query_as(sqlx::AssertSqlSafe(format!("{membership} SELECT count(*),count(CASE WHEN track.is_downloaded THEN 1 END) FROM selected JOIN tracks track USING(track_key)")))
+                    .fetch_one(&mut *connection).await?
+            }
+        };
+        Ok(DownloadStatus {
+            total: total.max(0) as u64,
+            downloaded: downloaded.max(0) as u64,
+        })
     }
 
     pub async fn downloaded_count(&self, source_id: Option<&str>) -> LibraryResult<usize> {

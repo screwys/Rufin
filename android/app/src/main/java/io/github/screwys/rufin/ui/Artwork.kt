@@ -3,7 +3,6 @@ package io.github.screwys.rufin.ui
 import io.github.screwys.rufin.player.PlayerConnection
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.util.Log
 import android.util.LruCache
 import androidx.compose.foundation.Image
@@ -24,6 +23,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import io.github.screwys.rufin.core.AndroidException
+import io.github.screwys.rufin.core.AndroidArtwork
+import io.github.screwys.rufin.core.decodeArtwork
+import java.nio.ByteBuffer
 import io.github.screwys.rufin.core.AndroidPlayer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -39,13 +42,15 @@ internal fun rememberArtwork(identityBytes: ByteArray?, player: PlayerConnection
     val revision = player.artworkRevision
     return key(identity) {
         val cached = remember(bridge, revision, pixels) { player.artworkCache.peek(identity, pixels) }
-        val preview = remember(bridge, revision, binding) {
-            if (cached == null) bridge?.artworkPreview(binding.toByteArray())?.let { decodeArtwork(it, 32) } else null
-        }
-        val loaded by produceState(cached ?: preview, bridge, revision, pixels, binding) {
-            value = cached ?: value ?: preview
+        val loaded by produceState(cached, bridge, revision, pixels, binding) {
+            value = cached ?: value
             if (bridge != null && pixels > 0) {
-                try { value = player.artworkCache.load(bridge, identity, binding.toByteArray(), pixels) ?: value }
+                try {
+                    if (value == null) value = withContext(Dispatchers.Default) {
+                        bridge.artworkPreview(binding.toByteArray())?.let(::playerArtwork)
+                    }
+                    value = player.artworkCache.load(bridge, identity, binding.toByteArray(), pixels) ?: value
+                }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { Log.d("Rufin", "Could not load artwork") }
             }
@@ -94,8 +99,7 @@ internal class ArtworkCache {
             return load.mutex.withLock {
                 peek(identity, pixels)?.let { return@withLock it }
                 val artwork = withContext(Dispatchers.Default) {
-                    val encoded = player.artwork(binding, pixels.toUInt()) ?: return@withContext null
-                    decodePlayerArtwork(encoded, pixels)
+                    player.artwork(binding, pixels.toUInt())?.let(::playerArtwork)
                 } ?: return@withLock null
                 synchronized(decoded) {
                     if (key.revision != revision) null
@@ -112,18 +116,14 @@ internal class ArtworkCache {
     }
 }
 
-// The shared artwork cache supplies the encoded image. Compose only decodes it for display.
+// Decode with the shared image reader to preserve formats and orientation.
 internal suspend fun decodePlayerArtwork(bytes: ByteArray, maxDimension: Int = 2048): PlayerArtwork? = withContext(Dispatchers.Default) {
-    decodeArtwork(bytes, maxDimension)
+    try { playerArtwork(decodeArtwork(bytes, maxDimension.toUInt())) } catch (_: AndroidException) { null }
 }
 
-private fun decodeArtwork(bytes: ByteArray, maxDimension: Int): PlayerArtwork? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    var sampleSize = 1
-    while (minOf(bounds.outWidth, bounds.outHeight) / (sampleSize * 2) >= maxDimension) sampleSize *= 2
-    val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
+internal fun playerArtwork(image: AndroidArtwork): PlayerArtwork {
+    val bitmap = Bitmap.createBitmap(image.width.toInt(), image.height.toInt(), Bitmap.Config.ARGB_8888)
+    bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(image.rgba))
     val sample = Bitmap.createScaledBitmap(bitmap, 8, 8, true)
     var red = 0L
     var green = 0L

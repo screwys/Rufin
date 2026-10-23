@@ -1,6 +1,6 @@
 use adw::prelude::*;
 use artwork::ArtworkBinding;
-use downloads::{DownloadQueueSnapshot, DownloadSubject};
+use downloads::DownloadSubject;
 use gtk::glib;
 use localization::tr;
 use sources::SourceId;
@@ -40,8 +40,7 @@ pub struct OperationFeedback {
 
 pub struct DownloadsState {
     settings: Rc<crate::settings::SettingsState>,
-    pub snapshots: RefCell<HashMap<Option<SourceId>, Arc<DownloadQueueSnapshot>>>,
-    queue_refresh: RefCell<Option<Weak<dyn Fn()>>>,
+    queue_refresh: RefCell<Option<(SourceId, Weak<dyn Fn()>)>>,
     badges: Rc<RefCell<HashMap<usize, DownloadBadgeBinding>>>,
 }
 
@@ -49,22 +48,25 @@ impl DownloadsState {
     pub fn new(settings: Rc<crate::settings::SettingsState>) -> Rc<Self> {
         Rc::new(Self {
             settings,
-            snapshots: Default::default(),
             queue_refresh: Default::default(),
             badges: Default::default(),
         })
     }
 
-    pub fn set_queue_refresh(&self, refresh: &Rc<dyn Fn()>) {
-        self.queue_refresh.replace(Some(Rc::downgrade(refresh)));
+    pub fn set_queue_refresh(&self, source_id: SourceId, refresh: &Rc<dyn Fn()>) {
+        self.queue_refresh
+            .replace(Some((source_id, Rc::downgrade(refresh))));
     }
 
-    pub fn refresh_queue(&self) {
-        let refresh = self.queue_refresh.borrow().as_ref().and_then(Weak::upgrade);
+    pub fn refresh_queue(&self, source_id: Option<&SourceId>) {
+        let refresh = self
+            .queue_refresh
+            .borrow()
+            .as_ref()
+            .filter(|(source, _)| Some(source) == source_id)
+            .and_then(|(_, refresh)| refresh.upgrade());
         if let Some(refresh) = refresh {
             refresh();
-        } else {
-            self.queue_refresh.borrow_mut().take();
         }
     }
 }

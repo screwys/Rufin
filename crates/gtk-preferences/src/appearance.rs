@@ -6,6 +6,7 @@ use std::{cell::RefCell, path::PathBuf};
 pub struct ApplicationAppearance {
     override_provider: gtk::CssProvider,
     pub themes: RefCell<Vec<Theme>>,
+    pub errors: RefCell<Vec<String>>,
     pub system_style: adw::StyleManager,
 }
 
@@ -13,7 +14,8 @@ impl ApplicationAppearance {
     pub fn install() -> Self {
         let appearance = Self {
             override_provider: gtk::CssProvider::new(),
-            themes: RefCell::new(rufin_core::themes::builtins()),
+            themes: RefCell::new(Vec::new()),
+            errors: RefCell::new(Vec::new()),
             // A manager without a display observes the OS without forcing its scheme on the app.
             system_style: gtk::glib::Object::new(),
         };
@@ -100,6 +102,7 @@ impl ApplicationAppearance {
             }
         }
         *self.themes.borrow_mut() = themes;
+        *self.errors.borrow_mut() = errors.clone();
         errors
     }
 
@@ -116,32 +119,6 @@ impl ApplicationAppearance {
             .set_color_scheme(color_scheme(&settings.appearance.theme_preference, &themes));
         self.override_provider
             .load_from_string(&appearance_override_css(settings, &themes));
-    }
-
-    pub fn preview_css(&self, theme: Option<&Theme>, settings: &Settings) -> String {
-        let themes = self.themes.borrow();
-        let theme = theme.unwrap_or_else(|| &themes[usize::from(self.system_style.is_dark())]);
-        let mut css = String::new();
-        if theme.accents.is_empty()
-            && settings.appearance.accent_preference == AccentPreference::System
-        {
-            append_accent(
-                &mut css,
-                &self.system_style.accent_color_rgba().to_string(),
-                "#ffffff",
-            );
-        }
-        css.push_str(&palette_css(
-            &themes,
-            theme,
-            settings
-                .appearance
-                .theme_accents
-                .get(&theme.id)
-                .map(String::as_str),
-            settings.appearance.accent_preference,
-        ));
-        css
     }
 }
 

@@ -441,7 +441,6 @@ impl Settings {
             self.window_height = None;
         }
         sanitize_home_blocks(&mut self.application.home_blocks);
-        migrate_library_lists(&mut self.library_lists);
         sanitize_downloads(&mut self.downloads);
     }
 
@@ -580,7 +579,7 @@ fn sanitize_home_blocks(blocks: &mut Vec<HomeBlockKind>) {
     }
 }
 
-fn migrate_library_lists(lists: &mut Vec<LibraryListSettingsEntry>) {
+pub(super) fn migrate_library_lists(lists: &mut Vec<LibraryListSettingsEntry>) {
     if lists.is_empty() {
         *lists = default_library_list_settings();
     }

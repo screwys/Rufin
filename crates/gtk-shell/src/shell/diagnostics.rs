@@ -59,30 +59,42 @@ pub(super) fn present_diagnostics(shell: &Rc<Shell>) {
         }
     });
 
-    let initial = shell.diagnostics.snapshot();
-    log.buffer().set_text(&initial);
+    let initial = shell.diagnostics.updates(0);
+    log.buffer().set_text(&initial.text);
     scroll_to_log_end(&scroller);
-    let last_revision = Rc::new(Cell::new(shell.diagnostics.revision()));
-    let weak_dialog = dialog.downgrade();
+    let mut cursor = initial.end;
+    let mut start_character = initial.start_character;
     let diagnostics = shell.diagnostics.clone();
-    let refresh_log = log.clone();
+    let buffer = log.buffer();
     let refresh_scroller = scroller.clone();
-    let refresh_revision = Rc::clone(&last_revision);
-    glib::timeout_add_local(LOG_REFRESH_INTERVAL, move || {
-        if weak_dialog.upgrade().is_none() {
-            return glib::ControlFlow::Break;
-        }
-        let revision = diagnostics.revision();
-        if refresh_revision.replace(revision) != revision {
+    let refresh = glib::timeout_add_local(LOG_REFRESH_INTERVAL, move || {
+        let update = diagnostics.updates(cursor);
+        if update.end != cursor {
             let adjustment = refresh_scroller.vadjustment();
             let follows_tail =
                 adjustment.value() + adjustment.page_size() >= adjustment.upper() - 24.0;
-            refresh_log.buffer().set_text(&diagnostics.snapshot());
+            let removed = update
+                .start_character
+                .saturating_sub(start_character)
+                .min(buffer.char_count() as u64) as i32;
+            buffer.delete(
+                &mut buffer.start_iter(),
+                &mut buffer.iter_at_offset(removed),
+            );
+            buffer.insert(&mut buffer.end_iter(), &update.text);
+            cursor = update.end;
+            start_character = update.start_character;
             if follows_tail {
                 scroll_to_log_end(&refresh_scroller);
             }
         }
         glib::ControlFlow::Continue
+    });
+    let refresh = std::cell::RefCell::new(Some(refresh));
+    dialog.connect_closed(move |_| {
+        if let Some(refresh) = refresh.borrow_mut().take() {
+            refresh.remove();
+        }
     });
 
     let copy_buffer = log.buffer();

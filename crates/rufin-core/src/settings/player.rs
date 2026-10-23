@@ -117,24 +117,18 @@ impl SettingsOwner {
         mut value: visualizer::VisualizerAppearance,
     ) -> Result<(), SettingsError> {
         value.normalize_analysis();
-        self.restore(
-            move |stored| {
-                stored.ui.visualizer.appearance = value;
-                Ok(())
-            },
-            false,
-        )
+        self.update_preferences(move |ui| {
+            ui.visualizer.appearance = value;
+            Ok(())
+        })
         .map_err(Into::into)
     }
 
     pub fn set_visualizer_frame_limit(&self, value: u32) -> Result<(), SettingsError> {
-        self.restore(
-            move |stored| {
-                stored.ui.visualizer.fps_limit = value;
-                Ok(())
-            },
-            false,
-        )
+        self.update_preferences(move |ui| {
+            ui.visualizer.fps_limit = value;
+            Ok(())
+        })
         .map_err(Into::into)
     }
 
@@ -143,17 +137,14 @@ impl SettingsOwner {
         slot: PreferenceIndex,
         save: bool,
     ) -> Result<(), SettingsError> {
-        self.restore(
-            move |stored| {
-                if save {
-                    stored.ui.visualizer.save_preset(slot);
-                } else {
-                    stored.ui.visualizer.select_preset(slot);
-                }
-                Ok(())
-            },
-            false,
-        )
+        self.update_preferences(move |ui| {
+            if save {
+                ui.visualizer.save_preset(slot);
+            } else {
+                ui.visualizer.select_preset(slot);
+            }
+            Ok(())
+        })
         .map_err(Into::into)
     }
 

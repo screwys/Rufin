@@ -147,7 +147,16 @@ class RufinService : MediaSessionService() {
                         val (identity, revision) = key ?: return@collectLatest
                         try {
                             val artwork = withContext(Dispatchers.Default) {
-                                artworkPlayer.artwork(identity.toByteArray(), 512u)
+                                artworkPlayer.artwork(identity.toByteArray(), 512u)?.let { image ->
+                                    io.github.screwys.rufin.ui.playerArtwork(image).bitmap.let { bitmap ->
+                                        try {
+                                            java.io.ByteArrayOutputStream().use { output ->
+                                                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)
+                                                output.toByteArray()
+                                            }
+                                        } finally { bitmap.recycle() }
+                                    }
+                                }
                             }
                             nativePlayer.updateArtwork(identity, revision, artwork)
                         } catch (cancelled: CancellationException) {

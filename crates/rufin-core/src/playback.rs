@@ -982,10 +982,12 @@ impl PlaybackOwner {
         self.send(Command::SetMuted(muted))
     }
     pub fn set_shuffle(&self, enabled: bool) {
-        let _ = self.settings.update(|stored| {
+        if let Err(error) = self.settings.edit(|stored| {
             stored.ui.shuffle_enabled = enabled;
             Ok(())
-        });
+        }) {
+            warn!(%error, "could not save shuffle setting");
+        }
         self.send(Command::SetShuffle {
             enabled,
             seed: random_u64(),
@@ -1002,19 +1004,24 @@ impl PlaybackOwner {
             self.set_repeat(next_repeat(projection.view.controls.repeat_mode));
             return;
         }
-        match self.settings.update(|stored| {
+        match self.settings.edit(|stored| {
             stored.ui.repeat_mode = next_repeat(stored.ui.repeat_mode);
             Ok(stored.ui.repeat_mode)
         }) {
             Ok(repeat) => self.send(Command::SetRepeat(repeat)),
-            Err(_) => self.set_repeat(RepeatMode::Off),
+            Err(error) => {
+                warn!(%error, "could not save repeat setting");
+                self.set_repeat(RepeatMode::Off);
+            }
         }
     }
     pub fn set_repeat(&self, repeat: RepeatMode) {
-        let _ = self.settings.update(|stored| {
+        if let Err(error) = self.settings.edit(|stored| {
             stored.ui.repeat_mode = repeat;
             Ok(())
-        });
+        }) {
+            warn!(%error, "could not save repeat setting");
+        }
         self.send(Command::SetRepeat(repeat))
     }
     pub fn toggle_auto_dj(&self) {
@@ -1030,14 +1037,17 @@ impl PlaybackOwner {
         }
         let (value, threshold) = self
             .settings
-            .update(|stored| {
+            .edit(|stored| {
                 stored.ui.auto_dj_enabled = !stored.ui.auto_dj_enabled;
                 Ok((
                     stored.ui.auto_dj_enabled,
                     stored.ui.application.auto_dj_refill_threshold,
                 ))
             })
-            .unwrap_or((false, 1));
+            .unwrap_or_else(|error| {
+                warn!(%error, "could not save Auto DJ setting");
+                (false, 1)
+            });
         self.send(Command::SetAutoDj {
             enabled: value,
             refill_threshold: usize::from(threshold),
@@ -1332,11 +1342,7 @@ fn cached_cast_artwork(
         stored.ui.allows_external_metadata_lookup(),
         stored.ui.lastfm_api_key,
     );
-    [512, 256, 96].into_iter().find_map(|size| {
-        let request = artwork::ArtworkRequest::new(binding.clone(), size, size)
-            .with_external(external.clone());
-        artwork.cache_only_file(&request)
-    })
+    artwork.cache_only_file(&artwork::ArtworkRequest::new(binding, 512).with_external(external))
 }
 
 pub(crate) fn audio_mime(source_format: &str) -> Option<String> {

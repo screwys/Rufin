@@ -33,7 +33,8 @@ internal data class BrowseLocation(
 )
 internal data class BrowseItem(val row: AndroidBrowseRow, val index: ULong, val query: AndroidBrowseQuery?,
     val displaySettings: AndroidBrowseDisplay? = null, val fromPins: Boolean = false,
-    val searchOrder: List<String>? = null, val searchContext: String? = null, val contextTitle: String? = null)
+    val searchOrder: List<String>? = null, val searchContext: String? = null, val contextTitle: String? = null,
+    val downloadRevision: ULong? = null)
 
 @OptIn(FlowPreview::class)
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -61,7 +62,6 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     var labelsVersion by mutableIntStateOf(0)
         private set
     var homeBlocksFingerprint by mutableStateOf<String?>(null)
-    var showDownloadedBadges by mutableStateOf(true)
     var artistAlbumsRevision by mutableIntStateOf(0)
         private set
     var artistAlbumsDisplay by mutableStateOf<AndroidBrowseDisplay?>(null)
@@ -134,11 +134,12 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                     searchLoading = true
                     try {
                         searchRows = withContext(Dispatchers.Default) {
+                            val downloadRevision = connection.downloads.state?.revision
                             val rows = context.library.search(context.text)
                             val order = rows.filter { it.kind == "track" }.map { it.mediaUri }
                             val capture = "search:${context.source?.selectedSourceId}:${context.text}"
                             rows.mapIndexed { index, row ->
-                                BrowseItem(row, index.toULong(), null, searchOrder = order, searchContext = capture, contextTitle = context.text)
+                                BrowseItem(row, index.toULong(), null, searchOrder = order, searchContext = capture, contextTitle = context.text, downloadRevision = downloadRevision)
                             }
                         }
                     } catch (cancelled: CancellationException) { throw cancelled }

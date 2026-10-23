@@ -112,7 +112,7 @@
                     </child>
                     <child>
                       <object class="GtkSpinner" id="spinner">
-                        <property name="spinning">true</property>
+                        <property name="spinning">false</property>
                       </object>
                     </child>
                   </object>

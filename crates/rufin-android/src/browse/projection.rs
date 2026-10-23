@@ -251,12 +251,7 @@ impl AndroidBrowseQuery {
                 )
                 .await?
                 .into_iter()
-                .map(|album| match self.release_section {
-                    Some(ArtistReleaseSection::Class(class)) => {
-                        release_row(album, release_index(class))
-                    }
-                    _ => album.into(),
-                })
+                .map(Into::into)
                 .collect(),
             },
             OpenedCollection::Artists { read, page } => {

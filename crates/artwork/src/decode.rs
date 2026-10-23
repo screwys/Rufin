@@ -1,5 +1,4 @@
 use std::io::{BufRead, Cursor, Seek};
-use std::path::Path;
 use std::sync::{Arc, Once};
 
 use fast_image_resize::FilterType;
@@ -8,28 +7,6 @@ use image::{
 };
 
 use crate::{ArtworkError, ArtworkKey};
-
-pub(crate) struct NormalizedImage {
-    image: DynamicImage,
-    bytes: Option<Vec<u8>>,
-}
-
-impl NormalizedImage {
-    pub(crate) fn bytes(&self) -> Option<&[u8]> {
-        self.bytes.as_deref()
-    }
-
-    pub(crate) fn blur_hash(&self) -> Result<String, ArtworkError> {
-        let (width, height) = preview_dimensions(self.image.width(), self.image.height());
-        rgba_image(resize_exact(
-            &self.image,
-            width,
-            height,
-            FilterType::Bilinear,
-        )?)?
-        .blur_hash()
-    }
-}
 
 fn preview_dimensions(width: u32, height: u32) -> (u32, u32) {
     let longest = width.max(height).max(32);
@@ -80,7 +57,7 @@ impl RgbaImage {
         let resized;
         let image = if self.width.max(self.height) > 32 {
             let (width, height) = preview_dimensions(self.width, self.height);
-            resized = self.resized_exact(width, height)?;
+            resized = self.resized(width, height, FilterType::Bilinear)?;
             &resized
         } else {
             self
@@ -104,7 +81,21 @@ impl RgbaImage {
         &self.rgba
     }
 
+    pub fn resized_to_fit(&self, size: u32) -> Result<Self, ArtworkError> {
+        let longest = self.width.max(self.height());
+        if longest <= size {
+            return Ok(self.clone());
+        }
+        let width = (u64::from(self.width) * u64::from(size) / u64::from(longest)).max(1) as u32;
+        let height = (u64::from(self.height) * u64::from(size) / u64::from(longest)).max(1) as u32;
+        self.resized_exact(width, height)
+    }
+
     pub fn resized_exact(&self, width: u32, height: u32) -> Result<Self, ArtworkError> {
+        self.resized(width, height, FilterType::Lanczos3)
+    }
+
+    fn resized(&self, width: u32, height: u32, filter: FilterType) -> Result<Self, ArtworkError> {
         let source = fast_image_resize::images::ImageRef::new(
             self.width,
             self.height,
@@ -122,9 +113,7 @@ impl RgbaImage {
             fast_image_resize::PixelType::U8x4,
         );
         let options = fast_image_resize::ResizeOptions::new()
-            .resize_alg(fast_image_resize::ResizeAlg::Convolution(
-                FilterType::Lanczos3,
-            ))
+            .resize_alg(fast_image_resize::ResizeAlg::Convolution(filter))
             .use_alpha(false);
         fast_image_resize::Resizer::new()
             .resize(&source, &mut resized, &options)
@@ -142,33 +131,20 @@ impl RgbaImage {
 pub struct DecodedImage {
     key: ArtworkKey,
     pub(crate) pixels: RgbaImage,
-    original: Option<Arc<[u8]>>,
-    animated: bool,
+    animation_bytes: Option<Arc<[u8]>>,
 }
 
 impl DecodedImage {
+    pub fn pixels(&self) -> &RgbaImage {
+        &self.pixels
+    }
+
     pub(crate) fn blur_hash(&self) -> Result<String, ArtworkError> {
         self.pixels.blur_hash()
     }
 
-    pub fn original(&self) -> Option<&Arc<[u8]>> {
-        self.original.as_ref()
-    }
-
     pub fn animation_bytes(&self) -> Option<&Arc<[u8]>> {
-        self.original.as_ref().filter(|_| self.animated)
-    }
-
-    pub(crate) fn with_original(mut self, bytes: Arc<[u8]>) -> Self {
-        self.animated = match crate::Animation::new(Arc::clone(&bytes), 1) {
-            Ok(animation) => animation.is_some(),
-            Err(error) => {
-                tracing::warn!(%error, "cover animation could not be opened");
-                false
-            }
-        };
-        self.original = Some(bytes);
-        self
+        self.animation_bytes.as_ref()
     }
 
     pub fn key(&self) -> &ArtworkKey {
@@ -204,6 +180,16 @@ pub fn decode_rgba(bytes: &[u8], render_size: u32) -> Result<RgbaImage, ArtworkE
         render_size.max(1),
         FilterType::Lanczos3,
     )?)
+}
+
+pub fn decode_cover(bytes: &[u8], render_size: u32) -> Result<RgbaImage, ArtworkError> {
+    register_decoders();
+    let image = decode_reader(
+        ImageReader::new(Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(decode_error)?,
+    )?;
+    rgba_image(cover_poster(&image, render_size)?)
 }
 
 pub fn square_thumbnail_png(bytes: &[u8], size: u32) -> Result<Vec<u8>, ArtworkError> {
@@ -262,98 +248,15 @@ fn square_thumbnail(bytes: &[u8], size: u32) -> Result<DynamicImage, ArtworkErro
     Ok(thumbnail)
 }
 
-pub(crate) fn decode_cached(
-    path: &Path,
-    key: ArtworkKey,
-    render_size: u32,
-) -> Result<DecodedImage, ArtworkError> {
-    register_decoders();
-    let reader = ImageReader::open(path)
-        .and_then(ImageReader::with_guessed_format)
-        .map_err(decode_error)?;
-    let image = decode_reader(reader)?;
-    decoded_image(image, key, render_size)
-}
-
-pub(crate) fn decode_normalized(
-    image: NormalizedImage,
-    key: ArtworkKey,
-    render_size: u32,
-) -> Result<DecodedImage, ArtworkError> {
-    decoded_image(image.image, key, render_size)
-}
-
-pub(crate) fn cached_poster(
-    path: &Path,
-    render_size: u32,
-) -> Result<Option<NormalizedImage>, ArtworkError> {
-    let decoder = ImageReader::open(path)
-        .and_then(ImageReader::with_guessed_format)
-        .map_err(decode_error)?
-        .into_decoder()
-        .map_err(decode_error)?;
-    let (width, height) = decoder.dimensions();
-    if width.min(height) < render_size {
-        return Ok(None);
-    }
-    let image = decode_image(decoder)?;
-    Ok(Some(NormalizedImage {
-        image: cover_poster(&image, render_size)?,
-        bytes: None,
-    }))
-}
-
-fn decoded_image(
-    image: DynamicImage,
-    key: ArtworkKey,
-    render_size: u32,
-) -> Result<DecodedImage, ArtworkError> {
-    let pixels = if key.fetch_size == sources::ImageSize::Original {
-        rgba_image(image)?
-    } else {
-        rgba_image(scale_to_fit(
-            image,
-            render_size.max(1),
-            FilterType::Lanczos3,
-        )?)?
-    };
-    Ok(DecodedImage {
-        key,
-        pixels,
-        original: None,
-        animated: false,
-    })
-}
-
-pub(crate) fn normalize_for_cache(
-    bytes: &[u8],
-    size: u32,
-    poster_size: Option<u32>,
-) -> Result<NormalizedImage, ArtworkError> {
-    register_decoders();
-    let image = decode_reader(
-        ImageReader::new(Cursor::new(bytes))
-            .with_guessed_format()
-            .map_err(decode_error)?,
-    )?;
-    let poster = poster_size
-        .map(|size| cover_poster(&image, size))
-        .transpose()?;
-    let image = scale_to_fit(image, size.max(1), FilterType::Bilinear)?;
-    let bytes = encode_png(&image)?;
-    Ok(NormalizedImage {
-        image: poster.unwrap_or(image),
-        bytes: Some(bytes),
-    })
-}
-
 // Playback tiles fill a square. Size the shorter edge for that tile while
 // keeping the full image available to the playback background.
 fn cover_poster(image: &DynamicImage, size: u32) -> Result<DynamicImage, ArtworkError> {
     let shortest = image.width().min(image.height()).max(1);
     let size = size.max(1).min(shortest);
-    let width = (u64::from(image.width()) * u64::from(size) / u64::from(shortest)) as u32;
-    let height = (u64::from(image.height()) * u64::from(size) / u64::from(shortest)) as u32;
+    let width = ((u64::from(image.width()) * u64::from(size) + u64::from(shortest / 2))
+        / u64::from(shortest)) as u32;
+    let height = ((u64::from(image.height()) * u64::from(size) + u64::from(shortest / 2))
+        / u64::from(shortest)) as u32;
     resize_exact(image, width, height, FilterType::Lanczos3)
 }
 
@@ -470,14 +373,11 @@ mod tests {
     }
 
     #[test]
-    fn normalization_preserves_aspect_ratio_and_emits_png() {
-        let normalized = normalize_for_cache(&wide_png(), 100, None).expect("normalize image");
-        assert_eq!(&normalized.bytes().unwrap()[..8], b"\x89PNG\r\n\x1a\n");
-        let decoded =
-            decode_rgba(normalized.bytes().unwrap(), 100).expect("decode normalized image");
+    fn decoding_preserves_aspect_ratio_and_preview_colors() {
+        let decoded = decode_rgba(&wide_png(), 100).expect("decode image");
         assert_eq!((decoded.width(), decoded.height()), (100, 50));
         assert_eq!(decoded.row_stride(), 400);
-        let preview = RgbaImage::from_blur_hash(&normalized.blur_hash().unwrap()).unwrap();
+        let preview = RgbaImage::from_blur_hash(&decoded.blur_hash().unwrap()).unwrap();
         assert_eq!(
             (preview.width(), preview.height(), preview.row_stride()),
             (32, 32, 128)
@@ -506,24 +406,99 @@ fn register_decoders() {
     });
 }
 
+pub(crate) fn decode_display<R: BufRead + Seek>(
+    reader: R,
+    key: ArtworkKey,
+    render_size: u32,
+    cache_size: Option<u32>,
+    decode: bool,
+) -> Result<(Option<DecodedImage>, Option<Vec<u8>>), ArtworkError> {
+    register_decoders();
+    let decoder = ImageReader::new(reader)
+        .with_guessed_format()
+        .map_err(decode_error)?
+        .into_decoder()
+        .map_err(decode_error)?;
+    let (width, height) = decoder.dimensions();
+    let normalize = cache_size.filter(|size| width.max(height) > *size);
+    if !decode && normalize.is_none() {
+        return Ok((None, None));
+    }
+    let source = decode_image(decoder)?;
+    let source = if let Some(size) = normalize {
+        scale_to_fit(source, size, FilterType::Bilinear)?
+    } else {
+        source
+    };
+    let encoded = normalize.map(|_| encode_png(&source)).transpose()?;
+    let image = if decode {
+        Some(DecodedImage {
+            key,
+            pixels: rgba_image(scale_to_fit(source, render_size, FilterType::Lanczos3)?)?,
+            animation_bytes: None,
+        })
+    } else {
+        None
+    };
+    Ok((image, encoded))
+}
+
+pub(crate) fn cached_poster(
+    path: &std::path::Path,
+    render_size: u32,
+) -> Result<Option<RgbaImage>, ArtworkError> {
+    register_decoders();
+    let decoder = ImageReader::open(path)
+        .map_err(decode_error)?
+        .with_guessed_format()
+        .map_err(decode_error)?
+        .into_decoder()
+        .map_err(decode_error)?;
+    let (width, height) = decoder.dimensions();
+    if width.min(height) < render_size {
+        return Ok(None);
+    }
+    rgba_image(cover_poster(&decode_image(decoder)?, render_size)?).map(Some)
+}
+
 pub(crate) fn decode_original(
     bytes: Arc<[u8]>,
     key: ArtworkKey,
     render_size: u32,
-) -> Result<DecodedImage, ArtworkError> {
-    register_decoders();
-    let image = decode_reader(
-        ImageReader::new(Cursor::new(bytes.as_ref()))
-            .with_guessed_format()
-            .map_err(decode_error)?,
-    )?;
-    Ok(DecodedImage {
-        key,
-        pixels: rgba_image(cover_poster(&image, render_size)?)?,
-        original: None,
-        animated: false,
-    }
-    .with_original(bytes))
+    poster: Option<RgbaImage>,
+    display_size: Option<u32>,
+) -> Result<(DecodedImage, Option<Vec<u8>>), ArtworkError> {
+    let (pixels, display) = if let Some(pixels) = poster {
+        (pixels, None)
+    } else {
+        register_decoders();
+        let source = decode_reader(
+            ImageReader::new(Cursor::new(bytes.as_ref()))
+                .with_guessed_format()
+                .map_err(decode_error)?,
+        )?;
+        let pixels = rgba_image(cover_poster(&source, render_size)?)?;
+        let display = display_size
+            .filter(|size| source.width().max(source.height()) > *size)
+            .map(|size| encode_png(&scale_to_fit(source, size, FilterType::Bilinear)?))
+            .transpose()?;
+        (pixels, display)
+    };
+    let animation_bytes = match crate::Animation::new(Arc::clone(&bytes), 1) {
+        Ok(animation) => animation.is_some().then_some(bytes),
+        Err(error) => {
+            tracing::warn!(%error, "cover animation could not be opened");
+            None
+        }
+    };
+    Ok((
+        DecodedImage {
+            key,
+            pixels,
+            animation_bytes,
+        },
+        display,
+    ))
 }
 
 pub(crate) fn original_extension(bytes: &[u8]) -> Result<&'static str, ArtworkError> {

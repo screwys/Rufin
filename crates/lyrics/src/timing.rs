@@ -4,7 +4,7 @@ use std::collections::BinaryHeap;
 
 pub const LYRICS_USER_SCROLL_PAUSE_MS: u64 = 3_000;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct KaraokeTiming {
     start_millis: u64,
     end_millis: Option<u64>,
@@ -87,7 +87,7 @@ pub fn should_highlight_all_lyrics_lines(lines: &[LyricsLine]) -> bool {
 pub fn lyric_line_has_text(line: &LyricsLine) -> bool {
     !line.text.trim().is_empty()
 }
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct LyricsTiming {
     line_starts: Vec<u64>,
     cue_boundaries: Vec<u64>,

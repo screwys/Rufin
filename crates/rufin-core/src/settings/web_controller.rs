@@ -75,7 +75,7 @@ impl SettingsOwner {
         &self,
         edit: impl FnOnce(&mut ControllerSettings),
     ) -> Result<ControllerSettings, String> {
-        self.file.update(|stored| {
+        self.file.edit(|stored| {
             edit(&mut stored.ui.web_controller);
             Ok(stored.ui.web_controller.clone())
         })

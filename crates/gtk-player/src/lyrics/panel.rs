@@ -12,7 +12,7 @@ use gtk_widgets::lyrics_editor::{
 };
 use gtk_widgets::popup::present_light_dismiss_dialog;
 use localization::{result_count_text, tr};
-use lyrics::{LyricsSearchResult, release_japanese_reader};
+use lyrics::LyricsSearchResult;
 use rufin_core::lyrics::{CurrentLyrics, CurrentLyricsContent};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -88,14 +88,6 @@ impl PlayerUi {
     }
 
     fn render_lyrics_contents(self: &Rc<Self>) {
-        let local_readings_enabled = {
-            let settings = self.settings.current.borrow();
-            settings.lyrics.preferences.show_furigana
-                || settings.lyrics.preferences.show_romanization
-        };
-        if !local_readings_enabled {
-            release_japanese_reader();
-        }
         self.request_auto_lyrics_if_needed();
         let Some(lyrics) = self.selected_lyrics() else {
             return;
@@ -118,21 +110,6 @@ impl PlayerUi {
         let settings = self.settings.current.borrow();
         let current_media = current_playback_media_id(self.selected_playback().as_deref());
         let current_track_id = current_playback_track_id(self.selected_playback().as_deref());
-        let dictionary_status = if (settings.lyrics.preferences.show_furigana
-            || settings.lyrics.preferences.show_romanization
-                && self.visible_lyrics_pronunciation().is_none())
-            && self
-                .visible_lyrics()
-                .as_deref()
-                .is_some_and(|lyrics| lyrics.is_japanese_for_readings())
-        {
-            self.lyrics_service.japanese_dictionary(false)
-        } else {
-            lyrics::JapaneseDictionaryStatus::Idle
-        };
-        if let lyrics::JapaneseDictionaryStatus::Ready(path) = &dictionary_status {
-            lyrics::prepare_japanese_reader(path);
-        }
         let Some(lyrics) = self.selected_lyrics() else {
             return;
         };
@@ -149,10 +126,6 @@ impl PlayerUi {
             current_track_id.as_deref(),
             &settings,
             writable,
-            match dictionary_status {
-                lyrics::JapaneseDictionaryStatus::Ready(path) => Some(path),
-                _ => None,
-            },
             offset,
             Rc::new(move |position| {
                 if let Some(shell) = seek_shell.upgrade() {

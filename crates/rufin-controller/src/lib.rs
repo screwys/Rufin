@@ -134,7 +134,8 @@ fn run_inner(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), 
         });
         inputs.products.playback.shutdown();
         inputs.products.scrobbling.shutdown();
-        result.map_err(|error| error.to_string())
+        let settings_result = inputs.products.settings.flush();
+        result.map_err(|error| error.to_string()).and(settings_result)
     })
     .map_err(|error| error.to_string())?
 }

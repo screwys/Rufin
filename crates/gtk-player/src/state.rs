@@ -16,8 +16,7 @@ pub struct PlaybackState {
     pub seek_pointer_active: Cell<bool>,
     pub volume_persist_source: RefCell<Option<glib::SourceId>>,
     pub audio_output_options: RefCell<Vec<(Option<String>, String)>>,
-    pub audio_output_refresh_running: Cell<bool>,
-    pub audio_output_refresh_generation: Cell<u64>,
+    pub audio_output_refresh_running: tokio::sync::watch::Sender<bool>,
     pub audio_output_refreshed_at: Cell<Option<Instant>>,
     pub remote_output_options: RefCell<Vec<RemoteOutput>>,
 }

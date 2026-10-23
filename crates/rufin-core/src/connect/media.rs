@@ -16,7 +16,6 @@ pub(super) enum ByteRequest {
     Artwork {
         family: String,
         size: Option<u32>,
-        fallback: bool,
         offset: u64,
         validator: Option<String>,
     },
@@ -193,7 +192,6 @@ impl ConnectOwner {
             ByteRequest::Artwork {
                 family,
                 size,
-                fallback,
                 offset,
                 validator,
             } => {
@@ -201,8 +199,7 @@ impl ConnectOwner {
                     artwork::CacheImageRequest {
                         family,
                         size: size
-                            .map_or(artwork::ImageSize::Original, artwork::ImageSize::Thumbnail),
-                        fallback,
+                            .map_or(sources::ImageSize::Original, sources::ImageSize::Thumbnail),
                     },
                     offset,
                     validator.as_deref(),

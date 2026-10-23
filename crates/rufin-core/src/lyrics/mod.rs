@@ -1,7 +1,7 @@
 //! One current lyrics document and its user operations.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -50,59 +50,9 @@ impl LyricsService {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct DocumentKey {
-    media_uri: String,
-}
-
-impl DocumentKey {
-    fn for_context(context: &LyricsContext) -> Self {
-        Self {
-            media_uri: context.media.id.media_uri.clone(),
-        }
-    }
-
-    fn cache_key(&self, plan: &LyricsPlan) -> (String, String, String) {
-        self.cache_key_for(
-            if plan.prefers_translations() {
-                LyricsRole::Translation
-            } else {
-                LyricsRole::Original
-            },
-            if plan.prefers_translations() {
-                plan.preferred_translation_language()
-            } else {
-                ""
-            },
-        )
-    }
-
-    fn cache_key_for(&self, role: LyricsRole, language: &str) -> (String, String, String) {
-        (
-            role.key().to_string(),
-            if role == LyricsRole::Translation {
-                ::lyrics::normalize_language_tag(language).unwrap_or_default()
-            } else {
-                String::new()
-            },
-            String::new(),
-        )
-    }
-
-    fn cache_input_digest(&self, authority: &str, source_input: [u8; 32]) -> [u8; 32] {
-        if authority == "external" {
-            *blake3::hash(self.media_uri.as_bytes()).as_bytes()
-        } else {
-            source_input
-        }
-    }
-}
-
 struct CurrentDocument {
     context: LyricsContext,
-    key: DocumentKey,
-    document: Option<Arc<LyricsDocument>>,
-    pronunciation: Option<Arc<LyricsDocument>>,
+    content: Option<CurrentLyricsContent>,
     bundle: Option<Arc<LyricsBundle>>,
     request: u64,
     loading: bool,
@@ -110,27 +60,52 @@ struct CurrentDocument {
     writable: bool,
 }
 
-#[derive(Clone)]
-struct PendingSearch {
-    request: u64,
-    key: DocumentKey,
-    query: LyricsQuery,
+impl CurrentDocument {
+    fn document(&self) -> Option<&Arc<LyricsDocument>> {
+        match &self.content {
+            Some(CurrentLyricsContent::Document { document, .. }) => Some(document),
+            _ => None,
+        }
+    }
 }
 
 struct State {
     settings: Settings,
     private_mode: bool,
     current: Option<CurrentDocument>,
-    current_cancelled: Option<Arc<AtomicBool>>,
     current_task: Option<JoinHandle<()>>,
-    search: Option<PendingSearch>,
+    search: Option<u64>,
 }
 
-struct CurrentResolution {
+struct LyricsRequest {
+    id: u64,
     context: LyricsContext,
-    lookup: LyricsLookup,
-    cue_track: bool,
     plan: LyricsPlan,
+    cue_track: bool,
+}
+
+impl LyricsRequest {
+    fn new(id: u64, context: LyricsContext, plan: LyricsPlan) -> Self {
+        let cue_track = library::cue_media_parts(&context.media.id.media_uri).is_some();
+        Self {
+            id,
+            context,
+            plan,
+            cue_track,
+        }
+    }
+
+    fn media_uri(&self) -> &str {
+        &self.context.media.id.media_uri
+    }
+
+    fn cache_input_digest(&self, authority: &str) -> [u8; 32] {
+        if authority == "external" {
+            *blake3::hash(self.media_uri().as_bytes()).as_bytes()
+        } else {
+            self.context.input_digest
+        }
+    }
 }
 
 #[derive(Default)]
@@ -195,7 +170,6 @@ impl LyricsService {
                 settings,
                 private_mode,
                 current: None,
-                current_cancelled: None,
                 current_task: None,
                 search: None,
             }),
@@ -216,47 +190,47 @@ impl LyricsService {
             self.clear();
             return;
         };
-        let key = DocumentKey::for_context(&context);
-        let (event, write_check) = {
-            let mut state = self
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if let Some(current) = state.current.as_mut().filter(|current| current.key == key) {
-                let media_changed = current.context.media.id != context.media.id;
-                let write_check = media_changed.then(|| (key.clone(), context.clone()));
-                current.context = context;
-                (media_changed.then(|| current_event(current)), write_check)
-            } else {
-                cancel_current_work(&mut state);
-                let request = self.next_request.fetch_add(1, Ordering::AcqRel);
-                let write_check = (key.clone(), context.clone());
-                let current = CurrentDocument {
-                    context,
-                    key,
-                    document: None,
-                    pronunciation: None,
-                    bundle: None,
-                    request,
-                    loading: false,
-                    automatic_attempted: false,
-                    writable: false,
-                };
-                let event = Some(current_event(&current));
-                state.current = Some(current);
-                state.search = None;
-                (event, Some(write_check))
-            }
-        };
+        let (event, write_check) =
+            {
+                let mut state = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if let Some(current) = state.current.as_mut().filter(|current| {
+                    current.context.media.id.media_uri == context.media.id.media_uri
+                }) {
+                    let media_changed = current.context.media.id != context.media.id;
+                    let write_check = media_changed.then(|| context.clone());
+                    current.context = context;
+                    (media_changed.then(|| current_event(current)), write_check)
+                } else {
+                    cancel_current_work(&mut state);
+                    let request = self.next_request.fetch_add(1, Ordering::AcqRel);
+                    let write_check = context.clone();
+                    let current = CurrentDocument {
+                        context,
+                        content: None,
+                        bundle: None,
+                        request,
+                        loading: false,
+                        automatic_attempted: false,
+                        writable: false,
+                    };
+                    let event = Some(current_event(&current));
+                    state.current = Some(current);
+                    state.search = None;
+                    (event, Some(write_check))
+                }
+            };
         if let Some(event) = event {
             self.publish(event);
         }
-        if let Some((key, context)) = write_check {
-            self.check_write_access(key, context);
+        if let Some(context) = write_check {
+            self.check_write_access(context);
         }
     }
 
-    fn check_write_access(self: &Arc<Self>, key: DocumentKey, context: LyricsContext) {
+    fn check_write_access(self: &Arc<Self>, context: LyricsContext) {
         let service = Arc::clone(self);
         self.runtime.spawn(async move {
             let sidecar = service
@@ -269,7 +243,7 @@ impl LyricsService {
             let writable = match service.source(&context).await {
                 Some(source) => {
                     source
-                        .lyrics_writable(&service.database, &key.media_uri, sidecar)
+                        .lyrics_writable(&service.database, &context.media.id.media_uri, sidecar)
                         .await
                 }
                 None => false,
@@ -282,8 +256,9 @@ impl LyricsService {
                 if state.settings.preferences.save_lyrics_as_sidecar != sidecar {
                     return;
                 }
-                let Some(current) = state.current.as_mut().filter(|current| current.key == key)
-                else {
+                let Some(current) = state.current.as_mut().filter(|current| {
+                    current.context.media.id.media_uri == context.media.id.media_uri
+                }) else {
                     return;
                 };
                 if current.writable == writable {
@@ -303,13 +278,31 @@ impl LyricsService {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .current
             .as_ref()
-            .map(|current| (current.key.clone(), current.context.clone()));
-        if let Some((key, context)) = current {
-            self.check_write_access(key, context);
+            .map(|current| current.context.clone());
+        if let Some(context) = current {
+            self.check_write_access(context);
         }
     }
 
     pub fn settings_changed(self: &Arc<Self>, settings: Settings, private_mode: bool) {
+        let readings_changed = {
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            reading_preferences(&state.settings.preferences)
+                != reading_preferences(&settings.preferences)
+        };
+        let release_reader =
+            !settings.preferences.show_furigana && !settings.preferences.show_romanization;
+        self.apply_settings(settings, private_mode);
+        if readings_changed {
+            self.refresh_current();
+            if release_reader {
+                self.runtime
+                    .spawn_blocking(::lyrics::release_japanese_reader);
+            }
+        }
+    }
+
+    fn apply_settings(self: &Arc<Self>, settings: Settings, private_mode: bool) {
         let restart = {
             let mut state = self
                 .state
@@ -318,14 +311,13 @@ impl LyricsService {
             let current = state.current.as_ref().map(|current| {
                 (
                     current.context.media.id.clone(),
-                    current.key.media_uri.clone(),
+                    current.context.media.id.media_uri.clone(),
                     current.automatic_attempted || current.loading || current.bundle.is_some(),
                     current.loading,
                     current.bundle.is_some(),
                     current
-                        .document
-                        .as_deref()
-                        .is_some_and(LyricsDocument::has_word_timing),
+                        .document()
+                        .is_some_and(|document| document.has_word_timing()),
                 )
             });
             let selection_changed = lyrics_selection_changed(&state.settings, &settings);
@@ -396,7 +388,7 @@ impl LyricsService {
                 .current
                 .as_ref()
                 .filter(|current| current.context.media.id == media_id)
-                .map(|current| current.key.media_uri.clone())
+                .map(|current| current.context.media.id.media_uri.clone())
             else {
                 return;
             };
@@ -417,7 +409,7 @@ impl LyricsService {
         plan: LyricsPlan,
         automatic: bool,
         keep_visible: bool,
-    ) -> Option<(u64, DocumentKey, LyricsContext, LyricsPlan, Arc<AtomicBool>)> {
+    ) -> Option<LyricsRequest> {
         let current = state
             .current
             .as_ref()
@@ -427,7 +419,6 @@ impl LyricsService {
             return None;
         }
         cancel_current_work(state);
-        let selection = state.settings.clone();
         let current = state
             .current
             .as_mut()
@@ -435,69 +426,46 @@ impl LyricsService {
         current.automatic_attempted = true;
         current.request = self.next_request.fetch_add(1, Ordering::AcqRel);
         current.loading = true;
-        if keep_visible && let Some(bundle) = current.bundle.clone() {
-            apply_bundle(current, &selection, bundle);
-        } else {
-            current.document = None;
-            current.pronunciation = None;
+        if !keep_visible {
+            current.content = None;
             current.bundle = None;
         }
-        let request = current.request;
-        let key = current.key.clone();
-        let context = current.context.clone();
-        let cancelled = Arc::new(AtomicBool::new(false));
-        state.current_cancelled = Some(Arc::clone(&cancelled));
-        Some((request, key, context, plan, cancelled))
+        Some(LyricsRequest::new(
+            current.request,
+            current.context.clone(),
+            plan,
+        ))
     }
 
-    fn launch_current(
-        self: &Arc<Self>,
-        prepared: (u64, DocumentKey, LyricsContext, LyricsPlan, Arc<AtomicBool>),
-        use_cache: bool,
-    ) {
-        let event = {
-            let state = self
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            state
+    fn launch_current(self: &Arc<Self>, request: LyricsRequest, use_cache: bool) {
+        let id = request.id;
+        let (event, visible) = {
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            let Some(current) = state
                 .current
                 .as_ref()
-                .filter(|current| current.request == prepared.0 && current.key == prepared.1)
-                .map(current_event)
+                .filter(|current| current.request == id)
+            else {
+                return;
+            };
+            (current_event(current), current.bundle.clone())
         };
-        if let Some(event) = event {
-            self.publish(event);
-        }
-        let context = prepared.2;
-        let plan = prepared.3;
+        self.publish(event);
         let service = Arc::clone(self);
-        let request = prepared.0;
-        let key = prepared.1;
-        let cancelled = prepared.4;
-        let task_cancelled = Arc::clone(&cancelled);
-        let task_key = key.clone();
         let task = self.runtime.spawn(async move {
-            if !service.current_request_active(request, &task_key, &task_cancelled) {
+            if !service.matches_current(id) {
                 return;
             }
-            let resolution = current_resolution(context, plan);
-            service
-                .resolve_current(request, task_key, resolution, task_cancelled, use_cache)
-                .await;
+            if let Some(bundle) = visible {
+                let _ = service.accept_bundle(id, bundle, false, true).await;
+            }
+            service.resolve_current(request, use_cache).await;
         });
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if state
             .current
             .as_ref()
-            .is_some_and(|current| current.request == request && current.key == key)
-            && state
-                .current_cancelled
-                .as_ref()
-                .is_some_and(|current| Arc::ptr_eq(current, &cancelled))
+            .is_some_and(|current| current.request == id && current.loading)
         {
             state.current_task = Some(task);
         } else {
@@ -505,122 +473,78 @@ impl LyricsService {
         }
     }
 
-    async fn resolve_current(
-        self: &Arc<Self>,
-        request: u64,
-        key: DocumentKey,
-        resolution: CurrentResolution,
-        cancelled: Arc<AtomicBool>,
-        use_cache: bool,
-    ) {
+    async fn resolve_current(self: &Arc<Self>, request: LyricsRequest, use_cache: bool) {
         let mut fallback = LyricsFallback::default();
         let document = sources::read_local_lyrics(
             &self.database,
-            &key.media_uri,
-            Some(&resolution.context.media.row.track.metadata.title),
-            &selection_settings(&resolution.plan),
+            request.media_uri(),
+            Some(&request.context.media.row.track.metadata.title),
+            &selection_settings(&request.plan),
         )
         .await
         .ok()
         .flatten();
         if let Some(document) = document
             && self
-                .resolve_candidate(
-                    request,
-                    &key,
-                    &resolution,
-                    &cancelled,
-                    &mut fallback,
-                    document,
-                )
+                .resolve_candidate(&request, &mut fallback, document)
                 .await
         {
             return;
         }
-        if !self.current_request_active(request, &key, &cancelled) {
+        if !self.matches_current(request.id) {
             return;
         }
-
-        for authority in acquisition_order(resolution.plan.prefers_server()) {
+        for authority in acquisition_order(request.plan.prefers_server()) {
             if use_cache
                 && self
-                    .resolve_cached_candidate(
-                        request,
-                        &key,
-                        &resolution,
-                        &cancelled,
-                        &mut fallback,
-                        authority,
-                    )
+                    .resolve_cached_candidate(&request, &mut fallback, authority)
                     .await
             {
                 return;
             }
-            if !self.current_request_active(request, &key, &cancelled) {
+            if !self.matches_current(request.id) {
                 return;
             }
             let complete = match authority {
                 LyricsAuthority::Source => {
-                    self.resolve_source_candidate(
-                        request,
-                        &key,
-                        &resolution,
-                        &cancelled,
-                        &mut fallback,
-                    )
-                    .await
+                    self.resolve_source_candidate(&request, &mut fallback).await
                 }
                 LyricsAuthority::External => {
-                    self.resolve_external_candidate(
-                        request,
-                        &key,
-                        &resolution,
-                        &cancelled,
-                        &mut fallback,
-                    )
-                    .await
+                    self.resolve_external_candidate(&request, &mut fallback)
+                        .await
                 }
             };
-            if complete || !self.current_request_active(request, &key, &cancelled) {
+            if complete || !self.matches_current(request.id) {
                 return;
             }
         }
         if let Some(document) = fallback.document {
-            if self.current_request_active(request, &key, &cancelled) {
+            if self.matches_current(request.id) {
                 if !fallback.from_cache && matches!(document.origin, LyricsOrigin::External(_)) {
-                    self.cache_and_accept(
-                        request,
-                        &key,
-                        &resolution.context.input_digest,
-                        &resolution.plan,
-                        document,
-                    )
-                    .await;
+                    self.cache_and_accept(&request, document).await;
                 } else if fallback.from_cache {
-                    self.accept_cached_bundle(request, &key, Arc::new(document));
+                    self.accept_cached_bundle(request.id, Arc::new(document))
+                        .await;
                 } else {
-                    self.accept_bundle(request, &key, Arc::new(document));
+                    let _ = self
+                        .accept_bundle(request.id, Arc::new(document), true, false)
+                        .await;
                 }
             }
-            return;
-        }
-        if self.current_request_active(request, &key, &cancelled) {
-            self.finish_current(request, &key, None);
+        } else if self.matches_current(request.id) {
+            self.finish_current(request.id);
         }
     }
 
     async fn resolve_cached_candidate(
         self: &Arc<Self>,
-        request: u64,
-        key: &DocumentKey,
-        resolution: &CurrentResolution,
-        cancelled: &AtomicBool,
+        request: &LyricsRequest,
         fallback: &mut LyricsFallback,
         authority: LyricsAuthority,
     ) -> bool {
         let (role, language, script) = match authority {
-            LyricsAuthority::Source => key.cache_key_for(LyricsRole::Original, ""),
-            LyricsAuthority::External => key.cache_key(&resolution.plan),
+            LyricsAuthority::Source => cache_key_for(LyricsRole::Original, ""),
+            LyricsAuthority::External => cache_key(&request.plan),
         };
         let authority = match authority {
             LyricsAuthority::Source => "source",
@@ -629,18 +553,18 @@ impl LyricsService {
         let mut cached = self
             .database
             .lyrics_cache_for_role(
-                &key.media_uri,
+                request.media_uri(),
                 &role,
                 &language,
                 &script,
-                resolution.context.input_digest,
+                request.context.input_digest,
                 authority,
                 &ReadCancellation::new(),
             )
             .await
             .ok()
             .flatten();
-        if cached.is_none() && self.current_request_active(request, key, cancelled) {
+        if cached.is_none() && self.matches_current(request.id) {
             let connect = self
                 .connect
                 .lock()
@@ -649,12 +573,12 @@ impl LyricsService {
             if let Some(connect) = connect {
                 cached = connect
                     .fetch_cached_lyrics(crate::connect::LyricsCacheQuery {
-                        media_uri: key.media_uri.clone(),
+                        media_uri: request.media_uri().to_owned(),
                         authority: authority.into(),
                         role,
                         language,
                         script,
-                        input: resolution.context.input_digest,
+                        input: request.context.input_digest,
                     })
                     .await;
             }
@@ -665,29 +589,37 @@ impl LyricsService {
         let candidate = LyricsBundle::from_cache_payload(&cached.lyrics)
             .and_then(lyrics_with_displayable_content);
         if let Some(document) = candidate {
-            if !cached_lyrics_allowed(&document, &resolution.plan, resolution.cue_track) {
+            if !cached_lyrics_allowed(&document, &request.plan, request.cue_track) {
                 return false;
             }
             if document.is_instrumental() && fallback.document.is_some() {
                 return false;
             }
-            if acquisition_complete(&document, &resolution.plan) {
-                if self.current_request_active(request, key, cancelled) {
-                    self.accept_cached_bundle(request, key, Arc::new(document));
+            if acquisition_complete(&document, &request.plan) {
+                if self.matches_current(request.id) {
+                    self.accept_cached_bundle(request.id, Arc::new(document))
+                        .await;
                 }
                 return true;
             }
-            if prefer_fallback(&mut fallback.document, document, &resolution.plan) {
+            if prefer_fallback(&mut fallback.document, document, &request.plan) {
                 fallback.from_cache = true;
-                self.show_fallback(request, key, fallback.document.as_ref().expect("fallback"));
+                let _ = self
+                    .accept_bundle(
+                        request.id,
+                        Arc::new(fallback.document.as_ref().expect("fallback").clone()),
+                        false,
+                        false,
+                    )
+                    .await;
             }
             return false;
         }
-        if self.current_request_active(request, key, cancelled) {
+        if self.matches_current(request.id) {
             let _ = self
                 .database
                 .remove_lyrics_cache(
-                    &key.media_uri,
+                    request.media_uri(),
                     authority,
                     &cached.role,
                     &cached.language,
@@ -700,16 +632,13 @@ impl LyricsService {
 
     async fn resolve_source_candidate(
         self: &Arc<Self>,
-        request: u64,
-        key: &DocumentKey,
-        resolution: &CurrentResolution,
-        cancelled: &AtomicBool,
+        request: &LyricsRequest,
         fallback: &mut LyricsFallback,
     ) -> bool {
-        let Some(source) = self.source(&resolution.context).await else {
+        let Some(source) = self.source(&request.context).await else {
             return false;
         };
-        if (library::file_media_path(&key.media_uri).is_some() || resolution.cue_track)
+        if (library::file_media_path(request.media_uri()).is_some() || request.cue_track)
             && matches!(&source.implementation, sources::Implementation::Local(_))
         {
             return false;
@@ -717,21 +646,20 @@ impl LyricsService {
         match source
             .cached_lyrics(
                 &self.database,
-                &key.media_uri,
-                resolution.context.input_digest,
+                request.media_uri(),
+                request.context.input_digest,
             )
             .await
         {
             Ok(Some(candidate)) => {
-                if !cached_lyrics_allowed(&candidate, &resolution.plan, resolution.cue_track) {
+                if !cached_lyrics_allowed(&candidate, &request.plan, request.cue_track) {
                     return false;
                 }
-                self.resolve_candidate(request, key, resolution, cancelled, fallback, candidate)
-                    .await
+                self.resolve_candidate(request, fallback, candidate).await
             }
             Ok(None) => false,
             Err(error) => {
-                debug!(%error, media_uri = %key.media_uri, "source lyrics request failed");
+                debug!(%error, media_uri = request.media_uri(), "source lyrics request failed");
                 false
             }
         }
@@ -739,24 +667,27 @@ impl LyricsService {
 
     async fn resolve_external_candidate(
         self: &Arc<Self>,
-        request: u64,
-        key: &DocumentKey,
-        resolution: &CurrentResolution,
-        cancelled: &Arc<AtomicBool>,
+        request: &LyricsRequest,
         fallback: &mut LyricsFallback,
     ) -> bool {
-        if !resolution.plan.allows_external_fallback() {
+        if !request.plan.allows_external_fallback() {
             return false;
         }
         let Ok(permit) = self.search_lane.acquire().await else {
             return false;
         };
+        let metadata = &request.context.media.row.track.metadata;
+        let lookup = LyricsLookup::from_search(
+            &metadata.artist,
+            &metadata.title,
+            u32::try_from(metadata.duration_millis.max(0) / 1_000).unwrap_or(u32::MAX),
+        );
         let document = external_best_lyrics(
-            &resolution.lookup,
-            resolution.plan.external_providers(),
-            resolution.plan.requires_word_timing(),
-            resolution.plan.prefers_translations(),
-            resolution.plan.preferred_translation_language(),
+            &lookup,
+            request.plan.external_providers(),
+            request.plan.requires_word_timing(),
+            request.plan.prefers_translations(),
+            request.plan.preferred_translation_language(),
             fallback.document.is_some(),
         )
         .await;
@@ -771,68 +702,57 @@ impl LyricsService {
         let Some(document) = document else {
             return false;
         };
-        self.resolve_candidate(request, key, resolution, cancelled, fallback, document)
-            .await
+        self.resolve_candidate(request, fallback, document).await
     }
 
     async fn resolve_candidate(
         self: &Arc<Self>,
-        request: u64,
-        key: &DocumentKey,
-        resolution: &CurrentResolution,
-        cancelled: &AtomicBool,
+        request: &LyricsRequest,
         fallback: &mut LyricsFallback,
         document: LyricsBundle,
     ) -> bool {
         if document.is_instrumental() && fallback.document.is_some() {
             return false;
         }
-        if acquisition_complete(&document, &resolution.plan) {
-            if self.current_request_active(request, key, cancelled) {
-                self.cache_and_accept(
-                    request,
-                    key,
-                    &resolution.context.input_digest,
-                    &resolution.plan,
-                    document,
-                )
-                .await;
+        if acquisition_complete(&document, &request.plan) {
+            if self.matches_current(request.id) {
+                self.cache_and_accept(request, document).await;
             }
             return true;
         }
-        if prefer_fallback(&mut fallback.document, document, &resolution.plan) {
+        if prefer_fallback(&mut fallback.document, document, &request.plan) {
             fallback.from_cache = false;
-            self.show_fallback(request, key, fallback.document.as_ref().expect("fallback"));
+            let _ = self
+                .accept_bundle(
+                    request.id,
+                    Arc::new(fallback.document.as_ref().expect("fallback").clone()),
+                    false,
+                    false,
+                )
+                .await;
         }
         false
     }
 
-    async fn cache_and_accept(
-        self: &Arc<Self>,
-        request: u64,
-        key: &DocumentKey,
-        input: &[u8; 32],
-        plan: &LyricsPlan,
-        document: LyricsBundle,
-    ) {
-        if !self.matches_current(request, key) {
+    async fn cache_and_accept(self: &Arc<Self>, request: &LyricsRequest, document: LyricsBundle) {
+        if !self.matches_current(request.id) {
             return;
         }
         let write_target = matches!(document.origin, LyricsOrigin::External(_))
-            .then(|| self.fetched_lyrics_write_target(request, key, &document))
+            .then(|| self.fetched_lyrics_write_target(request.id, &document))
             .flatten();
         if matches!(document.origin, LyricsOrigin::External(_)) {
-            match cache_write(key, plan, &document) {
+            match cache_write(&request.plan, &document) {
                 Ok((authority, role, language, script, payload, updated_at)) => {
                     if let Err(error) = self
                         .database
                         .write_lyrics_cache(
-                            &key.media_uri,
+                            request.media_uri(),
                             &authority,
                             &role,
                             &language,
                             &script,
-                            key.cache_input_digest(&authority, *input),
+                            request.cache_input_digest(&authority),
                             &payload,
                             updated_at,
                         )
@@ -844,7 +764,9 @@ impl LyricsService {
                 Err(error) => warn!(%error, "could not encode lyrics cache"),
             }
         }
-        self.accept_bundle(request, key, Arc::new(document));
+        let _ = self
+            .accept_bundle(request.id, Arc::new(document), true, false)
+            .await;
         if let Some(target) = write_target {
             self.queue_lyrics_write(target);
         }
@@ -853,7 +775,6 @@ impl LyricsService {
     fn fetched_lyrics_write_target(
         &self,
         request: u64,
-        key: &DocumentKey,
         lyrics: &LyricsBundle,
     ) -> Option<LyricsWriteTarget> {
         {
@@ -864,7 +785,7 @@ impl LyricsService {
             let Some(current) = state
                 .current
                 .as_ref()
-                .filter(|current| current.request == request && &current.key == key)
+                .filter(|current| current.request == request)
             else {
                 return None;
             };
@@ -926,97 +847,156 @@ impl LyricsService {
         });
     }
 
-    fn accept_cached_bundle(
-        self: &Arc<Self>,
-        request: u64,
-        key: &DocumentKey,
-        bundle: Arc<LyricsBundle>,
-    ) {
+    async fn accept_cached_bundle(self: &Arc<Self>, request: u64, bundle: Arc<LyricsBundle>) {
         let write_target = matches!(bundle.origin, LyricsOrigin::External(_))
-            .then(|| self.fetched_lyrics_write_target(request, key, &bundle))
+            .then(|| self.fetched_lyrics_write_target(request, &bundle))
             .flatten();
-        self.accept_bundle(request, key, bundle);
+        let _ = self.accept_bundle(request, bundle, true, false).await;
         if let Some(target) = write_target {
             self.queue_lyrics_write(target);
         }
     }
 
-    fn accept_bundle(&self, request: u64, key: &DocumentKey, bundle: Arc<LyricsBundle>) {
-        self.finish_current(request, key, Some(bundle));
-    }
-
-    fn show_fallback(&self, request: u64, key: &DocumentKey, bundle: &LyricsBundle) {
-        let event = {
-            let mut state = self
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let settings = state.settings.clone();
-            let Some(current) = state
-                .current
-                .as_mut()
-                .filter(|current| current.request == request && &current.key == key)
-            else {
-                return;
+    fn accept_bundle(
+        self: &Arc<Self>,
+        request: u64,
+        bundle: Arc<LyricsBundle>,
+        complete: bool,
+        refresh: bool,
+    ) -> JoinHandle<()> {
+        let service = Arc::clone(self);
+        self.runtime.spawn_blocking(move || {
+            let matches = |current: &CurrentDocument| {
+                current.request == request
+                    && (!refresh
+                        || current
+                            .bundle
+                            .as_ref()
+                            .is_some_and(|current| Arc::ptr_eq(current, &bundle)))
             };
-            if current
-                .bundle
-                .as_deref()
-                .is_some_and(|visible| visible == bundle)
-            {
+            loop {
+                let (preferences, previous) = {
+                    let state = service.state.lock().unwrap_or_else(|p| p.into_inner());
+                    let Some(current) = state.current.as_ref().filter(|current| matches(current))
+                    else {
+                        return;
+                    };
+                    if !refresh && current.bundle.as_deref() == Some(bundle.as_ref()) {
+                        drop(state);
+                        if complete {
+                            service.finish_current(request);
+                        }
+                        return;
+                    }
+                    (
+                        state.settings.preferences.clone(),
+                        current.document().cloned(),
+                    )
+                };
+                let document = bundle.selected_document(&preferences).map(|document| {
+                    previous
+                        .filter(|previous| previous.as_ref() == document)
+                        .unwrap_or_else(|| Arc::new(document.clone()))
+                });
+                let readings = document
+                    .as_deref()
+                    .is_some_and(LyricsDocument::is_japanese_for_readings)
+                    && (preferences.show_furigana || preferences.show_romanization);
+                let dictionary = if readings {
+                    service.handle().japanese_dictionary(false)
+                } else {
+                    ::lyrics::JapaneseDictionaryStatus::Idle
+                };
+                let content = if bundle.is_instrumental() {
+                    Some(CurrentLyricsContent::Instrumental)
+                } else if let Some(document) = document {
+                    let pronunciation = bundle.pronunciation_for(&document).cloned().map(Arc::new);
+                    let Some(prepared) = ::lyrics::PreparedLyrics::prepare(
+                        &document,
+                        pronunciation.as_deref(),
+                        &preferences,
+                        match &dictionary {
+                            ::lyrics::JapaneseDictionaryStatus::Ready(path) => Some(path.as_path()),
+                            _ => None,
+                        },
+                        || {
+                            let state = service.state.lock().unwrap_or_else(|p| p.into_inner());
+                            state.current.as_ref().is_some_and(&matches)
+                                && reading_preferences(&state.settings.preferences)
+                                    == reading_preferences(&preferences)
+                        },
+                    ) else {
+                        continue;
+                    };
+                    Some(CurrentLyricsContent::Document {
+                        document,
+                        pronunciation,
+                        prepared: Arc::new(prepared),
+                    })
+                } else {
+                    None
+                };
+                let mut state = service.state.lock().unwrap_or_else(|p| p.into_inner());
+                let current_preferences = &state.settings.preferences;
+                if reading_preferences(current_preferences) != reading_preferences(&preferences)
+                    || current_preferences.prefer_translations != preferences.prefer_translations
+                    || current_preferences.preferred_translation_language
+                        != preferences.preferred_translation_language
+                    || current_preferences.karaoke_mode != preferences.karaoke_mode
+                    || readings
+                        && !matches!(dictionary, ::lyrics::JapaneseDictionaryStatus::Ready(_))
+                        && matches!(
+                            *service
+                                .dictionary_status
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner()),
+                            ::lyrics::JapaneseDictionaryStatus::Ready(_)
+                        )
+                {
+                    continue;
+                }
+                let Some(current) = state.current.as_mut().filter(|current| matches(current))
+                else {
+                    return;
+                };
+                current.content = content;
+                current.bundle = Some(Arc::clone(&bundle));
+                current.loading &= !complete;
+                let event = current_event(current);
+                if complete {
+                    state.current_task = None;
+                }
+                service.publish(event);
                 return;
             }
-            apply_bundle(current, &settings, Arc::new(bundle.clone()));
-            current_event(current)
-        };
-        self.publish(event);
+        })
     }
 
-    fn finish_current(&self, request: u64, key: &DocumentKey, bundle: Option<Arc<LyricsBundle>>) {
+    fn finish_current(&self, request: u64) {
         let event = {
-            let mut state = self
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let settings = state.settings.clone();
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             let Some(current) = state
                 .current
                 .as_mut()
-                .filter(|current| current.request == request && &current.key == key)
+                .filter(|current| current.request == request)
             else {
                 return;
             };
             current.loading = false;
-            if let Some(bundle) = bundle {
-                apply_bundle(current, &settings, bundle);
-            } else if current.bundle.is_none() {
-                current.pronunciation = None;
-                current.bundle = None;
-            }
             let event = current_event(current);
-            state.current_cancelled = None;
             state.current_task = None;
             event
         };
         self.publish(event);
     }
 
-    fn matches_current(&self, request: u64, key: &DocumentKey) -> bool {
+    fn matches_current(&self, request: u64) -> bool {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|p| p.into_inner())
             .current
             .as_ref()
-            .is_some_and(|current| current.request == request && &current.key == key)
-    }
-
-    fn current_request_active(
-        &self,
-        request: u64,
-        key: &DocumentKey,
-        cancelled: &AtomicBool,
-    ) -> bool {
-        !cancelled.load(Ordering::Acquire) && self.matches_current(request, key)
+            .is_some_and(|current| current.request == request)
     }
 
     fn search(self: &Arc<Self>, media_id: CurrentMediaId, query: LyricsQuery) {
@@ -1027,20 +1007,15 @@ impl LyricsService {
         if query.artist_name.is_empty() && query.track_name.is_empty() {
             return;
         }
-        let prepared = {
-            let mut state = self
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let Some(current) = state
+        let (request, providers) = {
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            if !state
                 .current
                 .as_ref()
-                .filter(|current| current.context.media.id == media_id)
-            else {
+                .is_some_and(|current| current.context.media.id == media_id)
+            {
                 return;
-            };
-            let key = current.key.clone();
-            let event_media = current.context.media.id.clone();
+            }
             let allowed = state
                 .settings
                 .preferences
@@ -1051,63 +1026,45 @@ impl LyricsService {
                 Vec::new()
             };
             let request = self.next_request.fetch_add(1, Ordering::AcqRel);
-            state.search = Some(PendingSearch {
-                request,
-                key: key.clone(),
-                query: query.clone(),
-            });
-            (request, key, event_media, providers)
+            state.search = Some(request);
+            (request, providers)
         };
-        if prepared.3.is_empty() {
-            self.finish_search(prepared.0, &prepared.1, query, Ok(Vec::new()));
+        if providers.is_empty() {
+            self.finish_search(request, query, Ok(Vec::new()));
             return;
         }
         let service = Arc::clone(self);
-        let _task = self.runtime.spawn(async move {
-            let Ok(_permit) = Arc::clone(&service.search_lane).acquire_owned().await else {
+        self.runtime.spawn(async move {
+            let Ok(_permit) = service.search_lane.acquire().await else {
                 return;
             };
-            if !service.matches_search(prepared.0, &prepared.1, &query) {
+            if service
+                .state
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .search
+                != Some(request)
+            {
                 return;
             }
-            let result = search_lyrics(&prepared.3, &query.artist_name, &query.track_name).await;
-            service.finish_search(prepared.0, &prepared.1, query, result);
+            let result = search_lyrics(&providers, &query.artist_name, &query.track_name).await;
+            service.finish_search(request, query, result);
         });
-    }
-
-    fn matches_search(&self, request: u64, key: &DocumentKey, query: &LyricsQuery) -> bool {
-        let state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state
-            .current
-            .as_ref()
-            .is_some_and(|current| &current.key == key)
-            && state.search.as_ref().is_some_and(|search| {
-                search.request == request && &search.key == key && &search.query == query
-            })
     }
 
     fn finish_search(
         &self,
         request: u64,
-        key: &DocumentKey,
         query: LyricsQuery,
         result: Result<Vec<LyricsSearchResult>, String>,
     ) {
         let media_id = {
-            let mut state = self
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if !state.search.as_ref().is_some_and(|search| {
-                search.request == request && &search.key == key && search.query == query
-            }) {
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            if state.search != Some(request) {
                 return;
             }
             state.search = None;
-            let Some(current) = state.current.as_ref().filter(|current| &current.key == key) else {
+            let Some(current) = state.current.as_ref() else {
                 return;
             };
             current.context.media.id.clone()
@@ -1120,19 +1077,16 @@ impl LyricsService {
     }
 
     fn preview(self: &Arc<Self>, media_id: CurrentMediaId, result: LyricsSearchResult) {
-        let Some((request, key, input, plan)) = self.begin_external_document(&media_id, &result)
-        else {
+        let Some(request) = self.begin_external_document(&media_id, &result) else {
             return;
         };
         let service = Arc::clone(self);
         let _task = self.runtime.spawn(async move {
             match lyrics_from_search_result(&result).await {
                 Ok(Some(document)) => {
-                    service
-                        .cache_and_accept(request, &key, &input, &plan, document)
-                        .await;
+                    service.cache_and_accept(&request, document).await;
                 }
-                Ok(None) | Err(_) => service.finish_current(request, &key, None),
+                Ok(None) | Err(_) => service.finish_current(request.id),
             }
         });
     }
@@ -1143,18 +1097,17 @@ impl LyricsService {
         result: LyricsSearchResult,
         path: Option<PathBuf>,
     ) {
-        let Some((request, key, input, plan)) = self.begin_external_document(&media_id, &result)
-        else {
+        let Some(request) = self.begin_external_document(&media_id, &result) else {
             return;
         };
         let service = Arc::clone(self);
         let save_to_source = path.is_none();
         let _task = self.runtime.spawn(async move {
             let Ok(Some(bundle)) = lyrics_from_search_result(&result).await else {
-                service.finish_current(request, &key, None);
+                service.finish_current(request.id);
                 return;
             };
-            let save_plan = plan.clone();
+            let save_plan = request.plan.clone();
             let saved = tokio::task::spawn_blocking(move || {
                 let selection = lyrics::UserPreferences {
                     prefer_translations: save_plan.prefers_translations(),
@@ -1177,34 +1130,37 @@ impl LyricsService {
                 Ok(Ok(Some((path, document, source_content)))) => {
                     let document = Arc::new(document);
                     if let Some(content) = source_content {
-                        if service.matches_current(request, &key) {
-                            service.accept_bundle(request, &key, Arc::clone(&document));
+                        if service.matches_current(request.id) {
+                            let _ = service
+                                .accept_bundle(request.id, Arc::clone(&document), true, false)
+                                .await;
                         }
                         service.update_lyrics_text(media_id, content);
                         return;
                     }
                     if let Ok((authority, role, language, script, payload, updated_at)) =
-                        cache_write(&key, &plan, &document)
+                        cache_write(&request.plan, &document)
                     {
                         let _ = service
                             .database
                             .write_lyrics_cache(
-                                &key.media_uri,
+                                request.media_uri(),
                                 &authority,
                                 &role,
                                 &language,
                                 &script,
-                                key.cache_input_digest(&authority, input),
+                                request.cache_input_digest(&authority),
                                 &payload,
                                 updated_at,
                             )
                             .await;
                     }
-                    let write_target =
-                        service.fetched_lyrics_write_target(request, &key, &document);
-                    let accepted = service.matches_current(request, &key);
+                    let write_target = service.fetched_lyrics_write_target(request.id, &document);
+                    let accepted = service.matches_current(request.id);
                     if accepted {
-                        service.accept_bundle(request, &key, Arc::clone(&document));
+                        let _ = service
+                            .accept_bundle(request.id, Arc::clone(&document), true, false)
+                            .await;
                     }
                     if let Some(target) = write_target {
                         service.queue_lyrics_write(target);
@@ -1213,7 +1169,7 @@ impl LyricsService {
                         service.publish(LyricsEvent::Saved { media_id, path });
                     }
                 }
-                Ok(Ok(None) | Err(_)) | Err(_) => service.finish_current(request, &key, None),
+                Ok(Ok(None) | Err(_)) | Err(_) => service.finish_current(request.id),
             }
         });
     }
@@ -1222,12 +1178,9 @@ impl LyricsService {
         &self,
         media_id: &CurrentMediaId,
         result: &LyricsSearchResult,
-    ) -> Option<(u64, DocumentKey, [u8; 32], LyricsPlan)> {
-        let prepared = {
-            let mut state = self
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+    ) -> Option<LyricsRequest> {
+        let request = {
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             if !state
                 .settings
                 .preferences
@@ -1240,38 +1193,27 @@ impl LyricsService {
             {
                 return None;
             }
-            cancel_current_work(&mut state);
-            let track_id = state
+            let context = state
                 .current
                 .as_ref()
                 .filter(|current| &current.context.media.id == media_id)?
-                .key
-                .media_uri
+                .context
                 .clone();
             let plan = state
                 .settings
-                .configured_lyrics_plan(state.private_mode, &track_id);
-            let current = state
-                .current
-                .as_mut()
-                .filter(|current| &current.context.media.id == media_id)?;
+                .configured_lyrics_plan(state.private_mode, &context.media.id.media_uri);
+            cancel_current_work(&mut state);
+            let current = state.current.as_mut()?;
             current.request = self.next_request.fetch_add(1, Ordering::AcqRel);
             current.loading = true;
-            current.document = None;
-            current.pronunciation = None;
+            current.content = None;
             current.bundle = None;
-            (
-                current.request,
-                current.key.clone(),
-                current.context.input_digest,
-                plan,
-                current.context.media.id.clone(),
-            )
+            LyricsRequest::new(current.request, context, plan)
         };
         self.publish(LyricsEvent::Current(CurrentLyrics::Loading {
-            media_id: prepared.4,
+            media_id: request.context.media.id.clone(),
         }));
-        Some((prepared.0, prepared.1, prepared.2, prepared.3))
+        Some(request)
     }
 
     fn save_current(
@@ -1289,7 +1231,7 @@ impl LyricsService {
                 .current
                 .as_ref()
                 .filter(|current| current.context.media.id == media_id)
-                .and_then(|current| current.document.clone())
+                .and_then(|current| current.document().cloned())
         };
         let Some(document) = document else {
             return;
@@ -1310,34 +1252,23 @@ impl LyricsService {
         });
     }
 
-    fn begin_edited(
-        &self,
-        media_id: &CurrentMediaId,
-    ) -> Option<(u64, LyricsPlan, LyricsContext, DocumentKey, bool)> {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(current) = state
+    fn begin_edited(&self, media_id: &CurrentMediaId) -> Option<(LyricsRequest, bool)> {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let context = state
             .current
             .as_ref()
-            .filter(|current| &current.context.media.id == media_id)
-        else {
-            return None;
-        };
-        let key = current.key.clone();
-        let context = current.context.clone();
+            .filter(|current| &current.context.media.id == media_id)?
+            .context
+            .clone();
         let plan = state
             .settings
-            .configured_lyrics_plan(state.private_mode, &key.media_uri);
+            .configured_lyrics_plan(state.private_mode, &context.media.id.media_uri);
         let sidecar = state.settings.preferences.save_lyrics_as_sidecar;
         cancel_current_work(&mut state);
-        let request = self.next_request.fetch_add(1, Ordering::AcqRel);
-        if let Some(current) = state.current.as_mut() {
-            current.request = request;
-            current.loading = false;
-        }
-        Some((request, plan, context, key, sidecar))
+        let current = state.current.as_mut()?;
+        current.request = self.next_request.fetch_add(1, Ordering::AcqRel);
+        current.loading = false;
+        Some((LyricsRequest::new(current.request, context, plan), sidecar))
     }
 
     pub(crate) async fn accept_edited(self: &Arc<Self>, uri: &str, text: &str) {
@@ -1347,17 +1278,16 @@ impl LyricsService {
             .unwrap_or_else(|error| error.into_inner())
             .current
             .as_ref()
-            .filter(|current| current.key.media_uri == uri)
+            .filter(|current| current.context.media.id.media_uri == uri)
             .map(|current| current.context.media.id.clone());
         let Some(media_id) = media_id else { return };
         let Some(bundle) = lyrics_from_edited_text(text) else {
             return;
         };
-        let Some((request, plan, context, key, _)) = self.begin_edited(&media_id) else {
+        let Some((request, _)) = self.begin_edited(&media_id) else {
             return;
         };
-        self.cache_and_accept(request, &key, &context.input_digest, &plan, bundle)
-            .await;
+        self.cache_and_accept(&request, bundle).await;
     }
 
     fn update_lyrics_text(self: &Arc<Self>, media_id: CurrentMediaId, text: String) {
@@ -1371,24 +1301,22 @@ impl LyricsService {
             return;
         };
         let service = Arc::clone(self);
-        let (request, plan, context, key, sidecar) = prepared;
+        let (request, sidecar) = prepared;
         let content = lyrics_to_lrc_text(document, 0);
         let _task = self.runtime.spawn(async move {
-            let Some(source) = service.source(&context).await else {
+            let Some(source) = service.source(&request.context).await else {
                 return;
             };
             let Ok(_permit) = service.write_lane.acquire().await else {
                 return;
             };
             match source
-                .write_lyrics(&service.database, &key.media_uri, &content, sidecar)
+                .write_lyrics(&service.database, request.media_uri(), &content, sidecar)
                 .await
             {
                 Ok(()) => {
                     source.refresh_written_lyrics(&service.database);
-                    service
-                        .cache_and_accept(request, &key, &context.input_digest, &plan, bundle)
-                        .await;
+                    service.cache_and_accept(&request, bundle).await;
                 }
                 Err(error) => {
                     warn!(%error, "could not save edited lyrics");
@@ -1399,7 +1327,7 @@ impl LyricsService {
     }
 
     fn clear_fetched(self: &Arc<Self>, media_id: CurrentMediaId) {
-        let key = {
+        let uri = {
             let state = self
                 .state
                 .lock()
@@ -1408,15 +1336,15 @@ impl LyricsService {
                 .current
                 .as_ref()
                 .filter(|current| current.context.media.id == media_id)
-                .map(|current| current.key.clone())
+                .map(|current| current.context.media.id.media_uri.clone())
         };
-        let Some(key) = key else {
+        let Some(uri) = uri else {
             return;
         };
         let database = self.database.clone();
         let _task = self.runtime.spawn(async move {
             if let Err(error) = database
-                .remove_track_lyrics_by_authority(&key.media_uri, "external")
+                .remove_track_lyrics_by_authority(&uri, "external")
                 .await
             {
                 warn!(%error, "could not clear fetched lyrics cache");
@@ -1424,11 +1352,42 @@ impl LyricsService {
         });
     }
 
+    fn refresh_current(self: &Arc<Self>) {
+        let current = {
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            state
+                .current
+                .as_ref()
+                .filter(|current| {
+                    (state.settings.preferences.show_furigana
+                        || state.settings.preferences.show_romanization)
+                        && current
+                            .document()
+                            .is_some_and(|document| document.is_japanese_for_readings())
+                })
+                .and_then(|current| {
+                    current
+                        .bundle
+                        .clone()
+                        .map(|bundle| (current.request, bundle))
+                })
+        };
+        if let Some((request, bundle)) = current {
+            self.accept_bundle(request, bundle, false, true);
+        }
+    }
+
     fn publish(&self, event: LyricsEvent) {
         if let LyricsEvent::Current(current) = &event {
             self.current.send_replace(current.clone());
         }
         let _ = self.events.try_send(event);
+    }
+}
+
+impl Drop for LyricsService {
+    fn drop(&mut self) {
+        ::lyrics::release_japanese_reader();
     }
 }
 
@@ -1502,6 +1461,7 @@ impl LyricsHandle {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner()) = status.clone();
                 service.publish(LyricsEvent::JapaneseDictionaryChanged(status));
+                service.refresh_current();
             });
         }
         status.clone()
@@ -1640,45 +1600,14 @@ fn current_event(current: &CurrentDocument) -> LyricsEvent {
     } else {
         LyricsEvent::Current(CurrentLyrics::Ready {
             media_id: current.context.media.id.clone(),
-            content: current.bundle.as_ref().and_then(|bundle| {
-                if bundle.is_instrumental() {
-                    Some(CurrentLyricsContent::Instrumental)
-                } else {
-                    current
-                        .document
-                        .clone()
-                        .map(|document| CurrentLyricsContent::Document {
-                            document,
-                            pronunciation: current.pronunciation.clone(),
-                        })
-                }
-            }),
+            content: current.content.clone(),
             origin: current.bundle.as_ref().map(|bundle| bundle.origin),
         })
     }
 }
 
-fn apply_bundle(current: &mut CurrentDocument, settings: &Settings, bundle: Arc<LyricsBundle>) {
-    let selected = bundle.selected_document(&settings.preferences);
-    current.pronunciation = selected
-        .and_then(|document| bundle.pronunciation_for(document))
-        .map(|pronunciation| {
-            current
-                .pronunciation
-                .as_ref()
-                .filter(|visible| visible.as_ref() == pronunciation)
-                .cloned()
-                .unwrap_or_else(|| Arc::new(pronunciation.clone()))
-        });
-    current.document = selected.map(|selected| {
-        current
-            .document
-            .as_ref()
-            .filter(|visible| visible.as_ref() == selected)
-            .cloned()
-            .unwrap_or_else(|| Arc::new(selected.clone()))
-    });
-    current.bundle = Some(bundle);
+fn reading_preferences(preferences: &::lyrics::UserPreferences) -> (bool, bool) {
+    (preferences.show_furigana, preferences.show_romanization)
 }
 
 fn selection_settings(plan: &LyricsPlan) -> lyrics::UserPreferences {
@@ -1712,19 +1641,31 @@ fn prefer_fallback(
     replace
 }
 
-fn cache_key_for_bundle(
-    key: &DocumentKey,
-    plan: &LyricsPlan,
-    bundle: &LyricsBundle,
-) -> (String, String, String) {
-    if matches!(bundle.origin, LyricsOrigin::External(_))
-        && plan.prefers_translations()
-        && bundle.has_preferred_translation(&selection_settings(plan))
-    {
-        key.cache_key(plan)
-    } else {
-        key.cache_key_for(LyricsRole::Original, "")
-    }
+fn cache_key(plan: &LyricsPlan) -> (String, String, String) {
+    cache_key_for(
+        if plan.prefers_translations() {
+            LyricsRole::Translation
+        } else {
+            LyricsRole::Original
+        },
+        if plan.prefers_translations() {
+            plan.preferred_translation_language()
+        } else {
+            ""
+        },
+    )
+}
+
+fn cache_key_for(role: LyricsRole, language: &str) -> (String, String, String) {
+    (
+        role.key().to_string(),
+        if role == LyricsRole::Translation {
+            ::lyrics::normalize_language_tag(language).unwrap_or_default()
+        } else {
+            String::new()
+        },
+        String::new(),
+    )
 }
 
 fn lyrics_selection_changed(previous: &Settings, current: &Settings) -> bool {
@@ -1755,36 +1696,24 @@ fn lyrics_acquisition_changed(previous: &Settings, current: &Settings, track_id:
 }
 
 fn cancel_current_work(state: &mut State) {
-    if let Some(cancelled) = state.current_cancelled.take() {
-        cancelled.store(true, Ordering::Release);
-    }
     if let Some(task) = state.current_task.take() {
         task.abort();
     }
 }
 
-fn current_resolution(context: LyricsContext, plan: LyricsPlan) -> CurrentResolution {
-    let cue_track = library::cue_media_parts(&context.media.id.media_uri).is_some();
-    CurrentResolution {
-        lookup: LyricsLookup::from_search(
-            &context.media.row.track.metadata.artist,
-            &context.media.row.track.metadata.title,
-            u32::try_from(context.media.row.track.metadata.duration_millis.max(0) / 1_000)
-                .unwrap_or(u32::MAX),
-        ),
-        cue_track,
-        plan,
-        context,
-    }
-}
-
 fn cache_write(
-    key: &DocumentKey,
     plan: &LyricsPlan,
     document: &LyricsBundle,
 ) -> Result<(String, String, String, String, String, i64), serde_json::Error> {
     let authority = cache_authority(document.origin);
-    let (role, language, script) = cache_key_for_bundle(key, plan, document);
+    let (role, language, script) = if matches!(document.origin, LyricsOrigin::External(_))
+        && plan.prefers_translations()
+        && document.has_preferred_translation(&selection_settings(plan))
+    {
+        cache_key(plan)
+    } else {
+        cache_key_for(LyricsRole::Original, "")
+    };
     Ok((
         authority.to_string(),
         role,

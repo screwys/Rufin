@@ -175,6 +175,7 @@ impl AndroidRuntime {
         let controller_owner = Arc::new(web::Controller::new(inputs.products.clone()));
         let library_events = Arc::new(crate::library_events::AndroidLibraryEvents::new(
             inputs.receivers.source,
+            inputs.products.settings.persistence_errors(),
         ));
         Ok(Arc::new(Self {
             products: inputs.products,
@@ -205,8 +206,8 @@ impl AndroidRuntime {
     pub fn diagnostic_log(&self) -> String {
         self.diagnostics.snapshot()
     }
-    pub fn diagnostic_revision(&self) -> u64 {
-        self.diagnostics.revision()
+    pub fn diagnostic_updates(&self, cursor: u64) -> rufin_core::diagnostics::DiagnosticUpdate {
+        self.diagnostics.updates(cursor)
     }
     pub fn more(&self) -> Arc<crate::more::AndroidMore> {
         self.more.clone()
@@ -363,6 +364,9 @@ impl Drop for AndroidRuntime {
         self.controller_owner.stop();
         self.products.playback.shutdown();
         self.products.scrobbling.shutdown();
+        if let Err(error) = self.products.settings.flush() {
+            tracing::warn!(%error, "could not finish saving settings");
+        }
         if let Some(runtime) = self
             .runtime
             .get_mut()

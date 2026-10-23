@@ -114,12 +114,10 @@ pub struct AndroidDetailSummary {
 
 #[derive(uniffi::Record)]
 pub struct AndroidArtistReleaseGroup {
-    pub first_rows: Vec<AndroidBrowseRow>,
     pub id: String,
     pub title: String,
     pub total: u64,
     pub index: u64,
-    pub route: Route,
 }
 
 #[derive(uniffi::Record)]
@@ -351,12 +349,6 @@ impl From<rufin_core::detail_links::DetailLink> for AndroidDetailLink {
             icon_id: link.icon_name.into(),
         }
     }
-}
-
-#[derive(uniffi::Record)]
-pub struct AndroidTargetDownloadStatus {
-    pub total: u64,
-    pub downloaded: u64,
 }
 
 impl From<library::PlaylistFolderRow> for AndroidBrowseRow {

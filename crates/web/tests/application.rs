@@ -80,12 +80,11 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
     let controller = Controller::new(inputs.products.clone());
     let mut status = controller.status();
     assert!(status.borrow().address.is_none());
-    let mut settings = inputs.settings.load();
-    assert!(!settings.web_controller.enabled);
-    assert_eq!(settings.web_controller.port, 1717);
-    settings.web_controller.enabled = true;
-    settings.web_controller.port = 0;
-    inputs.settings.save(&settings).unwrap();
+    let settings = inputs.settings.load().web_controller;
+    assert!(!settings.enabled);
+    assert_eq!(settings.port, 1717);
+    inputs.settings.set_controller_port(0).unwrap();
+    inputs.settings.set_controller_enabled(true).unwrap();
     let started = controller_status(&mut status, |state| state.address.is_some()).await;
     assert_eq!(started.token.len(), 64);
     let address = started.address.unwrap();
@@ -117,18 +116,17 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
     assert!(events.chunk().await.unwrap().is_some());
 
     let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    settings.web_controller.port = occupied.local_addr().unwrap().port();
-    inputs.settings.save(&settings).unwrap();
+    let settings = inputs
+        .settings
+        .set_controller_port(occupied.local_addr().unwrap().port())
+        .unwrap();
     let fallback = controller_status(&mut status, |state| {
         state.address.is_some_and(|current| current != address)
     })
     .await;
     assert!(fallback.error.is_none());
-    assert!(fallback.address.unwrap().port() > settings.web_controller.port);
-    assert_eq!(
-        fallback.address.unwrap().ip(),
-        settings.web_controller.address
-    );
+    assert!(fallback.address.unwrap().port() > settings.port);
+    assert_eq!(fallback.address.unwrap().ip(), settings.address);
     assert_eq!(
         client
             .get(format!("http://{}/api/playback", fallback.address.unwrap()))
@@ -153,8 +151,7 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
     .await;
     assert!(closed.is_ok(), "rebinding closes existing event streams");
 
-    settings.web_controller.port = 0;
-    inputs.settings.save(&settings).unwrap();
+    inputs.settings.set_controller_port(0).unwrap();
     let rebound = controller_status(&mut status, |state| {
         state.address.is_some() && state.address != fallback.address
     })
@@ -213,8 +210,7 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
         reopened.token, regenerated,
         "regenerated token survives host restart"
     );
-    settings.web_controller.enabled = false;
-    inputs.settings.save(&settings).unwrap();
+    inputs.settings.set_controller_enabled(false).unwrap();
     controller_status(&mut status, |state| state.address.is_none()).await;
     assert!(
         client
@@ -651,9 +647,12 @@ async fn exercise_http_api(
         .await
         .unwrap();
     playback_event(&mut pin_events).await;
-    let mut saved = settings.load();
-    saved.sidebar.pins.reverse();
-    settings.save(&saved).unwrap();
+    settings
+        .update_preferences(|current| {
+            current.sidebar.pins.reverse();
+            Ok(())
+        })
+        .unwrap();
     tokio::time::timeout(Duration::from_secs(5), async {
         while playback_event(&mut pin_events).await["pins_changed"] != true {}
     })
@@ -873,9 +872,9 @@ async fn exercise_http_api(
         .unwrap();
     assert_eq!(metadata["favorite"], true);
     for include_current in [false, true] {
-        let mut saved = settings.load();
-        saved.player_display.clear_queue_includes_current = include_current;
-        settings.save(&saved).unwrap();
+        settings
+            .set_clear_queue_includes_current(include_current)
+            .unwrap();
         api(reqwest::Method::DELETE, "queue", Value::Null).await;
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {

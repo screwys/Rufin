@@ -306,6 +306,7 @@ pub(super) fn lyrics_json(current: &CurrentLyrics, settings: &lyrics::Settings) 
             Some(CurrentLyricsContent::Document {
                 document,
                 pronunciation,
+                ..
             }) => {
                 let readings = document.lines.iter().map(|line| {
                     let supplied = lyrics::pronunciation_line_for(line, pronunciation.as_deref());
@@ -436,53 +437,42 @@ async fn artwork(
         .map_err(bad_request)?
         .unwrap_or(256)
         .max(1);
-    let request = if parameters
+    let original = parameters
         .get("original")
-        .is_some_and(|value| value == "true")
-    {
+        .is_some_and(|value| value == "true");
+    let request = if original {
         artwork::ArtworkRequest::original(binding, size)
     } else {
-        artwork::ArtworkRequest::new(binding, size, size)
+        artwork::ArtworkRequest::new(binding, size)
     }
     .with_external(external);
-    let load = products.artwork.load(request);
-    let loaded = match load {
-        artwork::ArtworkLoad::Ready(image) => image,
-        artwork::ArtworkLoad::Pending(pending) => match pending.finish().await {
+    let (bytes, mime) = if original {
+        let bytes = products
+            .artwork
+            .image_bytes(request)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| error(StatusCode::NOT_FOUND, "No cover image"))?;
+        let mime = artwork::image_mime(&bytes)
+            .ok_or_else(|| error(StatusCode::NOT_FOUND, "No cover image"))?;
+        (bytes, mime)
+    } else {
+        let image = match products.artwork.load(request).finish().await {
             artwork::ArtworkOutcome::Ready(image) => image,
+            artwork::ArtworkOutcome::Missing | artwork::ArtworkOutcome::Invalidated => {
+                return Err(error(StatusCode::NOT_FOUND, "No cover image"));
+            }
             artwork::ArtworkOutcome::Failed(message) => return Err(internal(message)),
-            _ => return Err(error(StatusCode::NOT_FOUND, "No cover image")),
-        },
-        artwork::ArtworkLoad::Missing => {
-            return Err(error(StatusCode::NOT_FOUND, "No cover image"));
-        }
+        };
+        let png =
+            tokio::task::spawn_blocking(move || image.pixels().resized_to_fit(size)?.encode_png())
+                .await
+                .map_err(internal)?
+                .map_err(internal)?;
+        (png, "image/png")
     };
-    if let Some(original) = loaded.original()
-        && let Some(mime) = artwork::image_mime(&original)
-    {
-        return Ok(Response::builder()
-            .header("content-type", mime)
-            .header("cache-control", "private, max-age=300")
-            .body(Body::from(bytes::Bytes::from_owner(Arc::clone(original))))
-            .expect("image headers"));
-    }
-    let image = loaded;
-    let bytes = tokio::task::spawn_blocking(move || {
-        use image::ImageEncoder;
-        let mut bytes = Vec::new();
-        image::codecs::png::PngEncoder::new(&mut bytes).write_image(
-            image.rgba(),
-            image.width(),
-            image.height(),
-            image::ExtendedColorType::Rgba8,
-        )?;
-        Ok::<_, image::ImageError>(bytes)
-    })
-    .await
-    .map_err(internal)?
-    .map_err(internal)?;
     Ok(Response::builder()
-        .header("content-type", "image/png")
+        .header("content-type", mime)
         .header("cache-control", "private, max-age=300")
         .body(Body::from(bytes))
         .expect("image headers"))

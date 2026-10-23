@@ -1,9 +1,8 @@
 use lyrics::{
     LYRICS_USER_SCROLL_PAUSE_MS, active_lyrics_line_index, intro_lyrics_line_index,
-    lyric_line_has_text, pronunciation_line_for, should_highlight_all_lyrics_lines,
+    lyric_line_has_text, should_highlight_all_lyrics_lines,
 };
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,12 +11,12 @@ use gtk::glib;
 use gtk::prelude::*;
 use localization::{msgid, tr};
 use lyrics::{
-    JapaneseReadingSegment, LyricsAgentRole, LyricsCue, LyricsDocument, LyricsLine,
-    japanese_reading_for_language_options, japanese_reading_from_romanization,
+    JapaneseReadingSegment, LyricsAgentRole, LyricsDocument, LyricsLine, PreparedCueLine,
+    PreparedLyrics, PreparedLyricsLine,
 };
 
 use super::wrapping_line::WrappingLine;
-use lyrics::{KaraokeTiming, effective_cue_end};
+use lyrics::KaraokeTiming;
 
 const DEFAULT_LYRICS_SCROLL_ANIMATION_MS: u64 = 300;
 const MIN_LYRICS_SCROLL_ANIMATION_MS: u64 = 80;
@@ -35,10 +34,17 @@ mod karaoke_text {
     mod imp {
         use super::*;
 
+        struct HighlightGeometry {
+            serial: u32,
+            offsets: (i32, i32),
+            rectangles: Vec<Vec<(i32, gtk::graphene::Rect, bool)>>,
+        }
+
         #[derive(Default)]
         pub struct KaraokeText {
             pub label: RefCell<Option<gtk::Label>>,
             pub(super) highlights: RefCell<Vec<LyricsCueHighlight>>,
+            geometry: RefCell<Option<HighlightGeometry>>,
         }
 
         #[glib::object_subclass]
@@ -119,39 +125,69 @@ mod karaoke_text {
                 let fully_sung = highlights.iter().all(|span| span.progress.get() >= 1.0);
                 if !fully_sung {
                     let path = gtk::gsk::PathBuilder::new();
-                    for span in highlights.iter().filter(|span| span.progress.get() > 0.0) {
-                        let mut rectangles = Vec::new();
-                        let mut lines = layout.iter();
-                        loop {
-                            let line = lines.line_readonly().expect("lyric layout line");
-                            let start = (span.range.start as i32).max(line.start_index());
-                            let end =
-                                (span.range.end as i32).min(line.start_index() + line.length());
-                            if start < end {
-                                let (_, bounds) = lines.line_extents();
-                                let ranges = line.x_ranges(start, end);
-                                rectangles.extend(ranges.chunks_exact(2).map(|range| {
-                                    let (_, index, _) = layout.xy_to_index(
-                                        range[0] + (range[1] - range[0]) / 2,
-                                        bounds.y() + bounds.height() / 2,
-                                    );
-                                    (
-                                        index,
-                                        gtk::graphene::Rect::new(
-                                            x as f32 + range[0] as f32 / gtk::pango::SCALE as f32,
-                                            y as f32 + bounds.y() as f32 / gtk::pango::SCALE as f32,
-                                            (range[1] - range[0]) as f32 / gtk::pango::SCALE as f32,
-                                            bounds.height() as f32 / gtk::pango::SCALE as f32,
-                                        ),
-                                        layout.direction(index) == gtk::pango::Direction::Rtl,
-                                    )
-                                }));
-                            }
-                            if !lines.next_line() {
-                                break;
-                            }
-                        }
-                        rectangles.sort_unstable_by_key(|(index, _, _)| *index);
+                    let mut geometry = self.geometry.borrow_mut();
+                    if geometry.as_ref().is_none_or(|geometry| {
+                        geometry.serial != layout.serial() || geometry.offsets != (x, y)
+                    }) {
+                        *geometry = Some(HighlightGeometry {
+                            serial: layout.serial(),
+                            offsets: (x, y),
+                            rectangles: highlights
+                                .iter()
+                                .map(|span| {
+                                    let mut rectangles = Vec::new();
+                                    let mut lines = layout.iter();
+                                    loop {
+                                        let line =
+                                            lines.line_readonly().expect("lyric layout line");
+                                        let start =
+                                            (span.range.start as i32).max(line.start_index());
+                                        let end = (span.range.end as i32)
+                                            .min(line.start_index() + line.length());
+                                        if start < end {
+                                            let (_, bounds) = lines.line_extents();
+                                            let ranges = line.x_ranges(start, end);
+                                            rectangles.extend(ranges.chunks_exact(2).map(
+                                                |range| {
+                                                    let (_, index, _) = layout.xy_to_index(
+                                                        range[0] + (range[1] - range[0]) / 2,
+                                                        bounds.y() + bounds.height() / 2,
+                                                    );
+                                                    (
+                                                        index,
+                                                        gtk::graphene::Rect::new(
+                                                            x as f32
+                                                                + range[0] as f32
+                                                                    / gtk::pango::SCALE as f32,
+                                                            y as f32
+                                                                + bounds.y() as f32
+                                                                    / gtk::pango::SCALE as f32,
+                                                            (range[1] - range[0]) as f32
+                                                                / gtk::pango::SCALE as f32,
+                                                            bounds.height() as f32
+                                                                / gtk::pango::SCALE as f32,
+                                                        ),
+                                                        layout.direction(index)
+                                                            == gtk::pango::Direction::Rtl,
+                                                    )
+                                                },
+                                            ));
+                                        }
+                                        if !lines.next_line() {
+                                            break;
+                                        }
+                                    }
+                                    rectangles.sort_unstable_by_key(|(index, _, _)| *index);
+                                    rectangles
+                                })
+                                .collect(),
+                        });
+                    }
+                    for (span, rectangles) in highlights
+                        .iter()
+                        .zip(&geometry.as_ref().unwrap().rectangles)
+                        .filter(|(span, _)| span.progress.get() > 0.0)
+                    {
                         let mut remaining = rectangles
                             .iter()
                             .map(|(_, rect, _)| rect.width())
@@ -163,7 +199,7 @@ mod karaoke_text {
                                 break;
                             }
                             path.add_rect(&gtk::graphene::Rect::new(
-                                rect.x() + if rtl { rect.width() - width } else { 0.0 },
+                                rect.x() + if *rtl { rect.width() - width } else { 0.0 },
                                 rect.y(),
                                 width,
                                 rect.height(),
@@ -258,7 +294,6 @@ impl LyricsPane {
         current_track: Option<&str>,
         settings: &rufin_core::settings::Settings,
         writable: bool,
-        dictionary: Option<PathBuf>,
         offset: i64,
         seek: Rc<dyn Fn(u64)>,
     ) {
@@ -275,12 +310,9 @@ impl LyricsPane {
         // A new playback run of the same queue item keeps the same lyrics and scroll extent.
         let matches_current =
             current_media.map(|media| &media.media_uri) == media_id.map(|media| &media.media_uri);
-        let (document, pronunciation) = match content {
-            Some(CurrentLyricsContent::Document {
-                document,
-                pronunciation,
-            }) if matches_current => (Some(Arc::clone(document)), pronunciation.clone()),
-            _ => (None, None),
+        let document = match content {
+            Some(CurrentLyricsContent::Document { .. }) if matches_current => content,
+            _ => None,
         };
         let instrumental =
             matches_current && matches!(content, Some(CurrentLyricsContent::Instrumental));
@@ -317,14 +349,19 @@ impl LyricsPane {
             self.hide_content();
             return;
         }
-        let content = if let Some(lyrics) = document {
+        let content = if let Some(CurrentLyricsContent::Document {
+            document: lyrics,
+            pronunciation,
+            prepared,
+        }) = document
+        {
             LyricsPaneContent::Document {
-                lyrics,
-                pronunciation,
+                lyrics: Arc::clone(lyrics),
+                pronunciation: pronunciation.clone(),
                 show_furigana: settings.lyrics.preferences.show_furigana,
                 show_romanization: settings.lyrics.preferences.show_romanization,
                 word_by_word_highlighting: settings.lyrics.preferences.karaoke_mode,
-                dictionary,
+                prepared: Arc::clone(prepared),
             }
         } else if instrumental {
             LyricsPaneContent::Instrumental
@@ -406,7 +443,7 @@ pub enum LyricsPaneContent {
         show_furigana: bool,
         show_romanization: bool,
         word_by_word_highlighting: bool,
-        dictionary: Option<PathBuf>,
+        prepared: Arc<PreparedLyrics>,
     },
     Instrumental,
     Loading,
@@ -423,7 +460,7 @@ impl PartialEq for LyricsPaneContent {
                     show_furigana,
                     show_romanization,
                     word_by_word_highlighting,
-                    dictionary,
+                    prepared,
                 },
                 Self::Document {
                     lyrics: next,
@@ -431,7 +468,7 @@ impl PartialEq for LyricsPaneContent {
                     show_furigana: next_furigana,
                     show_romanization: next_romanization,
                     word_by_word_highlighting: next_highlighting,
-                    dictionary: next_dictionary,
+                    prepared: next_prepared,
                 },
             ) => {
                 Arc::ptr_eq(lyrics, next)
@@ -443,7 +480,7 @@ impl PartialEq for LyricsPaneContent {
                     && show_furigana == next_furigana
                     && show_romanization == next_romanization
                     && word_by_word_highlighting == next_highlighting
-                    && dictionary == next_dictionary
+                    && Arc::ptr_eq(prepared, next_prepared)
             }
             (Self::Instrumental, Self::Instrumental) | (Self::Loading, Self::Loading) => true,
             (Self::Empty(previous), Self::Empty(next)) => previous == next,
@@ -704,13 +741,13 @@ impl LyricsPane {
             show_furigana,
             show_romanization,
             word_by_word_highlighting,
-            ..
+            prepared,
         } = &content
         {
             self.append_document_rows(
                 current_lyrics,
                 LyricsRowTrack::Primary,
-                pronunciation.as_deref(),
+                &prepared.lines,
                 *show_furigana,
                 *show_romanization && pronunciation.is_none(),
                 *word_by_word_highlighting,
@@ -723,7 +760,7 @@ impl LyricsPane {
                 self.append_document_rows(
                     pronunciation,
                     LyricsRowTrack::Pronunciation,
-                    None,
+                    &prepared.pronunciation,
                     false,
                     false,
                     *word_by_word_highlighting,
@@ -776,7 +813,7 @@ impl LyricsPane {
         &self,
         document: &LyricsDocument,
         track: LyricsRowTrack,
-        pronunciation: Option<&LyricsDocument>,
+        prepared: &[PreparedLyricsLine],
         show_furigana: bool,
         show_romanization: bool,
         word_by_word_highlighting: bool,
@@ -786,9 +823,6 @@ impl LyricsPane {
             track == LyricsRowTrack::Primary && document.is_japanese_for_readings();
         let show_furigana = show_furigana && local_japanese_readings;
         let show_romanization = show_romanization && local_japanese_readings;
-        let reading_language = local_japanese_readings
-            .then_some("ja")
-            .or(document.language.as_deref());
         for (line_index, line) in document.lines.iter().enumerate() {
             if !lyric_line_has_text(line) {
                 continue;
@@ -797,59 +831,12 @@ impl LyricsPane {
             content.set_hexpand(true);
             content.set_halign(gtk::Align::Fill);
             let mut cue_highlights = Vec::new();
-            let pronunciation_line = show_furigana
-                .then(|| pronunciation_line_for(line, pronunciation))
-                .flatten();
+            let prepared = &prepared[line_index];
             let karaoke_line = word_by_word_highlighting && !line.cue_lines.is_empty();
-            let reading = (!karaoke_line
-                || show_romanization && line.cue_lines.iter().all(|line| line.cues.is_empty()))
-            .then(|| {
-                pronunciation_line
-                    .and_then(|pronunciation| {
-                        japanese_reading_from_romanization(&line.text, &pronunciation.text)
-                    })
-                    .or_else(|| {
-                        (show_furigana || show_romanization)
-                            .then(|| {
-                                japanese_reading_for_language_options(
-                                    &line.text,
-                                    reading_language,
-                                    show_furigana,
-                                    show_romanization,
-                                )
-                            })
-                            .flatten()
-                    })
-            })
-            .flatten();
+            let reading = prepared.reading.as_deref();
             if karaoke_line {
-                for cue_line in &line.cue_lines {
-                    let supplied_reading = pronunciation_line.and_then(|pronunciation| {
-                        japanese_reading_from_romanization(&cue_line.text, &pronunciation.text)
-                    });
-                    let local_reading = (show_romanization
-                        || show_furigana && supplied_reading.is_none())
-                    .then(|| {
-                        japanese_reading_for_language_options(
-                            &cue_line.text,
-                            reading_language,
-                            show_furigana,
-                            show_romanization,
-                        )
-                    })
-                    .flatten();
-                    let reading = supplied_reading.as_ref().or(local_reading.as_ref());
-                    let cues = cue_line
-                        .cues
-                        .iter()
-                        .enumerate()
-                        .map(|(index, cue)| {
-                            (
-                                cue,
-                                effective_cue_end(&document.lines, line_index, cue_line, index),
-                            )
-                        })
-                        .collect::<Vec<_>>();
+                for (cue_line, prepared) in line.cue_lines.iter().zip(&prepared.cue_lines) {
+                    let reading = prepared.reading.as_deref();
                     let cue_part = gtk::Box::new(gtk::Orientation::Vertical, 0);
                     if let Some(agent) = cue_line
                         .agent_id
@@ -876,24 +863,25 @@ impl LyricsPane {
                         line.add_css_class("lyrics-romanization");
                         line
                     });
-                    if show_furigana && let Some(reading) = reading {
+                    if show_furigana
+                        && let Some(reading) =
+                            reading.filter(|reading| !reading.segments.is_empty())
+                    {
                         let mut cursor = 0;
-                        for segment in &reading.segments {
+                        for (index, segment) in reading.segments.iter().enumerate() {
                             let range = cursor..cursor + segment.surface.len();
                             cursor = range.end;
                             let base = karaoke_surface(
                                 &cue_line.text,
                                 range.clone(),
-                                &cues,
+                                prepared,
                                 &mut cue_highlights,
                             );
                             let (ruby, annotation) = ruby_segment(segment, base.upcast_ref());
                             if segment.furigana.is_some() {
                                 register_karaoke_text(
                                     &annotation,
-                                    &cue_line.text,
-                                    range,
-                                    &cues,
+                                    &prepared.furigana[index],
                                     &mut cue_highlights,
                                 );
                             }
@@ -903,14 +891,16 @@ impl LyricsPane {
                         cue_line_widget.append(&karaoke_surface(
                             &cue_line.text,
                             0..cue_line.text.len(),
-                            &cues,
+                            prepared,
                             &mut cue_highlights,
                         ));
                     }
                     if let Some(romanization_line) = romanization_line.as_ref() {
-                        if let Some(reading) = local_reading.as_ref() {
+                        if let Some(reading) = reading {
                             let mut previous_was_word = false;
-                            for (range, romanization) in &reading.romanization_spans {
+                            for (index, (range, romanization)) in
+                                reading.romanization_spans.iter().enumerate()
+                            {
                                 let surface = cue_line
                                     .text
                                     .get(range.clone())
@@ -923,9 +913,7 @@ impl LyricsPane {
                                 let label = KaraokeText::new(romanization);
                                 register_karaoke_text(
                                     &label,
-                                    &cue_line.text,
-                                    range.clone(),
-                                    &cues,
+                                    &prepared.romanization[index],
                                     &mut cue_highlights,
                                 );
                                 romanization_line.append(&label);
@@ -934,7 +922,7 @@ impl LyricsPane {
                             romanization_line.append(&karaoke_surface(
                                 &cue_line.text,
                                 0..cue_line.text.len(),
-                                &cues,
+                                prepared,
                                 &mut cue_highlights,
                             ));
                         }
@@ -945,7 +933,9 @@ impl LyricsPane {
                     }
                     content.append(&cue_part);
                 }
-            } else if show_furigana && let Some(reading) = reading.as_ref() {
+            } else if show_furigana
+                && let Some(reading) = reading.filter(|reading| !reading.segments.is_empty())
+            {
                 content.append(&ruby_line(&reading.segments));
             } else {
                 let label = lyrics_label(&line.text);
@@ -1221,19 +1211,13 @@ fn ruby_line(segments: &[JapaneseReadingSegment]) -> WrappingLine {
 
 fn register_karaoke_text(
     label: &KaraokeText,
-    text: &str,
-    range: std::ops::Range<usize>,
-    cues: &[(&LyricsCue, Option<u64>)],
+    timings: &[KaraokeTiming],
     highlights: &mut Vec<KaraokeText>,
 ) {
-    let timings = cues
-        .iter()
-        .filter_map(|(cue, end)| KaraokeTiming::for_text_range(text, range.clone(), cue, *end))
-        .collect::<Vec<_>>();
     if !timings.is_empty() {
         label.add_highlight(LyricsCueHighlight {
             range: 0..label.text_len(),
-            timings,
+            timings: timings.to_vec(),
             progress: Cell::new(0.0),
         });
         highlights.push(label.clone());
@@ -1243,7 +1227,7 @@ fn register_karaoke_text(
 fn karaoke_surface(
     text: &str,
     range: std::ops::Range<usize>,
-    cues: &[(&LyricsCue, Option<u64>)],
+    prepared: &PreparedCueLine,
     highlights: &mut Vec<KaraokeText>,
 ) -> KaraokeText {
     let surface = reading_surface_label(
@@ -1251,28 +1235,16 @@ fn karaoke_surface(
             .expect("reading segment belongs to its lyric line"),
     );
     surface.add_css_class("lyrics-cue");
-    let mut boundaries = vec![range.start, range.end];
-    for (cue, _) in cues {
-        boundaries.extend(
-            [cue.byte_start, cue.byte_end_exclusive]
-                .into_iter()
-                .filter(|boundary| range.contains(boundary)),
-        );
-    }
-    boundaries.sort_unstable();
-    boundaries.dedup();
     let mut timed = false;
-    for pair in boundaries.windows(2) {
-        let timings = cues
-            .iter()
-            .filter_map(|(cue, end)| {
-                KaraokeTiming::for_text_range(text, pair[0]..pair[1], cue, *end)
-            })
-            .collect::<Vec<_>>();
-        timed |= !timings.is_empty();
+    for span in prepared
+        .surface
+        .iter()
+        .filter(|span| range.contains(&span.range.start))
+    {
+        timed |= !span.timings.is_empty();
         surface.add_highlight(LyricsCueHighlight {
-            range: pair[0] - range.start..pair[1] - range.start,
-            timings,
+            range: span.range.start - range.start..span.range.end - range.start,
+            timings: span.timings.clone(),
             progress: Cell::new(0.0),
         });
     }

@@ -1,8 +1,15 @@
-//! Checks media locations for explicit cleanup commands.
+//! Checks media locations for cleanup and playback failure recovery.
 use super::{SourceOwner, string_error};
 use std::collections::HashSet;
 
 impl SourceOwner {
+    pub async fn unavailable_local_folder(&self, media_uri: &str) -> Option<String> {
+        let cue = library::cue_media_parts(media_uri);
+        let uri = cue.as_ref().map_or(media_uri, |(_, uri, _, _)| uri);
+        let path = library::file_media_path(uri)?;
+        unavailable_local_folder_for_path(&self.list_sources().local_folders, &path).await
+    }
+
     pub(crate) async fn missing_media(&self, uris: &[String]) -> Result<HashSet<String>, String> {
         let database = &self.shared.database;
         let mut missing = HashSet::new();
@@ -90,10 +97,48 @@ impl SourceOwner {
     }
 }
 
+async fn unavailable_local_folder_for_path(
+    folders: &[crate::runtime::source::LocalFolder],
+    path: &std::path::Path,
+) -> Option<String> {
+    for folder in folders {
+        if path.starts_with(&folder.path) && tokio::fs::read_dir(&folder.path).await.is_err() {
+            return Some(folder.path.clone());
+        }
+    }
+    None
+}
+
 fn direct_local_media(uri: &str) -> bool {
     let backing = library::cue_media_parts(uri).map(|(_, backing, _, _)| backing);
     let backing = backing.as_deref().unwrap_or(uri);
     library::file_media_path(backing).is_some()
         || library::document_media_id(backing).is_some()
         || backing.starts_with("content:")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn local_folder_recovery_requires_the_tracks_root_to_be_unavailable() {
+        let directory = tempfile::tempdir().expect("temporary local folder parent");
+        let root = directory.path().join("Music");
+        std::fs::create_dir(&root).expect("create Local root");
+        let root_text = root.to_string_lossy().into_owned();
+        let folders = [crate::runtime::source::LocalFolder {
+            path: root_text.clone(),
+        }];
+        let track = root.join("ArtistView").join("SongView.flac");
+        assert_eq!(
+            unavailable_local_folder_for_path(&folders, &track).await,
+            None
+        );
+        std::fs::remove_dir(&root).expect("make Local root unavailable");
+        assert_eq!(
+            unavailable_local_folder_for_path(&folders, &track).await,
+            Some(root_text)
+        );
+    }
 }

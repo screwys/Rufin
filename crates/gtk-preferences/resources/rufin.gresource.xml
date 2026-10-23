@@ -41,5 +41,7 @@
     <file compressed="true">preferences/source/file_integration.ui</file>
     <file compressed="true">shell/controller.ui</file>
     <file compressed="true">style.css</file>
+    <file compressed="true">preferences/download_queue.ui</file>
+    <file compressed="true">preferences/download_queue_row.ui</file>
   </gresource>
 </gresources>

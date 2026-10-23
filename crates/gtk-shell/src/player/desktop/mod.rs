@@ -94,6 +94,7 @@ impl Shell {
 
         let transport = self.products.playback.clone();
         let scrobbling = self.products.scrobbling.clone();
+        let settings = self.products.settings.clone();
         let storage_reset = Rc::clone(&self.storage_reset);
         let resetting = storage_reset.borrow().is_some();
         let products = resetting.then(|| self.products.clone());
@@ -105,7 +106,7 @@ impl Shell {
                 scrobbling.shutdown();
                 let result = match products {
                     Some(products) => products.runtime.block_on(products.close_storage()),
-                    None => Ok(()),
+                    None => settings.flush(),
                 };
                 let _ = completed.send(result);
             })
@@ -123,7 +124,10 @@ impl Shell {
         glib::timeout_add_local(QUIT_POLL_INTERVAL, move || match completion.try_recv() {
             Ok(result) => {
                 if let Err(error) = result {
-                    storage_reset.replace(Some(Err(error)));
+                    warn!(%error, "could not finish saving settings and storage");
+                    if resetting {
+                        storage_reset.replace(Some(Err(error)));
+                    }
                 }
                 info!(
                     elapsed_ms = started_at.elapsed().as_millis(),

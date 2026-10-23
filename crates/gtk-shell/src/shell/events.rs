@@ -1,10 +1,9 @@
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gtk::prelude::{FileExt, WidgetExt};
-use gtk::{gio, glib};
+use gtk::glib;
+use gtk::prelude::WidgetExt;
 use localization::{tr, tr_with};
 use tracing::warn;
 
@@ -15,8 +14,7 @@ use gtk_player::fullscreen::{FullscreenPlaybackRefresh, fullscreen_playback_refr
 use gtk_player::state::{NowPlayingPresentation, current_playback_media_id};
 use gtk_widgets::route::Route;
 use rufin_core::runtime::source::{
-    ConfiguredSources, DiscoveryStatus, DiscoveryUpdate, LocalFolder, SourceOperation,
-    SourceProgress,
+    DiscoveryStatus, DiscoveryUpdate, SourceOperation, SourceProgress,
 };
 use rufin_core::runtime::source::{source_download_text, source_progress_text};
 use rufin_core::runtime::{
@@ -595,14 +593,6 @@ fn finish_playback_projection(
     notices: Vec<playback::PlaybackNotice>,
     queue_window_changed: bool,
 ) {
-    let unavailable_folder = unavailable_local_folder_for_failed_playback(
-        &next_player,
-        &notices,
-        &shell.source.configured.borrow(),
-    );
-    if let Some(folder) = unavailable_folder.as_ref() {
-        show_local_folder_recovery(shell, folder.clone());
-    }
     let previous_media = previous_player
         .as_ref()
         .and_then(|player| player.transport.current.as_ref())
@@ -682,11 +672,7 @@ fn finish_playback_projection(
                 notification_started_run = Some(run);
             }
             playback::PlaybackNotice::OperationFailed(error) => {
-                if unavailable_folder.is_none() {
-                    shell
-                        .control_feedback
-                        .show_feedback_toast(playback_error_toast(&error));
-                }
+                show_playback_failure(shell, &next_player, error);
             }
         }
     }
@@ -742,38 +728,42 @@ fn finish_playback_projection(
     }
 }
 
-fn unavailable_local_folder_for_failed_playback(
-    next: &playback::PlaybackView,
-    notices: &[playback::PlaybackNotice],
-    configured: &ConfiguredSources,
-) -> Option<String> {
-    next.transport.error.as_ref()?;
-    if !notices
-        .iter()
-        .any(|notice| matches!(notice, playback::PlaybackNotice::OperationFailed(_)))
-    {
-        return None;
-    }
-    let media_uri = &next.transport.current.as_ref()?.row.track.media_uri;
-    let cue = library::cue_media_parts(media_uri);
-    let media_uri = cue
+fn show_playback_failure(shell: &Rc<Shell>, next: &playback::PlaybackView, error: String) {
+    let current = next
+        .transport
+        .current
         .as_ref()
-        .map_or(media_uri.as_str(), |(_, uri, _, _)| uri);
-    let file = gio::File::for_uri(media_uri);
-    let source_path = file.path()?;
-    let source_path = source_path.to_str()?;
-    unavailable_local_folder_for_path(&configured.local_folders, source_path)
-}
-
-fn unavailable_local_folder_for_path(folders: &[LocalFolder], source_path: &str) -> Option<String> {
-    let source_path = Path::new(source_path);
-    folders
-        .iter()
-        .find(|folder| {
-            let root = Path::new(&folder.path);
-            source_path.starts_with(root) && std::fs::read_dir(root).is_err()
-        })
-        .map(|folder| folder.path.clone())
+        .filter(|_| next.transport.error.is_some());
+    let Some(current) = current else {
+        shell
+            .control_feedback
+            .show_feedback_toast(playback_error_toast(&error));
+        return;
+    };
+    let media = current.id.clone();
+    let uri = current.row.track.media_uri.clone();
+    let source = shell.products.source.clone();
+    let result = shell
+        .products
+        .runtime
+        .spawn(async move { source.unavailable_local_folder(&uri).await });
+    let shell = Rc::downgrade(shell);
+    glib::spawn_future_local(async move {
+        let folder = result.await.unwrap_or(None);
+        let Some(shell) = shell.upgrade() else { return };
+        if current_playback_media_id(shell.player_ui.selected_playback().as_deref()).as_ref()
+            != Some(&media)
+        {
+            return;
+        }
+        if let Some(folder) = folder {
+            show_local_folder_recovery(&shell, folder);
+        } else {
+            shell
+                .control_feedback
+                .show_feedback_toast(playback_error_toast(&error));
+        }
+    });
 }
 
 fn show_local_folder_recovery(shell: &Rc<Shell>, folder: String) {
@@ -905,11 +895,8 @@ mod tests {
     use super::{
         bottom_player_can_update_position_only, media_controls_static_state_changed,
         queue_panel_refresh_needed, source_operation_started_blocking, source_progress_fraction,
-        unavailable_local_folder_for_path,
     };
-    use rufin_core::runtime::source::{
-        LocalFolder, SourceOperation, SourceProgress, SourceProgressStage,
-    };
+    use rufin_core::runtime::source::{SourceOperation, SourceProgress, SourceProgressStage};
 
     #[test]
     fn playback_toasts_omit_backend_diagnostics() {
@@ -1001,29 +988,6 @@ mod tests {
             Some(&current),
             Some(&current)
         ));
-    }
-
-    #[test]
-    fn local_folder_recovery_requires_the_tracks_root_to_be_unavailable() {
-        let directory = tempfile::tempdir().expect("temporary local folder parent");
-        let root = directory.path().join("Music");
-        std::fs::create_dir(&root).expect("create Local root");
-        let root_text = root.to_string_lossy().into_owned();
-        let folders = [LocalFolder {
-            path: root_text.clone(),
-        }];
-        let track = root.join("ArtistView").join("SongView.flac");
-
-        assert_eq!(
-            unavailable_local_folder_for_path(&folders, &track.to_string_lossy()),
-            None
-        );
-
-        std::fs::remove_dir(&root).expect("make Local root unavailable");
-        assert_eq!(
-            unavailable_local_folder_for_path(&folders, &track.to_string_lossy()),
-            Some(root_text)
-        );
     }
 
     #[test]
