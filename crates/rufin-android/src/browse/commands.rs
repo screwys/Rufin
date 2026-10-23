@@ -805,19 +805,11 @@ impl AndroidLibrary {
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .map_err(error)?
                                     .as_secs() as i64;
-                                db.smart_playlist_rows(
-                                    selected.as_ref().map(|selected| selected.source_key),
-                                    &[key],
-                                    selected
-                                        .as_ref()
-                                        .and_then(|selected| selected.music_folder_key),
-                                    now,
-                                    &cancel,
-                                )
-                                .await
-                                .map_err(error)?
-                                .pop()
-                                .map(Into::into)
+                                db.smart_playlist_rows(&[key], now, &cancel)
+                                    .await
+                                    .map_err(error)?
+                                    .pop()
+                                    .map(Into::into)
                             } else {
                                 None
                             }

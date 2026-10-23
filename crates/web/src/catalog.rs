@@ -7,15 +7,16 @@ pub(super) async fn track_query(
     kind: &str,
 ) -> Result<library::MemberRead, Error> {
     use library::{Collection, MemberRead};
-    if parameters.contains_key("folder") && !parameters.contains_key("source") {
+    if !matches!(kind, "smart-playlist" | "smart-tracks")
+        && parameters.contains_key("folder")
+        && !parameters.contains_key("source")
+    {
         return Err(bad_request("source is required with folder"));
     }
-    let (source, folder) = if parameters.contains_key("source")
-        && (parameters.contains_key("folder")
-            || matches!(
-                kind,
-                "source" | "tracks" | "smart-playlist" | "smart-tracks"
-            )) {
+    let (source, folder) = if !matches!(kind, "smart-playlist" | "smart-tracks")
+        && parameters.contains_key("source")
+        && (parameters.contains_key("folder") || matches!(kind, "source" | "tracks"))
+    {
         let (source, folder) = scope(
             products,
             required(parameters, "source")?,
@@ -39,7 +40,6 @@ pub(super) async fn track_query(
         "playlist" | "entries" => Collection::Playlist(key(parameters, "id")?),
         "smart-playlist" | "smart-tracks" => Collection::Smart {
             key: key(parameters, "id")?,
-            source,
             now: now(),
         },
         _ => return Err(bad_request("Unknown media kind")),
@@ -476,7 +476,7 @@ pub(super) async fn smart_playlists_data(
         .map_err(internal)?;
     let total = page_total(products, parameters, &query).await?;
     Ok(
-        json!({"activity_sensitive":query.activity_sensitive(),"total":total,"offset":offset,"limit":limit,"smart_playlists":rows.iter().map(|row|json!({"id":row.smart_playlist_key,"object_id":row.object_id,"name":rufin_core::playlists::smart_playlist_display_name(row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_previews":artwork_previews(products, row.artwork_binding.as_slice())})).collect::<Vec<_>>()}),
+        json!({"activity_sensitive":query.activity_sensitive(),"total":total,"offset":offset,"limit":limit,"smart_playlists":rows.iter().map(|row|json!({"id":row.smart_playlist_key,"object_id":row.object_id,"name":rufin_core::playlists::smart_playlist_display_name(&row.object_id, &row.name),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_previews":artwork_previews(products, row.artwork_binding.as_slice())})).collect::<Vec<_>>()}),
     )
 }
 

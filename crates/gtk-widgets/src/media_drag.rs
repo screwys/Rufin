@@ -113,17 +113,9 @@ pub fn install_parent_selection<K, R>(
                         Some(library::MemberSelection::Members { read: right, .. }),
                     ) => match (&left.collection, &right.collection) {
                         (
-                            library::Collection::Smart {
-                                key: left,
-                                source: left_source,
-                                ..
-                            },
-                            library::Collection::Smart {
-                                key: right,
-                                source: right_source,
-                                ..
-                            },
-                        ) => left == right && left_source == right_source,
+                            library::Collection::Smart { key: left, .. },
+                            library::Collection::Smart { key: right, .. },
+                        ) => left == right,
                         _ => left == right,
                     },
                     (left, right) => left == right,

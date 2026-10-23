@@ -466,7 +466,6 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Smart {
                 key: smart_key,
-                source: Some(fixture.source),
                 now: 0,
             })
             .selection(),

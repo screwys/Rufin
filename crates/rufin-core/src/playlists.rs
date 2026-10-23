@@ -4,7 +4,7 @@ use crate::runtime::{CatalogChange, CatalogPublication, SourceEvent};
 use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
 use futures_util::{StreamExt, TryStreamExt};
-use library::{Database, FolderKey, PlaylistEntryKey, PlaylistKey, ReadCancellation, SourceKey};
+use library::{Database, PlaylistEntryKey, PlaylistKey, ReadCancellation, SourceKey};
 use sources::{Implementation, Source, SourceConfiguration, SourceError, SourceId};
 use std::{
     future::Future,
@@ -280,7 +280,6 @@ pub fn export_playlist(
     source_id: Option<SourceId>,
     path: PathBuf,
     target: PlaylistExport,
-    scope: Option<(SourceKey, Option<FolderKey>)>,
     mode: library::PlaylistPathMode,
     linked: bool,
 ) -> Receiver<Result<(), String>> {
@@ -303,10 +302,9 @@ pub fn export_playlist(
             crate::playlist_files::check_link(&owner, key, source.as_ref(), &location).await?;
         }
         if let Some(source) = &source_id {
-            export_source_playlist_on(&owner, source, &location, target, scope, mode, None).await?;
+            export_source_playlist_on(&owner, source, &location, target, mode, None).await?;
         } else {
-            crate::playlist_files::export_local_on(&owner, &path, target, scope, mode, None)
-                .await?;
+            crate::playlist_files::export_local_on(&owner, &path, target, mode, None).await?;
         }
         if linked && let Some(key) = key {
             crate::playlist_files::remember(&owner, key, source, location, Some(mode)).await?;
@@ -320,7 +318,6 @@ pub(crate) async fn export_source_playlist_on(
     source_id: &SourceId,
     path: &str,
     target: PlaylistExport,
-    scope: Option<(SourceKey, Option<FolderKey>)>,
     mode: library::PlaylistPathMode,
     expected_revision: Option<&str>,
 ) -> Result<(), String> {
@@ -330,13 +327,12 @@ pub(crate) async fn export_source_playlist_on(
             owner,
             &access,
             target,
-            scope,
             mode,
             expected_revision,
         )
         .await;
     }
-    let file = export_contents(owner, std::path::Path::new(path), target, scope, mode).await?;
+    let file = export_contents(owner, std::path::Path::new(path), target, mode).await?;
     source
         .save_playlist_file(&owner.shared.database, path, file, mode, expected_revision)
         .await
@@ -352,7 +348,6 @@ pub(crate) async fn export_contents(
     owner: &SourceOwner,
     path: &std::path::Path,
     target: PlaylistExport,
-    scope: Option<(SourceKey, Option<FolderKey>)>,
     mode: library::PlaylistPathMode,
 ) -> Result<tempfile::TempPath, String> {
     use std::io::Write;
@@ -374,15 +369,7 @@ pub(crate) async fn export_contents(
             owner
                 .shared
                 .database
-                .export_smart_playlist_file(
-                    key,
-                    scope.map(|s| s.0),
-                    scope.and_then(|s| s.1),
-                    now,
-                    path,
-                    mode,
-                    &mut output,
-                )
+                .export_smart_playlist_file(key, now, path, mode, &mut output)
                 .await
         }
     }
@@ -594,8 +581,6 @@ pub fn regenerate_playlist_artwork(
 pub fn regenerate_smart_playlist_artwork(
     owner: &SourceOwner,
     key: library::SmartPlaylistKey,
-    source: Option<library::SourceKey>,
-    folder: Option<library::FolderKey>,
 ) -> Receiver<Result<Option<Arc<sources::ImageBytes>>, String>> {
     owner.reply(move |owner, database| async move {
         let now = SystemTime::now()
@@ -603,7 +588,7 @@ pub fn regenerate_smart_playlist_artwork(
             .unwrap_or_default()
             .as_secs() as i64;
         let bindings = database
-            .random_smart_playlist_artwork(key, source, folder, now)
+            .random_smart_playlist_artwork(key, now)
             .await
             .map_err(string_error)?;
         generate_artwork(&owner, bindings).await
@@ -1272,13 +1257,13 @@ async fn local_playlist_changed(
         .await;
 }
 
-pub fn smart_playlist_display_name(playlist: &library::SmartPlaylistRow) -> String {
+pub fn smart_playlist_display_name(object_id: &str, name: &str) -> String {
     use localization::{msgid, tr};
-    match playlist.object_id.as_str() {
+    match object_id {
         "builtin:most_played" => tr(msgid("Most Played")),
         "builtin:never_played" => tr(msgid("Never Played")),
         "builtin:most_skipped" => tr(msgid("Most Skipped")),
-        _ => playlist.name.clone(),
+        _ => name.to_owned(),
     }
 }
 

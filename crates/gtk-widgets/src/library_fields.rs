@@ -149,7 +149,9 @@ pub fn playlist_artwork(playlist: &PlaylistRow) -> Vec<ArtworkBinding> {
 }
 pub fn smart_playlist_field(playlist: &SmartPlaylistRow, field: LibraryField) -> String {
     match field {
-        LibraryField::Title | LibraryField::TitleMerged => smart_playlist_display_name(playlist),
+        LibraryField::Title | LibraryField::TitleMerged => {
+            smart_playlist_display_name(&playlist.object_id, &playlist.name)
+        }
         LibraryField::SongCount if playlist.track_count > 0 => {
             track_count_text(playlist.track_count as u64)
         }

@@ -604,15 +604,12 @@ async fn refresh_automatic_playlist_artwork_on(
             .filter_map(|(uri, recipe)| (!recipe.is_empty()).then(|| uri.clone()))
             .collect();
         let prefix = if *smart {
-            let (source,folder): (Option<SourceKey>,Option<FolderKey>) = sqlx::query_as("SELECT (SELECT source_key FROM sources WHERE object_id=?1),(SELECT folder_key FROM folders WHERE source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND object_id=?2)").bind(&manifest.source_id).bind(&manifest.folder_id).fetch_one(&mut *connection).await?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs() as i64;
             crate::smart_playlists::smart_membership_sql(
                 connection,
-                source,
-                folder,
                 now,
                 Some(&[crate::SmartPlaylistKey::from_raw(key)]),
             )

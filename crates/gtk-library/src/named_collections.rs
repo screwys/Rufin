@@ -123,8 +123,7 @@ impl CatalogUi {
         );
         let row_key = Rc::new(row_key);
         gtk_widgets::media_drag::install_parent_selection(&sparse, Rc::clone(&applied), {
-            let selected = self.selected.clone();
-            move |row| row.playback(key, selected.as_ref())
+            move |row| row.playback(key)
         });
         sparse.seed_matching_at(first_row_position, first_rows, {
             let row_key = Rc::clone(&row_key);
@@ -207,7 +206,7 @@ impl CatalogUi {
         let downloads = crate::collection_download_change(move |identity, downloaded| {
             download_rows.update_matching(
                 |row| {
-                    row.playback(key, None)
+                    row.playback(key)
                         .is_some_and(|target| target.context() == Some(identity))
                         && row.downloaded() != downloaded
                 },
@@ -268,11 +267,7 @@ pub trait CollectionRow: Clone + PartialEq + Send + Sync + 'static {
         cancel: &'a library::ReadCancellation,
     ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a;
 
-    fn playback(
-        &self,
-        key: LibraryListKey,
-        _selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> Option<rufin_core::playback::PlayRequest>;
+    fn playback(&self, key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest>;
     fn downloaded(&self) -> bool;
     fn set_downloaded(&mut self, downloaded: bool);
     fn projection(
@@ -349,11 +344,7 @@ impl CollectionRow for ArtistView {
     {
         read.page_artists(database, window, cancel)
     }
-    fn playback(
-        &self,
-        key: LibraryListKey,
-        _selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> Option<rufin_core::playback::PlayRequest> {
+    fn playback(&self, key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
         Some(gtk_widgets::selection::artist_play_request(
             self,
             key == LibraryListKey::AlbumArtists,
@@ -414,11 +405,7 @@ impl CollectionRow for GenreView {
         };
     }
 
-    fn playback(
-        &self,
-        _key: LibraryListKey,
-        _selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> Option<rufin_core::playback::PlayRequest> {
+    fn playback(&self, _key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
         Some(gtk_widgets::selection::collection_play_request(
             library::Collection::Genre(self.genre_key),
         ))
@@ -511,11 +498,7 @@ impl CollectionRow for MoodView {
         };
     }
 
-    fn playback(
-        &self,
-        _key: LibraryListKey,
-        _selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> Option<rufin_core::playback::PlayRequest> {
+    fn playback(&self, _key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
         Some(gtk_widgets::selection::collection_play_request(
             library::Collection::Mood(self.mood_key),
         ))
@@ -594,18 +577,13 @@ impl CollectionRow for library::PlaylistListRow {
     {
         read.page_playlist_items(database, window, cancel)
     }
-    fn playback(
-        &self,
-        _key: LibraryListKey,
-        selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> Option<rufin_core::playback::PlayRequest> {
+    fn playback(&self, _key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
         match self {
             Self::Playlist(row) => Some(gtk_widgets::selection::collection_play_request(
                 library::Collection::Playlist(row.playlist_key),
             )),
             Self::SmartPlaylist(row) => Some(gtk_widgets::selection::smart_play_request(
                 row.smart_playlist_key,
-                selected,
             )),
             Self::Folder(_) => None,
         }
@@ -757,10 +735,20 @@ impl NamedCollectionRow for library::PlaylistListRow {
                     if gtk_media_menus::playlist_folders::single_regular_playlist_drag(&source) {
                         return false;
                     }
-                    gtk_media_menus::media_menus::add_drag_to_playlist(&menus, row, source)
+                    gtk_media_menus::media_menus::add_drag_to_playlist(
+                        &menus,
+                        row.playlist_key,
+                        row.name,
+                        source,
+                    )
                 }
                 library::PlaylistListRow::Folder(row) => {
-                    gtk_media_menus::playlist_folders::drop_playlist_on_folder(&menus, row, source)
+                    gtk_media_menus::playlist_folders::drop_playlist_on_folder(
+                        &menus,
+                        row.folder_key,
+                        row.smart,
+                        source,
+                    )
                 }
                 library::PlaylistListRow::SmartPlaylist(_) => false,
             }
@@ -869,7 +857,7 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
             &current,
             play_buttons.clone(),
             move |shell, item, placement| {
-                if let Some(target) = item.playback(key, shell.selected_library()) {
+                if let Some(target) = item.playback(key) {
                     (shell.media_menus.play_target)(&target, placement, false);
                 }
             },
@@ -877,13 +865,10 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
         let body = CollectionGridCardCell::new(&shell, fields, controls.upcast());
         body.set_download_badge(shell.downloads.download_badge(true));
         let drag_current = Rc::clone(&current);
-        let drag_shell = Rc::downgrade(&shell);
         install_compact_media_drag_source(&body.card, &cover.widget(), move || {
-            let shell = drag_shell.upgrade()?;
             let item = drag_current.borrow();
             let item = item.as_ref()?;
-            let source =
-                MediaDragSource::capture_target(item.playback(key, shell.selected_library())?);
+            let source = MediaDragSource::capture_target(item.playback(key)?);
             Some((source, item.field(LibraryField::Title)))
         });
         install_grid_context(
@@ -915,7 +900,7 @@ impl<T: NamedCollectionRow> ReusableCollectionGridCell<T> for NamedCollectionGri
     }
 
     fn bind(&self, _: u32, item: T) {
-        if let Some(target) = item.playback(self.key, self.shell.selected_library()) {
+        if let Some(target) = item.playback(self.key) {
             self.body.bind_playing_target(&self.shell, target);
         }
         for button in &self.play_buttons {
@@ -998,12 +983,11 @@ fn named_collection_column<T: NamedCollectionRow>(
     field: LibraryField,
     key: LibraryListKey,
 ) -> gtk::ColumnViewColumn {
-    let selected = shell.selected.clone();
     let column = match field {
         LibraryField::Tools => named_actions_column::<T>(shell),
         LibraryField::RowIndex => {
             mapped_row_index_column::<T>(shell, named_column_width(key, field), move |row| {
-                row.playback(key, selected.as_ref())
+                row.playback(key)
             })
         }
         LibraryField::Image => artwork_column::<T, _>(
@@ -1012,16 +996,13 @@ fn named_collection_column<T: NamedCollectionRow>(
             named_column_width(key, field),
             move |item| item.artwork().into_iter().next().unwrap_or_default(),
             Some(Rc::new(move |item| {
-                Some((
-                    item.playback(key, selected.as_ref())?,
-                    item.field(LibraryField::Title),
-                ))
+                Some((item.playback(key)?, item.field(LibraryField::Title)))
             })),
         ),
         LibraryField::Title | LibraryField::TitleMerged => {
             let factory = gtk::SignalListItemFactory::new();
             super::columns::bind_collection_title::<T>(&factory, shell, move |row| {
-                row.playback(key, selected.as_ref())
+                row.playback(key)
             });
             let setup_shell = Rc::clone(shell);
             factory.connect_setup(move |_, item| {
@@ -1030,14 +1011,10 @@ fn named_collection_column<T: NamedCollectionRow>(
                 };
                 let cell = RecycledBadgedTextCell::with_downloads(&setup_shell.downloads);
                 let drag_item = item.downgrade();
-                let drag_shell = Rc::downgrade(&setup_shell);
                 install_media_drag_source(&cell, move || {
-                    let shell = drag_shell.upgrade()?;
                     let item = drag_item.upgrade()?;
                     let row = item_at_from_item::<T>(&item)?;
-                    let source = MediaDragSource::capture_target(
-                        row.playback(key, shell.selected_library())?,
-                    );
+                    let source = MediaDragSource::capture_target(row.playback(key)?);
                     Some((source, row.field(LibraryField::Title)))
                 });
                 item.set_child(Some(&cell));

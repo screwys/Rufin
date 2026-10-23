@@ -56,11 +56,7 @@ impl PlaylistDetailOwner {
     fn source_label(&self, catalog: &CatalogUi) -> (&'static str, String) {
         let source_id = match self {
             Self::Saved { summary, .. } => summary.source_id.as_deref(),
-            Self::Smart { summary, .. } => catalog
-                .selected
-                .as_ref()
-                .filter(|_| summary.definition.current)
-                .map(|selected| selected.source_id.as_str()),
+            Self::Smart { .. } => None,
         };
         (catalog.source_label)(source_id)
     }
@@ -164,10 +160,6 @@ impl CatalogUi {
             ));
         };
         (self.update_smart_playlist_pin)(&summary);
-        let library::Collection::Smart { source, .. } = projection.read.collection else {
-            unreachable!("smart playlist page owns a smart song query")
-        };
-        let folder = projection.read.folder;
         let owner = PlaylistDetailOwner::Smart {
             key,
             summary: *summary,
@@ -217,8 +209,6 @@ impl CatalogUi {
         };
         self.shared_playlist_detail_route(
             owner,
-            source,
-            folder,
             tracks_widget,
             item_navigation,
             apply,
@@ -339,8 +329,6 @@ impl CatalogUi {
         });
         self.shared_playlist_detail_route(
             owner,
-            None,
-            None,
             tracks_widget,
             item_navigation,
             apply,
@@ -366,8 +354,6 @@ impl CatalogUi {
     fn shared_playlist_detail_route(
         self: &Rc<Self>,
         owner: PlaylistDetailOwner,
-        source: Option<library::SourceKey>,
-        folder: Option<library::FolderKey>,
         tracks_widget: gtk::Widget,
         item_navigation: gtk_widgets::mounted_route::MountedRouteItemNavigation,
         apply_list_settings: Rc<dyn Fn(&LibraryListSettings)>,
@@ -456,7 +442,12 @@ impl CatalogUi {
                 let PlaylistDetailOwner::Saved { summary, .. } = drop_owner.borrow().clone() else {
                     return false;
                 };
-                gtk_media_menus::media_menus::add_drag_to_playlist(&menus, summary, source)
+                gtk_media_menus::media_menus::add_drag_to_playlist(
+                    &menus,
+                    summary.playlist_key,
+                    summary.name,
+                    source,
+                )
             });
             wrapper.add_css_class("media-drop-target");
             wrapper.add_controller(drop);
@@ -559,7 +550,7 @@ impl CatalogUi {
                                     .duration_since(UNIX_EPOCH)
                                     .map_or(0, |duration| duration.as_secs() as i64);
                                 database
-                                    .smart_playlist_rows(source, &[key], folder, now, &cancellation)
+                                    .smart_playlist_rows(&[key], now, &cancellation)
                                     .await
                                     .map_err(|error| error.to_string())?
                                     .pop()

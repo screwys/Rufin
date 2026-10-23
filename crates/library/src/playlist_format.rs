@@ -1637,15 +1637,7 @@ mod tests {
         let mut output = tempfile::tempfile().unwrap();
         assert_eq!(
             database
-                .export_smart_playlist_file(
-                    key,
-                    None,
-                    None,
-                    0,
-                    &file,
-                    PlaylistPathMode::Automatic,
-                    &mut output
-                )
+                .export_smart_playlist_file(key, 0, &file, PlaylistPathMode::Automatic, &mut output)
                 .await
                 .unwrap(),
             10001

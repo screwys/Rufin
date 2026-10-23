@@ -703,7 +703,6 @@ async fn save_on(
             owner,
             &path,
             crate::runtime::source::PlaylistExport::Playlist(link.playlist),
-            None,
             link.path_mode,
             if overwrite {
                 None
@@ -718,7 +717,6 @@ async fn save_on(
             source,
             &link.path,
             crate::runtime::source::PlaylistExport::Playlist(link.playlist),
-            None,
             link.path_mode,
             if overwrite {
                 None
@@ -777,7 +775,6 @@ pub(crate) async fn export_local_on(
     owner: &SourceOwner,
     path: &Path,
     target: crate::runtime::source::PlaylistExport,
-    scope: Option<(library::SourceKey, Option<library::FolderKey>)>,
     mode: PlaylistPathMode,
     expected_revision: Option<&str>,
 ) -> Result<(), String> {
@@ -796,7 +793,7 @@ pub(crate) async fn export_local_on(
     {
         return Err(FILE_CONFLICT.into());
     }
-    let temporary = crate::playlists::export_contents(owner, &access, target, scope, mode).await?;
+    let temporary = crate::playlists::export_contents(owner, &access, target, mode).await?;
     let input = gio::File::for_path(&temporary)
         .read(gio::Cancellable::NONE)
         .map_err(string_error)?;

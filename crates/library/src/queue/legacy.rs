@@ -720,8 +720,6 @@ async fn resolve_collection_reference(
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
 pub(crate) struct SmartSourceReference {
     pub object_id: String,
-    pub source_id: Option<crate::SourceId>,
-    pub folder_object_id: Option<String>,
 }
 
 async fn smart_members_ref(
@@ -732,20 +730,12 @@ async fn smart_members_ref(
     display_sort: Option<crate::CatalogSort>,
     descending: bool,
 ) -> LibraryResult<Vec<String>> {
-    let Some((key, source, folder)) = resolve_smart_reference(connection, reference).await? else {
+    let Some(key) = resolve_smart_reference(connection, reference).await? else {
         return Ok(Vec::new());
     };
-    let query = crate::smart_playlists::smart_query(
-        connection,
-        source,
-        key,
-        folder,
-        filter,
-        display_sort,
-        descending,
-        now,
-    )
-    .await?;
+    let query =
+        crate::smart_playlists::smart_query(connection, key, filter, display_sort, descending, now)
+            .await?;
     Ok(sqlx::query_scalar_with(
         sqlx::AssertSqlSafe(query.select("track.media_uri")),
         query.arguments.clone(),
@@ -758,29 +748,13 @@ async fn smart_members_ref(
 async fn resolve_smart_reference(
     connection: &mut SqliteConnection,
     reference: &SmartSourceReference,
-) -> LibraryResult<Option<(SmartPlaylistKey, Option<SourceKey>, Option<FolderKey>)>> {
-    let Some((key,current))=sqlx::query_as::<_,(SmartPlaylistKey,bool)>("SELECT smart_playlist_key,COALESCE(json_extract(definition_json,'$.current'),0) FROM smart_playlists WHERE object_id=?1").bind(&reference.object_id).fetch_optional(&mut *connection).await? else {return Ok(None);};
-    let source =
-        sqlx::query_scalar::<_, SourceKey>("SELECT source_key FROM sources WHERE object_id=?1")
-            .bind(reference.source_id.as_ref().map(crate::SourceId::as_str))
-            .fetch_optional(&mut *connection)
-            .await?;
-    let folder = if current && let Some(id) = &reference.folder_object_id {
-        let Some(folder) = sqlx::query_scalar::<_, FolderKey>(
-            "SELECT folder_key FROM folders WHERE source_key=?1 AND object_id=?2",
-        )
-        .bind(source)
-        .bind(id)
-        .fetch_optional(&mut *connection)
-        .await?
-        else {
-            return Ok(None);
-        };
-        Some(folder)
-    } else {
-        None
-    };
-    Ok(Some((key, source, folder)))
+) -> LibraryResult<Option<SmartPlaylistKey>> {
+    Ok(
+        sqlx::query_scalar("SELECT smart_playlist_key FROM smart_playlists WHERE object_id=?1")
+            .bind(&reference.object_id)
+            .fetch_optional(connection)
+            .await?,
+    )
 }
 
 #[cfg(test)]
@@ -796,7 +770,7 @@ mod tests {
         let connection = writer.as_mut().unwrap();
         sqlx::raw_sql("DELETE FROM smart_playlists; INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32)); INSERT INTO genres(genre_key,source_key,object_id,media_uri,metadata) VALUES (1,1,'genre','genre:genre',jsonb(json_object('name','Genre','sort_text','genre'))); INSERT INTO folders(folder_key,source_key,object_id,media_uri,metadata) VALUES (1,1,'folder','folder:folder',jsonb(json_object('name','Folder','sort_text','folder')));").execute(&mut *connection).await.unwrap();
         let definition = crate::SmartPlaylistDefinition {
-            current: true,
+            source_id: Some(crate::SourceId::new("source")),
             ..crate::SmartPlaylistDefinition::default()
         };
         sqlx::query("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position) VALUES('smart','Smart','smart',?1,0)")
@@ -806,8 +780,6 @@ mod tests {
             .unwrap();
         let smart = SmartSourceReference {
             object_id: "smart".into(),
-            source_id: Some(crate::SourceId::new("source")),
-            folder_object_id: Some("folder".into()),
         };
         let collection = CollectionSourceReference {
             collection: CollectionIdentity::Genre {
@@ -817,14 +789,11 @@ mod tests {
             folder: Some((crate::SourceId::new("source"), "folder".into())),
         };
         sqlx::raw_sql("DELETE FROM sources; UPDATE smart_playlists SET smart_playlist_key=500; INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (99,'source','Source','source',zeroblob(32)); INSERT INTO genres(genre_key,source_key,object_id,media_uri,metadata) VALUES (88,99,'genre','genre:genre',jsonb(json_object('name','Genre','sort_text','genre'))); INSERT INTO folders(folder_key,source_key,object_id,media_uri,metadata) VALUES (77,99,'folder','folder:folder',jsonb(json_object('name','Folder','sort_text','folder')));").execute(&mut *connection).await.unwrap();
-        let (key, source, folder) = resolve_smart_reference(connection, &smart)
+        let key = resolve_smart_reference(connection, &smart)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(
-            (key.raw(), source.unwrap().raw(), folder.unwrap().raw()),
-            (500, 99, 77)
-        );
+        assert_eq!(key.raw(), 500);
         let (collection, folder) = resolve_collection_reference(connection, &collection)
             .await
             .unwrap()
@@ -839,8 +808,8 @@ mod tests {
             resolve_smart_reference(connection, &smart)
                 .await
                 .unwrap()
-                .is_none(),
-            "a missing folder must not widen the source scope"
+                .is_some(),
+            "browsing folders do not own smart playlists"
         );
     }
 }

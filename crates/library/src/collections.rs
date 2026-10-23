@@ -919,7 +919,7 @@ pub(crate) async fn load_mood_requested(
         .collect())
 }
 
-fn gallery_sql(kind: &str, folder: Option<FolderKey>) -> String {
+pub(crate) fn gallery_sql(kind: &str, folder: Option<FolderKey>) -> String {
     let binding = crate::artwork::track_artwork_sql("gallery_track");
     let gallery=format!("(SELECT json_group_array(CAST(binding AS TEXT)) FROM (
         SELECT {binding} binding FROM (

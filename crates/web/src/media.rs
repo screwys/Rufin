@@ -396,23 +396,10 @@ async fn artwork(
             .next()
             .and_then(|row| row.artwork_binding)
     } else if parameters.contains_key("smart_playlist") {
-        let (source, folder) = if parameters.contains_key("source") {
-            let (source, folder) = catalog::scope(
-                &products,
-                required(&parameters, "source")?,
-                parameters.get("folder").map(String::as_str),
-            )
-            .await?;
-            (Some(source), folder)
-        } else {
-            (None, None)
-        };
         products
             .library
             .smart_playlist_rows(
-                source,
                 &[key(&parameters, "smart_playlist")?],
-                folder,
                 catalog::now(),
                 &cancel,
             )

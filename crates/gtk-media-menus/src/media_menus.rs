@@ -39,7 +39,8 @@ use gtk_widgets::selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnaps
 
 pub fn add_drag_to_playlist(
     menus: &Rc<MediaMenus>,
-    playlist: PlaylistRow,
+    playlist_key: library::PlaylistKey,
+    playlist_name: String,
     source: gtk_widgets::media_drag::MediaDragSource,
 ) -> bool {
     let database = Arc::clone(&menus.library);
@@ -54,7 +55,7 @@ pub fn add_drag_to_playlist(
         let Some(owner) = menus.upgrade() else { return };
         gtk_widgets::playlists::add_media_to_playlist(
             &owner.source,
-            playlist.playlist_key,
+            playlist_key,
             selection,
             false,
             Rc::new(move |accepted| {
@@ -67,7 +68,7 @@ pub fn add_drag_to_playlist(
                             artwork: OperationArtwork::MediaUris(preview_uris.clone()),
                             item_count: accepted,
                             kind: OperationFeedbackKind::PlaylistAdded {
-                                destination: playlist.name.clone(),
+                                destination: playlist_name.clone(),
                             },
                         },
                         None,
@@ -1575,10 +1576,7 @@ fn present_smart_playlist_context_menu_ready(
     if present_playlist_selection_menu(
         target,
         menus,
-        gtk_widgets::selection::smart_play_request(
-            playlist.smart_playlist_key,
-            menus.source.selected_library().as_ref(),
-        ),
+        gtk_widgets::selection::smart_play_request(playlist.smart_playlist_key),
         position,
         in_folder,
     ) {
@@ -1617,10 +1615,7 @@ fn present_smart_playlist_context_menu_ready(
         in_folder,
     );
     surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
-    let playback = gtk_widgets::selection::smart_play_request(
-        playlist.smart_playlist_key,
-        menus.source.selected_library().as_ref(),
-    );
+    let playback = gtk_widgets::selection::smart_play_request(playlist.smart_playlist_key);
     install_download_actions(
         &surface,
         menus,

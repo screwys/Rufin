@@ -223,10 +223,7 @@ fn child_relation(read: &ListRead, query: &crate::query::OrderedQuery) -> String
     } else {
         query.from.clone()
     };
-    let stats = if smart
-        && read.folder.is_none()
-        && matches!(read.sort, CatalogSort::Position | CatalogSort::Title)
-    {
+    let stats = if smart && matches!(read.sort, CatalogSort::Position | CatalogSort::Title) {
         "0 track_count,0 duration_millis".into()
     } else {
         format!(
@@ -336,11 +333,7 @@ async fn load_folders_on(
                     arguments: Default::default(),
                 };
                 let children = crate::smart_playlists::load_smart_playlist_requested(
-                    connection,
-                    read.source,
-                    requested,
-                    read.folder,
-                    now,
+                    connection, requested, now,
                 )
                 .await?;
                 if children.is_empty() {
@@ -413,17 +406,13 @@ pub(crate) async fn load_items_on(
 ) -> LibraryResult<Vec<PlaylistListRow>> {
     if read.playlist_scope == PlaylistScope::All {
         return if let ListKind::SmartPlaylists { now } = read.kind {
-            Ok(crate::smart_playlists::load_smart_playlist_requested(
-                connection,
-                read.source,
-                requested,
-                read.folder,
-                now,
+            Ok(
+                crate::smart_playlists::load_smart_playlist_requested(connection, requested, now)
+                    .await?
+                    .into_iter()
+                    .map(PlaylistListRow::SmartPlaylist)
+                    .collect(),
             )
-            .await?
-            .into_iter()
-            .map(PlaylistListRow::SmartPlaylist)
-            .collect())
         } else {
             Ok(Database::load_playlist_requested(connection, requested)
                 .await?
@@ -459,9 +448,7 @@ pub(crate) async fn load_items_on(
     if let ListKind::SmartPlaylists { now } = read.kind {
         for row in crate::smart_playlists::load_smart_playlist_requested(
             connection,
-            read.source,
             crate::query::RequestedKeys::batch(&playlist_keys)?,
-            read.folder,
             now,
         )
         .await?

@@ -22,10 +22,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
     let sidebar = settings.sidebar;
     let database = &products.library;
     let cancellation = ReadCancellation::new();
-    let selected = products.source.selected_library();
     let configured = products.source.list_sources();
-    let source = selected.as_ref().map(|s| s.source_key);
-    let folder = selected.as_ref().and_then(|s| s.music_folder_key);
     let mut items = Vec::new();
     for pin in &sidebar.pins {
         let row = match pin {
@@ -94,11 +91,11 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                     continue;
                 };
                 let row = database
-                    .smart_playlist_rows(source, &[key], folder, catalog::now(), &cancellation)
+                    .smart_playlist_rows(&[key], catalog::now(), &cancellation)
                     .await
                     .map_err(internal)?
                     .pop();
-                row.map(|row| json!({"kind":"smart-playlist","id":row.smart_playlist_key,"object_id":row.object_id,"name":rufin_core::playlists::smart_playlist_display_name(&row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_revision":artwork_revision(row.artwork_binding.as_slice()),"artwork_previews":artwork_previews(&products, row.artwork_binding.as_slice()),"source":selected.as_ref().filter(|_| row.definition.current).map(|s| &s.source_id)}))
+                row.map(|row| json!({"kind":"smart-playlist","id":row.smart_playlist_key,"object_id":row.object_id,"name":rufin_core::playlists::smart_playlist_display_name(&row.object_id, &row.name),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_binding.as_slice().len(),"artwork_revision":artwork_revision(row.artwork_binding.as_slice()),"artwork_previews":artwork_previews(&products, row.artwork_binding.as_slice()),"source":None::<String>}))
             }
         };
         if let Some(mut row) = row {

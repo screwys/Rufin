@@ -26,9 +26,9 @@ use gtk_widgets::interactions::{
     CONTEXT_MENU_HOVER_HELD_CLASS, CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers,
     replace_native_menu_checkmarks, show_native_menu_icons,
 };
-use gtk_widgets::library_fields::{playlist_artwork, smart_playlist_display_name};
+use gtk_widgets::library_fields::smart_playlist_display_name;
 use gtk_widgets::route::{CollectionCategory, Route};
-use library::{AlbumView, ArtistView, GenreView, PlaylistRow, SmartPlaylistRow};
+use library::SmartPlaylistRow;
 use rufin_core::playback::QueuePlacement;
 use tracing::warn;
 
@@ -54,7 +54,7 @@ pub(crate) struct NavigationState {
     pub(crate) routes: RefCell<RouteStack>,
     pub(crate) favorite_category: Cell<CollectionCategory>,
     pin_generation: Cell<u64>,
-    pin_identity: RefCell<Option<SidebarPinIdentity>>,
+    pin_identity: RefCell<Option<Vec<SidebarPin>>>,
     pin_items: RefCell<Vec<SidebarPinItem>>,
     pub(super) pin_cancellation: RefCell<Option<library::ReadCancellation>>,
 }
@@ -69,6 +69,9 @@ impl NavigationState {
             pin_items: RefCell::new(Vec::new()),
             pin_cancellation: RefCell::new(None),
         }
+    }
+    pub(super) fn pins_ready(&self) -> bool {
+        !self.pin_items.borrow().is_empty() || self.pin_cancellation.borrow().is_none()
     }
 }
 
@@ -134,6 +137,8 @@ pub(super) fn rebuild_navigation(shell: &Rc<Shell>) {
 
 impl Shell {
     pub(crate) fn bind_sidebar_settings(self: &Rc<Self>) {
+        request_sidebar_pins(self);
+        self.import_remote_playlist_pins_once();
         let mut changes = self.settings.persistence.sidebar_changes();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -532,241 +537,243 @@ fn primary_menu_private_mode_label(shell: &Shell) -> String {
     }
 }
 
-#[derive(Clone, PartialEq)]
-enum SidebarPinItem {
-    Album(Box<AlbumView>),
-    Artist(ArtistView, bool),
-    Genre(GenreView),
-    Playlist(PlaylistRow),
-    SmartPlaylist(SmartPlaylistRow),
-    PlaylistFolder(library::PlaylistFolderRow),
-}
+type PinMenu = Box<dyn FnOnce(&gtk::Widget, &Rc<Shell>) + Send>;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct SidebarPinIdentity {
-    smart_context: Option<(library::SourceKey, Option<library::FolderKey>)>,
-    pins: Vec<SidebarPin>,
-}
+#[derive(Clone, PartialEq)]
+struct SidebarPinItem(library::SidebarPinRow);
 
 impl SidebarPinItem {
     fn stored_pin(&self) -> SidebarPin {
-        match self {
-            Self::Album(album) => SidebarPin::Album {
-                source_id: library::source_entity_parts(&album.media_uri)
-                    .expect("catalog entity has a source identity")
-                    .0,
-                album_id: album.object_id.clone(),
-            },
-            Self::Artist(artist, album_artist) => SidebarPin::Artist {
-                source_id: library::source_entity_parts(&artist.media_uri)
-                    .expect("catalog entity has a source identity")
-                    .0,
-                artist_id: artist.object_id.clone(),
-                album_artist: *album_artist,
-            },
-            Self::Genre(genre) => SidebarPin::Genre {
-                source_id: sources::SourceId::new(genre.source_id.clone()),
-                genre_id: genre.object_id.clone(),
-            },
-            Self::Playlist(playlist) => SidebarPin::Playlist {
-                source_id: playlist.source_id.clone().map(sources::SourceId::new),
-                playlist_id: playlist.object_id.clone(),
-            },
-            Self::PlaylistFolder(folder) => SidebarPin::PlaylistFolder {
-                folder_id: folder.object_id.clone(),
-                smart: folder.smart,
-            },
-            Self::SmartPlaylist(playlist) => SidebarPin::SmartPlaylist {
-                playlist_id: playlist.object_id.clone(),
-            },
-        }
+        self.0.pin.clone()
     }
-
     fn title(&self) -> String {
-        match self {
-            Self::Album(album) => album.metadata.title.clone(),
-            Self::Artist(artist, _) => artist.metadata.name.clone(),
-            Self::Genre(genre) => genre.metadata.name.clone(),
-            Self::Playlist(playlist) => playlist.name.clone(),
-            Self::SmartPlaylist(playlist) => smart_playlist_display_name(playlist),
-            Self::PlaylistFolder(folder) => folder.name.clone(),
+        if let SidebarPin::SmartPlaylist { playlist_id } = &self.0.pin {
+            smart_playlist_display_name(playlist_id, &self.0.name)
+        } else {
+            self.0.name.clone()
         }
     }
-
     fn track_count(&self) -> u32 {
-        match self {
-            Self::Album(album) => album.summary.track_count,
-            Self::Artist(artist, _) => artist.summary.track_count,
-            Self::Genre(genre) => genre.summary.track_count,
-            Self::Playlist(playlist) => playlist.track_count,
-            Self::SmartPlaylist(playlist) => playlist.track_count,
-            Self::PlaylistFolder(folder) => folder.track_count,
-        }
-        .max(0)
-        .try_into()
-        .unwrap_or(u32::MAX)
+        self.0
+            .totals
+            .unwrap_or_default()
+            .0
+            .clamp(0, u32::MAX as i64) as u32
     }
-
     fn duration_seconds(&self) -> u32 {
-        match self {
-            Self::Album(album) => album.summary.duration_millis,
-            Self::Artist(artist, _) => artist.summary.duration_millis,
-            Self::Genre(genre) => genre.summary.duration_millis,
-            Self::Playlist(playlist) => playlist.duration_millis,
-            Self::SmartPlaylist(playlist) => playlist.duration_millis,
-            Self::PlaylistFolder(folder) => folder.duration_millis,
-        }
-        .max(0)
-        .saturating_div(1_000)
-        .try_into()
-        .unwrap_or(u32::MAX)
+        (self.0.totals.unwrap_or_default().1.max(0) / 1000).min(u32::MAX as i64) as u32
     }
-
     fn route(&self) -> Route {
-        match self {
-            Self::Album(album) => Route::AlbumDetail(album.media_uri.clone()),
-            Self::Artist(artist, album_artist) => {
-                gtk_library::artist_detail_route(artist.media_uri.clone(), *album_artist)
+        let key = self.0.key;
+        match &self.0.pin {
+            SidebarPin::Album {
+                source_id,
+                album_id,
+            } => Route::AlbumDetail(library::source_entity_uri(source_id, "album", album_id)),
+            SidebarPin::Artist {
+                source_id,
+                artist_id,
+                album_artist,
+            } => gtk_library::artist_detail_route(
+                library::source_entity_uri(source_id, "artist", artist_id),
+                *album_artist,
+            ),
+            SidebarPin::Genre { .. } => Route::GenreDetail(library::GenreKey::from_raw(key)),
+            SidebarPin::Playlist { .. } => {
+                Route::PlaylistDetail(library::PlaylistKey::from_raw(key))
             }
-            Self::Genre(genre) => Route::GenreDetail(genre.genre_key),
-            Self::Playlist(playlist) => Route::PlaylistDetail(playlist.playlist_key),
-            Self::SmartPlaylist(playlist) => {
-                Route::SmartPlaylistDetail(playlist.smart_playlist_key)
+            SidebarPin::SmartPlaylist { .. } => {
+                Route::SmartPlaylistDetail(library::SmartPlaylistKey::from_raw(key))
             }
-            Self::PlaylistFolder(folder) => Route::PlaylistFolder {
-                key: folder.folder_key,
-                smart: folder.smart,
+            SidebarPin::PlaylistFolder { smart, .. } => Route::PlaylistFolder {
+                key: library::PlaylistFolderKey::from_raw(key),
+                smart: *smart,
             },
         }
     }
-
-    fn playback_target(
-        &self,
-        selected: Option<&rufin_core::runtime::SelectedLibrary>,
-    ) -> Option<PlayRequest> {
-        Some(match self {
-            Self::PlaylistFolder(_) => return None,
-            Self::Album(album) => gtk_widgets::selection::album_play_request(&album),
-            Self::Artist(artist, album_artist) => {
-                if *album_artist {
-                    gtk_widgets::selection::artist_play_request(&artist, true)
-                } else {
-                    gtk_widgets::selection::artist_play_request(&artist, false)
-                }
+    fn playback_target(&self) -> Option<PlayRequest> {
+        let key = self.0.key;
+        let collection = match self.0.pin {
+            SidebarPin::Album { .. } => {
+                library::Collection::Album(library::AlbumKey::from_raw(key))
             }
-            Self::Genre(genre) => {
-                collection_play_request(library::Collection::Genre(genre.genre_key))
+            SidebarPin::Artist { album_artist, .. } => library::Collection::Artist {
+                key: library::ArtistKey::from_raw(key),
+                album_artist,
+            },
+            SidebarPin::Genre { .. } => {
+                library::Collection::Genre(library::GenreKey::from_raw(key))
             }
-            Self::Playlist(playlist) => {
-                collection_play_request(library::Collection::Playlist(playlist.playlist_key))
+            SidebarPin::Playlist { .. } => {
+                library::Collection::Playlist(library::PlaylistKey::from_raw(key))
             }
-            Self::SmartPlaylist(playlist) => {
-                gtk_widgets::selection::smart_play_request(playlist.smart_playlist_key, selected)
+            SidebarPin::SmartPlaylist { .. } => {
+                return Some(gtk_widgets::selection::smart_play_request(
+                    library::SmartPlaylistKey::from_raw(key),
+                ));
             }
-        })
+            SidebarPin::PlaylistFolder { .. } => return None,
+        };
+        Some(
+            collection_play_request(collection).with_context(
+                sidebar_pin_route_key(&self.route())
+                    .expect("pin route")
+                    .into(),
+            ),
+        )
     }
-
     fn artwork(&self) -> Vec<ArtworkBinding> {
-        match self {
-            Self::Album(album) => album
-                .artwork_binding
-                .iter()
-                .map(|binding| ArtworkBinding::opaque(binding))
-                .collect(),
-            Self::Artist(artist, _) => artist
-                .artwork_binding
-                .iter()
-                .map(|binding| ArtworkBinding::opaque(binding))
-                .collect(),
-            Self::Genre(genre) => genre
-                .artwork_binding
-                .as_ref()
-                .map(std::slice::from_ref)
-                .unwrap_or(&genre.representative_artwork)
-                .iter()
-                .map(|binding| ArtworkBinding::opaque(binding))
-                .collect(),
-            Self::Playlist(playlist) => playlist_artwork(playlist),
-            Self::PlaylistFolder(folder) => folder
-                .artwork_binding
-                .iter()
-                .map(|binding| ArtworkBinding::opaque(binding))
-                .collect(),
-            Self::SmartPlaylist(playlist) => playlist
-                .artwork_binding
-                .iter()
-                .map(|binding| ArtworkBinding::opaque(binding))
-                .collect(),
-        }
+        self.0
+            .artwork
+            .iter()
+            .map(|binding| ArtworkBinding::opaque(binding))
+            .collect()
     }
-
     fn present_context_menu(
         &self,
         target: &gtk::Widget,
         shell: &Rc<Shell>,
         position: Option<(f64, f64)>,
     ) {
-        match self {
-            Self::PlaylistFolder(folder) => {
-                gtk_media_menus::playlist_folders::present_folder_context_menu(
-                    target,
-                    &shell.media_menus,
-                    folder.clone(),
-                    position,
-                )
-            }
-            Self::Album(album) => {
-                present_album_context_menu(
-                    target,
-                    &shell.media_menus,
-                    album.as_ref().clone(),
-                    None,
-                    None,
-                    position,
-                );
-            }
-            Self::Artist(artist, album_artist) => {
-                present_artist_context_menu(
-                    target,
-                    &shell.media_menus,
-                    artist.clone(),
-                    *album_artist,
-                    None,
-                    position,
-                );
-            }
-            Self::Genre(genre) => {
-                present_genre_context_menu(
-                    target,
-                    &shell.media_menus,
-                    genre.clone(),
-                    None,
-                    position,
-                );
-            }
-            Self::Playlist(playlist) => {
-                present_playlist_context_menu(
-                    target,
-                    &shell.media_menus,
-                    playlist.clone(),
-                    None,
-                    position,
-                    gtk_player::state::current_playback_track(
-                        shell.player_ui.selected_playback().as_deref(),
+        let database = shell.products.library.clone();
+        let pin = self.0.pin.clone();
+        let key = self.0.key;
+        let task = shell.products.runtime.spawn(async move {
+            let cancel = library::ReadCancellation::new();
+            Ok::<_, library::LibraryError>(match pin {
+                SidebarPin::Album {
+                    source_id,
+                    album_id,
+                } => database
+                    .album(
+                        &library::source_entity_uri(&source_id, "album", &album_id),
+                        false,
+                        &cancel,
                     )
-                    .map(|track| track.media_uri),
-                );
+                    .await?
+                    .map(|row| {
+                        Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {
+                            present_album_context_menu(
+                                target,
+                                &shell.media_menus,
+                                row,
+                                None,
+                                None,
+                                position,
+                            )
+                        }) as PinMenu
+                    }),
+                SidebarPin::Artist {
+                    source_id,
+                    artist_id,
+                    album_artist,
+                } => database
+                    .artist(
+                        &library::source_entity_uri(&source_id, "artist", &artist_id),
+                        album_artist,
+                        false,
+                        &cancel,
+                    )
+                    .await?
+                    .map(|row| {
+                        Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {
+                            present_artist_context_menu(
+                                target,
+                                &shell.media_menus,
+                                row,
+                                album_artist,
+                                None,
+                                position,
+                            )
+                        }) as PinMenu
+                    }),
+                SidebarPin::Genre {
+                    source_id,
+                    genre_id,
+                } => database
+                    .genre(
+                        &library::source_entity_uri(&source_id, "genre", &genre_id),
+                        None,
+                        &cancel,
+                    )
+                    .await?
+                    .map(|row| {
+                        Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {
+                            present_genre_context_menu(
+                                target,
+                                &shell.media_menus,
+                                row,
+                                None,
+                                position,
+                            )
+                        }) as PinMenu
+                    }),
+                SidebarPin::Playlist { .. } => database
+                    .playlists(&[library::PlaylistKey::from_raw(key)], &cancel)
+                    .await?
+                    .pop()
+                    .map(|row| {
+                        Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {
+                            present_playlist_context_menu(
+                                target,
+                                &shell.media_menus,
+                                row,
+                                None,
+                                position,
+                                gtk_player::state::current_playback_track(
+                                    shell.player_ui.selected_playback().as_deref(),
+                                )
+                                .map(|track| track.media_uri),
+                            )
+                        }) as PinMenu
+                    }),
+                SidebarPin::SmartPlaylist { .. } => database
+                    .smart_playlist_rows(
+                        &[library::SmartPlaylistKey::from_raw(key)],
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as i64,
+                        &cancel,
+                    )
+                    .await?
+                    .pop()
+                    .map(|row| {
+                        Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {
+                            present_smart_playlist_context_menu(
+                                target,
+                                &shell.media_menus,
+                                row,
+                                None,
+                                position,
+                            )
+                        }) as PinMenu
+                    }),
+                SidebarPin::PlaylistFolder { folder_id, .. } => database
+                    .playlist_folder_by_id(&folder_id, None, None, &cancel)
+                    .await?
+                    .map(|row| {
+                        Box::new(move |target: &gtk::Widget, shell: &Rc<Shell>| {
+                            gtk_media_menus::playlist_folders::present_folder_context_menu(
+                                target,
+                                &shell.media_menus,
+                                row,
+                                position,
+                            )
+                        }) as PinMenu
+                    }),
+            })
+        });
+        let target = target.downgrade();
+        let shell = Rc::downgrade(shell);
+        glib::spawn_future_local(async move {
+            let result = task.await.ok().and_then(Result::ok).flatten();
+            if let (Some(context), Some(target), Some(shell)) =
+                (result, target.upgrade(), shell.upgrade())
+            {
+                context(&target, &shell);
             }
-            Self::SmartPlaylist(playlist) => {
-                present_smart_playlist_context_menu(
-                    target,
-                    &shell.media_menus,
-                    playlist.clone(),
-                    None,
-                    position,
-                );
-            }
-        }
+        });
     }
 }
 
@@ -802,7 +809,6 @@ fn append_compact_sidebar_pins(shell: &Rc<Shell>) {
 }
 
 pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
-    let selected = shell.selected_library().as_deref().cloned();
     let pins = {
         let settings = shell.settings.current.borrow();
         if !settings.sidebar.pins_visible {
@@ -811,19 +817,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
             settings.sidebar.pins.clone()
         }
     };
-    let identity = SidebarPinIdentity {
-        smart_context: pins
-            .iter()
-            .any(|pin| matches!(pin, SidebarPin::SmartPlaylist { .. }))
-            .then(|| {
-                selected
-                    .as_ref()
-                    .map(|selected| (selected.source_key, selected.music_folder_key))
-            })
-            .flatten(),
-        pins: pins.clone(),
-    };
-    if shell.navigation.pin_identity.borrow().as_ref() == Some(&identity) {
+    if shell.navigation.pin_identity.borrow().as_ref() == Some(&pins) {
         return;
     }
     if let Some(cancellation) = shell.navigation.pin_cancellation.borrow_mut().take() {
@@ -831,10 +825,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
     }
     let generation = shell.navigation.pin_generation.get().wrapping_add(1);
     shell.navigation.pin_generation.set(generation);
-    shell
-        .navigation
-        .pin_identity
-        .replace(Some(identity.clone()));
+    shell.navigation.pin_identity.replace(Some(pins.clone()));
     {
         let retained = {
             let mut items = shell.navigation.pin_items.borrow_mut();
@@ -847,148 +838,140 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
         }
     }
     if pins.is_empty() {
-        shell
-            .navigation_view
-            .sidebar_modes
-            .remove_css_class("row-pending");
         shell.navigation.pin_items.borrow_mut().clear();
         reconcile_sidebar_pin_widgets(shell, &[]);
         shell.try_reveal_startup_route();
         return;
     }
-    shell
-        .navigation_view
-        .sidebar_modes
-        .add_css_class("row-pending");
+
     let cancellation = library::ReadCancellation::new();
     shell
         .navigation
         .pin_cancellation
         .replace(Some(cancellation.clone()));
     let database = Arc::clone(&shell.products.library);
-    let current_source = selected.as_ref().map(|selected| selected.source_key);
-    let folder = selected
-        .as_ref()
-        .and_then(|selected| selected.music_folder_key);
     let runtime = shell.products.runtime.clone();
+    let read_pins = pins;
+    let read_database = database.clone();
+    let read_cancel = cancellation.clone();
     let task = runtime.spawn(async move {
-        let mut items = Vec::with_capacity(pins.len());
-        for pin in pins {
-            let item = match pin {
-                SidebarPin::Album {
-                    source_id,
-                    album_id,
-                } => {
-                    let uri = library::source_entity_uri(&source_id, "album", &album_id);
-                    database
-                        .album(&uri, false, &cancellation)
-                        .await?
-                        .map(|row| SidebarPinItem::Album(Box::new(row)))
-                }
-                SidebarPin::Artist {
-                    source_id,
-                    artist_id,
-                    album_artist,
-                } => {
-                    let uri = library::source_entity_uri(&source_id, "artist", &artist_id);
-                    database
-                        .artist(&uri, album_artist, false, &cancellation)
-                        .await?
-                        .map(|artist| SidebarPinItem::Artist(artist, album_artist))
-                }
-                SidebarPin::Genre {
-                    source_id,
-                    genre_id,
-                } => {
-                    let uri = library::source_entity_uri(&source_id, "genre", &genre_id);
-                    database
-                        .genre(&uri, None, &cancellation)
-                        .await?
-                        .map(SidebarPinItem::Genre)
-                }
-                SidebarPin::Playlist {
-                    source_id,
-                    playlist_id,
-                } => {
-                    let key = database
-                        .playlist_key_by_identity(source_id.as_ref(), &playlist_id, &cancellation)
-                        .await?;
-                    let Some(key) = key else { continue };
-                    database
-                        .playlists(&[key], &cancellation)
-                        .await?
-                        .pop()
-                        .map(SidebarPinItem::Playlist)
-                }
-                SidebarPin::PlaylistFolder { folder_id, .. } => database
-                    .playlist_folder_by_id(&folder_id, current_source, folder, &cancellation)
-                    .await?
-                    .map(SidebarPinItem::PlaylistFolder),
-                SidebarPin::SmartPlaylist { playlist_id, .. } => {
-                    let Some(key) = database
-                        .smart_playlist_key_by_object(&playlist_id, &cancellation)
-                        .await?
-                    else {
-                        continue;
-                    };
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .map_or(0, |duration| duration.as_secs() as i64);
-                    database
-                        .smart_playlist_rows(current_source, &[key], folder, now, &cancellation)
-                        .await?
-                        .pop()
-                        .map(SidebarPinItem::SmartPlaylist)
-                }
-            };
-            if let Some(item) = item {
-                items.push(item);
-            }
-        }
-        Ok::<_, library::LibraryError>(items)
+        read_database
+            .sidebar_pin_rows(&read_pins, &read_cancel)
+            .await
     });
     let shell = Rc::downgrade(shell);
     glib::spawn_future_local(async move {
-        let items = task.await.ok().and_then(Result::ok);
-        let Some(shell) = shell.upgrade() else {
+        let result = task.await.ok().and_then(Result::ok);
+        let Some(current) = shell.upgrade() else {
             return;
         };
-        if !sidebar_pin_publication_is_current(
-            generation,
-            shell.navigation.pin_generation.get(),
-            &identity,
-            shell.navigation.pin_identity.borrow().as_ref(),
-        ) {
+        if !sidebar_pin_publication_is_current(generation, current.navigation.pin_generation.get())
+        {
             return;
         }
-        match items {
-            Some(items) => {
-                if *shell.navigation.pin_items.borrow() != items {
-                    reconcile_sidebar_pin_widgets(&shell, &items);
-                    shell.navigation.pin_items.replace(items);
+        let Some(rows) = result else {
+            current.navigation.pin_identity.borrow_mut().take();
+            current.navigation.pin_cancellation.borrow_mut().take();
+            warn!("failed to load sidebar Pins");
+            current.try_reveal_startup_route();
+            return;
+        };
+        let mut pending = Vec::new();
+        let mut indexed = HashMap::new();
+        {
+            let current_items = current.navigation.pin_items.borrow();
+            let known = current_items
+                .iter()
+                .map(|item| (&item.0.pin, item.0.totals))
+                .collect::<HashMap<_, _>>();
+            for mut row in rows {
+                if row.totals.is_none() {
+                    pending.push(row.clone());
+                    row.totals = known.get(&row.pin).copied().flatten();
                 }
-            }
-            None => {
-                shell.navigation.pin_identity.borrow_mut().take();
-                warn!("failed to load sidebar Pins");
+                indexed.insert(row.pin.clone(), SidebarPinItem(row));
             }
         }
-        shell.navigation.pin_cancellation.borrow_mut().take();
-        shell
-            .navigation_view
-            .sidebar_modes
-            .remove_css_class("row-pending");
-        shell.try_reveal_startup_route();
+        let items = current
+            .settings
+            .current
+            .borrow()
+            .sidebar
+            .pins
+            .iter()
+            .filter_map(|pin| indexed.remove(pin))
+            .collect::<Vec<_>>();
+        if *current.navigation.pin_items.borrow() != items {
+            reconcile_sidebar_pin_widgets(&current, &items);
+            current.navigation.pin_items.replace(items);
+        }
+
+        if pending.is_empty() {
+            current.navigation.pin_cancellation.borrow_mut().take();
+            current.try_reveal_startup_route();
+            return;
+        }
+        current.try_reveal_startup_route();
+        let task = runtime.spawn(async move {
+            database
+                .sidebar_pin_totals(
+                    pending,
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
+                    &cancellation,
+                )
+                .await
+        });
+        drop(current);
+        let result = task.await.ok().and_then(Result::ok);
+        let Some(current) = shell.upgrade() else {
+            return;
+        };
+        if !sidebar_pin_publication_is_current(generation, current.navigation.pin_generation.get())
+        {
+            return;
+        }
+        if let Some(rows) = result {
+            let totals = rows
+                .into_iter()
+                .map(|row| (row.pin, row.totals))
+                .collect::<HashMap<_, _>>();
+            let items = {
+                let mut items = current.navigation.pin_items.borrow_mut();
+                let mut changed = Vec::new();
+                for item in &mut *items {
+                    if let Some(total) = totals.get(&item.0.pin)
+                        && item.0.totals != *total
+                    {
+                        item.0.totals = *total;
+                        changed.push(item.clone());
+                    }
+                }
+                changed
+            };
+            if !items.is_empty() {
+                let widgets = keyed_sidebar_pin_widgets(&current.navigation_view.normal_nav_pins);
+                for item in &items {
+                    if let Some(key) = sidebar_pin_route_key(&item.route())
+                        && let Some(widget) = widgets.get(&key)
+                    {
+                        update_sidebar_pin_widget_metadata(widget, item);
+                    }
+                }
+            }
+        } else {
+            warn!("failed to load sidebar Pin totals");
+        }
+        current.navigation.pin_cancellation.borrow_mut().take();
+
+        current.try_reveal_startup_route();
     });
 }
 
-fn sidebar_pin_publication_is_current(
-    expected_generation: u64,
-    current_generation: u64,
-    expected_identity: &SidebarPinIdentity,
-    current_identity: Option<&SidebarPinIdentity>,
-) -> bool {
-    expected_generation == current_generation && current_identity == Some(expected_identity)
+fn sidebar_pin_publication_is_current(expected_generation: u64, current_generation: u64) -> bool {
+    expected_generation == current_generation
 }
 
 pub(crate) fn refresh_sidebar_pins(shell: &Rc<Shell>) {
@@ -1002,14 +985,14 @@ pub(crate) fn update_sidebar_smart_playlist_pin_metadata(
 ) {
     let item = {
         let mut items = shell.navigation.pin_items.borrow_mut();
-        let Some(SidebarPinItem::SmartPlaylist(playlist)) = items.iter_mut().find(|item| {
-            matches!(item, SidebarPinItem::SmartPlaylist(playlist) if playlist.smart_playlist_key == summary.smart_playlist_key)
+        let Some(playlist) = items.iter_mut().find(|item| {
+            matches!(item.0.pin, SidebarPin::SmartPlaylist { .. })
+                && item.0.key == summary.smart_playlist_key.raw()
         }) else {
             return;
         };
-        playlist.track_count = summary.track_count;
-        playlist.duration_millis = summary.duration_millis;
-        SidebarPinItem::SmartPlaylist(playlist.clone())
+        playlist.0.totals = Some((summary.track_count, summary.duration_millis));
+        playlist.clone()
     };
     let Some(key) = sidebar_pin_route_key(&item.route()) else {
         return;
@@ -1047,7 +1030,7 @@ fn reorder_current_sidebar_pin_projection(
         (moved_key, target_key)
     };
     if let Some(identity) = shell.navigation.pin_identity.borrow_mut().as_mut() {
-        identity.pins = desired;
+        *identity = desired;
     }
     if let (Some(moved_key), Some(target_key)) = (moved_key, target_key) {
         reorder_sidebar_pin_widget(
@@ -1105,10 +1088,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         .collect::<HashMap<_, _>>();
     let row_changed = |key: &str, item: &SidebarPinItem| {
         previous_items.get(key).is_some_and(|previous| {
-            previous.artwork() != item.artwork()
-                || matches!((previous, item), (SidebarPinItem::PlaylistFolder(previous), SidebarPinItem::PlaylistFolder(next)) if previous.name != next.name)
-                || matches!((previous, item), (SidebarPinItem::SmartPlaylist(previous), SidebarPinItem::SmartPlaylist(next))
-                    if previous.definition.current != next.definition.current)
+            previous.artwork() != item.artwork() || previous.0.name != item.0.name
         })
     };
     let desired_keys = items
@@ -1215,14 +1195,22 @@ fn remove_sidebar_pin_widgets(container: &gtk::Box) {
 }
 
 fn update_sidebar_pin_widget_metadata(widget: &gtk::Widget, item: &SidebarPinItem) {
-    for (class, text) in [
-        ("sidebar-pin-title", item.title()),
-        ("sidebar-pin-track-count", item.track_count().to_string()),
-        (
+    let mut labels = vec![("sidebar-pin-title", item.title())];
+    if item.0.totals.is_some() {
+        labels.push(("sidebar-pin-track-count", item.track_count().to_string()));
+        labels.push((
             "sidebar-pin-duration",
             format_duration_units(item.duration_seconds()),
-        ),
-    ] {
+        ));
+        if let Some(metadata) = descendant_with_class(widget, "sidebar-pin-metadata") {
+            let mut child = metadata.first_child();
+            while let Some(item) = child {
+                child = item.next_sibling();
+                item.set_visible(true);
+            }
+        }
+    }
+    for (class, text) in labels {
         if let Some(label) = descendant_with_class(widget, class)
             .and_then(|widget| widget.downcast::<gtk::Label>().ok())
         {
@@ -1294,7 +1282,7 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
             &artwork,
             SIDEBAR_PIN_COVER_SIZE,
             SIDEBAR_PIN_COVER_SIZE,
-            matches!(&pin, SidebarPinItem::Genre(_)),
+            matches!(&pin.0.pin, SidebarPin::Genre { .. }),
         )
         .widget();
     cover.set_can_target(false);
@@ -1311,23 +1299,26 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     title_label.set_width_chars(1);
     title_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-    if matches!(&pin, SidebarPinItem::PlaylistFolder(_)) {
+    if matches!(&pin.0.pin, SidebarPin::PlaylistFolder { .. }) {
         title_row.append(&gtk::Image::from_icon_name("rufin-folders-symbolic"));
     }
     title_row.append(&title_label);
     identity.append(&title_row);
     let metadata = sidebar_pin_metadata(track_count, duration_seconds);
+    if pin.0.totals.is_none() {
+        let mut child = metadata.first_child();
+        while let Some(item) = child {
+            child = item.next_sibling();
+            item.set_visible(false);
+        }
+    }
     let source_label = {
         let configured = shell.source.configured.borrow();
-        let source_id = match &pin {
-            SidebarPinItem::Playlist(playlist) => Some(playlist.source_id.as_deref()),
-            SidebarPinItem::SmartPlaylist(playlist) => Some(
-                configured
-                    .selected_source_id
-                    .as_ref()
-                    .filter(|_| playlist.definition.current)
-                    .map(sources::SourceId::as_str),
-            ),
+        let source_id = match &pin.0.pin {
+            SidebarPin::Playlist { source_id, .. } => {
+                Some(source_id.as_ref().map(sources::SourceId::as_str))
+            }
+            SidebarPin::SmartPlaylist { .. } => Some(None),
             _ => None,
         };
         source_id.map(|source_id| {
@@ -1356,7 +1347,7 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
             shell.navigate(route.clone());
         }
     });
-    if let Some(target) = pin.playback_target(shell.selected_library().as_deref()) {
+    if let Some(target) = pin.playback_target() {
         install_sidebar_pin_double_click(&activate, shell, target);
     }
     row.set_child(Some(&activate));
@@ -1369,7 +1360,7 @@ fn sidebar_pin_row(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
     controls.set_valign(gtk::Align::Center);
     controls.set_margin_end(2);
     controls.set_visible(false);
-    let playback_target = pin.playback_target(shell.selected_library().as_deref());
+    let playback_target = pin.playback_target();
     if let Some(playback_target) = playback_target {
         for (icon_name, label, placement) in [
             (PLAY_ICON, "Play", QueuePlacement::Now),
@@ -1449,7 +1440,7 @@ fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
             &artwork,
             COMPACT_SIDEBAR_PIN_COVER_SIZE,
             COMPACT_SIDEBAR_PIN_COVER_SIZE,
-            matches!(&pin, SidebarPinItem::Genre(_)),
+            matches!(&pin.0.pin, SidebarPin::Genre { .. }),
         )
         .widget();
     cover.set_can_target(false);
@@ -1460,14 +1451,14 @@ fn compact_sidebar_pin(shell: &Rc<Shell>, pin: SidebarPinItem) -> gtk::Overlay {
             shell.navigate(route.clone());
         }
     });
-    if let Some(target) = pin.playback_target(shell.selected_library().as_deref()) {
+    if let Some(target) = pin.playback_target() {
         install_sidebar_pin_double_click(&activate, shell, target);
     }
     row.set_child(Some(&activate));
     install_sidebar_pin_drag(&row, &cover, shell, &pin);
     install_playlist_pin_drop(&row, shell, &pin);
 
-    if let Some(playback_target) = pin.playback_target(shell.selected_library().as_deref()) {
+    if let Some(playback_target) = pin.playback_target() {
         let (controls, play) =
             cover_play_only_hover_controls(COMPACT_SIDEBAR_PIN_COVER_SIZE, "Play");
         play.add_css_class("compact-sidebar-pin-play");
@@ -1507,7 +1498,7 @@ fn install_sidebar_pin_drag(
     shell: &Rc<Shell>,
     pin: &SidebarPinItem,
 ) {
-    let playback = pin.playback_target(shell.selected_library().as_deref());
+    let playback = pin.playback_target();
     let title = pin.title();
     let pin = pin.stored_pin();
     let payload = sidebar_pin_drag_variant(&pin);
@@ -1623,14 +1614,14 @@ fn install_playlist_pin_drop(
     shell: &Rc<Shell>,
     pin: &SidebarPinItem,
 ) {
-    if let SidebarPinItem::PlaylistFolder(folder) = pin {
-        let folder = folder.clone();
+    if let SidebarPin::PlaylistFolder { smart, .. } = &pin.0.pin {
+        let folder_key = library::PlaylistFolderKey::from_raw(pin.0.key);
+        let smart = *smart;
         let menus = Rc::downgrade(&shell.media_menus);
         let drop = gtk::DropTarget::new(
             glib::BoxedAnyObject::static_type(),
             gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE,
         );
-        let smart = folder.smart;
         drop.set_preload(true);
         drop.connect_notify_local(Some("value"), move |drop, _| {
             if let Some(source) = drop
@@ -1651,18 +1642,17 @@ fn install_playlist_pin_drop(
                 return false;
             };
             gtk_media_menus::playlist_folders::drop_playlist_on_folder(
-                &menus,
-                folder.clone(),
-                source,
+                &menus, folder_key, smart, source,
             )
         });
         target.add_controller(drop);
         return;
     }
-    let SidebarPinItem::Playlist(playlist) = pin else {
+    if !matches!(pin.0.pin, SidebarPin::Playlist { .. }) {
         return;
-    };
-    let playlist = playlist.clone();
+    }
+    let playlist_key = library::PlaylistKey::from_raw(pin.0.key);
+    let playlist_name = pin.0.name.clone();
     let drop_target = gtk::DropTarget::new(
         glib::BoxedAnyObject::static_type(),
         gtk::gdk::DragAction::COPY,
@@ -1683,7 +1673,8 @@ fn install_playlist_pin_drop(
         };
         gtk_media_menus::media_menus::add_drag_to_playlist(
             &shell.media_menus,
-            playlist.clone(),
+            playlist_key,
+            playlist_name.clone(),
             source,
         )
     });
@@ -1956,23 +1947,28 @@ mod tests {
     }
 
     #[test]
-    fn stale_sidebar_pin_result_cannot_rebuild_navigation() {
-        let identity = SidebarPinIdentity {
-            smart_context: None,
-            pins: Vec::new(),
-        };
-        assert!(sidebar_pin_publication_is_current(
-            2,
-            2,
-            &identity,
-            Some(&identity)
-        ));
-        assert!(!sidebar_pin_publication_is_current(
-            1,
-            2,
-            &identity,
-            Some(&identity)
-        ));
+    fn pin_rows_are_ready_before_totals_and_old_reads_cannot_replace_them() {
+        assert!(sidebar_pin_publication_is_current(2, 2));
+        assert!(!sidebar_pin_publication_is_current(1, 2));
+        let state = NavigationState::new(Route::Home);
+        assert!(state.pins_ready());
+        state
+            .pin_cancellation
+            .replace(Some(library::ReadCancellation::new()));
+        assert!(!state.pins_ready());
+        state
+            .pin_items
+            .borrow_mut()
+            .push(SidebarPinItem(library::SidebarPinRow {
+                pin: SidebarPin::SmartPlaylist {
+                    playlist_id: "smart".into(),
+                },
+                key: 1,
+                name: "Smart".into(),
+                totals: None,
+                artwork: Vec::new(),
+            }));
+        assert!(state.pins_ready());
     }
 }
 

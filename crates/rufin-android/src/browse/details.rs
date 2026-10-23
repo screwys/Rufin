@@ -148,20 +148,11 @@ impl AndroidBrowseQuery {
                 row.artwork_binding.iter().cloned().collect(),
                 "Playlist",
             )),
-            DetailSummary::SmartPlaylist(row) => {
-                let mut projected = AndroidBrowseRow::from(row.as_ref().clone());
-                if row.definition.current {
-                    projected.context_source_id = self
-                        .selected
-                        .as_ref()
-                        .map(|selected| selected.source_id.to_string());
-                }
-                Some((
-                    projected,
-                    row.artwork_binding.iter().cloned().collect(),
-                    "Playlist",
-                ))
-            }
+            DetailSummary::SmartPlaylist(row) => Some((
+                AndroidBrowseRow::from(row.as_ref().clone()),
+                row.artwork_binding.iter().cloned().collect(),
+                "Playlist",
+            )),
             DetailSummary::Genre(row) => Some((
                 AndroidBrowseRow::from(row.as_ref().clone()),
                 row.artwork_binding

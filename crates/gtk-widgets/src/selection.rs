@@ -398,21 +398,11 @@ pub fn track_play_request(key: library::TrackKey) -> rufin_core::playback::PlayR
     )
 }
 
-pub fn smart_play_request(
-    key: library::SmartPlaylistKey,
-    selected: Option<&rufin_core::runtime::SelectedLibrary>,
-) -> rufin_core::playback::PlayRequest {
+pub fn smart_play_request(key: library::SmartPlaylistKey) -> rufin_core::playback::PlayRequest {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |value| value.as_secs() as i64);
-    let query = library::MemberRead {
-        folder: selected.and_then(|selected| selected.music_folder_key),
-        ..library::MemberRead::new(library::Collection::Smart {
-            key,
-            source: selected.map(|selected| selected.source_key),
-            now,
-        })
-    };
+    let query = library::MemberRead::new(library::Collection::Smart { key, now });
     rufin_core::playback::PlayRequest::ordered(query.selection(), 0, QueuePlacement::Now, true)
         .with_context(format!("smart-playlist:{key}").into())
 }

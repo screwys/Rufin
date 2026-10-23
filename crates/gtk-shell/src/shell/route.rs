@@ -396,10 +396,6 @@ impl Shell {
         self.replace_current_route_when_ready();
     }
 
-    pub(crate) fn clear_route_positions(&self) {
-        self.route_viewport.position_memory.borrow_mut().clear();
-    }
-
     pub(crate) fn go_back(self: &Rc<Self>) {
         if self.close_activity() {
             return;
@@ -463,21 +459,9 @@ impl Shell {
         self.cancel_route_loading();
         self.show_route_loading();
         let render_started = tracing::enabled!(tracing::Level::WARN).then(Instant::now);
-        let source_scoped = matches!(
-            route,
-            Route::Home
-                | Route::Search
-                | Route::Tracks
-                | Route::Albums
-                | Route::Artists
-                | Route::AlbumArtists
-                | Route::Genres
-                | Route::Moods
-                | Route::Folders { .. }
-                | Route::Favorites
-        );
+        let source_scoped = route.uses_selected_source();
         let selected = self.selected_library().as_deref().cloned();
-        if source_scoped && selected.is_none() {
+        if route.requires_selected_source() && selected.is_none() {
             self.replace_mounted_route(route, None, render_started, |_| {
                 MountedRoute::static_widget(gtk_library::route_layout::route_empty_view(
                     localization::msgid("Nothing here yet"),
@@ -485,18 +469,7 @@ impl Shell {
             });
             return;
         }
-        let selected = if source_scoped
-            || matches!(
-                route,
-                Route::Playlists
-                    | Route::SmartPlaylists
-                    | Route::SmartPlaylistDetail(_)
-                    | Route::PlaylistFolder { .. }
-            ) {
-            selected
-        } else {
-            None
-        };
+        let selected = if source_scoped { selected } else { None };
         let category = if route == Route::Favorites {
             self.navigation.favorite_category.get()
         } else if matches!(
@@ -802,20 +775,6 @@ impl Shell {
 
     fn clear_current_route_selections(&self) {
         self.route_viewport.catalog.borrow_mut().take();
-    }
-
-    pub(crate) fn clear_mounted_routes(&self) {
-        self.cancel_route_loading();
-        let mounted_route = self.begin_mounted_route_replacement();
-        if mounted_route.is_none() && self.route_viewport.route_host.first_child().is_none() {
-            return;
-        }
-        let mut child = self.route_viewport.route_host.first_child();
-        while let Some(current) = child {
-            child = current.next_sibling();
-            self.route_viewport.route_host.remove(&current);
-        }
-        drop(mounted_route);
     }
 }
 

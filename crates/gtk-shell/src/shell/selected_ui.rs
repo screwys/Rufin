@@ -56,12 +56,7 @@ impl SelectedUiState {
     }
 
     pub(crate) fn install(&self, session: SelectedUiSession) {
-        let mut current = self.session.borrow_mut();
-        assert!(
-            current.is_none(),
-            "a selected UI session must be released before installing its replacement"
-        );
-        *current = Some(session);
+        self.session.replace(Some(session));
     }
 
     pub(crate) fn take(&self) -> Option<SelectedUiSession> {

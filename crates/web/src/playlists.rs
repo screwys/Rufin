@@ -23,37 +23,12 @@ enum MediaSelection {
     },
 }
 
-async fn playlist_selection(
-    products: &ProductHandles,
+fn playlist_selection(
     uris: Vec<String>,
     selection: Option<MediaSelection>,
-    source: Option<String>,
-    folder: Option<String>,
-) -> Result<library::MemberSelection, Error> {
+) -> library::MemberSelection {
     let Some(selection) = selection else {
-        return Ok(library::MemberSelection::Uris((uris).into()));
-    };
-    let (source, folder) = if source.is_some() {
-        (source, folder)
-    } else {
-        products
-            .source
-            .selected_library()
-            .map_or((None, None), |selected| {
-                (
-                    Some(selected.source_id.to_string()),
-                    selected.music_folder_object_id,
-                )
-            })
-    };
-    let (source, folder) = match source.as_deref() {
-        Some(source)
-            if folder.is_some() || matches!(selection, MediaSelection::SmartPlaylist { .. }) =>
-        {
-            let (source, folder) = catalog::scope(products, source, folder.as_deref()).await?;
-            (Some(source), folder)
-        }
-        _ => (None, None),
+        return library::MemberSelection::Uris(uris.into());
     };
     let scope = match selection {
         MediaSelection::Album { id } => library::Collection::Album(id),
@@ -65,15 +40,10 @@ async fn playlist_selection(
         MediaSelection::Genre { id } => library::Collection::Genre(id),
         MediaSelection::SmartPlaylist { id } => library::Collection::Smart {
             key: id,
-            source,
             now: catalog::now(),
         },
     };
-    let mut query = library::MemberRead::new(scope);
-    if matches!(query.collection, library::Collection::Smart { .. }) {
-        query.folder = folder;
-    }
-    Ok(query.selection())
+    library::MemberRead::new(scope).selection()
 }
 
 pub(super) fn routes() -> Router<ProductHandles> {
@@ -312,7 +282,6 @@ async fn export_file(
         input.source,
         input.path.into(),
         target,
-        None,
         input.path_mode,
         input.linked,
     );
@@ -431,27 +400,16 @@ async fn create(
     #[derive(Deserialize)]
     struct Input {
         source: Option<sources::SourceId>,
-        selection_source: Option<String>,
         current: Option<bool>,
         public: Option<bool>,
         name: String,
         #[serde(default)]
         uris: Vec<String>,
         selection: Option<MediaSelection>,
-        folder: Option<String>,
     }
     let input: Input = body(request).await?;
     let source = input.source.clone();
-    let selection = playlist_selection(
-        products,
-        input.uris,
-        input.selection,
-        input
-            .selection_source
-            .or_else(|| input.source.as_ref().map(|id| id.as_str().to_owned())),
-        input.folder,
-    )
-    .await?;
+    let selection = playlist_selection(input.uris, input.selection);
     let created = rufin_core::playlists::create_playlist(
         &products.source,
         input.source,
@@ -531,20 +489,11 @@ async fn add_entries(
         #[serde(default)]
         uris: Vec<String>,
         selection: Option<MediaSelection>,
-        source: Option<String>,
-        folder: Option<String>,
         #[serde(default)]
         skip_duplicates: bool,
     }
     let input: Input = body(request).await?;
-    let selection = playlist_selection(
-        products,
-        input.uris,
-        input.selection,
-        input.source,
-        input.folder,
-    )
-    .await?;
+    let selection = playlist_selection(input.uris, input.selection);
     let added = rufin_core::playlists::add_playlist_tracks(
         &products.source,
         input.id,
