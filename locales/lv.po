@@ -298,6 +298,9 @@ msgstr "6 stundas"
 msgid "A new update is available, restart to apply"
 msgstr ""
 
+msgid "A"
+msgstr ""
+
 msgid "API key (Subsonic)"
 msgstr "API atslēga (Subsonic)"
 
@@ -733,6 +736,9 @@ msgstr ""
 msgid "Browse"
 msgstr ""
 
+msgid "C"
+msgstr ""
+
 #, fuzzy
 #| msgid "Change Profile"
 msgid "CUE file"
@@ -769,11 +775,22 @@ msgstr "Atcelt"
 msgid "Cast format"
 msgstr "Ceļa formāts"
 
+#, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Casting changes apply to the next stream"
+msgstr "Izmaiņas attiecas uz {count} celiņu"
+
 msgid "Casting network"
 msgstr "Pārraides tīkls"
 
 msgid "Casting"
 msgstr "Pārraide"
+
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Centered bars"
+msgstr "Segmentētas joslas"
 
 msgid "Certificate authority (PEM)"
 msgstr "Sertifikātu izsniedzēja iestāde (PEM)"
@@ -1151,12 +1168,6 @@ msgstr "Kopēt saiti"
 
 msgid "Copy of {name}"
 msgstr ""
-
-msgid "Copy preset"
-msgstr "Kopēt iepriekš iestatīto"
-
-msgid "Copy the current appearance to the clipboard"
-msgstr "Kopēt pašreizējo izskatu starplaikā"
 
 msgid "Copy"
 msgstr "Kopēt"
@@ -1580,6 +1591,9 @@ msgstr "EP"
 msgid "EPs"
 msgstr "EP"
 
+msgid "ERB"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr "Rediģēt tekstus"
 
@@ -1752,6 +1766,11 @@ msgstr "Ārēju metadatu meklēšana"
 
 msgid "External site links"
 msgstr "Ārējās saites"
+
+#, fuzzy
+#| msgid "Files"
+msgid "FFT size"
+msgstr "Faili"
 
 msgid "FLAC"
 msgstr ""
@@ -1946,6 +1965,9 @@ msgstr "Atsvaidzināt sadaļu"
 msgid "Frequency · Hz"
 msgstr ""
 
+msgid "Frequency scale"
+msgstr ""
+
 msgid "Frequency"
 msgstr ""
 
@@ -2053,6 +2075,9 @@ msgstr ""
 
 msgid "Guest / public access"
 msgstr "Viesis / publiska piekļuve"
+
+msgid "Halo"
+msgstr ""
 
 msgid "Height (%)"
 msgstr ""
@@ -2228,6 +2253,11 @@ msgstr ""
 
 msgid "Keyboard Shortcuts"
 msgstr "Tastatūras saīsnes"
+
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "LED spectrum"
+msgstr "Spektra līnija"
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -2434,6 +2464,9 @@ msgstr "Atrast mapi"
 msgid "Lock metadata"
 msgstr "Bloķēt metadatus"
 
+msgid "Logarithmic"
+msgstr ""
+
 msgid "Logs are copied"
 msgstr "Žurnāls ir kopēts"
 
@@ -2486,6 +2519,14 @@ msgstr ""
 msgid "Matched"
 msgstr "Atbilstība"
 
+msgid "Maximum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Maximum level (dB)"
+msgstr "Maksimālais gads"
+
 msgid "Maximum year"
 msgstr "Maksimālais gads"
 
@@ -2527,6 +2568,14 @@ msgstr "Metadati"
 
 msgid "Minimize overview"
 msgstr ""
+
+msgid "Minimum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum level (dB)"
+msgstr "Minimālais gads"
 
 msgid "Minimum year"
 msgstr "Minimālais gads"
@@ -3091,9 +3140,6 @@ msgstr "Parole vai žetons"
 msgid "Password"
 msgstr "Parole"
 
-msgid "Paste preset"
-msgstr "Ielīmēt iepriekš iestatīto"
-
 msgid "Paste"
 msgstr "Ielīmēt"
 
@@ -3317,27 +3363,9 @@ msgstr "Saglabāt toni"
 msgid "Preserve pitch"
 msgstr "Saglabāt toni"
 
-msgid "Preset 1"
-msgstr "Iepriekš iestatīts 1"
-
-msgid "Preset 2"
-msgstr "Iepriekš iestatīts 2"
-
-msgid "Preset 3"
-msgstr "Iepriekš iestatīts 3"
-
-msgid "Preset 4"
-msgstr "Iepriekš iestatīts 4"
-
-msgid "Preset 5"
-msgstr "Iepriekš iestatīts 5"
-
 #, fuzzy
 #| msgid "Preset saved"
 msgid "Preset name"
-msgstr "Iepriekš iestatīts profils saglabāts"
-
-msgid "Preset saved"
 msgstr "Iepriekš iestatīts profils saglabāts"
 
 #, fuzzy
@@ -3762,6 +3790,9 @@ msgstr "Pārsinhronizēt bibliotēku"
 msgid "Retry"
 msgstr "Mēģināt vēlreiz"
 
+msgid "Ribbon"
+msgstr ""
+
 msgid "Rise speed (%)"
 msgstr "Pacelšanās ātrums (%)"
 
@@ -3773,6 +3804,11 @@ msgstr "Romadži"
 
 msgid "Rounded bars"
 msgstr "Noapaļoti vizuālie elementi"
+
+#, fuzzy
+#| msgid "Filled spectrum"
+msgid "Rounded spectrum"
+msgstr "Aizpildīts spektrs"
 
 msgid "Row borders"
 msgstr ""
@@ -3847,11 +3883,6 @@ msgstr "Saglabāts iepriekš iestatījums"
 
 msgid "Save"
 msgstr "Saglabāt"
-
-#, fuzzy
-#| msgid "Saved"
-msgid "Save..."
-msgstr "Saglabāts"
 
 msgid "Saved Plex Login"
 msgstr "Saglabāts Plex konta pieslēgums"
@@ -4274,6 +4305,11 @@ msgstr "Viedā atskaņošanas saraksta dziesmas"
 
 msgid "Smart playlists"
 msgstr "Viedie atskaņošanas saraksti"
+
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "Soft spectrum"
+msgstr "Spektra līnija"
 
 msgid "Solid bars"
 msgstr "Vertikālas joslas"
@@ -4752,11 +4788,6 @@ msgstr "Izmantot maksimālo gadu"
 msgid "Use minimum year"
 msgstr "Izmantojiet minimālo gadu"
 
-#, fuzzy
-#| msgid "Use source setting"
-msgid "Use output settings"
-msgstr "Izmantot avota iestatījumu"
-
 msgid "Use source setting"
 msgstr "Izmantot avota iestatījumu"
 
@@ -4863,6 +4894,9 @@ msgstr "Nedēļas diena"
 
 msgid "Weekly"
 msgstr "Nedēļā"
+
+msgid "Weighting"
+msgstr ""
 
 msgid "Wide"
 msgstr ""
@@ -5150,6 +5184,43 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#~ msgid "Copy preset"
+#~ msgstr "Kopēt iepriekš iestatīto"
+
+#~ msgid "Copy the current appearance to the clipboard"
+#~ msgstr "Kopēt pašreizējo izskatu starplaikā"
+
+#~ msgid "Paste preset"
+#~ msgstr "Ielīmēt iepriekš iestatīto"
+
+#~ msgid "Preset 1"
+#~ msgstr "Iepriekš iestatīts 1"
+
+#~ msgid "Preset 2"
+#~ msgstr "Iepriekš iestatīts 2"
+
+#~ msgid "Preset 3"
+#~ msgstr "Iepriekš iestatīts 3"
+
+#~ msgid "Preset 4"
+#~ msgstr "Iepriekš iestatīts 4"
+
+#~ msgid "Preset 5"
+#~ msgstr "Iepriekš iestatīts 5"
+
+#~ msgid "Preset saved"
+#~ msgstr "Iepriekš iestatīts profils saglabāts"
+
+#, fuzzy
+#~| msgid "Saved"
+#~ msgid "Save..."
+#~ msgstr "Saglabāts"
+
+#, fuzzy
+#~| msgid "Use source setting"
+#~ msgid "Use output settings"
+#~ msgstr "Izmantot avota iestatījumu"
 
 #~ msgid "Identify"
 #~ msgstr "Identificēt"
