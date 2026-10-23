@@ -11,7 +11,6 @@ use ::library::{
 use adw::prelude::*;
 use gtk_widgets::controls::REMOVE_ICON;
 use gtk_widgets::layout::large_popup_content_width;
-use gtk_widgets::source_labels::configure_ownership_toggle;
 use localization::{msgid, tr};
 
 const SMART_PLAYLIST_DIALOG_WIDTH: i32 = 700;
@@ -29,7 +28,7 @@ fn smart_playlist_templates() -> Vec<SmartPlaylistTemplate> {
     let most_played = |name, activity_period| SmartPlaylistTemplate {
         name,
         definition: SmartPlaylistDefinition {
-            current: false,
+            source_id: None,
             match_all: vec![SmartPlaylistRule {
                 field: SmartPlaylistRuleField::PlayCount,
                 operator: SmartPlaylistRuleOperator::Above,
@@ -59,7 +58,7 @@ fn smart_playlist_templates() -> Vec<SmartPlaylistTemplate> {
         SmartPlaylistTemplate {
             name: msgid("Never Played"),
             definition: SmartPlaylistDefinition {
-                current: false,
+                source_id: None,
                 match_all: vec![SmartPlaylistRule {
                     field: SmartPlaylistRuleField::Played,
                     operator: SmartPlaylistRuleOperator::Is,
@@ -86,7 +85,8 @@ pub struct RuleValueSuggestions {
 #[derive(Clone)]
 struct SmartPlaylistEditor {
     name: gtk::Entry,
-    owner: gtk::ToggleButton,
+    source: gtk::DropDown,
+    source_ids: Rc<[Option<library::SourceId>]>,
     match_all: Rc<RefCell<Vec<SmartPlaylistRule>>>,
     match_any: Rc<RefCell<Vec<SmartPlaylistRule>>>,
     sort: gtk::DropDown,
@@ -139,7 +139,7 @@ impl SmartPlaylistEditor {
             .copied()
             .unwrap_or(SmartPlaylistSort::Title);
         let definition = SmartPlaylistDefinition {
-            current: self.owner.is_active(),
+            source_id: self.source_ids[self.source.selected() as usize].clone(),
             match_all: self.match_all.borrow().clone(),
             match_any: self.match_any.borrow().clone(),
             sort_field,
@@ -164,7 +164,7 @@ fn smart_playlist_dialog(
     submit_label: &str,
     name: Option<&str>,
     definition: Option<&SmartPlaylistDefinition>,
-    source: Option<&rufin_core::runtime::source::SourceSummary>,
+    sources: Rc<[rufin_core::runtime::source::SourceSummary]>,
 ) -> SmartPlaylistDialog {
     let resource = crate::ui_resource::SMART_PLAYLIST_DIALOG_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
@@ -175,7 +175,7 @@ fn smart_playlist_dialog(
         template_dropdown: gtk::DropDown,
         apply_template: gtk::Button,
         name_entry: gtk::Entry,
-        owner: gtk::ToggleButton,
+        source: gtk::DropDown,
         sort: gtk::DropDown,
         descending: gtk::CheckButton,
         activity_period: gtk::DropDown,
@@ -196,11 +196,26 @@ fn smart_playlist_dialog(
     if let Some(name) = name {
         name_entry.set_text(name);
     }
-    let mut definition = definition.cloned().unwrap_or_default();
-    if name.is_none() {
-        definition.current = source.is_some();
+    let definition = definition.cloned().unwrap_or_default();
+    let mut source_ids = vec![None];
+    let mut labels = vec![tr("All")];
+    for configured in sources.iter() {
+        source_ids.push(Some(configured.id.clone()));
+        labels.push(gtk_widgets::source_labels::configured_source_display_name(
+            configured,
+        ));
     }
-    configure_ownership_toggle(&owner, source, definition.current);
+    if let Some(id) = &definition.source_id
+        && !source_ids.contains(&Some(id.clone()))
+    {
+        source_ids.push(Some(id.clone()));
+        labels.push(id.to_string());
+    }
+    let selected = source_ids
+        .iter()
+        .position(|id| id == &definition.source_id)
+        .unwrap();
+    set_dropdown_labels(&source, &labels, selected);
     set_dropdown_labels(&sort, &sort_labels(), sort_index(definition.sort_field));
     descending.set_active(definition.descending);
     activity_period.set_selected(match definition.activity_period {
@@ -237,7 +252,8 @@ fn smart_playlist_dialog(
         dialog,
         editor: SmartPlaylistEditor {
             name: name_entry,
-            owner,
+            source,
+            source_ids: source_ids.into(),
             match_all: Rc::new(RefCell::new(definition.match_all)),
             match_any: Rc::new(RefCell::new(definition.match_any)),
             sort,
@@ -1039,11 +1055,10 @@ pub type SmartPlaylistSubmit =
 pub fn build_dialog(
     playlist: Option<library::SmartPlaylistRow>,
     value_suggestions: RuleValueSuggestions,
-    source: Option<rufin_core::runtime::source::SourceSummary>,
+    sources: Rc<[rufin_core::runtime::source::SourceSummary]>,
     publish: SmartPlaylistSubmit,
     owner: &std::sync::Arc<rufin_core::source::SourceOwner>,
     artwork_state: &Rc<gtk_widgets::artwork::ArtworkState>,
-    scope: (Option<library::SourceKey>, Option<library::FolderKey>),
 ) -> adw::Dialog {
     let templates = playlist
         .is_none()
@@ -1059,7 +1074,7 @@ pub fn build_dialog(
         submit_label,
         playlist.as_ref().map(|playlist| playlist.name.as_str()),
         playlist.as_ref().map(|playlist| &playlist.definition),
-        source.as_ref(),
+        sources,
     );
     configure_smart_playlist_editor(&surface, &templates, value_suggestions);
     let artwork = playlist.as_ref().map(|playlist| {
@@ -1086,11 +1101,7 @@ pub fn build_dialog(
             },
             &surface.editor_content,
             &surface.submit,
-            move |owner| {
-                rufin_core::playlists::regenerate_smart_playlist_artwork(
-                    owner, key, scope.0, scope.1,
-                )
-            },
+            move |owner| rufin_core::playlists::regenerate_smart_playlist_artwork(owner, key),
         );
         artwork.overlay.set_size_request(1, 1);
         artwork.overlay.set_halign(gtk::Align::Fill);

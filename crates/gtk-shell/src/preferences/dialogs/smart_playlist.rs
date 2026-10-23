@@ -135,13 +135,6 @@ impl Shell {
         playlist: Option<library::SmartPlaylistRow>,
         suggestions: RuleValueSuggestions,
     ) {
-        let configured = self.source.configured.borrow();
-        let source = configured
-            .selected_source_id
-            .as_ref()
-            .and_then(|id| configured.sources.iter().find(|source| &source.id == id))
-            .cloned();
-        drop(configured);
         let folder = if playlist.is_none() {
             match self.navigation.routes.borrow().current() {
                 gtk_widgets::route::Route::PlaylistFolder { key, smart: true } => Some(*key),
@@ -154,7 +147,7 @@ impl Shell {
         let dialog = gtk_editors::smart_playlist::build_dialog(
             playlist,
             suggestions,
-            source,
+            self.source.configured.borrow().sources.clone().into(),
             Rc::new(move |change, settled| {
                 if let Some(shell) = shell.upgrade() {
                     shell.publish_smart_playlist_change_in_folder(change, settled, folder);
@@ -162,11 +155,7 @@ impl Shell {
             }),
             &self.products.source,
             &self.artwork,
-            self.selected_library()
-                .as_ref()
-                .map(|selected| (Some(selected.source_key), selected.music_folder_key))
-                .unwrap_or_default(),
         );
-        self.present_selected_dialog(&dialog);
+        gtk_widgets::popup::present_light_dismiss_dialog(&dialog, &self.chrome.window);
     }
 }

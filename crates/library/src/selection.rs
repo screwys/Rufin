@@ -115,14 +115,7 @@ where
                 let query = crate::query::list_query_on(connection, read).await?;
                 let requested = query.requested_ranges(parent_ranges.as_deref());
                 if let ListKind::SmartPlaylists { now } = read.kind {
-                    crate::smart_playlists::smart_parent_query(
-                        connection,
-                        read.source,
-                        read.folder,
-                        now,
-                        requested,
-                    )
-                    .await?
+                    crate::smart_playlists::smart_parent_query(connection, now, requested).await?
                 } else {
                     parent_members(&read.kind, requested)
                 }
@@ -190,7 +183,6 @@ fn parent_collection(read: &ListRead, key: i64) -> Collection {
         ListKind::Playlists => Collection::Playlist(PlaylistKey::from_raw(key)),
         ListKind::SmartPlaylists { now } => Collection::Smart {
             key: SmartPlaylistKey::from_raw(key),
-            source: read.source,
             now,
         },
     }

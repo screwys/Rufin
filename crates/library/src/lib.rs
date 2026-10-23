@@ -45,7 +45,9 @@ mod playlist_folders;
 mod playlist_format;
 mod playlist_links;
 pub use playlist_folders::{PlaylistFolderMember, PlaylistFolderRow, PlaylistListRow};
+mod pins;
 mod playlists;
+pub use pins::{SidebarPin, SidebarPinRow};
 mod queue;
 mod waveform;
 pub use connect_media::{

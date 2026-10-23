@@ -152,11 +152,6 @@ impl Shell {
     pub(crate) fn export_playlist_dialog(self: &Rc<Self>, target: PlaylistExport, name: &str) {
         let mut filename = playlist_export_filename(name);
         let shell = Rc::clone(self);
-        let selected = self.selected_library();
-        let source = selected.as_ref().map(|selected| selected.source_key);
-        let folder = selected
-            .as_ref()
-            .and_then(|selected| selected.music_folder_key);
         glib::spawn_future_local(async move {
             let resource = gtk_preferences::ui_resource::PLAYLIST_FILE_DIALOG_RESOURCE;
             let builder = gtk_widgets::ui_resource::builder(resource);
@@ -207,7 +202,6 @@ impl Shell {
                     Some(destination),
                     path.into(),
                     target,
-                    source.map(|source| (source, folder)),
                     mode,
                     linked,
                 )
@@ -231,7 +225,6 @@ impl Shell {
                 None,
                 path,
                 target,
-                source.map(|source| (source, folder)),
                 mode,
                 linked,
             )

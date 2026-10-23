@@ -297,7 +297,6 @@ async fn smart(source: &mut SqliteConnection, target: &mut SqliteConnection) -> 
         let result = async {
             let mut definition: serde_json::Value =
                 serde_json::from_str(&required(&row, "definition_json")?)?;
-            definition["current"] = true.into();
             if version < 40 {
                 for field in ["match_all", "match_any"] {
                     if let Some(rules) = definition

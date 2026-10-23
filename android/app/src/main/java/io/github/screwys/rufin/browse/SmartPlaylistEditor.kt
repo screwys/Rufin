@@ -1,12 +1,6 @@
 package io.github.screwys.rufin.browse
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.Image
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
-import io.github.screwys.rufin.R
-import io.github.screwys.rufin.ui.SourceIcon
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -26,9 +20,9 @@ internal fun SmartPlaylistEditor(
     playlist: SmartPlaylistRow? = null, folder: Long? = null,
 ) {
     val library = browse.library ?: return
-    val source = model.sources?.let { state -> state.sources.firstOrNull { it.id == state.selectedSourceId } }
+    val sources = model.sources?.sources.orEmpty()
     var name by remember { mutableStateOf(playlist?.name.orEmpty()) }
-    var definition by remember { mutableStateOf(playlist?.definition ?: library.smartPlaylistDefaultDefinition().copy(current = source != null)) }
+    var definition by remember { mutableStateOf(playlist?.definition ?: library.smartPlaylistDefaultDefinition()) }
     var nextId by remember { mutableIntStateOf(0) }
     var all by remember { mutableStateOf(definition.matchAll.map { nextId++ to it }) }
     var any by remember { mutableStateOf(definition.matchAny.map { nextId++ to it }) }
@@ -39,14 +33,11 @@ internal fun SmartPlaylistEditor(
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(translate(if (playlist == null) "New Smart Playlist" else "Edit Smart Playlist"), style = MaterialTheme.typography.titleLarge)
-            OutlinedTextField(name, { name = it }, label = { Text(translate("Playlist name")) }, modifier = Modifier.fillMaxWidth(), singleLine = true,
-                trailingIcon = {
-                    IconToggleButton(definition.current, { definition = definition.copy(current = it) }, enabled = source != null,
-                        modifier = Modifier.semantics { contentDescription = if (definition.current) source?.name.orEmpty() else "Rufin" }) {
-                        if (definition.current && source != null) SourceIcon(source.kind)
-                        else Image(painterResource(R.drawable.app_icon), null, Modifier.size(24.dp))
-                    }
-                })
+            OutlinedTextField(name, { name = it }, label = { Text(translate("Playlist name")) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            SmartChoice(translate("Source"), (listOf<String?>(null) + sources.map { it.id } + listOfNotNull(definition.sourceId)).distinct(),
+                definition.sourceId, { id -> sources.firstOrNull { it.id == id }?.name ?: id ?: translate("All") }) {
+                definition = definition.copy(sourceId = it)
+            }
             Text(translate("All"), style = MaterialTheme.typography.titleSmall)
             all.forEach { (id, rule) -> key(id) {
                 SmartRuleEditor(rule, library, { changed -> all = all.map { if (it.first == id) id to changed else it } },

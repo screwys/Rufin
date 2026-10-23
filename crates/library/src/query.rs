@@ -20,7 +20,6 @@ pub enum Collection {
     Playlist(PlaylistKey),
     Smart {
         key: SmartPlaylistKey,
-        source: Option<SourceKey>,
         now: i64,
     },
     History {
@@ -444,7 +443,7 @@ list_windows!(smart_playlists, page_smart_playlists, SmartPlaylistRow, connectio
         unreachable!()
     };
     crate::smart_playlists::load_smart_playlist_requested(
-        connection, read.source, requested, read.folder, now,
+        connection, requested, now,
     )
 });
 
@@ -596,12 +595,10 @@ pub(crate) async fn member_query_on(
 ) -> LibraryResult<OrderedQuery> {
     let sort = read.effective_sort();
     let mut query = match &read.collection {
-        Collection::Smart { key, source, now } => {
+        Collection::Smart { key, now, .. } => {
             crate::smart_playlists::smart_query(
                 connection,
-                *source,
                 *key,
-                read.folder,
                 &read.filter,
                 read.sort,
                 read.descending,

@@ -322,11 +322,12 @@ pub fn playlist_drag_matches(
 
 pub fn drop_playlist_on_folder(
     menus: &Rc<MediaMenus>,
-    folder: library::PlaylistFolderRow,
+    folder_key: library::PlaylistFolderKey,
+    smart: bool,
     source: gtk_widgets::media_drag::MediaDragSource,
 ) -> bool {
     use gtk_widgets::media_drag::{CollectionTargets, MediaDragSource};
-    if !playlist_drag_matches(&source, folder.smart) {
+    if !playlist_drag_matches(&source, smart) {
         return false;
     }
     let targets = match source {
@@ -345,21 +346,17 @@ pub fn drop_playlist_on_folder(
             let collections = task.await.map_err(|error| error.to_string())??;
             for collection in collections {
                 let member = match collection {
-                    library::Collection::Playlist(key) if !folder.smart => {
+                    library::Collection::Playlist(key) if !smart => {
                         library::PlaylistFolderMember::Playlist { key }
                     }
-                    library::Collection::Smart { key, .. } if folder.smart => {
+                    library::Collection::Smart { key, .. } if smart => {
                         library::PlaylistFolderMember::SmartPlaylist { key }
                     }
                     _ => continue,
                 };
-                rufin_core::playlists::move_playlist_to_folder(
-                    &source,
-                    member,
-                    Some(folder.folder_key),
-                )
-                .await
-                .map_err(|error| error.to_string())?;
+                rufin_core::playlists::move_playlist_to_folder(&source, member, Some(folder_key))
+                    .await
+                    .map_err(|error| error.to_string())?;
             }
             Ok::<_, String>(())
         }

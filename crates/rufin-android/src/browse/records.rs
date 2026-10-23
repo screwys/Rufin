@@ -312,7 +312,10 @@ impl From<library::PlaylistRow> for AndroidBrowseRow {
 }
 impl From<library::SmartPlaylistRow> for AndroidBrowseRow {
     fn from(row: library::SmartPlaylistRow) -> Self {
-        let title = Some(rufin_core::playlists::smart_playlist_display_name(&row));
+        let title = Some(rufin_core::playlists::smart_playlist_display_name(
+            &row.object_id,
+            &row.name,
+        ));
         let pin = Some(SidebarPin::SmartPlaylist {
             playlist_id: row.object_id.clone(),
         });

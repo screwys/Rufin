@@ -555,7 +555,7 @@ impl SourceOwner {
 
     pub(crate) async fn close_storage(&self) {
         self.shared.started.store(false, Ordering::Release);
-        self.release_selected(true).await;
+        self.release_selected().await;
         self.shared
             .clients
             .lock()
@@ -575,7 +575,7 @@ impl SourceOwner {
     {
         let _lane = self.shared.lane.lock().await;
         if setup {
-            self.release_selected(true).await;
+            self.release_selected().await;
         }
         let result = restore().await;
         if setup
@@ -630,7 +630,7 @@ impl SourceOwner {
             .selected()
             .is_none_or(|selected| self.cached_client(&selected.source_id).is_none());
         if reconnect {
-            self.release_selected(true).await;
+            self.release_selected().await;
             if let Some(source) = current
                 .sources
                 .selected_source_id
@@ -938,7 +938,7 @@ impl SourceOwner {
         if !self.shared.selection_is_current(&acquisition) {
             return Ok(());
         }
-        self.release_selected(false).await;
+        self.cancel_selected_jobs();
         source = source.map(|source| self.cache_connected(&configured, source));
         *self
             .shared
@@ -980,15 +980,9 @@ impl SourceOwner {
         Ok(())
     }
 
-    async fn release_selected(&self, cancel_selection: bool) {
-        if cancel_selection {
-            self.shared.cancel_selection();
-        }
-        for job in [&self.shared.connection, &self.shared.album_release] {
-            if let Some(job) = job.lock().unwrap_or_else(|p| p.into_inner()).take() {
-                job.abort();
-            }
-        }
+    async fn release_selected(&self) {
+        self.shared.cancel_selection();
+        self.cancel_selected_jobs();
         let released = self
             .shared
             .selected
@@ -997,10 +991,18 @@ impl SourceOwner {
             .take()
             .is_some();
         if released {
-            if let Ok(playback) = self.shared.playback() {
-                playback.cancel_loudness_analysis();
-            }
             self.shared.send(SourceEvent::ReleaseSelected).await;
+        }
+    }
+
+    fn cancel_selected_jobs(&self) {
+        for job in [&self.shared.connection, &self.shared.album_release] {
+            if let Some(job) = job.lock().unwrap_or_else(|p| p.into_inner()).take() {
+                job.abort();
+            }
+        }
+        if let Ok(playback) = self.shared.playback() {
+            playback.cancel_loudness_analysis();
         }
     }
 
@@ -2217,7 +2219,7 @@ impl SourceOwner {
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
                     .clear();
-                owner.release_selected(true).await;
+                owner.release_selected().await;
                 if let Some(selected) = owner.shared.settings.load().sources.selected_source_id {
                     let selected_owner = owner.clone();
                     owner.shared.runtime.spawn(async move {
@@ -2672,7 +2674,7 @@ impl SourceOwner {
                 .selected()
                 .filter(|selected| selected.source_id == source_id);
             if selected.is_some() {
-                owner.release_selected(true).await;
+                owner.release_selected().await;
             }
             let playback = owner.shared.playback().ok();
             let identity = owner
@@ -4057,7 +4059,7 @@ mod source_tests {
             .0
             .clone();
         *owner.shared.selected.lock().unwrap() = Some(selected_library.clone());
-        owner.release_selected(false).await;
+        owner.release_selected().await;
         assert!(!observer.cancellation().load(Ordering::Acquire));
         assert!(!owner.start_observer(selected_library.clone(), client, false));
         for (metadata, activity, artwork, selected, visible) in [
@@ -4882,7 +4884,7 @@ mod source_tests {
                 }
                 assert_eq!(
                     assignments,
-                    vec![Some(first.clone()), None, Some(second.clone()), None]
+                    vec![Some(first.clone()), Some(second.clone()), None]
                 );
             }
             owner.shared.clients.lock().unwrap().clear();

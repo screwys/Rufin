@@ -20,15 +20,6 @@ pub(super) struct StartupState {
 const STARTUP_ROUTE_REVEAL_MAX_MS: u64 = 3_000;
 
 impl Shell {
-    pub(crate) fn enter_startup_loading(self: &Rc<Self>) {
-        self.startup.initial_launch.set(false);
-        self.startup.route_revealed.set(false);
-        self.cancel_startup_route_reveal();
-        self.clear_mounted_routes();
-        self.render_startup_loading_view();
-        self.update_layout();
-    }
-
     pub(crate) fn render_startup_loading_view(&self) {
         self.chrome
             .root_stack
@@ -112,7 +103,7 @@ impl Shell {
                 .as_ref()
                 .is_some_and(|content| content.is_ready())
             && width > 1
-            && self.navigation.pin_cancellation.borrow().is_none()
+            && self.navigation.pins_ready()
     }
 
     fn commit_startup_route_reveal(self: &Rc<Self>) {

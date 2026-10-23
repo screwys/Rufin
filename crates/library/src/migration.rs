@@ -383,16 +383,10 @@ async fn import_smart(
     let mut rank = 0;
     while let Some(row) = rows.try_next().await? {
         let result = async {
-            let mut definition: serde_json::Value = serde_json::from_str(
+            let definition: serde_json::Value = serde_json::from_str(
                 &string(&row, "definition_json")
                     .ok_or_else(|| LibraryError::InvalidStore("Smart rules unreadable".into()))?,
             )?;
-            if let Some(object) = definition.as_object_mut() {
-                object
-                    .entry("current")
-                    .or_insert(serde_json::Value::Bool(true));
-                object.remove("source_id");
-            }
             let record = crate::SmartPlaylistWrite {
                 artwork_binding: None,
                 artwork_bytes: None,

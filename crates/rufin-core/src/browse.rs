@@ -647,17 +647,13 @@ impl crate::source::SourceOwner {
                 })
             }
             Route::SmartPlaylistDetail(key) => database
-                .smart_playlist_rows(source, &[*key], folder, now, cancel)
+                .smart_playlist_rows(&[*key], now, cancel)
                 .await?
                 .pop()
                 .map(|row| {
                     (
                         DetailSummary::SmartPlaylist(Box::new(row)),
-                        member(Collection::Smart {
-                            key: *key,
-                            source,
-                            now,
-                        }),
+                        member(Collection::Smart { key: *key, now }),
                     )
                 }),
             Route::GenreDetail(key) => database

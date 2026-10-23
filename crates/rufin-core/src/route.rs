@@ -71,6 +71,31 @@ pub enum Route {
     },
 }
 
+impl Route {
+    pub fn requires_selected_source(&self) -> bool {
+        matches!(
+            self,
+            Self::Home
+                | Self::Search
+                | Self::Favorites
+                | Self::Albums
+                | Self::Tracks
+                | Self::Artists
+                | Self::AlbumArtists
+                | Self::Genres
+                | Self::Moods
+                | Self::Folders { .. }
+        )
+    }
+    pub fn uses_selected_source(&self) -> bool {
+        self.requires_selected_source()
+            || matches!(
+                self,
+                Self::Playlists | Self::PlaylistFolder { smart: false, .. }
+            )
+    }
+}
+
 pub struct SidebarRouteDescriptor {
     pub stable_id: &'static str,
     pub title: &'static str,

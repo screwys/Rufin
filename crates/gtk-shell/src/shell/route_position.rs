@@ -61,11 +61,6 @@ impl RoutePositionMemory {
         self.recency.push_back(key.clone());
         Some(position)
     }
-
-    pub(super) fn clear(&mut self) {
-        self.positions.clear();
-        self.recency.clear();
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -378,7 +373,7 @@ mod tests {
     use super::{RoutePosition, RoutePositionKey, RoutePositionMemory, clamp_route_position};
 
     #[test]
-    fn position_memory_is_bounded_and_clears_with_the_source() {
+    fn position_memory_is_bounded_and_keeps_other_routes() {
         let home = RoutePositionKey::new(Route::Home);
         let tracks = RoutePositionKey::new(Route::Tracks);
         let albums = RoutePositionKey::new(Route::Albums);
@@ -430,11 +425,6 @@ mod tests {
             memory.restore(&albums).map(|position| position.value),
             Some(360.0)
         );
-
-        memory.clear();
-
-        assert_eq!(memory.restore(&home), None);
-        assert_eq!(memory.restore(&albums), None);
     }
 
     #[test]

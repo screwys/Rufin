@@ -57,40 +57,8 @@ pub struct SidebarRouteItemSettings {
     pub item: SidebarRouteItem,
     pub visible: bool,
 }
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
-pub enum SidebarPin {
-    Album {
-        source_id: SourceId,
-        album_id: String,
-    },
-    Artist {
-        source_id: SourceId,
-        artist_id: String,
-        #[serde(default, skip_serializing_if = "is_false")]
-        album_artist: bool,
-    },
-    Genre {
-        source_id: SourceId,
-        genre_id: String,
-    },
-    Playlist {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        source_id: Option<SourceId>,
-        playlist_id: String,
-    },
-    SmartPlaylist {
-        playlist_id: String,
-    },
-    PlaylistFolder {
-        folder_id: String,
-        smart: bool,
-    },
-}
+pub use library::SidebarPin;
 
-fn is_false(value: &bool) -> bool {
-    !*value
-}
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SidebarSettings {
     #[serde(default = "default_sidebar_route_items")]

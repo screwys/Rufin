@@ -278,11 +278,10 @@ impl SmartPlaylistActivityPeriod {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct SmartPlaylistDefinition {
-    #[serde(default)]
-    pub current: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<crate::SourceId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub match_all: Vec<SmartPlaylistRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -298,7 +297,7 @@ pub struct SmartPlaylistDefinition {
 impl Default for SmartPlaylistDefinition {
     fn default() -> Self {
         Self {
-            current: false,
+            source_id: None,
             match_all: Vec::new(),
             match_any: Vec::new(),
             sort_field: SmartPlaylistSort::Title,
@@ -315,7 +314,7 @@ fn default_smart_playlists() -> [(&'static str, &'static str, SmartPlaylistDefin
             MOST_PLAYED_OBJECT_ID,
             "Most Played",
             SmartPlaylistDefinition {
-                current: false,
+                source_id: None,
                 match_all: vec![SmartPlaylistRule {
                     field: SmartPlaylistRuleField::Played,
                     operator: SmartPlaylistRuleOperator::Is,
@@ -332,7 +331,7 @@ fn default_smart_playlists() -> [(&'static str, &'static str, SmartPlaylistDefin
             NEVER_PLAYED_OBJECT_ID,
             "Never Played",
             SmartPlaylistDefinition {
-                current: false,
+                source_id: None,
                 match_all: vec![SmartPlaylistRule {
                     field: SmartPlaylistRuleField::Played,
                     operator: SmartPlaylistRuleOperator::Is,
@@ -349,7 +348,7 @@ fn default_smart_playlists() -> [(&'static str, &'static str, SmartPlaylistDefin
             MOST_SKIPPED_OBJECT_ID,
             "Most Skipped",
             SmartPlaylistDefinition {
-                current: false,
+                source_id: None,
                 match_all: vec![SmartPlaylistRule {
                     field: SmartPlaylistRuleField::SkipCount,
                     operator: SmartPlaylistRuleOperator::Above,
@@ -388,9 +387,7 @@ pub struct SmartPlaylistValueSuggestions {
 
 pub(crate) async fn load_smart_playlist_requested(
     connection: &mut SqliteConnection,
-    source: Option<SourceKey>,
     requested: crate::query::RequestedKeys,
-    folder: Option<FolderKey>,
     now: i64,
 ) -> LibraryResult<Vec<SmartPlaylistRow>> {
     let sql = format!(
@@ -413,8 +410,7 @@ pub(crate) async fn load_smart_playlist_requested(
         .iter()
         .map(|row| (row.smart_playlist_key.raw(), row.definition.clone()))
         .collect::<Vec<_>>();
-    let membership =
-        smart_membership_from_definitions(connection, source, folder, now, &definitions).await?;
+    let membership = smart_membership_from_definitions(connection, now, &definitions).await?;
     let totals = sqlx::query_as::<_,(i64,i64,i64,i64)>(AssertSqlSafe(format!(
         "{membership} SELECT selected.definition_key,count(*),COALESCE(sum(track.duration_millis),0),
          count(CASE WHEN track.is_downloaded THEN 1 END)
@@ -427,34 +423,12 @@ pub(crate) async fn load_smart_playlist_requested(
             row.downloaded_count = downloaded;
         }
     }
-    let needs_context = source.is_some()
-        && result.iter().any(|row| {
-            row.definition.current
-                && row.artwork_binding.as_ref().is_none_or(|binding| {
-                    serde_json::from_slice::<Vec<crate::ArtworkCandidate>>(binding).is_ok_and(
-                        |candidates| {
-                            !candidates
-                                .iter()
-                                .any(crate::ArtworkCandidate::is_automatic_playlist)
-                        },
-                    )
-                })
-        });
-    let context: (Option<String>, Option<String>) = if needs_context {
-        sqlx::query_as("SELECT (SELECT object_id FROM sources WHERE source_key=?1),(SELECT object_id FROM folders WHERE folder_key=?2)").bind(source).bind(folder).fetch_one(&mut *connection).await?
-    } else {
-        (None, None)
-    };
     for row in &mut result {
         normalize_definition(&mut row.definition)?;
         row.artwork_binding = Some(crate::artwork::playlist_artwork(
             row.artwork_binding.take(),
             (true, None, row.object_id.clone()),
-            if row.definition.current {
-                context.clone()
-            } else {
-                (None, None)
-            },
+            (None, None),
         )?);
     }
     Ok(result)
@@ -553,9 +527,7 @@ impl Database {
 
     pub async fn smart_playlist_rows(
         &self,
-        source: Option<SourceKey>,
         keys: &[SmartPlaylistKey],
-        folder: Option<FolderKey>,
         now: i64,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<SmartPlaylistRow>> {
@@ -563,9 +535,7 @@ impl Database {
         let mut transaction = connection.begin().await?;
         let result = load_smart_playlist_requested(
             &mut transaction,
-            source,
             crate::query::RequestedKeys::batch(keys)?,
-            folder,
             now,
         )
         .await?;
@@ -576,13 +546,10 @@ impl Database {
     pub async fn random_smart_playlist_artwork(
         &self,
         key: SmartPlaylistKey,
-        source: Option<SourceKey>,
-        folder: Option<FolderKey>,
         now: i64,
     ) -> LibraryResult<Vec<Vec<u8>>> {
         let mut connection = self.acquire_reader().await?;
-        let policy =
-            smart_membership_sql(&mut connection, source, folder, now, Some(&[key])).await?;
+        let policy = smart_membership_sql(&mut connection, now, Some(&[key])).await?;
         let choices =
             crate::artwork::playlist_artwork_choices_on(&mut connection, &policy, &[], true)
                 .await?;
@@ -869,7 +836,7 @@ mod source_window_tests {
             .await
             .unwrap();
         let definition = SmartPlaylistDefinition {
-            current: false,
+            source_id: None,
             match_all: vec![SmartPlaylistRule {
                 field: SmartPlaylistRuleField::PlayCount,
                 operator: SmartPlaylistRuleOperator::Above,
@@ -895,7 +862,7 @@ mod source_window_tests {
             }
             let sql = format!(
                 "{} SELECT media_uri FROM selected ORDER BY {SMART_RESULT_ORDER}",
-                smart_membership_sql(connection, None, None, 1000000, Some(&[key]))
+                smart_membership_sql(connection, 1000000, Some(&[key]))
                     .await
                     .unwrap()
             );
@@ -1184,8 +1151,6 @@ fn validate_definition(definition: &SmartPlaylistDefinition) -> LibraryResult<()
 
 pub(crate) async fn smart_membership_sql(
     connection: &mut SqliteConnection,
-    source: Option<SourceKey>,
-    folder: Option<FolderKey>,
     now: i64,
     keys: Option<&[SmartPlaylistKey]>,
 ) -> LibraryResult<String> {
@@ -1196,13 +1161,11 @@ pub(crate) async fn smart_membership_sql(
     ).bind(&keys_json).fetch_all(&mut *connection).await?
         .into_iter().map(|(key,json)| Ok((key,serde_json::from_str::<SmartPlaylistDefinition>(&json)?)))
         .collect::<LibraryResult<Vec<_>>>()?;
-    smart_membership_from_definitions(connection, source, folder, now, &definitions).await
+    smart_membership_from_definitions(connection, now, &definitions).await
 }
 
 async fn smart_membership_from_definitions(
     connection: &mut SqliteConnection,
-    source: Option<SourceKey>,
-    folder: Option<FolderKey>,
     now: i64,
     definitions: &[(i64, SmartPlaylistDefinition)],
 ) -> LibraryResult<String> {
@@ -1216,7 +1179,7 @@ async fn smart_membership_from_definitions(
         )?)
     );
     let mut sql = format!(
-        "WITH definitions AS (SELECT smart_playlist_key definition_key,position,normalized_name,COALESCE(json_extract(definition_json,'$.current'),0) current_scope FROM smart_playlists WHERE {admitted})"
+        "WITH definitions AS (SELECT smart_playlist_key definition_key,position,normalized_name FROM smart_playlists WHERE {admitted})"
     );
     let mut members = Vec::new();
     let mut periods = std::collections::BTreeSet::new();
@@ -1255,16 +1218,11 @@ async fn smart_membership_from_definitions(
         }
 
         let mut scope = "owner.indexed=1".to_string();
-        if definition.current {
+        if let Some(source) = &definition.source_id {
             scope.push_str(&format!(
-                " AND owner.source_key={}",
-                source
-                    .map(|key| key.raw().to_string())
-                    .unwrap_or_else(|| "NULL".into())
+                " AND owner.source_key=(SELECT source_key FROM sources WHERE object_id={})",
+                sql_text(source.as_str())
             ));
-            if let Some(folder) = folder {
-                scope.push_str(&format!(" AND EXISTS(SELECT 1 FROM track_folders WHERE track_key=owner.track_key AND folder_key={})",folder.raw()));
-            }
         }
         let positive = definition.match_all.iter().find_map(|rule| {
             match (rule.field, rule.operator, &rule.value) {
@@ -1305,7 +1263,7 @@ async fn smart_membership_from_definitions(
             format!("({candidates}{baseline}) played CROSS JOIN tracks owner USING(track_key)")
         } else if activity && definition.match_all.is_empty() && definition.match_any.is_empty() {
             // Ranking needs only the indexed key, URI and sort fields before the limit.
-            let index = if definition.current {
+            let index = if definition.source_id.is_some() {
                 "tracks_local_play_order_idx"
             } else {
                 "tracks_global_play_order_idx"
@@ -1465,8 +1423,6 @@ impl Database {
     pub async fn export_smart_playlist_file(
         &self,
         key: SmartPlaylistKey,
-        source: Option<SourceKey>,
-        folder: Option<FolderKey>,
         now: i64,
         file: &std::path::Path,
         mode: crate::PlaylistPathMode,
@@ -1476,7 +1432,7 @@ impl Database {
         let (_export, mut connection) = self.acquire_export().await?;
         let mut output =
             crate::playlist_format::PlaylistWriter::new(output, file, mode, None, None)?;
-        let query = smart_query(&mut connection, source, key, folder, "", None, false, now).await?;
+        let query = smart_query(&mut connection, key, "", None, false, now).await?;
         let rows = query.select(&format!(
             "track.*,row_number() OVER(ORDER BY {}) result_position",
             query.order.join(",")
@@ -1499,16 +1455,13 @@ impl Database {
 
 pub(crate) async fn smart_parent_query(
     connection: &mut SqliteConnection,
-    source: Option<SourceKey>,
-    folder: Option<FolderKey>,
     now: i64,
     requested: crate::query::RequestedKeys,
 ) -> LibraryResult<crate::query::OrderedQuery> {
     let definitions=sqlx::query_as_with::<_,(i64,String),_>(AssertSqlSafe(format!(
         "SELECT playlist.smart_playlist_key,playlist.definition_json FROM ({}) requested JOIN smart_playlists playlist ON playlist.smart_playlist_key=requested.value ORDER BY requested.ordinal",requested.sql
     )),requested.arguments.clone()).fetch_all(&mut *connection).await?.into_iter().map(|(key,json)| Ok((key,serde_json::from_str(&json)?))).collect::<LibraryResult<Vec<_>>>()?;
-    let membership =
-        smart_membership_from_definitions(connection, source, folder, now, &definitions).await?;
+    let membership = smart_membership_from_definitions(connection, now, &definitions).await?;
     Ok(crate::query::OrderedQuery {
         key: "track.track_key".into(),
         text: None,
@@ -1525,15 +1478,13 @@ pub(crate) async fn smart_parent_query(
 
 pub(crate) async fn smart_query(
     connection: &mut SqliteConnection,
-    source: Option<SourceKey>,
     key: SmartPlaylistKey,
-    folder: Option<FolderKey>,
     filter: &str,
     sort: Option<crate::CatalogSort>,
     descending: bool,
     now: i64,
 ) -> LibraryResult<crate::query::OrderedQuery> {
-    let membership = smart_membership_sql(connection, source, folder, now, Some(&[key])).await?;
+    let membership = smart_membership_sql(connection, now, Some(&[key])).await?;
     let mut query = crate::query::OrderedQuery {
         key: "track.track_key".into(),
         text: sort.and_then(|sort| sort.section_text(false)),
@@ -1556,8 +1507,6 @@ pub(crate) async fn smart_list_query(
     read: &crate::ListRead,
     now: i64,
 ) -> LibraryResult<crate::query::OrderedQuery> {
-    let source = read.source;
-    let folder = read.folder;
     let sort = read.sort;
     let descending = read.descending;
     let filter = &read.filter;
@@ -1573,7 +1522,7 @@ pub(crate) async fn smart_list_query(
         CatalogSort::Duration => "playlist.duration_millis",
         _ => unreachable!("playlist sort field"),
     };
-    let from = if folder.is_none() && matches!(sort, CatalogSort::Position | CatalogSort::Title) {
+    let from = if matches!(sort, CatalogSort::Position | CatalogSort::Title) {
         "smart_playlists playlist".into()
     } else {
         let keys = if let Some(key) = playlist_folder {
@@ -1588,10 +1537,9 @@ pub(crate) async fn smart_list_query(
         } else {
             None
         };
-        let policy = smart_membership_sql(connection, source, folder, now, keys.as_deref()).await?;
+        let policy = smart_membership_sql(connection, now, keys.as_deref()).await?;
         format!(
-            "({policy}, totals AS (SELECT definition_key,count(*) track_count,COALESCE(sum(track.duration_millis),0) duration_millis FROM selected JOIN tracks track INDEXED BY tracks_duration_idx USING(track_key) GROUP BY definition_key) SELECT definitions.*,definition_key smart_playlist_key,COALESCE(track_count,0) track_count,COALESCE(duration_millis,0) duration_millis FROM definitions LEFT JOIN totals USING(definition_key) WHERE current_scope=0 OR {} OR track_count>0) playlist",
-            if folder.is_none() { "1" } else { "0" }
+            "({policy}, totals AS (SELECT definition_key,count(*) track_count,COALESCE(sum(track.duration_millis),0) duration_millis FROM selected JOIN tracks track INDEXED BY tracks_duration_idx USING(track_key) GROUP BY definition_key) SELECT definitions.*,definition_key smart_playlist_key,COALESCE(track_count,0) track_count,COALESCE(duration_millis,0) duration_millis FROM definitions LEFT JOIN totals USING(definition_key)) playlist"
         )
     };
     let direction = if descending { "DESC" } else { "ASC" };

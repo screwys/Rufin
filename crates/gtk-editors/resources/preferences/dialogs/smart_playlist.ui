@@ -209,14 +209,9 @@
                           </object>
                         </child>
                         <child>
-                          <object class="GtkToggleButton" id="owner">
-                            <property name="hexpand">true</property>
-                            <property name="halign">end</property>
+                          <object class="GtkDropDown" id="source">
+                            <property name="tooltip-text" translatable="yes">Source</property>
                             <property name="valign">end</property>
-                            <style>
-                              <class name="flat"/>
-                              <class name="circular"/>
-                            </style>
                           </object>
                         </child>
                       </object>

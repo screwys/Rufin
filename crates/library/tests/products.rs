@@ -126,21 +126,23 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         }
     }
     let external = "https://example.test/outside-catalog.flac".to_string();
-    db.create_playlist(
-        None,
-        "Outside",
-        &library::MemberSelection::Uris(((std::slice::from_ref(&external)).to_vec()).into()),
-    )
-    .await
-    .unwrap();
+    let (_, outside_id) = db
+        .create_playlist(
+            None,
+            "Outside",
+            &library::MemberSelection::Uris(((std::slice::from_ref(&external)).to_vec()).into()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
     let all = db
         .create_smart_playlist("All", &SmartPlaylistDefinition::default())
         .await
         .unwrap();
     db.create_smart_playlist(
-        "Current",
+        "Source",
         &SmartPlaylistDefinition {
-            current: true,
+            source_id: Some(library::SourceId::new("source")),
             ..Default::default()
         },
     )
@@ -156,7 +158,22 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         )
         .await
         .unwrap();
-    for source in [None, Some(fixture.source)] {
+    let empty = db
+        .create_smart_playlist(
+            "Empty",
+            &SmartPlaylistDefinition {
+                source_id: Some(library::SourceId::new("absent")),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let other = db
+        .reconcile_source(&library::SourceId::new("other"), "local", "Other")
+        .await
+        .unwrap()
+        .source;
+    for source in [None, Some(fixture.source), Some(other)] {
         for folder in [None, Some(fixture.folder)] {
             for sort in [
                 CatalogSort::Position,
@@ -186,6 +203,22 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                         .map(|row| row.smart_playlist_key)
                         .collect::<Vec<_>>();
                     assert_eq!(count, order.len());
+                    assert_eq!(
+                        count, 4,
+                        "source and folder selection cannot hide a smart playlist"
+                    );
+                    for row in &rows {
+                        let expected = match row.name.as_str() {
+                            "Limited" => 1,
+                            "Empty" => 0,
+                            _ => fixture.tracks.len() as i64,
+                        };
+                        assert_eq!(row.track_count, expected);
+                        if row.smart_playlist_key == limited {
+                            assert_eq!(row.definition.limit, Some(1));
+                        }
+                    }
+
                     let mut actual = Vec::new();
                     for offset in 0..=order.len() {
                         actual.extend(
@@ -213,11 +246,173 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             }
         }
     }
+    let album_id = library::source_entity_parts(&fixture.album_uris[0])
+        .unwrap()
+        .2;
+    let artist_id = library::source_entity_parts(&fixture.artist_uris[0])
+        .unwrap()
+        .2;
+    let genre = db
+        .genres(&[fixture.genre], None, &cancel)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    let smart_rows = db
+        .smart_playlist_rows(&[all, limited, empty], 1000, &cancel)
+        .await
+        .unwrap();
+    let regular_folder = db
+        .create_playlist_folder("Pinned playlists", false)
+        .await
+        .unwrap();
+    let smart_folder = db
+        .create_playlist_folder("Pinned smart playlists", true)
+        .await
+        .unwrap();
+    let outside = db
+        .playlist_key_by_identity(None, &outside_id, &cancel)
+        .await
+        .unwrap()
+        .unwrap();
+    db.move_playlist_to_folder(
+        library::PlaylistFolderMember::Playlist { key: outside },
+        Some(regular_folder),
+    )
+    .await
+    .unwrap();
+    db.move_playlist_to_folder(
+        library::PlaylistFolderMember::SmartPlaylist { key: limited },
+        Some(smart_folder),
+    )
+    .await
+    .unwrap();
+    db.move_playlist_to_folder(
+        library::PlaylistFolderMember::SmartPlaylist { key: all },
+        Some(smart_folder),
+    )
+    .await
+    .unwrap();
+    let mut raw = connection(&fixture.path).await;
+    let folders: Vec<(i64, String)> =
+        sqlx::query_as("SELECT folder_key,object_id FROM playlist_folders ORDER BY folder_key")
+            .fetch_all(&mut raw)
+            .await
+            .unwrap();
+    let source_id = library::SourceId::new("source");
+    let pins = vec![
+        library::SidebarPin::Album {
+            source_id: source_id.clone(),
+            album_id,
+        },
+        library::SidebarPin::Artist {
+            source_id: source_id.clone(),
+            artist_id: artist_id.clone(),
+            album_artist: false,
+        },
+        library::SidebarPin::Artist {
+            source_id: source_id.clone(),
+            artist_id,
+            album_artist: true,
+        },
+        library::SidebarPin::Genre {
+            source_id: source_id.clone(),
+            genre_id: genre.object_id.clone(),
+        },
+        library::SidebarPin::Playlist {
+            source_id: None,
+            playlist_id: outside_id,
+        },
+        library::SidebarPin::SmartPlaylist {
+            playlist_id: smart_rows[0].object_id.clone(),
+        },
+        library::SidebarPin::SmartPlaylist {
+            playlist_id: smart_rows[1].object_id.clone(),
+        },
+        library::SidebarPin::PlaylistFolder {
+            folder_id: folders[0].1.clone(),
+            smart: false,
+        },
+        library::SidebarPin::PlaylistFolder {
+            folder_id: folders[1].1.clone(),
+            smart: true,
+        },
+        library::SidebarPin::SmartPlaylist {
+            playlist_id: smart_rows[2].object_id.clone(),
+        },
+        library::SidebarPin::Album {
+            source_id,
+            album_id: "missing".into(),
+        },
+    ];
+    let headers = db.sidebar_pin_rows(&pins, &cancel).await.unwrap();
+    assert_eq!(
+        headers.iter().map(|row| &row.pin).collect::<Vec<_>>(),
+        pins[..10].iter().collect::<Vec<_>>()
+    );
+    assert_eq!(headers[4].totals, Some((1, 0)));
+    assert!(headers[7].totals.is_none());
+    assert!(
+        headers[5].totals.is_none() && headers[6].totals.is_none() && headers[8].totals.is_none()
+    );
+    let rows = db.sidebar_pin_totals(headers, 1000, &cancel).await.unwrap();
+    assert_eq!(
+        rows[5].totals,
+        Some((smart_rows[0].track_count, smart_rows[0].duration_millis))
+    );
+    assert_eq!(
+        rows[6].totals,
+        Some((smart_rows[1].track_count, smart_rows[1].duration_millis))
+    );
+    assert_eq!(
+        rows[8].totals,
+        Some((
+            smart_rows[0].track_count + smart_rows[1].track_count,
+            smart_rows[0].duration_millis + smart_rows[1].duration_millis
+        ))
+    );
+    assert_eq!(rows[7].totals, Some((1, 0)));
+    assert_eq!(rows[9].totals, Some((0, 0)));
+    let album = db
+        .album(&fixture.album_uris[0], false, &cancel)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        rows[0].totals,
+        Some((album.summary.track_count, album.summary.duration_millis))
+    );
+    assert_eq!(
+        rows[0].artwork,
+        album.artwork_binding.iter().cloned().collect::<Vec<_>>()
+    );
+    for (index, role) in [(1, false), (2, true)] {
+        let artist = db
+            .artist(&fixture.artist_uris[0], role, false, &cancel)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rows[index].totals,
+            Some((artist.summary.track_count, artist.summary.duration_millis))
+        );
+    }
+    assert_eq!(
+        rows[3].totals,
+        Some((genre.summary.track_count, genre.summary.duration_millis))
+    );
+    assert_eq!(
+        rows[3].artwork,
+        genre
+            .artwork_binding
+            .as_ref()
+            .map(std::slice::from_ref)
+            .unwrap_or(&genre.representative_artwork)
+    );
     let order = db
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Smart {
                 key: all,
-                source: Some(fixture.source),
                 now: 1000,
             })
             .selection(),
@@ -232,7 +427,6 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         actual.extend(
             (&library::MemberRead::new(library::Collection::Smart {
                 key: all,
-                source: Some(fixture.source),
                 now: 1000,
             }))
                 .rows(&db, offset, 1, &cancel)
@@ -253,7 +447,6 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             filter: ("Beta").into(),
             ..library::MemberRead::new(library::Collection::Smart {
                 key: limited,
-                source: Some(fixture.source),
                 now: 1000
             })
         })
@@ -278,7 +471,6 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         filter: ("i\u{307}st").into(),
         ..library::MemberRead::new(library::Collection::Smart {
             key: all,
-            source: Some(fixture.source),
             now: 1000,
         })
     })
@@ -303,14 +495,12 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             library::MemberRead {
                 collection: library::Collection::Smart {
                     key: all,
-                    source: Some(fixture.source),
                     now: 1000,
                 },
                 sort: Some(library::CatalogSort::Title),
                 filter: "i\u{307}st".into(),
                 ..library::MemberRead::new(library::Collection::Smart {
                     key: all,
-                    source: Some(fixture.source),
                     now: 1000,
                 })
             }
@@ -1168,12 +1358,8 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .unwrap();
     let members = database
         .selected_track_uris(
-            &library::MemberRead::new(library::Collection::Smart {
-                key: key,
-                source: None,
-                now: 500,
-            })
-            .selection(),
+            &library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
+                .selection(),
             None,
             &cancel,
         )
@@ -1198,17 +1384,9 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         CatalogSort::Favorite,
     ] {
         let ascending = (&library::MemberRead {
-            collection: library::Collection::Smart {
-                key: key,
-                source: None,
-                now: 500,
-            },
+            collection: library::Collection::Smart { key: key, now: 500 },
             sort: Some(sort),
-            ..library::MemberRead::new(library::Collection::Smart {
-                key: key,
-                source: None,
-                now: 500,
-            })
+            ..library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
         })
             .rows(&database, 0, 64, &cancel)
             .await
@@ -1222,18 +1400,10 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
             .map(|row| row.media_uri.clone())
             .collect::<Vec<_>>();
         let descending = (&library::MemberRead {
-            collection: library::Collection::Smart {
-                key: key,
-                source: None,
-                now: 500,
-            },
+            collection: library::Collection::Smart { key: key, now: 500 },
             sort: Some(sort),
             descending: true,
-            ..library::MemberRead::new(library::Collection::Smart {
-                key: key,
-                source: None,
-                now: 500,
-            })
+            ..library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
         })
             .rows(&database, 0, 64, &cancel)
             .await
@@ -1331,18 +1501,10 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         ("", uris.clone()),
     ] {
         let order = (&library::MemberRead {
-            collection: library::Collection::Smart {
-                key: key,
-                source: None,
-                now: 500,
-            },
+            collection: library::Collection::Smart { key: key, now: 500 },
             sort: Some(CatalogSort::Title),
             filter: (query).into(),
-            ..library::MemberRead::new(library::Collection::Smart {
-                key: key,
-                source: None,
-                now: 500,
-            })
+            ..library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
         })
             .rows(&database, 0, 64, &cancel)
             .await
@@ -1371,12 +1533,8 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .unwrap();
     let limited = database
         .selected_track_uris(
-            &library::MemberRead::new(library::Collection::Smart {
-                key: key,
-                source: None,
-                now: 500,
-            })
-            .selection(),
+            &library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
+                .selection(),
             None,
             &cancel,
         )
@@ -1384,17 +1542,9 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .unwrap();
     assert_eq!(limited, members[..3]);
     let order = (&library::MemberRead {
-        collection: library::Collection::Smart {
-            key: key,
-            source: None,
-            now: 500,
-        },
+        collection: library::Collection::Smart { key: key, now: 500 },
         sort: Some(CatalogSort::TrackNumber),
-        ..library::MemberRead::new(library::Collection::Smart {
-            key: key,
-            source: None,
-            now: 500,
-        })
+        ..library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
     })
         .rows(&database, 0, 64, &cancel)
         .await
@@ -1420,18 +1570,10 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .unwrap();
     for descending in [false, true] {
         let order = (&library::MemberRead {
-            collection: library::Collection::Smart {
-                key: key,
-                source: None,
-                now: 500,
-            },
+            collection: library::Collection::Smart { key: key, now: 500 },
             sort: Some(CatalogSort::LastPlayed),
             descending: descending,
-            ..library::MemberRead::new(library::Collection::Smart {
-                key: key,
-                source: None,
-                now: 500,
-            })
+            ..library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
         })
             .rows(&database, 0, 64, &cancel)
             .await
@@ -1489,18 +1631,10 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .map(|row| row.track.media_uri)
         .collect::<Vec<_>>();
     let smart = (&library::MemberRead {
-        collection: library::Collection::Smart {
-            key: key,
-            source: None,
-            now: 500,
-        },
+        collection: library::Collection::Smart { key: key, now: 500 },
         sort: Some(CatalogSort::Title),
         filter: ("Toolbar Intro").into(),
-        ..library::MemberRead::new(library::Collection::Smart {
-            key: key,
-            source: None,
-            now: 500,
-        })
+        ..library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
     })
         .rows(&database, 0, 64, &cancel)
         .await
@@ -1664,7 +1798,7 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
         .create_smart_playlist(
             "Added",
             &SmartPlaylistDefinition {
-                current: false,
+                source_id: None,
                 match_all: vec![SmartPlaylistRule {
                     field: SmartPlaylistRuleField::DateAdded,
                     operator: SmartPlaylistRuleOperator::Equals,
@@ -1679,7 +1813,6 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Smart {
                 key: added,
-                source: None,
                 now: 86400,
             })
             .selection(),
@@ -1721,7 +1854,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         .create_smart_playlist(
             "All artwork",
             &SmartPlaylistDefinition {
-                current: false,
+                source_id: None,
                 match_all: vec![SmartPlaylistRule {
                     field: SmartPlaylistRuleField::Title,
                     operator: SmartPlaylistRuleOperator::Equals,
@@ -1861,7 +1994,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 assert_eq!(row.track.artwork_binding, expected_binding);
             }
             let summary = database
-                .smart_playlist_rows(source, &[smart], folder, 500, &cancel)
+                .smart_playlist_rows(&[smart], 500, &cancel)
                 .await
                 .unwrap()
                 .pop()
@@ -1869,14 +2002,12 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             let rows = (&library::MemberRead {
                 collection: library::Collection::Smart {
                     key: smart,
-                    source: source,
                     now: 500,
                 },
                 sort: Some(library::CatalogSort::Title),
                 folder: folder,
                 ..library::MemberRead::new(library::Collection::Smart {
                     key: smart,
-                    source: source,
                     now: 500,
                 })
             })
@@ -3087,7 +3218,7 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
         0
     );
     let mut definition = SmartPlaylistDefinition {
-        current: false,
+        source_id: None,
         match_all: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Title,
             operator: SmartPlaylistRuleOperator::Contains,
@@ -3108,12 +3239,8 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
     let all = fixture
         .database
         .selected_track_uris(
-            &library::MemberRead::new(library::Collection::Smart {
-                key: smart,
-                source: None,
-                now: 0,
-            })
-            .selection(),
+            &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
+                .selection(),
             None,
             &cancel,
         )
@@ -3121,7 +3248,7 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
         .expect("evaluate All Smart Playlist");
     assert!(all.is_empty());
 
-    definition.current = true;
+    definition.source_id = Some(library::SourceId::new("source"));
     fixture
         .database
         .update_smart_playlist(smart, "Direct", &definition, None)
@@ -3131,12 +3258,8 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
         fixture
             .database
             .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Smart {
-                    key: smart,
-                    source: Some(fixture.source),
-                    now: 0
-                })
-                .selection(),
+                &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
+                    .selection(),
                 None,
                 &cancel
             )
@@ -3155,12 +3278,8 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
         fixture
             .database
             .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Smart {
-                    key: smart,
-                    source: Some(fixture.source),
-                    now: 0
-                })
-                .selection(),
+                &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
+                    .selection(),
                 None,
                 &cancel
             )
@@ -3168,7 +3287,7 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
             .unwrap(),
         std::slice::from_ref(&direct)
     );
-    definition.current = false;
+    definition.source_id = None;
     fixture
         .database
         .update_smart_playlist(smart, "Direct", &definition, None)
@@ -3178,12 +3297,8 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
         fixture
             .database
             .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Smart {
-                    key: smart,
-                    source: None,
-                    now: 0
-                })
-                .selection(),
+                &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
+                    .selection(),
                 None,
                 &cancel
             )
@@ -3242,7 +3357,7 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
     );
 
     let mut definition = SmartPlaylistDefinition {
-        current: false,
+        source_id: None,
         match_all: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Title,
             operator: SmartPlaylistRuleOperator::Contains,
@@ -3260,12 +3375,8 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
         fixture
             .database
             .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Smart {
-                    key: smart,
-                    source: None,
-                    now: 0
-                })
-                .selection(),
+                &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
+                    .selection(),
                 None,
                 &cancel
             )
@@ -3273,7 +3384,7 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
             .expect("evaluate All direct download"),
         Vec::<String>::new()
     );
-    definition.current = true;
+    definition.source_id = Some(library::SourceId::new("source"));
     fixture
         .database
         .update_smart_playlist(smart, "Downloaded direct", &definition, None)
@@ -3283,12 +3394,8 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
         fixture
             .database
             .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Smart {
-                    key: smart,
-                    source: Some(fixture.source),
-                    now: 0
-                })
-                .selection(),
+                &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
+                    .selection(),
                 None,
                 &cancel
             )
@@ -3317,12 +3424,8 @@ async fn canonical_rows_keep_uri_order_after_smart_membership_changes() {
     let order = fixture
         .database
         .selected_track_uris(
-            &library::MemberRead::new(library::Collection::Smart {
-                key: key,
-                source: None,
-                now: 500,
-            })
-            .selection(),
+            &library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
+                .selection(),
             None,
             &cancel,
         )
@@ -3331,7 +3434,7 @@ async fn canonical_rows_keep_uri_order_after_smart_membership_changes() {
     assert!(!order.contains(&direct));
     let detail = fixture
         .database
-        .smart_playlist_rows(None, &[key], None, 500, &cancel)
+        .smart_playlist_rows(&[key], 500, &cancel)
         .await
         .unwrap()
         .pop()
@@ -3398,7 +3501,7 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
         .expect("remove retained media from the catalog");
     drop(raw);
     let mut definition = SmartPlaylistDefinition {
-        current: false,
+        source_id: None,
         match_all: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Title,
             operator: SmartPlaylistRuleOperator::Equals,
@@ -3416,12 +3519,8 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
         fixture
             .database
             .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Smart {
-                    key: smart,
-                    source: None,
-                    now: 0
-                })
-                .selection(),
+                &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
+                    .selection(),
                 None,
                 &cancellation
             )
@@ -3429,7 +3528,7 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
             .expect("evaluate All while source is retained"),
         Vec::<String>::new()
     );
-    definition.current = true;
+    definition.source_id = Some(library::SourceId::new("source"));
     fixture
         .database
         .update_smart_playlist(smart, "Retained", &definition, None)
@@ -3439,12 +3538,8 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
         fixture
             .database
             .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Smart {
-                    key: smart,
-                    source: Some(fixture.source),
-                    now: 0
-                })
-                .selection(),
+                &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
+                    .selection(),
                 None,
                 &cancellation
             )
@@ -3462,12 +3557,8 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
         fixture
             .database
             .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Smart {
-                    key: smart,
-                    source: Some(fixture.source),
-                    now: 0
-                })
-                .selection(),
+                &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
+                    .selection(),
                 None,
                 &cancellation
             )
@@ -3475,7 +3566,7 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
             .unwrap()
             .is_empty()
     );
-    definition.current = false;
+    definition.source_id = None;
     fixture
         .database
         .update_smart_playlist(smart, "Retained", &definition, None)
@@ -3485,12 +3576,8 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
         fixture
             .database
             .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Smart {
-                    key: smart,
-                    source: None,
-                    now: 0
-                })
-                .selection(),
+                &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
+                    .selection(),
                 None,
                 &cancellation
             )
@@ -3542,7 +3629,7 @@ async fn smart_membership_excludes_retained_queue_and_activity() {
         .create_smart_playlist(
             "All",
             &SmartPlaylistDefinition {
-                current: false,
+                source_id: None,
                 ..SmartPlaylistDefinition::default()
             },
         )
@@ -3553,12 +3640,8 @@ async fn smart_membership_excludes_retained_queue_and_activity() {
         fixture
             .database
             .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Smart {
-                    key: key,
-                    source: None,
-                    now: 10
-                })
-                .selection(),
+                &library::MemberRead::new(library::Collection::Smart { key: key, now: 10 })
+                    .selection(),
                 None,
                 &cancellation
             )
@@ -3606,7 +3689,7 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
         .bind(&fixture.track_uris[0]).execute(&mut raw).await.unwrap();
     for index in 0..70 {
         let definition = SmartPlaylistDefinition {
-            current: index % 2 == 0,
+            source_id: (index % 2 == 0).then(|| library::SourceId::new("source")),
             limit: Some(index % 4 + 1),
             ..SmartPlaylistDefinition::default()
         };
@@ -3648,11 +3731,39 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
             assert_eq!(rows.len(), 6);
             let expected = fixture
                 .database
-                .smart_playlist_rows(Some(fixture.source), &order, folder, 0, &cancel)
+                .smart_playlist_rows(&order, 0, &cancel)
                 .await
                 .unwrap();
             assert_eq!(rows, expected);
         }
+    }
+    let objects =
+        sqlx::query_scalar::<_, String>("SELECT object_id FROM smart_playlists ORDER BY position")
+            .fetch_all(&mut raw)
+            .await
+            .unwrap();
+    let pins = objects
+        .into_iter()
+        .map(|playlist_id| library::SidebarPin::SmartPlaylist { playlist_id })
+        .collect::<Vec<_>>();
+    let headers = fixture
+        .database
+        .sidebar_pin_rows(&pins, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(headers.len(), 70);
+    assert!(headers.iter().all(|row| row.totals.is_none()));
+    let rows = fixture
+        .database
+        .sidebar_pin_totals(headers, 0, &cancel)
+        .await
+        .unwrap();
+    for (index, row) in rows.iter().enumerate() {
+        assert_eq!(row.pin, pins[index]);
+        assert_eq!(
+            row.totals.unwrap().0,
+            ((index % 4 + 1).min(fixture.tracks.len())) as i64
+        );
     }
 }
 
@@ -3731,7 +3842,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     assert_eq!(suggestions.genres, ["Rock".to_string()]);
     assert_eq!(suggestions.moods, ["Energetic".to_string()]);
     let never = SmartPlaylistDefinition {
-        current: false,
+        source_id: None,
         match_all: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Played,
             operator: SmartPlaylistRuleOperator::Is,
@@ -3749,7 +3860,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         .await
         .expect("create Never Played");
     let policy_definition = SmartPlaylistDefinition {
-        current: false,
+        source_id: None,
         match_all: SmartPlaylistRuleField::ALL
             .into_iter()
             .map(SmartPlaylistRuleField::default_rule)
@@ -3765,12 +3876,8 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         fixture
             .database
             .selected_track_uris(
-                &library::MemberRead::new(library::Collection::Smart {
-                    key: smart,
-                    source: Some(fixture.source),
-                    now: 0
-                })
-                .selection(),
+                &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
+                    .selection(),
                 None,
                 &cancel
             )
@@ -3812,7 +3919,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         .await
         .expect("read fixed current time");
     let mut played = SmartPlaylistDefinition {
-        current: false,
+        source_id: None,
         match_all: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::PlayCount,
             operator: SmartPlaylistRuleOperator::Above,
@@ -3844,7 +3951,6 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
                 .selected_track_uris(
                     &library::MemberRead::new(library::Collection::Smart {
                         key: smart,
-                        source: Some(fixture.source),
                         now: now
                     })
                     .selection(),
@@ -3859,7 +3965,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     }
     let facts = fixture
         .database
-        .smart_playlist_rows(Some(fixture.source), &[smart], None, now, &cancel)
+        .smart_playlist_rows(&[smart], now, &cancel)
         .await
         .expect("Smart Playlist row")
         .pop()
@@ -3874,7 +3980,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     .await
     .expect("remove optional Comment");
     let mut optional = SmartPlaylistDefinition {
-        current: false,
+        source_id: None,
         match_all: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Comment,
             operator: SmartPlaylistRuleOperator::NotContains,
@@ -3897,7 +4003,6 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart {
                     key: second,
-                    source: Some(fixture.source),
                     now: now
                 })
                 .selection(),
@@ -3924,7 +4029,6 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart {
                     key: second,
-                    source: Some(fixture.source),
                     now: now
                 })
                 .selection(),
@@ -3937,7 +4041,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     );
     let smart_rows = fixture
         .database
-        .smart_playlist_rows(Some(fixture.source), &[smart, second], None, now, &cancel)
+        .smart_playlist_rows(&[smart, second], now, &cancel)
         .await
         .expect("consistent Smart Playlist rows");
     assert_eq!(
@@ -3947,7 +4051,6 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart {
                     key: smart,
-                    source: Some(fixture.source),
                     now: now
                 })
                 .selection(),
@@ -3965,7 +4068,6 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart {
                     key: second,
-                    source: Some(fixture.source),
                     now: now
                 })
                 .selection(),
