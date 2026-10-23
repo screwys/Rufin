@@ -180,8 +180,6 @@ pub async fn build(
     let startup = StartupState {
         route_revealed: Cell::new(!defer_initial_route),
         initial_launch: Cell::new(defer_initial_route),
-        content: RefCell::new(None),
-        reveal_deadline: RefCell::new(None),
     };
     let playback_state = PlaybackState {
         updating_controls: Cell::new(false),
@@ -675,7 +673,7 @@ pub async fn build(
     }
     schedule_periodic_release_checks(&shell.preferences);
     if defer_initial_route && !shell.source.operation.borrow().blocks_library() {
-        shell.schedule_startup_route_reveal();
+        shell.prepare_startup_route_content();
     }
     Ok(())
 }

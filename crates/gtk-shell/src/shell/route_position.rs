@@ -113,7 +113,6 @@ mod surface_imp {
         pub(super) target: Cell<Option<super::RoutePosition>>,
         pub(super) items: RefCell<Option<super::NativeListScroll>>,
         pub(super) allocated: RefCell<Option<Box<dyn Fn()>>>,
-        pub(super) readiness: RefCell<Option<std::rc::Rc<super::VisibleContent>>>,
     }
 
     #[glib::object_subclass]
@@ -129,7 +128,6 @@ mod surface_imp {
             self.target.take();
             self.items.take();
             self.allocated.take();
-            self.readiness.take();
             while let Some(child) = self.obj().first_child() {
                 child.unparent();
             }
@@ -177,14 +175,11 @@ mod surface_imp {
                         adjustment.page_size(),
                     ));
                 }
-                // Readiness must inspect the restored viewport after native layout.
+                // Apply the restored viewport before resuming row reads.
                 child.allocate(width, height, baseline, None);
             }
             if let Some(allocated) = self.allocated.take() {
                 allocated();
-            }
-            if let Some(readiness) = self.readiness.borrow().clone() {
-                readiness.check();
             }
         }
 
@@ -210,7 +205,6 @@ pub(super) fn mount_route_surface(
     target: Option<RoutePosition>,
     items: Option<NativeListScroll>,
     allocated: impl Fn() + 'static,
-    ready: impl Fn(&gtk::Widget) + 'static,
 ) -> RouteSurface {
     use gtk::subclass::prelude::ObjectSubclassIsExt;
 
@@ -224,146 +218,8 @@ pub(super) fn mount_route_surface(
     owner.imp().target.set(target);
     owner.imp().items.replace(items);
     owner.imp().allocated.replace(Some(Box::new(allocated)));
-    let weak = owner.downgrade();
-    owner
-        .imp()
-        .readiness
-        .replace(Some(VisibleContent::new(owner.upcast_ref(), move || {
-            if let Some(owner) = weak.upgrade() {
-                ready(owner.upcast_ref());
-            }
-        })));
     child.set_parent(&owner);
     owner
-}
-
-impl RouteSurface {
-    pub(super) fn is_ready(&self) -> bool {
-        use gtk::subclass::prelude::ObjectSubclassIsExt;
-        self.imp()
-            .readiness
-            .borrow()
-            .as_ref()
-            .is_some_and(|readiness| readiness.is_ready())
-    }
-}
-
-pub(super) struct VisibleContent {
-    root: gtk::glib::WeakRef<gtk::Widget>,
-    ready: std::cell::RefCell<Option<Box<dyn Fn()>>>,
-    pending: std::cell::RefCell<Vec<(gtk::glib::WeakRef<gtk::Widget>, gtk::glib::SignalHandlerId)>>,
-}
-
-impl VisibleContent {
-    pub(super) fn new(root: &gtk::Widget, ready: impl Fn() + 'static) -> std::rc::Rc<Self> {
-        std::rc::Rc::new(Self {
-            root: root.downgrade(),
-            ready: std::cell::RefCell::new(Some(Box::new(ready))),
-            pending: Default::default(),
-        })
-    }
-
-    pub(super) fn is_ready(&self) -> bool {
-        self.ready.borrow().is_none()
-    }
-
-    fn clear_pending(&self) {
-        for (widget, handler) in self.pending.take() {
-            if let Some(widget) = widget.upgrade() {
-                widget.disconnect(handler);
-            }
-        }
-    }
-
-    fn pending_changed(&self) {
-        if !self.pending.borrow().iter().any(|(widget, _)| {
-            widget
-                .upgrade()
-                .is_some_and(|widget| presentation_pending(&widget))
-        }) && let Some(root) = self.root.upgrade()
-        {
-            root.queue_allocate();
-        }
-    }
-
-    pub(super) fn check(self: &std::rc::Rc<Self>) {
-        if self.is_ready() {
-            return;
-        }
-        let Some(root) = self
-            .root
-            .upgrade()
-            .filter(|root| root.width() > 1 && root.height() > 1)
-        else {
-            return;
-        };
-        self.clear_pending();
-        let mut pending = Vec::new();
-        let clip = gtk::graphene::Rect::new(0.0, 0.0, root.width() as f32, root.height() as f32);
-        visible_pending(&root, &root, &clip, &mut pending);
-        if pending.is_empty() {
-            if let Some(ready) = self.ready.take() {
-                ready();
-            }
-        } else {
-            self.pending.replace(
-                pending
-                    .into_iter()
-                    .map(|widget| {
-                        let owner = std::rc::Rc::downgrade(self);
-                        let handler = widget.connect_css_classes_notify(move |_| {
-                            if let Some(owner) = owner.upgrade() {
-                                owner.pending_changed();
-                            }
-                        });
-                        (widget.downgrade(), handler)
-                    })
-                    .collect(),
-            );
-        }
-    }
-}
-
-impl Drop for VisibleContent {
-    fn drop(&mut self) {
-        self.clear_pending();
-    }
-}
-
-// Row data must be ready. Artwork tiles can display a placeholder while loading.
-fn presentation_pending(widget: &gtk::Widget) -> bool {
-    widget.has_css_class("row-pending") || widget.has_css_class("track-skeleton")
-}
-
-fn visible_pending(
-    widget: &gtk::Widget,
-    root: &gtk::Widget,
-    clip: &gtk::graphene::Rect,
-    pending: &mut Vec<gtk::Widget>,
-) {
-    if !widget.is_visible() || !widget.is_child_visible() {
-        return;
-    }
-    let Some(bounds) = widget.compute_bounds(root) else {
-        return;
-    };
-    let Some(intersection) = bounds.intersection(clip) else {
-        return;
-    };
-    if presentation_pending(widget) {
-        pending.push(widget.clone());
-        return;
-    }
-    let clip = if widget.overflow() == gtk::Overflow::Hidden || widget.is::<gtk::ScrolledWindow>() {
-        &intersection
-    } else {
-        clip
-    };
-    let mut child = widget.first_child();
-    while let Some(current) = child {
-        child = current.next_sibling();
-        visible_pending(&current, root, clip, pending);
-    }
 }
 
 #[cfg(test)]

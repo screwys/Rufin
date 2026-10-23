@@ -206,7 +206,7 @@ fn apply_selected_source(
         shell.replace_current_route_when_ready();
     }
     if !shell.startup.route_revealed.get() && !shell.source.operation.borrow().blocks_library() {
-        shell.schedule_startup_route_reveal();
+        shell.prepare_startup_route_content();
     }
 }
 
@@ -402,16 +402,16 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
                     shell.preferences.update_add_server_dialog();
                 }
                 if previously_blocked {
-                    shell.schedule_startup_route_reveal();
+                    shell.prepare_startup_route_content();
                 }
             } else if previously_blocked {
-                shell.schedule_startup_route_reveal();
+                shell.prepare_startup_route_content();
             }
         }
         SourceOperation::Idle => {
             shell.preferences.update_add_server_dialog();
             if shell.selected_library().is_some() && !shell.startup.route_revealed.get() {
-                shell.schedule_startup_route_reveal();
+                shell.prepare_startup_route_content();
             }
         }
     }
