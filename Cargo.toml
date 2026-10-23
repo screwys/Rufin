@@ -134,7 +134,7 @@ tempfile = "3.23.0"
 zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2"] }
 thiserror = "2.0.18"
 tray-icon = { version = "0.25.0", default-features = false }
-tokio = "1.52.3"
+tokio = "1.53.3"
 tokio-rustls = { version = "0.26.4", default-features = false }
 tokio-tungstenite = { version = "0.30.0", default-features = false }
 tracing = "0.1.41"
