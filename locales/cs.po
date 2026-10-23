@@ -263,6 +263,9 @@ msgstr ""
 msgid "A new update is available, restart to apply"
 msgstr ""
 
+msgid "A"
+msgstr ""
+
 #, fuzzy
 #| msgid "API keys"
 msgid "API key (Subsonic)"
@@ -732,6 +735,9 @@ msgstr ""
 msgid "Browse"
 msgstr ""
 
+msgid "C"
+msgstr ""
+
 #, fuzzy
 #| msgid "Saved Sources"
 msgid "CUE file"
@@ -767,12 +773,23 @@ msgid "Cast format"
 msgstr ""
 
 #, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Casting changes apply to the next stream"
+msgstr "Změny se vztahují na {count} skladbu"
+
+#, fuzzy
 #| msgid "Casting"
 msgid "Casting network"
 msgstr "Přenos"
 
 msgid "Casting"
 msgstr "Přenos"
+
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Centered bars"
+msgstr "Vybrat složku s hudbou"
 
 msgid "Certificate authority (PEM)"
 msgstr ""
@@ -1179,12 +1196,6 @@ msgid "Copy link"
 msgstr "Kopírovat"
 
 msgid "Copy of {name}"
-msgstr ""
-
-msgid "Copy preset"
-msgstr ""
-
-msgid "Copy the current appearance to the clipboard"
 msgstr ""
 
 msgid "Copy"
@@ -1625,6 +1636,9 @@ msgstr "EP"
 msgid "EPs"
 msgstr "EP"
 
+msgid "ERB"
+msgstr ""
+
 #, fuzzy
 #| msgid "Lyrics"
 msgid "Edit Lyrics"
@@ -1817,6 +1831,9 @@ msgstr "Externí vyhledávání metadat"
 
 msgid "External site links"
 msgstr "Odkazy na externí stránky"
+
+msgid "FFT size"
+msgstr ""
 
 msgid "FLAC"
 msgstr ""
@@ -2014,6 +2031,9 @@ msgstr "Obnovit sekci"
 msgid "Frequency · Hz"
 msgstr ""
 
+msgid "Frequency scale"
+msgstr ""
+
 msgid "Frequency"
 msgstr ""
 
@@ -2122,6 +2142,9 @@ msgid "Grouping"
 msgstr ""
 
 msgid "Guest / public access"
+msgstr ""
+
+msgid "Halo"
 msgstr ""
 
 msgid "Height (%)"
@@ -2302,6 +2325,9 @@ msgstr ""
 
 msgid "Keyboard Shortcuts"
 msgstr "Klávesové zkratky"
+
+msgid "LED spectrum"
+msgstr ""
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -2514,6 +2540,9 @@ msgstr "Vyhledat složku"
 msgid "Lock metadata"
 msgstr "Uzamknout metadata"
 
+msgid "Logarithmic"
+msgstr ""
+
 msgid "Logs are copied"
 msgstr ""
 
@@ -2568,6 +2597,14 @@ msgstr ""
 msgid "Matched"
 msgstr "V mezipaměti"
 
+msgid "Maximum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Maximum level (dB)"
+msgstr "Maximální rok"
+
 msgid "Maximum year"
 msgstr "Maximální rok"
 
@@ -2611,6 +2648,14 @@ msgstr "Metadata"
 
 msgid "Minimize overview"
 msgstr ""
+
+msgid "Minimum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum level (dB)"
+msgstr "Minimální rok"
 
 msgid "Minimum year"
 msgstr "Minimální rok"
@@ -3223,11 +3268,6 @@ msgstr "Heslo"
 msgid "Password"
 msgstr "Heslo"
 
-#, fuzzy
-#| msgid "Preset"
-msgid "Paste preset"
-msgstr "Předvolba"
-
 msgid "Paste"
 msgstr "Vložit"
 
@@ -3473,37 +3513,7 @@ msgstr "Zachovat výšku tónu"
 
 #, fuzzy
 #| msgid "Preset"
-msgid "Preset 1"
-msgstr "Předvolba"
-
-#, fuzzy
-#| msgid "Preset"
-msgid "Preset 2"
-msgstr "Předvolba"
-
-#, fuzzy
-#| msgid "Preset"
-msgid "Preset 3"
-msgstr "Předvolba"
-
-#, fuzzy
-#| msgid "Preset"
-msgid "Preset 4"
-msgstr "Předvolba"
-
-#, fuzzy
-#| msgid "Preset"
-msgid "Preset 5"
-msgstr "Předvolba"
-
-#, fuzzy
-#| msgid "Preset"
 msgid "Preset name"
-msgstr "Předvolba"
-
-#, fuzzy
-#| msgid "Preset"
-msgid "Preset saved"
 msgstr "Předvolba"
 
 #, fuzzy
@@ -3954,6 +3964,9 @@ msgstr "Znovu synchronizovat knihovnu"
 msgid "Retry"
 msgstr ""
 
+msgid "Ribbon"
+msgstr ""
+
 msgid "Rise speed (%)"
 msgstr ""
 
@@ -3964,6 +3977,9 @@ msgid "Romaji"
 msgstr "Rómadži (romanizace japonštiny)"
 
 msgid "Rounded bars"
+msgstr ""
+
+msgid "Rounded spectrum"
 msgstr ""
 
 msgid "Row borders"
@@ -4043,11 +4059,6 @@ msgstr "Uložit do"
 
 msgid "Save"
 msgstr "Uložit"
-
-#, fuzzy
-#| msgid "Saved"
-msgid "Save..."
-msgstr "Uloženo"
 
 #, fuzzy
 #| msgid "Saved to"
@@ -4510,6 +4521,9 @@ msgstr "Skladby v chytrém playlistu"
 
 msgid "Smart playlists"
 msgstr "Chytré playlisty"
+
+msgid "Soft spectrum"
+msgstr ""
 
 msgid "Solid bars"
 msgstr ""
@@ -5012,11 +5026,6 @@ msgstr "Minimální rok"
 
 #, fuzzy
 #| msgid "Lyrics settings"
-msgid "Use output settings"
-msgstr "Nastavení textu skladeb"
-
-#, fuzzy
-#| msgid "Lyrics settings"
 msgid "Use source setting"
 msgstr "Nastavení textu skladeb"
 
@@ -5125,6 +5134,9 @@ msgid "Weekday"
 msgstr ""
 
 msgid "Weekly"
+msgstr ""
+
+msgid "Weighting"
 msgstr ""
 
 msgid "Wide"
@@ -5395,6 +5407,51 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Paste preset"
+#~ msgstr "Předvolba"
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Preset 1"
+#~ msgstr "Předvolba"
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Preset 2"
+#~ msgstr "Předvolba"
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Preset 3"
+#~ msgstr "Předvolba"
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Preset 4"
+#~ msgstr "Předvolba"
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Preset 5"
+#~ msgstr "Předvolba"
+
+#, fuzzy
+#~| msgid "Preset"
+#~ msgid "Preset saved"
+#~ msgstr "Předvolba"
+
+#, fuzzy
+#~| msgid "Saved"
+#~ msgid "Save..."
+#~ msgstr "Uloženo"
+
+#, fuzzy
+#~| msgid "Lyrics settings"
+#~ msgid "Use output settings"
+#~ msgstr "Nastavení textu skladeb"
 
 #~ msgid "Identify"
 #~ msgstr "Identifikovat"

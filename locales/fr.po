@@ -321,6 +321,9 @@ msgstr "6 heures"
 msgid "A new update is available, restart to apply"
 msgstr "Une nouvelle mise à jour est disponible, redémarrer pour l'appliquer"
 
+msgid "A"
+msgstr ""
+
 msgid "API key (Subsonic)"
 msgstr "Clé API (Subsonic)"
 
@@ -730,6 +733,9 @@ msgstr ""
 msgid "Browse"
 msgstr "Parcourir"
 
+msgid "C"
+msgstr ""
+
 #, fuzzy
 #| msgid "New file"
 msgid "CUE file"
@@ -766,11 +772,22 @@ msgstr "Annuler"
 msgid "Cast format"
 msgstr "Format du chemin"
 
+#, fuzzy
+#| msgid "Changes apply to {count} track"
+#| msgid_plural "Changes apply to {count} tracks"
+msgid "Casting changes apply to the next stream"
+msgstr "Les modifications s'appliquent à {count} morceau"
+
 msgid "Casting network"
 msgstr "Réseau de distribution"
 
 msgid "Casting"
 msgstr "Distribution"
+
+#, fuzzy
+#| msgid "Segmented bars"
+msgid "Centered bars"
+msgstr "Barres segmentées"
 
 msgid "Certificate authority (PEM)"
 msgstr "Autorité de certification (PEM)"
@@ -1111,12 +1128,6 @@ msgstr "Copier le lien"
 
 msgid "Copy of {name}"
 msgstr ""
-
-msgid "Copy preset"
-msgstr "Copier le préréglage"
-
-msgid "Copy the current appearance to the clipboard"
-msgstr "Copier l’apparence actuelle dans le presse-papiers"
 
 msgid "Copy"
 msgstr "Copier"
@@ -1498,6 +1509,9 @@ msgstr "EP"
 msgid "EPs"
 msgstr "EPs"
 
+msgid "ERB"
+msgstr ""
+
 msgid "Edit Lyrics"
 msgstr "Modifier les paroles"
 
@@ -1658,6 +1672,11 @@ msgstr "Recherche externe des métadonnées"
 
 msgid "External site links"
 msgstr "Liens externes"
+
+#, fuzzy
+#| msgid "Files"
+msgid "FFT size"
+msgstr "Fichiers"
 
 msgid "FLAC"
 msgstr ""
@@ -1838,6 +1857,9 @@ msgstr "Images par seconde"
 msgid "Frequency · Hz"
 msgstr ""
 
+msgid "Frequency scale"
+msgstr ""
+
 msgid "Frequency"
 msgstr ""
 
@@ -1941,6 +1963,9 @@ msgstr "Groupé"
 
 msgid "Guest / public access"
 msgstr "Invité / accès public"
+
+msgid "Halo"
+msgstr ""
 
 msgid "Height (%)"
 msgstr ""
@@ -2108,6 +2133,11 @@ msgstr ""
 
 msgid "Keyboard Shortcuts"
 msgstr "Raccourcis clavier"
+
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "LED spectrum"
+msgstr "Ligne du spectre"
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -2297,6 +2327,9 @@ msgstr "Localiser le dossier"
 msgid "Lock metadata"
 msgstr "Verrouiller les métadonnées"
 
+msgid "Logarithmic"
+msgstr ""
+
 msgid "Logs are copied"
 msgstr "Les journaux sont copiés"
 
@@ -2347,6 +2380,14 @@ msgstr "Mars {year}"
 msgid "Matched"
 msgstr "Mise en cache"
 
+msgid "Maximum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Maximum level (dB)"
+msgstr "Année maximale"
+
 msgid "Maximum year"
 msgstr "Année maximale"
 
@@ -2388,6 +2429,14 @@ msgstr "Métadonnées"
 
 msgid "Minimize overview"
 msgstr "Réduire l’aperçu"
+
+msgid "Minimum frequency (Hz)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Minimum level (dB)"
+msgstr "Année minimum"
 
 msgid "Minimum year"
 msgstr "Année minimum"
@@ -2918,9 +2967,6 @@ msgstr "Mot de passe ou jeton"
 msgid "Password"
 msgstr "Mot de passe"
 
-msgid "Paste preset"
-msgstr "Coller le préréglage"
-
 msgid "Paste"
 msgstr "Coller"
 
@@ -3136,27 +3182,9 @@ msgstr "Préserver la hauteur tonale"
 msgid "Preserve pitch"
 msgstr "Préserver la hauteur tonale"
 
-msgid "Preset 1"
-msgstr "Préréglage 1"
-
-msgid "Preset 2"
-msgstr "Préréglage 2"
-
-msgid "Preset 3"
-msgstr "Préréglage 3"
-
-msgid "Preset 4"
-msgstr "Préréglage 4"
-
-msgid "Preset 5"
-msgstr "Préréglage 5"
-
 #, fuzzy
 #| msgid "Preset saved"
 msgid "Preset name"
-msgstr "Préréglage enregistré"
-
-msgid "Preset saved"
 msgstr "Préréglage enregistré"
 
 #, fuzzy
@@ -3556,6 +3584,9 @@ msgstr "Resynchroniser la bibliothèque"
 msgid "Retry"
 msgstr "Réessayer"
 
+msgid "Ribbon"
+msgstr ""
+
 msgid "Rise speed (%)"
 msgstr "Vitesse de montée (%)"
 
@@ -3567,6 +3598,11 @@ msgstr "Rōmaji"
 
 msgid "Rounded bars"
 msgstr "Barres arrondies"
+
+#, fuzzy
+#| msgid "Filled spectrum"
+msgid "Rounded spectrum"
+msgstr "Spectre rempli"
 
 msgid "Row borders"
 msgstr "Bord de rangée"
@@ -3640,11 +3676,6 @@ msgstr "Préréglage enregistré"
 
 msgid "Save"
 msgstr "Enregistrer"
-
-#, fuzzy
-#| msgid "Saved..."
-msgid "Save..."
-msgstr "Enregistré..."
 
 msgid "Saved Plex Login"
 msgstr "Connexion Plex enregistrée"
@@ -4051,6 +4082,11 @@ msgstr "Morceaux de la playlist intelligente"
 
 msgid "Smart playlists"
 msgstr "Playlists intelligentes"
+
+#, fuzzy
+#| msgid "Spectrum line"
+msgid "Soft spectrum"
+msgstr "Ligne du spectre"
 
 msgid "Solid bars"
 msgstr "Barres pleines"
@@ -4488,11 +4524,6 @@ msgstr "Utiliser l’année maximale"
 msgid "Use minimum year"
 msgstr "Utiliser l’année minimale"
 
-#, fuzzy
-#| msgid "Use source setting"
-msgid "Use output settings"
-msgstr "Utiliser les paramètres de la source"
-
 msgid "Use source setting"
 msgstr "Utiliser les paramètres de la source"
 
@@ -4591,6 +4622,9 @@ msgstr "Jours de la semaine"
 
 msgid "Weekly"
 msgstr "Hebdomadaire"
+
+msgid "Weighting"
+msgstr ""
 
 msgid "Wide"
 msgstr "Étendu"
@@ -4861,6 +4895,43 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue sur l'installateur de Rufin"
+
+#~ msgid "Copy preset"
+#~ msgstr "Copier le préréglage"
+
+#~ msgid "Copy the current appearance to the clipboard"
+#~ msgstr "Copier l’apparence actuelle dans le presse-papiers"
+
+#~ msgid "Paste preset"
+#~ msgstr "Coller le préréglage"
+
+#~ msgid "Preset 1"
+#~ msgstr "Préréglage 1"
+
+#~ msgid "Preset 2"
+#~ msgstr "Préréglage 2"
+
+#~ msgid "Preset 3"
+#~ msgstr "Préréglage 3"
+
+#~ msgid "Preset 4"
+#~ msgstr "Préréglage 4"
+
+#~ msgid "Preset 5"
+#~ msgstr "Préréglage 5"
+
+#~ msgid "Preset saved"
+#~ msgstr "Préréglage enregistré"
+
+#, fuzzy
+#~| msgid "Saved..."
+#~ msgid "Save..."
+#~ msgstr "Enregistré..."
+
+#, fuzzy
+#~| msgid "Use source setting"
+#~ msgid "Use output settings"
+#~ msgstr "Utiliser les paramètres de la source"
 
 #~ msgid "Identify"
 #~ msgstr "Identification"
