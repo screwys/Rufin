@@ -66,6 +66,11 @@ msgstr ""
 "Устройства, использующие Rufin Connect, больше не поддерживаются. "
 "Пожалуйста, обновите Rufin."
 
+msgid ""
+"Do you want to cache all lyrics automatically? You can also enable this from "
+"Preferences -> Storage"
+msgstr ""
+
 #, fuzzy
 #| msgid ""
 #| "Downloads from this server will be removed, and automatic rules will be "
@@ -736,6 +741,16 @@ msgstr ""
 msgid "Browse"
 msgstr "Обзор"
 
+#, fuzzy
+#| msgid "Lyrics"
+msgid "By Lyrics"
+msgstr "Текст песни"
+
+#, fuzzy
+#| msgid "Title"
+msgid "By Title"
+msgstr "Название"
+
 msgid "C"
 msgstr ""
 
@@ -743,6 +758,11 @@ msgstr ""
 #| msgid "Image files"
 msgid "CUE file"
 msgstr "Файлы изображений"
+
+#, fuzzy
+#| msgid "Cached"
+msgid "Cache"
+msgstr "Кэшировано"
 
 #, fuzzy
 #| msgid "Cached"
@@ -935,6 +955,11 @@ msgstr "Очистить Кэш"
 
 msgid "Clear queue"
 msgstr "Очистить очередь"
+
+#, fuzzy
+#| msgid "Clear Cache"
+msgid "Clear this cache?"
+msgstr "Очистить Кэш"
 
 msgid "Clear title"
 msgstr "Очистить название"
@@ -1431,21 +1456,21 @@ msgstr "Пожертвовать"
 msgid "Done"
 msgstr ""
 
+#, fuzzy
+#| msgid "Open automatically"
+msgid "Download Automatically"
+msgstr "Открыть автоматически"
+
 msgid "Download Folder"
 msgstr "Локальная папка"
 
+#, fuzzy
+#| msgid "Download quality"
+msgid "Download Lazily"
+msgstr "Качество скачивания"
+
 msgid "Download Queue"
 msgstr "Очередь загрузок"
-
-#, fuzzy
-#| msgid "Upload artwork"
-msgid "Download artwork"
-msgstr "Загрузить обложку"
-
-#, fuzzy
-#| msgid "Downloads"
-msgid "Download lyrics"
-msgstr "Загрузки"
 
 msgid "Download quality"
 msgstr "Качество скачивания"
@@ -1573,6 +1598,11 @@ msgstr "Включить автоматическое создание резе�
 
 msgid "Enable background image"
 msgstr "Включить фоновое изображение"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Enable caching lyrics"
+msgstr "Поиск текста песни"
 
 msgid "Enable partial star ratings"
 msgstr "Включить частичные оценки в виде звёзд"
@@ -4927,6 +4957,16 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#, fuzzy
+#~| msgid "Upload artwork"
+#~ msgid "Download artwork"
+#~ msgstr "Загрузить обложку"
+
+#, fuzzy
+#~| msgid "Downloads"
+#~ msgid "Download lyrics"
+#~ msgstr "Загрузки"
 
 #~ msgid "Copy preset"
 #~ msgstr "Скопировать предустановку"

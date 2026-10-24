@@ -55,6 +55,11 @@ msgid ""
 "Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
 
+msgid ""
+"Do you want to cache all lyrics automatically? You can also enable this from "
+"Preferences -> Storage"
+msgstr ""
+
 #, fuzzy
 #| msgid ""
 #| "Downloads from this server will be removed, and automatic rules will be "
@@ -736,6 +741,16 @@ msgstr ""
 msgid "Browse"
 msgstr ""
 
+#, fuzzy
+#| msgid "Lyrics"
+msgid "By Lyrics"
+msgstr "Teksti"
+
+#, fuzzy
+#| msgid "Title"
+msgid "By Title"
+msgstr "Nosaukums"
+
 msgid "C"
 msgstr ""
 
@@ -743,6 +758,11 @@ msgstr ""
 #| msgid "Change Profile"
 msgid "CUE file"
 msgstr "Mainīt profilu"
+
+#, fuzzy
+#| msgid "Cached"
+msgid "Cache"
+msgstr "Kešots"
 
 #, fuzzy
 #| msgid "Cached"
@@ -943,6 +963,11 @@ msgstr "Notīrīt kešatmiņu"
 
 msgid "Clear queue"
 msgstr "Notīrīt rindu"
+
+#, fuzzy
+#| msgid "Clear Cache"
+msgid "Clear this cache?"
+msgstr "Notīrīt kešatmiņu"
 
 msgid "Clear title"
 msgstr "Notīrīt nosaukumu"
@@ -1499,21 +1524,21 @@ msgstr ""
 msgid "Done"
 msgstr ""
 
+#, fuzzy
+#| msgid "Refresh automatically"
+msgid "Download Automatically"
+msgstr "Atjaunot automātiski"
+
 msgid "Download Folder"
 msgstr "Lejupielādes mape"
 
+#, fuzzy
+#| msgid "Download quality"
+msgid "Download Lazily"
+msgstr "Lejupielādes kvalitāte"
+
 msgid "Download Queue"
 msgstr "Lejupielādes rinda"
-
-#, fuzzy
-#| msgid "Show artwork"
-msgid "Download artwork"
-msgstr "Rādīt albuma vāciņu"
-
-#, fuzzy
-#| msgid "Downloads"
-msgid "Download lyrics"
-msgstr "Lejupielādes"
 
 msgid "Download quality"
 msgstr "Lejupielādes kvalitāte"
@@ -1645,6 +1670,11 @@ msgstr "Iespējot automātiskās dublējumu izveidi"
 
 msgid "Enable background image"
 msgstr "Ieslēgt fona attēlu"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Enable caching lyrics"
+msgstr "Meklēt tekstus"
 
 msgid "Enable partial star ratings"
 msgstr "Iespējot daļēju zvaigžņu vērtējumu"
@@ -5184,6 +5214,16 @@ msgstr "Lietotnes {app_name} automātiskās atjaunināšanas opcija ir nederīga
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Laipni lūdzam Rufin instalācijas programmā"
+
+#, fuzzy
+#~| msgid "Show artwork"
+#~ msgid "Download artwork"
+#~ msgstr "Rādīt albuma vāciņu"
+
+#, fuzzy
+#~| msgid "Downloads"
+#~ msgid "Download lyrics"
+#~ msgstr "Lejupielādes"
 
 #~ msgid "Copy preset"
 #~ msgstr "Kopēt iepriekš iestatīto"
