@@ -78,8 +78,41 @@ mod imp {
         }
         fn pad_templates() -> &'static [gst::PadTemplate] {
             static PADS: OnceLock<Vec<gst::PadTemplate>> = OnceLock::new();
-            PADS.get_or_init(|| vec![gst::PadTemplate::new("sink", gst::PadDirection::Sink,
-                gst::PadPresence::Always, &"audio/x-raw,format=(string){S16LE,F32LE},layout=(string)interleaved,channels=(int)[1,2],rate=(int){8000,11025,12000,16000,22050,24000,32000,44100,48000}".parse::<gst::Caps>().unwrap()).unwrap()])
+            PADS.get_or_init(|| {
+                let pcm = || {
+                    audio::AudioCapsBuilder::new_interleaved()
+                        .format_list([audio::AudioFormat::S16le, audio::AudioFormat::F32le])
+                        .rate_range(8_000..=192_000)
+                };
+                // Unlisted layouts fixate on this first structure and downmix to stereo.
+                let mut caps = pcm().channels_range(1..=2).build();
+                // Layouts AndroidAudioTrack names by channel count. A side pair keeps its
+                // samples and plays as Android's rear pair, as other Android players send it.
+                for (channels, mask) in [
+                    (3, 0x7),
+                    (4, 0x33),
+                    (4, 0xc03),
+                    (5, 0x37),
+                    (5, 0xc07),
+                    (6, 0x3f),
+                    (6, 0xc0f),
+                    (7, 0x13f),
+                    (8, 0xc3f),
+                ] {
+                    caps.get_mut()
+                        .unwrap()
+                        .append(pcm().channels(channels).channel_mask(mask).build());
+                }
+                vec![
+                    gst::PadTemplate::new(
+                        "sink",
+                        gst::PadDirection::Sink,
+                        gst::PadPresence::Always,
+                        &caps,
+                    )
+                    .unwrap(),
+                ]
+            })
         }
     }
     impl BaseSinkImpl for AudioTrackSink {}

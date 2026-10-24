@@ -632,6 +632,9 @@ msgstr ""
 msgid "Bitrate"
 msgstr ""
 
+msgid "Bitstream"
+msgstr ""
+
 msgid "Blue"
 msgstr ""
 

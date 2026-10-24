@@ -93,37 +93,40 @@ pub fn now_playing_labels(
             .filter(|year| *year > 0)
             .map(|year| year.to_string()),
     );
-    labels.extend(format);
+    // One label for the audio format and one for where it plays.
+    let mut audio = Vec::from_iter(format);
     if same_format {
-        labels.extend(
-            media
-                .row
-                .track
-                .metadata
-                .audio_properties
+        let properties = &media.row.track.metadata.audio_properties;
+        audio.extend(
+            properties
                 .bit_depth
                 .filter(|bits| *bits > 0)
                 .map(|bits| format!("{bits} bit")),
         );
-        labels.extend(
-            media
-                .row
-                .track
-                .metadata
-                .audio_properties
+        audio.extend(
+            properties
                 .sample_rate_hz
                 .filter(|rate| *rate > 0)
                 .map(|rate| format!("{} kHz", f64::from(rate) / 1000.0)),
         );
     }
-    labels.extend(output_name.map(str::to_owned));
+    let mut place = Vec::from_iter(output_name.map(str::to_owned));
     if let Some(stream) = &media.stream {
-        labels.push(localization::tr(if stream.local {
+        place.push(localization::tr(if stream.local {
             msgid("Local")
         } else {
             msgid("Streaming")
         }));
+        if stream.bitstream {
+            place.push(localization::tr(msgid("Bitstream")));
+        }
     }
+    labels.extend(
+        [audio, place]
+            .into_iter()
+            .filter(|group| !group.is_empty())
+            .map(|group| group.join(" · ")),
+    );
     labels
 }
 

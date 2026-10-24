@@ -21,9 +21,16 @@ internal class AndroidAudioTrack(rate: Int, channels: Int, encoding: Int, buffer
     private val track: AudioTrack
 
     init {
+        // Matches the layouts the GStreamer sink accepts, in GStreamer's channel order.
         val channelMask = when (channels) {
             1 -> AudioFormat.CHANNEL_OUT_MONO
             2 -> AudioFormat.CHANNEL_OUT_STEREO
+            3 -> AudioFormat.CHANNEL_OUT_STEREO or AudioFormat.CHANNEL_OUT_FRONT_CENTER
+            4 -> AudioFormat.CHANNEL_OUT_QUAD
+            5 -> AudioFormat.CHANNEL_OUT_QUAD or AudioFormat.CHANNEL_OUT_FRONT_CENTER
+            6 -> AudioFormat.CHANNEL_OUT_5POINT1
+            7 -> AudioFormat.CHANNEL_OUT_5POINT1 or AudioFormat.CHANNEL_OUT_BACK_CENTER
+            8 -> AudioFormat.CHANNEL_OUT_7POINT1_SURROUND
             else -> throw IllegalArgumentException("Unsupported channel count: $channels")
         }
         val minimum = AudioTrack.getMinBufferSize(rate, channelMask, encoding)

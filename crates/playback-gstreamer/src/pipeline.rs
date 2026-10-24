@@ -1,4 +1,4 @@
-use super::audio::{AudioGraph, SharedQueuedLoudness};
+use super::audio::{AudioGraph, SharedQueuedLoudness, make_audio_output, passthrough_allowed};
 use super::engine::{
     GaplessPlayback, PipelineId, PreparedRun, SharedBackendState, Slot, WorkerInput,
     handle_about_to_finish,
@@ -92,6 +92,11 @@ pub(super) struct PlayerPipeline {
     // Paused while the other player of a crossfade refills.
     held: Cell<bool>,
     draining: Cell<bool>,
+    // The compressed format this session hands to `bitstream_output` undecoded.
+    bitstream: Option<gst::Caps>,
+    bitstream_output: Option<gst::Element>,
+    // Set when this decoded session's first stream can reach the output undecoded.
+    bitstream_request: Arc<Mutex<Option<gst::Caps>>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -150,6 +155,9 @@ impl PlayerPipeline {
             live: Cell::new(false),
             held: Cell::new(false),
             draining: Cell::new(false),
+            bitstream: None,
+            bitstream_output: None,
+            bitstream_request: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -177,6 +185,7 @@ impl PlayerPipeline {
         playback_rate: f64,
         startup_state: gst::State,
         fade_in: Option<Duration>,
+        bitstream: Option<gst::Caps>,
     ) -> Result<(), BackendFailure> {
         if self
             .audio_graph
@@ -200,12 +209,15 @@ impl PlayerPipeline {
                 playback_rate,
                 startup_state,
                 fade_in,
+                bitstream,
             )?;
             *self = replacement;
             return Ok(());
         }
         self.stop();
         self.initialize()?;
+        lock_recover(&self.gapless).bitstream = bitstream.is_some();
+        self.bitstream = bitstream;
         self.id = Some(id);
         self.session.store(id.0, Ordering::Release);
         self.current_stream = Some(item.stream.clone());
@@ -244,9 +256,7 @@ impl PlayerPipeline {
 
     #[cfg(test)]
     pub(super) fn audio_output(&self) -> Option<gst::Element> {
-        self.audio_graph
-            .as_ref()
-            .map(|graph| graph.output().clone())
+        self.output().cloned()
     }
 
     #[cfg(test)]
@@ -271,10 +281,9 @@ impl PlayerPipeline {
         let Some((pipeline, _)) = &self.native else {
             return;
         };
-        let Some(graph) = &self.audio_graph else {
+        let Some(output) = self.output() else {
             return;
         };
-        let output = graph.output();
         let sink = if output.find_property("last-sample").is_some() {
             Some(output.clone())
         } else {
@@ -398,6 +407,24 @@ impl PlayerPipeline {
 
     pub(super) fn has_session(&self) -> bool {
         self.id.is_some()
+    }
+
+    pub(super) fn is_bitstream(&self) -> bool {
+        self.bitstream.is_some()
+    }
+
+    pub(super) fn bitstream_format(&self) -> Option<gst::Caps> {
+        self.bitstream.clone()
+    }
+
+    pub(super) fn bitstream_request(&self) -> Option<gst::Caps> {
+        lock_recover(&self.bitstream_request).clone()
+    }
+
+    fn output(&self) -> Option<&gst::Element> {
+        self.bitstream_output
+            .as_ref()
+            .or_else(|| self.audio_graph.as_ref().map(AudioGraph::output))
     }
 
     pub(super) fn message_source_is_pipeline(&self, message: &gst::Message) -> bool {
@@ -654,12 +681,22 @@ impl PlayerPipeline {
         if self.current_stream.is_none() {
             return Ok(());
         }
+        if let Some(format) = self.bitstream.clone() {
+            if self.bitstream_output.is_none() {
+                self.install_bitstream_output(settings, &format)?;
+            }
+            return Ok(());
+        }
+        let detached = self.bitstream_output.take().is_some();
         if let Some(graph) = self.audio_graph.as_mut()
             && graph.reconfigure(settings, self.playback_rate)?
         {
             let request = lock_recover(&self.shared).processing.clone();
             if let Some(request) = request {
                 self.configure_processing(&request)?;
+            }
+            if detached {
+                self.attach_audio_graph(true)?;
             }
             return Ok(());
         }
@@ -684,78 +721,203 @@ impl PlayerPipeline {
         graph
             .output()
             .set_property("name", format!("{}-audio-output", self.native()?.0.name()));
-        let segment = Arc::clone(&self.segment);
-        let shared = Arc::clone(&self.shared);
-        let gapless = Arc::clone(&self.gapless);
-        graph
-            .root()
-            .static_pad("sink")
-            .expect("audio graph input")
-            .add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |pad, info| {
-                let Some(event) = info.event_mut() else {
-                    return gst::PadProbeReturn::Ok;
-                };
-                if matches!(event.view(), gst::EventView::StreamStart(_)) {
-                    let shared = lock_recover(&shared);
-                    let gapless = lock_recover(&gapless);
-                    if gapless
-                        .pending
-                        .as_ref()
-                        .is_some_and(|pending| shared.next.as_ref() != Some(pending))
-                    {
-                        // Let the current song finish, then end output before a
-                        // removed preload can send any audio to the sink.
-                        *event = gst::event::Eos::new();
-                    }
-                }
-                if matches!(event.view(), gst::EventView::Segment(_)) {
-                    let (starts_stream, time_reopened) = {
-                        let mut segment = segment.lock().unwrap_or_else(|p| p.into_inner());
-                        (
-                            segment.seek == Some(event.seqnum())
-                                && std::mem::take(&mut segment.starts_stream),
-                            segment.time_reopened,
-                        )
-                    };
-                    if time_reopened
-                        && let gst::EventView::Segment(current) = event.view()
-                        && let Some(current) = current.segment().downcast_ref::<gst::ClockTime>()
-                    {
-                        let mut current = current.clone();
-                        current.set_rate(lock_recover(&shared).playback_rate);
-                        *event = gst::event::Segment::builder(&current)
-                            .seqnum(event.seqnum())
-                            .build();
-                    }
-                    if starts_stream {
-                        // A non-flushing segment seek keeps the decoder and sink. Mark
-                        // the logical track boundary for gain, tags, and playback events.
-                        let mut tags = Vec::new();
-                        while let Some(tag) = pad.sticky_event::<gst::event::Tag>(tags.len() as u32)
-                        {
-                            tags.push(tag);
-                        }
-                        pad.send_event(
-                            gst::event::StreamStart::builder(&format!(
-                                "rufin-segment-{:?}",
-                                event.seqnum()
-                            ))
-                            .group_id(gst::GroupId::next())
-                            .build(),
-                        );
-                        for tag in tags {
-                            pad.send_event(tag);
-                        }
-                    }
-                }
-                gst::PadProbeReturn::Ok
-            });
+        self.watch_stream_boundaries(
+            &graph.root().static_pad("sink").expect("audio graph input"),
+            graph.output(),
+        );
+        self.audio_graph = Some(graph);
+        self.attach_audio_graph(detached)
+    }
+
+    fn attach_audio_graph(&self, decode_all: bool) -> Result<(), BackendFailure> {
+        let graph = self.audio_graph.as_ref().expect("configured audio graph");
         // Keep normalization out of the sink: playbin searches it for a volume
         // control and would otherwise let track gain overwrite the user's volume.
         self.native()?.0.set_property("audio-filter", graph.root());
         self.native()?.0.set_property("audio-sink", graph.sink());
-        self.audio_graph = Some(graph);
+        if decode_all {
+            self.set_undecoded_format(None)?;
+        }
         Ok(())
+    }
+
+    /// The audio graph stays detached: playsink links `format` straight to the output.
+    fn install_bitstream_output(
+        &mut self,
+        settings: &BackendAudioSettings,
+        format: &gst::Caps,
+    ) -> Result<(), BackendFailure> {
+        let output = make_audio_output(settings.audio_output.as_deref())?;
+        #[cfg(test)]
+        super::audio::configure_test_output(&output);
+        let playbin = &self.native()?.0;
+        output.set_property("name", format!("{}-audio-output", playbin.name()));
+        self.watch_stream_boundaries(
+            &output.static_pad("sink").expect("audio output input"),
+            &output,
+        );
+        playbin.set_property("audio-filter", None::<gst::Element>);
+        playbin.set_property("audio-sink", &output);
+        self.set_undecoded_format(Some(format))?;
+        self.bitstream_output = Some(output);
+        Ok(())
+    }
+
+    /// decodebin3 stops at the parser for `format` and decodes every other stream.
+    fn set_undecoded_format(&self, format: Option<&gst::Caps>) -> Result<(), BackendFailure> {
+        let decoder = self
+            .native()?
+            .0
+            .downcast_ref::<gst::Bin>()
+            .and_then(|playbin| playbin.by_name("uridecodebin3"))
+            .ok_or("playbin3 has no URI decoder")?;
+        let mut caps = "audio/x-raw(ANY)"
+            .parse::<gst::Caps>()
+            .expect("raw audio caps");
+        if let Some(name) = format
+            .and_then(|format| format.structure(0))
+            .map(|format| format.name())
+        {
+            caps.merge(gst::Caps::new_empty_simple(name));
+        }
+        decoder.set_property("caps", caps);
+        Ok(())
+    }
+
+    /// Watches streams entering the output path: the audio graph for decoded sessions,
+    /// the output for passed-through ones.
+    fn watch_stream_boundaries(&self, pad: &gst::Pad, output: &gst::Element) {
+        let segment = Arc::clone(&self.segment);
+        let shared = Arc::clone(&self.shared);
+        let gapless = Arc::clone(&self.gapless);
+        let request = Arc::clone(&self.bitstream_request);
+        let inputs = self.inputs.clone();
+        let output = output.downgrade();
+        let (slot, passthrough) = (self.slot, self.bitstream.clone());
+        let session = Arc::clone(&self.session);
+        // The session whose first stream already passed. Its later streams are queued items.
+        let started_session = AtomicU64::new(0);
+        pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |pad, info| {
+            let Some(event) = info.event_mut() else {
+                return gst::PadProbeReturn::Ok;
+            };
+            let started = match event.view() {
+                // The parsed format, also on decoded streams. Rufin's own CUE
+                // boundaries carry no stream, so they never change the mode.
+                gst::EventView::StreamStart(start) => {
+                    Some(start.stream().and_then(|stream| stream.caps()))
+                }
+                _ => None,
+            };
+            if let Some(format) = started {
+                // A short source can queue its next item before its own stream starts.
+                let queued = format.is_none() || {
+                    let id = session.load(Ordering::Acquire);
+                    started_session.swap(id, Ordering::AcqRel) == id
+                };
+                let (removed, allowed, active) = {
+                    let shared = lock_recover(&shared);
+                    let gapless = lock_recover(&gapless);
+                    let loudness = match (&gapless.pending, queued) {
+                        (Some(pending), true) => pending.stream.loudness.clone(),
+                        _ => shared
+                            .current
+                            .as_ref()
+                            .and_then(|current| current.stream.loudness.clone()),
+                    };
+                    (
+                        queued
+                            && gapless
+                                .pending
+                                .as_ref()
+                                .is_some_and(|pending| shared.next.as_ref() != Some(pending)),
+                        format.as_ref().is_some_and(|format| {
+                            passthrough_allowed(
+                                format,
+                                &shared.settings,
+                                shared.playback_rate,
+                                shared.processing.as_ref(),
+                                loudness.as_ref(),
+                            )
+                        }),
+                        shared.active == slot,
+                    )
+                };
+                let switch = format.as_ref().is_some_and(|format| {
+                    let undecoded = allowed
+                        && output
+                            .upgrade()
+                            .and_then(|output| output.static_pad("sink"))
+                            .is_some_and(|output| output.query_accept_caps(format));
+                    match &passthrough {
+                        Some(current) => {
+                            !undecoded
+                                || current.structure(0).map(|current| current.name())
+                                    != format.structure(0).map(|format| format.name())
+                        }
+                        None => undecoded,
+                    }
+                });
+                if removed || queued && switch {
+                    // Let the current song finish, then end output before a removed
+                    // preload, or one for the other output mode, can reach the sink.
+                    *event = gst::event::Eos::new();
+                } else if switch && passthrough.is_none() && active {
+                    *lock_recover(&request) = format;
+                    // Until the restart stops this session, nothing after this stream
+                    // start plays decoded or lets a queued item begin.
+                    let held = Arc::clone(&request);
+                    pad.add_probe(gst::PadProbeType::BLOCK_DOWNSTREAM, move |_, _| {
+                        if lock_recover(&held).is_some() {
+                            gst::PadProbeReturn::Ok
+                        } else {
+                            gst::PadProbeReturn::Remove
+                        }
+                    });
+                    let _ = inputs.send(WorkerInput::Wake);
+                }
+            }
+            if matches!(event.view(), gst::EventView::Segment(_)) {
+                let (starts_stream, time_reopened) = {
+                    let mut segment = segment.lock().unwrap_or_else(|p| p.into_inner());
+                    (
+                        segment.seek == Some(event.seqnum())
+                            && std::mem::take(&mut segment.starts_stream),
+                        segment.time_reopened,
+                    )
+                };
+                if time_reopened
+                    && let gst::EventView::Segment(current) = event.view()
+                    && let Some(current) = current.segment().downcast_ref::<gst::ClockTime>()
+                {
+                    let mut current = current.clone();
+                    current.set_rate(lock_recover(&shared).playback_rate);
+                    *event = gst::event::Segment::builder(&current)
+                        .seqnum(event.seqnum())
+                        .build();
+                }
+                if starts_stream {
+                    // A non-flushing segment seek keeps the decoder and sink. Mark
+                    // the logical track boundary for gain, tags, and playback events.
+                    let mut tags = Vec::new();
+                    while let Some(tag) = pad.sticky_event::<gst::event::Tag>(tags.len() as u32) {
+                        tags.push(tag);
+                    }
+                    pad.send_event(
+                        gst::event::StreamStart::builder(&format!(
+                            "rufin-segment-{:?}",
+                            event.seqnum()
+                        ))
+                        .group_id(gst::GroupId::next())
+                        .build(),
+                    );
+                    for tag in tags {
+                        pad.send_event(tag);
+                    }
+                }
+            }
+            gst::PadProbeReturn::Ok
+        });
     }
 
     pub(super) fn try_reconfigure_audio(
@@ -1040,6 +1202,7 @@ impl PlayerPipeline {
         self.live.set(false);
         self.held.set(false);
         self.draining.set(false);
+        *lock_recover(&self.bitstream_request) = None;
         if let Some(graph) = self.audio_graph.as_mut() {
             graph.clear_stream();
         }
@@ -1267,9 +1430,9 @@ impl PlayerPipeline {
     }
 
     pub(super) fn audio_output_factory(&self) -> Option<String> {
-        self.audio_graph
-            .as_ref()
-            .and_then(AudioGraph::output_factory)
+        self.output()
+            .and_then(|output| output.factory())
+            .map(|factory| factory.name().to_string())
     }
 }
 impl Drop for PlayerPipeline {
@@ -1342,6 +1505,7 @@ mod tests {
                 false,
                 1.0,
                 gst::State::Paused,
+                None,
                 None,
             )
             .unwrap();
@@ -1461,6 +1625,7 @@ mod tests {
                     false,
                     1.0,
                     gst::State::Playing,
+                    None,
                     None,
                 )
                 .unwrap();

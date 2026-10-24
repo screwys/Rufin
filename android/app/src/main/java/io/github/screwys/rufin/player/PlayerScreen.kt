@@ -10,6 +10,7 @@ import io.github.screwys.rufin.settings.LocalReduceMotion
 import io.github.screwys.rufin.settings.PreferencesConnection
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import io.github.screwys.rufin.ui.rufinMarquee
 import androidx.compose.foundation.clickable
@@ -347,9 +348,14 @@ private fun PlayerControls(player: PlayerConnection, modifier: Modifier) {
 @Composable
 private fun PlayerSourceInfo(player: PlayerConnection) {
     val labels by remember(player) { derivedStateOf { player.sourceLabels } }
-    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
+    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
         labels.forEach { label ->
-            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(shape = CircleShape, color = Color.Transparent, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                Text(label, Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
