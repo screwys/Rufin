@@ -354,6 +354,11 @@ impl Shell {
         self.refresh_activity_playback();
         let current = route_current_track(self.player_ui.selected_playback().as_deref());
         self.chrome.topbar.refresh_search_playback(current.as_ref());
+        if let Some(queue) = self.player_ui.selected_queue() {
+            queue
+                .playing
+                .set_paused(current.as_ref().is_none_or(|current| current.paused));
+        }
         if let Some(catalog) = self.route_viewport.catalog.borrow().as_ref() {
             catalog.refresh_current_route_now_playing_selections(current);
         }

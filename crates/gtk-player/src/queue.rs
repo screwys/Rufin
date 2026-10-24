@@ -9,7 +9,10 @@ use gtk_widgets::{
     media_drag::{
         MediaDragPreviewBinding, MediaDragSource, media_drag_content_provider, media_drag_source,
     },
-    recycled_cells::{RecycledMergedCell, set_track_row_index_text, track_list_row_index_cell},
+    recycled_cells::{
+        RecycledMergedCell, TrackRowPlayingIndicator, set_track_row_index_text,
+        track_list_row_index_cell,
+    },
     sparse_model::{SparseObjectItem, connect_sparse_bind},
 };
 use library::QueueRow;
@@ -30,6 +33,7 @@ pub struct QueueState {
     pub selection: RefCell<Option<gtk::MultiSelection>>,
     pub filter: RefCell<String>,
     pub current: RefCell<Option<usize>>,
+    pub playing: TrackRowPlayingIndicator,
     pub render_queued: Cell<bool>,
     reveal_current: [Cell<bool>; 2],
 }
@@ -44,6 +48,7 @@ impl QueueState {
             selection: RefCell::new(None),
             filter: RefCell::new(String::new()),
             current: RefCell::new(None),
+            playing: TrackRowPlayingIndicator::new(),
             render_queued: Cell::new(false),
             reveal_current: Default::default(),
         }
@@ -180,28 +185,18 @@ impl QueueState {
     }
 
     pub fn update_current(&self, current: Option<usize>) -> bool {
-        let previous = self.current.replace(current);
-        let changed = previous != current;
-        for position in [previous.filter(|_| changed), current]
-            .into_iter()
-            .flatten()
-        {
-            let row = self
-                .rows
+        let changed = self.current.replace(current) != current;
+        let media_uri = current.and_then(|current| {
+            self.window
                 .borrow()
                 .iter()
-                .enumerate()
-                .find(|(_, row)| row.position == position)
-                .map(|(position, row)| (position, row.clone()));
-            if let Some((position, row)) = row {
-                let object = self
-                    .model
-                    .item(position as u32)
-                    .and_downcast::<SparseObjectItem>()
-                    .expect("Queue row object");
-                object.replace(row, true);
-            }
-        }
+                .find(|row| row.position == current)
+                .map(|row| row.track.media_uri.clone())
+        });
+        self.playing.set_current(
+            media_uri.as_deref(),
+            current.map_or(gtk::INVALID_LIST_POSITION, |current| current as u32),
+        );
         changed
     }
 
@@ -452,7 +447,8 @@ fn queue_index_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         }
         item.set_child(Some(&cell));
     });
-    let bind_shell = Rc::downgrade(shell);
+    let playing = shell.queue.borrow().playing.clone();
+    let bind_playing = playing.clone();
     connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
@@ -461,26 +457,18 @@ fn queue_index_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
             return;
         };
         set_track_row_index_text(&cell, &(item.position() + 1).to_string());
-        if let Some(shell) = bind_shell.upgrade() {
-            let row = queue_row_from_item(&item.downgrade());
-            let player = shell.selected_playback();
-            let current = row
-                .as_ref()
-                .zip(player.as_ref())
-                .is_some_and(|(row, player)| {
-                    player.queue.current_index.as_ref() == Some(&row.position)
-                });
-            let paused = player
-                .as_ref()
-                .is_some_and(|player| !player.transport.desired_playing);
-            gtk_widgets::recycled_cells::set_track_playing(cell.upcast_ref(), current, paused);
+        match queue_row_from_item(&item.downgrade()) {
+            Some(row) => {
+                bind_playing.bind(cell.upcast_ref(), row.position as u32, &row.track.media_uri);
+            }
+            None => bind_playing.unbind(cell.upcast_ref()),
         }
     });
-    factory.connect_unbind(|_, item| {
+    factory.connect_unbind(move |_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>()
             && let Some(cell) = item.child().and_downcast::<gtk::Overlay>()
         {
-            gtk_widgets::recycled_cells::set_track_playing(cell.upcast_ref(), false, false);
+            playing.unbind(cell.upcast_ref());
             set_track_row_index_text(&cell, "");
         }
     });
@@ -521,6 +509,8 @@ fn queue_title_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         );
         item.set_child(Some(&cell));
     });
+    let playing = shell.queue.borrow().playing.clone();
+    let bind_playing = playing.clone();
     let bind_shell = Rc::downgrade(shell);
     connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -539,18 +529,13 @@ fn queue_title_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
         let Some(shell) = bind_shell.upgrade() else {
             return;
         };
-        let current = shell
-            .selected_playback()
-            .as_deref()
-            .and_then(|player| player.queue.current_index);
-        let is_current = current.as_ref() == Some(&row.position);
         let title = cell.title();
         title.set_text(&row.track.metadata.title);
-        let paused = shell
-            .selected_playback()
-            .as_ref()
-            .is_some_and(|p| !p.transport.desired_playing);
-        gtk_widgets::recycled_cells::set_track_playing(title.upcast_ref(), is_current, paused);
+        bind_playing.bind(
+            title.upcast_ref(),
+            row.position as u32,
+            &row.track.media_uri,
+        );
         let subtitle = cell.subtitle();
         subtitle.set_visible(!row.track.metadata.artist.is_empty());
         cell.bind_subtitle(row.links(LibraryField::Artist));
@@ -571,7 +556,7 @@ fn queue_title_column(shell: &Rc<crate::PlayerUi>) -> gtk::ColumnViewColumn {
             && let Some(cell) = item.child().and_downcast::<RecycledMergedCell>()
         {
             cell.title().set_text("");
-            cell.title().remove_css_class("track-row-playing");
+            playing.unbind(cell.title().upcast_ref());
             cell.clear_subtitle();
             if let Some(shell) = unbind_shell.upgrade() {
                 shell.artwork.clear_artwork_tile(&cell.cover());

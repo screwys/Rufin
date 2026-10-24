@@ -43,7 +43,10 @@ pub fn route_current_track(player: Option<&playback::PlaybackView>) -> Option<Ro
         track_key: Some(entry.row.track.track_key),
         media_uri: entry.row.track.media_uri.clone(),
         context,
-        paused: player.transport.effective_state() == TransportStatus::Paused,
+        paused: !matches!(
+            player.transport.effective_state(),
+            TransportStatus::Resolving | TransportStatus::Buffering | TransportStatus::Playing
+        ),
     })
 }
 pub type RouteCurrentTrackSelection = Rc<dyn Fn(Option<&RouteCurrentTrack>) -> bool>;

@@ -1,4 +1,5 @@
-use std::cell::{OnceCell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -552,6 +553,99 @@ pub fn set_track_playing(title: &gtk::Widget, playing: bool, paused: bool) {
             title.add_css_class(class);
         } else {
             title.remove_css_class(class);
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TrackRowPlayingIndicator {
+    inner: Rc<TrackRowPlayingIndicatorInner>,
+}
+
+struct TrackRowPlayingIndicatorInner {
+    position: Cell<u32>,
+    media_uri: RefCell<Option<String>>,
+    paused: Cell<bool>,
+    cells: RefCell<HashMap<usize, (glib::WeakRef<gtk::Widget>, u32, String)>>,
+}
+
+impl TrackRowPlayingIndicator {
+    pub fn new() -> Self {
+        Self {
+            inner: Rc::new(TrackRowPlayingIndicatorInner {
+                position: Cell::new(gtk::INVALID_LIST_POSITION),
+                media_uri: RefCell::new(None),
+                paused: Cell::new(false),
+                cells: RefCell::new(HashMap::new()),
+            }),
+        }
+    }
+
+    fn matches(&self, position: u32, media_uri: &str) -> bool {
+        self.inner.media_uri.borrow().as_deref() == Some(media_uri)
+            && (self.inner.position.get() == gtk::INVALID_LIST_POSITION
+                || self.inner.position.get() == position)
+    }
+
+    pub fn bind(&self, widget: &gtk::Widget, position: u32, media_uri: &str) {
+        set_track_playing(
+            widget,
+            self.matches(position, media_uri),
+            self.inner.paused.get(),
+        );
+        self.inner
+            .cells
+            .borrow_mut()
+            .entry(widget.as_ptr() as usize)
+            .and_modify(|(bound_widget, bound_position, uri)| {
+                *bound_widget = widget.downgrade();
+                *bound_position = position;
+                if uri != media_uri {
+                    media_uri.clone_into(uri);
+                }
+            })
+            .or_insert_with(|| (widget.downgrade(), position, media_uri.to_owned()));
+    }
+
+    pub fn unbind(&self, widget: &gtk::Widget) {
+        set_track_playing(widget, false, false);
+        self.inner
+            .cells
+            .borrow_mut()
+            .remove(&(widget.as_ptr() as usize));
+    }
+
+    pub fn set_current(&self, media_uri: Option<&str>, position: u32) {
+        if self.inner.position.get() == position
+            && self.inner.media_uri.borrow().as_deref() == media_uri
+        {
+            return;
+        }
+        self.inner.media_uri.replace(media_uri.map(str::to_owned));
+        self.inner.position.set(position);
+        self.refresh();
+    }
+
+    fn refresh(&self) {
+        self.inner
+            .cells
+            .borrow_mut()
+            .retain(|_, (widget, bound_position, uri)| {
+                let Some(widget) = widget.upgrade() else {
+                    return false;
+                };
+                set_track_playing(
+                    &widget,
+                    self.matches(*bound_position, uri),
+                    self.inner.paused.get(),
+                );
+                true
+            });
+    }
+
+    pub fn set_paused(&self, paused: bool) {
+        if self.inner.paused.replace(paused) != paused {
+            self.refresh();
         }
     }
 }
