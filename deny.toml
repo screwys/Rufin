@@ -12,6 +12,7 @@ ignore = [
     { id = "RUSTSEC-2026-0372", reason = "zvariant 5 requires zvariant_derive 5. Maintenance advisory after the zbus 6 crate merge; remove when upstream dependencies drop standalone zvariant." },
     { id = "RUSTSEC-2026-0374", reason = "Askama 0.16 and i18n-config 0.4 still use basic-toml for build-time configuration. Maintenance advisory with no patched release; remove when these dependencies migrate to toml." },
     { id = "RUSTSEC-2023-0071", reason = "rsa is pulled by smb -> sspi -> picky; Rufin enables only NTLM, with Kerberos and PKU2U disabled, so the affected RSA private-key operations are unused. Reassess if SMB authentication features change." },
+    { id = "RUSTSEC-2026-0387", reason = "age 0.12 pulls p256 0.13 -> elliptic-curve 0.13 -> crypto-bigint 0.5, which has no patched release. Rufin uses only age X25519 identities, so the affected P-256 arithmetic (p256tag recipients) is unused. crypto-bigint 0.7 is patched; remove when age moves to p256 0.14." },
     { id = "RUSTSEC-2024-0436", reason = "lofty uses paste, can be removed if they change it to pastey" },
 ]
 
