@@ -327,18 +327,6 @@ impl AndroidBrowseQuery {
                 }
                 return Ok(Arc::new(read.selection()));
             }
-            if let OpenedCollection::Detail(Some(rufin_core::browse::DetailPage {
-                summary: rufin_core::browse::DetailSummary::Artist(artist),
-                ..
-            })) = self.opened(&cancel).await.map_err(error)?
-            {
-                return Ok(Arc::new(MemberSelection::Collections(vec![
-                    Collection::Artist {
-                        key: artist.artist_key,
-                        album_artist: self.artist_release_identity().is_some_and(|(_, role)| role),
-                    },
-                ])));
-            }
             self.list(&cancel)
                 .await
                 .map_err(error)?

@@ -28,7 +28,6 @@ desktop-integration.workspace = true
 localization.workspace = true
 playback.workspace = true
 playback-gstreamer.workspace = true
-sources.workspace = true
 tracing.workspace = true
 gtk-shell.workspace = true
 

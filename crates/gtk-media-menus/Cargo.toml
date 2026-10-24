@@ -18,7 +18,6 @@ gtk = { workspace = true, features = ["v4_20"] }
 library.workspace = true
 localization.workspace = true
 sources.workspace = true
-playback.workspace = true
 tokio.workspace = true
 
 [build-dependencies]

@@ -104,19 +104,17 @@ async fn unavailable_local_root_preserves_catalog_and_can_retry() {
             .fetch_all(&mut connection)
             .await
             .unwrap();
-    assert!(
-        profile
-            .current_records(&keys)
+    let mut removed = false;
+    for (kind, key) in &keys {
+        let record = library::Database::connect_record_on(&mut connection, kind, key)
             .await
-            .unwrap()
-            .iter()
-            .any(|record| {
-                record.value.as_ref().is_some_and(|value| {
-                    value["file"]["relative_path"] == "removed.wav"
-                        && value["tracks"].as_array().is_some_and(Vec::is_empty)
-                })
-            })
-    );
+            .unwrap();
+        removed |= record.value.is_some_and(|value| {
+            value["file"]["relative_path"] == "removed.wav"
+                && value["tracks"].as_array().is_some_and(Vec::is_empty)
+        });
+    }
+    assert!(removed);
     assert!(
         source
             .catch_up_local(&database, &|_| {}, cancelled.clone())

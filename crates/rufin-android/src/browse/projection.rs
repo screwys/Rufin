@@ -209,9 +209,6 @@ impl AndroidBrowseQuery {
                 content: DetailContent::Releases { page, .. },
                 ..
             })) => page.page.count,
-            OpenedCollection::Search(rows) => {
-                rows.tracks.len() + rows.albums.len() + rows.artists.len()
-            }
             _ => 0,
         }
     }
@@ -341,12 +338,7 @@ impl AndroidBrowseQuery {
                 .take(limit)
                 .map(|(row, _)| row.clone())
                 .collect(),
-            OpenedCollection::Search(rows) => search_rows(rows.clone())
-                .into_iter()
-                .skip(offset)
-                .take(limit)
-                .collect(),
-            OpenedCollection::Detail(None) => Vec::new(),
+            OpenedCollection::Search(_) | OpenedCollection::Detail(None) => Vec::new(),
         })
     }
 }

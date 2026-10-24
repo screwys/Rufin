@@ -1084,21 +1084,14 @@ pub(crate) async fn apply_on(
         )
         .await?;
     }
-    if update.changed() {
-        sqlx::query("UPDATE sources SET catalog_revision=catalog_revision+1 WHERE source_key=?1")
-            .bind(source)
-            .execute(&mut *connection)
-            .await?;
-    }
     Ok(update)
 }
 
 impl super::Catalog<'_> {
     pub async fn apply_catalog(&mut self, batch: &CatalogBatch, admit: bool) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let mut tx = self
-            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-            .await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut tx = connection.begin().await?;
         let update = apply_on(
             &mut tx,
             self.source.raw(),
@@ -1108,7 +1101,7 @@ impl super::Catalog<'_> {
             admit,
         )
         .await?;
-        self.commit_write(tx).await?;
+        tx.commit().await?;
         self.changes.merge(update);
         Ok(())
     }
@@ -1123,9 +1116,8 @@ impl super::Catalog<'_> {
             let mut after = 0_i64;
             loop {
                 let mut writer = self.database.writer().await?;
-                let mut tx = self
-                    .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-                    .await?;
+                let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+                let mut tx = connection.begin().await?;
                 let source = self.source.raw();
                 let (table, key) = if *kind == "playlist" {
                     ("playlists", "playlist_key")
@@ -1137,10 +1129,9 @@ impl super::Catalog<'_> {
                 } else {
                     ""
                 };
-                let keep_local = super::keep_local_membership(kind, self.incoming);
-                let keys:Vec<i64>=sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT {key} FROM {table} WHERE source_key=?1 AND indexed=1 AND observed_stamp<?2 AND {key}>?3 {absent}{keep_local} ORDER BY {key} LIMIT 128"))).bind(source).bind(observed).bind(after).fetch_all(&mut *tx).await?;
+                let keys:Vec<i64>=sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT {key} FROM {table} WHERE source_key=?1 AND indexed=1 AND observed_stamp<?2 AND {key}>?3 {absent} ORDER BY {key} LIMIT 128"))).bind(source).bind(observed).bind(after).fetch_all(&mut *tx).await?;
                 let Some(last) = keys.last() else {
-                    self.commit_write(tx).await?;
+                    tx.commit().await?;
                     self.changes.merge(update.clone());
                     break;
                 };
@@ -1170,7 +1161,7 @@ impl super::Catalog<'_> {
                             .iter()
                             .map(|key| crate::AlbumKey::from_raw(*key))
                             .collect::<Vec<_>>(),
-                        !self.incoming,
+                        true,
                     )
                     .await?;
                 }
@@ -1183,18 +1174,16 @@ impl super::Catalog<'_> {
                     false,
                 )
                 .await?;
-                self.commit_write(tx).await?;
+                tx.commit().await?;
                 self.changes.merge(update.clone());
             }
         }
-        let mut writer = self.database.writer().await?;
-        let mut tx = self
-            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-            .await?;
-        let source = self.source.raw();
         if kinds.is_empty() {
-            let share: Option<bool> = sqlx::query_scalar("UPDATE sources SET catalog_complete=1,freshness=?2,catalog_revision=catalog_revision+?3 WHERE source_key=?1 AND(catalog_complete,freshness) IS NOT(1,?2) RETURNING coalesce(kind IN('local','webdav','smb'),0)")
-                .bind(source).bind(freshness.map(Freshness::as_bytes)).bind(update.changed()).fetch_optional(&mut *tx).await?;
+            let mut writer = self.database.writer().await?;
+            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+            let mut tx = connection.begin().await?;
+            let share: Option<bool> = sqlx::query_scalar("UPDATE sources SET catalog_complete=1,freshness=?2 WHERE source_key=?1 AND(catalog_complete,freshness) IS NOT(1,?2) RETURNING coalesce(kind IN('local','webdav','smb'),0)")
+                .bind(self.source.raw()).bind(freshness.map(Freshness::as_bytes)).fetch_optional(&mut *tx).await?;
             if share == Some(true) {
                 crate::connect::mark_current_on(
                     &mut tx,
@@ -1204,16 +1193,8 @@ impl super::Catalog<'_> {
                 )
                 .await?;
             }
-        } else if update.changed() {
-            sqlx::query(
-                "UPDATE sources SET catalog_revision=catalog_revision+1 WHERE source_key=?1",
-            )
-            .bind(source)
-            .execute(&mut *tx)
-            .await?;
+            tx.commit().await?;
         }
-        self.commit_write(tx).await?;
-        self.changes.merge(update.clone());
         self.changes.merge(update);
         Ok(())
     }
@@ -1222,12 +1203,11 @@ impl super::Catalog<'_> {
 impl super::Catalog<'_> {
     pub async fn start_observation(&mut self) -> LibraryResult<i64> {
         let mut writer = self.database.writer().await?;
-        let mut tx = self
-            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-            .await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut tx = connection.begin().await?;
         let stamp = sqlx::query_scalar("UPDATE sources SET observation_stamp=observation_stamp+1 WHERE source_key=?1 RETURNING observation_stamp")
             .bind(self.source).fetch_one(&mut *tx).await?;
-        self.commit_write(tx).await?;
+        tx.commit().await?;
         self.observed = Some(stamp);
         Ok(stamp)
     }

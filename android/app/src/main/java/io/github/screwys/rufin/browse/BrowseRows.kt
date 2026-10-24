@@ -207,28 +207,6 @@ internal val AndroidBrowseRow.sourceId: String?
         else -> null
     }
 
-internal val AndroidBrowseRow.sourceName: String
-    get() = contextSourceName.takeIf { it.isNotEmpty() } ?: when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.access.sourceName
-        is AndroidBrowseItem.PlaylistEntry -> item.row.track.access.sourceName
-        else -> contextSourceName
-    }
-
-internal val AndroidBrowseRow.lastPlayed: Long?
-    get() = when (val item = item) {
-        is AndroidBrowseItem.Track -> item.row.state.lastPlayed
-        is AndroidBrowseItem.PlaylistEntry -> item.row.track.state.lastPlayed
-        is AndroidBrowseItem.Album -> item.row.state.lastPlayed
-        is AndroidBrowseItem.Artist -> item.row.state.lastPlayed
-        else -> null
-    }
-
-internal val AndroidBrowseRow.writable: Boolean
-    get() = when (val item = item) {
-        is AndroidBrowseItem.Playlist -> item.row.writable
-        else -> false
-    }
-
 internal val AndroidBrowseRow.trackKey: Long?
     get() = when (val item = item) {
         is AndroidBrowseItem.Track -> item.row.trackKey

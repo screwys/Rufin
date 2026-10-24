@@ -193,17 +193,8 @@ impl Database {
             .fetch_one(&mut *transaction)
             .await?;
         if known {
-            let changed = sqlx::query("INSERT INTO native_media_state(media_uri,favorite) VALUES(?1,?2) ON CONFLICT(media_uri) DO UPDATE SET favorite=excluded.favorite WHERE favorite IS NOT excluded.favorite")
-                .bind(target.media_uri()).bind(favorite).execute(&mut *transaction).await?.rows_affected()>0;
-            if changed {
-                sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "UPDATE sources SET catalog_revision=catalog_revision+1 WHERE source_key=(SELECT source_key FROM {}s WHERE media_uri=?1)",
-                    target.kind()
-                )))
-                .bind(target.media_uri())
-                .execute(&mut *transaction)
-                .await?;
-            }
+            sqlx::query("INSERT INTO native_media_state(media_uri,favorite) VALUES(?1,?2) ON CONFLICT(media_uri) DO UPDATE SET favorite=excluded.favorite WHERE favorite IS NOT excluded.favorite")
+                .bind(target.media_uri()).bind(favorite).execute(&mut *transaction).await?;
             update_favorite(&mut transaction, target, None).await?;
         }
         transaction.commit().await?;

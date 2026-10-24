@@ -28,7 +28,6 @@ blake3.workspace = true
 md5_digest.workspace = true
 libsqlite3-sys.workspace = true
 percent-encoding.workspace = true
-process-memory.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx = { workspace = true, features = ["json"] }

@@ -993,13 +993,6 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
     let database = Database::open(&path).await.expect("open Library Store");
     let first = write_small_catalog(&database, "fresh-one", "Track One", false, br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/242a249a37e1642edb20688243d50616","image":{"kind":"native","source_id":"source","item_id":"genre-art","tag":null},"blur_hash":null}]"#).await;
     assert!(first.1.metadata);
-    let first_revision = sqlx::query_scalar::<_, i64>(
-        "SELECT catalog_revision FROM sources WHERE object_id='source-one'",
-    )
-    .fetch_one(&mut connection(&path).await)
-    .await
-    .unwrap();
-    assert!(first_revision > 0);
     assert_eq!(
         database
             .cached_source("source-one", &ReadCancellation::new())
@@ -1040,16 +1033,6 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
     let unchanged =
         write_small_catalog(&database, "fresh-two", "Track One", true, br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/242a249a37e1642edb20688243d50616","image":{"kind":"native","source_id":"source","item_id":"genre-art","tag":null},"blur_hash":null}]"#).await;
     assert!(!unchanged.1.changed());
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT catalog_revision FROM sources WHERE object_id='source-one'"
-        )
-        .fetch_one(&mut outside)
-        .await
-        .unwrap(),
-        first_revision
-    );
-    assert!(!unchanged.1.changed());
     assert!(
         (&database)
             .accept_freshness(
@@ -1070,13 +1053,6 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
     )
     .await;
     assert!(changed.1.metadata);
-    let changed_revision = sqlx::query_scalar::<_, i64>(
-        "SELECT catalog_revision FROM sources WHERE object_id='source-one'",
-    )
-    .fetch_one(&mut outside)
-    .await
-    .unwrap();
-    assert!(changed_revision > first_revision);
     assert_eq!(changed.0, first.0);
     let changed_facts = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
         "SELECT

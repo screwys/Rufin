@@ -3297,7 +3297,6 @@ dependencies = [
  "libadwaita",
  "library",
  "localization",
- "playback",
  "rufin-core",
  "sources",
  "tempfile",
@@ -3309,14 +3308,12 @@ dependencies = [
 name = "gtk-media-menus"
 version = "0.16.6"
 dependencies = [
- "downloads",
  "glib-build-tools",
  "gtk-widgets",
  "gtk4",
  "libadwaita",
  "library",
  "localization",
- "playback",
  "rufin-core",
  "sources",
  "tokio",
@@ -3392,7 +3389,6 @@ dependencies = [
  "libadwaita",
  "library",
  "localization",
- "lyrics",
  "playback",
  "proptest",
  "rufin-core",
@@ -4737,7 +4733,6 @@ dependencies = [
  "loro",
  "md-5 0.10.6",
  "percent-encoding",
- "process-memory",
  "proptest",
  "regex",
  "roxmltree 0.21.1",
@@ -7712,7 +7707,6 @@ dependencies = [
  "playback-gstreamer",
  "rufin-controller",
  "rufin-core",
- "sources",
  "tracing",
  "windows-updater",
 ]

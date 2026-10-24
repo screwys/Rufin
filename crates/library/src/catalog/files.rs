@@ -784,12 +784,6 @@ pub(crate) async fn write_file_observations_on(
         )
         .await?;
     }
-    if update.changed() {
-        sqlx::query("UPDATE sources SET catalog_revision=catalog_revision+1 WHERE source_key=?1")
-            .bind(source)
-            .execute(&mut *connection)
-            .await?;
-    }
     Ok(update)
 }
 
@@ -801,9 +795,8 @@ impl super::Catalog<'_> {
         admit: bool,
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let mut tx = self
-            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-            .await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut tx = connection.begin().await?;
         let update = write_file_observations_on(
             &mut tx,
             (self.source.raw(), self.source_id),
@@ -811,10 +804,10 @@ impl super::Catalog<'_> {
             files,
             songs,
             admit,
-            !self.incoming,
+            true,
         )
         .await?;
-        self.commit_write(tx).await?;
+        tx.commit().await?;
         self.changes.merge(update);
         Ok(())
     }
@@ -891,12 +884,11 @@ impl super::Catalog<'_> {
         for path in paths {
             loop {
                 let mut writer = self.database.writer().await?;
-                let mut tx = self
-                    .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-                    .await?;
+                let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+                let mut tx = connection.begin().await?;
                 let (update, done) =
                     remove_files_page_on(&mut tx, self.source.raw(), path, observed).await?;
-                self.commit_write(tx).await?;
+                tx.commit().await?;
                 self.changes.merge(update);
                 if done {
                     break;

@@ -66,7 +66,6 @@ pub struct Catalog<'a> {
     pub observed: Option<i64>,
     pub source: SourceKey,
     pub(crate) changes: CatalogUpdate,
-    pub(crate) incoming: bool,
 }
 
 pub(crate) fn keep_local_membership(kind: &str, incoming: bool) -> String {
@@ -84,28 +83,6 @@ pub(crate) fn keep_local_membership(kind: &str, incoming: bool) -> String {
 }
 
 impl Catalog<'_> {
-    pub(crate) async fn begin_write<'c>(
-        &self,
-        connection: &'c mut SqliteConnection,
-    ) -> LibraryResult<sqlx::Transaction<'c, sqlx::Sqlite>> {
-        let mut transaction = connection.begin().await?;
-        if self.incoming {
-            crate::connect::set_receiving_on(&mut transaction, true).await?;
-        }
-        Ok(transaction)
-    }
-
-    pub(crate) async fn commit_write(
-        &self,
-        mut transaction: sqlx::Transaction<'_, sqlx::Sqlite>,
-    ) -> LibraryResult<()> {
-        if self.incoming {
-            crate::connect::set_receiving_on(&mut transaction, false).await?;
-        }
-        transaction.commit().await?;
-        Ok(())
-    }
-
     pub fn changes(&self) -> &CatalogUpdate {
         &self.changes
     }
@@ -153,7 +130,6 @@ impl Database {
             source,
             observed,
             changes: CatalogUpdate::default(),
-            incoming: false,
         })
     }
 
@@ -180,23 +156,9 @@ impl Database {
         kind: &str,
         name: &str,
     ) -> LibraryResult<CachedSource> {
-        self.reconcile_source_cache(source_id, kind, name, false)
-            .await
-    }
-
-    pub(crate) async fn reconcile_source_cache(
-        &self,
-        source_id: &SourceId,
-        kind: &str,
-        name: &str,
-        incoming: bool,
-    ) -> LibraryResult<CachedSource> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
-        if incoming {
-            crate::connect::set_receiving_on(&mut transaction, true).await?;
-        }
         let source = crate::db::write_source_identity(&mut transaction, source_id.as_str()).await?;
         let changed = sqlx::query("UPDATE sources SET kind=?2,display_name=?3,normalized_name=?4,distinct_track_covers=?5 WHERE source_key=?1 AND (kind,display_name,normalized_name,distinct_track_covers) IS NOT (?2,?3,?4,?5)")
             .bind(source).bind(kind).bind(name).bind(name.to_lowercase()).bind(self.distinct_track_covers()).execute(&mut *transaction).await?.rows_affected()>0;
@@ -211,9 +173,6 @@ impl Database {
         }
         let row = sqlx::query_as("SELECT source_key source,object_id,display_name,catalog_complete FROM sources WHERE source_key=?1")
             .bind(source).fetch_one(&mut *transaction).await?;
-        if incoming {
-            crate::connect::set_receiving_on(&mut transaction, false).await?;
-        }
         transaction.commit().await?;
         Ok(row)
     }

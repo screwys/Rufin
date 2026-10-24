@@ -212,7 +212,6 @@ pub struct AndroidBrowseRow {
     pub section_kind: String,
     pub section_refreshable: bool,
     pub context_source_id: Option<String>,
-    pub context_source_name: String,
 }
 
 impl AndroidBrowseRow {
@@ -229,7 +228,6 @@ impl AndroidBrowseRow {
             section_kind: String::new(),
             section_refreshable: false,
             context_source_id: None,
-            context_source_name: String::new(),
         }
     }
 

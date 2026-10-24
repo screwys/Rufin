@@ -68,10 +68,6 @@ impl Shell {
             media_playing_cells: RefCell::new(Vec::new()),
             track_selections: RefCell::new(Vec::new()),
             playlist_entry_selection: RefCell::new(None),
-            has_current_track: gtk_player::state::current_playback_track(
-                self.player_ui.selected_playback().as_deref(),
-            )
-            .is_some(),
             history_source_name,
             update_smart_playlist_pin: {
                 let weak = Rc::downgrade(self);
@@ -139,14 +135,6 @@ impl Shell {
                     }
                 })
             },
-            refresh_catalog: {
-                let weak = Rc::downgrade(self);
-                Rc::new(move || {
-                    if let Some(shell) = weak.upgrade() {
-                        shell.refresh_mounted_catalog();
-                    }
-                })
-            },
             present_full_artwork: {
                 let weak = Rc::downgrade(self);
                 Rc::new(move |artwork| {
@@ -160,18 +148,6 @@ impl Shell {
                 Rc::new(move |dialog| {
                     if let Some(shell) = weak.upgrade() {
                         shell.present_selected_dialog(dialog);
-                    }
-                })
-            },
-            add_current_to_playlist: {
-                let weak = Rc::downgrade(self);
-                Rc::new(move |playlist, destination| {
-                    if let Some(shell) = weak.upgrade() {
-                        super::catalog_actions::add_current_to_playlist(
-                            &shell,
-                            playlist,
-                            destination,
-                        );
                     }
                 })
             },

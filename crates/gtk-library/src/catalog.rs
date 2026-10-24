@@ -25,7 +25,6 @@ pub struct CatalogUi {
     pub search_session: Rc<crate::SearchSession>,
     pub reconcile: Rc<dyn Fn()>,
     pub refresh: Rc<dyn Fn()>,
-    pub refresh_catalog: Rc<dyn Fn()>,
     pub present_full_artwork: Rc<dyn Fn(Vec<artwork::ArtworkBinding>)>,
     pub present_selected_dialog: Rc<dyn Fn(&adw::Dialog)>,
     pub playlist_context_menu: Rc<
@@ -36,9 +35,7 @@ pub struct CatalogUi {
             Option<(f64, f64)>,
         ),
     >,
-    pub has_current_track: bool,
     pub update_smart_playlist_pin: Rc<dyn Fn(&library::SmartPlaylistRow)>,
-    pub add_current_to_playlist: Rc<dyn Fn(library::PlaylistKey, String)>,
     pub refresh_home_section: Rc<dyn Fn(rufin_core::settings::HomeSectionKind)>,
     pub set_favorite_category: Rc<dyn Fn(gtk_widgets::route::CollectionCategory)>,
     pub cycle_favorite_category: Rc<dyn Fn()>,

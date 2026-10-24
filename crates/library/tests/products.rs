@@ -185,7 +185,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                 CatalogSort::Duration,
             ] {
                 for descending in [false, true] {
-                    let (count, _, rows) = library::ListRead {
+                    let rows = library::ListRead {
                         playlist_scope: Default::default(),
                         kind: library::ListKind::SmartPlaylists { now: 1000 },
                         source: (source).into(),
@@ -197,17 +197,16 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                         downloaded_only: false,
                         activity: true,
                     }
-                    .page_smart_playlists(&db, RouteSeedWindow::top(), &cancel)
+                    .smart_playlists(&db, 0, 64, &cancel)
                     .await
-                    .map(|page| (page.count, page.first_row_position, page.rows))
                     .unwrap();
                     let order = rows
                         .iter()
                         .map(|row| row.smart_playlist_key)
                         .collect::<Vec<_>>();
-                    assert_eq!(count, order.len());
                     assert_eq!(
-                        count, 4,
+                        order.len(),
+                        4,
                         "source and folder selection cannot hide a smart playlist"
                     );
                     for row in &rows {
@@ -762,7 +761,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
         ] {
             for descending in [false, true] {
                 for filter in ["", "global"] {
-                    let (count, _, rows) = library::ListRead {
+                    let rows = library::ListRead {
                         playlist_scope: Default::default(),
                         kind: library::ListKind::Playlists,
                         source: (source).into(),
@@ -774,12 +773,10 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         downloaded_only: false,
                         activity: true,
                     }
-                    .page_playlists(&database, RouteSeedWindow::top(), &cancel)
+                    .playlists(&database, 0, 64, &cancel)
                     .await
-                    .map(|page| (page.count, page.first_row_position, page.rows))
                     .unwrap();
                     let order = rows.iter().map(|row| row.playlist_key).collect::<Vec<_>>();
-                    assert_eq!(count, order.len());
                     let mut paged = Vec::new();
                     for offset in 0..=order.len() {
                         paged.extend(
@@ -1957,7 +1954,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 library::CatalogSort::TrackCount,
                 library::CatalogSort::Duration,
             ] {
-                let (count, _, rows) = library::ListRead {
+                let rows = library::ListRead {
                     playlist_scope: Default::default(),
                     kind: library::ListKind::Playlists,
                     source: (source).into(),
@@ -1969,12 +1966,10 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                     downloaded_only: false,
                     activity: true,
                 }
-                .page_playlists(&database, RouteSeedWindow::top(), &cancel)
+                .playlists(&database, 0, 64, &cancel)
                 .await
-                .map(|page| (page.count, page.first_row_position, page.rows))
                 .unwrap();
                 let order = rows.iter().map(|row| row.playlist_key).collect::<Vec<_>>();
-                assert_eq!(count, order.len());
                 assert!(order.contains(&global));
                 let row = rows.iter().find(|row| row.playlist_key == global).unwrap();
                 assert_eq!(row.track_count, 2);
@@ -3112,7 +3107,7 @@ async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
         .unwrap()
         .source;
     let cancellation = ReadCancellation::new();
-    let (count, _, rows) = library::ListRead {
+    let rows = library::ListRead {
         playlist_scope: Default::default(),
         kind: library::ListKind::SmartPlaylists { now: 0 },
         source: (Some(source)).into(),
@@ -3124,15 +3119,13 @@ async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
         downloaded_only: false,
         activity: true,
     }
-    .page_smart_playlists(&database, RouteSeedWindow::top(), &cancellation)
+    .smart_playlists(&database, 0, 64, &cancellation)
     .await
-    .map(|page| (page.count, page.first_row_position, page.rows))
     .expect("read default Smart Playlists");
     let order = rows
         .iter()
         .map(|row| row.smart_playlist_key)
         .collect::<Vec<_>>();
-    assert_eq!(count, order.len());
     assert_eq!(order.len(), 3);
     assert_eq!(
         rows.iter()
@@ -3711,8 +3704,7 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
         (Some(fixture.folder), CatalogSort::Title),
     ] {
         for descending in [false, true] {
-            let window = RouteSeedWindow::relative(1.0);
-            let (count, start, rows) = library::ListRead {
+            let rows = library::ListRead {
                 playlist_scope: Default::default(),
                 kind: library::ListKind::SmartPlaylists { now: 0 },
                 source: (Some(fixture.source)).into(),
@@ -3724,16 +3716,13 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
                 downloaded_only: false,
                 activity: true,
             }
-            .page_smart_playlists(&fixture.database, window, &cancel)
+            .smart_playlists(&fixture.database, 64, 64, &cancel)
             .await
-            .map(|page| (page.count, page.first_row_position, page.rows))
             .unwrap();
             let order = rows
                 .iter()
                 .map(|row| row.smart_playlist_key)
                 .collect::<Vec<_>>();
-            assert_eq!(count, 70);
-            assert_eq!(start, 64);
             assert_eq!(rows.len(), 6);
             let expected = fixture
                 .database
@@ -3771,69 +3760,6 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
             ((index % 4 + 1).min(fixture.tracks.len())) as i64
         );
     }
-}
-
-#[tokio::test]
-async fn smart_playlist_reordering_preserves_unique_positions() {
-    let fixture = fixture().await;
-    let definition = SmartPlaylistDefinition::default();
-    let first = fixture
-        .database
-        .create_smart_playlist("First", &definition, None)
-        .await
-        .expect("create first Smart Playlist");
-    let second = fixture
-        .database
-        .create_smart_playlist("Second", &definition, None)
-        .await
-        .expect("create second Smart Playlist");
-    let third = fixture
-        .database
-        .create_smart_playlist("Third", &definition, None)
-        .await
-        .expect("create third Smart Playlist");
-
-    assert!(
-        fixture
-            .database
-            .move_smart_playlist(third, first)
-            .await
-            .expect("move Smart Playlist upward")
-    );
-    assert!(
-        fixture
-            .database
-            .move_smart_playlist(third, second)
-            .await
-            .expect("move Smart Playlist downward")
-    );
-    assert_eq!(
-        library::ListRead {
-            playlist_scope: Default::default(),
-            kind: library::ListKind::SmartPlaylists { now: 0 },
-            source: (Some(fixture.source)).into(),
-            sort: CatalogSort::Position,
-            folder: None,
-            filter: ("").to_string(),
-            descending: false,
-            favorites_only: false,
-            activity: true,
-            downloaded_only: false
-        }
-        .page_smart_playlists(
-            &fixture.database,
-            RouteSeedWindow::top(),
-            &ReadCancellation::new()
-        )
-        .await
-        .map(|page| (page.count, page.first_row_position, page.rows))
-        .expect("read reordered Smart Playlists")
-        .2
-        .into_iter()
-        .map(|row| row.smart_playlist_key)
-        .collect::<Vec<_>>(),
-        [first, second, third]
-    );
 }
 
 #[tokio::test]
@@ -4097,11 +4023,9 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             activity: true,
             downloaded_only: false
         }
-        .page_smart_playlists(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .smart_playlists(&fixture.database, 0, 64, &cancel)
         .await
-        .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("sorted Smart Playlist order")
-        .2
         .into_iter()
         .map(|row| row.smart_playlist_key)
         .collect::<Vec<_>>(),
@@ -4120,11 +4044,9 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             activity: true,
             downloaded_only: false
         }
-        .page_smart_playlists(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .smart_playlists(&fixture.database, 0, 64, &cancel)
         .await
-        .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("duration-sorted Smart Playlist order")
-        .2
         .into_iter()
         .map(|row| row.smart_playlist_key)
         .collect::<Vec<_>>(),

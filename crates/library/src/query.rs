@@ -383,7 +383,7 @@ impl ListRead {
 
 // Every typed window projects the bounded requested relation in the same statement.
 macro_rules! list_windows {
-    ($rows:ident, $page:ident, $row:ty, $connection:ident, $read:ident, $requested:ident => $projection:expr) => {
+    ($rows:ident, $($page:ident)?, $row:ty, $connection:ident, $read:ident, $requested:ident => $projection:expr) => {
         impl ListRead {
             pub async fn $rows(
                 &self,
@@ -404,7 +404,7 @@ macro_rules! list_windows {
                 transaction.commit().await?;
                 Ok(rows)
             }
-            pub async fn $page(
+            $(pub async fn $page(
                 &self,
                 database: &Database,
                 window: RouteSeedWindow,
@@ -427,7 +427,7 @@ macro_rules! list_windows {
                     first_row_position: range.start,
                     rows,
                 })
-            }
+            })?
         }
     };
 }
@@ -447,13 +447,13 @@ list_windows!(genres, page_genres, GenreView, connection, read, requested => {
 list_windows!(moods, page_moods, MoodView, connection, read, requested => {
     crate::collections::load_mood_requested(connection, requested, read.folder)
 });
-list_windows!(playlists, page_playlists, PlaylistRow, connection, _read, requested => {
+list_windows!(playlists, , PlaylistRow, connection, _read, requested => {
     Database::load_playlist_requested(connection, requested)
 });
 list_windows!(playlist_items, page_playlist_items, PlaylistListRow, connection, read, requested => {
     crate::playlist_folders::load_items_on(connection, read, requested)
 });
-list_windows!(smart_playlists, page_smart_playlists, SmartPlaylistRow, connection, read, requested => {
+list_windows!(smart_playlists, , SmartPlaylistRow, connection, read, requested => {
     let ListKind::SmartPlaylists { now } = read.kind else {
         unreachable!()
     };
@@ -946,14 +946,6 @@ collection_points!(album,albums,Album,AlbumKey,AlbumView,load_album_requested,ac
 collection_points!(artist,artists,Artist,ArtistKey,ArtistView,load_artist_requested,album_artist:bool,activity:bool);
 collection_points!(genre,genres,Genre,GenreKey,GenreView,load_genre_requested,folder:Option<FolderKey>);
 collection_points!(mood,moods,Mood,MoodKey,MoodView,load_mood_requested,folder:Option<FolderKey>);
-collection_points!(
-    folder,
-    folders,
-    Folder,
-    FolderKey,
-    FolderView,
-    load_folder_requested,
-);
 
 pub(crate) fn selection_ranges(
     ranges: Option<&[std::ops::Range<usize>]>,

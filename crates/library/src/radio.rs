@@ -202,27 +202,15 @@ impl Database {
                         UNION SELECT id FROM seed WHERE kind=1
                     ), seed_artists AS (
                         SELECT artist_key FROM track_artists WHERE track_key IN (SELECT id FROM seed WHERE kind=0)
-                        UNION SELECT artist_key FROM album_artists JOIN albums album USING(album_key)
-                        WHERE album_key IN seed_albums AND album.metadata IS NOT NULL
-                        UNION SELECT artist_key FROM track_album_artists JOIN tracks member USING(track_key) JOIN albums album USING(album_key)
-                        WHERE member.album_key IN seed_albums AND member.indexed=1 AND album.metadata IS NULL
+                        UNION SELECT artist_key FROM album_artists WHERE album_key IN seed_albums
                         UNION SELECT id FROM seed WHERE kind IN (2,5)
                     ), seed_genres AS (
                         SELECT genre_key FROM track_genres WHERE track_key IN (SELECT id FROM seed WHERE kind=0)
-                        UNION SELECT genre_key FROM album_genres JOIN albums album USING(album_key)
-                        WHERE album_key IN seed_albums AND album.metadata IS NOT NULL
-                        UNION SELECT genre_key FROM track_genres JOIN tracks member USING(track_key) JOIN albums album USING(album_key)
-                        WHERE member.album_key IN seed_albums AND member.indexed=1 AND album.metadata IS NULL
+                        UNION SELECT genre_key FROM album_genres WHERE album_key IN seed_albums
                         UNION SELECT id FROM seed WHERE kind=3
                     ), related_albums AS (
-                        SELECT album_key FROM album_artists JOIN albums album USING(album_key)
-                        WHERE artist_key IN seed_artists AND album.metadata IS NOT NULL
-                        UNION SELECT member.album_key FROM track_album_artists JOIN tracks member USING(track_key) JOIN albums album USING(album_key)
-                        WHERE artist_key IN seed_artists AND member.indexed=1 AND album.metadata IS NULL
-                        UNION SELECT album_key FROM album_genres JOIN albums album USING(album_key)
-                        WHERE genre_key IN seed_genres AND album.metadata IS NOT NULL
-                        UNION SELECT member.album_key FROM track_genres JOIN tracks member USING(track_key) JOIN albums album USING(album_key)
-                        WHERE genre_key IN seed_genres AND member.indexed=1 AND album.metadata IS NULL
+                        SELECT album_key FROM album_artists WHERE artist_key IN seed_artists
+                        UNION SELECT album_key FROM album_genres WHERE genre_key IN seed_genres
                     ) ",
                     );
             }

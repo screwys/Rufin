@@ -219,9 +219,8 @@ impl super::Catalog<'_> {
         last: bool,
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let mut tx = self
-            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-            .await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut tx = connection.begin().await?;
         let update = write_home_on(
             &mut tx,
             self.source.raw(),
@@ -232,7 +231,7 @@ impl super::Catalog<'_> {
             last,
         )
         .await?;
-        self.commit_write(tx).await?;
+        tx.commit().await?;
         self.changes.merge(update);
         Ok(())
     }
@@ -245,9 +244,8 @@ impl super::Catalog<'_> {
     ) -> LibraryResult<()> {
         let source_id = self.source_id;
         let mut writer = self.database.writer().await?;
-        let mut tx = self
-            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-            .await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut tx = connection.begin().await?;
         let source = self.source.raw();
         let playlist:i64=sqlx::query_scalar("SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=?2 AND owner='source'").bind(source).bind(id).fetch_one(&mut *tx).await?;
         let mut update = CatalogUpdate::default();
@@ -291,7 +289,7 @@ impl super::Catalog<'_> {
                 .execute(&mut *tx)
                 .await?;
         }
-        self.commit_write(tx).await?;
+        tx.commit().await?;
         self.changes.merge(update);
         Ok(())
     }
@@ -301,9 +299,8 @@ impl super::Catalog<'_> {
         rows: &[(String, NativeUserState)],
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let mut tx = self
-            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-            .await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut tx = connection.begin().await?;
         let source = self.source.raw();
         let update = super::cache::users(
             &mut tx,
@@ -313,10 +310,10 @@ impl super::Catalog<'_> {
                 .iter()
                 .map(|(id, state)| (id.as_str(), state))
                 .collect::<Vec<_>>(),
-            if self.incoming { self.observed } else { None },
+            None,
         )
         .await?;
-        self.commit_write(tx).await?;
+        tx.commit().await?;
         self.changes.merge(update);
         Ok(())
     }
@@ -326,33 +323,25 @@ impl super::Catalog<'_> {
         ids: &[String],
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let mut tx = self
-            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-            .await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut tx = connection.begin().await?;
         let source = self.source.raw();
         let (table, _) = super::cache::table(kind);
         let mut update = CatalogUpdate::default();
         update.metadata = sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO native_media_state(media_uri,favorite) SELECT media_uri,object_id IN(SELECT value FROM json_each(?2)) FROM {table} WHERE source_key=?1 ON CONFLICT(media_uri) DO UPDATE SET favorite=excluded.favorite WHERE favorite IS NOT excluded.favorite"))).bind(source).bind(serde_json::to_string(ids)?).execute(&mut *tx).await?.rows_affected() > 0;
-        self.commit_write(tx).await?;
+        tx.commit().await?;
         self.changes.merge(update);
         Ok(())
     }
     pub async fn remove_source_items(&mut self, kind: &str, ids: &[String]) -> LibraryResult<()> {
         for page in ids.chunks(128) {
             let mut writer = self.database.writer().await?;
-            let mut tx = self
-                .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-                .await?;
-            let update = remove_items_on(
-                &mut tx,
-                self.source.raw(),
-                kind,
-                page,
-                self.observed,
-                self.incoming,
-            )
-            .await?;
-            self.commit_write(tx).await?;
+            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+            let mut tx = connection.begin().await?;
+            let update =
+                remove_items_on(&mut tx, self.source.raw(), kind, page, self.observed, false)
+                    .await?;
+            tx.commit().await?;
             self.changes.merge(update);
         }
         Ok(())
@@ -402,12 +391,11 @@ impl super::Catalog<'_> {
         valid_until: Option<i64>,
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let mut tx = self
-            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-            .await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut tx = connection.begin().await?;
         let source = self.source.raw();
         sqlx::query("UPDATE playlists SET provider_revision=?3,valid_until=?4 WHERE source_key=?1 AND object_id=?2 AND(provider_revision,valid_until) IS NOT(?3,?4)").bind(source).bind(id).bind(revision).bind(valid_until).execute(&mut *tx).await?;
-        self.commit_write(tx).await?;
+        tx.commit().await?;
         Ok(())
     }
     pub async fn create_observed_playlist(
@@ -436,12 +424,11 @@ impl super::Catalog<'_> {
         observed: i64,
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let mut tx = self
-            .begin_write(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
-            .await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut tx = connection.begin().await?;
         let source = self.source.raw();
         let tracks:Vec<i64>=sqlx::query_scalar("DELETE FROM track_folders WHERE folder_key=(SELECT folder_key FROM folders WHERE source_key=?1 AND object_id=?2) AND observed_stamp<?3 RETURNING track_key").bind(source).bind(id).bind(observed).fetch_all(&mut *tx).await?;
-        self.commit_write(tx).await?;
+        tx.commit().await?;
         self.changes.metadata |= !tracks.is_empty();
         Ok(())
     }
@@ -463,17 +450,8 @@ impl crate::Catalog<'_> {
         let removed = sqlx::query("DELETE FROM home_entries WHERE source_key=?1 AND substr(section_id,1,length(?2))=?2 AND section_id NOT IN(SELECT value FROM json_each(?3)) AND NOT EXISTS(SELECT 1 FROM json_each(?4) retained WHERE substr(section_id,1,length(retained.value))=retained.value)")
             .bind(source).bind(prefix).bind(serde_json::to_string(sections)?).bind(serde_json::to_string(retained_prefixes)?)
             .execute(&mut *transaction).await?.rows_affected();
-        let changed = removed > 0;
-        if changed {
-            sqlx::query(
-                "UPDATE sources SET catalog_revision=catalog_revision+1 WHERE source_key=?1",
-            )
-            .bind(source)
-            .execute(&mut *transaction)
-            .await?;
-        }
         transaction.commit().await?;
-        self.changes.home |= changed;
+        self.changes.home |= removed > 0;
         Ok(())
     }
 }

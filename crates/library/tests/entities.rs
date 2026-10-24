@@ -1185,13 +1185,6 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         .find(|candidate| candidate.album_key == fixture.albums[0])
         .unwrap();
     assert_eq!(first.lookup_identity, "release-group:group-a");
-    let mut release_raw = connection(&fixture.path).await;
-    let revision =
-        sqlx::query_scalar::<_, i64>("SELECT catalog_revision FROM sources WHERE source_key=?1")
-            .bind(fixture.source)
-            .fetch_one(&mut release_raw)
-            .await
-            .unwrap();
     assert_eq!(
         fixture
             .database
@@ -1318,14 +1311,6 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         found.metadata.release_types,
         ["Compilation".to_string(), "Remix".to_string()]
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT catalog_revision FROM sources WHERE source_key=?1")
-            .bind(fixture.source)
-            .fetch_one(&mut release_raw)
-            .await
-            .unwrap(),
-        revision + 1 // The metadata edit publishes once; release annotations do not republish it.
     );
 
     let mut raw = connection(&fixture.path).await;

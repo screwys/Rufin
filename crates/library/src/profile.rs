@@ -171,8 +171,11 @@ impl ProfileStore {
         Ok(())
     }
 
-    /// Read only the current observations needed by a media transfer.
-    pub async fn current_records(&self, keys: &[(String, String)]) -> Result<Vec<ConnectRecord>> {
+    #[cfg(test)]
+    pub(crate) async fn current_records(
+        &self,
+        keys: &[(String, String)],
+    ) -> Result<Vec<ConnectRecord>> {
         let mut connection = self.writer().await?;
         let mut records = Vec::new();
         for (kind, key) in keys {

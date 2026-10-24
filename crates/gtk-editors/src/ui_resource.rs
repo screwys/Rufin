@@ -4,8 +4,6 @@ pub const METADATA_LYRICS_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/metadata_lyrics.ui";
 pub const METADATA_FIELD_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/metadata_field.ui";
-pub const METADATA_TRACK_RESOURCE: &str =
-    "/io/github/screwys/Rufin/ui/preferences/dialogs/metadata_track.ui";
 pub const METADATA_BATCH_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/metadata_batch.ui";
 pub use gtk_widgets::ui_resource::{builder, object};
@@ -32,5 +30,3 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     METADATA_ARTWORK_RESOURCE,
     METADATA_ARTWORK_RESULT_RESOURCE,
 ];
-
-pub const TEMPLATE_RESOURCE_PATHS: &[&str] = &[METADATA_TRACK_RESOURCE];

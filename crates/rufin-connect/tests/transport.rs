@@ -339,12 +339,17 @@ async fn enrollment_after_collection_publication() {
                 value: None,
             });
         }
-        let keys: Vec<_> = records
-            .iter()
-            .map(|record| (record.kind.clone(), record.key.clone()))
-            .collect();
-        let records = a_docs.current_records(&keys).await.unwrap();
-        assert_eq!(records.len(), 20);
+        let mut writer = a_database.writer().await.unwrap();
+        for record in &mut records {
+            *record = library::Database::connect_record_on(
+                writer.as_mut().unwrap(),
+                &record.kind,
+                &record.key,
+            )
+            .await
+            .unwrap();
+        }
+        drop(writer);
         for (index, record) in records.iter().enumerate() {
             let value = record.value.as_ref().unwrap();
             assert_eq!(

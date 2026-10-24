@@ -713,54 +713,6 @@ impl Database {
         transaction.commit().await?;
         Ok(identity.is_some())
     }
-
-    pub async fn move_smart_playlist(
-        &self,
-        dragged: SmartPlaylistKey,
-        target: SmartPlaylistKey,
-    ) -> LibraryResult<bool> {
-        if dragged == target {
-            return Ok(false);
-        }
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        let (dragged_position,target_position): (Option<i64>,Option<i64>)=sqlx::query_as(
-            "SELECT(SELECT position FROM smart_playlists WHERE smart_playlist_key=?1),(SELECT position FROM smart_playlists WHERE smart_playlist_key=?2)"
-        ).bind(dragged).bind(target).fetch_one(&mut *transaction).await?;
-        let (Some(dragged_position), Some(target_position)) = (dragged_position, target_position)
-        else {
-            transaction.rollback().await?;
-            return Ok(false);
-        };
-        let mut order:Vec<(SmartPlaylistKey,String,i64)>=sqlx::query_as(
-            "SELECT smart_playlist_key,object_id,position FROM smart_playlists WHERE position BETWEEN ?1 AND ?2 ORDER BY position"
-        ).bind(dragged_position.min(target_position)).bind(dragged_position.max(target_position)).fetch_all(&mut *transaction).await?;
-        let positions = order.iter().map(|row| row.2).collect::<Vec<_>>();
-        if dragged_position < target_position {
-            order.rotate_left(1);
-        } else {
-            order.rotate_right(1);
-        }
-        let final_positions = order
-            .iter()
-            .zip(&positions)
-            .map(|(row, position)| (row.0, *position))
-            .collect::<Vec<_>>();
-        write_positions_on(&mut transaction, &final_positions).await?;
-        let records = order
-            .into_iter()
-            .zip(positions)
-            .map(|((_, key, _), position)| crate::ConnectRecord {
-                kind: "smart_order".into(),
-                key,
-                value: Some(serde_json::json!({"position":position})),
-            })
-            .collect::<Vec<_>>();
-        crate::profile::write_local_on(&mut transaction, &records).await?;
-        transaction.commit().await?;
-        Ok(true)
-    }
 }
 
 /// Store accepted playlist positions.

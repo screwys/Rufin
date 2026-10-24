@@ -614,10 +614,18 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_and_source_catalog(
     .fetch_all(&mut support::connection(&fixture.path).await)
     .await
     .unwrap();
-    let keys = std::iter::once(("playlist".into(), identity_key.clone()))
-        .chain(entry_keys.into_iter().map(|key| ("entry".into(), key)))
+    let keys = std::iter::once(("playlist", identity_key.clone()))
+        .chain(entry_keys.into_iter().map(|key| ("entry", key)))
         .collect::<Vec<_>>();
-    let records = source_profile.current_records(&keys).await.unwrap();
+    let mut connection = support::connection(&fixture.path).await;
+    let mut records = Vec::new();
+    for (kind, key) in &keys {
+        records.push(
+            Database::connect_record_on(&mut connection, kind, key)
+                .await
+                .unwrap(),
+        );
+    }
     assert!(
         records
             .iter()

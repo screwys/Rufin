@@ -23,7 +23,6 @@ app-identity.workspace = true
 uniffi.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
-backup.workspace = true
 artwork.workspace = true
 async-channel.workspace = true
 downloads.workspace = true

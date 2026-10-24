@@ -1623,16 +1623,13 @@ mod tests {
                     .unwrap();
             }
             host.attach_documents(documents.clone()).await.unwrap();
-            let receiving_documents = Arc::new(
-                ProfileStore::open(
-                    library::Database::open(&directory.path().join("peer.sqlite"))
-                        .await
-                        .unwrap(),
-                    2,
-                    KEY.parse().unwrap(),
-                )
+            let receiving_database = library::Database::open(&directory.path().join("peer.sqlite"))
                 .await
-                .unwrap(),
+                .unwrap();
+            let receiving_documents = Arc::new(
+                ProfileStore::open(receiving_database.clone(), 2, KEY.parse().unwrap())
+                    .await
+                    .unwrap(),
             );
             let file = directory.path().join("snapshot");
             documents
@@ -1743,14 +1740,14 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let current = documents
-                .current_records(&[(
-                    "catalog:file".into(),
-                    serde_json::json!(["remote", path]).to_string(),
-                )])
-                .await
-                .unwrap()
-                .remove(0);
+            let current = library::Database::connect_record_on(
+                database.writer().await.unwrap().as_mut().unwrap(),
+                "catalog:file",
+                &serde_json::json!(["remote", path]).to_string(),
+            )
+            .await
+            .unwrap();
+            assert!(current.value.is_some());
             peer.attach_documents(receiving_documents.clone())
                 .await
                 .unwrap();
@@ -1817,11 +1814,14 @@ mod tests {
                     .any(|value| value.name == format!("reference:{uri}"))
             );
             assert_eq!(
-                receiving_documents
-                    .current_records(&[(current.kind.clone(), current.key.clone())])
-                    .await
-                    .unwrap(),
-                [current]
+                library::Database::connect_record_on(
+                    receiving_database.writer().await.unwrap().as_mut().unwrap(),
+                    &current.kind,
+                    &current.key,
+                )
+                .await
+                .unwrap(),
+                current
             );
             let unchanged = receiving_documents.revision().await.unwrap();
             peer.sync_peer(&receiving, &host.identity()).await.unwrap();

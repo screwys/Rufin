@@ -42,10 +42,7 @@ impl AndroidBrowseQuery {
                 let rows = self
                     .rows(
                         0,
-                        if matches!(
-                            opened,
-                            OpenedCollection::Home(_) | OpenedCollection::Search(_)
-                        ) {
+                        if matches!(opened, OpenedCollection::Home(_)) {
                             usize::MAX
                         } else {
                             64
@@ -161,18 +158,14 @@ impl AndroidBrowseQuery {
             )),
             _ => None,
         };
-        if let Some((mut row, artwork_bindings, label)) = named {
-            let configuration = row.context_source_id.as_ref().and_then(|id| {
-                self.source
-                    .configuration(&sources::SourceId::new(id.clone()))
-            });
-            row.context_source_name = configuration
-                .as_ref()
-                .map(|source| source.name.clone())
-                .unwrap_or_default();
+        if let Some((row, artwork_bindings, label)) = named {
             let links = if let AndroidBrowseItem::Playlist { row: playlist } = &row.item {
-                configuration
+                row.context_source_id
                     .as_ref()
+                    .and_then(|id| {
+                        self.source
+                            .configuration(&sources::SourceId::new(id.clone()))
+                    })
                     .and_then(|source| {
                         rufin_core::runtime::source::source_kind_icon_name(&source.kind).map(
                             |icon| AndroidDetailLink {

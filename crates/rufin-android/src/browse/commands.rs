@@ -620,14 +620,6 @@ impl AndroidLibrary {
         self.settings.set_pinned(pin, pinned).map_err(error)
     }
 
-    pub fn reorder_pin(&self, moved: SidebarPin, target: SidebarPin) -> Result<bool, AndroidError> {
-        self.settings.reorder_pin(&moved, &target).map_err(error)
-    }
-
-    pub fn pin_count(&self) -> u64 {
-        self.settings.sidebar_changes().borrow().pins.len() as u64
-    }
-
     pub fn pins_use_activity(&self) -> bool {
         self.settings.load().sidebar.pins_use_activity()
     }

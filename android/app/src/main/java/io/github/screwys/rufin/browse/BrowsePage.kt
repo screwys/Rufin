@@ -200,17 +200,7 @@ internal class BrowsePage(
                 val folders = if (kind == "Folders") library.musicFolders() else null
                 val isHome = !pins && routeId == "Home"
                 val home = if (isHome && query != null) {
-                    val rows = mutableListOf<BrowseItem>()
-                    rows += prepared?.rows.orEmpty().mapIndexed { index, row -> BrowseItem(row, index.toULong(), query, display, contextTitle = row.section, downloadRevision = downloadRevision) }
-                    var offset = rows.size.toULong()
-                    while (offset < (count ?: 0).toULong()) {
-                        val pageDownloadRevision = connection.downloads.state?.revision
-                        val page = query.page(offset, 64u)
-                        if (page.isEmpty()) break
-                        rows += page.mapIndexed { index, row -> BrowseItem(row, offset + index.toULong(), query, display, contextTitle = row.section, downloadRevision = pageDownloadRevision) }
-                        offset += page.size.toULong()
-                    }
-                    rows
+                    prepared?.rows.orEmpty().mapIndexed { index, row -> BrowseItem(row, index.toULong(), query, display, contextTitle = row.section, downloadRevision = downloadRevision) }
                 } else emptyList()
                 val favoriteRoute = detail?.favoriteRoute?.takeIf {
                     detail.showsReleases && detail.mode.kind in listOf("ArtistDetail", "AlbumArtistDetail")
