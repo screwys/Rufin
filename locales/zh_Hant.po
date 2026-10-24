@@ -51,6 +51,11 @@ msgid ""
 "Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
 
+msgid ""
+"Do you want to cache all lyrics automatically? You can also enable this from "
+"Preferences -> Storage"
+msgstr ""
+
 #, fuzzy
 #| msgid ""
 #| "Downloads from this server will be removed, and automatic rules will be "
@@ -710,6 +715,16 @@ msgstr ""
 msgid "Browse"
 msgstr ""
 
+#, fuzzy
+#| msgid "Lyrics"
+msgid "By Lyrics"
+msgstr "歌詞"
+
+#, fuzzy
+#| msgid "Title"
+msgid "By Title"
+msgstr "標題"
+
 msgid "C"
 msgstr ""
 
@@ -717,6 +732,11 @@ msgstr ""
 #| msgid "Change Secret Storage"
 msgid "CUE file"
 msgstr "變更敏感存儲空間"
+
+#, fuzzy
+#| msgid "Cached"
+msgid "Cache"
+msgstr "已快取"
 
 #, fuzzy
 #| msgid "Cached"
@@ -923,6 +943,11 @@ msgstr "搜尋歌詞"
 
 msgid "Clear queue"
 msgstr "清除播放佇列"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear this cache?"
+msgstr "搜尋歌詞"
 
 #, fuzzy
 #| msgid "Add a title"
@@ -1499,21 +1524,21 @@ msgstr ""
 msgid "Done"
 msgstr ""
 
+#, fuzzy
+#| msgid "Download quality"
+msgid "Download Automatically"
+msgstr "下載品質"
+
 msgid "Download Folder"
 msgstr "下載資料夾"
 
+#, fuzzy
+#| msgid "Download quality"
+msgid "Download Lazily"
+msgstr "下載品質"
+
 msgid "Download Queue"
 msgstr "下載佇列"
-
-#, fuzzy
-#| msgid "Download started"
-msgid "Download artwork"
-msgstr "已開始下載"
-
-#, fuzzy
-#| msgid "Downloads"
-msgid "Download lyrics"
-msgstr "下載"
 
 msgid "Download quality"
 msgstr "下載品質"
@@ -1657,6 +1682,11 @@ msgstr ""
 
 msgid "Enable background image"
 msgstr ""
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Enable caching lyrics"
+msgstr "搜尋歌詞"
 
 msgid "Enable partial star ratings"
 msgstr ""
@@ -5255,6 +5285,16 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Download started"
+#~ msgid "Download artwork"
+#~ msgstr "已開始下載"
+
+#, fuzzy
+#~| msgid "Downloads"
+#~ msgid "Download lyrics"
+#~ msgstr "下載"
 
 #, fuzzy
 #~| msgid "Preset"

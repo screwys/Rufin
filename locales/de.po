@@ -66,6 +66,11 @@ msgstr ""
 "aktualisiere Rufin."
 
 msgid ""
+"Do you want to cache all lyrics automatically? You can also enable this from "
+"Preferences -> Storage"
+msgstr ""
+
+msgid ""
 "Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
@@ -709,11 +714,26 @@ msgstr "Helligkeit (%)"
 msgid "Browse"
 msgstr "Durchsuchen"
 
+#, fuzzy
+#| msgid "Lyrics"
+msgid "By Lyrics"
+msgstr "Liedtexte"
+
+#, fuzzy
+#| msgid "Title"
+msgid "By Title"
+msgstr "Titel"
+
 msgid "C"
 msgstr "C"
 
 msgid "CUE file"
 msgstr "CUE-Datei"
+
+#, fuzzy
+#| msgid "Cached"
+msgid "Cache"
+msgstr "Zwischengespeichert"
 
 msgid "Cached data"
 msgstr "Zwischengespeicherte Daten"
@@ -874,6 +894,11 @@ msgstr "Liedtext-Cache leeren"
 
 msgid "Clear queue"
 msgstr "Warteschlange leeren"
+
+#, fuzzy
+#| msgid "Clear lyrics cache"
+msgid "Clear this cache?"
+msgstr "Liedtext-Cache leeren"
 
 msgid "Clear title"
 msgstr "Titel entfernen"
@@ -1344,17 +1369,21 @@ msgstr "Spenden"
 msgid "Done"
 msgstr "Fertig"
 
+#, fuzzy
+#| msgid "Open automatically"
+msgid "Download Automatically"
+msgstr "Automatisch öffnen"
+
 msgid "Download Folder"
 msgstr "Download-Ordner"
 
+#, fuzzy
+#| msgid "Download quality"
+msgid "Download Lazily"
+msgstr "Downloadqualität"
+
 msgid "Download Queue"
 msgstr "Download-Warteschlange"
-
-msgid "Download artwork"
-msgstr "Cover herunterladen"
-
-msgid "Download lyrics"
-msgstr "Liedtexte herunterladen"
 
 msgid "Download quality"
 msgstr "Downloadqualität"
@@ -1472,6 +1501,11 @@ msgstr "Automatische Sicherungen aktivieren"
 
 msgid "Enable background image"
 msgstr "Hintergrundbild aktivieren"
+
+#, fuzzy
+#| msgid "Fetching lyrics"
+msgid "Enable caching lyrics"
+msgstr "Liedtexte werden abgerufen"
 
 msgid "Enable partial star ratings"
 msgstr "Teilbewertungen mit Sternen aktivieren"
@@ -4636,6 +4670,12 @@ msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Willkommen beim Rufin-Setup"
+
+#~ msgid "Download artwork"
+#~ msgstr "Cover herunterladen"
+
+#~ msgid "Download lyrics"
+#~ msgstr "Liedtexte herunterladen"
 
 #~ msgid "Copy preset"
 #~ msgstr "Voreinstellung kopieren"

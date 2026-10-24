@@ -51,6 +51,11 @@ msgid ""
 "Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
 
+msgid ""
+"Do you want to cache all lyrics automatically? You can also enable this from "
+"Preferences -> Storage"
+msgstr ""
+
 #, fuzzy
 #| msgid ""
 #| "Downloads from this server will be removed, and automatic rules will be "
@@ -735,6 +740,16 @@ msgstr ""
 msgid "Browse"
 msgstr ""
 
+#, fuzzy
+#| msgid "Lyrics"
+msgid "By Lyrics"
+msgstr "Text skladby"
+
+#, fuzzy
+#| msgid "Title"
+msgid "By Title"
+msgstr "Název"
+
 msgid "C"
 msgstr ""
 
@@ -742,6 +757,11 @@ msgstr ""
 #| msgid "Saved Sources"
 msgid "CUE file"
 msgstr "Uložené zdroje"
+
+#, fuzzy
+#| msgid "Cached"
+msgid "Cache"
+msgstr "V mezipaměti"
 
 #, fuzzy
 #| msgid "Cached"
@@ -954,6 +974,11 @@ msgstr "Hledat texty"
 
 msgid "Clear queue"
 msgstr "Vymazat frontu"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear this cache?"
+msgstr "Hledat texty"
 
 #, fuzzy
 #| msgid "Sort title"
@@ -1546,21 +1571,21 @@ msgstr ""
 msgid "Done"
 msgstr ""
 
+#, fuzzy
+#| msgid "Searching will start automatically"
+msgid "Download Automatically"
+msgstr "Vyhledávání se spustí automaticky"
+
 msgid "Download Folder"
 msgstr "Stáhnout složku"
 
+#, fuzzy
+#| msgid "Download quality"
+msgid "Download Lazily"
+msgstr "Kvalita stažení"
+
 msgid "Download Queue"
 msgstr "Stáhnout frontu"
-
-#, fuzzy
-#| msgid "Download started"
-msgid "Download artwork"
-msgstr "Stahování začalo"
-
-#, fuzzy
-#| msgid "Downloads"
-msgid "Download lyrics"
-msgstr "Stahování"
 
 msgid "Download quality"
 msgstr "Kvalita stažení"
@@ -1706,6 +1731,11 @@ msgstr ""
 
 msgid "Enable background image"
 msgstr ""
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Enable caching lyrics"
+msgstr "Hledat texty"
 
 msgid "Enable partial star ratings"
 msgstr ""
@@ -5407,6 +5437,16 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#, fuzzy
+#~| msgid "Download started"
+#~ msgid "Download artwork"
+#~ msgstr "Stahování začalo"
+
+#, fuzzy
+#~| msgid "Downloads"
+#~ msgid "Download lyrics"
+#~ msgstr "Stahování"
 
 #, fuzzy
 #~| msgid "Preset"
