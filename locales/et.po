@@ -708,6 +708,11 @@ msgstr "Bitisügavus"
 msgid "Bitrate"
 msgstr "Bitikiirus"
 
+#, fuzzy
+#| msgid "Playing stream"
+msgid "Bitstream"
+msgstr "Voogedastus on esitamisel"
+
 msgid "Blue"
 msgstr "Sinine"
 
