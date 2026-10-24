@@ -125,6 +125,7 @@
                 <property name="halign">center</property>
                 <property name="valign">end</property>
                 <property name="visible">false</property>
+                <property name="can-target">false</property>
                 <style><class name="source-refresh-feedback"/></style>
                 <child>
                   <object class="GtkImage">
@@ -153,14 +154,6 @@
                         <style><class name="source-refresh-progress"/></style>
                       </object>
                     </child>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkButton" id="source_refresh_feedback_close">
-                    <property name="icon-name">rufin-window-close-symbolic</property>
-                    <property name="tooltip-text" translatable="yes">Close</property>
-                    <property name="valign">center</property>
-                    <style><class name="flat"/><class name="circular"/></style>
                   </object>
                 </child>
               </object>

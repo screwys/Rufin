@@ -2,7 +2,7 @@ use async_channel::Receiver;
 
 use super::SourceOwner;
 use crate::runtime::source::{SourceOperation, SourceProgress, SourceProgressStage};
-use sources::{SourceConfiguration, SourceId};
+use sources::{SourceConfiguration, SourceError, SourceId};
 use std::sync::{Arc, atomic::Ordering};
 
 impl SourceOwner {
@@ -47,7 +47,6 @@ impl SourceOwner {
     }
 
     async fn download_assets(&self) {
-        let mut failures = Vec::new();
         for configured in self.shared.settings.load().sources.configured {
             for stage in [SourceProgressStage::Artwork, SourceProgressStage::Lyrics] {
                 if !self.asset_download_enabled(stage)
@@ -59,19 +58,11 @@ impl SourceOwner {
                     .download_source_assets(&configured.configuration, stage)
                     .await
                 {
-                    failures.push(format!("{}: {error}", configured.configuration.name));
+                    tracing::warn!(source = %configured.configuration.name, %error, "could not download source assets");
                 }
             }
         }
-        self.publish_asset_operation(if failures.is_empty() {
-            SourceOperation::Idle
-        } else {
-            SourceOperation::Failed {
-                source_id: None,
-                message: failures.join("\n"),
-                add_form: false,
-            }
-        });
+        self.publish_asset_operation(SourceOperation::Idle);
     }
 
     async fn download_source_assets(
@@ -163,10 +154,17 @@ impl SourceOwner {
                     } else {
                         [0; 32]
                     };
-                    source
-                        .cached_lyrics(database, &uri, input)
-                        .await
-                        .map_err(super::string_error)?;
+                    match source.cached_lyrics(database, &uri, input).await {
+                        Ok(_) => {}
+                        Err(
+                            error @ (SourceError::Network(_)
+                            | SourceError::Auth(_)
+                            | SourceError::Tls(_)
+                            | SourceError::Cancelled),
+                        ) => return Err(error.to_string()),
+                        // One unreadable track must not stop the rest of the source.
+                        Err(error) => tracing::warn!(%error, uri, "could not download lyrics"),
+                    }
                     completed += 1;
                     report(completed);
                 }
