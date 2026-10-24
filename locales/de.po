@@ -715,6 +715,11 @@ msgstr "Bittiefe"
 msgid "Bitrate"
 msgstr "Bitrate"
 
+#, fuzzy
+#| msgid "Playing stream"
+msgid "Bitstream"
+msgstr "Stream wird wiedergegeben"
+
 msgid "Blue"
 msgstr "Blau"
 
