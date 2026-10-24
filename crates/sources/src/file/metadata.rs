@@ -1146,7 +1146,8 @@ mod tests {
     async fn sidecar_lyrics_replace_the_neighbor_without_changing_audio() {
         use std::sync::{Arc, atomic::AtomicBool};
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("track.wav");
+        let root = directory.path().canonicalize().unwrap();
+        let path = root.join("track.wav");
         let audio = silent_wav();
         fs::write(&path, &audio).unwrap();
         let uri = url::Url::from_file_path(&path).unwrap();
@@ -1158,13 +1159,13 @@ mod tests {
             "[00:02.000]Updated"
         );
         assert_eq!(fs::read(&path).unwrap(), audio);
-        let database = library::Database::open(directory.path().join("lyrics.sqlite"))
+        let database = library::Database::open(root.join("lyrics.sqlite"))
             .await
             .unwrap();
         let (configuration, source, _) = crate::Source::connect(
             crate::SourceId::new("lyrics-scan"),
             crate::SourceSetup::Local {
-                roots: vec![directory.path().to_path_buf()],
+                roots: vec![root.clone()],
             },
             "",
         )
