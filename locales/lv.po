@@ -324,6 +324,11 @@ msgstr "Absolūts"
 msgid "Accent color"
 msgstr "Akcenta krāsa"
 
+#, fuzzy
+#| msgid "Access token"
+msgid "Access denied"
+msgstr "Piekļuves žetons"
+
 msgid "Access token"
 msgstr "Piekļuves žetons"
 
@@ -608,6 +613,11 @@ msgstr "Skaņas pakāpeniska izdzišana atskaņošanā/pauzē"
 
 msgid "Audio fingerprints"
 msgstr ""
+
+#, fuzzy
+#| msgid "Audio output"
+msgid "Audio output failed"
+msgstr "Skaņas izvade"
 
 msgid "Audio output"
 msgstr "Skaņas izvade"
@@ -1253,8 +1263,18 @@ msgstr "Nevarēja atjaunināt Rufin līdz versijai {version}"
 msgid "Could not update favorites"
 msgstr "Nevarēja atjaunināt izlasi"
 
+#, fuzzy
+#| msgid "Couldn't connect to {service}"
+msgid "Couldn't connect to the server"
+msgstr "Nevarēja izveidot savienojumu ar {service}"
+
 msgid "Couldn't connect to {service}"
 msgstr "Nevarēja izveidot savienojumu ar {service}"
+
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Couldn't decode this track"
+msgstr "Šo lapu nevarēja ielādēt"
 
 msgid "Couldn't load this folder"
 msgstr "Nevarēja ielādēt šo mapi"
@@ -1974,6 +1994,9 @@ msgstr "Aizmirst avotu"
 
 msgid "Forget \"{name}\"?"
 msgstr "Aizmirst \"{name}\"?"
+
+msgid "Format not supported"
+msgstr ""
 
 msgid "Format"
 msgstr "Formāts"
@@ -4318,6 +4341,11 @@ msgstr "Izlaišanas skaits"
 msgid "Skip same-album crossfade"
 msgstr "Izlaist pāreju starp dziesmām no viena un tā paša albuma"
 
+#, fuzzy
+#| msgid "Only unplayed tracks"
+msgid "Skip unplayable tracks"
+msgstr "Tikai neatskaņotās dziesmas"
+
 msgid "Slate"
 msgstr "Pelēks"
 
@@ -4639,6 +4667,11 @@ msgstr "Dziesmas radio"
 
 msgid "Track radio"
 msgstr "Dziesmas radio"
+
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Track unavailable"
+msgstr "Meklēšana nav pieejama"
 
 msgid "Track"
 msgstr "Dziesma"

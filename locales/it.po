@@ -315,6 +315,11 @@ msgstr ""
 msgid "Accent color"
 msgstr "Colore d'accento"
 
+#, fuzzy
+#| msgid "Access token"
+msgid "Access denied"
+msgstr "Token di accesso"
+
 msgid "Access token"
 msgstr "Token di accesso"
 
@@ -590,6 +595,11 @@ msgstr "Dissolvenza audio su play/pausa"
 
 msgid "Audio fingerprints"
 msgstr ""
+
+#, fuzzy
+#| msgid "Audio output"
+msgid "Audio output failed"
+msgstr "Output audio"
 
 msgid "Audio output"
 msgstr "Output audio"
@@ -1214,8 +1224,18 @@ msgstr "Non è stato possibile aggiornare Rufin alla versione {version}"
 msgid "Could not update favorites"
 msgstr "Non è stato possibile aggiornare i preferiti"
 
+#, fuzzy
+#| msgid "Couldn't connect to {service}"
+msgid "Couldn't connect to the server"
+msgstr "Non è stato possibile connettersi a {service}"
+
 msgid "Couldn't connect to {service}"
 msgstr "Non è stato possibile connettersi a {service}"
+
+#, fuzzy
+#| msgid "Could not load this page"
+msgid "Couldn't decode this track"
+msgstr "Non è stato possibile caricare questa pagina"
 
 msgid "Couldn't load this folder"
 msgstr "Non è stato possibile caricare questa cartella"
@@ -1889,6 +1909,9 @@ msgid "Forget Source"
 msgstr ""
 
 msgid "Forget \"{name}\"?"
+msgstr ""
+
+msgid "Format not supported"
 msgstr ""
 
 msgid "Format"
@@ -4080,6 +4103,11 @@ msgstr ""
 msgid "Skip same-album crossfade"
 msgstr ""
 
+#, fuzzy
+#| msgid "Album unavailable"
+msgid "Skip unplayable tracks"
+msgstr "Album non disponibile"
+
 msgid "Slate"
 msgstr ""
 
@@ -4373,6 +4401,11 @@ msgstr ""
 
 msgid "Track radio"
 msgstr ""
+
+#, fuzzy
+#| msgid "Artist unavailable"
+msgid "Track unavailable"
+msgstr "Artista non disponibile"
 
 msgid "Track"
 msgstr ""

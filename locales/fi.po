@@ -282,6 +282,11 @@ msgstr ""
 msgid "Accent color"
 msgstr "Korostusväri"
 
+#, fuzzy
+#| msgid "Access token"
+msgid "Access denied"
+msgstr "Pääsypoletti"
+
 msgid "Access token"
 msgstr "Pääsypoletti"
 
@@ -568,6 +573,11 @@ msgstr "Äänen häivennys toistossa/keskeytyksessä"
 
 msgid "Audio fingerprints"
 msgstr ""
+
+#, fuzzy
+#| msgid "Audio output"
+msgid "Audio output failed"
+msgstr "Äänen ulostulo"
 
 msgid "Audio output"
 msgstr "Äänen ulostulo"
@@ -1221,8 +1231,18 @@ msgstr "Suosikkeja ei voitu päivittää"
 msgid "Could not update favorites"
 msgstr "Suosikkeja ei voitu päivittää"
 
+#, fuzzy
+#| msgid "Couldn't connect to {service}"
+msgid "Couldn't connect to the server"
+msgstr "Yhteyttä palveluun {service} ei voitu muodostaa"
+
 msgid "Couldn't connect to {service}"
 msgstr "Yhteyttä palveluun {service} ei voitu muodostaa"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "Couldn't decode this track"
+msgstr "Tätä kansiota ei voitu ladata"
 
 msgid "Couldn't load this folder"
 msgstr "Tätä kansiota ei voitu ladata"
@@ -1939,6 +1959,9 @@ msgstr "Unohda lähde"
 
 msgid "Forget \"{name}\"?"
 msgstr "Unohdetaanko \"{name}\"?"
+
+msgid "Format not supported"
+msgstr ""
 
 msgid "Format"
 msgstr ""
@@ -4316,6 +4339,11 @@ msgstr "Ohituskerrat"
 msgid "Skip same-album crossfade"
 msgstr "Ohita saman albumin ristihäivytys"
 
+#, fuzzy
+#| msgid "Only played tracks"
+msgid "Skip unplayable tracks"
+msgstr "Vain toistetut kappaleet"
+
 msgid "Slate"
 msgstr ""
 
@@ -4633,6 +4661,11 @@ msgstr "Kappale"
 
 msgid "Track radio"
 msgstr ""
+
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Track unavailable"
+msgstr "Haku ei ole saatavilla"
 
 msgid "Track"
 msgstr "Kappale"
