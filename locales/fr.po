@@ -65,6 +65,11 @@ msgstr ""
 "Les appareils utilisant Rufin Connect ne sont plus compatibles. Mettez à "
 "jour Rufin."
 
+msgid ""
+"Do you want to cache all lyrics automatically? You can also enable this from "
+"Preferences -> Storage"
+msgstr ""
+
 #, fuzzy
 #| msgid ""
 #| "Downloads from this server will be removed, and automatic rules will be "
@@ -733,6 +738,16 @@ msgstr ""
 msgid "Browse"
 msgstr "Parcourir"
 
+#, fuzzy
+#| msgid "Lyrics"
+msgid "By Lyrics"
+msgstr "Paroles"
+
+#, fuzzy
+#| msgid "Title"
+msgid "By Title"
+msgstr "Morceau"
+
 msgid "C"
 msgstr ""
 
@@ -740,6 +755,11 @@ msgstr ""
 #| msgid "New file"
 msgid "CUE file"
 msgstr "Nouveau fichier"
+
+#, fuzzy
+#| msgid "Cached"
+msgid "Cache"
+msgstr "Mise en cache"
 
 #, fuzzy
 #| msgid "Cached"
@@ -931,6 +951,11 @@ msgstr "Rechercher des paroles"
 
 msgid "Clear queue"
 msgstr "Effacer la file d'attente"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear this cache?"
+msgstr "Rechercher des paroles"
 
 msgid "Clear title"
 msgstr "Effacer le titre"
@@ -1421,17 +1446,21 @@ msgstr "Donner"
 msgid "Done"
 msgstr ""
 
+#, fuzzy
+#| msgid "Open automatically"
+msgid "Download Automatically"
+msgstr "Ouvrir automatiquement"
+
 msgid "Download Folder"
 msgstr "Dossier de téléchargement"
 
+#, fuzzy
+#| msgid "Download quality"
+msgid "Download Lazily"
+msgstr "Qualité de téléchargement"
+
 msgid "Download Queue"
 msgstr "Liste de téléchargement"
-
-msgid "Download artwork"
-msgstr "Télécharger l'illustration"
-
-msgid "Download lyrics"
-msgstr "Télécharger les paroles"
 
 msgid "Download quality"
 msgstr "Qualité de téléchargement"
@@ -1559,6 +1588,11 @@ msgstr "Activer les sauvegardes automatiques"
 
 msgid "Enable background image"
 msgstr "Activer l'image de fond"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Enable caching lyrics"
+msgstr "Rechercher des paroles"
 
 msgid "Enable partial star ratings"
 msgstr "Activer les notes par demi-étoiles"
@@ -4895,6 +4929,12 @@ msgstr "L'option de mise à jour automatique de {app_name} est invalide."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Bienvenue sur l'installateur de Rufin"
+
+#~ msgid "Download artwork"
+#~ msgstr "Télécharger l'illustration"
+
+#~ msgid "Download lyrics"
+#~ msgstr "Télécharger les paroles"
 
 #~ msgid "Copy preset"
 #~ msgstr "Copier le préréglage"
