@@ -3657,7 +3657,7 @@ impl ConnectOwner {
                     .try_into()
                     .unwrap(),
             );
-            let database = library::Database::open_snapshot(staged.path())
+            let database = library::Database::open(staged.path())
                 .await
                 .map_err(error)?;
             let converted = async {

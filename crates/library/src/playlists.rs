@@ -1047,30 +1047,6 @@ pub(crate) async fn write_playlist_identity(
         .fetch_one(connection).await?)
 }
 
-pub(crate) async fn write_playlist_entry(
-    connection: &mut SqliteConnection,
-    playlist: PlaylistKey,
-    entry: &PlaylistEntryWrite,
-) -> LibraryResult<()> {
-    if entry.object_id.is_empty() || entry.track.media_uri.is_empty() || entry.position < 0 {
-        return Err(LibraryError::InvalidRequest(
-            "invalid playlist occurrence identity or order".into(),
-        ));
-    }
-    let track = remember_playlist_track(connection, entry).await?;
-    write_entry_positions_on(
-        connection,
-        &[(
-            playlist,
-            entry.object_id.clone(),
-            Some(track),
-            entry.position,
-        )],
-    )
-    .await?;
-    Ok(())
-}
-
 /// Store accepted playlist positions.
 pub(crate) async fn write_positions_on(
     connection: &mut SqliteConnection,

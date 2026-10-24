@@ -60,11 +60,7 @@ impl StorageResetRequest {
         else {
             validate_root(&paths.data_dir())?;
             validate_root(&paths.cache_dir())?;
-            for path in [
-                paths.store_file(),
-                paths.legacy_store_file(),
-                paths.catalog_file(),
-            ] {
+            for path in [paths.store_file(), paths.catalog_file()] {
                 for suffix in ["", "-wal", "-shm"] {
                     let mut file = path.as_os_str().to_os_string();
                     file.push(suffix);

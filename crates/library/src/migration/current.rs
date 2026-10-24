@@ -1,5 +1,4 @@
 //! One-time conversion of the former durable and catalog files.
-use super::track_uri;
 use crate::{LibraryError, LibraryResult, SourceId, source_entity_uri};
 use sqlx::{Connection, Row, SqliteConnection};
 use std::path::Path;
@@ -171,11 +170,7 @@ pub(crate) async fn separate_file_access(connection: &mut SqliteConnection) -> L
     Ok(())
 }
 
-pub(crate) async fn attach(
-    connection: &mut SqliteConnection,
-    path: &Path,
-    alias: &str,
-) -> LibraryResult<()> {
+async fn attach(connection: &mut SqliteConnection, path: &Path, alias: &str) -> LibraryResult<()> {
     let mut uri = url::Url::from_file_path(path.canonicalize()?)
         .map_err(|_| LibraryError::Migration("database path is not absolute".into()))?;
     uri.set_query(Some("mode=ro"));
@@ -202,7 +197,7 @@ async fn columns(
     )
 }
 
-pub(super) async fn has_table(
+async fn has_table(
     connection: &mut SqliteConnection,
     schema: &str,
     table: &str,
@@ -258,8 +253,8 @@ async fn copy_table(
     Ok(())
 }
 
-pub(crate) async fn recover_columns(input: &Path, destination: &Path) -> LibraryResult<()> {
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+pub(crate) async fn recover_columns(path: &Path) -> LibraryResult<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)?;
     let stage = tempfile::Builder::new()
         .prefix("rufin-migration-")
@@ -269,7 +264,7 @@ pub(crate) async fn recover_columns(input: &Path, destination: &Path) -> Library
     let copied = async {
         crate::schema::initialize_durable(&mut connection).await?;
         crate::connect::initialize(&mut connection).await?;
-        attach(&mut connection, input, "old_store").await?;
+        attach(&mut connection, path, "old_store").await?;
         sqlx::query("PRAGMA foreign_keys=OFF").execute(&mut connection).await?;
         let mut transaction = connection.begin().await?;
         let triggers: Vec<String> = sqlx::query_scalar("SELECT name FROM main.sqlite_schema WHERE type='trigger'")
@@ -305,15 +300,11 @@ pub(crate) async fn recover_columns(input: &Path, destination: &Path) -> Library
     }.await;
     connection.close().await?;
     copied?;
-    super::install(&pending, input, destination)?;
+    super::install(&pending, path)?;
     Ok(())
 }
 
-pub(super) async fn copy_catalog(
-    connection: &mut SqliteConnection,
-    schema: &str,
-    released: bool,
-) -> LibraryResult<()> {
+async fn copy_catalog(connection: &mut SqliteConnection, schema: &str) -> LibraryResult<()> {
     sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO sources(object_id) SELECT object_id FROM {schema}.sources WHERE true ON CONFLICT(object_id) DO NOTHING")))
         .execute(&mut *connection).await?;
     sqlx::query(sqlx::AssertSqlSafe(format!("CREATE TEMP TABLE migration_source_keys AS SELECT old.source_key old_key,current.source_key FROM {schema}.sources old JOIN main.sources current USING(object_id)")))
@@ -363,12 +354,8 @@ pub(super) async fn copy_catalog(
                 after = row.try_get(key)?;
                 let source: String = row.try_get("migration_source")?;
                 let object: String = row.try_get("object_id")?;
-                let uri = if kind == "track" && released {
-                    track_uri(&row, &source, &object)
-                } else {
-                    super::string(&row, "media_uri")
-                }
-                .unwrap_or_else(|| source_entity_uri(&SourceId::new(source), kind, &object));
+                let uri = super::string(&row, "media_uri")
+                    .unwrap_or_else(|| source_entity_uri(&SourceId::new(source), kind, &object));
                 values.push((after, uri));
             }
             let mut insert = sqlx::QueryBuilder::new("INSERT INTO migration_uris(entity_key,uri) ");
@@ -443,36 +430,23 @@ pub(super) async fn copy_catalog(
                 .bind(key).bind(crate::catalog::files::parent_locator(&path)).execute(&mut *connection).await?;
         }
     }
-    if released {
-        sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at) SELECT track.media_uri,lyrics.authority,lyrics.role,lyrics.language,lyrics.script,lyrics.cache_input_digest,lyrics.lyrics,lyrics.updated_at FROM {schema}.lyrics_cache lyrics JOIN tracks track USING(track_key)")))
-            .execute(&mut *connection).await?;
-        copy_table(
-            connection,
-            schema,
-            "local_access_files",
-            "local_access_metadata",
-            &[("access_uri", "old.media_uri")],
-        )
-        .await?;
-    } else {
-        copy_table(connection, schema, "lyrics_cache", "lyrics_cache", &[]).await?;
-        copy_table(
-            connection,
-            schema,
-            "local_access_metadata",
-            "local_access_metadata",
-            &[],
-        )
-        .await?;
-        if has_table(connection, schema, "activity_baseline").await? {
-            for (table, kind) in [
-                ("tracks", "track"),
-                ("artists", "artist"),
-                ("genres", "genre"),
-            ] {
-                sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO native_media_state(media_uri,play_count,skip_count,last_played) SELECT item.media_uri,activity.play_count,activity.skip_count,activity.last_played_at FROM {schema}.activity_baseline activity JOIN migration_source_keys mapping ON mapping.old_key=activity.source_key JOIN {table} item ON item.source_key=mapping.source_key AND item.object_id=activity.track_object_id WHERE activity.period='lifetime' AND activity.item_kind='{kind}' ON CONFLICT(media_uri) DO UPDATE SET play_count=excluded.play_count,skip_count=excluded.skip_count,last_played=excluded.last_played")))
-                    .execute(&mut *connection).await?;
-            }
+    copy_table(connection, schema, "lyrics_cache", "lyrics_cache", &[]).await?;
+    copy_table(
+        connection,
+        schema,
+        "local_access_metadata",
+        "local_access_metadata",
+        &[],
+    )
+    .await?;
+    if has_table(connection, schema, "activity_baseline").await? {
+        for (table, kind) in [
+            ("tracks", "track"),
+            ("artists", "artist"),
+            ("genres", "genre"),
+        ] {
+            sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO native_media_state(media_uri,play_count,skip_count,last_played) SELECT item.media_uri,activity.play_count,activity.skip_count,activity.last_played_at FROM {schema}.activity_baseline activity JOIN migration_source_keys mapping ON mapping.old_key=activity.source_key JOIN {table} item ON item.source_key=mapping.source_key AND item.object_id=activity.track_object_id WHERE activity.period='lifetime' AND activity.item_kind='{kind}' ON CONFLICT(media_uri) DO UPDATE SET play_count=excluded.play_count,skip_count=excluded.skip_count,last_played=excluded.last_played")))
+                .execute(&mut *connection).await?;
         }
     }
     copy_table(connection, schema, "waveform_cache", "waveform_cache", &[]).await?;
@@ -505,9 +479,7 @@ const FIELDS: &[(&str, &str)] = &[
     ("primary_artist_musicbrainz_id", "TEXT"),
 ];
 
-pub(super) async fn create_metadata_candidates(
-    connection: &mut SqliteConnection,
-) -> LibraryResult<()> {
+async fn create_metadata_candidates(connection: &mut SqliteConnection) -> LibraryResult<()> {
     let fields = FIELDS
         .iter()
         .map(|(name, kind)| format!("{name} {kind}"))
@@ -576,10 +548,7 @@ async fn connect_candidates(connection: &mut SqliteConnection) -> LibraryResult<
     Ok(())
 }
 
-pub(super) async fn saved_candidates(
-    connection: &mut SqliteConnection,
-    schema: &str,
-) -> LibraryResult<()> {
+async fn saved_candidates(connection: &mut SqliteConnection, schema: &str) -> LibraryResult<()> {
     if !has_table(connection, schema, "queue_saved").await? {
         return Ok(());
     }
@@ -605,73 +574,7 @@ pub(super) async fn saved_candidates(
     Ok(())
 }
 
-pub(super) async fn row_candidate(
-    connection: &mut SqliteConnection,
-    row: &sqlx::sqlite::SqliteRow,
-    uri: &str,
-    priority: i64,
-    stamp: i64,
-    tie: i64,
-    listen: bool,
-) -> LibraryResult<()> {
-    for field in ["duration_millis", "disc_number", "track_number"] {
-        if super::integer(row, field)
-            .or_else(|| super::integer(row, &format!("fallback_{field}")))
-            .is_some_and(|value| value < 0)
-        {
-            return Err(LibraryError::InvalidStore(format!("invalid saved {field}")));
-        }
-    }
-    let mut query = sqlx::QueryBuilder::new(
-        "INSERT INTO migration_metadata(media_uri,priority,present,stamp,tie,",
-    );
-    query.push(
-        FIELDS
-            .iter()
-            .map(|(name, _)| *name)
-            .collect::<Vec<_>>()
-            .join(","),
-    );
-    query.push(") VALUES (");
-    query
-        .push_bind(uri)
-        .push(",")
-        .push_bind(priority)
-        .push(",")
-        .push_bind(i64::from(
-            priority == 1 && super::string(row, "title").is_none(),
-        ))
-        .push(",")
-        .push_bind(stamp)
-        .push(",")
-        .push_bind(tie);
-    for (name, kind) in FIELDS {
-        let column = match (*name, listen) {
-            ("title", true) => "track_title",
-            ("display_artist", true) => "artist_name",
-            ("display_album", true) => "album_title",
-            ("display_artist", false) => "artist",
-            ("display_album", false) => "album",
-            (name, _) => name,
-        };
-        query.push(",");
-        if *kind == "TEXT" {
-            query.push_bind(
-                super::string(row, column)
-                    .or_else(|| super::string(row, &format!("fallback_{column}"))),
-            );
-        } else {
-            query.push_bind(
-                super::integer(row, column)
-                    .or_else(|| super::integer(row, &format!("fallback_{column}"))),
-            );
-        }
-    }
-    query.push(")").build().execute(connection).await?;
-    Ok(())
-}
-
-pub(super) async fn reduce_metadata(connection: &mut SqliteConnection) -> LibraryResult<()> {
+async fn reduce_metadata(connection: &mut SqliteConnection) -> LibraryResult<()> {
     sqlx::query("INSERT INTO tracks(media_uri,indexed) SELECT DISTINCT media_uri,0 FROM migration_metadata WHERE true ON CONFLICT(media_uri) DO NOTHING")
         .execute(&mut *connection).await?;
     for (field, _) in FIELDS {
@@ -719,7 +622,7 @@ pub(super) async fn reduce_metadata(connection: &mut SqliteConnection) -> Librar
     Ok(())
 }
 
-pub(super) async fn copy_native_playlists(connection: &mut SqliteConnection) -> LibraryResult<()> {
+async fn copy_native_playlists(connection: &mut SqliteConnection) -> LibraryResult<()> {
     if !has_table(connection, "old_catalog", "native_playlists").await? {
         return Ok(());
     }
@@ -748,18 +651,6 @@ pub(super) async fn copy_native_playlists(connection: &mut SqliteConnection) -> 
             UPDATE home_entries SET entity_key=(SELECT playlist_key FROM migration_playlist_keys WHERE old_key=-home_entries.entity_key) WHERE entity_kind='playlist' AND entity_key<0;")
             .execute(&mut *connection).await?;
     Ok(())
-}
-
-pub(super) async fn native_candidates(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    snapshot_candidates(
-        connection,
-        "old_catalog",
-        "native_playlist_entries",
-        1,
-        "(old.title IS NULL),old.snapshot_at,-old.playlist_entry_key",
-        &[("display_artist", "artist"), ("display_album", "album")],
-    )
-    .await
 }
 
 async fn playlists(connection: &mut SqliteConnection, catalog: bool) -> LibraryResult<()> {
@@ -814,13 +705,7 @@ async fn restore_saved_queue(connection: &mut SqliteConnection) -> LibraryResult
         None
     };
     let (mut state, occurrences) = match saved {
-        Some(saved) if saved.get("entries").is_some() => {
-            crate::queue::legacy::decode_saved(connection, saved).await?
-        }
-        Some(saved) => {
-            let (rows, _) = crate::queue::legacy::stored_rows(connection).await?;
-            crate::queue::legacy::migrate_saved(connection, saved, &rows).await?
-        }
+        Some(saved) => crate::queue::legacy::decode_saved(connection, saved).await?,
         None => {
             let (rows, keys) = crate::queue::legacy::stored_rows(connection).await?;
             let mut ordinary = (0..rows.len()).collect::<Vec<_>>();
@@ -884,8 +769,8 @@ async fn restore_saved_queue(connection: &mut SqliteConnection) -> LibraryResult
     crate::queue::save_queue_on(connection, &state).await
 }
 
-pub(crate) async fn import(input: &Path, destination: &Path, catalog: &Path) -> LibraryResult<()> {
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+pub(crate) async fn import(path: &Path, catalog: &Path) -> LibraryResult<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)?;
     let stage = tempfile::Builder::new()
         .prefix("rufin-migration-")
@@ -894,7 +779,7 @@ pub(crate) async fn import(input: &Path, destination: &Path, catalog: &Path) -> 
     let mut connection = crate::db::open_writer(&pending).await?;
     crate::schema::initialize_durable(&mut connection).await?;
     crate::connect::initialize(&mut connection).await?;
-    attach(&mut connection, input, "old_store").await?;
+    attach(&mut connection, path, "old_store").await?;
     let has_catalog = catalog.exists();
     if has_catalog {
         attach(&mut connection, catalog, "old_catalog").await?;
@@ -906,7 +791,7 @@ pub(crate) async fn import(input: &Path, destination: &Path, catalog: &Path) -> 
     sqlx::query("INSERT INTO sources(source_key,object_id) SELECT source_key,object_id FROM old_store.source_ids")
         .execute(&mut *transaction).await?;
     if has_catalog {
-        copy_catalog(&mut transaction, "old_catalog", false).await?;
+        copy_catalog(&mut transaction, "old_catalog").await?;
     }
     create_metadata_candidates(&mut transaction).await?;
     connect_candidates(&mut transaction).await?;
@@ -1040,6 +925,6 @@ pub(crate) async fn import(input: &Path, destination: &Path, catalog: &Path) -> 
     super::normalize_stored_artwork(&mut transaction).await?;
     transaction.commit().await?;
     connection.close().await?;
-    super::install(&pending, input, destination)?;
+    super::install(&pending, path)?;
     Ok(())
 }

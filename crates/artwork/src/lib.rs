@@ -398,17 +398,8 @@ impl Artwork {
         self.pipeline.cache_revision()
     }
 
-    pub async fn install_database(
-        &self,
-        database: Arc<library::Database>,
-    ) -> Result<(), ArtworkError> {
-        self.pipeline.install_database(Arc::clone(&database));
-        let legacy = self.pipeline.cache().preview_index_path();
-        if tokio::fs::try_exists(&legacy).await? {
-            database.import_artwork_previews(&legacy).await?;
-            tokio::fs::remove_file(legacy).await?;
-        }
-        Ok(())
+    pub fn install_database(&self, database: Arc<library::Database>) {
+        self.pipeline.install_database(database);
     }
     pub fn new(cache_root: impl AsRef<Path>, runtime: Handle) -> Result<Self, ArtworkError> {
         let cache_root = cache::current_layout(cache_root.as_ref())?;
@@ -629,7 +620,6 @@ mod tests {
                 .is_none()
         );
         assert_eq!(resolutions.load(Ordering::Relaxed), 0);
-        assert!(!directory.path().join("covers/v1/previews.sqlite3").exists());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -640,10 +630,7 @@ mod tests {
         let database = library::Database::open(directory.path().join("library.sqlite3"))
             .await
             .unwrap();
-        artwork
-            .install_database(Arc::new(database.clone()))
-            .await
-            .unwrap();
+        artwork.install_database(Arc::new(database.clone()));
         let encoded = sources::native_artwork_binding(
             "source",
             &sources::NativeImageRef::new("cover", Some("revision".into())),
@@ -840,10 +827,7 @@ mod tests {
         artwork.clear_cache(&database, &[]).await.unwrap();
         assert!(!original.exists());
         let reopened = Artwork::new(&root, Handle::current()).unwrap();
-        reopened
-            .install_database(Arc::new(database.clone()))
-            .await
-            .unwrap();
+        reopened.install_database(Arc::new(database.clone()));
         let restored = database
             .artwork_bindings(
                 &[library::source_entity_uri(
@@ -892,7 +876,6 @@ mod tests {
                 .is_some()
         );
         assert_eq!(resolutions.load(Ordering::Relaxed), 0);
-        assert!(!directory.path().join("covers/v1/previews.sqlite3").exists());
         let request = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 64);
         assert_eq!(resolutions.load(Ordering::Relaxed), 0);
 

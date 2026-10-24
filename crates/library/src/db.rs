@@ -167,128 +167,33 @@ impl Database {
     pub fn distinct_track_covers(&self) -> bool {
         self.inner.distinct_track_covers.load(Ordering::Acquire)
     }
-    pub async fn relocate(source: &Path, destination: &Path) -> LibraryResult<()> {
-        if destination.exists() || !source.exists() {
-            return Ok(());
-        }
-        let parent = destination.parent().ok_or_else(|| {
-            LibraryError::InvalidRequest("the Store destination has no parent".to_string())
-        })?;
-        std::fs::create_dir_all(parent)?;
-        let pending = destination.with_extension(format!("relocating-{}", std::process::id()));
-        if pending.exists() {
-            std::fs::remove_file(&pending)?;
-        }
-        let options = SqliteConnectOptions::new()
-            .filename(source)
-            .read_only(true)
-            .create_if_missing(false)
-            .busy_timeout(BUSY_TIMEOUT);
-        let mut connection = SqliteConnection::connect_with(&options).await?;
-        let result = sqlx::query("VACUUM INTO ?1")
-            .bind(pending.to_string_lossy().as_ref())
-            .execute(&mut connection)
-            .await;
-        connection.close().await?;
-        result?;
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(&pending)?
-            .sync_all()?;
-        std::fs::rename(&pending, destination)?;
-        #[cfg(unix)]
-        std::fs::File::open(parent)?.sync_all()?;
-        Ok(())
-    }
 
-    pub async fn open(path: impl AsRef<Path>) -> LibraryResult<Self> {
-        Self::open_configured(path, &[], None).await
-    }
-
-    pub async fn open_snapshot(path: impl AsRef<Path>) -> LibraryResult<Self> {
-        Self::open_final(path.as_ref()).await
-    }
-
-    pub async fn open_configured(
-        path: impl AsRef<Path>,
-        configured: &[crate::SourceId],
-        selected: Option<&crate::SourceId>,
-    ) -> LibraryResult<Self> {
-        let path = path.as_ref();
-        Self::open_with_legacy_catalog(
-            path,
-            path.with_extension("catalog.sqlite"),
-            configured,
-            selected,
-        )
-        .await
-    }
-
-    pub async fn open_with_legacy_catalog(
-        path: impl AsRef<Path>,
-        catalog: impl AsRef<Path>,
-        configured: &[crate::SourceId],
-        selected: Option<&crate::SourceId>,
-    ) -> LibraryResult<Self> {
-        let path = path.as_ref();
-        let catalog = catalog.as_ref();
-        if path.exists() {
-            Self::migrate_released(path, path, catalog, configured, selected).await?;
-        }
-        Self::open_final(path).await
-    }
-
-    pub async fn open_installation(
-        path: &Path,
-        legacy: &Path,
-        catalog: &Path,
-        configured: &[crate::SourceId],
-        selected: Option<&crate::SourceId>,
-    ) -> LibraryResult<Self> {
-        let input = if !path.exists() && legacy.exists() {
-            legacy
-        } else {
-            path
-        };
+    pub async fn open_installation(path: &Path, catalog: &Path) -> LibraryResult<Self> {
         let opened = async {
-            if input.exists() {
-                Self::migrate_released(input, path, catalog, configured, selected).await?;
+            if path.exists() {
+                Self::migrate_released(path, catalog).await?;
             }
-            Self::open_final(path).await
+            Self::open(path).await
         }
         .await;
         match opened {
-            Err(error) if input.exists() && !error.is_store_unavailable() => {
+            Err(error) if path.exists() && !error.is_store_unavailable() => {
                 tracing::warn!(%error, "could not open the Store; trying compatible columns");
-                crate::migration::current::recover_columns(input, path).await?;
-                Self::open_final(path).await
+                crate::migration::current::recover_columns(path).await?;
+                Self::open(path).await
             }
             opened => opened,
         }
     }
 
-    async fn migrate_released(
-        input: &Path,
-        destination: &Path,
-        catalog: &Path,
-        configured: &[crate::SourceId],
-        selected: Option<&crate::SourceId>,
-    ) -> LibraryResult<()> {
+    async fn migrate_released(path: &Path, catalog: &Path) -> LibraryResult<()> {
         let mut reader =
-            SqliteConnection::connect_with(&base_options(input).read_only(true)).await?;
+            SqliteConnection::connect_with(&base_options(path).read_only(true)).await?;
         let version = schema::pragma(&mut reader, "user_version").await;
         reader.close().await?;
         match version? {
-            1..=43 => {
-                crate::migration::import_released(input, destination, catalog, configured, selected)
-                    .await?
-            }
-            44..=46 => crate::migration::import_current(input, destination, catalog).await?,
-            0 | 47 | 48 | 49 | 50 | 51 | 53 | 54 | 55 | 56 | 57 | 58 => {
-                if input != destination {
-                    Self::relocate(input, destination).await?;
-                }
-            }
+            44..=46 => crate::migration::import_current(path, catalog).await?,
+            0 | 47 | 48 | 49 | 50 | 51 | 53 | 54 | 55 | 56 | 57 | 58 => {}
             version => {
                 return Err(LibraryError::Migration(format!(
                     "unsupported library schema {version}"
@@ -309,7 +214,8 @@ impl Database {
         Ok(())
     }
 
-    pub(crate) async fn open_final(path: &Path) -> LibraryResult<Self> {
+    pub async fn open(path: impl AsRef<Path>) -> LibraryResult<Self> {
+        let path = path.as_ref();
         let mut writer = open_writer(path).await?;
         let initialized = async {
             schema::initialize_durable(&mut writer).await?;

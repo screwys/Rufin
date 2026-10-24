@@ -60,19 +60,10 @@ where
     let secret_storage_fallbacks = settings.secret_storage_fallbacks.1.clone();
     let stored = settings.load();
     let secrets = Arc::new(SwitchableSecretStore::new(platform_secret_store(&settings)));
-    let configured_source_ids = stored
-        .sources
-        .configured
-        .iter()
-        .map(|source| source.configuration.source_id.clone())
-        .collect::<Vec<_>>();
     let store_path = paths.store_file();
     let (database, temporary_store) = match library::Database::open_installation(
         &store_path,
-        &paths.legacy_store_file(),
         &paths.catalog_file(),
-        &configured_source_ids,
-        stored.sources.selected_source_id.as_ref(),
     )
     .await
     {
@@ -159,9 +150,7 @@ where
             discovery: discovery_events,
         },
     );
-    if let Err(error) = artwork.install_database(Arc::clone(&library)).await {
-        warn!(%error, "could not import cached artwork previews");
-    }
+    artwork.install_database(Arc::clone(&library));
     if !stored.ui.recent_search_results.is_empty() {
         let uris = stored
             .ui

@@ -85,10 +85,6 @@ impl Paths {
             .join("rufin-catalog.sqlite")
     }
 
-    pub fn legacy_store_file(&self) -> PathBuf {
-        self.cache_dir().join(STORE_DIRECTORY).join(STORE_FILE)
-    }
-
     pub fn artwork_dir(&self) -> PathBuf {
         self.cache_dir().join(ARTWORK_DIRECTORY)
     }

@@ -1064,55 +1064,6 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
 }
 
 #[tokio::test]
-async fn installed_cursor_queue_retains_displaced_entries_and_play_last() {
-    let fixture = fixture().await;
-    let row = |id: &str, uri: &str, source| serde_json::json!({"occurrence":id,"item":TrackReference::direct(uri,uri,"","",1000),"canonical_position":0,"source_index":source,"playlist_entry_id":null,"provenance":"Manual"});
-    let rows = vec![row("old-a", "a", 0), row("old-duplicate", "a", 1)];
-    let choice = |uri: &str, origin: Option<(usize, usize)>| serde_json::json!({"origin":origin,"media_uri":uri,"fallback":null,"provenance":"Manual"});
-    let instruction = |choices: Vec<serde_json::Value>, repeat| serde_json::json!({"input":{"Choices":choices},"repeat":repeat,"seed":null});
-    let saved = serde_json::json!({"occurrences":rows,"current_index":1,"progress_millis":42000,"repeat_mode":"All","shuffled":false,"next_id":20,
-        "sources":[instruction(vec![choice("a",None),choice("b",None),choice("c",None),choice("d",None)],true),instruction(vec![choice("a",None)],true),instruction(vec![choice("b",Some((0,1))),choice("c",Some((0,2)))],false),instruction(vec![choice("z",None)],true)],
-        "pending":[{"source":2,"offset":0},{"source":0,"offset":3},{"source":3,"offset":0}]});
-    fixture
-        .database
-        .import_queue_jsonl(std::io::Cursor::new(
-            serde_json::to_vec(&serde_json::json!({"version":2,"queue":saved})).unwrap(),
-        ))
-        .await
-        .unwrap();
-    let restored = fixture.database.restore_queue().await.unwrap();
-    assert_eq!(
-        fixture
-            .database
-            .selected_track_uris(
-                &library::MemberSelection::Keys {
-                    source: None,
-                    keys: ((&restored
-                        .order
-                        .iter()
-                        .map(|index| restored.entries[*index as usize].track_key)
-                        .collect::<Vec<_>>())
-                        .iter()
-                        .map(|key| key.raw())
-                        .collect::<Vec<i64>>())
-                    .into_iter()
-                    .map(library::TrackKey::from_raw)
-                    .collect::<Vec<_>>()
-                    .into()
-                },
-                None,
-                &ReadCancellation::new()
-            )
-            .await
-            .unwrap(),
-        ["a", "a", "b", "c", "d", "z"]
-    );
-    assert_eq!(restored.current_index, Some(1));
-    assert_eq!(restored.progress_millis, 42000);
-    assert_eq!(restored.repeat_mode, QueueRepeatMode::All);
-}
-
-#[tokio::test]
 async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes() {
     let fixture = fixture().await;
     let mut latest = library::QueueRestore::default();
@@ -1211,63 +1162,6 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
     assert_eq!(restored.progress_millis, latest.progress_millis);
     assert_eq!(restored.repeat_mode, latest.repeat_mode);
     assert_eq!(restored.shuffled, latest.shuffled);
-}
-
-#[tokio::test]
-async fn installed_shuffled_source_keeps_its_exact_pending_order() {
-    let fixture = fixture().await;
-    let mut raw = connection(&fixture.path).await;
-    let seed = 1_200_000_000_u64;
-    let ordered:Vec<String>=sqlx::query_scalar("SELECT media_uri FROM tracks ORDER BY (((track_key*1103515245)%2147483647)<?1),(track_key*1103515245)%2147483647,track_key").bind(seed as i64).fetch_all(&mut raw).await.unwrap();
-    let rows = ordered
-        .iter()
-        .take(2)
-        .enumerate()
-        .map(|(index, uri)| serde_json::json!({"occurrence":format!("old:{index}"),"item":TrackReference::direct(uri.clone(),uri.clone(),"","",1000),"canonical_position":index,"source_index":0,"playlist_entry_id":null,"provenance":{"Context":{"context_id":"source","context_title":null,"source_rank":index}}}))
-        .collect::<Vec<_>>();
-    let reference = serde_json::json!({
-        "scope": {"Tracks": {"source":"source","folder":null,"downloaded_only":false,"favorites_only":false,"recursive":false}},
-        "filter":"","sort":"Title","descending":false,"anchor_uri":null
-    });
-    let saved = serde_json::json!({"occurrences":rows,"current_index":1,"progress_millis":42,"repeat_mode":"All","shuffled":true,"next_id":20,
-        "sources":[{"input":{"Source":{"reference":reference,"context_id":"source"}},"repeat":true,"seed":seed}],
-        "pending":[{"source":0,"offset":2,"seed":seed}]});
-    fixture
-        .database
-        .import_queue_jsonl(std::io::Cursor::new(
-            serde_json::to_vec(&serde_json::json!({"version":2,"queue":saved})).unwrap(),
-        ))
-        .await
-        .unwrap();
-    let restored = fixture.database.restore_queue().await.unwrap();
-    assert_eq!(
-        fixture
-            .database
-            .selected_track_uris(
-                &library::MemberSelection::Keys {
-                    source: None,
-                    keys: ((&restored
-                        .order
-                        .iter()
-                        .map(|index| restored.entries[*index as usize].track_key)
-                        .collect::<Vec<_>>())
-                        .iter()
-                        .map(|key| key.raw())
-                        .collect::<Vec<i64>>())
-                    .into_iter()
-                    .map(library::TrackKey::from_raw)
-                    .collect::<Vec<_>>()
-                    .into()
-                },
-                None,
-                &ReadCancellation::new()
-            )
-            .await
-            .unwrap(),
-        ordered
-    );
-    assert_eq!(restored.current_index, Some(1));
-    assert_eq!(restored.progress_millis, 42);
 }
 
 #[tokio::test]

@@ -788,22 +788,6 @@ impl Database {
         Ok(())
     }
 
-    pub async fn import_artwork_previews(&self, path: &std::path::Path) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        crate::migration::current::attach(connection, path, "old_artwork_previews").await?;
-        let result = async {
-            let mut transaction = connection.begin().await?;
-            sqlx::query("INSERT OR IGNORE INTO main.artwork_previews SELECT family,hash FROM old_artwork_previews.previews").execute(&mut *transaction).await?;
-            transaction.commit().await
-        }.await;
-        sqlx::query("DETACH DATABASE old_artwork_previews")
-            .execute(&mut *connection)
-            .await?;
-        result?;
-        Ok(())
-    }
-
     pub async fn artwork_preview(&self, family: &str) -> LibraryResult<Option<String>> {
         let mut connection = self.acquire_reader().await?;
         Ok(

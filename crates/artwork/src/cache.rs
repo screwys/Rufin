@@ -170,10 +170,6 @@ impl FilesystemCache {
         })
     }
 
-    pub(crate) fn preview_index_path(&self) -> PathBuf {
-        self.root.join("previews.sqlite3")
-    }
-
     pub(crate) fn file(&self, key: &str) -> io::Result<Option<PathBuf>> {
         let path = self.path_for_key(key)?;
         match fs::metadata(&path) {
