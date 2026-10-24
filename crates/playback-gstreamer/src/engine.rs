@@ -4523,6 +4523,8 @@ mod tests {
                 start_position_millis: 0,
                 playback_rate: 1.0,
             });
+            // A slow worker: short sources finish reading and queue their next item first.
+            std::thread::sleep(Duration::from_millis(500));
             let mut rendered = Rendered::default();
             let mut end = None::<gst::ClockTime>;
             let deadline = Instant::now() + Duration::from_secs(10);

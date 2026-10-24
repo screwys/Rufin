@@ -797,131 +797,127 @@ impl PlayerPipeline {
         let session = Arc::clone(&self.session);
         // The session whose first stream already passed. Its later streams are queued items.
         let started_session = AtomicU64::new(0);
-        pad.add_probe(
-            gst::PadProbeType::EVENT_DOWNSTREAM
-                | gst::PadProbeType::BUFFER
-                | gst::PadProbeType::BUFFER_LIST,
-            move |pad, info| {
-                if !matches!(info.data, Some(gst::PadProbeData::Event(_))) {
-                    // Decoded audio never plays while its session restarts undecoded.
-                    return if lock_recover(&request).is_some() {
-                        gst::PadProbeReturn::Drop
-                    } else {
-                        gst::PadProbeReturn::Ok
-                    };
+        pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |pad, info| {
+            let Some(event) = info.event_mut() else {
+                return gst::PadProbeReturn::Ok;
+            };
+            let started = match event.view() {
+                // The parsed format, also on decoded streams. Rufin's own CUE
+                // boundaries carry no stream, so they never change the mode.
+                gst::EventView::StreamStart(start) => {
+                    Some(start.stream().and_then(|stream| stream.caps()))
                 }
-                let Some(event) = info.event_mut() else {
-                    return gst::PadProbeReturn::Ok;
+                _ => None,
+            };
+            if let Some(format) = started {
+                // A short source can queue its next item before its own stream starts.
+                let queued = format.is_none() || {
+                    let id = session.load(Ordering::Acquire);
+                    started_session.swap(id, Ordering::AcqRel) == id
                 };
-                let started = match event.view() {
-                    // The parsed format, also on decoded streams. Rufin's own CUE
-                    // boundaries carry no stream, so they never change the mode.
-                    gst::EventView::StreamStart(start) => {
-                        Some(start.stream().and_then(|stream| stream.caps()))
-                    }
-                    _ => None,
-                };
-                if let Some(format) = started {
-                    // A short source can queue its next item before its own stream starts.
-                    let queued = format.is_none() || {
-                        let id = session.load(Ordering::Acquire);
-                        started_session.swap(id, Ordering::AcqRel) == id
+                let (removed, allowed, active) = {
+                    let shared = lock_recover(&shared);
+                    let gapless = lock_recover(&gapless);
+                    let loudness = match (&gapless.pending, queued) {
+                        (Some(pending), true) => pending.stream.loudness.clone(),
+                        _ => shared
+                            .current
+                            .as_ref()
+                            .and_then(|current| current.stream.loudness.clone()),
                     };
-                    let (removed, allowed, active) = {
-                        let shared = lock_recover(&shared);
-                        let gapless = lock_recover(&gapless);
-                        let loudness = match (&gapless.pending, queued) {
-                            (Some(pending), true) => pending.stream.loudness.clone(),
-                            _ => shared
-                                .current
+                    (
+                        queued
+                            && gapless
+                                .pending
                                 .as_ref()
-                                .and_then(|current| current.stream.loudness.clone()),
-                        };
-                        (
-                            queued
-                                && gapless
-                                    .pending
-                                    .as_ref()
-                                    .is_some_and(|pending| shared.next.as_ref() != Some(pending)),
-                            format.as_ref().is_some_and(|format| {
-                                passthrough_allowed(
-                                    format,
-                                    &shared.settings,
-                                    shared.playback_rate,
-                                    shared.processing.as_ref(),
-                                    loudness.as_ref(),
-                                )
-                            }),
-                            shared.active == slot,
-                        )
-                    };
-                    let switch = format.as_ref().is_some_and(|format| {
-                        let undecoded = allowed
-                            && output
-                                .upgrade()
-                                .and_then(|output| output.static_pad("sink"))
-                                .is_some_and(|output| output.query_accept_caps(format));
-                        match &passthrough {
-                            Some(current) => {
-                                !undecoded
-                                    || current.structure(0).map(|current| current.name())
-                                        != format.structure(0).map(|format| format.name())
-                            }
-                            None => undecoded,
+                                .is_some_and(|pending| shared.next.as_ref() != Some(pending)),
+                        format.as_ref().is_some_and(|format| {
+                            passthrough_allowed(
+                                format,
+                                &shared.settings,
+                                shared.playback_rate,
+                                shared.processing.as_ref(),
+                                loudness.as_ref(),
+                            )
+                        }),
+                        shared.active == slot,
+                    )
+                };
+                let switch = format.as_ref().is_some_and(|format| {
+                    let undecoded = allowed
+                        && output
+                            .upgrade()
+                            .and_then(|output| output.static_pad("sink"))
+                            .is_some_and(|output| output.query_accept_caps(format));
+                    match &passthrough {
+                        Some(current) => {
+                            !undecoded
+                                || current.structure(0).map(|current| current.name())
+                                    != format.structure(0).map(|format| format.name())
+                        }
+                        None => undecoded,
+                    }
+                });
+                if removed || queued && switch {
+                    // Let the current song finish, then end output before a removed
+                    // preload, or one for the other output mode, can reach the sink.
+                    *event = gst::event::Eos::new();
+                } else if switch && passthrough.is_none() && active {
+                    *lock_recover(&request) = format;
+                    // Until the restart stops this session, nothing after this stream
+                    // start plays decoded or lets a queued item begin.
+                    let held = Arc::clone(&request);
+                    pad.add_probe(gst::PadProbeType::BLOCK_DOWNSTREAM, move |_, _| {
+                        if lock_recover(&held).is_some() {
+                            gst::PadProbeReturn::Ok
+                        } else {
+                            gst::PadProbeReturn::Remove
                         }
                     });
-                    if removed || queued && switch {
-                        // Let the current song finish, then end output before a removed
-                        // preload, or one for the other output mode, can reach the sink.
-                        *event = gst::event::Eos::new();
-                    } else if switch && passthrough.is_none() && active {
-                        *lock_recover(&request) = format;
-                        let _ = inputs.send(WorkerInput::Wake);
+                    let _ = inputs.send(WorkerInput::Wake);
+                }
+            }
+            if matches!(event.view(), gst::EventView::Segment(_)) {
+                let (starts_stream, time_reopened) = {
+                    let mut segment = segment.lock().unwrap_or_else(|p| p.into_inner());
+                    (
+                        segment.seek == Some(event.seqnum())
+                            && std::mem::take(&mut segment.starts_stream),
+                        segment.time_reopened,
+                    )
+                };
+                if time_reopened
+                    && let gst::EventView::Segment(current) = event.view()
+                    && let Some(current) = current.segment().downcast_ref::<gst::ClockTime>()
+                {
+                    let mut current = current.clone();
+                    current.set_rate(lock_recover(&shared).playback_rate);
+                    *event = gst::event::Segment::builder(&current)
+                        .seqnum(event.seqnum())
+                        .build();
+                }
+                if starts_stream {
+                    // A non-flushing segment seek keeps the decoder and sink. Mark
+                    // the logical track boundary for gain, tags, and playback events.
+                    let mut tags = Vec::new();
+                    while let Some(tag) = pad.sticky_event::<gst::event::Tag>(tags.len() as u32) {
+                        tags.push(tag);
+                    }
+                    pad.send_event(
+                        gst::event::StreamStart::builder(&format!(
+                            "rufin-segment-{:?}",
+                            event.seqnum()
+                        ))
+                        .group_id(gst::GroupId::next())
+                        .build(),
+                    );
+                    for tag in tags {
+                        pad.send_event(tag);
                     }
                 }
-                if matches!(event.view(), gst::EventView::Segment(_)) {
-                    let (starts_stream, time_reopened) = {
-                        let mut segment = segment.lock().unwrap_or_else(|p| p.into_inner());
-                        (
-                            segment.seek == Some(event.seqnum())
-                                && std::mem::take(&mut segment.starts_stream),
-                            segment.time_reopened,
-                        )
-                    };
-                    if time_reopened
-                        && let gst::EventView::Segment(current) = event.view()
-                        && let Some(current) = current.segment().downcast_ref::<gst::ClockTime>()
-                    {
-                        let mut current = current.clone();
-                        current.set_rate(lock_recover(&shared).playback_rate);
-                        *event = gst::event::Segment::builder(&current)
-                            .seqnum(event.seqnum())
-                            .build();
-                    }
-                    if starts_stream {
-                        // A non-flushing segment seek keeps the decoder and sink. Mark
-                        // the logical track boundary for gain, tags, and playback events.
-                        let mut tags = Vec::new();
-                        while let Some(tag) = pad.sticky_event::<gst::event::Tag>(tags.len() as u32)
-                        {
-                            tags.push(tag);
-                        }
-                        pad.send_event(
-                            gst::event::StreamStart::builder(&format!(
-                                "rufin-segment-{:?}",
-                                event.seqnum()
-                            ))
-                            .group_id(gst::GroupId::next())
-                            .build(),
-                        );
-                        for tag in tags {
-                            pad.send_event(tag);
-                        }
-                    }
-                }
-                gst::PadProbeReturn::Ok
-            },
-        );
+            }
+            gst::PadProbeReturn::Ok
+        });
     }
 
     pub(super) fn try_reconfigure_audio(
