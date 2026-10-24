@@ -157,18 +157,18 @@ function renderSources(configured) {
 }
 
 let previousOperation = "";
-let downloadProgressDismissed = false;
-
 function showSourceProgress(value) {
-  if (value.state !== "downloading") downloadProgressDismissed = false;
-  const active = ["adding", "switching", "refreshing", "downloading"].includes(value.state);
-  $("source-progress").hidden = !active || downloadProgressDismissed;
-  const dismiss = $("source-download-dismiss");
-  dismiss.hidden = value.state !== "downloading";
-  dismiss.onclick = () => {
-    downloadProgressDismissed = true;
-    $("source-progress").hidden = true;
-  };
+  const active = ["adding", "switching", "refreshing"].includes(value.state);
+  $("source-progress").hidden = !active;
+  for (const output of document.querySelectorAll("[data-cache-progress]")) {
+    const stage = output.dataset.cacheProgress;
+    output.hidden = value.state !== "downloading" || value.progress.stage !== stage;
+    if (!output.hidden)
+      output.textContent = tr("{stage}: {completed}", {
+        stage: stage === "artwork" ? tr("Downloading artwork") : tr("Downloading lyrics"),
+        completed: value.progress.completed,
+      });
+  }
   if (active) {
     const progress = value.progress;
     const stage = {
@@ -179,8 +179,8 @@ function showSourceProgress(value) {
       genres: tr("Fetching genres"),
       playlists: tr("Fetching playlists"),
       home: tr("Fetching Home"),
-      artwork: value.state === "downloading" ? tr("Downloading artwork") : tr("Fetching artwork"),
-      lyrics: value.state === "downloading" ? tr("Downloading lyrics") : tr("Fetching lyrics"),
+      artwork: tr("Fetching artwork"),
+      lyrics: tr("Fetching lyrics"),
       finalizing: tr("Preparing library..."),
     }[progress.stage];
     $("source-progress-label").textContent = ["connecting", "finalizing"].includes(progress.stage)

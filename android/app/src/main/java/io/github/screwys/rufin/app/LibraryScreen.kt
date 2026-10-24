@@ -162,8 +162,6 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     }
     val player = rememberPlayerConnection(model)
     FeedbackToast(model, player)
-    val downloadingAssets = model.sourceOperation is SourceOperation.Downloading
-    var assetProgressDismissed by remember(downloadingAssets) { mutableStateOf(false) }
     val connectState = model.connect.state
     if (model.connect.operationActive && connectState != null && connectState.pairing == null && (connectState.connecting || model.connect.visibleError != null)) {
         BackHandler { model.connect.dismissOperation() }
@@ -424,7 +422,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                         }
                     }
                 }
-                model.sourceStatus?.takeUnless { downloadingAssets && assetProgressDismissed }?.let {
+                model.sourceStatus?.takeUnless { model.sourceOperation is SourceOperation.Downloading }?.let {
                     val progress = model.sourceProgress
                     val total = progress?.total
                     if (progress != null && total != null && total > 0UL) {
@@ -434,9 +432,6 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     } else LinearProgressIndicator(Modifier.fillMaxWidth())
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(it, Modifier.weight(1f).padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
-                        if (downloadingAssets) TextButton({ assetProgressDismissed = true }) {
-                            Text(label("Cancel"))
-                        }
                     }
                 }
                 val refreshState = rememberPullToRefreshState()

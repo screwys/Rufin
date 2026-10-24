@@ -87,7 +87,6 @@ pub async fn build(
         source_refresh_feedback: gtk::Box,
         source_refresh_feedback_label: gtk::Label,
         source_refresh_feedback_progress: gtk::ProgressBar,
-        source_refresh_feedback_close: gtk::Button,
         operation_feedback: gtk::Box,
         operation_feedback_artwork: gtk::Box,
         operation_feedback_title: gtk::Label,
@@ -174,7 +173,6 @@ pub async fn build(
         discovery_provider: Cell::new(rufin_core::runtime::source::DiscoveryProvider::Jellyfin),
         add_server: RefCell::new(None),
         refresh_feedback_generation: Rc::new(Cell::new(0)),
-        refresh_feedback_dismissed: Cell::new(false),
     });
     let startup = StartupState {
         route_revealed: Cell::new(!defer_initial_route),
@@ -549,13 +547,6 @@ pub async fn build(
         }
     });
     app.connect_shutdown(move |_| open_task.abort());
-    let weak = Rc::downgrade(&shell);
-    source_refresh_feedback_close.connect_clicked(move |_| {
-        if let Some(shell) = weak.upgrade() {
-            shell.source.refresh_feedback_dismissed.set(true);
-            shell.chrome.source_refresh_feedback.set_visible(false);
-        }
-    });
     shell.chrome.topbar.bind(&shell);
     install_application_quit(&shell);
     install_desktop_lifecycle(&shell);

@@ -16,6 +16,8 @@ import io.github.screwys.rufin.core.translate
 import io.github.screwys.rufin.shared.rufin_core.CacheKind
 import io.github.screwys.rufin.shared.rufin_core.StorageSummary
 import io.github.screwys.rufin.shared.rufin_core.StorageReset
+import io.github.screwys.rufin.shared.rufin_core.SourceOperation
+import io.github.screwys.rufin.shared.rufin_core.SourceProgressStage
 import io.github.screwys.rufin.ui.RufinIcon
 import io.github.screwys.rufin.ui.userMessage
 import kotlinx.coroutines.CancellationException
@@ -47,6 +49,14 @@ internal fun StorageSettingsPage(model: RufinConnection, preferences: Preference
         finally { busy = false }
     }
     LaunchedEffect(model.service, model.ready) { if (model.ready) refresh() }
+    // The downloader reports its own count; the summary is measured again only once it ends.
+    val download = model.sourceOperation as? SourceOperation.Downloading
+    val downloadKind = when (download?.progress?.stage) {
+        SourceProgressStage.ARTWORK -> CacheKind.ARTWORK
+        SourceProgressStage.LYRICS -> CacheKind.LYRICS
+        else -> null
+    }
+    LaunchedEffect(download != null) { if (download == null && summary != null) refresh() }
     SettingsPage {
         Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.large) {
             Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically,
@@ -78,7 +88,8 @@ internal fun StorageSettingsPage(model: RufinConnection, preferences: Preference
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(translate(kind.title()), Modifier.alignByBaseline())
                         if (kind != CacheKind.JAPANESE_DICTIONARY) {
-                            Text(usage?.let { cacheEntryCountText(it.entries) } ?: if (busy) "..." else translate("Unavailable"),
+                            Text(model.sourceStatus?.takeIf { kind == downloadKind }
+                                ?: usage?.let { cacheEntryCountText(it.entries) } ?: if (busy) "..." else translate("Unavailable"),
                                 modifier = Modifier.alignByBaseline(), style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }

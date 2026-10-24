@@ -13,10 +13,10 @@ use crate::shell::playlist_picker::refresh_context_playlist_picker;
 use gtk_player::fullscreen::{FullscreenPlaybackRefresh, fullscreen_playback_refresh};
 use gtk_player::state::{NowPlayingPresentation, current_playback_media_id};
 use gtk_widgets::route::Route;
+use rufin_core::runtime::source::source_progress_text;
 use rufin_core::runtime::source::{
     DiscoveryStatus, DiscoveryUpdate, SourceOperation, SourceProgress,
 };
-use rufin_core::runtime::source::{source_download_text, source_progress_text};
 use rufin_core::runtime::{
     CatalogChange, CatalogPublication, ProductReceivers, SourceEvent, SourceNotice,
     SourceNoticeKind, WaveformProjection,
@@ -428,28 +428,15 @@ fn apply_source_refresh_feedback(
     previous: &SourceOperation,
     operation: &SourceOperation,
 ) {
-    let downloading = matches!(operation, SourceOperation::Downloading { .. });
+    let refreshing = matches!(previous, SourceOperation::Refreshing { .. });
     match operation {
         SourceOperation::Refreshing {
             source_id,
             progress,
-        }
-        | SourceOperation::Downloading {
-            source_id,
-            progress,
         } => {
-            if !matches!(
-                previous,
-                SourceOperation::Refreshing { .. } | SourceOperation::Downloading { .. }
-            ) {
-                shell.source.refresh_feedback_dismissed.set(false);
-            }
             let continues = matches!(
                 previous,
                 SourceOperation::Refreshing {
-                    source_id: previous_source_id,
-                    progress: previous_progress,
-                } | SourceOperation::Downloading {
                     source_id: previous_source_id,
                     progress: previous_progress,
                 } if previous_source_id == source_id && previous_progress.stage == progress.stage
@@ -467,11 +454,7 @@ fn apply_source_refresh_feedback(
             shell
                 .chrome
                 .source_refresh_feedback_label
-                .set_text(&if downloading {
-                    source_download_text(progress)
-                } else {
-                    source_progress_text(progress)
-                });
+                .set_text(&source_progress_text(progress));
             let next_fraction = source_progress_fraction(progress);
             let fraction = if continues {
                 shell
@@ -490,28 +473,16 @@ fn apply_source_refresh_feedback(
                 .chrome
                 .source_refresh_feedback_progress
                 .set_visible(progress.total.is_some_and(|total| total > 0));
-            shell
-                .chrome
-                .source_refresh_feedback
-                .set_visible(!shell.source.refresh_feedback_dismissed.get());
+            shell.chrome.source_refresh_feedback.set_visible(true);
         }
-        SourceOperation::Idle
-            if matches!(
-                previous,
-                SourceOperation::Refreshing { .. } | SourceOperation::Downloading { .. }
-            ) =>
-        {
+        SourceOperation::Idle | SourceOperation::Downloading { .. } if refreshing => {
             finish_source_refresh_feedback(shell, None, Duration::from_millis(1_200));
         }
         SourceOperation::Failed {
             message,
             add_form: false,
             ..
-        } if matches!(
-            previous,
-            SourceOperation::Refreshing { .. } | SourceOperation::Downloading { .. }
-        ) =>
-        {
+        } if refreshing => {
             finish_source_refresh_feedback(shell, Some(message), Duration::from_secs(5));
         }
         SourceOperation::Failed {
@@ -521,12 +492,7 @@ fn apply_source_refresh_feedback(
         } => {
             shell.control_feedback.show_feedback_toast(message.clone());
         }
-        SourceOperation::Adding { .. } | SourceOperation::Switching { .. }
-            if matches!(
-                previous,
-                SourceOperation::Refreshing { .. } | SourceOperation::Downloading { .. }
-            ) =>
-        {
+        SourceOperation::Adding { .. } | SourceOperation::Switching { .. } if refreshing => {
             shell.source.refresh_feedback_generation.set(
                 shell
                     .source
@@ -541,9 +507,6 @@ fn apply_source_refresh_feedback(
 }
 
 fn finish_source_refresh_feedback(shell: &Shell, error: Option<&str>, delay: Duration) {
-    if shell.source.refresh_feedback_dismissed.get() {
-        return;
-    }
     let generation = shell
         .source
         .refresh_feedback_generation

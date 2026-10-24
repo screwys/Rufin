@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use adw::prelude::*;
+use rufin_core::runtime::source::{SourceOperation, SourceProgressStage, source_download_text};
 use rufin_core::runtime::{CacheKind, CacheUsage, ProductHandles, StorageSummary};
 
 use crate::Preferences;
@@ -191,6 +192,21 @@ pub(super) fn page(
             });
         });
     }
+    let mut operation = shell.products.source.operation();
+    let downloads = Rc::downgrade(&view);
+    gtk::glib::spawn_future_local(async move {
+        let mut downloading = false;
+        loop {
+            let Some(view) = downloads.upgrade() else {
+                break;
+            };
+            downloading = view.show_download(&operation.borrow_and_update(), downloading);
+            drop(view);
+            if operation.changed().await.is_err() {
+                break;
+            }
+        }
+    });
     storage_page.connect_map(move |_| view.load(None));
     navigation.upcast()
 }
@@ -269,6 +285,30 @@ impl StorageView {
                 label.set_visible(!summary.errors.is_empty());
             }
         });
+    }
+
+    /// Shows the downloader's own count; the summary is measured again only once it ends.
+    fn show_download(self: &Rc<Self>, operation: &SourceOperation, downloading: bool) -> bool {
+        let SourceOperation::Downloading { progress, .. } = operation else {
+            if downloading && self.page.upgrade().is_some_and(|page| page.is_mapped()) {
+                self.load(None);
+            }
+            return false;
+        };
+        let kind = match progress.stage {
+            SourceProgressStage::Artwork => CacheKind::Artwork,
+            SourceProgressStage::Lyrics => CacheKind::Lyrics,
+            _ => return true,
+        };
+        if let Some(count) = self
+            .rows
+            .iter()
+            .find(|row| row.kind == kind)
+            .and_then(|row| row.count.upgrade())
+        {
+            count.set_label(&source_download_text(progress));
+        }
+        true
     }
 
     fn set_busy(&self, busy: bool) {

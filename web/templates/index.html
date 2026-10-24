@@ -181,7 +181,6 @@
         </form>
         <div id="source-progress" role="status" hidden>
           <span id="source-progress-label"></span>
-          <button type="button" id="source-download-dismiss" hidden>{{ localization::tr("Cancel") }}</button>
         </div>
         <div id="content" data-rendered="{{ page.connected && page.error.is_empty() }}" data-source="{{ page.source }}" data-folder="{{ page.folder() }}" tabindex="-1" aria-busy="false" hx-sync="this:replace">
           {% if !page.error.is_empty() %}<p class="empty-note" role="alert">{{ page.error }}</p>{% endif %}
@@ -468,8 +467,8 @@
       <fieldset class="source-actions">
         <legend>{{ localization::tr("Cache") }}</legend>
         <div class="download-quality-controls">
-          <label>{{ localization::tr("Artwork") }}<select data-cache="artwork" disabled><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select></label>
-          <label>{{ localization::tr("Lyrics") }}<select data-cache="lyrics" disabled><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select></label>
+          <label>{{ localization::tr("Artwork") }}<select data-cache="artwork" disabled><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select><output data-cache-progress="artwork" hidden></output></label>
+          <label>{{ localization::tr("Lyrics") }}<select data-cache="lyrics" disabled><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select><output data-cache-progress="lyrics" hidden></output></label>
         </div>
       </fieldset>
     </template>
