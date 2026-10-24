@@ -293,6 +293,11 @@ msgstr "Barva zvýraznění"
 
 #, fuzzy
 #| msgid "Get token"
+msgid "Access denied"
+msgstr "Získat token"
+
+#, fuzzy
+#| msgid "Get token"
 msgid "Access token"
 msgstr "Získat token"
 
@@ -587,6 +592,11 @@ msgstr "Ztlumení zvuku při přehrávání/pozastavení"
 
 msgid "Audio fingerprints"
 msgstr ""
+
+#, fuzzy
+#| msgid "Audio output"
+msgid "Audio output failed"
+msgstr "Zvukový výstup"
 
 msgid "Audio output"
 msgstr "Zvukový výstup"
@@ -1292,8 +1302,18 @@ msgstr "Nelze aktualizovat oblíbené"
 msgid "Could not update favorites"
 msgstr "Nelze aktualizovat oblíbené"
 
+#, fuzzy
+#| msgid "Couldn't connect to {service}"
+msgid "Couldn't connect to the server"
+msgstr "Nelze se připojit k {service}"
+
 msgid "Couldn't connect to {service}"
 msgstr "Nelze se připojit k {service}"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "Couldn't decode this track"
+msgstr "Nelze načíst tuto složku"
 
 msgid "Couldn't load this folder"
 msgstr "Nelze načíst tuto složku"
@@ -2039,6 +2059,9 @@ msgid "Forget Source"
 msgstr "Zapomenout server"
 
 msgid "Forget \"{name}\"?"
+msgstr ""
+
+msgid "Format not supported"
 msgstr ""
 
 msgid "Format"
@@ -4534,6 +4557,11 @@ msgstr "Počet přeskočení"
 msgid "Skip same-album crossfade"
 msgstr "Přeskočení prolínání mezi skladbami na stejném albu"
 
+#, fuzzy
+#| msgid "Only unplayed tracks"
+msgid "Skip unplayable tracks"
+msgstr "Pouze nepřehrané skladby"
+
 msgid "Slate"
 msgstr "Šedá"
 
@@ -4859,6 +4887,11 @@ msgstr "Rádio skladeb"
 
 msgid "Track radio"
 msgstr "Rádio skladeb"
+
+#, fuzzy
+#| msgid "This isn't available"
+msgid "Track unavailable"
+msgstr "Toto není dostupné"
 
 msgid "Track"
 msgstr "Skladba"
