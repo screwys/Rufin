@@ -65,6 +65,11 @@ msgstr ""
 "Seadmed mis kasutavad Rufin Connecti liidestust pole enam ühilduvad. Palun "
 "uuenda seda Rufini paigaldust."
 
+msgid ""
+"Do you want to cache all lyrics automatically? You can also enable this from "
+"Preferences -> Storage"
+msgstr ""
+
 #, fuzzy
 #| msgid ""
 #| "Downloads from this server will be removed, and automatic rules will be "
@@ -728,6 +733,16 @@ msgstr ""
 msgid "Browse"
 msgstr "Sirvi"
 
+#, fuzzy
+#| msgid "Lyrics"
+msgid "By Lyrics"
+msgstr "Laulusõnad"
+
+#, fuzzy
+#| msgid "Title"
+msgid "By Title"
+msgstr "Pealkiri"
+
 msgid "C"
 msgstr ""
 
@@ -735,6 +750,11 @@ msgstr ""
 #| msgid "New file"
 msgid "CUE file"
 msgstr "Uus fail"
+
+#, fuzzy
+#| msgid "Cached"
+msgid "Cache"
+msgstr "Puhverdatud"
 
 #, fuzzy
 #| msgid "Cached"
@@ -922,6 +942,11 @@ msgstr "Kustuta laulusõnade vahemälu"
 
 msgid "Clear queue"
 msgstr "Tühjenda esitusjärjekord"
+
+#, fuzzy
+#| msgid "Clear lyrics cache"
+msgid "Clear this cache?"
+msgstr "Kustuta laulusõnade vahemälu"
 
 msgid "Clear title"
 msgstr "Eemalda pealkiri"
@@ -1412,17 +1437,21 @@ msgstr "Toeta meid rahaliselt"
 msgid "Done"
 msgstr ""
 
+#, fuzzy
+#| msgid "Open automatically"
+msgid "Download Automatically"
+msgstr "Ava automaatselt"
+
 msgid "Download Folder"
 msgstr "Allalaadimiste kaust"
 
+#, fuzzy
+#| msgid "Download quality"
+msgid "Download Lazily"
+msgstr "Allalaadimiste kvaliteet"
+
 msgid "Download Queue"
 msgstr "Allalaadimise järjekord"
-
-msgid "Download artwork"
-msgstr "Laadi kaanepilt alla"
-
-msgid "Download lyrics"
-msgstr "Laadi laulusõnad alla"
 
 msgid "Download quality"
 msgstr "Allalaadimiste kvaliteet"
@@ -1550,6 +1579,11 @@ msgstr "Lülita automaatne varundus sisse"
 
 msgid "Enable background image"
 msgstr "Kasuta taustapilti"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Enable caching lyrics"
+msgstr "Otsi laulusõnu"
 
 msgid "Enable partial star ratings"
 msgstr "Luba kasutada osalisi reitingutärne"
@@ -4867,6 +4901,12 @@ msgstr "Rakenduse automaatse uuenduse seadistus on vigane: {app_name}."
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tere tulemast, see on Rufini paigaldusprogramm"
+
+#~ msgid "Download artwork"
+#~ msgstr "Laadi kaanepilt alla"
+
+#~ msgid "Download lyrics"
+#~ msgstr "Laadi laulusõnad alla"
 
 #~ msgid "Copy preset"
 #~ msgstr "Kopeeri eelseadistus"

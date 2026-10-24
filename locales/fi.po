@@ -50,6 +50,11 @@ msgid ""
 "Devices using Rufin Connect are no longer compatible. Please update Rufin."
 msgstr ""
 
+msgid ""
+"Do you want to cache all lyrics automatically? You can also enable this from "
+"Preferences -> Storage"
+msgstr ""
+
 #, fuzzy
 #| msgid ""
 #| "Downloads from this server will be removed, and automatic rules will be "
@@ -694,6 +699,14 @@ msgstr ""
 msgid "Browse"
 msgstr ""
 
+#, fuzzy
+#| msgid "Lyrics"
+msgid "By Lyrics"
+msgstr "Sanoitukset"
+
+msgid "By Title"
+msgstr ""
+
 msgid "C"
 msgstr ""
 
@@ -701,6 +714,11 @@ msgstr ""
 #| msgid "Change Profile"
 msgid "CUE file"
 msgstr "Vaihda profiilia"
+
+#, fuzzy
+#| msgid "Cached"
+msgid "Cache"
+msgstr "Välimuistissa"
 
 #, fuzzy
 #| msgid "Cached"
@@ -899,6 +917,11 @@ msgstr "Hae sanoituksia"
 
 msgid "Clear queue"
 msgstr "Tyhjennä jono"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Clear this cache?"
+msgstr "Hae sanoituksia"
 
 msgid "Clear title"
 msgstr ""
@@ -1465,21 +1488,21 @@ msgstr ""
 msgid "Done"
 msgstr ""
 
+#, fuzzy
+#| msgid "Save lyrics automatically"
+msgid "Download Automatically"
+msgstr "Tallenna sanoitukset automaattisesti"
+
 msgid "Download Folder"
 msgstr "Latauskansio"
 
+#, fuzzy
+#| msgid "Download quality"
+msgid "Download Lazily"
+msgstr "Latauslaatu"
+
 msgid "Download Queue"
 msgstr "Latausjono"
-
-#, fuzzy
-#| msgid "Show artwork"
-msgid "Download artwork"
-msgstr "Näytä kuvitus"
-
-#, fuzzy
-#| msgid "Downloads"
-msgid "Download lyrics"
-msgstr "Lataukset"
 
 msgid "Download quality"
 msgstr "Latauslaatu"
@@ -1617,6 +1640,11 @@ msgstr "Ota automaattiset varmuuskopiot käyttöön"
 
 msgid "Enable background image"
 msgstr "Käytä taustakuvaa"
+
+#, fuzzy
+#| msgid "Search lyrics"
+msgid "Enable caching lyrics"
+msgstr "Hae sanoituksia"
 
 msgid "Enable partial star ratings"
 msgstr ""
@@ -5172,6 +5200,16 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Tervetuloa Rufinin asennukseen"
+
+#, fuzzy
+#~| msgid "Show artwork"
+#~ msgid "Download artwork"
+#~ msgstr "Näytä kuvitus"
+
+#, fuzzy
+#~| msgid "Downloads"
+#~ msgid "Download lyrics"
+#~ msgstr "Lataukset"
 
 #~ msgid "Copy preset"
 #~ msgstr "Kopioi esiasetus"
