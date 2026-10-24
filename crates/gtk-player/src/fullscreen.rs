@@ -1152,7 +1152,7 @@ mod playback_refresh_tests {
         assert_eq!(presentation.album, "Album");
         assert_eq!(
             presentation.meta,
-            ["2026", "FLAC", "24 bit", "96 kHz", "Local"]
+            ["2026", "FLAC · 24 bit · 96 kHz", "Local"]
         );
         let mut streaming = current_change.clone();
         let current = streaming.transport.current.as_mut().unwrap();
@@ -1160,6 +1160,7 @@ mod playback_refresh_tests {
             local: false,
             format: Some("audio/mpeg".into()),
             transcoded: true,
+            bitstream: false,
         });
         assert_eq!(
             NowPlayingPresentation::new(Some(&streaming)).meta,
@@ -1170,7 +1171,7 @@ mod playback_refresh_tests {
                 streaming.transport.current.as_ref(),
                 Some("Living room")
             ),
-            ["2026", "MP3", "Living room", "Streaming"]
+            ["2026", "MP3", "Living room · Streaming"]
         );
         assert_eq!(
             fullscreen_playback_refresh(Some(&current_change), &streaming),
@@ -1181,6 +1182,7 @@ mod playback_refresh_tests {
             local: true,
             format: Some("audio/ogg; codecs=opus".into()),
             transcoded: false,
+            bitstream: false,
         });
         assert_eq!(
             NowPlayingPresentation::new(Some(&streaming)).meta,
@@ -1200,7 +1202,7 @@ mod playback_refresh_tests {
         current.stream.as_mut().unwrap().format = Some("audio/ogg".into());
         assert_eq!(
             NowPlayingPresentation::new(Some(&streaming)).meta,
-            ["2026", "OPUS", "48 kHz", "Local"]
+            ["2026", "OPUS · 48 kHz", "Local"]
         );
     }
 
@@ -1212,6 +1214,7 @@ mod playback_refresh_tests {
                 local: true,
                 format: Some("audio/flac".into()),
                 transcoded: false,
+                bitstream: false,
             }),
             id: CurrentMediaId {
                 run: Some(RunId::new(1)),

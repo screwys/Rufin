@@ -8,7 +8,7 @@ use gstreamer_controller::{self as controller, prelude::*};
 use playback::TrackLoudness;
 use playback::{
     AudioOutput, BackendAudioSettings, DEFAULT_PLAYBACK_RATE, LoudnessNormalization,
-    LoudnessNormalizationScope,
+    LoudnessNormalizationScope, ProcessingRequest,
 };
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -506,12 +506,6 @@ impl AudioGraph {
             self.output.static_pad("sink")
         }
     }
-
-    pub(super) fn output_factory(&self) -> Option<String> {
-        self.output
-            .factory()
-            .map(|factory| factory.name().to_string())
-    }
 }
 
 fn prepare_effects(
@@ -658,6 +652,28 @@ fn selected_loudness(
     }
 }
 
+/// A receiver can decode `format` itself. The stream bypasses every stage that changes
+/// samples, so it reaches the output only when those stages would leave decoded audio unchanged.
+pub(super) fn passthrough_allowed(
+    format: &gst::CapsRef,
+    settings: &BackendAudioSettings,
+    playback_rate: f64,
+    processing: Option<&ProcessingRequest>,
+    loudness: Option<&TrackLoudness>,
+) -> bool {
+    format.structure(0).is_some_and(|format| {
+        ["audio/x-ac3", "audio/x-eac3", "audio/x-dts"].contains(&format.name().as_str())
+    }) && settings.output_gain() >= 1.0
+        && !settings.muted
+        && (playback_rate - DEFAULT_PLAYBACK_RATE).abs() <= f64::EPSILON
+        && processing.is_none_or(|request| {
+            request.config.is_neutral() || request.local_device != settings.audio_output
+        })
+        && loudness
+            .and_then(|loudness| selected_loudness(settings, loudness))
+            .is_none_or(|(gain, peak)| clipping_safe_gain_db(gain, peak).abs() < 0.01)
+}
+
 fn clipping_safe_gain_db(gain_db: f64, peak: Option<f64>) -> f64 {
     let peak = peak
         .filter(|peak| peak.is_finite() && *peak > 0.0)
@@ -670,7 +686,7 @@ fn tempo_enabled(settings: &BackendAudioSettings, playback_rate: f64) -> bool {
 }
 
 #[cfg(test)]
-fn configure_test_output(output: &gst::Element) {
+pub(super) fn configure_test_output(output: &gst::Element) {
     if output
         .factory()
         .is_some_and(|factory| factory.name() == "fakesink")
@@ -683,12 +699,14 @@ fn configure_test_output(output: &gst::Element) {
     let Some(sink) = output.downcast_ref::<gst_app::AppSink>() else {
         return;
     };
-    let caps = gst::Caps::builder("audio/x-raw")
+    let mut caps = gst::Caps::builder("audio/x-raw")
         .field("format", "F32LE")
         .field("layout", "interleaved")
         .field("channels", 1_i32)
         .field("rate", 8_000_i32)
         .build();
+    // Like a receiver with passthrough enabled.
+    caps.merge(gst::Caps::builder("audio/x-eac3").build());
     sink.set_caps(Some(&caps));
     sink.set_max_buffers(8);
     sink.set_drop(false);
@@ -826,7 +844,7 @@ fn audio_output_selector_from_element(device: &gst::Device) -> Option<String> {
         .filter(|selector| !selector.trim().is_empty())
 }
 
-fn make_audio_output(selected: Option<&str>) -> Result<gst::Element, String> {
+pub(super) fn make_audio_output(selected: Option<&str>) -> Result<gst::Element, String> {
     match selected {
         None => make_element(default_audio_output_factory(), "rufin-audio-output"),
         Some(selected) => {
@@ -976,8 +994,10 @@ mod tests {
         let graph =
             test_graph(&settings, DEFAULT_PLAYBACK_RATE, empty_stream()).expect("audio graph");
         let sink = graph.output.clone().downcast::<gst_app::AppSink>().unwrap();
+        let mut caps = sink.caps().unwrap();
+        caps.truncate();
         let source = gst_app::AppSrc::builder()
-            .caps(&sink.caps().unwrap())
+            .caps(&caps)
             .format(gst::Format::Time)
             .build();
         let pipeline = gst::Pipeline::new();

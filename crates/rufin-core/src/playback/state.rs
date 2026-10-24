@@ -146,6 +146,7 @@ struct RunContext {
     resolved_stream: Option<PreparedStream>,
     backend_loaded: bool,
     seekable: bool,
+    bitstream: bool,
 }
 
 impl RunContext {
@@ -166,6 +167,7 @@ impl RunContext {
             resolved_stream: None,
             backend_loaded: false,
             seekable: true,
+            bitstream: false,
         }
     }
 
@@ -1176,6 +1178,16 @@ impl Player {
             BackendEvent::Position { run, millis } => self.accept_position(run, millis, sample),
             BackendEvent::Duration { run, millis } => self.accept_duration(run, millis),
             BackendEvent::Seekable { run, seekable } => self.accept_seekable(run, seekable),
+            BackendEvent::Bitstream { run, active } => {
+                if let Some(current) = self
+                    .current_run
+                    .as_mut()
+                    .filter(|current| current.id == run && current.bitstream != active)
+                {
+                    current.bitstream = active;
+                    self.dirty = true;
+                }
+            }
             BackendEvent::Buffering { run, percent } => self.accept_buffering(run, percent),
             BackendEvent::Ended { run } => self.accept_ended(run, sample),
             BackendEvent::Transitioned { old_run, new_run } => {
@@ -2765,15 +2777,16 @@ impl Player {
             queue_window: sequence.entries().iter().map(projected_row).collect(),
             transport: TransportView {
                 current: sequence.selected().map(|entry| CurrentMedia {
-                    stream: self
-                        .current_run
-                        .as_ref()
-                        .and_then(|run| run.resolved_stream.as_ref())
-                        .map(|stream| playback::CurrentStream {
-                            local: stream.local_input,
-                            format: stream.content_type.clone(),
-                            transcoded: stream.transcoded(),
-                        }),
+                    stream: self.current_run.as_ref().and_then(|run| {
+                        run.resolved_stream
+                            .as_ref()
+                            .map(|stream| playback::CurrentStream {
+                                local: stream.local_input,
+                                format: stream.content_type.clone(),
+                                transcoded: stream.transcoded(),
+                                bitstream: run.bitstream,
+                            })
+                    }),
                     id: CurrentMediaId {
                         run: self.current_run(),
                         media_uri: entry.track.media_uri.clone(),

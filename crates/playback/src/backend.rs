@@ -311,6 +311,11 @@ pub enum BackendEvent {
         old_run: RunId,
         new_run: RunId,
     },
+    /// The output takes this run's compressed audio undecoded, or decodes it again.
+    Bitstream {
+        run: RunId,
+        active: bool,
+    },
     NextNeeded {
         run: RunId,
     },
