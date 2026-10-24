@@ -739,6 +739,11 @@ msgstr "Résolution en bits"
 msgid "Bitrate"
 msgstr "Bitrate"
 
+#, fuzzy
+#| msgid "Playing from"
+msgid "Bitstream"
+msgstr "Jouer de"
+
 msgid "Blue"
 msgstr "Bleu"
 

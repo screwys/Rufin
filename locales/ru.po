@@ -742,6 +742,11 @@ msgstr "Битовая глубина"
 msgid "Bitrate"
 msgstr "Битрейт"
 
+#, fuzzy
+#| msgid "Playing from"
+msgid "Bitstream"
+msgstr "Воспроизведение с"
+
 msgid "Blue"
 msgstr "Синий"
 

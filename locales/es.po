@@ -738,6 +738,11 @@ msgstr "Profundidad de bits"
 msgid "Bitrate"
 msgstr "Tasa de bits"
 
+#, fuzzy
+#| msgid "Playing from"
+msgid "Bitstream"
+msgstr "Reproducir a partir de"
+
 msgid "Blue"
 msgstr "Azul"
 

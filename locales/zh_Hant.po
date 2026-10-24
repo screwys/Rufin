@@ -716,6 +716,11 @@ msgstr ""
 msgid "Bitrate"
 msgstr ""
 
+#, fuzzy
+#| msgid "Play random"
+msgid "Bitstream"
+msgstr "任意播放"
+
 msgid "Blue"
 msgstr "藍色"
 
