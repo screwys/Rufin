@@ -30,14 +30,18 @@ pub const BOTTOM_PLAYER_EDGE_PADDING: i32 = 8;
 pub const BOTTOM_PLAYER_HORIZONTAL_PADDING: i32 =
     BOTTOM_PLAYER_COVER_START_INSET - BOTTOM_PLAYER_EDGE_PADDING;
 pub const BOTTOM_PLAYER_NOW_PLAYING_SPACING: i32 = 8;
-pub const BOTTOM_PLAYER_TRANSPORT_WIDTH: i32 = 300;
+// Six side buttons and the play button, with the same gap between all of them.
+pub const BOTTOM_PLAYER_TRANSPORT_WIDTH: i32 = BOTTOM_PLAYER_SIDE_BUTTON_SIZE * 6
+    + BOTTOM_PLAYER_PLAY_BUTTON_SIZE
+    + BOTTOM_PLAYER_BUTTON_GAP * 6;
 pub const BOTTOM_PLAYER_PROGRESS_WIDTH: i32 = 320;
 pub const BOTTOM_PLAYER_PROGRESS_MIN_WIDTH: i32 = 140;
 pub const BOTTOM_PLAYER_BUTTON_ROW_HEIGHT: i32 = 58;
 pub const BOTTOM_PLAYER_SIDE_BUTTON_SIZE: i32 = 36;
 pub const BOTTOM_PLAYER_PLAY_BUTTON_SIZE: i32 = 44;
-pub const BOTTOM_PLAYER_BUTTON_OFFSET_Y: f64 = 5.0;
-pub const BOTTOM_PLAYER_BUTTON_STEP: f64 = 44.0;
+// Keeps the refill ring, 4px outside the play button, inside the button row.
+pub const BOTTOM_PLAYER_BUTTON_OFFSET_Y: f64 = 3.0;
+pub const BOTTOM_PLAYER_BUTTON_GAP: i32 = 8;
 pub const BOTTOM_PLAYER_WAVEFORM_HEIGHT: i32 = 24;
 pub const BOTTOM_PLAYER_ACTION_BUTTON_SIZE: i32 = 32;
 pub const BOTTOM_PLAYER_TITLE_MENU_BUTTON_SIZE: i32 = 18;
@@ -52,7 +56,9 @@ pub const BOTTOM_PLAYER_VOLUME_SPACING: i32 = BOTTOM_PLAYER_ACTION_SPACING;
 pub const BOTTOM_PLAYER_VOLUME_SLOT_WIDTH: i32 = 95;
 pub const BOTTOM_PLAYER_VOLUME_SLOT_LAYOUT_WIDTH: i32 = 90;
 pub const OUTPUT_DISCOVERY_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
-pub const BOTTOM_PLAYER_TINY_TRANSPORT_WIDTH: i32 = 126;
+pub const BOTTOM_PLAYER_TINY_TRANSPORT_WIDTH: i32 = BOTTOM_PLAYER_SIDE_BUTTON_SIZE * 2
+    + BOTTOM_PLAYER_PLAY_BUTTON_SIZE
+    + BOTTOM_PLAYER_BUTTON_GAP * 2;
 pub const BOTTOM_PLAYER_IDENTITY_MIN_WIDTH: i32 = 85;
 pub const BOTTOM_PLAYER_IDENTITY_COMPACT_MIN_WIDTH: i32 = BOTTOM_PLAYER_EDGE_PADDING * 2
     + BOTTOM_PLAYER_TRANSPORT_WIDTH
@@ -103,6 +109,7 @@ pub struct PlayerControls {
     pub previous_button: gtk::Button,
     pub play_button: gtk::Button,
     pub play_icon: gtk::Image,
+    pub play_ring: crate::refill_ring::RefillRing,
     pub next_button: gtk::Button,
     pub shuffle_button: gtk::Button,
     pub repeat_button: gtk::Button,
@@ -147,6 +154,7 @@ pub struct TransportControls {
     pub previous_button: gtk::Button,
     pub play_button: gtk::Button,
     pub play_icon: gtk::Image,
+    pub play_ring: crate::refill_ring::RefillRing,
     pub next_button: gtk::Button,
     pub shuffle_button: gtk::Button,
     pub repeat_button: gtk::Button,
@@ -460,6 +468,7 @@ pub fn build_bottom_player() -> PlayerControls {
         previous_button,
         play_button,
         play_icon,
+        play_ring,
         next_button,
         shuffle_button,
         repeat_button,
@@ -528,6 +537,7 @@ pub fn build_bottom_player() -> PlayerControls {
         previous_button,
         play_button,
         play_icon,
+        play_ring,
         next_button,
         shuffle_button,
         repeat_button,
@@ -652,6 +662,7 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
     let dj_button = auto_dj_icon_button("Auto DJ");
     let previous_button = skip_icon_button(false, "Previous");
     let (play_button, play_icon) = play_icon_button("Play");
+    let play_ring = crate::refill_ring::RefillRing::new(BOTTOM_PLAYER_PLAY_BUTTON_SIZE);
     let next_button = skip_icon_button(true, "Next");
     let shuffle_button = shuffle_icon_button("Shuffle");
     let repeat_button = repeat_icon_button("Repeat off");
@@ -685,6 +696,13 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
         BOTTOM_PLAYER_TRANSPORT_WIDTH,
         -1.0,
         BOTTOM_PLAYER_SIDE_BUTTON_SIZE,
+    );
+    put_transport_button(
+        &transport_buttons,
+        &play_ring,
+        BOTTOM_PLAYER_TRANSPORT_WIDTH,
+        0.0,
+        BOTTOM_PLAYER_PLAY_BUTTON_SIZE,
     );
     put_transport_button(
         &transport_buttons,
@@ -759,6 +777,7 @@ pub fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> Trans
         previous_button,
         play_button,
         play_icon,
+        play_ring,
         next_button,
         shuffle_button,
         repeat_button,
@@ -974,7 +993,7 @@ pub fn bottom_player_tiny(player_width: i32) -> bool {
 
 pub fn put_transport_button(
     buttons: &gtk::Fixed,
-    button: &gtk::Button,
+    button: &impl IsA<gtk::Widget>,
     width: i32,
     slot: f64,
     size: i32,
@@ -985,7 +1004,7 @@ pub fn put_transport_button(
 
 pub fn move_transport_button(
     buttons: &gtk::Fixed,
-    button: &gtk::Button,
+    button: &impl IsA<gtk::Widget>,
     width: i32,
     slot: f64,
     size: i32,
@@ -995,7 +1014,17 @@ pub fn move_transport_button(
 }
 
 pub fn transport_button_position(width: i32, slot: f64, size: i32) -> (f64, f64) {
-    let center_x = f64::from(width) / 2.0 + BOTTOM_PLAYER_BUTTON_STEP * slot;
+    // Edges, not centers, are spaced evenly, so the larger play button keeps the same gap.
+    let gap = f64::from(BOTTOM_PLAYER_BUTTON_GAP);
+    let offset = if slot == 0.0 {
+        0.0
+    } else {
+        slot.signum()
+            * (f64::from(BOTTOM_PLAYER_PLAY_BUTTON_SIZE + BOTTOM_PLAYER_SIDE_BUTTON_SIZE) / 2.0
+                + gap
+                + (slot.abs() - 1.0) * (f64::from(BOTTOM_PLAYER_SIDE_BUTTON_SIZE) + gap))
+    };
+    let center_x = f64::from(width) / 2.0 + offset;
     let radius = f64::from(size) / 2.0;
     let y = f64::from(BOTTOM_PLAYER_BUTTON_ROW_HEIGHT - size) / 2.0 + BOTTOM_PLAYER_BUTTON_OFFSET_Y;
     (center_x - radius, y)
@@ -1090,10 +1119,12 @@ impl crate::PlayerUi {
 
         set_play_icon(
             &controls.play_icon,
+            &controls.play_ring,
             matches!(
                 state,
                 TransportStatus::Resolving | TransportStatus::Playing | TransportStatus::Buffering
             ),
+            player.is_some_and(|player| player.transport.refilling()),
         );
         controls
             .play_button
@@ -1895,6 +1926,13 @@ impl crate::PlayerUi {
             transport_width,
             -1.0,
             BOTTOM_PLAYER_SIDE_BUTTON_SIZE,
+        );
+        move_transport_button(
+            &player.transport_buttons,
+            &player.play_ring,
+            transport_width,
+            0.0,
+            BOTTOM_PLAYER_PLAY_BUTTON_SIZE,
         );
         move_transport_button(
             &player.transport_buttons,

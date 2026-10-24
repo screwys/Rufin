@@ -548,8 +548,15 @@ impl PlaybackOwner {
                     .map_err(string_error)?
                 },
             )
-            .await
-            .map(|stream| prepare_media_stream(stream, loudness, occurrence));
+            .await;
+            let result = match result {
+                Ok(stream) if !local_stream_available(stream.uri()).await => {
+                    let kind = playback::FailureKind::UnavailableMedia;
+                    Err(playback::BackendFailure::with_kind(kind, kind.summary()))
+                }
+                Ok(stream) => Ok(prepare_media_stream(stream, loudness, occurrence)),
+                Err(error) => Err(playback::BackendFailure::new(error)),
+            };
             playback.post(move |player, sample| match result {
                 Ok(stream) => player.stream_resolved(run, stream),
                 Err(error) => player.stream_failed(run, error, sample),
@@ -1269,6 +1276,13 @@ where
     }
     let source = source(source_id).await?;
     source.stream(database, request).await.map_err(string_error)
+}
+
+// Catches a removed local file before it reaches playback, where a failed
+// gapless preload would cut the current song short.
+async fn local_stream_available(uri: &str) -> bool {
+    let local = url::Url::parse(uri).is_ok_and(|uri| matches!(uri.scheme(), "file" | "content"));
+    !local || local_access_available(uri).await.unwrap_or(true)
 }
 
 async fn local_access_available(uri: &str) -> Result<bool, String> {

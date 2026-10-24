@@ -901,6 +901,12 @@ fn playback_error_toast(error: &str) -> String {
         | "Resource not found."
         | "the configured source no longer exists"
         | "Could not play this track" => tr("Could not play this track"),
+        "Track unavailable" => tr("Track unavailable"),
+        "Format not supported" => tr("Format not supported"),
+        "Couldn't decode this track" => tr("Couldn't decode this track"),
+        "Access denied" => tr("Access denied"),
+        "Couldn't connect to the server" => tr("Couldn't connect to the server"),
+        "Audio output failed" => tr("Audio output failed"),
         _ => error.to_owned(),
     }
 }

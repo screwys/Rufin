@@ -55,6 +55,7 @@ function showPlayback(value) {
     playing ? tr("Pause") : tr("Play"),
   );
   setIcon($("play-pause").firstElementChild, playing ? "pause" : "play");
+  $("play-pause").lastElementChild.hidden = !value?.refilling;
   $("shuffle").setAttribute("aria-pressed", String(value?.shuffle || false));
   $("repeat").setAttribute(
     "aria-pressed",
@@ -142,7 +143,14 @@ function showPlayback(value) {
       "Could not play this track",
     ].includes(notice.error)
       ? tr("Could not play this track")
-      : notice.error;
+      : ({
+          "Track unavailable": tr("Track unavailable"),
+          "Format not supported": tr("Format not supported"),
+          "Couldn't decode this track": tr("Couldn't decode this track"),
+          "Access denied": tr("Access denied"),
+          "Couldn't connect to the server": tr("Couldn't connect to the server"),
+          "Audio output failed": tr("Audio output failed"),
+        })[notice.error] || notice.error;
     noticeError(message);
   }
   markCurrent();

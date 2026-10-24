@@ -56,23 +56,56 @@
   grid-area: 1 / 1;
 }
 
-.queue-loading {
+/* Follows AdwSpinner: a faint track and a round arc that extends and contracts while
+   the whole turns once per 1.2s. Like AdwSpinner, it keeps turning with reduced motion,
+   since a still spinner says nothing. */
+.loading {
+  display: inline-block;
   width: 16px;
   height: 16px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: queue-loading 800ms linear infinite;
 }
-@keyframes queue-loading {
+.loading svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  animation: loading-turn 1.2s linear infinite;
+}
+.loading circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5px;
+  r: 6.75px;
+}
+.loading circle:first-child {
+  opacity: 0.15;
+}
+.loading circle:last-child {
+  stroke-linecap: round;
+  animation: loading-arc 1.59s linear infinite;
+}
+@keyframes loading-turn {
   to {
-    transform: rotate(360deg);
+    transform: rotate(1turn);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .queue-loading {
-    animation: none;
-  }
+@keyframes loading-arc {
+  0%, 100% { stroke-dasharray: 0.75 100; stroke-dashoffset: -17.5; }
+  5% { stroke-dasharray: 2.32 100; stroke-dashoffset: -15.25; }
+  10% { stroke-dasharray: 6.79 100; stroke-dashoffset: -13; }
+  15% { stroke-dasharray: 13.54 100; stroke-dashoffset: -10.75; }
+  20% { stroke-dasharray: 20.61 100; stroke-dashoffset: -9.5; }
+  25% { stroke-dasharray: 25.86 100; stroke-dashoffset: -10.25; }
+  30% { stroke-dasharray: 28.42 100; stroke-dashoffset: -12.71; }
+  35% { stroke-dasharray: 27.69 100; stroke-dashoffset: -16.43; }
+  40% { stroke-dasharray: 23.5 100; stroke-dashoffset: -20.85; }
+  45% { stroke-dasharray: 16.9 100; stroke-dashoffset: -25.35; }
+  50% { stroke-dasharray: 10.72 100; stroke-dashoffset: -29.28; }
+  55% { stroke-dasharray: 5.68 100; stroke-dashoffset: -32.07; }
+  60% { stroke-dasharray: 2.27 100; stroke-dashoffset: -33.23; }
+  65% { stroke-dasharray: 0.8 100; stroke-dashoffset: -32.45; }
+  70% { stroke-dasharray: 0.75 100; stroke-dashoffset: -30.25; }
+  80% { stroke-dasharray: 0.75 100; stroke-dashoffset: -25.75; }
+  90% { stroke-dasharray: 0.75 100; stroke-dashoffset: -21.25; }
 }
 
 .queue-row {
@@ -302,13 +335,12 @@
   max-width: 650px;
 }
 
+/* One gap between button edges, so the larger play button does not crowd its neighbors. */
 .transport-buttons {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 38px;
+  display: flex;
+  gap: 4px;
   align-items: center;
   justify-content: center;
-  justify-items: center;
 }
 
 .transport-buttons .icon-button {
@@ -338,6 +370,8 @@
   padding: 0;
   display: grid;
   place-items: center;
+  position: relative;
+  overflow: visible;
   border-radius: 50%;
   background: color-mix(
     in srgb,
@@ -352,11 +386,18 @@
   height: 16px;
 }
 
-.play-button [data-icon="play"] {
-  margin-left: 3px;
+/* A thin ring just outside the button, on the background, clear of its neighbors. */
+.play-button .loading {
+  position: absolute;
+  inset: -4px;
+  width: auto;
+  height: auto;
+  color: var(--window-fg-color, var(--text));
 }
-.play-button [data-icon="pause"] {
-  margin-left: 2px;
+
+.play-button .loading circle {
+  stroke-width: 1.06px;
+  r: 7.47px;
 }
 
 .play-button:hover {
@@ -473,6 +514,7 @@ button.lyric-line:hover {
   }
   .transport-buttons .icon-button { width: 24px; }
   .transport-buttons .play-button { width: 40px; height: 40px; }
+  .transport-buttons .play-button .loading { inset: -3px; }
   .volume .icon-button { width: 24px; flex-shrink: 0; }
   .player .without-js { padding: 3px 4px; font-size: 12px; }
   html:not(.enhanced) .volume input { min-width: 18px; }

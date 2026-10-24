@@ -50,6 +50,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.style.TextOverflow
 import io.github.screwys.rufin.shared.library.QueueRepeatMode
 import io.github.screwys.rufin.shared.playback.TransportStatus
@@ -474,14 +475,25 @@ private fun PlayerTransport(player: PlayerConnection) {
 @Composable
 private fun PlayerPlayPause(player: PlayerConnection) {
     val playing by remember(player) { derivedStateOf { player.playback?.transport?.desiredPlaying == true } }
-    FilledIconButton(player::togglePlayback, Modifier.size(64.dp), shape = CircleShape,
-        colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.onBackground.copy(alpha = .92f),
-            contentColor = MaterialTheme.colorScheme.background)) {
-        Crossfade(playing, animationSpec = tween(if (LocalReduceMotion.current) 0 else 140), label = "fullPlayerTransport") { active ->
-            RufinIcon(if (active) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
-                translate(if (active) "Pause" else "Play"), Modifier.size(28.dp), glyph = true)
+    Box(contentAlignment = Alignment.Center) {
+        // A thin ring just outside the button, on the background; it does not move the layout.
+        if (player.refilling) RefillSpinner(72.dp, MaterialTheme.colorScheme.onBackground)
+        FilledIconButton(player::togglePlayback, Modifier.size(64.dp), shape = CircleShape,
+            colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.onBackground.copy(alpha = .92f),
+                contentColor = MaterialTheme.colorScheme.background)) {
+            Crossfade(playing, animationSpec = tween(if (LocalReduceMotion.current) 0 else 140), label = "fullPlayerTransport") { active ->
+                RufinIcon(if (active) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
+                    translate(if (active) "Pause" else "Play"), Modifier.size(28.dp), glyph = true)
+            }
         }
     }
+}
+
+// Matches the desktop refill ring: a thin faint track and a round arc.
+@Composable
+internal fun RefillSpinner(size: Dp, color: Color = LocalContentColor.current) {
+    CircularProgressIndicator(Modifier.requiredSize(size).semantics { contentDescription = translate("Loading...") },
+        color, 3.dp, color.copy(alpha = .15f), StrokeCap.Round)
 }
 
 private fun playerTime(millis: ULong): String {

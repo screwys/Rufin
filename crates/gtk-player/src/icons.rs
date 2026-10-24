@@ -82,12 +82,18 @@ pub fn play_icon_button(label: &str) -> (gtk::Button, gtk::Image) {
     (button, icon)
 }
 
-pub fn set_play_icon(icon: &gtk::Image, playing: bool) {
+pub fn set_play_icon(
+    icon: &gtk::Image,
+    ring: &crate::refill_ring::RefillRing,
+    playing: bool,
+    refilling: bool,
+) {
     icon.set_icon_name(Some(if playing {
         "rufin-media-playback-pause-symbolic"
     } else {
         "rufin-media-playback-start-symbolic"
     }));
+    ring.set_visible(refilling);
 }
 
 fn transport_image(name: &str) -> gtk::Image {

@@ -2428,3 +2428,149 @@ async fn removing_the_visible_window_continues_with_the_unbuffered_source() {
     );
     assert!(session.current_run().is_some());
 }
+
+fn skip_session_sample() -> ClockSample {
+    ClockSample {
+        monotonic_millis: 0,
+        unix_seconds: 0,
+        local_period: "1970-01".into(),
+    }
+}
+
+async fn skip_session(
+    settings: PlaybackSettings,
+) -> (Player, Arc<Mutex<Vec<BackendCommand>>>, impl Sized) {
+    let (directory, database, sequence, owner, commands, playback, inbox) = seeded(
+        (0..8)
+            .map(|track| batch_item(track, Provenance::Manual))
+            .collect(),
+    )
+    .await;
+    let mut session = Player::new(
+        sequence,
+        "skip-law",
+        settings,
+        PlaybackOutput::Local,
+        false,
+        3,
+        Box::new(IdleBackend(commands.clone())),
+        Arc::downgrade(&owner),
+        playback.downgrade(),
+    );
+    session.set_playing(true);
+    (
+        session,
+        commands,
+        (directory, database, owner, playback, inbox),
+    )
+}
+
+fn fail_current(session: &mut Player, kind: FailureKind) {
+    let run = session.current_run().unwrap();
+    session.handle_backend(
+        BackendEvent::Error {
+            run,
+            error: BackendFailure::with_kind(kind, kind.summary()),
+        },
+        &skip_session_sample(),
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unplayable_tracks_are_skipped_until_the_failure_cap() {
+    let (mut session, _commands, _guards) = skip_session(PlaybackSettings::default()).await;
+    let start = session.sequence.selected_index().unwrap();
+    for skipped in 1..=MAX_CONSECUTIVE_SKIPS {
+        fail_current(&mut session, FailureKind::Decode);
+        assert_eq!(session.sequence.selected_index(), Some(start + skipped));
+        assert!(session.current_run.as_ref().unwrap().desired_playing);
+        assert!(session.last_error.is_none());
+    }
+    fail_current(&mut session, FailureKind::UnavailableMedia);
+    assert_eq!(
+        session.sequence.selected_index(),
+        Some(start + MAX_CONSECUTIVE_SKIPS)
+    );
+    assert!(session.current_run().is_none());
+    assert!(session.last_error.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shared_failures_disabled_skipping_and_repeat_one_stop_playback() {
+    for (kind, skip, repeat) in [
+        (FailureKind::Output, true, RepeatMode::Off),
+        (FailureKind::DeniedAccess, true, RepeatMode::Off),
+        (FailureKind::Decode, false, RepeatMode::Off),
+        (FailureKind::Decode, true, RepeatMode::One),
+    ] {
+        let settings = PlaybackSettings {
+            skip_unplayable_tracks: skip,
+            ..PlaybackSettings::default()
+        };
+        let (mut session, _commands, _guards) = skip_session(settings).await;
+        session.sequence.set_repeat_mode(repeat);
+        let start = session.sequence.selected_index();
+        fail_current(&mut session, kind);
+        assert_eq!(session.sequence.selected_index(), start, "{kind:?}");
+        assert!(session.current_run().is_none(), "{kind:?}");
+        assert!(session.last_error.is_some(), "{kind:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_next_preparation_is_skipped_at_the_track_boundary() {
+    let (mut session, commands, _guards) = skip_session(PlaybackSettings::default()).await;
+    let start = session.sequence.selected_index().unwrap();
+    let current_run = session.current_run().unwrap();
+    let next_run = session.next_plan.as_ref().unwrap().next_run;
+    let kind = FailureKind::UnavailableMedia;
+    session.handle_backend(
+        BackendEvent::NextPreparationFailed {
+            current_run,
+            next_run,
+            error: BackendFailure::with_kind(kind, kind.summary()),
+        },
+        &skip_session_sample(),
+    );
+    assert!(commands.lock().unwrap().iter().any(|command| matches!(
+        command,
+        BackendCommand::PrepareNext { current_run: run, next: None } if *run == current_run
+    )));
+    session.handle_backend(
+        BackendEvent::Ended { run: current_run },
+        &skip_session_sample(),
+    );
+    assert_eq!(session.sequence.selected_index(), Some(start + 2));
+    let current = session.current_run.as_ref().unwrap();
+    assert_ne!(current.id, next_run);
+    assert!(current.desired_playing);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn seeks_before_the_backend_loads_a_run_become_its_start_position() {
+    let (mut session, commands, _guards) = skip_session(PlaybackSettings::default()).await;
+    let run = session.current_run().unwrap();
+    session.seek(42_000);
+    assert_eq!(session.sequence.progress_millis(), 42_000);
+    assert!(
+        !commands
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|command| matches!(command, BackendCommand::Seek { .. }))
+    );
+
+    session.stream_resolved(
+        run,
+        PreparedStream::from(audio_processing::ResolvedStream::new(
+            "https://example.test/track-0",
+        )),
+    );
+    assert!(commands.lock().unwrap().iter().any(|command| matches!(
+        command,
+        BackendCommand::Start {
+            start_position_millis: 42_000,
+            ..
+        }
+    )));
+}

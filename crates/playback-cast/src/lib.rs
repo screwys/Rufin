@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 use chromecast::GoogleCastController;
 use discovery::{DiscoveredTarget, discover_google_cast, discover_upnp};
 use playback::{
-    BackendCommand, BackendError, BackendEvent, BackendFailure, PlaybackBackend, ProcessingRequest,
-    RemoteOutput, RemoteOutputProtocol,
+    BackendCommand, BackendError, BackendEvent, BackendFailure, EventWaker, PlaybackBackend,
+    ProcessingRequest, RemoteOutput, RemoteOutputProtocol,
 };
 use relay::{
     ArtworkResolver, RelayServer, available_networks, network_address, network_binding_for,
@@ -187,9 +187,15 @@ impl CastManager {
     }
 }
 
+#[derive(Default)]
+struct Mailbox {
+    ready: Vec<BackendEvent>,
+    waker: Option<EventWaker>,
+}
+
 pub struct CastPlaybackBackend {
     commands: SyncSender<WorkerCommand>,
-    events: Arc<Mutex<Vec<BackendEvent>>>,
+    events: Arc<Mutex<Mailbox>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -234,7 +240,7 @@ impl CastPlaybackBackend {
             }
         };
         let (commands, receiver) = sync_channel(64);
-        let events = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Mailbox::default()));
         let worker_events = Arc::clone(&events);
         let thread = thread::Builder::new()
             .name("rufin-cast-output".to_string())
@@ -272,11 +278,26 @@ impl PlaybackBackend for CastPlaybackBackend {
 
     fn drain_events(&mut self) -> Vec<BackendEvent> {
         std::mem::take(
-            &mut *self
+            &mut self
                 .events
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .ready,
         )
+    }
+
+    fn set_event_waker(&mut self, waker: EventWaker) {
+        let pending = {
+            let mut events = self
+                .events
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            events.waker = Some(Arc::clone(&waker));
+            !events.ready.is_empty()
+        };
+        if pending {
+            waker();
+        }
     }
 
     fn shutdown(&mut self) -> Result<(), BackendError> {
@@ -376,7 +397,7 @@ fn run_controller(
     mut controller: Controller,
     mut relay: RelayServer,
     commands: Receiver<WorkerCommand>,
-    events: Arc<Mutex<Vec<BackendEvent>>>,
+    events: Arc<Mutex<Mailbox>>,
     mut processing: tokio::sync::watch::Receiver<ProcessingRequest>,
 ) {
     publish(&events, controller.initial_events());
@@ -445,15 +466,25 @@ fn run_controller(
     relay.shutdown();
 }
 
-fn publish(events: &Mutex<Vec<BackendEvent>>, mut update: Vec<BackendEvent>) {
-    events
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .append(&mut update);
+fn publish(events: &Mutex<Mailbox>, mut update: Vec<BackendEvent>) {
+    if update.is_empty() {
+        return;
+    }
+    let waker = {
+        let mut events = events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let wake = events.ready.is_empty();
+        events.ready.append(&mut update);
+        wake.then(|| events.waker.clone()).flatten()
+    };
+    if let Some(waker) = waker {
+        waker();
+    }
 }
 
 fn publish_error(
-    events: &Mutex<Vec<BackendEvent>>,
+    events: &Mutex<Mailbox>,
     run: Option<playback::RunId>,
     current_run: Option<playback::RunId>,
     requested_playing: Option<bool>,

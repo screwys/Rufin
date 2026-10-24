@@ -115,7 +115,11 @@ impl Playback {
             .name("rufin-playback".into())
             .spawn(move || {
                 loop {
-                    let message = receiver.recv_timeout(Duration::from_millis(33));
+                    let message = if player.external_clock_running() {
+                        receiver.recv_timeout(Duration::from_millis(33))
+                    } else {
+                        receiver.recv().map_err(|_| RecvTimeoutError::Disconnected)
+                    };
                     let Some(_owner) = owner.upgrade() else {
                         let _ = player.shutdown_backend();
                         break;

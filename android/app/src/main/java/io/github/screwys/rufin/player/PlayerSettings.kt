@@ -122,6 +122,7 @@ internal fun PlaybackPreferences(player: PlayerConnection, preferences: Preferen
             }
         }
         PreferenceSwitch("Audio fade on play/pause", playback.audioFadeOnStatusChange) { change { setAudioFadeOnStatusChange(it) } }
+        PreferenceSwitch("Skip unplayable tracks", playback.skipUnplayableTracks) { change { setSkipUnplayableTracks(it) } }
         SettingsSliderNumber(translate("Playback speed"), playback.playbackRate,
             options.minPlaybackRate..options.maxPlaybackRate, .05, unit = "×") { change { setPlaybackRate((it as Number).toDouble()) } }
         PreferenceSwitch("Preserve pitch", playback.preservePitch) { change { setPreservePitch(it) } }

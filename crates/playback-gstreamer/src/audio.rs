@@ -27,6 +27,9 @@ pub(super) struct AudioGraph {
     sink: gst::Element,
     gain: BaseTransform,
     gain_curve: controller::InterpolationControlSource,
+    // Crossfade gain stays apart from user volume, mute and status fades.
+    transition: BaseTransform,
+    transition_curve: controller::InterpolationControlSource,
     gain_frontier: Arc<AtomicU64>,
     audio_output: Option<String>,
     processing_output: String,
@@ -113,21 +116,15 @@ impl AudioGraph {
         let output = make_audio_output(settings.audio_output.as_deref())?;
         #[cfg(test)]
         configure_test_output(&output);
-        let gain = make_element("volume", "rufin-output-gain")?
-            .downcast::<BaseTransform>()
-            .expect("volume is an audio transform");
-        let gain_curve = controller::InterpolationControlSource::new();
-        gain_curve.set_mode(controller::InterpolationMode::Linear);
-        let binding = controller::DirectControlBinding::new_absolute(&gain, "volume", &gain_curve);
-        gain.add_control_binding(&binding)
-            .map_err(|error| error.to_string())?;
-        binding.set_disabled(true);
+        let (gain, gain_curve) = controlled_volume("rufin-output-gain")?;
+        let (transition, transition_curve) = controlled_volume("rufin-transition-gain")?;
         let processing = EffectsBin::new(&ProcessingConfig::default())?;
         let tempo_bin = make_element("insertbin", "rufin-tempo-bin")?;
         let sink = gst::Bin::new();
         sink.add_many([
             processing.element(),
             gain.upcast_ref::<gst::Element>(),
+            transition.upcast_ref::<gst::Element>(),
             &tempo_bin,
             &resample,
             &convert_out,
@@ -137,6 +134,7 @@ impl AudioGraph {
         gst::Element::link_many([
             processing.element(),
             gain.upcast_ref::<gst::Element>(),
+            transition.upcast_ref::<gst::Element>(),
             &tempo_bin,
             &resample,
             &convert_out,
@@ -156,8 +154,10 @@ impl AudioGraph {
         sink.add_pad(&sink_pad).map_err(|error| error.to_string())?;
         let gain_frontier = Arc::new(AtomicU64::new(0));
         let frontier = Arc::clone(&gain_frontier);
-        let curve = gain_curve.clone();
-        let controlled_gain = gain.downgrade();
+        let curves = [
+            (gain.downgrade(), gain_curve.clone()),
+            (transition.downgrade(), transition_curve.clone()),
+        ];
         gain.static_pad("src").expect("gain output").add_probe(
             gst::PadProbeType::EVENT_DOWNSTREAM | gst::PadProbeType::BUFFER,
             move |pad, info| {
@@ -170,18 +170,13 @@ impl AudioGraph {
                         .position()
                         .and_then(|position| segment.to_stream_time(position))
                         .unwrap_or(gst::ClockTime::ZERO);
-                    if controlled_gain
-                        .upgrade()
-                        .is_some_and(|gain| gain.has_active_control_bindings())
-                        && let Some(end) = curve.list_control_points().last()
-                    {
-                        let volume =
-                            ControlSourceExt::value(&curve, previous).unwrap_or(end.value());
-                        let remaining = end.timestamp().saturating_sub(previous);
-                        let target = end.value();
-                        curve.unset_all();
-                        curve.set(start, volume);
-                        curve.set(start + remaining, target);
+                    for (element, curve) in &curves {
+                        if element
+                            .upgrade()
+                            .is_some_and(|element| element.has_active_control_bindings())
+                        {
+                            move_curve(curve, previous, start);
+                        }
                     }
                     frontier.store(start.nseconds(), Ordering::Release);
                 }
@@ -266,6 +261,8 @@ impl AudioGraph {
             sink: sink.upcast(),
             gain,
             gain_curve,
+            transition,
+            transition_curve,
             gain_frontier,
             audio_output: settings.audio_output.clone(),
             processing_output: format!(
@@ -287,6 +284,10 @@ impl AudioGraph {
         self.gain_frontier.store(0, Ordering::Release);
         self.gain.set_control_binding_disabled("volume", true);
         self.gain_curve.unset_all();
+        self.transition.set_control_binding_disabled("volume", true);
+        self.transition_curve.unset_all();
+        self.transition.set_property("volume", 1.0);
+        self.transition.set_passthrough(true);
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         state.tags = gst::TagList::new();
         state.current_loudness = None;
@@ -362,6 +363,45 @@ impl AudioGraph {
             end.value(),
             Duration::from_nanos(end.timestamp().saturating_sub(position).nseconds()),
         ))
+    }
+
+    /// Starts an equal-power fade at the next processed sample, in stream time,
+    /// finishing no later than `end`.
+    pub(super) fn fade_transition(
+        &self,
+        fade_in: bool,
+        duration: Duration,
+        end: Option<gst::ClockTime>,
+    ) {
+        const STEPS: u64 = 16;
+        let start = gst::ClockTime::from_nseconds(self.gain_frontier.load(Ordering::Acquire));
+        let duration = gst::ClockTime::try_from(duration).expect("fade duration");
+        let duration = end
+            .map_or(duration, |end| duration.min(end.saturating_sub(start)))
+            .max(gst::ClockTime::MSECOND);
+        self.transition_curve.unset_all();
+        for step in 0..=STEPS {
+            let angle = step as f64 / STEPS as f64 * std::f64::consts::FRAC_PI_2;
+            self.transition_curve.set(
+                start + duration * step / STEPS,
+                if fade_in { angle.sin() } else { angle.cos() },
+            );
+        }
+        self.transition
+            .set_control_binding_disabled("volume", false);
+        self.transition.set_passthrough(false);
+    }
+
+    pub(super) fn transition_end(&self) -> Option<gst::ClockTime> {
+        self.transition
+            .has_active_control_bindings()
+            .then(|| {
+                self.transition_curve
+                    .list_control_points()
+                    .last()
+                    .map(|point| point.timestamp())
+            })
+            .flatten()
     }
 
     pub(super) fn retarget_output(&self, target: f64, muted: bool) {
@@ -842,6 +882,40 @@ fn set_output_target(output: &gst::Element, target: Option<&str>) -> bool {
         .dynamic_cast_ref::<gst::ChildProxy>()
         .and_then(|proxy| proxy.child_by_index(0))
         .is_some_and(|child| apply(&child))
+}
+
+fn controlled_volume(
+    name: &str,
+) -> Result<(BaseTransform, controller::InterpolationControlSource), String> {
+    let volume = make_element("volume", name)?
+        .downcast::<BaseTransform>()
+        .expect("volume is an audio transform");
+    let curve = controller::InterpolationControlSource::new();
+    curve.set_mode(controller::InterpolationMode::Linear);
+    let binding = controller::DirectControlBinding::new_absolute(&volume, "volume", &curve);
+    volume
+        .add_control_binding(&binding)
+        .map_err(|error| error.to_string())?;
+    binding.set_disabled(true);
+    Ok((volume, curve))
+}
+
+// A new segment moves the rest of an envelope from the old stream position to the new one.
+fn move_curve(
+    curve: &controller::InterpolationControlSource,
+    from: gst::ClockTime,
+    to: gst::ClockTime,
+) {
+    let points = curve.list_control_points();
+    let Some(last) = points.last() else {
+        return;
+    };
+    let current = ControlSourceExt::value(curve, from).unwrap_or(last.value());
+    curve.unset_all();
+    curve.set(to, current);
+    for point in points.iter().filter(|point| point.timestamp() > from) {
+        curve.set(point.timestamp() - from + to, point.value());
+    }
 }
 
 fn make_element(factory: &str, name: &str) -> Result<gst::Element, String> {

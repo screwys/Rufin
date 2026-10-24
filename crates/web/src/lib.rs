@@ -708,7 +708,7 @@ fn playback_json(
         "current":state.transport.current.as_ref().map(|current| json!({"position":state.queue.current_index,"media_uri":current.id.media_uri,"run":current.id.run.map(playback::RunId::get),"track":track_json(products, &current.row.track, include_preview)})),
         "volume":state.controls.volume,"muted":state.controls.muted,"shuffle":state.controls.shuffle_enabled,"auto_dj":state.controls.auto_dj_enabled,
         "repeat":match state.controls.repeat_mode {playback::RepeatMode::Off=>"off",playback::RepeatMode::One=>"one",playback::RepeatMode::All=>"all"},
-        "queue_total":state.queue.total,"queue_loading":state.queue_loading,"error":state.transport.error,
+        "queue_total":state.queue.total,"queue_loading":state.queue_loading,"refilling":state.transport.refilling(),"error":state.transport.error,
         "queue_revision":state.queue.revision
     })
 }

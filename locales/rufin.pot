@@ -268,6 +268,9 @@ msgstr ""
 msgid "Accent color"
 msgstr ""
 
+msgid "Access denied"
+msgstr ""
+
 msgid "Access token"
 msgstr ""
 
@@ -510,6 +513,9 @@ msgid "Audio fade on play/pause"
 msgstr ""
 
 msgid "Audio fingerprints"
+msgstr ""
+
+msgid "Audio output failed"
 msgstr ""
 
 msgid "Audio output"
@@ -1054,8 +1060,14 @@ msgstr ""
 msgid "Could not update favorites"
 msgstr ""
 
+msgid "Couldn't connect to the server"
+msgstr ""
+
 #, rust-format
 msgid "Couldn't connect to {service}"
+msgstr ""
+
+msgid "Couldn't decode this track"
 msgstr ""
 
 msgid "Couldn't load this folder"
@@ -1672,6 +1684,9 @@ msgstr ""
 
 #, rust-format
 msgid "Forget \"{name}\"?"
+msgstr ""
+
+msgid "Format not supported"
 msgstr ""
 
 msgid "Format"
@@ -3785,6 +3800,9 @@ msgstr ""
 msgid "Skip same-album crossfade"
 msgstr ""
 
+msgid "Skip unplayable tracks"
+msgstr ""
+
 msgid "Slate"
 msgstr ""
 
@@ -4055,6 +4073,9 @@ msgid "Track peak"
 msgstr ""
 
 msgid "Track radio"
+msgstr ""
+
+msgid "Track unavailable"
 msgstr ""
 
 msgid "Track"

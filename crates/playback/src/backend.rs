@@ -379,17 +379,61 @@ pub enum BackendError {
     #[error("playback command channel closed")]
     ChannelClosed,
 }
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FailureKind {
+    UnavailableMedia,
+    UnsupportedFormat,
+    Decode,
+    DeniedAccess,
+    Connection,
+    Output,
+    #[default]
+    Unclassified,
+}
+
+impl FailureKind {
+    /// The failure belongs to this track, so the queue can continue.
+    pub fn skippable(self) -> bool {
+        matches!(
+            self,
+            Self::UnavailableMedia | Self::UnsupportedFormat | Self::Decode
+        )
+    }
+
+    pub fn summary(self) -> &'static str {
+        match self {
+            Self::UnavailableMedia => "Track unavailable",
+            Self::UnsupportedFormat => "Format not supported",
+            Self::Decode => "Couldn't decode this track",
+            Self::DeniedAccess => "Access denied",
+            Self::Connection => "Couldn't connect to the server",
+            Self::Output => "Audio output failed",
+            Self::Unclassified => "Could not play this track",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Error, PartialEq)]
 #[error("{message}")]
 pub struct BackendFailure {
+    kind: FailureKind,
     message: String,
 }
 
 impl BackendFailure {
     pub fn new(message: impl Into<String>) -> Self {
+        Self::with_kind(FailureKind::Unclassified, message)
+    }
+
+    pub fn with_kind(kind: FailureKind, message: impl Into<String>) -> Self {
         Self {
+            kind,
             message: message.into(),
         }
+    }
+
+    pub fn kind(&self) -> FailureKind {
+        self.kind
     }
 
     pub fn message(&self) -> &str {
@@ -397,9 +441,26 @@ impl BackendFailure {
     }
 }
 
+impl From<String> for BackendFailure {
+    fn from(message: String) -> Self {
+        Self::new(message)
+    }
+}
+
+impl From<&str> for BackendFailure {
+    fn from(message: &str) -> Self {
+        Self::new(message)
+    }
+}
+
+/// Called when a backend's event mailbox goes from empty to non-empty.
+pub type EventWaker = Arc<dyn Fn() + Send + Sync>;
+
 pub trait PlaybackBackend: Send {
     fn send(&mut self, command: BackendCommand) -> Result<(), BackendError>;
     fn drain_events(&mut self) -> Vec<BackendEvent>;
+
+    fn set_event_waker(&mut self, _waker: EventWaker) {}
 
     fn shutdown(&mut self) -> Result<(), BackendError> {
         Ok(())

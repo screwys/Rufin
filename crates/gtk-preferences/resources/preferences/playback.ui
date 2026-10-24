@@ -26,6 +26,9 @@
     <property name="title" translatable="yes">Audio fade on play/pause</property>
     <property name="subtitle" translatable="yes">Fade audio when playback is paused or resumed</property>
   </object>
+  <object class="AdwSwitchRow" id="skip_unplayable_row">
+    <property name="title" translatable="yes">Skip unplayable tracks</property>
+  </object>
   <object class="AdwActionRow" id="refill_row">
     <property name="title" translatable="yes">Auto DJ refill threshold</property>
     <property name="subtitle" translatable="yes">Add tracks when fewer than this many remain</property>

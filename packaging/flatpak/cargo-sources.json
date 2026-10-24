@@ -1783,14 +1783,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/crypto-bigint/crypto-bigint-0.7.5.crate",
-        "sha256": "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271",
-        "dest": "cargo/vendor/crypto-bigint-0.7.5"
+        "url": "https://static.crates.io/crates/crypto-bigint/crypto-bigint-0.7.6.crate",
+        "sha256": "6bb08299a6046833a879ace115697f12fd2bd6c8d3e93c909ffc9e0738e7cae0",
+        "dest": "cargo/vendor/crypto-bigint-0.7.6"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271\", \"files\": {}}",
-        "dest": "cargo/vendor/crypto-bigint-0.7.5",
+        "contents": "{\"package\": \"6bb08299a6046833a879ace115697f12fd2bd6c8d3e93c909ffc9e0738e7cae0\", \"files\": {}}",
+        "dest": "cargo/vendor/crypto-bigint-0.7.6",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -1900,14 +1900,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/ctutils/ctutils-0.4.4.crate",
-        "sha256": "12218662ccac37d9714f2191252553d67585b97df8c839cbe49e0bde278dc865",
-        "dest": "cargo/vendor/ctutils-0.4.4"
+        "url": "https://static.crates.io/crates/ctutils/ctutils-0.4.5.crate",
+        "sha256": "38d28fb6aa7dd680b3ffd1a3e64e115c177bdba63c0ae7f9cd48129ff05c4fa0",
+        "dest": "cargo/vendor/ctutils-0.4.5"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"12218662ccac37d9714f2191252553d67585b97df8c839cbe49e0bde278dc865\", \"files\": {}}",
-        "dest": "cargo/vendor/ctutils-0.4.4",
+        "contents": "{\"package\": \"38d28fb6aa7dd680b3ffd1a3e64e115c177bdba63c0ae7f9cd48129ff05c4fa0\", \"files\": {}}",
+        "dest": "cargo/vendor/ctutils-0.4.5",
         "dest-filename": ".cargo-checksum.json"
     },
     {
