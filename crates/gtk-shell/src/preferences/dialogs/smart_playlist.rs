@@ -6,78 +6,21 @@ impl Shell {
     pub(crate) fn publish_smart_playlist_change(
         self: &Rc<Self>,
         change: SmartPlaylistChange,
-        settled: Option<Rc<dyn Fn(Result<(), String>)>>,
-    ) {
-        self.publish_smart_playlist_change_in_folder(change, settled, None);
-    }
-
-    fn publish_smart_playlist_change_in_folder(
-        self: &Rc<Self>,
-        change: SmartPlaylistChange,
-        settled: Option<Rc<dyn Fn(Result<(), String>)>>,
         folder: Option<library::PlaylistFolderKey>,
+        settled: Option<Rc<dyn Fn(Result<(), String>)>>,
     ) {
-        let database = std::sync::Arc::clone(&self.products.library);
-        let task = self.products.runtime.spawn(async move {
-            let accepted = match change {
-                SmartPlaylistChange::Create { name, definition } => {
-                    match database.create_smart_playlist(&name, &definition).await {
-                        Ok(key) => {
-                            if let Some(folder) = folder {
-                                database
-                                    .move_playlist_to_folder(
-                                        library::PlaylistFolderMember::SmartPlaylist { key },
-                                        Some(folder),
-                                    )
-                                    .await
-                                    .map(|_| true)
-                            } else {
-                                Ok(true)
-                            }
-                        }
-                        Err(error) => Err(error),
-                    }
-                }
-                SmartPlaylistChange::Update {
-                    key,
-                    name,
-                    definition,
-                    artwork,
-                } => {
-                    database
-                        .update_smart_playlist(
-                            key,
-                            &name,
-                            &definition,
-                            artwork.as_ref().map(|change| match change {
-                                sources::ArtworkChange::Replace(image) => {
-                                    Some(image.bytes.as_slice())
-                                }
-                                sources::ArtworkChange::Remove => None,
-                            }),
-                        )
-                        .await
-                }
-                SmartPlaylistChange::Delete(key) => database.delete_smart_playlist(key).await,
-            };
-            accepted
-                .map_err(|error| error.to_string())
-                .and_then(|accepted| {
-                    accepted
-                        .then_some(())
-                        .ok_or_else(|| "Smart Playlist is no longer current".to_string())
-                })
-        });
+        let owner = self.products.source.clone();
         let shell = Rc::downgrade(self);
         gtk::glib::spawn_future_local(async move {
-            let result = task
+            let result = rufin_core::playlists::apply_smart_playlist_change(&owner, change, folder)
                 .await
                 .map_err(|error| error.to_string())
-                .and_then(|result| result);
+                .and_then(|applied| {
+                    applied
+                        .map(|_| ())
+                        .ok_or_else(|| "Smart Playlist is no longer current".to_string())
+                });
             let Some(shell) = shell.upgrade() else { return };
-            if result.is_ok() {
-                rufin_core::playlists::playlist_folders_changed(&shell.products.source).await;
-            }
             if let Err(error) = result.as_ref() {
                 shell
                     .control_feedback
@@ -88,8 +31,7 @@ impl Shell {
             }
         });
     }
-}
-impl Shell {
+
     pub(crate) fn new_smart_playlist_dialog(self: &Rc<Self>) {
         self.load_smart_playlist_suggestions(None);
     }
@@ -150,7 +92,7 @@ impl Shell {
             self.source.configured.borrow().sources.clone().into(),
             Rc::new(move |change, settled| {
                 if let Some(shell) = shell.upgrade() {
-                    shell.publish_smart_playlist_change_in_folder(change, settled, folder);
+                    shell.publish_smart_playlist_change(change, folder, settled);
                 }
             }),
             &self.products.source,

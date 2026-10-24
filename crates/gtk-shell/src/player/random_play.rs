@@ -1,11 +1,10 @@
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use ::library::{GenreChoice, PlayedFilter, RandomCriteria, ReadCancellation};
+use ::library::{GenreChoice, PlayedFilter, ReadCancellation};
 use adw::prelude::*;
 use gtk::glib;
-use rufin_core::playback::{QueuePlacement, RandomPlayRequest};
+use rufin_core::playback::QueuePlacement;
 use tracing::warn;
 
 use localization::tr;
@@ -230,23 +229,16 @@ fn connect_action(
         ) else {
             return;
         };
-        let request = request_from_settings(
-            &settings,
-            &genres,
-            &selected.source_id,
-            selected.music_folder_object_id.as_deref(),
-            placement,
-        );
         shell
             .settings
             .update_app_settings("random play settings", |current| {
                 if current.random_play == settings {
                     return false;
                 }
-                current.random_play = settings;
+                current.random_play = settings.clone();
                 true
             });
-        execute_random(&shell, selected.clone(), request);
+        play_random(&shell, settings, placement);
         if let Some(dialog) = dialog.upgrade() {
             dialog.close();
         }
@@ -286,65 +278,9 @@ fn settings_from_controls(
     })
 }
 
-fn request_from_settings(
-    settings: &RandomPlaySettings,
-    genres: &[GenreChoice],
-    source_id: &sources::SourceId,
-    music_folder_id: Option<&str>,
-    placement: QueuePlacement,
-) -> RandomPlayRequest {
-    let genre = settings
-        .selected_genre_id(source_id, music_folder_id)
-        .and_then(|selected| genres.iter().find(|genre| genre.object_id == selected));
-    rufin_core::radio::random_play_request(settings, genre.map(|genre| genre.genre_key), placement)
-}
-
 pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
-    let Some(selected) = shell.selected_library().as_deref().cloned() else {
-        return;
-    };
     let settings = shell.settings.current.borrow().random_play.clone();
-    let database = Arc::clone(&shell.products.library);
-    let source = selected.source_key;
-    let genre_object_id = settings
-        .selected_genre_id(
-            &selected.source_id,
-            selected.music_folder_object_id.as_deref(),
-        )
-        .map(str::to_owned);
-    let runtime = shell.products.runtime.clone();
-    let queue = shell.products.playback.clone();
-    let task = runtime.spawn(async move {
-        let cancellation = ReadCancellation::new();
-        let genre = match genre_object_id {
-            Some(object_id) => database
-                .catalog_keys(
-                    library::CatalogKind::Genre,
-                    Some(source),
-                    &[(&object_id).to_string()],
-                    &cancellation,
-                )
-                .await
-                .map(|keys| keys.into_iter().next().map(library::GenreKey::from_raw))
-                .ok()
-                .flatten(),
-            None => None,
-        };
-        let request = RandomPlayRequest {
-            placement,
-            requested: settings.limit,
-            criteria: RandomCriteria {
-                min_year: settings.min_year.map(i64::from),
-                max_year: settings.max_year.map(i64::from),
-                genre,
-                played: settings.played_filter,
-                require_media: false,
-                variation: random_variation(),
-            },
-        };
-        execute_random_task(database, selected, request, queue).await
-    });
-    report_random_result(shell, task);
+    play_random(shell, settings, placement);
 }
 
 fn selected_genre(genres: &[GenreChoice], selected: u32) -> Option<String> {
@@ -356,91 +292,20 @@ fn selected_genre(genres: &[GenreChoice], selected: u32) -> Option<String> {
         .map(|genre| genre.object_id.clone())
 }
 
-fn execute_random(
-    shell: &Shell,
-    selected: rufin_core::runtime::SelectedLibrary,
-    request: RandomPlayRequest,
-) {
-    let runtime = shell.products.runtime.clone();
-    let queue = shell.products.playback.clone();
-    let database = shell.products.library.clone();
-    let task = runtime.spawn(execute_random_task(database, selected, request, queue));
-    report_random_result(shell, task);
-}
-
-fn report_random_result(shell: &Shell, task: tokio::task::JoinHandle<bool>) {
+fn play_random(shell: &Shell, settings: RandomPlaySettings, placement: QueuePlacement) {
+    let owner = shell.products.source.clone();
     let feedback = Rc::clone(&shell.control_feedback);
     glib::spawn_future_local(async move {
-        if matches!(task.await, Ok(true)) {
-            let resource = crate::ui_resource::RANDOM_PLAY_RESOURCE;
-            let builder = gtk_widgets::ui_resource::builder(resource);
-            let message: gtk::Label =
-                gtk_widgets::ui_resource::object(&builder, resource, "no_matches");
-            feedback.show_feedback_toast(message.text().to_string());
+        match rufin_core::radio::play_saved_random(&owner, settings, placement).await {
+            Ok(true) => {
+                let resource = crate::ui_resource::RANDOM_PLAY_RESOURCE;
+                let builder = gtk_widgets::ui_resource::builder(resource);
+                let message: gtk::Label =
+                    gtk_widgets::ui_resource::object(&builder, resource, "no_matches");
+                feedback.show_feedback_toast(message.text().to_string());
+            }
+            Ok(false) => {}
+            Err(error) => warn!(%error, "failed to select Random Play tracks"),
         }
     });
-}
-
-async fn execute_random_task(
-    database: Arc<library::Database>,
-    selected: rufin_core::runtime::SelectedLibrary,
-    request: RandomPlayRequest,
-    queue: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
-) -> bool {
-    match rufin_core::radio::queue_random(
-        &database,
-        selected.source_key,
-        selected.music_folder_key,
-        request,
-        &queue,
-    )
-    .await
-    {
-        Ok(empty) => empty,
-        Err(error) => {
-            warn!(%error, "failed to select Random Play tracks");
-            false
-        }
-    }
-}
-
-fn random_variation() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos() as i64)
-}
-
-#[cfg(test)]
-mod tests {
-    use library::PlayedFilter;
-    use rufin_core::playback::QueuePlacement;
-    use sources::SourceId;
-
-    use super::{RandomPlaySettings, request_from_settings};
-
-    #[test]
-    fn saved_random_criteria_accept_each_explicit_placement() {
-        let settings = RandomPlaySettings {
-            limit: 24,
-            min_year: Some(1995),
-            max_year: Some(2015),
-            genre: None,
-            played_filter: PlayedFilter::Unplayed,
-        };
-        let source_id = SourceId::new("source");
-
-        for placement in [
-            QueuePlacement::Now,
-            QueuePlacement::Next,
-            QueuePlacement::Last,
-        ] {
-            let request = request_from_settings(&settings, &[], &source_id, None, placement);
-            assert_eq!(request.placement, placement);
-            assert_eq!(request.requested, 24);
-            assert_eq!(request.criteria.min_year, Some(1995));
-            assert_eq!(request.criteria.max_year, Some(2015));
-            assert_eq!(request.criteria.played, PlayedFilter::Unplayed);
-            assert!(request.criteria.genre.is_none());
-        }
-    }
 }

@@ -458,7 +458,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
         .expect("Playlist URI order");
     let smart_key = fixture
         .database
-        .create_smart_playlist("Everything", &SmartPlaylistDefinition::default())
+        .create_smart_playlist("Everything", &SmartPlaylistDefinition::default(), None)
         .await
         .expect("create Smart Playlist");
     let smart = fixture

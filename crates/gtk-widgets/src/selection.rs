@@ -265,13 +265,6 @@ impl TrackSelectionSnapshot {
                 .shuffled(shuffled),
         );
     }
-
-    pub async fn media_uris(&self, database: &library::Database) -> Result<Vec<String>, String> {
-        database
-            .selected_track_uris(&self.input, None, &library::ReadCancellation::new())
-            .await
-            .map_err(|error| error.to_string())
-    }
 }
 #[derive(Clone)]
 pub struct PlaylistEntrySelectionSnapshot {
@@ -282,13 +275,6 @@ pub struct PlaylistEntrySelectionSnapshot {
     pub count: usize,
 }
 impl PlaylistEntrySelectionSnapshot {
-    pub async fn media_uris(&self, database: &library::Database) -> Result<Vec<String>, String> {
-        database
-            .selected_track_uris(&self.input, None, &library::ReadCancellation::new())
-            .await
-            .map_err(|error| error.to_string())
-    }
-
     pub fn play(
         &self,
         queue: &rufin_core::playback::PlaybackOwner,

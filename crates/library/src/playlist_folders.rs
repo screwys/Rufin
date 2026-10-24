@@ -46,6 +46,32 @@ fn member_relation(member: &PlaylistFolderMember) -> (&'static str, &'static str
     }
 }
 
+pub(crate) async fn move_to_folder_on(
+    connection: &mut SqliteConnection,
+    member: PlaylistFolderMember,
+    folder: Option<PlaylistFolderKey>,
+) -> LibraryResult<()> {
+    let smart = matches!(member, PlaylistFolderMember::SmartPlaylist { .. });
+    let (table, column, key) = member_relation(&member);
+    if let Some(folder) = folder {
+        let namespace: Option<bool> =
+            sqlx::query_scalar("SELECT smart FROM playlist_folders WHERE folder_key=?1")
+                .bind(folder)
+                .fetch_optional(&mut *connection)
+                .await?;
+        if namespace != Some(smart) {
+            return Err(LibraryError::InvalidRequest(
+                "Playlist folder does not match the playlist kind".into(),
+            ));
+        }
+    }
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE {table} SET playlist_folder_key=?2 WHERE {column}=?1 AND playlist_folder_key IS NOT ?2"
+    )))
+    .bind(key).bind(folder).execute(connection).await?;
+    Ok(())
+}
+
 fn folder_name(name: &str) -> LibraryResult<&str> {
     let name = name.trim();
     if name.is_empty() {
@@ -116,27 +142,9 @@ impl Database {
         member: PlaylistFolderMember,
         folder: Option<PlaylistFolderKey>,
     ) -> LibraryResult<()> {
-        let smart = matches!(member, PlaylistFolderMember::SmartPlaylist { .. });
-        let (table, column, key) = member_relation(&member);
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        if let Some(folder) = folder {
-            let namespace: Option<bool> =
-                sqlx::query_scalar("SELECT smart FROM playlist_folders WHERE folder_key=?1")
-                    .bind(folder)
-                    .fetch_optional(&mut *connection)
-                    .await?;
-            if namespace != Some(smart) {
-                return Err(LibraryError::InvalidRequest(
-                    "Playlist folder does not match the playlist kind".into(),
-                ));
-            }
-        }
-        sqlx::query(sqlx::AssertSqlSafe(format!(
-            "UPDATE {table} SET playlist_folder_key=?2 WHERE {column}=?1 AND playlist_folder_key IS NOT ?2"
-        )))
-        .bind(key).bind(folder).execute(connection).await?;
-        Ok(())
+        move_to_folder_on(connection, member, folder).await
     }
     pub async fn playlist_folder_choices(
         &self,

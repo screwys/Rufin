@@ -19,7 +19,6 @@ library.workspace = true
 localization.workspace = true
 sources.workspace = true
 playback.workspace = true
-downloads.workspace = true
 tokio.workspace = true
 
 [build-dependencies]

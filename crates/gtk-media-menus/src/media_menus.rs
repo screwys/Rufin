@@ -1,7 +1,6 @@
 use std::{rc::Rc, sync::Arc};
 
 use adw::prelude::*;
-use downloads::DownloadSubject;
 use gtk::glib;
 use library::{
     AlbumView, ArtistView, FavoriteTarget, GenreView, MoodView, PlaylistRow, RadioSeed,
@@ -88,7 +87,6 @@ pub struct MediaMenus {
     pub runtime: tokio::runtime::Handle,
     pub source: rufin_core::runtime::SourceHandle,
     pub playback: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
-    pub downloads: downloads::Downloads,
     pub settings: Rc<gtk_widgets::settings::SettingsState>,
     pub navigate: Rc<dyn Fn(Route)>,
     pub projected_item_favorite: Rc<dyn Fn(&FavoriteTarget, bool) -> bool>,
@@ -593,27 +591,7 @@ fn collection_selection_surface(
             });
         });
     }
-    surface.append_configurable_action(
-        ContextMenuItem::Download,
-        msgid("Download"),
-        "download",
-        DOWNLOAD_ICON,
-    );
-    let download_menus = Rc::clone(menus);
-    let download_payload = payload.clone();
-    surface.add_action("download", move || {
-        (download_menus.download)(&download_payload)
-    });
-    surface.append_configurable_action(
-        ContextMenuItem::Download,
-        msgid("Remove Downloads"),
-        "remove-downloads",
-        TRASH_ICON,
-    );
-    let remove_menus = Rc::clone(menus);
-    surface.add_action("remove-downloads", move || {
-        (remove_menus.remove_download)(&payload)
-    });
+    install_selection_download_actions(&surface, menus, payload);
     Some((surface, targets))
 }
 
@@ -822,7 +800,8 @@ fn append_playlist_entry_selection_actions(
     append_context_menu_picker_entries(surface, menus, selection.clone());
     append_metadata_selection_action(surface, menus, selection.input.clone());
     let download_menus = Rc::clone(menus);
-    let download_selection = selection.clone();
+    let download_payload =
+        gtk_widgets::media_drag::MediaDragSource::playlist_entries(selection.clone());
     surface.append_configurable_action(
         ContextMenuItem::Download,
         msgid("Download"),
@@ -830,7 +809,7 @@ fn append_playlist_entry_selection_actions(
         DOWNLOAD_ICON,
     );
     surface.add_action("download", move || {
-        download_playlist_entry_selection(&download_menus, download_selection.clone());
+        (download_menus.download)(&download_payload)
     });
     for (action, placement, shuffled) in PLAY_ACTIONS {
         let menus = Rc::clone(menus);
@@ -839,22 +818,6 @@ fn append_playlist_entry_selection_actions(
             selection.play(&menus.playback, placement, shuffled)
         });
     }
-}
-
-pub fn download_playlist_entry_selection(
-    menus: &Rc<MediaMenus>,
-    selection: PlaylistEntrySelectionSnapshot,
-) -> bool {
-    let source = menus.source.clone();
-    let database = menus.library.clone();
-    menus.runtime.spawn(async move {
-        let Ok(media_uris) = selection.media_uris(&database).await else {
-            return;
-        };
-        let subject = DownloadSubject::for_media_uris("playlist", Some("Playlist"), &media_uris);
-        source.download_media(subject, media_uris);
-    });
-    true
 }
 
 fn append_track_selection_actions(
@@ -868,7 +831,11 @@ fn append_track_selection_actions(
     surface.append_play_actions(&menus.settings.current.borrow().application.context_menu);
     append_context_menu_picker_selection(&surface, menus, selection.clone());
     append_metadata_selection_action(surface, menus, selection.input.clone());
-    install_track_selection_download_actions(&surface, menus, selection.clone());
+    install_selection_download_actions(
+        &surface,
+        menus,
+        gtk_widgets::media_drag::MediaDragSource::selection(selection.clone()),
+    );
     for (action, placement, shuffled) in PLAY_ACTIONS {
         let menus = Rc::clone(menus);
         let selection = selection.clone();
@@ -895,10 +862,10 @@ fn append_metadata_selection_action(
     });
 }
 
-pub fn install_track_selection_download_actions(
+fn install_selection_download_actions(
     surface: &ContextMenuSurface,
     menus: &Rc<MediaMenus>,
-    selection: TrackSelectionSnapshot,
+    payload: gtk_widgets::media_drag::MediaDragSource,
 ) {
     surface.append_configurable_action(
         ContextMenuItem::Download,
@@ -913,39 +880,14 @@ pub fn install_track_selection_download_actions(
         TRASH_ICON,
     );
     let download_menus = Rc::clone(menus);
-    let download_selection = selection.clone();
+    let download_payload = payload.clone();
     surface.add_action("download", move || {
-        download_track_selection(&download_menus, download_selection.clone());
+        (download_menus.download)(&download_payload)
     });
     let remove_menus = Rc::clone(menus);
     surface.add_action("remove-downloads", move || {
-        let downloads = remove_menus.downloads.clone();
-        let database = remove_menus.library.clone();
-        let selection = selection.clone();
-        let task = remove_menus
-            .runtime
-            .spawn(async move { selection.media_uris(&database).await });
-        glib::spawn_future_local(async move {
-            if let Ok(Ok(uris)) = task.await {
-                downloads.remove(uris, true);
-            }
-        });
+        (remove_menus.remove_download)(&payload)
     });
-}
-
-pub fn download_track_selection(menus: &Rc<MediaMenus>, selection: TrackSelectionSnapshot) -> bool {
-    let source = menus.source.clone();
-    let database = menus.library.clone();
-    let task = menus
-        .runtime
-        .spawn(async move { selection.media_uris(&database).await });
-    glib::spawn_future_local(async move {
-        if let Ok(Ok(uris)) = task.await {
-            let subject = DownloadSubject::for_media_uris("track-selection", None, &uris);
-            source.download_media(subject, uris);
-        }
-    });
-    true
 }
 
 pub fn present_album_context_menu(

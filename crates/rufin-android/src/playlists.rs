@@ -257,56 +257,33 @@ impl AndroidLibrary {
         definition: library::SmartPlaylistDefinition,
         folder: Option<library::PlaylistFolderKey>,
     ) -> Result<library::SmartPlaylistKey, AndroidError> {
-        let source = self.source.clone();
-        let database = self.database.clone();
-        self.runtime
-            .spawn(async move {
-                let key = if let Some(key) = key {
-                    if !database
-                        .update_smart_playlist(key, &name, &definition, None)
-                        .await
-                        .map_err(error)?
-                    {
-                        return Err(error("Playlist no longer exists"));
-                    }
-                    key
-                } else {
-                    database
-                        .create_smart_playlist(&name, &definition)
-                        .await
-                        .map_err(error)?
-                };
-                if let Some(folder) = folder {
-                    playlists::move_playlist_to_folder(
-                        &source,
-                        library::PlaylistFolderMember::SmartPlaylist { key },
-                        Some(folder),
-                    )
-                    .await
-                    .map_err(error)?;
-                } else {
-                    playlists::playlist_folders_changed(&source).await;
-                }
-                Ok(key)
-            })
+        let change = match key {
+            Some(key) => playlists::SmartPlaylistChange::Update {
+                key,
+                name,
+                definition,
+                artwork: None,
+            },
+            None => playlists::SmartPlaylistChange::Create { name, definition },
+        };
+        playlists::apply_smart_playlist_change(&self.source, change, folder)
             .await
             .map_err(error)?
+            .ok_or_else(|| error("Playlist no longer exists"))
     }
 
     pub async fn delete_smart_playlist(
         &self,
         key: library::SmartPlaylistKey,
     ) -> Result<(), AndroidError> {
-        let source = self.source.clone();
-        let database = self.database.clone();
-        self.runtime
-            .spawn(async move {
-                database.delete_smart_playlist(key).await.map_err(error)?;
-                playlists::playlist_folders_changed(&source).await;
-                Ok(())
-            })
-            .await
-            .map_err(error)?
+        playlists::apply_smart_playlist_change(
+            &self.source,
+            playlists::SmartPlaylistChange::Delete(key),
+            None,
+        )
+        .await
+        .map_err(error)?;
+        Ok(())
     }
 
     pub fn smart_playlist_default_definition(&self) -> library::SmartPlaylistDefinition {

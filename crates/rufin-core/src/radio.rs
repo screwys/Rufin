@@ -9,27 +9,83 @@ use sources::{Source, SourceRadioSeed};
 
 use crate::playback::random_u64;
 use crate::runtime::SelectedLibrary;
+use crate::settings::RandomPlaySettings;
 use crate::source::SourceOwner;
 
-pub fn random_play_request(
-    settings: &crate::settings::RandomPlaySettings,
-    genre: Option<library::GenreKey>,
+/// Plays the saved Random Play settings in the selected library. True means nothing matched.
+pub async fn play_saved_random(
+    owner: &SourceOwner,
+    settings: RandomPlaySettings,
     placement: crate::playback::QueuePlacement,
-) -> RandomPlayRequest {
-    RandomPlayRequest {
-        placement,
-        requested: settings.limit,
-        criteria: library::RandomCriteria {
-            min_year: settings.min_year.map(i64::from),
-            max_year: settings.max_year.map(i64::from),
-            genre,
-            played: settings.played_filter,
-            require_media: false,
-            variation: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |duration| duration.as_nanos() as i64),
-        },
-    }
+) -> Result<bool, String> {
+    owner
+        .reply(move |owner, database| async move {
+            let selected = owner.selected_library().ok_or("No source selected")?;
+            let genre = saved_random_genre(&database, &settings, &selected).await?;
+            let request = RandomPlayRequest {
+                placement,
+                requested: settings.limit,
+                criteria: library::RandomCriteria {
+                    min_year: settings.min_year.map(i64::from),
+                    max_year: settings.max_year.map(i64::from),
+                    genre: genre.map(|genre| genre.genre_key),
+                    played: settings.played_filter,
+                    require_media: false,
+                    variation: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |duration| duration.as_nanos() as i64),
+                },
+            };
+            let queue = owner.shared.playback()?;
+            queue_random(
+                &database,
+                selected.source_key,
+                selected.music_folder_key,
+                request,
+                &queue,
+            )
+            .await
+        })
+        .recv()
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+/// Finds the saved Random Play genre when it was saved for this library.
+pub async fn saved_random_genre(
+    database: &Database,
+    settings: &RandomPlaySettings,
+    selected: &SelectedLibrary,
+) -> Result<Option<library::GenreView>, String> {
+    let Some(object_id) = settings.selected_genre_id(
+        &selected.source_id,
+        selected.music_folder_object_id.as_deref(),
+    ) else {
+        return Ok(None);
+    };
+    let cancellation = ReadCancellation::new();
+    let Some(key) = database
+        .catalog_keys(
+            library::CatalogKind::Genre,
+            Some(selected.source_key),
+            &[object_id.to_owned()],
+            &cancellation,
+        )
+        .await
+        .map_err(|error| error.to_string())?
+        .pop()
+    else {
+        return Ok(None);
+    };
+    database
+        .genres(
+            &[library::GenreKey::from_raw(key)],
+            selected.music_folder_key,
+            &cancellation,
+        )
+        .await
+        .map(|mut genres| genres.pop())
+        .map_err(|error| error.to_string())
 }
 
 pub async fn queue_random(

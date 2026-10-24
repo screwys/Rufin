@@ -162,34 +162,18 @@ async fn random_settings(
         .await
         .map_err(internal)?;
     let settings = products.settings.load().random_play.clone();
-    let mut selected_genre = None;
-    if let Some(object_id) = settings.selected_genre_id(
-        &sources::SourceId::new(required(&parameters, "source")?),
-        parameters.get("folder").map(String::as_str),
-    ) {
-        let cancel = library::ReadCancellation::new();
-        if let Some(key) = products
-            .library
-            .catalog_keys(
-                library::CatalogKind::Genre,
-                Some(source),
-                &[(object_id).to_string()],
-                &cancel,
-            )
+    let selected = rufin_core::runtime::SelectedLibrary {
+        source_id: sources::SourceId::new(required(&parameters, "source")?),
+        source_key: source,
+        music_folder_key: folder,
+        music_folder_object_id: parameters.get("folder").cloned(),
+        music_folders: Default::default(),
+    };
+    let selected_genre =
+        rufin_core::radio::saved_random_genre(&products.library, &settings, &selected)
             .await
-            .map(|keys| keys.into_iter().next().map(library::GenreKey::from_raw))
             .map_err(internal)?
-        {
-            selected_genre = products
-                .library
-                .genres(&[key], folder, &cancel)
-                .await
-                .map_err(internal)?
-                .into_iter()
-                .next()
-                .map(|row| json!({"id":row.genre_key,"name":row.metadata.name}));
-        }
-    }
+            .map(|row| json!({"id":row.genre_key,"name":row.metadata.name}));
     Ok(json_response(
         StatusCode::OK,
         json!({"total":catalog::page_total(&products, &parameters, &query).await?,"settings":settings,"selected_genre":selected_genre,"genres":rows.iter().map(|row|json!({"id":row.genre_key,"object_id":row.object_id,"name":row.metadata.name})).collect::<Vec<_>>()}),

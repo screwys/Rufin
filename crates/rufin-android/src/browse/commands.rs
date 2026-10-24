@@ -452,39 +452,18 @@ impl AndroidLibrary {
             return Ok(localization::tr("Any genre"));
         };
         let database = self.database.clone();
-        self.runtime
+        let genre = self
+            .runtime
             .spawn(async move {
-                let Some(object_id) = settings.selected_genre_id(
-                    &selected.source_id,
-                    selected.music_folder_object_id.as_deref(),
-                ) else {
-                    return Ok(localization::tr("Any genre"));
-                };
-                let Some(key) = database
-                    .catalog_keys(
-                        library::CatalogKind::Genre,
-                        Some(selected.source_key),
-                        &[(object_id).to_string()],
-                        &ReadCancellation::new(),
-                    )
-                    .await
-                    .map(|keys| keys.into_iter().next().map(library::GenreKey::from_raw))
-                    .map_err(error)?
-                else {
-                    return Ok(localization::tr("Any genre"));
-                };
-                Ok(database
-                    .genres(&[key], selected.music_folder_key, &ReadCancellation::new())
-                    .await
-                    .map_err(error)?
-                    .pop()
-                    .map_or_else(
-                        || localization::tr("Any genre"),
-                        |genre| genre.metadata.name,
-                    ))
+                rufin_core::radio::saved_random_genre(&database, &settings, &selected).await
             })
             .await
             .map_err(error)?
+            .map_err(error)?;
+        Ok(genre.map_or_else(
+            || localization::tr("Any genre"),
+            |genre| genre.metadata.name,
+        ))
     }
 
     pub async fn random_play(
@@ -493,10 +472,6 @@ impl AndroidLibrary {
         placement: String,
     ) -> Result<bool, AndroidError> {
         let placement = queue_placement(&placement)?;
-        let selected = self
-            .source
-            .selected_library()
-            .ok_or_else(|| error("No source selected"))?;
         let owner = self.settings.clone();
         let settings = self
             .runtime
@@ -504,39 +479,9 @@ impl AndroidLibrary {
             .await
             .map_err(error)?
             .map_err(error)?;
-        let queue = self.playback.clone();
-        let database = self.database.clone();
-        self.runtime
-            .spawn(async move {
-                let genre = if let Some(object) = settings.selected_genre_id(
-                    &selected.source_id,
-                    selected.music_folder_object_id.as_deref(),
-                ) {
-                    database
-                        .catalog_keys(
-                            library::CatalogKind::Genre,
-                            Some(selected.source_key),
-                            &[(object).to_string()],
-                            &ReadCancellation::new(),
-                        )
-                        .await
-                        .map(|keys| keys.into_iter().next().map(library::GenreKey::from_raw))
-                        .map_err(error)?
-                } else {
-                    None
-                };
-                rufin_core::radio::queue_random(
-                    &database,
-                    selected.source_key,
-                    selected.music_folder_key,
-                    rufin_core::radio::random_play_request(&settings, genre, placement),
-                    &queue,
-                )
-                .await
-                .map_err(error)
-            })
+        rufin_core::radio::play_saved_random(&self.source, settings, placement)
             .await
-            .map_err(error)?
+            .map_err(error)
     }
 
     pub fn routes(&self) -> Vec<AndroidRouteDescriptor> {

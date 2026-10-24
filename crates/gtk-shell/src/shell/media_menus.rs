@@ -29,7 +29,6 @@ pub(super) fn build(
         runtime: products.runtime.clone(),
         source: products.source.clone(),
         playback: products.playback.clone(),
-        downloads: products.downloads.clone(),
         settings,
         navigate: {
             let weak = weak.clone();
@@ -102,7 +101,7 @@ pub(super) fn build(
             let weak = weak.clone();
             Rc::new(move |change, settled| {
                 if let Some(shell) = weak.upgrade() {
-                    shell.publish_smart_playlist_change(change, settled);
+                    shell.publish_smart_playlist_change(change, None, settled);
                 }
             })
         },

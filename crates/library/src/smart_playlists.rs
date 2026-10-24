@@ -604,6 +604,7 @@ impl Database {
         &self,
         name: &str,
         definition: &SmartPlaylistDefinition,
+        folder: Option<crate::PlaylistFolderKey>,
     ) -> LibraryResult<SmartPlaylistKey> {
         let name = require_name(name)?;
         let definition = encode_definition(definition)?;
@@ -625,6 +626,14 @@ impl Database {
         .await?;
         let key = SmartPlaylistKey::from_raw(result.last_insert_rowid());
         sync_smart_on(&mut transaction, key).await?;
+        if let Some(folder) = folder {
+            crate::playlist_folders::move_to_folder_on(
+                &mut transaction,
+                crate::PlaylistFolderMember::SmartPlaylist { key },
+                Some(folder),
+            )
+            .await?;
+        }
         transaction.commit().await?;
         Ok(key)
     }
@@ -888,7 +897,7 @@ mod source_window_tests {
             ..Default::default()
         };
         let key = database
-            .create_smart_playlist("Recent", &definition)
+            .create_smart_playlist("Recent", &definition, None)
             .await
             .unwrap();
         let mut writer = database.writer().await.unwrap();

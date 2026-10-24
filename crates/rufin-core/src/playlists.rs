@@ -1267,7 +1267,7 @@ pub fn smart_playlist_display_name(object_id: &str, name: &str) -> String {
     }
 }
 
-pub async fn playlist_folders_changed(owner: &SourceOwner) {
+async fn playlist_folders_changed(owner: &SourceOwner) {
     owner
         .shared
         .send(SourceEvent::CatalogPublished(CatalogPublication {
@@ -1373,6 +1373,56 @@ pub enum SmartPlaylistChange {
         artwork: Option<sources::ArtworkChange>,
     },
     Delete(library::SmartPlaylistKey),
+}
+
+/// Applies a Smart Playlist change. A created or updated playlist goes into `folder` when
+/// one is given. Returns `None` when the playlist no longer exists.
+pub async fn apply_smart_playlist_change(
+    owner: &SourceOwner,
+    change: SmartPlaylistChange,
+    folder: Option<library::PlaylistFolderKey>,
+) -> sources::SourceResult<Option<library::SmartPlaylistKey>> {
+    owner
+        .reply(move |owner, database| async move {
+            let applied = match change {
+                SmartPlaylistChange::Create { name, definition } => Some(
+                    database
+                        .create_smart_playlist(&name, &definition, folder)
+                        .await?,
+                ),
+                SmartPlaylistChange::Update {
+                    key,
+                    name,
+                    definition,
+                    artwork,
+                } => {
+                    let artwork = artwork.as_ref().map(|change| match change {
+                        sources::ArtworkChange::Replace(image) => Some(image.bytes.as_slice()),
+                        sources::ArtworkChange::Remove => None,
+                    });
+                    let updated = database
+                        .update_smart_playlist(key, &name, &definition, artwork)
+                        .await?;
+                    if updated && folder.is_some() {
+                        database
+                            .move_playlist_to_folder(
+                                library::PlaylistFolderMember::SmartPlaylist { key },
+                                folder,
+                            )
+                            .await?;
+                    }
+                    updated.then_some(key)
+                }
+                SmartPlaylistChange::Delete(key) => {
+                    database.delete_smart_playlist(key).await?.then_some(key)
+                }
+            };
+            playlist_folders_changed(&owner).await;
+            Ok::<_, SourceError>(applied)
+        })
+        .recv()
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))?
 }
 
 async fn append_native_tracks(

@@ -136,7 +136,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         .unwrap()
         .unwrap();
     let all = db
-        .create_smart_playlist("All", &SmartPlaylistDefinition::default())
+        .create_smart_playlist("All", &SmartPlaylistDefinition::default(), None)
         .await
         .unwrap();
     db.create_smart_playlist(
@@ -145,6 +145,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             source_id: Some(library::SourceId::new("source")),
             ..Default::default()
         },
+        None,
     )
     .await
     .unwrap();
@@ -155,6 +156,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                 limit: Some(1),
                 ..Default::default()
             },
+            None,
         )
         .await
         .unwrap();
@@ -165,6 +167,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                 source_id: Some(library::SourceId::new("absent")),
                 ..Default::default()
             },
+            None,
         )
         .await
         .unwrap();
@@ -1353,7 +1356,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         ..SmartPlaylistDefinition::default()
     };
     let key = database
-        .create_smart_playlist("Toolbar", &definition)
+        .create_smart_playlist("Toolbar", &definition, None)
         .await
         .unwrap();
     let members = database
@@ -1806,6 +1809,7 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
                 }],
                 ..SmartPlaylistDefinition::default()
             },
+            None,
         )
         .await
         .unwrap();
@@ -1862,6 +1866,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 }],
                 ..SmartPlaylistDefinition::default()
             },
+            None,
         )
         .await
         .unwrap();
@@ -3232,7 +3237,7 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
     };
     let smart = fixture
         .database
-        .create_smart_playlist("Direct", &definition)
+        .create_smart_playlist("Direct", &definition, None)
         .await
         .expect("create All Smart Playlist");
     let cancel = ReadCancellation::new();
@@ -3367,7 +3372,7 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
     };
     let smart = fixture
         .database
-        .create_smart_playlist("Downloaded direct", &definition)
+        .create_smart_playlist("Downloaded direct", &definition, None)
         .await
         .expect("create direct download Smart Playlist");
     let cancel = ReadCancellation::new();
@@ -3417,7 +3422,7 @@ async fn canonical_rows_keep_uri_order_after_smart_membership_changes() {
     let mut definition = SmartPlaylistDefinition::default();
     let key = fixture
         .database
-        .create_smart_playlist("Window", &definition)
+        .create_smart_playlist("Window", &definition, None)
         .await
         .unwrap();
     let cancel = ReadCancellation::new();
@@ -3511,7 +3516,7 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
     };
     let smart = fixture
         .database
-        .create_smart_playlist("Retained", &definition)
+        .create_smart_playlist("Retained", &definition, None)
         .await
         .expect("create retained-source Smart Playlist");
     let cancellation = ReadCancellation::new();
@@ -3632,6 +3637,7 @@ async fn smart_membership_excludes_retained_queue_and_activity() {
                 source_id: None,
                 ..SmartPlaylistDefinition::default()
             },
+            None,
         )
         .await
         .unwrap();
@@ -3695,7 +3701,7 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
         };
         fixture
             .database
-            .create_smart_playlist(&format!("List {index:02}"), &definition)
+            .create_smart_playlist(&format!("List {index:02}"), &definition, None)
             .await
             .unwrap();
     }
@@ -3773,17 +3779,17 @@ async fn smart_playlist_reordering_preserves_unique_positions() {
     let definition = SmartPlaylistDefinition::default();
     let first = fixture
         .database
-        .create_smart_playlist("First", &definition)
+        .create_smart_playlist("First", &definition, None)
         .await
         .expect("create first Smart Playlist");
     let second = fixture
         .database
-        .create_smart_playlist("Second", &definition)
+        .create_smart_playlist("Second", &definition, None)
         .await
         .expect("create second Smart Playlist");
     let third = fixture
         .database
-        .create_smart_playlist("Third", &definition)
+        .create_smart_playlist("Third", &definition, None)
         .await
         .expect("create third Smart Playlist");
 
@@ -3856,7 +3862,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     };
     let smart = fixture
         .database
-        .create_smart_playlist("Never Played", &never)
+        .create_smart_playlist("Never Played", &never, None)
         .await
         .expect("create Never Played");
     let policy_definition = SmartPlaylistDefinition {
@@ -3869,7 +3875,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     };
     let policy = fixture
         .database
-        .create_smart_playlist("Policy Defaults", &policy_definition)
+        .create_smart_playlist("Policy Defaults", &policy_definition, None)
         .await
         .expect("Library-owned editor defaults pass Library validation");
     assert_eq!(
@@ -3994,7 +4000,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     };
     let second = fixture
         .database
-        .create_smart_playlist("Optional", &optional)
+        .create_smart_playlist("Optional", &optional, None)
         .await
         .expect("create second Smart Playlist");
     assert_eq!(

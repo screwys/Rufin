@@ -6,9 +6,7 @@ use crate::shell::playlist_picker::{
 };
 use adw::prelude::*;
 use gtk::glib;
-use gtk_media_menus::media_menus::{
-    download_playlist_entry_selection, download_track_selection, remove_playlist_entry_selection,
-};
+use gtk_media_menus::media_menus::remove_playlist_entry_selection;
 use gtk_player::outputs::{select_next_audio_output, select_previous_audio_output};
 use gtk_widgets::selection::TrackSelectionSnapshot;
 use rufin_core::playback::{QueuePlacement, QueueSelection};
@@ -191,9 +189,10 @@ impl Shell {
                 SelectionShortcut::AddToPlaylist => {
                     present_playlist_picker_entries(self, selection)
                 }
-                SelectionShortcut::Download => {
-                    return download_playlist_entry_selection(&self.media_menus, selection);
-                }
+                SelectionShortcut::Download => super::catalog_actions::download(
+                    &gtk_widgets::media_drag::MediaDragSource::playlist_entries(selection),
+                    self,
+                ),
                 SelectionShortcut::Delete => unreachable!(),
             }
             return true;
@@ -206,9 +205,10 @@ impl Shell {
                 selection.play(&self.products.playback, placement, false)
             }
             SelectionShortcut::AddToPlaylist => present_playlist_picker_selection(self, selection),
-            SelectionShortcut::Download => {
-                return download_track_selection(&self.media_menus, selection);
-            }
+            SelectionShortcut::Download => super::catalog_actions::download(
+                &gtk_widgets::media_drag::MediaDragSource::selection(selection),
+                self,
+            ),
             SelectionShortcut::Delete => unreachable!(),
         }
         true

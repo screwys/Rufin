@@ -438,7 +438,11 @@ mod tests {
                 .execute(writer.as_mut().unwrap()).await.unwrap();
         }
         let smart = source
-            .create_smart_playlist("Saved choice", &crate::SmartPlaylistDefinition::default())
+            .create_smart_playlist(
+                "Saved choice",
+                &crate::SmartPlaylistDefinition::default(),
+                None,
+            )
             .await
             .unwrap();
         let mut expected_artwork = Vec::new();

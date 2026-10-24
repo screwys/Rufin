@@ -327,6 +327,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
                 ],
                 ..library::SmartPlaylistDefinition::default()
             },
+            None,
         )
         .await
         .unwrap();

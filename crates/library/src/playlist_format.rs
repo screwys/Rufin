@@ -1631,7 +1631,7 @@ mod tests {
                 .execute(writer.as_mut().unwrap()).await.unwrap();
         }
         let key = database
-            .create_smart_playlist("All", &crate::SmartPlaylistDefinition::default())
+            .create_smart_playlist("All", &crate::SmartPlaylistDefinition::default(), None)
             .await
             .unwrap();
         let mut output = tempfile::tempfile().unwrap();

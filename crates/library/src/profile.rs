@@ -2689,16 +2689,16 @@ mod tests {
         assert_eq!(names, ["c", "a", "b"]);
         let definition = crate::SmartPlaylistDefinition::default();
         a.database
-            .create_smart_playlist("First", &definition)
+            .create_smart_playlist("First", &definition, None)
             .await
             .unwrap();
         let middle = a
             .database
-            .create_smart_playlist("Middle", &definition)
+            .create_smart_playlist("Middle", &definition, None)
             .await
             .unwrap();
         a.database
-            .create_smart_playlist("Last", &definition)
+            .create_smart_playlist("Last", &definition, None)
             .await
             .unwrap();
         let mut expected: Vec<String> =
@@ -2759,7 +2759,7 @@ mod tests {
             expected
         );
         a.database
-            .create_smart_playlist("Appended", &definition)
+            .create_smart_playlist("Appended", &definition, None)
             .await
             .unwrap();
         expected.push("Appended".into());
@@ -3008,7 +3008,7 @@ mod tests {
             .unwrap();
         let smart = store
             .database
-            .create_smart_playlist("Saved", &crate::SmartPlaylistDefinition::default())
+            .create_smart_playlist("Saved", &crate::SmartPlaylistDefinition::default(), None)
             .await
             .unwrap();
         let (_, playlist) = store
