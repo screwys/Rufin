@@ -61,9 +61,8 @@
     "POST /api/sources/refresh": {
       "id": "source ID"
     },
-    "POST /api/sources/download-artwork": "Start downloading artwork from the selected source library with {id:source ID}. Uses the source's artwork and the configured music-folder scope. Does not search external services.",
-    "POST /api/sources/download-lyrics": "Start downloading lyrics from the selected source library with {id:source ID}. Uses embedded, sidecar or source-provided lyrics. Does not search external services.",
-    "POST /api/sources/cancel-download": "Cancel the source artwork or lyrics download with {id:source ID}. Completed downloads are kept.",
+    "GET /api/downloads/cache-settings": "Read artwork and lyrics caching choices across all sources as {artwork:bool,lyrics:bool}. True downloads automatically; false downloads lazily.",
+    "POST /api/downloads/cache-settings": "Set caching choices across all sources with {artwork:bool,lyrics:bool}. Automatic downloads include existing and newly scanned entries. Returns the saved choices.",
     "POST /api/downloads/quality": "Set a source download profile with {source:source ID,quality:original|{transcoded:{codec:opus|aac|mp3|vorbis|flac,bitrate_kbps:128,channels:preserve|stereo_lossy|stereo}}}. Bitrate presets run from 64 through 320 kbps in 16 kbps steps. FLAC ignores bitrate. Rufin uses server transcoding when suitable and otherwise encodes the original locally. Changing quality replaces managed downloads through the existing queue and keeps the previous copy until replacement succeeds.",
     "POST /api/downloads/clear-artwork-cache": "Clear the artwork cache across sources. Keeps artwork for completed and active music downloads, authored playlist artwork and source files. Takes no body and returns after clearing.",
     "POST /api/downloads/clear-lyrics-cache": "Clear cached lyrics across sources. Keeps lyrics for completed and active music downloads, edited lyrics and source files. Takes no body and returns after clearing.",

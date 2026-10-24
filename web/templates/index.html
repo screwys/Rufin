@@ -181,7 +181,7 @@
         </form>
         <div id="source-progress" role="status" hidden>
           <span id="source-progress-label"></span>
-          <button type="button" id="source-download-cancel" hidden>{{ localization::tr("Cancel") }}</button>
+          <button type="button" id="source-download-dismiss" hidden>{{ localization::tr("Cancel") }}</button>
         </div>
         <div id="content" data-rendered="{{ page.connected && page.error.is_empty() }}" data-source="{{ page.source }}" data-folder="{{ page.folder() }}" tabindex="-1" aria-busy="false" hx-sync="this:replace">
           {% if !page.error.is_empty() %}<p class="empty-note" role="alert">{{ page.error }}</p>{% endif %}
@@ -463,6 +463,15 @@
       </form>
     </dialog>
     <template id="download-quality-template">{% include "download_quality.html" %}</template>
+    <template id="cache-settings-template">
+      <fieldset class="source-actions">
+        <legend>{{ localization::tr("Cache") }}</legend>
+        <div class="download-quality-controls">
+          <label>{{ localization::tr("Artwork") }}<select data-cache="artwork" disabled><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select></label>
+          <label>{{ localization::tr("Lyrics") }}<select data-cache="lyrics" disabled><option value="false">{{ localization::tr("Download Lazily") }}</option><option value="true">{{ localization::tr("Download Automatically") }}</option></select></label>
+        </div>
+      </fieldset>
+    </template>
     <dialog id="source-dialog" aria-labelledby="source-title">
       <form id="source-form" hx-post="/api/sources" hx-ext="source-form" hx-swap="none" hx-disabled-elt="find button[type='submit']" hx-sync="this:drop">
         <h2 id="source-title">{{ localization::tr("Add Source") }}</h2>

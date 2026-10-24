@@ -51,6 +51,24 @@ impl TryFrom<LyricsScalar> for LyricsCacheRow {
 }
 
 impl Database {
+    pub async fn uncached_source_lyrics_page(
+        &self,
+        source: crate::SourceKey,
+        input: [u8; 32],
+        after: Option<crate::TrackKey>,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<(crate::TrackKey, String)>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        Ok(sqlx::query_as("SELECT track_key,media_uri FROM tracks track
+            WHERE source_key=?1 AND indexed=1 AND track_key>?2
+              AND NOT EXISTS(SELECT 1 FROM lyrics_cache lyrics
+                WHERE lyrics.media_uri=track.media_uri AND lyrics.authority='source'
+                  AND lyrics.cache_input_digest=CASE WHEN track.media_uri LIKE 'rufin:source/%' THEN ?3 ELSE zeroblob(32) END)
+            ORDER BY track_key LIMIT 128")
+            .bind(source).bind(after.map_or(0, crate::TrackKey::raw)).bind(input.as_slice())
+            .fetch_all(&mut *connection).await?)
+    }
+
     pub async fn clear_lyrics_cache(&self, active_media_uris: &[String]) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;

@@ -16,9 +16,10 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/sources/library", post(select_library))
         .route("/api/sources/edit", get(editable))
         .route("/api/sources/refresh", post(select))
-        .route("/api/sources/download-artwork", post(source_download))
-        .route("/api/sources/download-lyrics", post(source_download))
-        .route("/api/sources/cancel-download", post(source_download))
+        .route(
+            "/api/downloads/cache-settings",
+            get(cache_settings).post(cache_settings),
+        )
         .route(
             "/api/downloads/clear-artwork-cache",
             post(clear_artwork_cache),
@@ -272,32 +273,41 @@ pub(super) async fn select(
     }
 }
 
-async fn source_download(
+async fn cache_settings(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
-    let path = request.uri().path().to_owned();
-    let input: Identifier = body(request).await?;
-    if input.id.is_empty() {
-        return Err(bad_request("id is required"));
+    #[derive(Deserialize)]
+    struct Input {
+        artwork: bool,
+        lyrics: bool,
     }
-    let id = sources::SourceId::new(input.id);
-    if path.ends_with("/download-artwork") {
-        products.source.download_artwork(id).map_err(bad_request)?;
-    } else if path.ends_with("/download-lyrics") {
-        products.source.download_lyrics(id).map_err(bad_request)?;
-    } else {
-        products.source.cancel_source_download(id);
+    if request.method() == hyper::Method::POST {
+        let input: Input = body(request).await?;
+        products
+            .settings
+            .update_preferences(|settings| {
+                settings.application.download_artwork_automatically = input.artwork;
+                settings.application.download_lyrics_automatically = input.lyrics;
+                Ok(())
+            })
+            .map_err(bad_request)?;
     }
-    Ok(accepted())
+    let settings = products.settings.load();
+    Ok(json_response(
+        StatusCode::OK,
+        json!({
+            "artwork": settings.application.download_artwork_automatically,
+            "lyrics": settings.application.download_lyrics_automatically,
+        }),
+    ))
 }
 
 async fn clear_artwork_cache(
     State(products): State<ProductHandles>,
 ) -> Result<Response<Body>, Error> {
     products
-        .downloads
-        .clear_artwork_cache()
+        .clear_cached_data(rufin_core::runtime::CacheKind::Artwork)
         .await
         .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"cleared": true})))
@@ -307,8 +317,7 @@ async fn clear_lyrics_cache(
     State(products): State<ProductHandles>,
 ) -> Result<Response<Body>, Error> {
     products
-        .downloads
-        .clear_lyrics_cache()
+        .clear_cached_data(rufin_core::runtime::CacheKind::Lyrics)
         .await
         .map_err(bad_request)?;
     Ok(json_response(StatusCode::OK, json!({"cleared": true})))

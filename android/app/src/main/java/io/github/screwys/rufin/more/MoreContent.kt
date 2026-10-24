@@ -48,7 +48,7 @@ internal enum class MoreDestination(val title: String) {
         Root -> null
         Routes, HomeSettings -> Customization
         Lyrics, Visualizer -> Playback
-        BackupSettings -> Storage
+        BackupSettings -> Privacy
         OverviewSettings -> General
         DownloadSettings -> Downloads
         else -> Root
@@ -107,7 +107,7 @@ internal fun MoreContent(model: RufinConnection, preferences: PreferencesConnect
         MoreDestination.HomeSettings -> HomeSettingsPage(preferences)
         MoreDestination.Customization -> CustomizationSettingsPage(preferences, browse, player)
         MoreDestination.Theme -> ThemeSettingsPage(preferences)
-        MoreDestination.Storage -> StorageSettingsPage(model, preferences) { navigate(MoreDestination.BackupSettings) }
+        MoreDestination.Storage -> StorageSettingsPage(model, preferences)
         MoreDestination.Routes -> RouteSettingsPage(browse)
         MoreDestination.Equalizer -> PlayerSettingsContent(player, PlayerSettingsPage.EQUALIZER)
         MoreDestination.Lyrics -> PlayerSettingsContent(player, PlayerSettingsPage.LYRICS)

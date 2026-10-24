@@ -16,6 +16,8 @@ pub struct TrackObservation {
     pub cue_end_millis: Option<i64>,
     pub first_seen_at: Option<i64>,
     pub loudness_analysis_key: [u8; 32],
+    pub source_lyrics: Option<String>,
+    pub source_lyrics_input: [u8; 32],
     pub artwork_binding: Option<Vec<u8>>,
     pub user_data: NativeUserState,
     pub folders: Option<Vec<String>>,

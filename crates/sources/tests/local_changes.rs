@@ -414,12 +414,6 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     )
     .await
     .unwrap();
-    sqlx::query("UPDATE local_files SET parse_version=16,parsed_stamp=json_set(parsed_stamp,'$[3]',16) WHERE kind IN ('media','cue')")
-        .execute(&mut stored)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE local_file_observations SET parsed_stamp=json_set(parsed_stamp,'$[3]',16),accepted_facts=(SELECT parsed_stamp FROM local_files file WHERE file.local_file_key=local_file_observations.local_file_key) WHERE local_file_key IN(SELECT local_file_key FROM local_files WHERE kind IN('media','cue'))")
-        .execute(&mut stored).await.unwrap();
     sqlx::query("UPDATE tracks SET metadata=jsonb_remove(metadata,'$.album_tags')")
         .execute(&mut stored)
         .await
@@ -446,7 +440,7 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
             .into_iter()
             .find(|file| file.kind == library::LocalFileKind::Media)
             .unwrap();
-        assert_eq!(observation.parse_version, Some(16));
+        assert_eq!(observation.parse_version, Some(19));
         assert_eq!(observation.state, library::LocalFileState::Accepted);
         database.close().await.unwrap();
     }

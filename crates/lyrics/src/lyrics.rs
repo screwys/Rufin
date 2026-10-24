@@ -11,7 +11,7 @@ use tracing::debug;
 use crate::{
     ExternalLyricsProvider, LyricsBundle as Lyrics, LyricsCue, LyricsCueLine, LyricsDocument,
     LyricsLine as LyricLine, LyricsOrigin, LyricsRole, LyricsSearchContent, LyricsSearchResult,
-    normalize_language_tag,
+    UserPreferences, normalize_language_tag,
 };
 
 const EXTERNAL_LYRICS_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -1790,13 +1790,34 @@ pub struct LocalLyricsInput {
     pub cue_track: bool,
 }
 
-pub fn local_sidecar_lyrics(input: &LocalLyricsInput) -> Option<Lyrics> {
-    for path in local_sidecar_candidates(input) {
-        if let Some(lyrics) = lyrics_from_sidecar_file(&path) {
-            return Some(lyrics);
-        }
+pub fn local_file_lyrics(
+    input: &LocalLyricsInput,
+    preferences: &UserPreferences,
+    embedded: impl FnOnce() -> Option<Lyrics>,
+) -> Option<Lyrics> {
+    let sidecar = local_sidecar_candidates(input)
+        .iter()
+        .find_map(|path| lyrics_from_sidecar_file(path));
+    if input.cue_track
+        || sidecar
+            .as_ref()
+            .is_some_and(|lyrics| lyrics.acquisition_complete(preferences))
+    {
+        return sidecar;
     }
-    None
+    match embedded() {
+        Some(embedded)
+            if sidecar.as_ref().is_none_or(|current| {
+                !embedded.is_instrumental()
+                    && (embedded.acquisition_complete(preferences)
+                        || !current.satisfies_preferences(preferences)
+                            && embedded.satisfies_preferences(preferences))
+            }) =>
+        {
+            Some(embedded)
+        }
+        _ => sidecar,
+    }
 }
 
 pub fn lyrics_from_edited_text(content: &str) -> Option<Lyrics> {
@@ -1814,7 +1835,7 @@ fn lyrics_from_sidecar_file(path: &Path) -> Option<Lyrics> {
     let content = read_text_file_bounded(path, LOCAL_LYRICS_MAX_BYTES).ok()?;
     lyrics_from_local_text(&content)
 }
-fn local_sidecar_candidates(input: &LocalLyricsInput) -> Vec<PathBuf> {
+pub fn local_sidecar_candidates(input: &LocalLyricsInput) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if !input.cue_track {
         paths.push(input.audio_path.with_extension("lrc"));

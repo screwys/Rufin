@@ -51,6 +51,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Do you want to cache all lyrics automatically? You can also enable this from "
+"Preferences -> Storage"
+msgstr ""
+
+msgid ""
 "Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
@@ -630,10 +635,19 @@ msgstr ""
 msgid "Browse"
 msgstr ""
 
+msgid "By Lyrics"
+msgstr ""
+
+msgid "By Title"
+msgstr ""
+
 msgid "C"
 msgstr ""
 
 msgid "CUE file"
+msgstr ""
+
+msgid "Cache"
 msgstr ""
 
 msgid "Cached data"
@@ -793,6 +807,9 @@ msgid "Clear lyrics cache"
 msgstr ""
 
 msgid "Clear queue"
+msgstr ""
+
+msgid "Clear this cache?"
 msgstr ""
 
 msgid "Clear title"
@@ -1275,16 +1292,16 @@ msgstr ""
 msgid "Done"
 msgstr ""
 
+msgid "Download Automatically"
+msgstr ""
+
 msgid "Download Folder"
 msgstr ""
 
+msgid "Download Lazily"
+msgstr ""
+
 msgid "Download Queue"
-msgstr ""
-
-msgid "Download artwork"
-msgstr ""
-
-msgid "Download lyrics"
 msgstr ""
 
 msgid "Download quality"
@@ -1404,6 +1421,9 @@ msgid "Enable automatic backups"
 msgstr ""
 
 msgid "Enable background image"
+msgstr ""
+
+msgid "Enable caching lyrics"
 msgstr ""
 
 msgid "Enable partial star ratings"

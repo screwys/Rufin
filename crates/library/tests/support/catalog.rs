@@ -114,7 +114,7 @@ CREATE VIEW effective_album_release_types AS SELECT * FROM album_release_types;
         .await
         .unwrap();
     let tables: Vec<(String, String)> = sqlx::query_as(
-        "SELECT name,sql FROM accepted.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN('folder_children','collection_album_index','collection_totals','playlist_genres')",
+        "SELECT name,sql FROM accepted.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB 'lyrics_fts*' AND name NOT IN('folder_children','collection_album_index','collection_totals','playlist_genres','lyrics_documents')",
     )
     .fetch_all(&mut *connection)
     .await

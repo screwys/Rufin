@@ -278,13 +278,17 @@ pub(crate) fn read_embedded_lyrics_input(
     )
     .map_err(write_error)?
     .ok_or(SourceMetadataError::Unavailable)?;
-    Ok(tagged.tags().iter().find_map(|tag| {
+    Ok(embedded_lyrics(&tagged))
+}
+
+pub(crate) fn embedded_lyrics(tagged: &::lofty::file::TaggedFile) -> Option<String> {
+    tagged.tags().iter().find_map(|tag| {
         [ItemKey::UnsyncLyrics, ItemKey::Lyrics]
             .into_iter()
             .find_map(|key| tag.get_string(key))
             .map(ToString::to_string)
             .filter(|lyrics| !lyrics.trim().is_empty())
-    }))
+    })
 }
 
 fn set_embedded_lyrics(tag: &mut Tag, key: ItemKey, lyrics: &str) {
@@ -1103,12 +1107,47 @@ mod tests {
         set_embedded_lyrics(&mut id3, ItemKey::UnsyncLyrics, "first");
         set_embedded_lyrics(&mut id3, ItemKey::UnsyncLyrics, "updated");
         assert_eq!(id3.get_string(ItemKey::UnsyncLyrics), Some("updated"));
+        let mut tag = Vec::new();
+        id3.dump_to(&mut tag, WriteOptions::default()).unwrap();
+        let mut audio = silent_wav();
+        audio.extend_from_slice(b"id3 ");
+        audio.extend_from_slice(&(tag.len() as u32).to_le_bytes());
+        audio.extend_from_slice(&tag);
+        if tag.len() % 2 != 0 {
+            audio.push(0);
+        }
+        let size = (audio.len() - 8) as u32;
+        audio[4..8].copy_from_slice(&size.to_le_bytes());
+        fs::write(&path, audio).unwrap();
+        let crate::file::media::MediaRead::Accepted(scanned) =
+            crate::file::local::media::read_media(
+                &mut crate::file::media::Worker::default(),
+                path,
+                None,
+            )
+        else {
+            panic!("tagged WAV was not read");
+        };
+        let bundle = lyrics::LyricsBundle::from_cache_payload(
+            scanned
+                .into_observation(0)
+                .source_lyrics
+                .as_deref()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            lyrics::lyrics_to_lrc_text(&bundle.documents()[0], 0),
+            "updated"
+        );
     }
 
     #[tokio::test]
     async fn sidecar_lyrics_replace_the_neighbor_without_changing_audio() {
+        use std::sync::{Arc, atomic::AtomicBool};
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("track.wav");
+        let root = directory.path().canonicalize().unwrap();
+        let path = root.join("track.wav");
         let audio = silent_wav();
         fs::write(&path, &audio).unwrap();
         let uri = url::Url::from_file_path(&path).unwrap();
@@ -1119,7 +1158,92 @@ mod tests {
             fs::read_to_string(path.with_extension("lrc")).unwrap(),
             "[00:02.000]Updated"
         );
-        assert_eq!(fs::read(path).unwrap(), audio);
+        assert_eq!(fs::read(&path).unwrap(), audio);
+        let database = library::Database::open(root.join("lyrics.sqlite"))
+            .await
+            .unwrap();
+        let (configuration, source, _) = crate::Source::connect(
+            crate::SourceId::new("lyrics-scan"),
+            crate::SourceSetup::Local {
+                roots: vec![root.clone()],
+            },
+            "",
+        )
+        .await
+        .unwrap()
+        .into_parts();
+        let source = Arc::new(source);
+        database
+            .reconcile_source(
+                &configuration.source_id,
+                &configuration.kind,
+                &configuration.name,
+            )
+            .await
+            .unwrap();
+        source
+            .acquire_catalog(&database, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .await
+            .unwrap();
+        let cancellation = library::ReadCancellation::new();
+        let result = database
+            .search_tracks_by_lyrics(&library::SearchRequest::new("updated"), &cancellation)
+            .await
+            .unwrap();
+        assert_eq!(
+            result.tracks.len(),
+            1,
+            "sidecars are searchable after scanning"
+        );
+        source
+            .write_lyrics(&database, uri.as_str(), "[00:02.000]Replacement", true)
+            .await
+            .unwrap();
+        assert_eq!(
+            database
+                .search_tracks_by_lyrics(&library::SearchRequest::new("replacement"), &cancellation)
+                .await
+                .unwrap()
+                .tracks
+                .len(),
+            1
+        );
+        assert!(
+            database
+                .search_tracks_by_lyrics(&library::SearchRequest::new("updated"), &cancellation)
+                .await
+                .unwrap()
+                .tracks
+                .is_empty()
+        );
+        fs::remove_file(path.with_extension("lrc")).unwrap();
+        source
+            .acquire_catalog(&database, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .await
+            .unwrap();
+        assert!(
+            database
+                .search_tracks_by_lyrics(&library::SearchRequest::new("replacement"), &cancellation)
+                .await
+                .unwrap()
+                .tracks
+                .is_empty()
+        );
+        fs::write(path.with_extension("lrc"), "[00:03.000]Returned").unwrap();
+        source
+            .acquire_catalog(&database, &|_| {}, Arc::new(AtomicBool::new(false)), true)
+            .await
+            .unwrap();
+        assert_eq!(
+            database
+                .search_tracks_by_lyrics(&library::SearchRequest::new("returned"), &cancellation)
+                .await
+                .unwrap()
+                .tracks
+                .len(),
+            1
+        );
+        assert_eq!(fs::read(&path).unwrap(), audio);
     }
 
     #[tokio::test]
@@ -1385,10 +1509,7 @@ mod tests {
                     .unwrap();
             catalog
                 .write_file_observations(
-                    &observation
-                        .into_iter()
-                        .map(|row| (row, Vec::new()))
-                        .collect::<Vec<_>>(),
+                    &observation.into_iter().collect::<Vec<_>>(),
                     vec![facts],
                     true,
                 )
@@ -1477,7 +1598,6 @@ mod tests {
             .unwrap()
             .pop()
             .unwrap();
-        physical.parse_version = Some(14);
         physical.root = audio
             .ancestors()
             .last()

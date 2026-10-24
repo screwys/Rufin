@@ -1,14 +1,22 @@
 use crate::runtime::SelectedLibrary;
-use library::{ReadCancellation, SearchRequest, SearchResults};
+use library::{ReadCancellation, SearchMode, SearchRequest, SearchResults};
 
 pub async fn acquire_search(
     owner: &super::SourceOwner,
     database: &library::Database,
-    selected: &SelectedLibrary,
+    selected: Option<&SelectedLibrary>,
+    mode: SearchMode,
     query: String,
     limit: usize,
     cancellation: ReadCancellation,
 ) -> Result<SearchResults, String> {
+    if mode == SearchMode::Lyrics {
+        return database
+            .search_tracks_by_lyrics(&SearchRequest::with_limit(query, limit), &cancellation)
+            .await
+            .map_err(|error| error.to_string());
+    }
+    let selected = selected.ok_or_else(|| "No source selected".to_owned())?;
     if selected.source_id.as_str() != sources::LOCAL_LIBRARY_SOURCE_ID
         && let Some(source) = owner.cached_client(&selected.source_id)
     {

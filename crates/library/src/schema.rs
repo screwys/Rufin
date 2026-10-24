@@ -14,7 +14,7 @@ pub(crate) async fn pragma(
 }
 pub(crate) const STORE_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 57;
+PRAGMA user_version = 58;
 
 CREATE TABLE IF NOT EXISTS queue_contexts (
     context_key INTEGER PRIMARY KEY,
@@ -732,8 +732,12 @@ CREATE TABLE IF NOT EXISTS native_playlist_pending (
 "#;
 
 pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
+    crate::lyrics_tokenizer::register(connection).await?;
     let version = pragma(connection, "user_version").await?;
-    if !matches!(version, 0 | 47 | 48 | 49 | 50 | 51 | 53 | 54 | 55 | 56 | 57) {
+    if !matches!(
+        version,
+        0 | 47 | 48 | 49 | 50 | 51 | 53 | 54 | 55 | 56 | 57 | 58
+    ) {
         return Err(crate::LibraryError::Migration(format!(
             "unsupported library schema {version}"
         )));
@@ -794,6 +798,7 @@ pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> Lib
     sqlx::raw_sql(STORE_SCHEMA)
         .execute(&mut *transaction)
         .await?;
+    crate::lyrics_search::initialize(&mut transaction, version < 58).await?;
     for table in ["local_files", "local_file_access_roots"] {
         if !sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name='root_id')",

@@ -849,13 +849,13 @@ async fn source_artwork_pages_distinct_bindings() {
     let cancel = ReadCancellation::new();
     let first = fixture
         .database
-        .source_artwork_page(fixture.source, None, None, 1, &cancel)
+        .source_artwork_page(fixture.source, None, 1, &cancel)
         .await
         .expect("first artwork page");
     assert_eq!(first.len(), 1);
     let second = fixture
         .database
-        .source_artwork_page(fixture.source, None, Some(&first[0]), 128, &cancel)
+        .source_artwork_page(fixture.source, Some(&first[0]), 128, &cancel)
         .await
         .expect("resume artwork page");
     let mut expected_first = [binding("binding-a"), binding("binding-b")];
@@ -911,7 +911,6 @@ async fn source_artwork_pages_distinct_bindings() {
             .database
             .source_artwork_page(
                 fixture.source,
-                None,
                 actual.last().map(Vec::as_slice),
                 128,
                 &cancel,
@@ -961,31 +960,6 @@ async fn source_artwork_pages_distinct_bindings() {
         [false, true, false]
     );
     retention.finish().await.unwrap();
-    let scoped = fixture
-        .database
-        .source_artwork_page(fixture.source, Some(fixture.folder), None, 128, &cancel)
-        .await
-        .unwrap();
-    let mut scoped_expected = vec![
-        binding("binding-a"),
-        binding("binding-b"),
-        binding("binding-folder"),
-        binding("binding-playlist"),
-    ];
-    scoped_expected.sort();
-    assert_eq!(scoped, scoped_expected);
-    let scoped_tracks = fixture
-        .database
-        .source_track_uri_page(fixture.source, Some(fixture.folder), None, &cancel)
-        .await
-        .unwrap();
-    assert_eq!(
-        scoped_tracks
-            .iter()
-            .map(|(key, _)| *key)
-            .collect::<Vec<_>>(),
-        fixture.tracks
-    );
 }
 
 #[tokio::test]

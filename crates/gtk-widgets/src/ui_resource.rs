@@ -94,6 +94,7 @@ pub const RECYCLED_TEXT_CELL_RESOURCE: &str =
 
 pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     LYRICS_EDITOR_RESOURCE,
+    LYRICS_SNIPPET_RESOURCE,
     SOURCE_PICKER_RESOURCE,
     TEXT_SLIDE_RESOURCE,
     DISPLAY_SETTINGS_RESOURCE,
@@ -192,3 +193,5 @@ mod resource_tests {
         super::verify_icons().expect("compiled icon resources");
     }
 }
+
+pub const LYRICS_SNIPPET_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/lyrics_snippet.ui";

@@ -138,6 +138,18 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
             .await
             .unwrap();
         assert_eq!(rows.len(), 2);
+        let lyrics = database
+            .search_tracks_by_lyrics(
+                &library::SearchRequest::new("lyric line"),
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            lyrics.tracks.len(),
+            1,
+            "WebDAV scans index sidecars without opening lyrics"
+        );
         let requests = server.received_requests().await.unwrap();
         for name in ["/a.wav", "/b.wav", "/c.wav"] {
             assert!(
@@ -495,14 +507,6 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
             )
             .await
             .unwrap();
-            sqlx::query("UPDATE local_files SET parse_version=7,parsed_stamp=json_set(parsed_stamp,'$[3]',7) WHERE kind IN ('media','cue')")
-                .execute(&mut stored)
-                .await
-                .unwrap();
-            sqlx::query("UPDATE local_file_observations SET parsed_stamp=json_set(parsed_stamp,'$[3]',7),accepted_facts=json_set(accepted_facts,'$[3]',7) WHERE local_file_key IN(SELECT local_file_key FROM local_files WHERE kind IN('media','cue'))")
-                .execute(&mut stored)
-                .await
-                .unwrap();
             sqlx::query("UPDATE tracks SET metadata=jsonb_remove(metadata,'$.album_tags')")
                 .execute(&mut stored)
                 .await
@@ -523,7 +527,7 @@ async fn dav_inventory_round_trip(sync_supported: bool) {
                 .into_iter()
                 .find(|file| file.kind == library::LocalFileKind::Media)
                 .unwrap();
-            assert_eq!(observation.parse_version, Some(7));
+            assert_eq!(observation.parse_version, Some(super::scan::PARSER_VERSION));
             assert_eq!(observation.state, library::LocalFileState::Accepted);
         }
         if round == 3 {

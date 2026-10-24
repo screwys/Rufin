@@ -31,4 +31,12 @@
       </object>
     </child>
   </object>
+  <object class="AdwNavigationView" id="navigation">
+    <child>
+      <object class="AdwNavigationPage">
+        <property name="title" translatable="yes">Privacy &amp; Security</property>
+        <property name="child">privacy_page</property>
+      </object>
+    </child>
+  </object>
 </interface>

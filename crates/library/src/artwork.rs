@@ -1083,7 +1083,6 @@ impl Database {
     pub async fn source_artwork_page(
         &self,
         source: SourceKey,
-        folder: Option<FolderKey>,
         after_binding: Option<&[u8]>,
         limit: usize,
         cancellation: &ReadCancellation,
@@ -1117,32 +1116,6 @@ impl Database {
                 .push(" WHERE source_key=")
                 .push_bind(source)
                 .push(format!(" AND {column} IS NOT NULL"));
-            if let Some(folder) = folder {
-                let members = format!(
-                    "SELECT track_key FROM track_folders WHERE folder_key={}",
-                    folder.raw()
-                );
-                let predicate = match table {
-                    "tracks" => format!("track_key IN ({members})"),
-                    "albums" => format!(
-                        "album_key IN (SELECT album_key FROM tracks WHERE track_key IN ({members}))"
-                    ),
-                    "artists" => format!(
-                        "artist_key IN (SELECT artist_key FROM track_artists WHERE track_key IN ({members}) UNION SELECT artist_key FROM album_artists WHERE album_key IN (SELECT album_key FROM tracks WHERE track_key IN ({members})))"
-                    ),
-                    "genres" => format!(
-                        "genre_key IN (SELECT genre_key FROM track_genres WHERE track_key IN ({members}) UNION SELECT genre_key FROM album_genres WHERE album_key IN (SELECT album_key FROM tracks WHERE track_key IN ({members})))"
-                    ),
-                    "folders" => format!(
-                        "folder_key={} OR folder_key IN (SELECT folder_key FROM track_folders WHERE track_key IN ({members}))",
-                        folder.raw()
-                    ),
-                    // Native playlists can span the server's music folders.
-                    "playlists" => "1".into(),
-                    _ => unreachable!(),
-                };
-                query.push(" AND (").push(predicate).push(")");
-            }
             if let Some(after) = after_binding {
                 query.push(format!(" AND {column}>")).push_bind(after);
             }

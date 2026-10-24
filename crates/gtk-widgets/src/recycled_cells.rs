@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -9,6 +9,7 @@ use crate::artwork::{ArtworkTile, ArtworkTileWeak};
 use crate::{downloads::DownloadsState, route::Route};
 
 use crate::detail_links::{DetailLinkBinding, DetailLinks};
+use crate::lyrics_snippet::LyricsSnippetView;
 
 pub const ROW_ACTIONS_WIDTH: i32 = 44;
 
@@ -162,6 +163,7 @@ pub mod text_imp {
         #[template_child]
         pub(super) label: TemplateChild<gtk::Label>,
         pub(super) links: RefCell<Option<DetailLinkBinding>>,
+        pub(super) lyrics: OnceCell<LyricsSnippetView>,
     }
 
     #[glib::object_subclass]
@@ -205,6 +207,15 @@ impl RecycledTextCell {
         self.imp().label.get()
     }
 
+    pub fn lyrics(&self) -> &LyricsSnippetView {
+        self.imp().lyrics.get_or_init(|| {
+            let snippet = LyricsSnippetView::new();
+            self.set_orientation(gtk::Orientation::Vertical);
+            self.append(&snippet);
+            snippet
+        })
+    }
+
     pub fn enable_links(&self, navigate: Rc<dyn Fn(Route)>) {
         self.imp()
             .links
@@ -218,6 +229,9 @@ impl RecycledTextCell {
     }
 
     pub fn clear(&self) {
+        if let Some(lyrics) = self.imp().lyrics.get() {
+            lyrics.bind(None);
+        }
         if let Some(binding) = self.imp().links.borrow().as_ref() {
             binding.clear();
         } else {
@@ -272,12 +286,15 @@ pub mod merged_imp {
         #[template_child]
         pub(super) cover: TemplateChild<RecycledArtworkCell>,
         #[template_child]
+        pub(super) labels: TemplateChild<gtk::Box>,
+        #[template_child]
         pub(super) title_row: TemplateChild<gtk::Box>,
         #[template_child]
         pub(super) title: TemplateChild<gtk::Label>,
         #[template_child]
         pub(super) subtitle: TemplateChild<gtk::Label>,
         pub(super) links: RefCell<Option<DetailLinkBinding>>,
+        pub(super) lyrics: OnceCell<LyricsSnippetView>,
         pub(super) downloaded: RefCell<Option<gtk::Image>>,
     }
 
@@ -342,6 +359,14 @@ impl RecycledMergedCell {
         imp.links
             .replace(Some(DetailLinkBinding::new(&imp.subtitle, navigate)));
         cell
+    }
+
+    pub fn lyrics(&self) -> &LyricsSnippetView {
+        self.imp().lyrics.get_or_init(|| {
+            let snippet = LyricsSnippetView::new();
+            self.imp().labels.append(&snippet);
+            snippet
+        })
     }
 
     pub fn cover(&self) -> ArtworkTile {

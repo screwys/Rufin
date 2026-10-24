@@ -59,6 +59,9 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -572,6 +575,16 @@ private fun BrowseTrackRow(item: BrowseItem, player: PlayerConnection,
             BrowseTitle(item, player = player)
             Text(item.row.subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            item.row.lyricsSnippet?.let { snippet ->
+                val accent = MaterialTheme.colorScheme.primary
+                Text(buildAnnotatedString {
+                    snippet.parts.forEach { part ->
+                        if (part.highlighted) withStyle(SpanStyle(color = accent, fontWeight = FontWeight.Bold)) { append(part.text) }
+                        else append(part.text)
+                    }
+                }, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
                 if (item.row.kind == "track" && item.row.durationMillis > 0UL) Text(browseDuration(item.row.durationMillis),

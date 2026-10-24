@@ -10,11 +10,11 @@ use crate::file::remote::input::{FileInput, FileInputServer};
 use crate::file::{check_cancelled, media};
 use crate::{LocalImageRef, SourceError, SourceReadProgress, SourceReadStage, SourceResult};
 
-pub(crate) const PARSER_VERSION: i64 = 9;
+pub(crate) const PARSER_VERSION: i64 = 10;
 
 pub(crate) fn reusable_parser_version(version: Option<i64>) -> bool {
-    // Earlier accepted metadata remains usable; version 9 reconsiders negative audio discovery.
-    matches!(version, Some(7..=9))
+    // Older observations have not read lyrics yet.
+    version == Some(PARSER_VERSION)
 }
 
 pub(crate) fn audio_revision(
@@ -26,7 +26,8 @@ pub(crate) fn audio_revision(
     hash.update(path.as_bytes());
     hash.update(revision.unwrap_or_default().as_bytes());
     hash.update(&size.unwrap_or_default().to_le_bytes());
-    hash.update(&PARSER_VERSION.to_le_bytes());
+    // Lyrics indexing does not change the interpreted audio.
+    hash.update(&9_i64.to_le_bytes());
     hash
 }
 
@@ -78,11 +79,12 @@ impl FileSource {
 
     pub(crate) async fn read_saved_file(
         &self,
+        database: &library::Database,
         media_uri: &str,
         relative: &str,
         input: &Arc<FileInputServer>,
         temporary: &std::path::Path,
-    ) -> SourceResult<(LocalFileWrite, library::TrackObservation)> {
+    ) -> SourceResult<((LocalFileWrite, Vec<String>), library::TrackObservation)> {
         let (_, _, object_id) =
             library::source_entity_parts(media_uri).ok_or(SourceError::NotFound)?;
         let mut observation = self.stat(input, relative).await?;
@@ -92,6 +94,8 @@ impl FileSource {
             relative.to_owned()
         };
         let mut track = media::read_saved_media(temporary, display_path.into()).await?;
+        self.read_track_lyrics(database, relative, &mut track)
+            .await?;
         track.observe_images(&mut observation)?;
         observation.state = LocalFileState::Accepted;
         track.local_artwork = track
@@ -105,12 +109,14 @@ impl FileSource {
             });
         track.track.object_id = object_id;
         self.locate_track(&mut track, &observation);
+        let observation = (observation, std::mem::take(&mut track.lyrics_paths));
         Ok((observation, track.into_observation(media::accepted_at())))
     }
 
     pub(crate) fn locate_track(&self, track: &mut media::ScannedTrack, file: &LocalFileWrite) {
         track.track.source_path = Some(file.path.clone());
         track.track.media_uri = None;
+        track.track.source_lyrics_input = self.lyrics_input;
         track.audio_revision =
             audio_revision(&file.path, file.revision.as_deref(), file.size_bytes);
         if let Some(artwork) = &mut track.local_artwork {
@@ -306,12 +312,25 @@ impl FileSource {
             let candidates = database
                 .source_file_reuse_candidates(source_id, &observations)
                 .await?;
+            if self.document_access().is_some() {
+                self.observe_lyrics_dependencies(
+                    catalog,
+                    &candidates
+                        .iter()
+                        .flat_map(|file| file.dependencies.iter().cloned())
+                        .collect::<Vec<_>>(),
+                )
+                .await?;
+            }
             let paths = observations
                 .iter()
                 .map(|file| file.path.clone())
                 .collect::<Vec<_>>();
             let dependencies = database
                 .source_dependency_paths(source_id, &paths, stamp, true)
+                .await?;
+            let changed = database
+                .source_changed_file_dependencies(source_id, &paths)
                 .await?;
             let files = observations
                 .into_iter()
@@ -321,11 +340,16 @@ impl FileSource {
                             && file.revision.is_some()
                             && old.revision == file.revision
                             && reusable_parser_version(old.parse_version)
+                            && !changed.contains(&old.path)
                             && (old.state == LocalFileState::Rejected
                                 && old.parse_version == Some(PARSER_VERSION)
                                 || old.state == LocalFileState::Accepted && old.current_output)
                     });
-                    (file, reusable.map(|old| (old.state, old.parse_version)))
+                    (
+                        file,
+                        reusable
+                            .map(|old| (old.state, old.parse_version, old.dependencies.clone())),
+                    )
                 })
                 .collect::<Vec<_>>();
             let mut files = stream::iter(files.into_iter().enumerate().map(
@@ -336,7 +360,7 @@ impl FileSource {
                         let parsed = if dependency || reusable.is_some() || cancelled() {
                             None
                         } else {
-                            Some(self.read_audio(&file, worker).await)
+                            Some(self.read_audio(database, &file, worker).await)
                         };
                         (file, reusable, parsed)
                     }
@@ -352,10 +376,10 @@ impl FileSource {
                     if dependencies.contains(&file.path) {
                         continue;
                     }
-                    if let Some((state, version)) = reusable {
+                    if let Some((state, version, dependencies)) = reusable {
                         file.state = state;
                         file.parse_version = version;
-                        observations.push((file, vec![]));
+                        observations.push((file, dependencies));
                         if state == LocalFileState::Accepted {
                             completed += 1;
                             if reported.elapsed() >= Duration::from_millis(100) {
@@ -419,8 +443,12 @@ impl FileSource {
                             track.observe_images(&mut file)?;
                             self.locate_track(&mut track, &file);
                             file.state = LocalFileState::Accepted;
+                            if track.lyrics.is_none() {
+                                file.parse_version = None;
+                            }
+                            let dependencies = track.lyrics_paths.clone();
                             accepted.push(track.into_observation(media::accepted_at()));
-                            observations.push((file, vec![]));
+                            observations.push((file, dependencies));
                             completed += 1;
                             if reported.elapsed() >= Duration::from_millis(100) {
                                 report(completed);
@@ -443,6 +471,16 @@ impl FileSource {
             .await;
             if !observations.is_empty() {
                 check_cancelled(cancelled)?;
+                if self.document_access().is_some() {
+                    self.observe_lyrics_dependencies(
+                        catalog,
+                        &observations
+                            .iter()
+                            .flat_map(|(_, paths)| paths.iter().cloned())
+                            .collect::<Vec<_>>(),
+                    )
+                    .await?;
+                }
                 catalog
                     .write_file_observations(&observations, accepted, true)
                     .await?;
@@ -527,6 +565,7 @@ impl FileSource {
 
     pub(crate) async fn read_audio(
         &self,
+        database: &library::Database,
         file: &LocalFileWrite,
         worker: Arc<Mutex<media::Worker>>,
     ) -> SourceResult<media::MediaRead> {
@@ -548,7 +587,7 @@ impl FileSource {
         let artwork_path = file.path.clone();
         let revision = file.revision.clone().unwrap_or_default();
         let display_path = file.relative_path.clone();
-        tokio::task::spawn_blocking(move || {
+        let mut parsed = tokio::task::spawn_blocking(move || {
             let mut worker = worker.lock().unwrap_or_else(|p| p.into_inner());
             let mut parsed =
                 media::read_media_input(&mut worker, display_path.into(), &mut reader, &uri, None);
@@ -570,7 +609,14 @@ impl FileSource {
             }
         })
         .await
-        .map_err(|e| SourceError::Other(e.to_string()))
+        .map_err(|e| SourceError::Other(e.to_string()))?;
+        if let media::MediaRead::Accepted(track) = &mut parsed {
+            if let Err(error) = self.read_track_lyrics(database, &relative, track).await {
+                tracing::warn!(%error, "Could not read file lyrics");
+                track.lyrics = None;
+            }
+        }
+        Ok(parsed)
     }
 
     pub(crate) async fn list_directory(

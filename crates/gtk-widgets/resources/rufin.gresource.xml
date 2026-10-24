@@ -151,6 +151,7 @@
     <file compressed="true">routes/recycled_folder_cell.ui</file>
     <file compressed="true">routes/recycled_merged_cell.ui</file>
     <file compressed="true">routes/recycled_text_cell.ui</file>
+    <file compressed="true">routes/lyrics_snippet.ui</file>
     <file compressed="true">routes/track_row_index.ui</file>
     <file compressed="true">routes/row_actions.ui</file>
     <file compressed="true">routes/column_view_header.ui</file>

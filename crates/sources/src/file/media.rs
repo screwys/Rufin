@@ -23,6 +23,8 @@ pub(crate) struct ScannedTrack {
     pub(crate) picture_index: Option<i64>,
     pub(crate) artist_pictures: Vec<super::artwork::ArtistPicture>,
     pub(crate) audio_revision: blake3::Hasher,
+    pub(crate) lyrics_paths: Vec<String>,
+    pub(crate) lyrics: Option<lyrics::LyricsBundle>,
 }
 
 impl ScannedTrack {
@@ -40,6 +42,9 @@ impl ScannedTrack {
 
     pub(crate) fn into_observation(mut self, accepted_at: i64) -> library::TrackObservation {
         let track = &mut self.track;
+        track.source_lyrics = self
+            .lyrics
+            .map(|lyrics| lyrics.cache_payload().expect("file lyrics payload"));
         track.artwork_binding = self
             .local_artwork
             .as_ref()
@@ -262,6 +267,13 @@ pub(crate) fn read_media_input(
         audio_metadata_from_discoverer(&path, discovered.as_ref(), sidecar)
     };
     let mut track = scanned_track(&path, metadata);
+    super::lyrics::set_lyrics(
+        &mut track,
+        tagged_file
+            .as_ref()
+            .and_then(super::metadata::embedded_lyrics)
+            .and_then(|text| lyrics::lyrics_from_edited_text(&text)),
+    );
     if let Some(tagged) = tagged_file.as_ref().filter(|_| pictures_read) {
         track.picture_index = Some(
             super::artwork::best_picture_index(
@@ -724,6 +736,8 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
         picture_index: None,
         artist_pictures: Vec::new(),
         audio_revision: blake3::Hasher::new(),
+        lyrics_paths: Vec::new(),
+        lyrics: None,
     }
 }
 

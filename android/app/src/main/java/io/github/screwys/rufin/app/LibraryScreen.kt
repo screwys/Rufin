@@ -162,6 +162,8 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
     }
     val player = rememberPlayerConnection(model)
     FeedbackToast(model, player)
+    val downloadingAssets = model.sourceOperation is SourceOperation.Downloading
+    var assetProgressDismissed by remember(downloadingAssets) { mutableStateOf(false) }
     val connectState = model.connect.state
     if (model.connect.operationActive && connectState != null && connectState.pairing == null && (connectState.connecting || model.connect.visibleError != null)) {
         BackHandler { model.connect.dismissOperation() }
@@ -302,7 +304,10 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     onValueChange = { if (browse.section == AppSection.Search) browse.searchText = it else browse.filter = it },
                     singleLine = true, textStyle = MaterialTheme.typography.titleMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus(); keyboard?.hide(); searchExpanded = false }),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        if (browse.section == AppSection.Search) browse.submitSearch()
+                        focusManager.clearFocus(); keyboard?.hide(); searchExpanded = false
+                    }),
                     decorationBox = { input -> Box(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
                         if ((if (browse.section == AppSection.Search) browse.searchText else browse.filter).isBlank())
                             Text(label("Search"), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -419,8 +424,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                         }
                     }
                 }
-                model.sourceStatus?.let {
-                    val download = model.sourceOperation as? SourceOperation.Downloading
+                model.sourceStatus?.takeUnless { downloadingAssets && assetProgressDismissed }?.let {
                     val progress = model.sourceProgress
                     val total = progress?.total
                     if (progress != null && total != null && total > 0UL) {
@@ -430,7 +434,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                     } else LinearProgressIndicator(Modifier.fillMaxWidth())
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(it, Modifier.weight(1f).padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
-                        if (download != null) TextButton({ model.runAction { model.sourceOwner?.cancelSourceDownload(download.sourceId) } }) {
+                        if (downloadingAssets) TextButton({ assetProgressDismissed = true }) {
                             Text(label("Cancel"))
                         }
                     }
@@ -499,7 +503,7 @@ internal fun LibraryScreen(model: RufinConnection, preferences: PreferencesConne
                             onOpen = onOpen, onSaveLog = onSaveLog, onOutput = { outputs = true }, navigationDepth = moreStack.size)
                         }
                     } else if (browse.section == AppSection.Search) {
-                        SearchContent(browse, player, { menu = it }, { playlist = it }, { scrolled = it })
+                        SearchContent(model, preferences, browse, player, { menu = it }, { playlist = it }, { scrolled = it })
                     } else if (browse.section == AppSection.Pins) {
                         routeState.SaveableStateProvider("section:Pins") { PinsContent(model, browse, player, pinsPage) }
                     }

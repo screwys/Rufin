@@ -105,9 +105,14 @@ impl FileSource {
             && old.current_output
         {
             let input = self.input().await?;
+            self.observe_lyrics_dependencies(catalog, &old.dependencies)
+                .await?;
             for paths in old.dependencies.chunks(128) {
                 let mut current = Vec::with_capacity(paths.len());
                 for path in paths {
+                    if crate::file::lyrics::is_sidecar(path) {
+                        continue;
+                    }
                     match self.stat(&input, &self.relative(path)?).await {
                         Ok(backing) => current.push((backing, vec![])),
                         Err(SourceError::Cancelled) => return Err(SourceError::Cancelled),
@@ -151,6 +156,7 @@ impl FileSource {
         file.parse_version = Some(PARSER_VERSION);
         let relative = self.relative(&file.path)?;
         let mut dependencies = Vec::new();
+        let mut lyrics_read_failed = false;
         let parsed: SourceResult<bool> = async {
             let input = self.input().await?;
             let text = self.small_file(&input, &relative, 1024 * 1024).await?;
@@ -199,7 +205,10 @@ impl FileSource {
                 };
                 dependencies.push(backing_file.path.clone());
                 backing_file.parse_version = Some(PARSER_VERSION);
-                let mut backing = match self.read_audio(&backing_file, Arc::clone(&worker)).await {
+                let mut backing = match self
+                    .read_audio(database, &backing_file, Arc::clone(&worker))
+                    .await
+                {
                     Ok(media::MediaRead::Accepted(backing)) => backing,
                     result => {
                         failure = Some(result.err().unwrap_or_else(|| {
@@ -219,7 +228,7 @@ impl FileSource {
                 let duration = backing.track.metadata.duration_millis as u64;
                 for (chunk, cues) in entry.tracks.chunks(128).enumerate() {
                     let mut tracks = Vec::with_capacity(cues.len());
-                    let parsed: SourceResult<bool> = (|| {
+                    let parsed: SourceResult<bool> = async {
                         for (position, cue) in cues.iter().enumerate() {
                             let end = entry
                                 .tracks
@@ -239,10 +248,26 @@ impl FileSource {
                             );
                             track.track.object_id = format!("{prefix}:{}", cue.number);
                             track.track.cue_path = Some(file.path.clone());
+                            if let Err(error) = self
+                                .read_track_lyrics(database, &referenced, &mut track)
+                                .await
+                            {
+                                tracing::warn!(%error, "Could not read CUE track lyrics");
+                                track.lyrics = None;
+                                lyrics_read_failed = true;
+                            }
+                            for path in &track.lyrics_paths {
+                                if !dependencies.contains(path) {
+                                    dependencies.push(path.clone());
+                                }
+                            }
                             tracks.push(track.into_observation(media::accepted_at()));
                         }
                         Ok(true)
-                    })();
+                    }
+                    .await;
+                    self.observe_lyrics_dependencies(catalog, &dependencies)
+                        .await?;
                     check_cancelled(cancelled)?;
                     let count = tracks.len();
                     catalog.write_file_observations(&[], tracks, true).await?;
@@ -279,6 +304,9 @@ impl FileSource {
                 LocalFileState::Unreadable
             }
         };
+        if lyrics_read_failed {
+            file.parse_version = None;
+        }
         check_cancelled(cancelled)?;
         catalog
             .write_file_observations(&[(file, dependencies)], Vec::new(), true)

@@ -6,6 +6,7 @@ pub(crate) mod discovery;
 pub(crate) mod documents;
 pub(crate) mod local;
 pub(crate) mod lofty;
+pub(crate) mod lyrics;
 pub(crate) mod media;
 pub(crate) mod metadata;
 pub(crate) mod playlist;

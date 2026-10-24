@@ -17,53 +17,60 @@ use crate::{SourceError, SourceResult};
 
 const LOCAL_BATCH_SIZE: usize = 128;
 const LOCAL_CUE_MAX_BYTES: u64 = 1024 * 1024;
-pub(crate) const LOCAL_PARSER_VERSION: u32 = 18;
+pub(crate) const LOCAL_PARSER_VERSION: u32 = 19;
 
 pub(crate) fn reusable_parser_version(version: Option<i64>) -> bool {
-    // Accepted released metadata remains usable; newer readers retry rejected files.
-    matches!(version, Some(14..=18))
+    // Older observations have not read lyrics yet.
+    version == Some(i64::from(LOCAL_PARSER_VERSION))
 }
 
 pub(crate) async fn read_saved_file(
     catalog: &library::Catalog<'_>,
     media_uri: &str,
     path: &Path,
-) -> SourceResult<(Option<library::LocalFileWrite>, library::TrackObservation)> {
+) -> SourceResult<(
+    Option<(library::LocalFileWrite, Vec<String>)>,
+    library::TrackObservation,
+)> {
     let (object_id, source_path, previous) = catalog
         .database
         .saved_file_observation(catalog.source, media_uri)
         .await?
         .ok_or(SourceError::NotFound)?;
     let path = normalize_observed_path(path);
-    let mut track = media::read_saved_media(&path, path.clone()).await?;
+    let track = media::read_saved_media(&path, path.clone()).await?;
     let saved_path = path.clone();
-    let (mut observation, revision, audio_revision) = tokio::task::spawn_blocking(move || {
-        let observation = previous
-            .map(|previous| {
-                let roots = BTreeSet::from([Path::new(&previous.root)]);
-                let (mut observation, _) = file_observation(
-                    &roots,
-                    &saved_path,
-                    library::LocalFileKind::Media,
-                    library::LocalFileState::Accepted,
-                    &[],
-                )?;
-                observation.root = previous.root;
-                observation.relative_path = previous.relative_path;
-                Ok::<_, SourceError>(observation)
-            })
-            .transpose()?;
-        Ok::<_, SourceError>((
-            observation,
-            super::artwork::revision(&saved_path).unwrap_or_default(),
-            super::media::audio_revision(
-                &saved_path.to_string_lossy(),
-                &super::media::local_media_identity_path(&saved_path),
-            ),
-        ))
-    })
-    .await
-    .map_err(|error| SourceError::Other(error.to_string()))??;
+    let (mut track, mut observation, revision, audio_revision) =
+        tokio::task::spawn_blocking(move || {
+            let mut track = track;
+            crate::file::lyrics::read_local(&mut track);
+            let observation = previous
+                .map(|previous| {
+                    let roots = BTreeSet::from([Path::new(&previous.root)]);
+                    let (mut observation, _) = file_observation(
+                        &roots,
+                        &saved_path,
+                        library::LocalFileKind::Media,
+                        library::LocalFileState::Accepted,
+                        &[],
+                    )?;
+                    observation.root = previous.root;
+                    observation.relative_path = previous.relative_path;
+                    Ok::<_, SourceError>(observation)
+                })
+                .transpose()?;
+            Ok::<_, SourceError>((
+                track,
+                observation,
+                super::artwork::revision(&saved_path).unwrap_or_default(),
+                super::media::audio_revision(
+                    &saved_path.to_string_lossy(),
+                    &super::media::local_media_identity_path(&saved_path),
+                ),
+            ))
+        })
+        .await
+        .map_err(|error| SourceError::Other(error.to_string()))??;
     if let Some(observation) = &mut observation {
         track.observe_images(observation)?;
     }
@@ -82,6 +89,7 @@ pub(crate) async fn read_saved_file(
         track.track.source_path = source_path;
     }
     track.audio_revision = audio_revision;
+    let observation = observation.map(|file| (file, std::mem::take(&mut track.lyrics_paths)));
     Ok((observation, track.into_observation(media::accepted_at())))
 }
 
@@ -90,7 +98,10 @@ pub(crate) async fn read_saved_document(
     media_uri: &str,
     document_uri: &str,
     temporary: &Path,
-) -> SourceResult<(Option<library::LocalFileWrite>, library::TrackObservation)> {
+) -> SourceResult<(
+    Option<(library::LocalFileWrite, Vec<String>)>,
+    library::TrackObservation,
+)> {
     let (object_id, source_path, mut observation) = catalog
         .database
         .saved_file_observation(catalog.source, media_uri)
@@ -127,6 +138,7 @@ pub(crate) async fn read_saved_document(
             revision: entry.revision.unwrap_or_default(),
             picture_index,
         });
+    let observation = observation.map(|file| (file, std::mem::take(&mut track.lyrics_paths)));
     Ok((observation, track.into_observation(media::accepted_at())))
 }
 
@@ -156,6 +168,33 @@ pub(crate) async fn catch_up(
             break;
         }
         after = page.last().map(|file| file.local_file_key);
+        let single_files = page
+            .iter()
+            .filter(|file| {
+                local
+                    .roots()
+                    .iter()
+                    .any(|root| root == Path::new(&file.path))
+            })
+            .collect::<Vec<_>>();
+        observe_lyrics_dependencies(
+            catalog,
+            &local.roots().iter().map(PathBuf::as_path).collect(),
+            &single_files
+                .iter()
+                .flat_map(|file| file.dependencies.iter().cloned())
+                .collect::<Vec<_>>(),
+        )
+        .await?;
+        let changed = database
+            .source_changed_file_dependencies(
+                source_id,
+                &single_files
+                    .iter()
+                    .map(|file| file.path.clone())
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
         let paths = page
             .iter()
             .filter(|file| {
@@ -164,7 +203,7 @@ pub(crate) async fn catch_up(
                     .iter()
                     .any(|root| Path::new(&file.path).starts_with(root))
             })
-            .filter(|file| cached_observation_changed(file))
+            .filter(|file| cached_observation_changed(file) || changed.contains(&file.path))
             .map(|file| PathBuf::from(&file.path))
             .collect::<Vec<_>>();
         if !paths.is_empty() {
@@ -248,7 +287,13 @@ pub(crate) async fn acquire_paths(
     require_roots(database, source_id, local, &paths).await?;
     let seeds = paths
         .iter()
-        .filter(|path| roots.iter().any(|root| path.starts_with(root)))
+        .filter(|path| {
+            roots.iter().any(|root| {
+                path.starts_with(root)
+                    || crate::file::lyrics::is_sidecar(&path.to_string_lossy())
+                        && root.parent() == path.parent()
+            })
+        })
         .map(|path| path.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
     if seeds.is_empty() {
@@ -571,6 +616,12 @@ async fn acquire_exact_cue(
             }
         }
     }
+    for dependency in tracks.iter().flat_map(|track| &track.lyrics_paths) {
+        if !dependencies.contains(dependency) {
+            dependencies.push(dependency.clone());
+        }
+    }
+    observe_lyrics_dependencies(catalog, roots, &dependencies).await?;
     let accepted = tracks.len();
     let mut observations = vec![file_observation(
         roots,
@@ -582,6 +633,7 @@ async fn acquire_exact_cue(
     if dependencies_observed {
         for path in dependencies
             .iter()
+            .filter(|path| !crate::file::lyrics::is_sidecar(path))
             .map(PathBuf::from)
             .filter(|path| path.is_file() && roots.iter().any(|root| path.starts_with(root)))
         {
@@ -941,9 +993,11 @@ async fn unchanged_cue(
     {
         return Ok(None);
     }
+    observe_lyrics_dependencies(catalog, roots, &stored.dependencies).await?;
     let backing = stored
         .dependencies
         .iter()
+        .filter(|path| !crate::file::lyrics::is_sidecar(path))
         .map(PathBuf::from)
         .filter(|path| roots.iter().any(|root| path.starts_with(root)))
         .map(|path| {
@@ -1030,9 +1084,8 @@ async fn acquire_audio_batch(
         return Ok(0);
     }
     let database = catalog.database;
-    let source_id = catalog.source_id;
     let reuse = if reuse_unchanged {
-        path_reuse(database, source_id, roots, paths, explicit_rename).await?
+        path_reuse(catalog, roots, paths, explicit_rename).await?
     } else {
         PathReuse::default()
     };
@@ -1072,13 +1125,14 @@ async fn acquire_audio_batch(
     let mut reported = Instant::now();
     while let Some((path, state, read)) = reads.try_next().await? {
         if let Some(state) = state {
-            observations.push(file_observation(
-                roots,
-                &path,
-                library::LocalFileKind::Media,
-                state,
-                &[],
-            )?);
+            let mut observation =
+                file_observation(roots, &path, library::LocalFileKind::Media, state, &[])?;
+            observation.1 = reuse
+                .dependencies
+                .get(path.to_string_lossy().as_ref())
+                .cloned()
+                .unwrap_or_default();
+            observations.push(observation);
             if state == library::LocalFileState::Accepted {
                 accepted_count += 1;
                 if reported.elapsed() >= Duration::from_millis(100) {
@@ -1095,7 +1149,7 @@ async fn acquire_audio_batch(
                     &path,
                     library::LocalFileKind::Media,
                     library::LocalFileState::Accepted,
-                    &[],
+                    &track.lyrics_paths,
                 )?;
                 track.observe_images(&mut observation.0)?;
                 observations.push(observation);
@@ -1162,6 +1216,11 @@ async fn acquire_audio_batch(
         }
     }
     let facts = accepted
+        .iter()
+        .flat_map(|track| track.lyrics_paths.iter().cloned())
+        .collect::<Vec<_>>();
+    observe_lyrics_dependencies(catalog, roots, &facts).await?;
+    let facts = accepted
         .into_iter()
         .map(|track| track.into_observation(media::accepted_at()))
         .collect::<Vec<_>>();
@@ -1191,15 +1250,17 @@ fn local_workers() -> Vec<Arc<Mutex<media::Worker>>> {
 struct PathReuse {
     unchanged: BTreeMap<String, library::LocalFileState>,
     renamed: BTreeMap<String, (String, String)>,
+    dependencies: BTreeMap<String, Vec<String>>,
 }
 
 async fn path_reuse(
-    database: &library::Database,
-    source_id: &str,
+    catalog: &mut library::Catalog<'_>,
     roots: &BTreeSet<&Path>,
     paths: &[PathBuf],
     explicit_rename: Option<&(PathBuf, PathBuf)>,
 ) -> SourceResult<PathReuse> {
+    let database = catalog.database;
+    let source_id = catalog.source_id;
     let mut facts = Vec::new();
     for path in paths {
         let observation = file_observation(
@@ -1232,6 +1293,24 @@ async fn path_reuse(
     let current = database
         .source_file_reuse_candidates(source_id, &facts)
         .await?;
+    observe_lyrics_dependencies(
+        catalog,
+        roots,
+        &current
+            .iter()
+            .flat_map(|file| file.dependencies.iter().cloned())
+            .collect::<Vec<_>>(),
+    )
+    .await?;
+    let changed = database
+        .source_changed_file_dependencies(
+            source_id,
+            &facts
+                .iter()
+                .map(|file| file.path.clone())
+                .collect::<Vec<_>>(),
+        )
+        .await?;
     let mut reuse = PathReuse::default();
     for observation in facts.into_iter().take(original_count) {
         if current.iter().any(|stored| {
@@ -1239,6 +1318,7 @@ async fn path_reuse(
                 && stored.size_bytes == observation.size_bytes
                 && stored.mtime_ns == observation.mtime_ns
                 && reusable_parser_version(stored.parse_version)
+                && !changed.contains(&stored.path)
                 && (stored.state != library::LocalFileState::Rejected
                     || stored.parse_version == Some(i64::from(LOCAL_PARSER_VERSION)))
                 && (stored.state == library::LocalFileState::Rejected || stored.current_output)
@@ -1251,6 +1331,9 @@ async fn path_reuse(
                 .iter()
                 .find(|stored| stored.path == observation.path)
             {
+                reuse
+                    .dependencies
+                    .insert(observation.path.clone(), stored.dependencies.clone());
                 reuse.unchanged.insert(observation.path, stored.state);
             }
         } else if let Some(stored) = current.iter().find(|stored| {
@@ -1287,6 +1370,70 @@ async fn path_reuse(
         }
     }
     Ok(reuse)
+}
+
+async fn observe_lyrics_dependencies(
+    catalog: &mut library::Catalog<'_>,
+    roots: &BTreeSet<&Path>,
+    dependencies: &[String],
+) -> SourceResult<()> {
+    let mut observations = Vec::new();
+    let mut missing = Vec::new();
+    for path in dependencies
+        .iter()
+        .filter(|path| crate::file::lyrics::is_sidecar(path))
+        .collect::<BTreeSet<_>>()
+    {
+        let path = Path::new(path);
+        if path.is_file() {
+            let root = roots
+                .iter()
+                .copied()
+                .find(|root| path.starts_with(root))
+                .or_else(|| {
+                    roots
+                        .iter()
+                        .copied()
+                        .find(|root| root.parent() == path.parent())
+                });
+            let Some(root) = root else {
+                continue;
+            };
+            let mut candidates = roots.clone();
+            if let Some(parent) = path.parent() {
+                candidates.insert(parent);
+            }
+            let mut observation = file_observation(
+                &candidates,
+                path,
+                library::LocalFileKind::Media,
+                library::LocalFileState::Rejected,
+                &[],
+            )?;
+            observation.0.root = root.to_string_lossy().into_owned();
+            observations.push(observation);
+        } else {
+            missing.push(path.to_string_lossy().into_owned());
+        }
+    }
+    if !observations.is_empty() {
+        catalog
+            .write_file_observations(&observations, Vec::new(), true)
+            .await?;
+    }
+    if !missing.is_empty() {
+        let missing = catalog
+            .database
+            .source_files(catalog.source_id, &missing)
+            .await?
+            .into_iter()
+            .map(|file| file.path)
+            .collect::<Vec<_>>();
+        catalog
+            .remove_source_files(&missing, catalog.observed.unwrap_or(i64::MAX))
+            .await?;
+    }
+    Ok(())
 }
 
 fn resolve_cue_file_path(cue_path: &Path, value: &str) -> PathBuf {
@@ -1336,7 +1483,7 @@ fn read_cue_tracks(
             if cue.index_start_ms >= end || end > duration_millis {
                 return None;
             }
-            let track = cue_track(
+            let mut track = cue_track(
                 cue_path,
                 album_title.as_deref(),
                 album_performer.as_deref(),
@@ -1344,6 +1491,7 @@ fn read_cue_tracks(
                 end,
                 &backing,
             );
+            crate::file::lyrics::read_local(&mut track);
             tracks.push(track);
         }
     }

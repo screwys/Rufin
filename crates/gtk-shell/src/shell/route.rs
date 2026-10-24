@@ -169,6 +169,11 @@ impl RouteStack {
 }
 
 impl Shell {
+    pub(super) fn route_uses_selected_source(&self, route: &Route) -> bool {
+        route.uses_selected_source()
+            && (route != &Route::Search || self.search_session.mode() == library::SearchMode::Title)
+    }
+
     fn route_seed_window(&self, route: &Route) -> library::RouteSeedWindow {
         let mounted = self.route_viewport.mounted_route.borrow();
         let current = mounted.as_ref().filter(|entry| entry.route == *route);
@@ -196,7 +201,7 @@ impl Shell {
         render_started: RouteTiming,
     ) {
         let source = self.products.source.clone();
-        let source_scoped = route.uses_selected_source();
+        let source_scoped = self.route_uses_selected_source(&route);
         let window = if refresh_home {
             library::RouteSeedWindow::top()
         } else {
@@ -422,9 +427,9 @@ impl Shell {
         self.cancel_route_loading();
         self.show_route_loading();
         let render_started = tracing::enabled!(tracing::Level::WARN).then(Instant::now);
-        let source_scoped = route.uses_selected_source();
+        let source_scoped = self.route_uses_selected_source(&route);
         let selected = self.selected_library().as_deref().cloned();
-        if route.requires_selected_source() && selected.is_none() {
+        if source_scoped && route.requires_selected_source() && selected.is_none() {
             self.cancel_root_order_read();
             self.replace_mounted_route(route, None, render_started, |_| {
                 MountedRoute::static_widget(gtk_library::route_layout::route_empty_view(
@@ -434,6 +439,14 @@ impl Shell {
             return;
         }
         let selected = if source_scoped { selected } else { None };
+        if route == Route::Search {
+            self.cancel_root_order_read();
+            let source_id = selected.as_ref().map(|selected| selected.source_id.clone());
+            self.replace_mounted_route(route, source_id, render_started, |catalog| {
+                catalog.search_route()
+            });
+            return;
+        }
         let category = if route == Route::Favorites {
             self.navigation.favorite_category.get()
         } else if matches!(
@@ -687,12 +700,8 @@ impl Shell {
         let scope = |selected: &rufin_core::runtime::SelectedLibrary| {
             (selected.source_key, selected.music_folder_key)
         };
-        let source_scoped = self
-            .navigation
-            .routes
-            .borrow()
-            .current()
-            .uses_selected_source();
+        let source_scoped =
+            self.route_uses_selected_source(self.navigation.routes.borrow().current());
         let selected_scope = self.selected_library().as_deref().map(scope);
         self.route_viewport
             .catalog

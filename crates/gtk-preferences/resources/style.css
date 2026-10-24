@@ -139,6 +139,12 @@ toastoverlay toast {
     inset 0 1px color-mix(in srgb, white 14%, transparent);
 }
 
+.source-refresh-feedback > button {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+}
+
 .source-refresh-feedback.error {
   color: var(--error-color);
   border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
@@ -697,6 +703,38 @@ headerbar.shared-topbar .topbar-search > entry.search {
   padding: 6px 0;
   border-radius: 12px;
 }
+
+.search-modes {
+  border: 1px solid var(--accent-color);
+  border-radius: 999px;
+  padding: 2px;
+  color: var(--accent-color);
+}
+.search-popover .search-modes { margin: 0 8px 4px; }
+.lyrics-cache-prompt {
+  margin: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--card-bg-color);
+}
+.search-modes > button {
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.9em;
+}
+.search-modes > button:hover { background: color-mix(in srgb, var(--accent-color) 12%, transparent); }
+.search-modes > button:checked {
+  background: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+}
+.lyrics-snippet { color: var(--accent-color); }
+.lyrics-snippet > label { color: var(--window-fg-color); }
 
 list.search-results { background: transparent; color: inherit; }
 list.search-results .heading { font-size: 0.9em; font-weight: 600; }

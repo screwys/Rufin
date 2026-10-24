@@ -282,7 +282,7 @@ impl Database {
                     .await?
             }
             44..=46 => crate::migration::import_current(input, destination, catalog).await?,
-            0 | 47 | 48 | 49 | 50 | 51 | 53 | 54 | 55 | 56 | 57 => {
+            0 | 47 | 48 | 49 | 50 | 51 | 53 | 54 | 55 | 56 | 57 | 58 => {
                 if input != destination {
                     Self::relocate(input, destination).await?;
                 }
@@ -584,6 +584,9 @@ async fn open_readers(
         .test_before_acquire(true)
         .after_connect(move |connection, _| {
             Box::pin(async move {
+                crate::lyrics_tokenizer::register(connection)
+                    .await
+                    .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
                 sqlx::query("PRAGMA query_only=ON")
                     .execute(connection)
                     .await?;

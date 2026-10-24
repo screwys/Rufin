@@ -1,7 +1,9 @@
 //! Owns bounded cached Search and complete route-filter orders over normalized facts.
 //! Callers receive final rows and never merge related Store results.
 
+use serde::{Deserialize, Serialize};
 use sqlx::Connection;
+use std::collections::BTreeMap;
 
 use crate::query::{OrderedQuery, RequestedKeys};
 use crate::{
@@ -11,6 +13,28 @@ use crate::{
 
 const SEARCH_LIMIT: usize = 100;
 const SEARCH_TEXT_LIMIT: usize = 256;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
+pub enum SearchMode {
+    #[default]
+    Title,
+    Lyrics,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct LyricsSnippet {
+    pub parts: Vec<LyricsSnippetPart>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(uniffi::Record))]
+pub struct LyricsSnippetPart {
+    pub text: String,
+    pub highlighted: bool,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SearchRequest {
@@ -51,6 +75,7 @@ pub struct SearchResults {
     pub tracks: Vec<TrackView>,
     pub albums: Vec<AlbumView>,
     pub artists: Vec<ArtistView>,
+    pub lyrics: BTreeMap<crate::TrackKey, LyricsSnippet>,
 }
 
 impl Database {
@@ -93,6 +118,7 @@ impl Database {
             })
         };
         let result = SearchResults {
+            lyrics: BTreeMap::new(),
             tracks: crate::tracks::load_track_requested(
                 &mut transaction,
                 request(crate::CatalogKind::Track, track_objects)?,
@@ -161,6 +187,7 @@ impl Database {
             relation.requested_keys(0, request.limit)
         };
         let result = SearchResults {
+            lyrics: BTreeMap::new(),
             tracks: crate::tracks::load_track_requested(
                 &mut transaction,
                 request(tracks, term_match("track.normalized_search")),

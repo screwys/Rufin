@@ -163,6 +163,7 @@ internal fun AppSettingsPage(destination: MoreDestination, model: RufinConnectio
                         select = { network -> preferences.changePreference { setCastNetworkInterface(network.takeIf { it.isNotEmpty() }) } })
                     PreferenceChoice(translate("Secret storage"), if (state.secretStorageMode == io.github.screwys.rufin.shared.secrets.SecretStorageMode.SYSTEM_KEYRING) "system-keyring" else "config-file", listOf("system-keyring" to translate("System keyring"), "config-file" to translate("Legacy")), select = preferences::changeSecretStorage)
                 }
+                BackupsPage(model, preferences, embedded = true) { navigate(MoreDestination.BackupSettings) }
             }
             else -> Unit
         }

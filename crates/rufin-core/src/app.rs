@@ -247,6 +247,7 @@ where
     let settings_playback = Arc::clone(&playback);
     let settings_lyrics = Arc::clone(&lyrics);
     let settings_downloads = downloads.clone();
+    let settings_source = Arc::clone(&source);
     let settings_scrobbling = Arc::clone(&scrobbling);
     let settings_library = Arc::clone(&library);
     let settings_runtime = runtime.clone();
@@ -311,6 +312,13 @@ where
                     current.ui.lyrics.clone(),
                     current.ui.application.private_mode,
                 );
+            }
+            if (!previous.ui.application.download_artwork_automatically
+                && current.ui.application.download_artwork_automatically)
+                || (!previous.ui.application.download_lyrics_automatically
+                    && current.ui.application.download_lyrics_automatically)
+            {
+                settings_source.request_asset_downloads();
             }
             if previous.ui.downloads != current.ui.downloads {
                 settings_downloads.settings_changed(current.ui.downloads.clone());

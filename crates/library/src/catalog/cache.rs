@@ -672,6 +672,30 @@ pub(super) async fn tracks(
         )
         .await?;
         changed.metadata |= track_folders(connection, source, page, observed).await?;
+        if authoritative {
+            for (row, uri) in page.iter().zip(&uris) {
+                let Some(payload) = &row.source_lyrics else {
+                    continue;
+                };
+                let current: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tracks WHERE media_uri=?1 AND source_key=?2 AND object_id=?3 AND observed_stamp<=?4)")
+                    .bind(uri).bind(source).bind(&row.object_id).bind(observed.unwrap_or(i64::MAX))
+                    .fetch_one(&mut *connection).await?;
+                if !current {
+                    continue;
+                }
+                let removed = sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1 AND authority='source' AND (role<>'original' OR language<>'' OR script<>'' OR json_array_length(?2,'$.bundle.content.Documents')=0)")
+                    .bind(uri).bind(payload).execute(&mut *connection).await?.rows_affected();
+                let written = sqlx::query("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at)
+                    SELECT ?1,'source','original','','',?2,?3,CAST(strftime('%s','now') AS INTEGER)
+                    WHERE json_array_length(?3,'$.bundle.content.Documents') IS NOT 0
+                    ON CONFLICT(media_uri,authority,role,language,script) DO UPDATE SET
+                        cache_input_digest=excluded.cache_input_digest,lyrics=excluded.lyrics,updated_at=excluded.updated_at
+                    WHERE lyrics_cache.lyrics IS NOT excluded.lyrics OR lyrics_cache.cache_input_digest IS NOT excluded.cache_input_digest")
+                    .bind(uri).bind(row.source_lyrics_input.as_slice()).bind(payload)
+                    .execute(&mut *connection).await?.rows_affected();
+                changed.metadata |= removed != 0 || written != 0;
+            }
+        }
         changed.merge(
             users(
                 connection,

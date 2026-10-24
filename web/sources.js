@@ -109,16 +109,32 @@ function renderSources(configured) {
       return value;
     });
     card.append(quality);
-    if (item.id === state.source) {
-      const downloads = el("div", "source-actions");
-      downloads.append(
-        button(tr("Download artwork"), () => api("/sources/download-artwork", "POST", { id: item.id }), null, ""),
-        button(tr("Download lyrics"), () => api("/sources/download-lyrics", "POST", { id: item.id }), null, ""),
-      );
-      card.append(downloads);
-    }
     $("content").append(card);
   }
+  const cache = $("cache-settings-template").content.firstElementChild.cloneNode(true);
+  $("content").append(cache);
+  run(async () => {
+    let current = await api("/downloads/cache-settings");
+    if (!cache.isConnected) return;
+    const choices = cache.querySelectorAll("select");
+    for (const choice of choices) {
+      choice.value = String(current[choice.dataset.cache]);
+      choice.disabled = false;
+      choice.onchange = () => run(async () => {
+        for (const select of choices) select.disabled = true;
+        try {
+          current = await api("/downloads/cache-settings", "POST", {
+            ...current, [choice.dataset.cache]: choice.value === "true",
+          });
+        } finally {
+          for (const select of choices) {
+            select.value = String(current[select.dataset.cache]);
+            select.disabled = false;
+          }
+        }
+      });
+    }
+  });
   const cacheActions = el("div", "source-actions");
   for (const [path, title, success] of [
     ["clear-artwork-cache", tr("Clear artwork cache"), tr("Artwork cache cleared")],
@@ -141,15 +157,18 @@ function renderSources(configured) {
 }
 
 let previousOperation = "";
+let downloadProgressDismissed = false;
 
 function showSourceProgress(value) {
+  if (value.state !== "downloading") downloadProgressDismissed = false;
   const active = ["adding", "switching", "refreshing", "downloading"].includes(value.state);
-  $("source-progress").hidden = !active;
-  const cancel = $("source-download-cancel");
-  cancel.hidden = value.state !== "downloading";
-  cancel.onclick = value.state === "downloading"
-    ? () => run(() => api("/sources/cancel-download", "POST", { id: value.source_id }))
-    : null;
+  $("source-progress").hidden = !active || downloadProgressDismissed;
+  const dismiss = $("source-download-dismiss");
+  dismiss.hidden = value.state !== "downloading";
+  dismiss.onclick = () => {
+    downloadProgressDismissed = true;
+    $("source-progress").hidden = true;
+  };
   if (active) {
     const progress = value.progress;
     const stage = {
