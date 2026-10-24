@@ -197,6 +197,7 @@ async fn serve(
         FileInput::Peer { peer, encoding } => peer_response(peer, *encoding, &path, &request).await,
     };
     result.unwrap_or_else(|error| {
+        tracing::warn!(%error, "file input request failed");
         empty(match error {
             SourceError::NotFound => StatusCode::NOT_FOUND,
             SourceError::Auth(_) => StatusCode::UNAUTHORIZED,

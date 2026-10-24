@@ -1,11 +1,13 @@
 use super::audio::{AudioGraph, SharedQueuedLoudness};
 use super::engine::{
-    GaplessPlayback, PipelineId, PreparedRun, SharedBackendState, Slot, handle_about_to_finish,
+    GaplessPlayback, PipelineId, PreparedRun, SharedBackendState, Slot, WorkerInput,
+    handle_about_to_finish,
 };
 use super::visualizer::VisualizerTap;
 use super::*;
 use glib::translate::IntoGlib;
 use std::cell::Cell;
+use std::sync::atomic::AtomicU64;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct SourceClock {
@@ -64,9 +66,14 @@ impl SourceClock {
 }
 pub(super) struct PlayerPipeline {
     name: String,
+    slot: Slot,
     shared: Arc<Mutex<SharedBackendState>>,
+    inputs: Sender<WorkerInput>,
     native: Option<(gst::Element, gst::Bus)>,
     id: Option<PipelineId>,
+    // The bus handler runs on streaming threads and tags messages with this session.
+    session: Arc<AtomicU64>,
+    last_error: Arc<Mutex<Option<gst::Message>>>,
     pub(super) initial_stream_started: bool,
     trust_invalid_certificate: Arc<AtomicBool>,
     about_to_finish_id: Option<glib::SignalHandlerId>,
@@ -82,6 +89,9 @@ pub(super) struct PlayerPipeline {
     requested_state: Cell<gst::State>,
     buffering_percent: Cell<Option<u8>>,
     live: Cell<bool>,
+    // Paused while the other player of a crossfade refills.
+    held: Cell<bool>,
+    draining: Cell<bool>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -108,12 +118,21 @@ enum SeekProgress {
 }
 
 impl PlayerPipeline {
-    pub(super) fn new(name: &str, shared: Arc<Mutex<SharedBackendState>>) -> Self {
+    pub(super) fn new(
+        name: &str,
+        slot: Slot,
+        shared: Arc<Mutex<SharedBackendState>>,
+        inputs: Sender<WorkerInput>,
+    ) -> Self {
         Self {
             name: name.to_string(),
+            slot,
             shared,
+            inputs,
             native: None,
             id: None,
+            session: Arc::new(AtomicU64::new(0)),
+            last_error: Arc::new(Mutex::new(None)),
             initial_stream_started: false,
             trust_invalid_certificate: Arc::new(AtomicBool::new(false)),
             about_to_finish_id: None,
@@ -129,13 +148,15 @@ impl PlayerPipeline {
             requested_state: Cell::new(gst::State::Null),
             buffering_percent: Cell::new(None),
             live: Cell::new(false),
+            held: Cell::new(false),
+            draining: Cell::new(false),
         }
     }
 
-    fn native(&self) -> Result<&(gst::Element, gst::Bus), String> {
+    fn native(&self) -> Result<&(gst::Element, gst::Bus), BackendFailure> {
         self.native
             .as_ref()
-            .ok_or_else(|| format!("GStreamer player {} is not active", self.name))
+            .ok_or_else(|| format!("GStreamer player {} is not active", self.name).into())
     }
 
     fn clock(&self) -> SourceClock {
@@ -155,14 +176,20 @@ impl PlayerPipeline {
         muted: bool,
         playback_rate: f64,
         startup_state: gst::State,
-    ) -> Result<(), String> {
+        fade_in: Option<Duration>,
+    ) -> Result<(), BackendFailure> {
         if self
             .audio_graph
             .as_ref()
             .is_some_and(|graph| !graph.uses_output(settings.audio_output.as_deref()))
         {
             // Keep the working output until its replacement has opened.
-            let mut replacement = Self::new(&self.name, Arc::clone(&self.shared));
+            let mut replacement = Self::new(
+                &self.name,
+                self.slot,
+                Arc::clone(&self.shared),
+                self.inputs.clone(),
+            );
             replacement.play_item(
                 id,
                 slot,
@@ -172,6 +199,7 @@ impl PlayerPipeline {
                 muted,
                 playback_rate,
                 startup_state,
+                fade_in,
             )?;
             *self = replacement;
             return Ok(());
@@ -179,6 +207,7 @@ impl PlayerPipeline {
         self.stop();
         self.initialize()?;
         self.id = Some(id);
+        self.session.store(id.0, Ordering::Release);
         self.current_stream = Some(item.stream.clone());
         self.playback_rate = sanitize_playback_rate(playback_rate);
         lock_recover(&self.segment).time_reopened = item.stream.time_offset_millis().is_some();
@@ -187,6 +216,10 @@ impl PlayerPipeline {
             self.configure_audio(settings)?;
             self.set_stream(&item.stream)?;
             self.set_output_volume(volume, muted);
+            // Installed before preroll so the first samples already follow the curve.
+            if let (Some(duration), Some(graph)) = (fade_in, self.audio_graph.as_ref()) {
+                graph.fade_transition(true, duration.mul_f64(self.playback_rate), None);
+            }
             self.set_state(startup_state)?;
             self.set_output_volume(volume, muted);
             Ok(())
@@ -283,7 +316,7 @@ impl PlayerPipeline {
         &self,
         percent: u8,
         mode: gst::BufferingMode,
-    ) -> Result<(), String> {
+    ) -> Result<(), BackendFailure> {
         let was_buffering = self.is_buffering();
         self.buffering_percent.set(Some(percent));
         if mode == gst::BufferingMode::Live {
@@ -313,7 +346,10 @@ impl PlayerPipeline {
         std::mem::take(&mut self.segment.lock().unwrap_or_else(|p| p.into_inner()).done)
     }
 
-    pub(super) fn continue_segment(&self, next: Option<&PreparedStream>) -> Result<(), String> {
+    pub(super) fn continue_segment(
+        &self,
+        next: Option<&PreparedStream>,
+    ) -> Result<(), BackendFailure> {
         let (start, end, flags) = if let Some(next) = next {
             *self
                 .queued_loudness
@@ -364,21 +400,6 @@ impl PlayerPipeline {
         self.id.is_some()
     }
 
-    pub(super) fn pop_bus_message(&self) -> Option<(PipelineId, gst::Message)> {
-        let id = self.id?;
-        let (_, bus) = self.native.as_ref()?;
-        let mut message = bus.pop()?;
-        // Use the latest consecutive refill update to avoid an unnecessary pause.
-        if message.type_() == gst::MessageType::Buffering {
-            while bus.peek().is_some_and(|next| {
-                next.type_() == gst::MessageType::Buffering && next.src() == message.src()
-            }) {
-                message = bus.pop()?;
-            }
-        }
-        Some((id, message))
-    }
-
     pub(super) fn message_source_is_pipeline(&self, message: &gst::Message) -> bool {
         self.native.as_ref().is_some_and(|(pipeline, _)| {
             message
@@ -387,7 +408,7 @@ impl PlayerPipeline {
         })
     }
 
-    fn initialize(&mut self) -> Result<(), String> {
+    fn initialize(&mut self) -> Result<(), BackendFailure> {
         if self.native.is_some() {
             return Ok(());
         }
@@ -402,6 +423,18 @@ impl PlayerPipeline {
             .map_err(|error| error.to_string())?;
         configure_playbin_for_audio(&pipeline);
         pipeline.set_property("video-sink", &fakesink);
+        let (slot, inputs) = (self.slot, self.inputs.clone());
+        let (session, last_error) = (Arc::clone(&self.session), Arc::clone(&self.last_error));
+        bus.set_sync_handler(move |_, message| {
+            if message.type_() == gst::MessageType::Error {
+                *lock_recover(&last_error) = Some(message.clone());
+            }
+            let id = session.load(Ordering::Acquire);
+            if id != 0 {
+                let _ = inputs.send(WorkerInput::Bus(slot, PipelineId(id), message.clone()));
+            }
+            gst::BusSyncReply::Drop
+        });
         let certificate_policy = Arc::clone(&self.trust_invalid_certificate);
         configure_sources(&pipeline, move || certificate_policy.load(Ordering::SeqCst));
 
@@ -581,6 +614,7 @@ impl PlayerPipeline {
         let queued_loudness = Arc::clone(&self.queued_loudness);
         let gapless = Arc::clone(&self.gapless);
         let certificate_policy = Arc::clone(&self.trust_invalid_certificate);
+        let inputs = self.inputs.clone();
         self.about_to_finish_id = Some(element.connect("about-to-finish", false, move |_| {
             let pipeline = pipeline.upgrade()?;
             handle_about_to_finish(
@@ -592,6 +626,8 @@ impl PlayerPipeline {
                 slot,
                 id,
             );
+            // Deferred preloads and next-track requests are finished by the worker.
+            let _ = inputs.send(WorkerInput::Wake);
             None
         }));
     }
@@ -614,7 +650,7 @@ impl PlayerPipeline {
     pub(super) fn configure_audio(
         &mut self,
         settings: &BackendAudioSettings,
-    ) -> Result<(), String> {
+    ) -> Result<(), BackendFailure> {
         if self.current_stream.is_none() {
             return Ok(());
         }
@@ -725,7 +761,7 @@ impl PlayerPipeline {
     pub(super) fn try_reconfigure_audio(
         &mut self,
         settings: &BackendAudioSettings,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, BackendFailure> {
         let changed = self.audio_graph.as_mut().map_or(Ok(false), |graph| {
             graph.reconfigure(settings, self.playback_rate)
         })?;
@@ -738,7 +774,7 @@ impl PlayerPipeline {
         Ok(changed)
     }
 
-    pub(super) fn set_stream(&mut self, stream: &PreparedStream) -> Result<(), String> {
+    pub(super) fn set_stream(&mut self, stream: &PreparedStream) -> Result<(), BackendFailure> {
         *self
             .queued_loudness
             .lock()
@@ -752,7 +788,7 @@ impl PlayerPipeline {
     pub(super) fn configure_processing(
         &mut self,
         request: &ProcessingRequest,
-    ) -> Result<(), String> {
+    ) -> Result<(), BackendFailure> {
         if let Some(graph) = self.audio_graph.as_mut()
             && graph.uses_output(request.local_device.as_deref())
         {
@@ -848,7 +884,78 @@ impl PlayerPipeline {
         }
     }
 
-    pub(super) fn set_state(&self, state: gst::State) -> Result<gst::StateChangeSuccess, String> {
+    /// Fades out over the crossfade duration, ending with this stream's audio.
+    pub(super) fn fade_transition_out(&self, duration: Duration) {
+        let end = self
+            .clock()
+            .end_millis()
+            .map(gst::ClockTime::from_mseconds)
+            .or_else(|| self.duration());
+        if let Some(graph) = &self.audio_graph {
+            graph.fade_transition(false, duration.mul_f64(self.playback_rate), end);
+        }
+    }
+
+    pub(super) fn transition_finished(&self) -> bool {
+        self.audio_graph
+            .as_ref()
+            .and_then(AudioGraph::transition_end)
+            .is_some_and(|end| self.position().is_some_and(|position| position >= end))
+    }
+
+    pub(super) fn set_held(&self, held: bool) -> Result<(), BackendFailure> {
+        if self.held.replace(held) != held && self.requested_state.get() == gst::State::Playing {
+            self.apply_requested_state()?;
+        }
+        Ok(())
+    }
+
+    /// Ends output after the audio already inside the graph. A failed queued URI keeps
+    /// playbin3 from sending the current item's own EOS.
+    pub(super) fn drain(&self) {
+        self.draining.set(true);
+        let (Some((pipeline, _)), Some(graph)) = (&self.native, &self.audio_graph) else {
+            return;
+        };
+        let pad = graph.root().static_pad("sink").expect("audio graph input");
+        let session = Arc::clone(&self.session);
+        let id = session.load(Ordering::Acquire);
+        // The serialized event waits for the streaming thread, which a paused sink blocks.
+        pipeline.call_async(move |_| {
+            if session.load(Ordering::Acquire) == id {
+                pad.send_event(gst::event::Eos::new());
+            }
+        });
+    }
+
+    pub(super) fn draining(&self) -> bool {
+        self.draining.get()
+    }
+
+    pub(super) fn recover_clock(&self) -> Result<(), BackendFailure> {
+        let (pipeline, _) = self.native()?;
+        if pipeline.current_state() == gst::State::Playing {
+            pipeline
+                .set_state(gst::State::Paused)
+                .map_err(|error| error.to_string())?;
+            self.apply_requested_state()?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn recalculate_latency(&self) {
+        if let Some((pipeline, _)) = &self.native {
+            let _ = pipeline
+                .downcast_ref::<gst::Bin>()
+                .expect("playbin is a bin")
+                .recalculate_latency();
+        }
+    }
+
+    pub(super) fn set_state(
+        &self,
+        state: gst::State,
+    ) -> Result<gst::StateChangeSuccess, BackendFailure> {
         self.requested_state.set(state);
         self.apply_requested_state()
     }
@@ -861,18 +968,21 @@ impl PlayerPipeline {
                 .is_some_and(|percent| percent < 100)
     }
 
-    fn apply_requested_state(&self) -> Result<gst::StateChangeSuccess, String> {
+    fn apply_requested_state(&self) -> Result<gst::StateChangeSuccess, BackendFailure> {
         let requested = self.requested_state.get();
-        let waiting = requested == gst::State::Playing && self.is_buffering();
+        let waiting = requested == gst::State::Playing
+            && (self.is_buffering() || self.held.get() && !self.live.get());
         let seeking = self.seek_in_progress();
         let state = if waiting || seeking {
             gst::State::Paused
         } else {
             requested
         };
-        let (pipeline, bus) = self.native()?;
+        let (pipeline, _) = self.native()?;
+        lock_recover(&self.last_error).take();
         let result = pipeline.set_state(state).map_err(|error| {
-            bus.pop_filtered(&[gst::MessageType::Error])
+            lock_recover(&self.last_error)
+                .take()
                 .and_then(|message| {
                     let output = self.audio_output_factory();
                     gstreamer_playback_error(
@@ -886,7 +996,7 @@ impl PlayerPipeline {
                         .audio_output_factory()
                         .unwrap_or_else(|| "unconfigured".to_string());
                     error!(?state, audio_sink = %output, %error, "GStreamer state change failed");
-                    "Could not play this track".to_string()
+                    BackendFailure::new("Could not play this track")
                 })
         })?;
         if result == gst::StateChangeSuccess::NoPreroll {
@@ -919,6 +1029,7 @@ impl PlayerPipeline {
             let _ = pipeline.set_state(gst::State::Null);
         }
         self.id = None;
+        self.session.store(0, Ordering::Release);
         self.initial_stream_started = false;
         self.current_stream = None;
         *lock_recover(&self.queued_loudness) = None;
@@ -927,6 +1038,8 @@ impl PlayerPipeline {
         self.buffering_percent.set(None);
         self.requested_state.set(gst::State::Null);
         self.live.set(false);
+        self.held.set(false);
+        self.draining.set(false);
         if let Some(graph) = self.audio_graph.as_mut() {
             graph.clear_stream();
         }
@@ -935,11 +1048,11 @@ impl PlayerPipeline {
         }
     }
 
-    pub(super) fn seek_millis(&self, millis: u64) -> Result<(), String> {
+    pub(super) fn seek_millis(&self, millis: u64) -> Result<(), BackendFailure> {
         self.seek_physical_millis(self.clock().physical_seek(millis))
     }
 
-    pub(super) fn seek_physical_millis(&self, millis: u64) -> Result<(), String> {
+    pub(super) fn seek_physical_millis(&self, millis: u64) -> Result<(), BackendFailure> {
         let mut flags = gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE;
         let end = self
             .current_stream
@@ -958,7 +1071,7 @@ impl PlayerPipeline {
         end: Option<u64>,
         flags: gst::SeekFlags,
         starts_stream: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), BackendFailure> {
         let start = gst::ClockTime::try_from(Duration::from_millis(
             end.map_or(millis, |end| millis.min(end)),
         ))
@@ -1006,7 +1119,7 @@ impl PlayerPipeline {
                         .lock()
                         .unwrap_or_else(|p| p.into_inner())
                         .progress = SeekProgress::Ready;
-                    return Err(error);
+                    return Err(error.into());
                 }
                 _ => {}
             }
@@ -1017,7 +1130,7 @@ impl PlayerPipeline {
             .0
             .send_event(event)
             .then_some(())
-            .ok_or_else(|| "GStreamer segment seek failed".to_string())
+            .ok_or_else(|| "GStreamer segment seek failed".into())
     }
 
     pub(super) fn seek_in_progress(&self) -> bool {
@@ -1042,7 +1155,7 @@ impl PlayerPipeline {
             && pending == gst::State::VoidPending
     }
 
-    pub(super) fn complete_seek(&self) -> Result<(), String> {
+    pub(super) fn complete_seek(&self) -> Result<(), BackendFailure> {
         if !self.has_prerolled() {
             return Ok(());
         }
@@ -1065,7 +1178,7 @@ impl PlayerPipeline {
                     .unwrap_or_else(|p| p.into_inner())
                     .progress = SeekProgress::Ready;
                 let _ = self.apply_requested_state();
-                return Err("GStreamer segment seek failed".to_string());
+                return Err("GStreamer segment seek failed".into());
             }
             // Live sources cannot preroll. Other sinks can finish the flush
             // synchronously, so neither case needs another bus message.
@@ -1087,7 +1200,7 @@ impl PlayerPipeline {
         rate: f64,
         seek_position_millis: Option<u64>,
         settings: &BackendAudioSettings,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, BackendFailure> {
         let previous_rate = self.playback_rate;
         let fade = seek_position_millis
             .and_then(|_| self.position())
@@ -1209,7 +1322,8 @@ mod tests {
         std::fs::write(&path, module).unwrap();
         let uri = glib::filename_to_uri(&path, None).unwrap();
         let shared = Arc::new(Mutex::new(SharedBackendState::new()));
-        let mut player = PlayerPipeline::new("tracker-decoder-check", shared);
+        let mut player =
+            PlayerPipeline::new("tracker-decoder-check", Slot::Primary, shared, channel().0);
         let item = PreparedRun {
             run: RunId::new(1),
             stream: ResolvedStream::new(uri.as_str()).into(),
@@ -1228,6 +1342,7 @@ mod tests {
                 false,
                 1.0,
                 gst::State::Paused,
+                None,
             )
             .unwrap();
         let state = player
@@ -1320,7 +1435,7 @@ mod tests {
             },
             ..Default::default()
         });
-        let mut player = PlayerPipeline::new("retention-check", shared);
+        let mut player = PlayerPipeline::new("retention-check", Slot::Primary, shared, channel().0);
         let settings = BackendAudioSettings {
             audio_output: Some("fakesink".to_string()),
             ..BackendAudioSettings::default()
@@ -1346,6 +1461,7 @@ mod tests {
                     false,
                     1.0,
                     gst::State::Playing,
+                    None,
                 )
                 .unwrap();
             drop(item);

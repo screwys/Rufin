@@ -76,6 +76,13 @@ internal class PlayerConnection(private val connection: RufinConnection) {
     val playingMediaUri by derivedStateOf(structuralEqualityPolicy()) {
         playback?.transport?.takeIf { it.desiredPlaying }?.current?.id?.mediaUri
     }
+    // Matches TransportView::refilling: wanted playback waits while a stream refills.
+    val refilling by derivedStateOf {
+        playback?.transport?.let {
+            it.desiredPlaying && it.bufferingPercent != null &&
+                (it.state == TransportStatus.BUFFERING || it.state == TransportStatus.PAUSED)
+        } == true
+    }
     val currentId get() = playback?.transport?.current?.id
     var metadataLinks by mutableStateOf<AndroidPlayerMetadata?>(null)
         private set

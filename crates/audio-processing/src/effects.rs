@@ -528,6 +528,7 @@ impl EffectsBin {
                                     );
                                 }
                                 state.info = Some(info);
+                                notify_changed(&probe_slots[0]);
                             }
                         }
                         gst::EventView::Segment(segment) => {
@@ -837,6 +838,12 @@ impl EffectsBin {
             .applied
             .take())
     }
+    pub fn is_change_message(message: &gst::MessageRef) -> bool {
+        message.type_() == gst::MessageType::Application
+            && message
+                .structure()
+                .is_some_and(|structure| structure.name() == CHANGED)
+    }
     pub fn meter_message(&self, message: &gst::MessageRef) -> Option<Vec<f64>> {
         let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let level = state.stages[4].as_ref()?;
@@ -959,6 +966,16 @@ fn install(
     state.stages = prepared.stages;
     state.controls = prepared.controls;
     state.applied = Some((prepared.config, prepared.rate, prepared.preamp_db));
+    notify_changed(&slots[0]);
+}
+
+const CHANGED: &str = "rufin-effects-changed";
+
+// Format changes and applied settings need `EffectsBin::poll` on the owning worker.
+fn notify_changed(element: &gst::Element) {
+    let _ = element.post_message(gst::message::Application::new(gst::Structure::new_empty(
+        CHANGED,
+    )));
 }
 fn balance_matrix(info: &audio::AudioInfo, balance: f64) -> gst::Array {
     use audio::AudioChannelPosition::*;

@@ -5,9 +5,9 @@ use super::{
 };
 use crate::playback::{QueueReorderTarget, QueueSelection};
 use playback::{
-    BackendFailure, ControlsView, CurrentMedia, CurrentMediaId, PlaybackBackend, PlaybackNotice,
-    PlaybackProjection, PlaybackView, PositionDiscontinuity, SourceReportFact, SourceReportPhase,
-    TransportStatus, TransportView,
+    BackendFailure, ControlsView, CurrentMedia, CurrentMediaId, FailureKind, PlaybackBackend,
+    PlaybackNotice, PlaybackProjection, PlaybackView, PositionDiscontinuity, SourceReportFact,
+    SourceReportPhase, TransportStatus, TransportView,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Weak};
@@ -205,10 +205,20 @@ impl RunContext {
     }
 }
 
+// Drains backend events as they arrive; the actor turn publishes the result.
+fn event_waker(playback: &WeakPlayback) -> playback::EventWaker {
+    let playback = playback.clone();
+    Arc::new(move || playback.post(|_, _| {}))
+}
+
+// Stops a run of failures, such as a removed drive, from walking a long queue.
+const MAX_CONSECUTIVE_SKIPS: usize = 5;
+
 #[derive(Clone, Debug)]
 enum NextResolution {
     Resolving,
     Ready(PreparedStream),
+    Unplayable,
 }
 
 #[derive(Clone, Debug)]
@@ -267,6 +277,7 @@ pub(super) struct Player {
     auto_dj_waiting_for_continuation: bool,
     buffering_percent: Option<u8>,
     last_error: Option<String>,
+    consecutive_skips: usize,
 }
 
 impl Player {
@@ -278,7 +289,7 @@ impl Player {
         playback_output: PlaybackOutput,
         auto_dj_enabled: bool,
         auto_dj_refill_threshold: usize,
-        backend: Box<dyn PlaybackBackend>,
+        mut backend: Box<dyn PlaybackBackend>,
         owner: Weak<PlaybackOwner>,
         playback: WeakPlayback,
     ) -> Self {
@@ -286,6 +297,7 @@ impl Player {
         let output_volume = settings.volume;
         let output_muted = settings.muted;
         let restored_paused = sequence.selected().is_some();
+        backend.set_event_waker(event_waker(&playback));
         Self {
             owner,
             playback,
@@ -321,6 +333,7 @@ impl Player {
             auto_dj_waiting_for_continuation: false,
             buffering_percent: None,
             last_error: None,
+            consecutive_skips: 0,
         }
     }
 
@@ -566,6 +579,16 @@ impl Player {
             self.maybe_request_auto_dj();
         }
         Ok(())
+    }
+
+    /// The external playhead is interpolated between receiver reports.
+    pub(super) fn external_clock_running(&self) -> bool {
+        let duration = self.duration_millis();
+        self.external
+            .as_ref()
+            .is_some_and(|external| external.status == TransportStatus::Playing)
+            && self.sequence.selected_index().is_some()
+            && (duration == 0 || self.sequence.progress_millis() < duration)
     }
 
     pub(super) fn advance_external_clock(&mut self, sample: &ClockSample) {
@@ -1091,26 +1114,34 @@ impl Player {
         }
     }
 
-    pub(super) fn stream_failed(&mut self, run: RunId, error: String, sample: &ClockSample) {
+    pub(super) fn stream_failed(
+        &mut self,
+        run: RunId,
+        error: BackendFailure,
+        sample: &ClockSample,
+    ) {
         self.stream_tasks.remove(&run);
-        if self
+        if let Some(current) = self
             .current_run
             .as_ref()
-            .is_some_and(|current| current.id == run)
+            .filter(|current| current.id == run)
         {
+            let desired_playing = current.desired_playing;
             self.dirty = true;
             self.finish_current(RunEndReason::Failed, sample);
-            self.last_error = Some(error.clone());
             self.buffering_percent = None;
-            self.report_error(error);
+            self.report_error(error.message().to_string());
+            if !self.skip_unplayable(error.kind(), desired_playing) {
+                self.last_error = Some(error.message().to_string());
+            }
             return;
         }
-        if self
-            .next_plan
-            .as_ref()
-            .is_some_and(|plan| plan.next_run == run)
-        {
-            self.next_plan = None;
+        if let Some(plan) = self.next_plan.as_mut().filter(|plan| plan.next_run == run) {
+            if error.kind().skippable() {
+                plan.resolution = NextResolution::Unplayable;
+            } else {
+                self.next_plan = None;
+            }
         }
     }
 
@@ -1165,11 +1196,21 @@ impl Player {
                 next_run,
                 error,
             } => {
-                if self.next_plan.as_ref().is_some_and(|plan| {
-                    plan.current_run == current_run && plan.next_run == next_run
-                }) {
-                    self.report_error(error.message().to_string());
+                let Some(plan) = self
+                    .next_plan
+                    .as_mut()
+                    .filter(|plan| plan.current_run == current_run && plan.next_run == next_run)
+                else {
+                    return;
+                };
+                if error.kind().skippable() {
+                    plan.resolution = NextResolution::Unplayable;
+                    self.send_backend(BackendCommand::PrepareNext {
+                        current_run,
+                        next: None,
+                    });
                 }
+                self.report_error(error.message().to_string());
             }
             BackendEvent::ProcessingApplied {
                 output,
@@ -1238,9 +1279,11 @@ impl Player {
                 };
                 self.dirty = true;
                 self.finish_current(RunEndReason::Failed, sample);
-                self.failed_run = Some(failed);
-                self.last_error = Some(error.message().to_string());
                 self.report_error(error.message().to_string());
+                if !self.skip_unplayable(error.kind(), failed.desired_playing) {
+                    self.failed_run = Some(failed);
+                    self.last_error = Some(error.message().to_string());
+                }
             }
             BackendEvent::OperationFailed { run, error } => {
                 if run.is_some() && run != self.current_run() {
@@ -1903,12 +1946,18 @@ impl Player {
         if !run.seekable && position_millis != 0 {
             return;
         }
-        let run = run.id;
-
-        self.send_backend(BackendCommand::Seek {
-            run,
-            position_millis,
-        });
+        let (run, loaded) = (run.id, run.backend_loaded);
+        if loaded {
+            self.send_backend(BackendCommand::Seek {
+                run,
+                position_millis,
+            });
+        } else {
+            // Nothing plays this run yet; its start uses the stored position.
+            self.sequence.set_progress_millis(position_millis);
+            self.sequence.persist_state();
+            self.dirty = true;
+        }
         self.notices.push(PlaybackNotice::PositionDiscontinuity(
             PositionDiscontinuity {
                 run,
@@ -2135,6 +2184,7 @@ impl Player {
         else {
             return;
         };
+        self.consecutive_skips = 0;
         current.backend_loaded = true;
         if current.started_at_unix_seconds.is_some() {
             if current.status != TransportStatus::Buffering {
@@ -2223,7 +2273,8 @@ impl Player {
         {
             return;
         }
-        self.buffering_percent = Some(percent.min(100));
+        // The level is kept only while a refill is under way.
+        self.buffering_percent = (percent < 100).then_some(percent);
         self.dirty = true;
     }
 
@@ -2305,10 +2356,19 @@ impl Player {
     }
 
     fn promote_or_begin(&mut self, position: usize, desired_playing: bool) {
-        let plan = self
+        let mut plan = self
             .next_plan
             .take()
             .filter(|plan| Some(plan.occurrence) == self.sequence.id_at(position));
+        if plan
+            .as_ref()
+            .is_some_and(|plan| matches!(plan.resolution, NextResolution::Unplayable))
+        {
+            if self.skip_unplayable(FailureKind::UnavailableMedia, desired_playing) {
+                return;
+            }
+            plan = None;
+        }
         let Some(plan) = plan else {
             self.begin_selected_run();
             if !desired_playing && let Some(current) = self.current_run.as_mut() {
@@ -2328,7 +2388,7 @@ impl Player {
                     run: plan.next_run,
                     current: stream,
                     next: None,
-                    start_position_millis: 0,
+                    start_position_millis: self.sequence.progress_millis(),
                     playback_rate: self.settings.playback_rate,
                 });
             }
@@ -2338,8 +2398,25 @@ impl Player {
                     current.resolved_stream = Some(stream);
                 }
             }
-            NextResolution::Resolving => {}
+            NextResolution::Resolving | NextResolution::Unplayable => {}
         }
+    }
+
+    /// Moves past a track that cannot play. Returns false when playback should stop.
+    fn skip_unplayable(&mut self, failure: FailureKind, desired_playing: bool) -> bool {
+        if !failure.skippable()
+            || !self.settings.skip_unplayable_tracks
+            || self.sequence.repeat_mode() == RepeatMode::One
+            || self.consecutive_skips >= MAX_CONSECUTIVE_SKIPS
+        {
+            return false;
+        }
+        let Some(position) = self.sequence.advance_index(false) else {
+            return false;
+        };
+        self.consecutive_skips += 1;
+        self.promote_or_begin(position, desired_playing);
+        true
     }
 
     fn install_reserved_run(&mut self, run: RunId, position: usize, desired_playing: bool) {
@@ -2512,6 +2589,9 @@ impl Player {
 
     fn finish_current(&mut self, reason: RunEndReason, sample: &ClockSample) {
         self.failed_run = None;
+        if reason != RunEndReason::Failed {
+            self.consecutive_skips = 0;
+        }
         let Some(current) = self.current_run.as_mut() else {
             self.next_plan = None;
             return;
@@ -2870,7 +2950,7 @@ impl Player {
         output: PlaybackOutput,
         backend: Box<dyn PlaybackBackend>,
     ) {
-        let mut previous = std::mem::replace(&mut self.backend, backend);
+        let mut previous = self.install_backend(backend);
         if let Some(run) = self.current_run()
             && let Err(error) = previous.send(BackendCommand::Stop { run })
         {
@@ -2883,8 +2963,16 @@ impl Player {
         self.replace_output(output);
     }
 
+    fn install_backend(
+        &mut self,
+        mut backend: Box<dyn PlaybackBackend>,
+    ) -> Box<dyn PlaybackBackend> {
+        backend.set_event_waker(event_waker(&self.playback));
+        std::mem::replace(&mut self.backend, backend)
+    }
+
     fn swap_backend(&mut self, backend: Box<dyn PlaybackBackend>) -> Result<(), PlaybackError> {
-        let mut previous = std::mem::replace(&mut self.backend, backend);
+        let mut previous = self.install_backend(backend);
         let stopped = self
             .current_run()
             .map_or(Ok(()), |run| previous.send(BackendCommand::Stop { run }));

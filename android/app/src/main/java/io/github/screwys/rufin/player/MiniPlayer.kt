@@ -119,6 +119,7 @@ internal fun MiniPlayer(player: PlayerConnection, onOpen: () -> Unit, onOutput: 
                 PlayerIconButton(if (favorite) "rufin-heart-filled-symbolic" else "rufin-heart-outline-symbolic",
                     "Favorite current track", player::favorite, selected = favorite)
                 IconButton(player::togglePlayback) {
+                    if (player.refilling) RefillSpinner(34.dp)
                     RufinIcon(if (current.playing) "rufin-media-playback-pause-symbolic" else "rufin-media-playback-start-symbolic",
                         translate(if (current.playing) "Pause" else "Play"), Modifier.size(24.dp))
                 }

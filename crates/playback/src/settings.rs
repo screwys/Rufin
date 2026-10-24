@@ -101,6 +101,8 @@ macro_rules! playback_preference_fields {
                 skip_same_album_crossfade: bool = false => set_skip_same_album_crossfade;
                 #[serde(default = "default_true")]
                 audio_fade_on_status_change: bool = true => set_audio_fade_on_status_change;
+                #[serde(default = "default_true")]
+                skip_unplayable_tracks: bool = true => set_skip_unplayable_tracks;
                 #[serde(default)]
                 write_ebu_r128_tags: bool = false => set_write_ebu_r128_tags;
                 #[serde(default)]

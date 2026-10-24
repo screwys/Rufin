@@ -36,6 +36,7 @@ enum SdkEvent {
     Position(f64),
     Duration(f64),
     State(FutoPlaybackState),
+    Source(String),
     Stopped,
     Error(String),
     OperationFailed(String),
@@ -78,7 +79,11 @@ impl DeviceEventHandler for FutoEventHandler {
 
     fn speed_changed(&self, _speed: f64) {}
 
-    fn source_changed(&self, _source: Source) {}
+    fn source_changed(&self, source: Source) {
+        if let Source::Url { url, .. } = source {
+            self.publish(SdkEvent::Source(url));
+        }
+    }
 
     fn playback_stopped(&self) {
         self.publish(SdkEvent::Stopped);
@@ -127,6 +132,8 @@ pub(crate) struct GoogleCastController {
     awaiting_load: bool,
     seekable: bool,
     previous: Option<CastMedia>,
+    // The receiver reports a resource's URL before its positions.
+    observed_source: Option<String>,
 }
 
 impl GoogleCastController {
@@ -186,6 +193,7 @@ impl GoogleCastController {
             awaiting_load: false,
             seekable: false,
             previous: None,
+            observed_source: None,
         })
     }
 
@@ -247,17 +255,19 @@ impl GoogleCastController {
                 run,
                 position_millis,
             } if self.current_run() == Some(run) => {
-                if !self.playing {
-                    self.current
-                        .as_mut()
-                        .expect("current cast media")
-                        .position_millis = position_millis;
-                    self.pending_reload = true;
-                } else if self
-                    .current
-                    .as_ref()
-                    .is_some_and(|current| current.published.native_seek)
+                let current = self.current.as_ref().expect("current cast media");
+                let native = current.published.native_seek;
+                // Generated media cannot start at its end; the track is finished there.
+                if !native
+                    && stream_duration_millis(&current.stream)
+                        .is_some_and(|duration| position_millis >= duration)
                 {
+                    let _ = self.device.stop_playback();
+                    self.finish_current(relay);
+                    return Ok(vec![BackendEvent::Ended { run }]);
+                }
+                // A native seek keeps the receiver paused and the direct representation.
+                if native {
                     self.device
                         .seek(position_millis as f64 / 1_000.0)
                         .map_err(string_error)?;
@@ -265,6 +275,12 @@ impl GoogleCastController {
                         .as_mut()
                         .expect("current cast media")
                         .position_millis = position_millis;
+                } else if !self.playing {
+                    self.current
+                        .as_mut()
+                        .expect("current cast media")
+                        .position_millis = position_millis;
+                    self.pending_reload = true;
                 } else {
                     self.reload(position_millis, relay)?;
                 }
@@ -549,10 +565,20 @@ impl GoogleCastController {
                     });
                 }
             }
+            SdkEvent::Source(url) => self.observed_source = Some(url),
             SdkEvent::Position(seconds) => {
                 let Some(run) = self.current_run() else {
                     return Ok(());
                 };
+                // Until a reload is reported, a position from the previous resource would be
+                // read against the new offset and duration, and could end playback early.
+                if self.awaiting_load
+                    && self.current.as_ref().is_some_and(|current| {
+                        self.observed_source.as_deref() != Some(current.published.uri.as_str())
+                    })
+                {
+                    return Ok(());
+                }
                 let renderer_millis = (seconds.max(0.0) * 1_000.0).round() as u64;
                 if self
                     .current

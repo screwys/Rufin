@@ -340,6 +340,13 @@ impl ConnectOwner {
                     .map_err(error)?,
             };
             if let Some((start, requested_end)) = request.window {
+                // An empty interval must never widen into the whole recording.
+                if requested_end.is_some_and(|end| end <= start) {
+                    return Err(format!(
+                        "requested audio interval {start}..{end:?} is empty",
+                        end = requested_end
+                    ));
+                }
                 let end = requested_end
                     .or(self
                         .database

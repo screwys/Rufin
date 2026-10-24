@@ -81,6 +81,11 @@ impl TransportView {
     pub fn effective_state(&self) -> TransportStatus {
         effective_transport_state(self.state, self.desired_playing)
     }
+
+    /// Wanted playback waits while a stream refills. Starts without a refill level do not count.
+    pub fn refilling(&self) -> bool {
+        self.effective_state() == TransportStatus::Buffering && self.buffering_percent.is_some()
+    }
 }
 
 fn effective_transport_state(state: TransportStatus, desired_playing: bool) -> TransportStatus {

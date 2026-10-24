@@ -569,6 +569,7 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
     gtk_widgets::objects!(builder, resource, {
         transition_group: adw::PreferencesGroup,
         audio_fade_row: adw::SwitchRow,
+        skip_unplayable_row: adw::SwitchRow,
         refill_row: adw::ActionRow,
         refill: gtk::SpinButton,
         clear_queue_row: adw::SwitchRow,
@@ -599,6 +600,17 @@ pub fn playback_page(shell: &Rc<Preferences>) -> adw::PreferencesPage {
             });
     });
     transition_group.add(&audio_fade_row);
+
+    skip_unplayable_row.set_active(settings.skip_unplayable_tracks);
+    let skip_unplayable_shell = Rc::clone(shell);
+    skip_unplayable_row.connect_active_notify(move |row| {
+        skip_unplayable_shell
+            .player_ui
+            .update_playback_settings(|settings| {
+                settings.skip_unplayable_tracks = row.is_active();
+            });
+    });
+    transition_group.add(&skip_unplayable_row);
 
     refill.set_range(
         f64::from(MIN_AUTO_DJ_REFILL_THRESHOLD),

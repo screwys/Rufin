@@ -181,6 +181,7 @@ mod icons;
 mod preset_name;
 mod preset_transfer;
 mod progress;
+mod refill_ring;
 pub mod visualizer;
 mod visualizer_settings;
 use bottom::PlayerControls;

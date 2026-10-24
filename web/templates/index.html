@@ -202,7 +202,7 @@
 
       <aside id="right-panel" aria-label="{{ localization::tr("Queue") }}">
         <div class="panel-header">
-          <h2><span class="icon" data-icon="queue" aria-hidden="true"></span>{{ localization::tr("Queue") }} <span class="queue-total"><span id="queue-count" class="count">{{ page.queue_total }}</span><span id="queue-loading" class="queue-loading" role="status" aria-label="{{ localization::tr("Loading...") }}" hidden></span></span></h2>
+          <h2><span class="icon" data-icon="queue" aria-hidden="true"></span>{{ localization::tr("Queue") }} <span class="queue-total"><span id="queue-count" class="count">{{ page.queue_total }}</span><span id="queue-loading" class="loading" role="status" aria-label="{{ localization::tr("Loading...") }}" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" pathLength="100"/><circle cx="8" cy="8" pathLength="100"/></svg></span></span></h2>
           <label class="queue-limit" for="queue-limit"
             >{{ localization::tr("Show") }}<select id="queue-limit" aria-label="{{ localization::tr("Queue tracks to show") }}">
               <option selected>5</option>
@@ -299,6 +299,7 @@
             </button>
             <button id="play-pause" form="transport-form" formaction="/api/playback/{% if page.paused %}play{% else %}pause{% endif %}" class="play-button" aria-label="{% if page.paused %}{{ localization::tr("Play") }}{% else %}{{ localization::tr("Pause") }}{% endif %}">
               <span class="icon" data-icon="{% if page.paused %}play{% else %}pause{% endif %}"></span>
+              <span class="loading" role="status" aria-label="{{ localization::tr("Loading...") }}" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" pathLength="100"/><circle cx="8" cy="8" pathLength="100"/></svg></span>
             </button>
             <button id="next" form="transport-form" formaction="/api/playback/next" class="icon-button" aria-label="{{ localization::tr("Next") }}">
               <span class="icon" data-icon="next"></span>

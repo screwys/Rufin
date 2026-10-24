@@ -22,8 +22,8 @@ const PLAY_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 static NEXT_DIAGNOSTIC_SESSION: AtomicU64 = AtomicU64::new(1);
 
 struct PendingSeek {
-    origin_millis: u64,
     target_millis: u64,
+    requested_at: Instant,
     remaining_samples: u8,
 }
 
@@ -108,12 +108,13 @@ fn normalize_content_type(value: &str) -> String {
 }
 
 impl PendingSeek {
+    /// Renderers report whole seconds, and playback moves on after the seek lands.
     fn reached(&self, observed_millis: u64) -> bool {
-        if self.origin_millis <= self.target_millis {
-            observed_millis >= self.target_millis
-        } else {
-            observed_millis <= self.target_millis
-        }
+        let latest = self
+            .target_millis
+            .saturating_add(self.requested_at.elapsed().as_millis() as u64)
+            .saturating_add(1_000);
+        (self.target_millis.saturating_sub(1_000)..=latest).contains(&observed_millis)
     }
 
     fn observe(&mut self, observed_millis: u64) -> SeekObservation {
@@ -347,20 +348,39 @@ impl UpnpController {
                 run,
                 position_millis,
             } if self.current_run() == Some(run) && self.seekable => {
+                let native = self
+                    .current
+                    .as_ref()
+                    .is_some_and(|media| media.published.native_seek);
+                // Generated media cannot start at its end; the track is finished there.
+                if !native
+                    && self
+                        .current_duration_millis()
+                        .is_some_and(|duration| position_millis >= duration)
+                {
+                    let _ = self.stop();
+                    self.finish_current(relay);
+                    return Ok(vec![BackendEvent::Ended { run }]);
+                }
                 if !self.playing {
                     self.last_position_millis = position_millis;
                     self.position_observed = Instant::now();
-                    self.pending_reload = true;
+                    if native {
+                        // Seek while paused through the silenced startup restore, keeping
+                        // the direct representation.
+                        if let Err(error) = self.hold_startup_output() {
+                            tracing::debug!(%error, "UPnP output could not be silenced for seeking");
+                        }
+                        self.pending_start_position_millis = Some(position_millis);
+                    } else {
+                        self.pending_reload = true;
+                    }
                     return Ok(vec![BackendEvent::Position {
                         run,
                         millis: position_millis,
                     }]);
                 }
-                if self
-                    .current
-                    .as_ref()
-                    .is_some_and(|media| !media.published.native_seek)
-                {
+                if !native {
                     return self.reload(position_millis, relay);
                 }
                 let target = position_millis;
@@ -1098,8 +1118,8 @@ impl UpnpController {
         }
         if let Ok(target_millis) = &result {
             self.pending_seek = Some(PendingSeek {
-                origin_millis: self.last_position_millis,
                 target_millis: *target_millis,
+                requested_at: Instant::now(),
                 remaining_samples: SEEK_POSITION_SAMPLES,
             });
         }
@@ -1118,12 +1138,7 @@ impl UpnpController {
             return true;
         };
         match pending.observe(observed_millis) {
-            SeekObservation::Reached => {
-                self.last_position_millis = observed_millis;
-                self.position_observed = Instant::now();
-                false
-            }
-            SeekObservation::Expired => true,
+            SeekObservation::Reached | SeekObservation::Expired => true,
             SeekObservation::Waiting => {
                 if self.startup_output.is_some() {
                     let _ = self.seek_logical_position(pending.target_millis);
@@ -2023,27 +2038,36 @@ mod tests {
     #[test]
     fn stale_renderer_positions_do_not_cross_a_seek_boundary() {
         let mut forward = PendingSeek {
-            origin_millis: 25_000,
             target_millis: 99_000,
+            requested_at: Instant::now(),
             remaining_samples: SEEK_POSITION_SAMPLES,
         };
         assert_eq!(forward.observe(25_000), SeekObservation::Waiting);
         assert_eq!(forward.observe(99_000), SeekObservation::Reached);
 
+        // Playback that moved on past a backward target confirms it; the old position does not.
         let mut backward = PendingSeek {
-            origin_millis: 180_000,
             target_millis: 60_000,
+            requested_at: Instant::now() - Duration::from_secs(2),
             remaining_samples: SEEK_POSITION_SAMPLES,
         };
         assert_eq!(backward.observe(180_000), SeekObservation::Waiting);
-        assert_eq!(backward.observe(59_000), SeekObservation::Reached);
+        assert_eq!(backward.observe(61_000), SeekObservation::Reached);
+
+        // A report from a superseded target does not confirm the newer one.
+        let mut superseded = PendingSeek {
+            target_millis: 100_000,
+            requested_at: Instant::now(),
+            remaining_samples: SEEK_POSITION_SAMPLES,
+        };
+        assert_eq!(superseded.observe(60_000), SeekObservation::Waiting);
     }
 
     #[test]
     fn a_renderer_that_never_moves_releases_position_updates() {
         let mut pending = PendingSeek {
-            origin_millis: 25_000,
             target_millis: 99_000,
+            requested_at: Instant::now(),
             remaining_samples: 2,
         };
         assert_eq!(pending.observe(25_000), SeekObservation::Waiting);
