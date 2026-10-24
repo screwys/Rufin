@@ -582,6 +582,75 @@ async fn unsupported_version_preserves_library_data() {
 }
 
 #[tokio::test]
+async fn released_store_imports_old_playlist_artwork_and_known_roots() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = directory.path().join("rufin-store.sqlite");
+    let catalog = directory.path().join("rufin-catalog.sqlite");
+    let root_id = blake3::hash(b"/music").to_hex().to_string();
+    let mut raw = connection(&store, true).await;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE TABLE source_ids(source_key INTEGER PRIMARY KEY,object_id TEXT NOT NULL);
+        INSERT INTO source_ids VALUES(1,'source');
+        CREATE TABLE connect_roots(source_id TEXT NOT NULL,id TEXT NOT NULL,label TEXT NOT NULL,PRIMARY KEY(source_id,id)) STRICT;
+        INSERT INTO connect_roots VALUES('source','{root_id}','Music');
+        CREATE TABLE legacy_activity(source_id TEXT NOT NULL,period TEXT NOT NULL,item_kind TEXT NOT NULL,track_object_id TEXT NOT NULL,play_count INTEGER NOT NULL,skip_count INTEGER NOT NULL,last_played_at INTEGER);
+        INSERT INTO legacy_activity VALUES('source','lifetime','track','played',3,0,90);
+        CREATE TABLE local_locators(local_access_file_key INTEGER PRIMARY KEY,media_uri TEXT NOT NULL,origin TEXT NOT NULL,access_uri TEXT NOT NULL);
+        CREATE TABLE queue_occurrences(queue_occurrence_key INTEGER PRIMARY KEY,object_id TEXT,media_uri TEXT,position INTEGER,traversal_position INTEGER,provenance_kind TEXT,provenance_context_id TEXT,provenance_source_rank INTEGER,snapshot_at INTEGER);
+        CREATE TABLE queue_state(singleton INTEGER PRIMARY KEY,current_occurrence_id TEXT,progress_millis INTEGER,repeat_mode TEXT,shuffled INTEGER);
+        PRAGMA user_version=46;"))).execute(&mut raw).await.unwrap();
+    raw.close().await.unwrap();
+    let mut raw = connection(&catalog, true).await;
+    let mut tables = String::new();
+    for (table, key) in [
+        ("albums", "album_key"),
+        ("artists", "artist_key"),
+        ("tracks", "track_key"),
+        ("genres", "genre_key"),
+        ("moods", "mood_key"),
+        ("folders", "folder_key"),
+    ] {
+        tables += &format!(
+            "CREATE TABLE {table}({key} INTEGER PRIMARY KEY,source_key INTEGER,object_id TEXT);"
+        );
+    }
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("{tables}
+        CREATE TABLE sources(source_key INTEGER PRIMARY KEY,object_id TEXT NOT NULL,catalog_complete INTEGER NOT NULL DEFAULT 1);
+        INSERT INTO sources(source_key,object_id) VALUES(7,'source');
+        CREATE TABLE local_files(local_file_key INTEGER PRIMARY KEY,source_key INTEGER NOT NULL,path TEXT NOT NULL,root TEXT NOT NULL,relative_path TEXT NOT NULL,kind TEXT NOT NULL,size_bytes INTEGER,mtime_ns INTEGER NOT NULL,state TEXT NOT NULL);
+        INSERT INTO local_files VALUES(1,7,'/music/a.flac','/music','a.flac','media',1,1,'observed');
+        CREATE TABLE local_access_metadata(access_uri TEXT PRIMARY KEY,title TEXT,artist TEXT,album TEXT,duration_millis INTEGER,disc_number INTEGER,track_number INTEGER);
+        CREATE TABLE native_playlists(playlist_key INTEGER PRIMARY KEY,source_key INTEGER NOT NULL,object_id TEXT NOT NULL,name TEXT NOT NULL,normalized_name TEXT NOT NULL,sort_text TEXT NOT NULL,artwork_binding BLOB);
+        INSERT INTO native_playlists VALUES(1,7,'list','List','list','list',CAST('{{\"source_id\":\"source\",\"image\":{{\"item_id\":\"list-art\",\"tag\":\"t\"}}}}' AS BLOB));
+        CREATE TABLE native_playlist_entries(playlist_entry_key INTEGER PRIMARY KEY,playlist_key INTEGER NOT NULL,object_id TEXT NOT NULL,media_uri TEXT NOT NULL,title TEXT,snapshot_at INTEGER NOT NULL DEFAULT 0,position INTEGER NOT NULL);
+        PRAGMA user_version=51;"))).execute(&mut raw).await.unwrap();
+    raw.close().await.unwrap();
+
+    Database::open_installation(&store, &catalog)
+        .await
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
+    let mut raw = connection(&store, false).await;
+    assert_eq!(
+        sqlx::query_as::<_, (String, String)>("SELECT id,label FROM connect_roots")
+            .fetch_all(&mut raw)
+            .await
+            .unwrap(),
+        vec![(root_id, "Music".into())]
+    );
+    assert_eq!(sqlx::query_scalar::<_, String>("SELECT json_extract(artwork_binding,'$[0].image.item_id') FROM playlists WHERE object_id='list'").fetch_one(&mut raw).await.unwrap(), "list-art");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks WHERE object_id='played'")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        1
+    );
+    raw.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn missing_listen_identity_returns_error_without_replacing_user_data() {
     let fixture = super::support::fixture().await;
     fixture

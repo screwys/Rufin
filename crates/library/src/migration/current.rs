@@ -790,6 +790,15 @@ pub(crate) async fn import(path: &Path, catalog: &Path) -> LibraryResult<()> {
         .await?;
     sqlx::query("INSERT INTO sources(source_key,object_id) SELECT source_key,object_id FROM old_store.source_ids")
         .execute(&mut *transaction).await?;
+    // Copy released roots first so the catalog copy keeps them and adds only missing ones.
+    copy_table(
+        &mut transaction,
+        "old_store",
+        "connect_roots",
+        "connect_roots",
+        &[],
+    )
+    .await?;
     if has_catalog {
         copy_catalog(&mut transaction, "old_catalog").await?;
     }
@@ -857,6 +866,8 @@ pub(crate) async fn import(path: &Path, catalog: &Path) -> LibraryResult<()> {
         copy_table(&mut transaction, "old_store", table, table, &[]).await?;
     }
     sqlx::query("UPDATE smart_playlists SET artwork_binding=CAST(json_object('kind','playlist','smart',json('true'),'source_id',NULL,'object_id',object_id,'revision',artwork_revision) AS BLOB) WHERE artwork_revision IS NOT NULL").execute(&mut *transaction).await?;
+    // Remembering tracks below reads playlist artwork, so convert the released shapes first.
+    super::normalize_stored_artwork(&mut transaction).await?;
     let has_received_media = has_table(&mut transaction, "old_store", "connect_collection").await?;
     loop {
         let files:Vec<(String,String)>=sqlx::query_as("SELECT media_uri,encoding FROM connect_media_files WHERE backing_uri IS NULL LIMIT 128").fetch_all(&mut *transaction).await?;
@@ -906,14 +917,6 @@ pub(crate) async fn import(path: &Path, catalog: &Path) -> LibraryResult<()> {
     }
     restore_saved_queue(&mut transaction).await?;
     sqlx::query("UPDATE tracks SET local_play_count=(SELECT count(*) FROM listens WHERE listens.media_uri=tracks.media_uri)").execute(&mut *transaction).await?;
-    copy_table(
-        &mut transaction,
-        "old_store",
-        "connect_roots",
-        "connect_roots",
-        &[],
-    )
-    .await?;
     crate::connect::migrate_collection_on(&mut transaction, "old_store").await?;
     if has_table(&mut transaction, "old_store", "connect_changes").await? {
         sqlx::raw_sql("CREATE TABLE legacy_connect_changes(kind TEXT NOT NULL,object_key TEXT NOT NULL,payload TEXT,PRIMARY KEY(kind,object_key)) STRICT;
@@ -922,7 +925,6 @@ pub(crate) async fn import(path: &Path, catalog: &Path) -> LibraryResult<()> {
     if has_table(&mut transaction, "old_store", "connect_capture").await? {
         sqlx::query("UPDATE connect_profile SET enabled=COALESCE((SELECT enabled FROM old_store.connect_capture WHERE singleton=1),0),receiving=0 WHERE singleton=1").execute(&mut *transaction).await?;
     }
-    super::normalize_stored_artwork(&mut transaction).await?;
     transaction.commit().await?;
     connection.close().await?;
     super::install(&pending, path)?;
