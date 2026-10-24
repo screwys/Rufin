@@ -1,4 +1,5 @@
 use crate::{Database, LibraryError, LibraryResult};
+use sqlx::Connection;
 
 impl Database {
     pub async fn fingerprint_cache(
@@ -56,10 +57,12 @@ impl Database {
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
         sqlx::query("UPDATE waveform_cache SET analysis_key=(SELECT loudness_analysis_key FROM tracks WHERE media_uri=?1) WHERE media_uri=?1 AND analysis_key=?2")
-            .bind(uri).bind(previous.as_slice()).execute(&mut *connection).await?;
+            .bind(uri).bind(previous.as_slice()).execute(&mut *transaction).await?;
         sqlx::query("UPDATE loudness_measurements AS measurement SET analysis_key=track.loudness_analysis_key FROM tracks track WHERE track.media_uri=?1 AND measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key AND measurement.analysis_key=?2")
-            .bind(uri).bind(previous.as_slice()).execute(connection).await?;
+            .bind(uri).bind(previous.as_slice()).execute(&mut *transaction).await?;
+        transaction.commit().await?;
         Ok(())
     }
 }

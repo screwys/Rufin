@@ -418,7 +418,11 @@ impl Database {
         current: usize,
     ) -> LibraryResult<QueueRestore> {
         let mut writer = self.writer().await?;
-        let reader = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = writer
+            .as_mut()
+            .ok_or(LibraryError::WriterUnavailable)?
+            .begin()
+            .await?;
         let mut entries = vec![None; total];
         let mut order = Vec::new();
         let mut rows = Vec::new();
@@ -428,7 +432,7 @@ impl Database {
             )
             .bind(transfer)
             .bind(offset as i64)
-            .fetch_optional(&mut *reader)
+            .fetch_optional(&mut *transaction)
             .await?;
             let mut page: QueueTransferPage = serde_json::from_str(&payload.ok_or_else(|| {
                 LibraryError::InvalidRequest("Queue transfer is incomplete".into())
@@ -450,15 +454,17 @@ impl Database {
                 row.received_from_connect = true;
                 *slot = Some(QueueEntry {
                     received_from_connect: true,
-                    track_key: persist_metadata(&mut *reader, &row.item).await?,
+                    track_key: persist_metadata(&mut transaction, &row.item).await?,
                     provenance: row.provenance.clone(),
                 });
                 if row.position == current {
-                    let song =
-                        crate::tracks::load_track_rows(reader, &[slot.as_ref().unwrap().track_key])
-                            .await?
-                            .pop()
-                            .expect("requested canonical queue song");
+                    let song = crate::tracks::load_track_rows(
+                        &mut transaction,
+                        &[slot.as_ref().unwrap().track_key],
+                    )
+                    .await?
+                    .pop()
+                    .expect("requested canonical queue song");
                     rows.push(Arc::new(QueueRow {
                         position: row.position,
                         track: song,
@@ -475,6 +481,7 @@ impl Database {
                 "Invalid queue current position".into(),
             ));
         }
+        transaction.commit().await?;
         let entries = entries.into_iter().map(Option::unwrap).collect::<Vec<_>>();
         let current_index = Some(current);
         Ok(QueueRestore {
@@ -486,7 +493,7 @@ impl Database {
         })
     }
 
-    /// Commit staged metadata with the accepted queue in the same Store transaction.
+    /// Save the accepted queue and delete its staged pages in one Store transaction.
     pub async fn commit_queue_transfer(
         &self,
         transfer: &str,
@@ -498,7 +505,6 @@ impl Database {
             .ok_or(LibraryError::WriterUnavailable)?
             .begin()
             .await?;
-        persist_transfer_on(&mut transaction, transfer, queue.entries.len()).await?;
         save_queue_on(&mut transaction, queue).await?;
         sqlx::query("DELETE FROM queue_transfer_pages WHERE transfer=?1")
             .bind(transfer)
@@ -518,7 +524,7 @@ impl Database {
         let queue = self
             .prepare_queue_transfer(transfer, total, current)
             .await?;
-        self.import_queue_transfer_metadata(transfer, total).await?;
+        self.discard_queue_transfer(transfer).await?;
         Ok((
             QueueLoad::Captured(
                 queue
@@ -529,26 +535,6 @@ impl Database {
             ),
             queue.current_index.unwrap_or_default(),
         ))
-    }
-
-    pub async fn import_queue_transfer_metadata(
-        &self,
-        transfer: &str,
-        total: usize,
-    ) -> LibraryResult<()> {
-        let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
-        persist_transfer_on(&mut transaction, transfer, total).await?;
-        sqlx::query("DELETE FROM queue_transfer_pages WHERE transfer=?1")
-            .bind(transfer)
-            .execute(&mut *transaction)
-            .await?;
-        transaction.commit().await?;
-        Ok(())
     }
 
     pub async fn remember_media_uris(
@@ -783,27 +769,6 @@ impl Database {
         }
         Ok(positions)
     }
-}
-
-async fn persist_transfer_on(
-    connection: &mut sqlx::SqliteConnection,
-    transfer: &str,
-    total: usize,
-) -> LibraryResult<()> {
-    for offset in (0..total).step_by(QUEUE_CONTEXT_LIMIT) {
-        let payload: String = sqlx::query_scalar(
-            "SELECT payload FROM queue_transfer_pages WHERE transfer=?1 AND page_offset=?2",
-        )
-        .bind(transfer)
-        .bind(offset as i64)
-        .fetch_one(&mut *connection)
-        .await?;
-        let page: QueueTransferPage = serde_json::from_str(&payload)?;
-        for row in &page.rows {
-            persist_metadata(connection, &row.item).await?;
-        }
-    }
-    Ok(())
 }
 
 async fn save_settings(

@@ -103,7 +103,7 @@ impl ConnectOwner {
             .await
             .map_err(error)?;
         self.database
-            .import_queue_transfer_metadata(&transfer, header.total)
+            .discard_queue_transfer(&transfer)
             .await
             .map_err(error)?;
         queue.progress_millis = header.position_millis.min(i64::MAX as u64) as i64;

@@ -753,15 +753,17 @@ impl Database {
     pub async fn clear_mapping_access(&self, source: SourceKey) -> LibraryResult<u64> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        sqlx::query("DELETE FROM main.local_access_metadata WHERE access_uri IN (SELECT access_uri FROM local_access_files WHERE source_key=?1 AND origin='mapping') AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND (other.source_key IS NOT ?1 OR other.origin<>'mapping'))").bind(source).execute(&mut *connection).await?;
+        let mut transaction = connection.begin().await?;
+        sqlx::query("DELETE FROM main.local_access_metadata WHERE access_uri IN (SELECT access_uri FROM local_access_files WHERE source_key=?1 AND origin='mapping') AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND (other.source_key IS NOT ?1 OR other.origin<>'mapping'))").bind(source).execute(&mut *transaction).await?;
         let removed =
             sqlx::query("DELETE FROM main.local_locators WHERE local_access_file_key IN (SELECT local_access_file_key FROM local_access_files WHERE source_key=?1 AND origin='mapping')")
                 .bind(source)
-                .execute(&mut *connection)
+                .execute(&mut *transaction)
                 .await?
                 .rows_affected();
         sqlx::query("UPDATE tracks SET loudness_analysis_key=COALESCE((SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.media_uri=tracks.media_uri ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),source_loudness_analysis_key) WHERE source_key=?1")
-            .bind(source).execute(&mut *connection).await?;
+            .bind(source).execute(&mut *transaction).await?;
+        transaction.commit().await?;
         Ok(removed)
     }
 
@@ -1051,11 +1053,11 @@ impl Database {
         locator: &LocalLocatorWrite,
     ) -> LibraryResult<LocalAccessFileKey> {
         let mut writer = self.writer().await?;
-        write_local_locator(
-            writer.as_mut().ok_or(LibraryError::WriterUnavailable)?,
-            locator,
-        )
-        .await
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        let key = write_local_locator(&mut transaction, locator).await?;
+        transaction.commit().await?;
+        Ok(key)
     }
 
     pub async fn import_local_locators_jsonl(

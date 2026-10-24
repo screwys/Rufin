@@ -134,25 +134,27 @@ impl Database {
 
     pub async fn set_distinct_track_covers(&self, enabled: bool) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let changed:Vec<(crate::SourceKey,String)>=sqlx::query_as("UPDATE sources SET distinct_track_covers=?1 WHERE distinct_track_covers<>?1 RETURNING source_key,object_id").bind(enabled).fetch_all(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
-        self.inner
-            .distinct_track_covers
-            .store(enabled, Ordering::Release);
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        let changed:Vec<(crate::SourceKey,String)>=sqlx::query_as("UPDATE sources SET distinct_track_covers=?1 WHERE distinct_track_covers<>?1 RETURNING source_key,object_id").bind(enabled).fetch_all(&mut *transaction).await?;
         for (source, _) in &changed {
             let mut after = 0;
             loop {
                 let keys: Vec<i64> = sqlx::query_scalar("SELECT track_key FROM tracks WHERE source_key=?1 AND track_key>?2 ORDER BY track_key LIMIT 128")
-                    .bind(source).bind(after).fetch_all(&mut *connection).await?;
+                    .bind(source).bind(after).fetch_all(&mut *transaction).await?;
                 let Some(last) = keys.last() else { break };
                 after = *last;
-                if crate::catalog::artwork::refresh_track_choices(connection, &keys, &[], &[])
+                if crate::catalog::artwork::refresh_track_choices(&mut transaction, &keys, &[], &[])
                     .await?
                 {
-                    crate::artwork::refresh_mosaics(connection, &keys, &[], &[]).await?;
+                    crate::artwork::refresh_mosaics(&mut transaction, &keys, &[], &[]).await?;
                 }
             }
         }
+        transaction.commit().await?;
+        self.inner
+            .distinct_track_covers
+            .store(enabled, Ordering::Release);
         drop(writer);
         for (_source, id) in changed {
             let mut update = crate::CatalogUpdate::default();
