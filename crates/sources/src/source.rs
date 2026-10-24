@@ -107,34 +107,41 @@ pub async fn read_local_lyrics(
     };
     let preferences = preferences.clone();
     tokio::task::spawn_blocking(move || {
-        let sidecar = lyrics::local_sidecar_lyrics(&input);
-        if input.cue_track
-            || sidecar
-                .as_ref()
-                .is_some_and(|lyrics| lyrics.acquisition_complete(&preferences))
-        {
-            return sidecar;
-        }
-        let embedded = crate::file::metadata::read_embedded_lyrics(&input.audio_path)
-            .ok()
-            .flatten()
-            .and_then(|text| lyrics::lyrics_from_edited_text(&text));
-        match embedded {
-            Some(embedded)
-                if sidecar.as_ref().is_none_or(|current| {
-                    !embedded.is_instrumental()
-                        && (embedded.acquisition_complete(&preferences)
-                            || !current.satisfies_preferences(&preferences)
-                                && embedded.satisfies_preferences(&preferences))
-                }) =>
-            {
-                Some(embedded)
-            }
-            _ => sidecar,
-        }
+        lyrics::local_file_lyrics(&input, &preferences, || {
+            crate::file::metadata::read_embedded_lyrics(&input.audio_path)
+                .ok()
+                .flatten()
+                .and_then(|text| lyrics::lyrics_from_edited_text(&text))
+        })
     })
     .await
     .map_err(|error| SourceError::Other(error.to_string()))
+}
+
+pub(crate) async fn cache_native_lyrics(
+    database: &Database,
+    uri: &str,
+    input: [u8; 32],
+    bundle: &mut Option<lyrics::LyricsBundle>,
+) -> SourceResult<()> {
+    *bundle = bundle
+        .take()
+        .and_then(lyrics::lyrics_with_displayable_content);
+    let Some(bundle) = bundle else {
+        database
+            .remove_track_lyrics_by_authority(uri, "source")
+            .await?;
+        return Ok(());
+    };
+    bundle.origin = lyrics::LyricsOrigin::Native;
+    let payload = bundle.cache_payload()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |time| time.as_secs().min(i64::MAX as u64) as i64);
+    database
+        .write_lyrics_cache(uri, "source", "original", "", "", input, &payload, now)
+        .await?;
+    Ok(())
 }
 
 pub(crate) const LIVE_CHANGE_LIMIT: usize = 128;
@@ -1487,30 +1494,31 @@ impl Source {
             Err(SourceError::NotFound) => None,
             result => result?,
         };
-        let Some(mut bundle) = native.and_then(lyrics::lyrics_with_displayable_content) else {
-            return Ok(None);
-        };
-        bundle.origin = lyrics::LyricsOrigin::Native;
-        let payload = bundle.cache_payload()?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |time| time.as_secs().min(i64::MAX as u64) as i64);
-        if let Err(error) = database
-            .write_lyrics_cache(
-                media_uri,
-                "source",
-                "original",
-                "",
-                "",
-                input_digest,
-                &payload,
-                now,
-            )
-            .await
+        let mut bundle = native;
+        if let Err(error) =
+            cache_native_lyrics(database, media_uri, input_digest, &mut bundle).await
         {
             tracing::warn!(%error, "could not save source lyrics cache");
         }
-        Ok(Some(bundle))
+        if bundle.is_none() {
+            // Bulk downloads skip known missing lyrics; opening the lyrics still retries.
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |time| time.as_secs().min(i64::MAX as u64) as i64);
+            database
+                .write_lyrics_cache(
+                    media_uri,
+                    "source",
+                    "original",
+                    "",
+                    "",
+                    input_digest,
+                    "",
+                    now,
+                )
+                .await?;
+        }
+        Ok(bundle)
     }
 
     async fn read_lyrics(

@@ -207,6 +207,12 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     external_metadata_enabled: bool = true => set_external_metadata_enabled;
     #[serde(default)]
     prefer_distinct_track_covers: bool = false => set_prefer_distinct_track_covers;
+    #[serde(default)]
+    download_artwork_automatically: bool = false => set_download_artwork_automatically;
+    #[serde(default)]
+    download_lyrics_automatically: bool = false => set_download_lyrics_automatically;
+    #[serde(default)]
+    lyrics_cache_prompt_dismissed: bool = false => set_lyrics_cache_prompt_dismissed;
     notifications_enabled: bool = false => set_notifications_enabled;
     #[serde(default = "default_true")]
     control_notifications_enabled: bool = true => set_control_notifications_enabled;

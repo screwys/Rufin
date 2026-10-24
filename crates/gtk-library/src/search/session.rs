@@ -23,6 +23,7 @@ pub struct SearchPreview {
     pub title: String,
     pub subtitle: String,
     pub artwork: ArtworkBinding,
+    pub lyrics: Option<library::LyricsSnippet>,
 }
 
 pub const SEARCH_PREVIEW_LIMIT: usize = 30;
@@ -34,6 +35,7 @@ pub struct SearchSession {
     runtime: tokio::runtime::Handle,
     selected: RefCell<Option<SelectedLibrary>>,
     query: RefCell<String>,
+    mode: Cell<library::SearchMode>,
     pub(super) items: RefCell<[Vec<SearchItem>; 3]>,
     status: Cell<&'static str>,
     pub(super) revision: Cell<u64>,
@@ -56,6 +58,7 @@ impl SearchSession {
             runtime,
             selected: RefCell::new(None),
             query: RefCell::new(String::new()),
+            mode: Cell::new(library::SearchMode::Title),
             items: RefCell::new(Default::default()),
             status: Cell::new("initial"),
             revision: Cell::new(0),
@@ -157,6 +160,20 @@ impl SearchSession {
         self.query.borrow().clone()
     }
 
+    pub fn mode(&self) -> library::SearchMode {
+        self.mode.get()
+    }
+
+    pub fn set_mode(self: &Rc<Self>, mode: library::SearchMode) {
+        if self.mode.replace(mode) == mode {
+            return;
+        }
+        if mode == library::SearchMode::Lyrics {
+            self.category.set(CollectionCategory::Tracks);
+        }
+        self.schedule();
+    }
+
     pub fn status(&self) -> &'static str {
         self.status.get()
     }
@@ -176,7 +193,7 @@ impl SearchSession {
                 .as_ref()
                 .map(|s| (&s.source_id, s.music_folder_key, &s.music_folder_object_id));
         self.selected.replace(selected);
-        if changed {
+        if changed && self.mode() == library::SearchMode::Title {
             self.schedule();
         }
     }
@@ -200,11 +217,20 @@ impl SearchSession {
         }
     }
 
+    pub fn refresh(self: &Rc<Self>) {
+        self.schedule();
+        self.submit();
+    }
+
     fn schedule(self: &Rc<Self>) {
         self.cancel();
         self.items.replace(Default::default());
         self.revision.set(self.revision.get().wrapping_add(1));
-        if self.query.borrow().is_empty() || self.selected.borrow().is_none() {
+        if self.query.borrow().is_empty()
+            || (self.mode() == library::SearchMode::Title && self.selected.borrow().is_none())
+            || (self.mode() == library::SearchMode::Lyrics
+                && self.query.borrow().chars().nth(1).is_none())
+        {
             self.status.set("initial");
         } else {
             self.status.set("loading");
@@ -222,21 +248,29 @@ impl SearchSession {
         self.notify();
     }
 
-    /// Enter skips only the pending delay, never repeats an active or completed query.
+    /// Enter also submits a one-character lyric query, but never repeats a running or finished query.
     pub fn submit(self: &Rc<Self>) {
-        if self.status.get() != "loading" || self.cancellation.borrow().is_some() {
+        let single_lyric = self.mode() == library::SearchMode::Lyrics
+            && self.status.get() == "initial"
+            && !self.query.borrow().is_empty();
+        if (self.status.get() != "loading" && !single_lyric) || self.cancellation.borrow().is_some()
+        {
             return;
         }
         if let Some(source) = self.debounce.borrow_mut().take() {
             source.remove();
         }
-        let Some(selected) = self.selected.borrow().clone() else {
-            return;
-        };
+        let selected = self.selected.borrow().clone();
         let generation = self.generation.get();
         let cancellation = ReadCancellation::new();
         self.cancellation.replace(Some(cancellation.clone()));
+        if single_lyric {
+            self.status.set("loading");
+            self.revision.set(self.revision.get().wrapping_add(1));
+            self.notify();
+        }
         let query = self.query();
+        let mode = self.mode();
         let weak = Rc::downgrade(self);
         let source = self.source.clone();
         let database = self.database.clone();
@@ -244,7 +278,8 @@ impl SearchSession {
             rufin_core::source::search::acquire_search(
                 &source,
                 &database,
-                &selected,
+                selected.as_ref(),
+                mode,
                 query,
                 60,
                 cancellation,
@@ -309,6 +344,7 @@ impl SearchSession {
                     title: item.title().to_owned(),
                     subtitle: item.subtitle().to_owned(),
                     artwork: item.artwork(),
+                    lyrics: item.lyrics().cloned(),
                 })
                 .collect()
         })
@@ -338,7 +374,7 @@ impl SearchSession {
             .get(index)
             .is_some_and(|item| {
                 let (kind, uri) = match item {
-                    SearchItem::Track(row) => (RecentSearchKind::Track, row.media_uri.as_str()),
+                    SearchItem::Track(row, _) => (RecentSearchKind::Track, row.media_uri.as_str()),
                     SearchItem::Album(row) => (RecentSearchKind::Album, row.media_uri.as_str()),
                     SearchItem::Artist(row) => (RecentSearchKind::Artist, row.media_uri.as_str()),
                 };

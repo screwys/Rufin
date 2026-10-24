@@ -125,7 +125,8 @@ pub(crate) struct Shared {
     selection_intent: Mutex<Weak<AtomicBool>>,
     connection: Mutex<Option<tokio::task::AbortHandle>>,
     album_release: Mutex<Option<tokio::task::AbortHandle>>,
-    asset_download: Mutex<Option<(SourceId, Weak<tokio_util::sync::CancellationToken>)>>,
+    asset_download: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    asset_download_requested: Arc<tokio::sync::Notify>,
     pub(crate) lane: tokio::sync::Mutex<()>,
     playback: Mutex<Weak<PlaybackOwner>>,
     connect: Mutex<Weak<crate::connect::ConnectOwner>>,
@@ -232,10 +233,7 @@ impl Shared {
         if matches!(
             operation,
             SourceOperation::Idle | SourceOperation::Refreshing { .. }
-        ) && active
-            .as_ref()
-            .and_then(|(_, token)| token.upgrade())
-            .is_some()
+        ) && active.is_some()
             && matches!(
                 *self.operation.borrow(),
                 SourceOperation::Downloading { .. }
@@ -471,6 +469,7 @@ impl SourceOwner {
             connection: Mutex::new(None),
             album_release: Mutex::new(None),
             asset_download: Mutex::new(None),
+            asset_download_requested: Arc::new(tokio::sync::Notify::new()),
             lane: tokio::sync::Mutex::new(()),
             playback: Mutex::new(Weak::new()),
             connect: Mutex::new(Weak::new()),
@@ -513,6 +512,7 @@ impl SourceOwner {
         if self.shared.started.swap(true, Ordering::AcqRel) {
             return Err("the source owner is already running".to_string());
         }
+        self.start_asset_downloader();
         if let Some(source_id) = self.shared.settings.load().sources.selected_source_id {
             let owner = self.clone();
             self.shared.runtime.spawn(async move {
@@ -555,6 +555,16 @@ impl SourceOwner {
 
     pub(crate) async fn close_storage(&self) {
         self.shared.started.store(false, Ordering::Release);
+        let task = self
+            .shared
+            .asset_download
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take();
+        if let Some(task) = task {
+            task.abort();
+            let _ = task.await;
+        }
         self.release_selected().await;
         self.shared
             .clients
@@ -613,6 +623,9 @@ impl SourceOwner {
             ))
             .await;
         self.publish_operation(SourceOperation::Idle).await;
+        if result.is_ok() {
+            self.request_asset_downloads();
+        }
         result
     }
 
@@ -678,6 +691,7 @@ impl SourceOwner {
                 change: CatalogChange::Broad,
             }))
             .await;
+        self.request_asset_downloads();
         Ok(())
     }
 
@@ -1447,6 +1461,7 @@ impl SourceOwner {
                     .configured_sources(self.shared.selected().as_ref()),
             ))
             .await;
+        self.request_asset_downloads();
         Ok(())
     }
 
@@ -1505,6 +1520,9 @@ impl SourceOwner {
                     Err(error) => self.shared.warn_nonfatal(&error),
                 }
             }
+        }
+        if update.metadata || update.artwork || update.playlists {
+            self.request_asset_downloads();
         }
         if update.metadata || update.playlists {
             self.shared.downloads.library_changed(source_id.clone());

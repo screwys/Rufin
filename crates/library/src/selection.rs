@@ -227,27 +227,6 @@ impl Database {
             .collect())
     }
 
-    pub async fn source_track_uri_page(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        after: Option<TrackKey>,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<(TrackKey, String)>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        Ok(sqlx::query_as(
-            "SELECT track_key,media_uri FROM tracks WHERE source_key=?1 AND indexed=1
-             AND track_key>?2 AND (?3 IS NULL OR track_key IN
-                 (SELECT track_key FROM track_folders WHERE folder_key=?3))
-             ORDER BY track_key LIMIT 128",
-        )
-        .bind(source)
-        .bind(after.map_or(0, TrackKey::raw))
-        .bind(folder)
-        .fetch_all(&mut *connection)
-        .await?)
-    }
-
     pub async fn selected_track_keys(
         &self,
         selection: &MemberSelection,

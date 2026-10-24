@@ -22,6 +22,8 @@ fn shared_ui(settings: &UiSettings) -> Result<serde_json::Map<String, Value>, St
         "web_controller",
         "backup",
         "downloads",
+        "download_artwork_automatically",
+        "download_lyrics_automatically",
         "secret_storage_mode",
         "cast_proxy_enabled",
         "cast_network_interface",

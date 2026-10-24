@@ -423,6 +423,14 @@ impl SettingsFile {
             .cloned()
     }
 
+    pub(crate) fn cache_downloads(&self) -> (bool, bool) {
+        let stored = self.value.lock().unwrap_or_else(|p| p.into_inner());
+        (
+            stored.ui.application.download_artwork_automatically,
+            stored.ui.application.download_lyrics_automatically,
+        )
+    }
+
     pub(crate) fn source_name(&self, source_id: &sources::SourceId) -> String {
         self.value
             .lock()

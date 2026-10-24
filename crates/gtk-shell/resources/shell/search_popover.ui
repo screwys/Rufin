@@ -7,6 +7,45 @@
     <property name="autohide">false</property>
     <property name="child"><object class="GtkBox">
       <property name="orientation">vertical</property><property name="spacing">6</property>
+      <child><object class="GtkBox" id="search_modes">
+        <property name="visible">false</property><property name="spacing">0</property>
+        <property name="halign">start</property><style><class name="search-modes"/></style>
+        <child><object class="GtkToggleButton" id="by_title">
+          <property name="label" translatable="yes">By Title</property>
+          <property name="active">true</property><property name="focus-on-click">false</property>
+        </object></child>
+        <child><object class="GtkToggleButton" id="by_lyrics">
+          <property name="label" translatable="yes">By Lyrics</property>
+          <property name="group">by_title</property><property name="focus-on-click">false</property>
+        </object></child>
+      </object></child>
+      <child><object class="GtkBox" id="lyrics_cache_prompt">
+        <property name="visible">false</property><property name="orientation">vertical</property>
+        <style><class name="lyrics-cache-prompt"/></style>
+        <child><object class="GtkButton" id="dismiss_lyrics_cache_prompt">
+          <property name="icon-name">rufin-window-close-symbolic</property>
+          <property name="tooltip-text" translatable="yes">Close</property>
+          <property name="halign">end</property>
+          <property name="margin-top">4</property><property name="margin-end">4</property>
+          <property name="focus-on-click">false</property>
+          <style><class name="flat"/><class name="circular"/></style>
+        </object></child>
+        <child><object class="GtkBox">
+          <property name="orientation">vertical</property><property name="spacing">12</property>
+          <property name="margin-start">16</property><property name="margin-end">16</property>
+          <property name="margin-bottom">16</property>
+          <child><object class="GtkLabel">
+            <property name="label" translatable="yes">Do you want to cache all lyrics automatically? You can also enable this from Preferences -&gt; Storage</property>
+            <property name="wrap">true</property><property name="justify">center</property>
+            <property name="width-chars">1</property><property name="max-width-chars">40</property>
+          </object></child>
+          <child><object class="GtkButton" id="download_lyrics">
+            <property name="label" translatable="yes">Enable caching lyrics</property>
+            <property name="halign">center</property><property name="focus-on-click">false</property>
+            <style><class name="suggested-action"/></style>
+          </object></child>
+        </object></child>
+      </object></child>
       <child><object class="GtkLabel" id="error"><property name="label" translatable="yes">Search unavailable</property><property name="margin-top">8</property><property name="margin-bottom">8</property><property name="visible">false</property><style><class name="dim-label"/></style></object></child>
       <child><object class="GtkLabel" id="empty_results"><property name="ellipsize">end</property><property name="max-width-chars">40</property><property name="margin-top">8</property><property name="margin-bottom">8</property><property name="visible">false</property><style><class name="dim-label"/></style></object></child>
       <child><object class="GtkScrolledWindow" id="scroller">

@@ -122,7 +122,7 @@ impl ProductHandles {
         }
     }
 
-    async fn clear_cached_data(&self, kind: CacheKind) -> Result<(), String> {
+    pub async fn clear_cached_data(&self, kind: CacheKind) -> Result<(), String> {
         match kind {
             CacheKind::MetadataLookups => self
                 .library

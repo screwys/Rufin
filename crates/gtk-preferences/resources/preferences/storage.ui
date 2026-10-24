@@ -5,6 +5,12 @@
   <object class="GtkLabel" id="unavailable_text">
     <property name="label" translatable="yes">Unavailable</property>
   </object>
+  <object class="GtkStringList" id="download_options">
+    <items>
+      <item translatable="yes">Download Lazily</item>
+      <item translatable="yes">Download Automatically</item>
+    </items>
+  </object>
   <object class="AdwNavigationView" id="navigation">
     <child>
       <object class="AdwNavigationPage" id="storage_root">
@@ -12,59 +18,6 @@
         <property name="child">
           <object class="AdwPreferencesPage" id="storage_page">
             <property name="title" translatable="yes">Storage</property>
-            <child>
-              <object class="AdwPreferencesGroup">
-                <property name="title" translatable="yes">Downloads</property>
-                <child>
-                  <object class="AdwActionRow" id="download_source_row">
-                    <property name="title" translatable="yes">Source</property>
-                    <child type="suffix">
-                      <object class="GtkMenuButton" id="download_source">
-                        <property name="valign">center</property>
-                      </object>
-                    </child>
-                    <child type="suffix">
-                      <object class="GtkButton" id="download_artwork">
-                        <property name="icon-name">rufin-image-x-generic-symbolic</property>
-                        <property name="tooltip-text" translatable="yes">Download artwork</property>
-                        <accessibility>
-                          <property name="label" translatable="yes">Download artwork</property>
-                        </accessibility>
-                        <property name="valign">center</property>
-                        <style>
-                          <class name="flat" />
-                        </style>
-                      </object>
-                    </child>
-                    <child type="suffix">
-                      <object class="GtkButton" id="download_lyrics">
-                        <property name="icon-name">rufin-text-justify-center-symbolic</property>
-                        <property name="tooltip-text" translatable="yes">Download lyrics</property>
-                        <accessibility>
-                          <property name="label" translatable="yes">Download lyrics</property>
-                        </accessibility>
-                        <property name="valign">center</property>
-                        <style>
-                          <class name="flat" />
-                        </style>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkLabel" id="download_status">
-                    <property name="visible">false</property>
-                    <property name="xalign">0</property>
-                    <property name="wrap">true</property>
-                    <property name="margin-top">8</property>
-                    <style>
-                      <class name="dim-label" />
-                      <class name="caption" />
-                    </style>
-                  </object>
-                </child>
-              </object>
-            </child>
             <child>
               <object class="AdwPreferencesGroup">
                 <child>
@@ -115,6 +68,23 @@
                         <property name="spinning">false</property>
                       </object>
                     </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup">
+                <property name="title" translatable="yes">Cache</property>
+                <child>
+                  <object class="AdwComboRow" id="artwork_download">
+                    <property name="title" translatable="yes">Artwork</property>
+                    <property name="model">download_options</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwComboRow" id="lyrics_download">
+                    <property name="title" translatable="yes">Lyrics</property>
+                    <property name="model">download_options</property>
                   </object>
                 </child>
               </object>
@@ -544,6 +514,15 @@
         </property>
       </object>
     </child>
+  </object>
+  <object class="AdwAlertDialog" id="cache_entry_confirmation">
+    <property name="heading" translatable="yes">Clear this cache?</property>
+    <property name="default-response">cancel</property>
+    <property name="close-response">cancel</property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="clear" appearance="destructive" translatable="yes">Clear</response>
+    </responses>
   </object>
   <object class="AdwAlertDialog" id="clear_cache_confirmation">
     <property name="heading" translatable="yes">Clear all cache?</property>

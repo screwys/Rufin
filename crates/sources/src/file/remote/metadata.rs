@@ -5,6 +5,130 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 
 impl FileSource {
+    pub(crate) async fn read_track_lyrics(
+        &self,
+        database: &library::Database,
+        relative: &str,
+        track: &mut crate::file::media::ScannedTrack,
+    ) -> SourceResult<()> {
+        let mut candidates = self.lyrics_candidates(
+            relative,
+            &track.track.metadata.title,
+            track.track.cue_path.is_some(),
+        );
+        track.lyrics_paths = candidates
+            .iter()
+            .map(|path| self.location(path))
+            .collect::<SourceResult<_>>()?;
+        let input = self.input().await?;
+        if self.document_access().is_none() && track.track.cue_path.is_none() {
+            let available = database
+                .source_files(self.source_id.as_str(), &track.lyrics_paths)
+                .await?;
+            candidates.retain(|relative| {
+                self.location(relative)
+                    .is_ok_and(|path| available.iter().any(|file| file.path == path))
+            });
+        }
+        let sidecar = self.sidecar_lyrics(&input, &candidates).await?;
+        let bundle = match sidecar {
+            Some(text) => lyrics::lyrics_from_edited_text(&text),
+            None if track.track.cue_path.is_none() => track
+                .lyrics
+                .take()
+                .and_then(lyrics::lyrics_with_displayable_content),
+            None => None,
+        };
+        crate::file::lyrics::set_lyrics(track, bundle);
+        Ok(())
+    }
+
+    async fn sidecar_lyrics(
+        &self,
+        input: &Arc<FileInputServer>,
+        candidates: &[String],
+    ) -> SourceResult<Option<String>> {
+        for path in candidates {
+            match self.small_file(input, path, 2 * 1024 * 1024).await {
+                Ok(bytes) => {
+                    if let Ok(text) = String::from_utf8(bytes)
+                        && !text.trim().is_empty()
+                    {
+                        return Ok(Some(text));
+                    }
+                }
+                Err(SourceError::NotFound) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(None)
+    }
+
+    pub(crate) async fn observe_lyrics_dependencies(
+        &self,
+        catalog: &mut library::Catalog<'_>,
+        paths: &[String],
+    ) -> SourceResult<()> {
+        let input = self.input().await?;
+        let mut observations = Vec::new();
+        let mut missing = Vec::new();
+        for path in paths
+            .iter()
+            .filter(|path| crate::file::lyrics::is_sidecar(path))
+            .collect::<std::collections::BTreeSet<_>>()
+        {
+            match self.stat(&input, &self.relative(path)?).await {
+                Ok(mut file) => {
+                    file.path = path.clone();
+                    file.state = library::LocalFileState::Rejected;
+                    observations.push((file, Vec::new()));
+                }
+                Err(SourceError::NotFound) => missing.push(path.clone()),
+                Err(SourceError::Cancelled) => return Err(SourceError::Cancelled),
+                Err(error) => tracing::warn!(%error, "Could not inspect lyrics sidecar"),
+            }
+        }
+        catalog
+            .write_file_observations(&observations, Vec::new(), true)
+            .await?;
+        let missing = catalog
+            .database
+            .source_files(catalog.source_id, &missing)
+            .await?
+            .into_iter()
+            .map(|file| file.path)
+            .collect::<Vec<_>>();
+        catalog
+            .remove_source_files(&missing, catalog.observed.unwrap_or(i64::MAX))
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) fn lyrics_candidates(&self, relative: &str, title: &str, cue: bool) -> Vec<String> {
+        let relative = crate::file::documents::relative_parts(relative).0;
+        let mut candidates = Vec::new();
+        if !cue {
+            let sidecar = sidecar_path(relative);
+            candidates.push(sidecar.clone());
+            candidates.push(format!(
+                "{}.LRC",
+                sidecar.strip_suffix(".lrc").unwrap_or(&sidecar)
+            ));
+        }
+        if !title.is_empty() && !matches!(title, "." | "..") && !title.contains(['/', '\\', '\0']) {
+            let parent = relative
+                .rsplit_once('/')
+                .map_or(String::new(), |(parent, _)| format!("{parent}/"));
+            for extension in ["lrc", "LRC"] {
+                let path = format!("{parent}{title}.{extension}");
+                if !candidates.contains(&path) {
+                    candidates.push(path);
+                }
+            }
+        }
+        candidates
+    }
+
     pub(crate) async fn commit_file(
         &self,
         relative: &str,
@@ -189,41 +313,13 @@ impl FileSource {
             .ok_or(SourceError::NotFound)?;
         let relative = self.relative(&file.path)?;
         let input = self.input().await?;
-        let mut candidates = Vec::new();
-        if track.access.cue_path.is_none() {
-            let sidecar = sidecar_path(crate::file::documents::relative_parts(&relative).0);
-            candidates.push(sidecar.clone());
-            candidates.push(format!(
-                "{}.LRC",
-                sidecar.strip_suffix(".lrc").unwrap_or(&sidecar)
-            ));
-        }
-        if !track.metadata.title.is_empty()
-            && !matches!(track.metadata.title.as_str(), "." | "..")
-            && !track.metadata.title.contains(['/', '\\', '\0'])
-        {
-            let parent = relative
-                .rsplit_once('/')
-                .map_or(String::new(), |(parent, _)| format!("{parent}/"));
-            for extension in ["lrc", "LRC"] {
-                let path = format!("{parent}{}.{extension}", track.metadata.title);
-                if !candidates.contains(&path) {
-                    candidates.push(path);
-                }
-            }
-        }
-        for candidate in candidates {
-            match self.small_file(&input, &candidate, 2 * 1024 * 1024).await {
-                Ok(bytes) => {
-                    if let Ok(text) = String::from_utf8(bytes)
-                        && !text.trim().is_empty()
-                    {
-                        return Ok(Some(text));
-                    }
-                }
-                Err(SourceError::NotFound) => {}
-                Err(error) => return Err(error),
-            }
+        let candidates = self.lyrics_candidates(
+            &relative,
+            &track.metadata.title,
+            track.access.cue_path.is_some(),
+        );
+        if let Some(text) = self.sidecar_lyrics(&input, &candidates).await? {
+            return Ok(Some(text));
         }
         if track.access.cue_path.is_some() {
             return Ok(None);

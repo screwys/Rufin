@@ -46,6 +46,7 @@ pub(crate) fn read_media(
     };
     let mut read = read_media_input(worker, path, &mut file, access_uri.as_str(), sidecar);
     if let MediaRead::Accepted(track) = &mut read {
+        crate::file::lyrics::read_local(track);
         track.track.object_id = crate::file::media::track_id(&identity);
         track.track.media_uri = Some(uri.into());
         track.audio_revision = audio_revision(
@@ -80,6 +81,7 @@ pub(crate) fn audio_revision(access: &str, identity: &Path) -> blake3::Hasher {
             hash.update(&metadata.ino().to_le_bytes());
         }
     }
-    hash.update(&super::scan::LOCAL_PARSER_VERSION.to_le_bytes());
+    // Lyrics indexing does not change the interpreted audio.
+    hash.update(&18_u32.to_le_bytes());
     hash
 }

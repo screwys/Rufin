@@ -205,6 +205,7 @@ pub fn library_list_key(route: &Route, category: CollectionCategory) -> LibraryL
 pub struct OpenOptions {
     pub category: CollectionCategory,
     pub filter: String,
+    pub search_mode: library::SearchMode,
     pub sort: Option<LibraryField>,
     pub descending: Option<bool>,
     pub favorites_only: bool,
@@ -218,6 +219,7 @@ impl Default for OpenOptions {
         Self {
             category: CollectionCategory::Tracks,
             filter: String::new(),
+            search_mode: library::SearchMode::Title,
             sort: None,
             descending: None,
             favorites_only: false,
@@ -852,23 +854,19 @@ impl crate::source::SourceOwner {
                         .await?,
                 ))
             }
-            Route::Search => {
-                let selected = selected.ok_or_else(|| {
-                    library::LibraryError::InvalidRequest("No source selected".into())
-                })?;
-                OpenedCollection::Search(
-                    crate::source::search::acquire_search(
-                        self,
-                        database,
-                        selected,
-                        options.filter.clone(),
-                        60,
-                        cancel.clone(),
-                    )
-                    .await
-                    .map_err(library::LibraryError::InvalidRequest)?,
+            Route::Search => OpenedCollection::Search(
+                crate::source::search::acquire_search(
+                    self,
+                    database,
+                    selected,
+                    options.search_mode,
+                    options.filter.clone(),
+                    60,
+                    cancel.clone(),
                 )
-            }
+                .await
+                .map_err(library::LibraryError::InvalidRequest)?,
+            ),
             _ => unreachable!("collection route was handled above"),
         })
     }

@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
@@ -16,7 +16,7 @@ gtk_widgets::composite_box!(
     search_preview_row_imp,
     "RufinSearchPreviewRow",
     "/io/github/screwys/Rufin/ui/shell/search_row.ui",
-    { cover_host: gtk::Box, title_row: gtk::Box, title: gtk::Label, subtitle: gtk::Label, separator: gtk::Label, kind: gtk::Stack, remove: gtk::Button, play: gtk::Button, menu: gtk::Button }
+    { cover_host: gtk::Box, title_row: gtk::Box, title: gtk::Label, subtitle: gtk::Label, lyrics: gtk_widgets::lyrics_snippet::LyricsSnippetView, separator: gtk::Label, kind: gtk::Stack, remove: gtk::Button, play: gtk::Button, menu: gtk::Button }
 );
 
 struct PreviewRow {
@@ -27,6 +27,7 @@ struct PreviewRow {
 
 impl PreviewRow {
     fn new(history: bool) -> Self {
+        gtk_widgets::lyrics_snippet::LyricsSnippetView::ensure_type();
         let body = SearchPreviewRow::new();
         gtk_widgets::recycled_cells::install_playing_indicator(
             &body.imp().title,
@@ -85,6 +86,10 @@ pub(super) struct SearchPopup {
     list: gtk::ListBox,
     error: gtk::Label,
     empty_results: gtk::Label,
+    search_modes: gtk::Box,
+    lyrics_cache_prompt: gtk::Box,
+    download_lyrics: gtk::Button,
+    modes: [gtk::ToggleButton; 2],
     history_heading: gtk::ListBoxRow,
     history_footer: gtk::ListBoxRow,
     headings: [gtk::ListBoxRow; 3],
@@ -103,6 +108,8 @@ impl SearchPopup {
         gtk_widgets::objects!(builder, resource, {
             popover: gtk::Popover, scroller: gtk::ScrolledWindow, list: gtk::ListBox,
             error: gtk::Label,
+            search_modes: gtk::Box, by_title: gtk::ToggleButton, by_lyrics: gtk::ToggleButton,
+            lyrics_cache_prompt: gtk::Box, download_lyrics: gtk::Button, dismiss_lyrics_cache_prompt: gtk::Button,
             empty_results: gtk::Label, history_heading: gtk::ListBoxRow, history_footer: gtk::ListBoxRow,
             clear_history: gtk::Button,
             tracks_heading: gtk::ListBoxRow, albums_heading: gtk::ListBoxRow, artists_heading: gtk::ListBoxRow,
@@ -119,6 +126,10 @@ impl SearchPopup {
             list,
             error,
             empty_results,
+            search_modes,
+            lyrics_cache_prompt,
+            download_lyrics,
+            modes: [by_title, by_lyrics],
             history_heading,
             history_footer,
             headings: [tracks_heading, albums_heading, artists_heading],
@@ -148,11 +159,51 @@ impl SearchPopup {
                 popup.list.append(&row.row);
             }
         }
-        popup.connect(&clear_history);
+        popup.connect(&clear_history, &dismiss_lyrics_cache_prompt);
         popup
     }
 
-    fn connect(self: &Rc<Self>, clear: &gtk::Button) {
+    fn connect(self: &Rc<Self>, clear: &gtk::Button, dismiss_prompt: &gtk::Button) {
+        let weak = Rc::downgrade(self);
+        dismiss_prompt.connect_clicked(move |_| {
+            if let Some(popup) = weak.upgrade()
+                && let Some(shell) = popup.shell.upgrade()
+            {
+                shell
+                    .settings
+                    .set_app_setting("dismiss lyrics cache prompt", true, |settings| {
+                        &mut settings.application.lyrics_cache_prompt_dismissed
+                    });
+                popup.refresh_cache_prompt();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.download_lyrics.connect_clicked(move |_| {
+            if let Some(popup) = weak.upgrade()
+                && let Some(shell) = popup.shell.upgrade()
+            {
+                shell
+                    .settings
+                    .set_app_setting("automatic lyrics download", true, |settings| {
+                        &mut settings.application.download_lyrics_automatically
+                    });
+                popup.refresh_cache_prompt();
+            }
+        });
+        for (button, mode) in self
+            .modes
+            .iter()
+            .zip([library::SearchMode::Title, library::SearchMode::Lyrics])
+        {
+            let session = Rc::downgrade(&self.session);
+            button.connect_toggled(move |button| {
+                if button.is_active()
+                    && let Some(session) = session.upgrade()
+                {
+                    session.set_mode(mode);
+                }
+            });
+        }
         let actions = gtk::gio::SimpleActionGroup::new();
         let dismiss = gtk::gio::SimpleAction::new("dismiss", None);
         let weak = Rc::downgrade(self);
@@ -226,9 +277,18 @@ impl SearchPopup {
             }
         });
         let weak = Rc::downgrade(self);
+        let mode = Cell::new(self.session.mode());
         self.observer.replace(Some(self.session.observe(move || {
-            if let Some(popup) = weak.upgrade().filter(|popup| popup.popover.is_visible()) {
+            let Some(popup) = weak.upgrade() else { return };
+            let mode_changed = mode.replace(popup.session.mode()) != popup.session.mode();
+            if popup.popover.is_visible() {
                 popup.render();
+            }
+            if mode_changed && let Some(shell) = popup.shell.upgrade() {
+                let searching = shell.navigation.routes.borrow().current() == &Route::Search;
+                if searching {
+                    shell.replace_current_route_when_ready();
+                }
             }
         })));
         let weak = Rc::downgrade(self);
@@ -450,7 +510,7 @@ impl SearchPopup {
         self.entry.has_focus() || self.entry.focus_child().is_some()
     }
 
-    pub fn open(&self) {
+    pub fn open(self: &Rc<Self>) {
         if self.session.query().is_empty()
             && self.shell.upgrade().is_none_or(|shell| {
                 shell
@@ -539,7 +599,14 @@ impl SearchPopup {
                 }
                 .unwrap_or(shell.chrome.window.height() as f32);
                 // Leave room for the popover padding and a gap above the player.
-                let available = (bottom - anchor.y() - anchor.height() - 24.0) as i32;
+                let modes_height = self.search_modes.measure(gtk::Orientation::Vertical, -1).1;
+                let prompt_height = self
+                    .lyrics_cache_prompt
+                    .measure(gtk::Orientation::Vertical, width - 16)
+                    .1;
+                let available = (bottom - anchor.y() - anchor.height() - 30.0) as i32
+                    - modes_height
+                    - prompt_height;
                 self.scroller.set_max_content_height(available.max(1));
             }
         }
@@ -567,12 +634,16 @@ impl SearchPopup {
             .map(|(_, action)| action.clone())
     }
 
-    fn render(&self) {
+    fn render(self: &Rc<Self>) {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
         self.actions.borrow_mut().clear();
+        let lyrics = self.session.mode() == library::SearchMode::Lyrics;
+        self.modes[usize::from(lyrics)].set_active(true);
         let query = self.session.query();
+        self.search_modes.set_visible(!query.is_empty());
+        self.refresh_cache_prompt();
         let history = shell
             .settings
             .current
@@ -587,8 +658,9 @@ impl SearchPopup {
         let loading = !query.is_empty() && status == "loading";
         self.list
             .update_state(&[gtk::accessible::State::Busy(loading)]);
-        self.error
-            .set_visible(!query.is_empty() && matches!(status, "error" | "initial"));
+        self.error.set_visible(
+            !query.is_empty() && (status == "error" || (status == "initial" && !lyrics)),
+        );
         self.empty_results.set_visible(false);
         self.history_heading
             .set_visible(query.is_empty() && !history.is_empty());
@@ -652,6 +724,10 @@ impl SearchPopup {
                 row.row.set_activatable(!skeleton);
                 row.body.imp().play.set_visible(!skeleton);
                 row.body.imp().menu.set_visible(!skeleton);
+                row.body
+                    .imp()
+                    .lyrics
+                    .bind(preview.and_then(|preview| preview.lyrics.as_ref()));
                 if skeleton {
                     row.body.add_css_class("search-preview-loading");
                     row.body.imp().title.set_text("");
@@ -700,12 +776,36 @@ impl SearchPopup {
         );
     }
 
+    pub(super) fn refresh_cache_prompt(&self) {
+        let Some(shell) = self.shell.upgrade() else {
+            return;
+        };
+        let settings = shell.settings.persistence.load();
+        let show = self.session.mode() == library::SearchMode::Lyrics
+            && !self.session.query().is_empty()
+            && !settings.application.download_lyrics_automatically
+            && !settings.application.lyrics_cache_prompt_dismissed
+            && shell
+                .source
+                .configured
+                .borrow()
+                .sources
+                .iter()
+                .any(|source| source.kind != "local");
+        self.lyrics_cache_prompt.set_visible(show);
+        self.resize();
+    }
+
     fn catalog(&self) -> Option<Rc<gtk_library::CatalogUi>> {
         let shell = self.shell.upgrade()?;
         let route = shell.navigation.routes.borrow().current().clone();
-        let source = shell
-            .selected_library()
-            .map(|selected| selected.source_id.clone());
+        let source = (self.session.mode() == library::SearchMode::Title)
+            .then(|| {
+                shell
+                    .selected_library()
+                    .map(|selected| selected.source_id.clone())
+            })
+            .flatten();
         Some(shell.build_catalog(&route, source.as_ref()))
     }
 

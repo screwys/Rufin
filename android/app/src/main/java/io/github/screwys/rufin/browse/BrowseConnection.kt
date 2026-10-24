@@ -3,6 +3,7 @@ package io.github.screwys.rufin.browse
 import io.github.screwys.rufin.shared.rufin_core.ConfiguredSources
 import io.github.screwys.rufin.shared.rufin_core.Route
 import io.github.screwys.rufin.shared.rufin_core.SidebarRouteItem
+import io.github.screwys.rufin.shared.library.SearchMode
 import io.github.screwys.rufin.app.RufinConnection
 import io.github.screwys.rufin.ui.userMessage
 
@@ -52,6 +53,8 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     var details by mutableStateOf<List<BrowseLocation>>(emptyList())
         private set
     var searchText by mutableStateOf("")
+    var searchMode by mutableStateOf(SearchMode.TITLE)
+    private var searchSubmission by mutableIntStateOf(0)
     var searchRows by mutableStateOf<List<BrowseItem>>(emptyList())
         private set
     var recentSearchRows by mutableStateOf<List<BrowseItem>>(emptyList())
@@ -95,8 +98,12 @@ internal class BrowseConnection(private val connection: RufinConnection, private
     val current get() = details.lastOrNull() ?: routes.firstOrNull { it.id == rootId }
         ?.let { BrowseLocation(it.route, it.title, it.id, optionsFor(it.id)) }
 
-    private data class SearchContext(val section: AppSection, val text: String,
-        val library: AndroidLibrary?, val source: ConfiguredSources?, val revision: ULong?)
+    private data class SearchContext(val section: AppSection, val text: String, val mode: SearchMode,
+        val library: AndroidLibrary?, val source: ConfiguredSources?, val revision: ULong?, val submission: Int)
+
+    fun submitSearch() {
+        if (searchMode == SearchMode.LYRICS) searchSubmission++
+    }
 
     init {
         scope.launch {
@@ -123,10 +130,15 @@ internal class BrowseConnection(private val connection: RufinConnection, private
             }
         }
         scope.launch {
-            snapshotFlow { SearchContext(section, searchText, library,
-                connection.sources, connection.catalogRevision?.catalog) }
-                .debounce(250).collectLatest { context ->
-                    if (context.section != AppSection.Search || context.text.isBlank() || context.library == null) {
+            var submitted = 0
+            snapshotFlow { SearchContext(section, searchText, searchMode, library,
+                if (searchMode == SearchMode.TITLE) connection.sources else null, connection.catalogRevision?.catalog, searchSubmission) }
+                .debounce { if (it.submission != submitted) 0L else 250L }.collectLatest { context ->
+                    val explicit = context.submission != submitted
+                    submitted = context.submission
+                    val query = context.text.trim()
+                    if (context.section != AppSection.Search || query.isEmpty() || context.library == null ||
+                        context.mode == SearchMode.LYRICS && !explicit && query.codePointCount(0, query.length) < 2) {
                         searchRows = emptyList()
                         searchLoading = false
                         return@collectLatest
@@ -135,9 +147,10 @@ internal class BrowseConnection(private val connection: RufinConnection, private
                     try {
                         searchRows = withContext(Dispatchers.Default) {
                             val downloadRevision = connection.downloads.state?.revision
-                            val rows = context.library.search(context.text)
+                            val rows = context.library.search(context.text, context.mode)
                             val order = rows.filter { it.kind == "track" }.map { it.mediaUri }
-                            val capture = "search:${context.source?.selectedSourceId}:${context.text}"
+                            val capture = if (context.mode == SearchMode.LYRICS) "search:lyrics:${context.text}"
+                                else "search:${context.source?.selectedSourceId}:title:${context.text}"
                             rows.mapIndexed { index, row ->
                                 BrowseItem(row, index.toULong(), null, searchOrder = order, searchContext = capture, contextTitle = context.text, downloadRevision = downloadRevision)
                             }

@@ -567,11 +567,12 @@ impl AndroidLibrary {
         )
     }
 
-    pub async fn search(&self, text: String) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
-        let selected = self
-            .source
-            .selected_library()
-            .ok_or_else(|| error("No source selected"))?;
+    pub async fn search(
+        &self,
+        text: String,
+        mode: library::SearchMode,
+    ) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
+        let selected = self.source.selected_library();
         let source = self.source.clone();
         let database = self.database.clone();
         self.runtime
@@ -579,7 +580,8 @@ impl AndroidLibrary {
                 rufin_core::source::search::acquire_search(
                     &source,
                     &database,
-                    &selected,
+                    selected.as_ref(),
+                    mode,
                     text,
                     60,
                     ReadCancellation::new(),

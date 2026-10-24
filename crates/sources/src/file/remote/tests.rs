@@ -138,6 +138,18 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
             .await
             .unwrap();
         assert_eq!(rows.len(), 2);
+        let lyrics = database
+            .search_tracks_by_lyrics(
+                &library::SearchRequest::new("lyric line"),
+                &ReadCancellation::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            lyrics.tracks.len(),
+            1,
+            "WebDAV scans index sidecars without opening lyrics"
+        );
         let requests = server.received_requests().await.unwrap();
         for name in ["/a.wav", "/b.wav", "/c.wav"] {
             assert!(

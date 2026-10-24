@@ -35,10 +35,8 @@ pub(super) fn page(
         reset_group: adw::PreferencesGroup,
         clear_all_cache: gtk::Button,
         clear_all_data: gtk::Button,
-        download_source: gtk::MenuButton,
-        download_artwork: gtk::Button,
-        download_lyrics: gtk::Button,
-        download_status: gtk::Label,
+        artwork_download: adw::ComboRow,
+        lyrics_download: adw::ComboRow,
         total_size: gtk::Label,
         spinner: gtk::Spinner,
         error: gtk::Label,
@@ -55,91 +53,29 @@ pub(super) fn page(
     navigation_controls.set_nested_page_visible(false);
     let controls = navigation_controls.clone();
     navigation.connect_popped(move |_, _| controls.set_nested_page_visible(false));
-    storage_page.add(&super::backup::group(
-        shell,
-        &navigation,
-        navigation_controls,
-    ));
     storage_page.add(&reset_group);
-    let (sources, selection) = super::source::preference_source_choices(shell, &download_source);
-    for (button, artwork) in [(download_artwork, true), (download_lyrics, false)] {
-        button.set_sensitive(!sources.is_empty());
-        let source = shell.products.source.clone();
-        let choices = sources.clone();
-        let selected = selection.downgrade();
-        let status = download_status.downgrade();
-        button.connect_clicked(move |_| {
-            let Some(selected) = selected.upgrade() else {
-                return;
-            };
-            let Some(choice) = choices.get(selected.selected() as usize) else {
-                return;
-            };
-            let result = if artwork {
-                source.download_artwork(choice.id.clone())
-            } else {
-                source.download_lyrics(choice.id.clone())
-            };
-            if let Err(error) = result
-                && let Some(status) = status.upgrade()
-            {
-                status.set_label(&error.to_string());
-                status.add_css_class("error");
-                status.set_visible(true);
-            }
-        });
-    }
-    let source = shell.products.source.clone();
-    let status = download_status.downgrade();
-    let task = Rc::new(std::cell::RefCell::new(None::<gtk::glib::JoinHandle<()>>));
-    let running = task.clone();
-    storage_page.connect_map(move |_| {
-        let mut updates = source.operation();
-        let status = status.clone();
-        let sources = sources.clone();
-        *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
-            use rufin_core::runtime::source::{SourceOperation, source_download_text};
-            let mut downloading = false;
-            loop {
-                let operation = updates.borrow_and_update().clone();
-                let Some(status) = status.upgrade() else {
-                    return;
-                };
-                match &operation {
-                    SourceOperation::Downloading {
-                        source_id,
-                        progress,
-                    } => {
-                        let text = source_download_text(progress);
-                        let name = sources
-                            .iter()
-                            .find(|source| &source.id == source_id)
-                            .map(gtk_widgets::source_labels::configured_source_display_name);
-                        status.set_label(
-                            &name.map_or_else(|| text.clone(), |name| format!("{name} · {text}")),
-                        );
-                        status.remove_css_class("error");
-                        status.set_visible(true);
-                    }
-                    SourceOperation::Failed { message, .. } if downloading => {
-                        status.set_label(message);
-                        status.add_css_class("error");
-                        status.set_visible(true);
-                    }
-                    _ => status.set_visible(false),
-                }
-                downloading = matches!(operation, SourceOperation::Downloading { .. });
-                drop(status);
-                if updates.changed().await.is_err() {
-                    return;
-                }
-            }
-        }));
+    let settings = shell.settings.persistence.load();
+    artwork_download.set_selected(u32::from(
+        settings.application.download_artwork_automatically,
+    ));
+    lyrics_download.set_selected(u32::from(
+        settings.application.download_lyrics_automatically,
+    ));
+    let settings = Rc::clone(&shell.settings);
+    artwork_download.connect_selected_notify(move |row| {
+        settings.set_app_setting(
+            "automatic artwork download",
+            row.selected() == 1,
+            |settings| &mut settings.application.download_artwork_automatically,
+        );
     });
-    storage_page.connect_unmap(move |_| {
-        if let Some(task) = task.borrow_mut().take() {
-            task.abort();
-        }
+    let settings = Rc::clone(&shell.settings);
+    lyrics_download.connect_selected_notify(move |row| {
+        settings.set_app_setting(
+            "automatic lyrics download",
+            row.selected() == 1,
+            |settings| &mut settings.application.download_lyrics_automatically,
+        );
     });
 
     let controls = [
@@ -206,7 +142,7 @@ pub(super) fn page(
     });
     for (kind, _, _, button) in controls {
         let view = view.clone();
-        button.connect_clicked(move |_| view.load(Some(kind)));
+        button.connect_clicked(move |_| view.confirm_clear(kind));
     }
     for (button, kind, confirmation) in [
         (
@@ -260,6 +196,22 @@ pub(super) fn page(
 }
 
 impl StorageView {
+    fn confirm_clear(self: &Rc<Self>, kind: CacheKind) {
+        let view = self.clone();
+        gtk::glib::spawn_future_local(async move {
+            let Some(page) = view.page.upgrade() else {
+                return;
+            };
+            let resource = crate::ui_resource::STORAGE_PREFERENCES_RESOURCE;
+            let builder = gtk_widgets::ui_resource::builder(resource);
+            let dialog: adw::AlertDialog =
+                gtk_widgets::ui_resource::object(&builder, resource, "cache_entry_confirmation");
+            if dialog.choose_future(Some(&page)).await == "clear" {
+                view.load(Some(kind));
+            }
+        });
+    }
+
     fn load(self: &Rc<Self>, clear: Option<CacheKind>) {
         if self
             .spinner

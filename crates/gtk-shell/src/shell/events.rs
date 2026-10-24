@@ -161,13 +161,8 @@ fn release_selected_source(shell: &Rc<Shell>) {
     shell.search_session.set_selected(None);
     let released = shell.selected_ui.take();
     drop(released);
-    if shell
-        .navigation
-        .routes
-        .borrow()
-        .current()
-        .uses_selected_source()
-    {
+    let route = shell.navigation.routes.borrow().current().clone();
+    if shell.route_uses_selected_source(&route) {
         shell.replace_current_route_when_ready();
     }
     shell.player_ui.update_bottom_player();
@@ -179,6 +174,7 @@ fn apply_configured_sources(
 ) {
     *shell.source.configured.borrow_mut() = configured;
     shell.products.lyrics.refresh_write_access();
+    shell.chrome.topbar.refresh_lyrics_cache_prompt();
     refresh_context_playlist_picker(shell);
     shell.player_ui.update_bottom_player();
 }
@@ -200,7 +196,7 @@ fn apply_selected_source(
     shell.search_session.set_selected(Some(selected));
     refresh_context_playlist_picker(shell);
     let route = shell.navigation.routes.borrow().current().clone();
-    if changed && route.uses_selected_source() {
+    if changed && shell.route_uses_selected_source(&route) {
         shell.replace_current_route_when_ready();
     }
     if !shell.startup.route_revealed.get() && !shell.source.operation.borrow().blocks_library() {
@@ -255,7 +251,8 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
             .selected_library()
             .as_deref()
             .is_some_and(|selected| Some(selected.source_key) == publication.source_key);
-    let source_scoped = current.requires_selected_source();
+    let source_scoped =
+        current.requires_selected_source() && shell.route_uses_selected_source(&current);
     match publication.change {
         CatalogChange::Broad => {
             refresh_context_playlist_picker(shell);
@@ -263,7 +260,7 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
             if !affects_current && source_scoped {
                 return;
             }
-            if scope_changed && current.uses_selected_source() {
+            if scope_changed && shell.route_uses_selected_source(&current) {
                 shell.replace_current_route_when_ready();
             } else if current == Route::Home {
                 shell.refresh_mounted_home();
@@ -315,7 +312,7 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
         CatalogChange::Scope => {
             if affects_current {
                 refresh_context_playlist_picker(shell);
-                if current.uses_selected_source() {
+                if shell.route_uses_selected_source(&current) {
                     shell.replace_current_route_when_ready();
                 }
             }
@@ -375,6 +372,17 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
     let previously_blocked = previous_operation.blocks_library();
     let started_blocking = source_operation_started_blocking(&previous_operation, &operation);
     *shell.source.operation.borrow_mut() = operation.clone();
+    if matches!(
+        operation,
+        SourceOperation::Idle | SourceOperation::Failed { .. }
+    ) {
+        shell.chrome.topbar.refresh_lyrics_cache_prompt();
+        if shell.search_session.mode() == library::SearchMode::Lyrics
+            && matches!(&previous_operation, SourceOperation::Downloading { .. })
+        {
+            shell.search_session.refresh();
+        }
+    }
     if operation.blocks_library() {
         shell.chrome.source_refresh_feedback.set_visible(false);
     }
@@ -430,6 +438,12 @@ fn apply_source_refresh_feedback(
             source_id,
             progress,
         } => {
+            if !matches!(
+                previous,
+                SourceOperation::Refreshing { .. } | SourceOperation::Downloading { .. }
+            ) {
+                shell.source.refresh_feedback_dismissed.set(false);
+            }
             let continues = matches!(
                 previous,
                 SourceOperation::Refreshing {
@@ -476,7 +490,10 @@ fn apply_source_refresh_feedback(
                 .chrome
                 .source_refresh_feedback_progress
                 .set_visible(progress.total.is_some_and(|total| total > 0));
-            shell.chrome.source_refresh_feedback.set_visible(true);
+            shell
+                .chrome
+                .source_refresh_feedback
+                .set_visible(!shell.source.refresh_feedback_dismissed.get());
         }
         SourceOperation::Idle
             if matches!(
@@ -524,6 +541,9 @@ fn apply_source_refresh_feedback(
 }
 
 fn finish_source_refresh_feedback(shell: &Shell, error: Option<&str>, delay: Duration) {
+    if shell.source.refresh_feedback_dismissed.get() {
+        return;
+    }
     let generation = shell
         .source
         .refresh_feedback_generation

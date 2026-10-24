@@ -444,6 +444,7 @@ impl PreparedFile {
                     let input = files.input().await.map_err(failure)?;
                     let (observation, facts) = files
                         .read_saved_file(
+                            catalog.database,
                             &self.target.media_uri,
                             &files.relative(path).map_err(failure)?,
                             &input,
@@ -475,8 +476,8 @@ impl PreparedFile {
             Ok::<_, Error>(SavedFile {
                 uri: self.target.media_uri.clone(),
                 observation,
-                facts,
                 previous,
+                facts,
             })
         }
         .await;
@@ -495,7 +496,7 @@ impl PreparedFile {
 
 struct SavedFile {
     uri: String,
-    observation: Option<library::LocalFileWrite>,
+    observation: Option<(library::LocalFileWrite, Vec<String>)>,
     facts: library::TrackObservation,
     previous: Option<[u8; 32]>,
 }
@@ -512,7 +513,7 @@ async fn publish_saved_files(
     let mut analysis = Vec::new();
     for saved in pending.drain(..) {
         if let Some(file) = saved.observation {
-            files.push((file, Vec::new()));
+            files.push(file);
         }
         if let Some(previous) = saved.previous {
             analysis.push((saved.uri, previous));
@@ -634,13 +635,7 @@ impl FileEditSession {
         if let Some(saved) = file.save_lyrics(text, sidecar, || false).await? {
             saved.preserve_fingerprint(database).await?;
         }
-        if !sidecar {
-            file.publish_direct(database).await?;
-        }
-        database
-            .remove_track_lyrics_by_authority(&self.media_uri, "source")
-            .await
-            .map_err(failure)?;
+        file.publish_direct(database).await?;
         file.revision().await
     }
 
@@ -1380,6 +1375,7 @@ impl Source {
                         Implementation::Local(_) | Implementation::Files(_)
                     ) {
                         committed.write_catalog(self, catalog).await?;
+                        return Ok(());
                     }
                 }
             }
@@ -1388,10 +1384,23 @@ impl Source {
                     crate::SourceError::Cancelled.to_string(),
                 ));
             }
-            database
-                .remove_track_lyrics_by_authority(uri, "source")
-                .await
-                .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
+            if matches!(
+                self.implementation,
+                Implementation::Local(_) | Implementation::Files(_)
+            ) {
+                let input = self
+                    .file_source(row.access.source_path.as_deref())
+                    .map_or([0; 32], |source| source.lyrics_input());
+                let mut bundle = self.read_lyrics(database, uri).await.map_err(failure)?;
+                super::cache_native_lyrics(database, uri, input, &mut bundle)
+                    .await
+                    .map_err(failure)?;
+            } else {
+                database
+                    .remove_track_lyrics_by_authority(uri, "source")
+                    .await
+                    .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
+            }
             Ok(())
         })
         .await
@@ -1579,10 +1588,7 @@ impl NativeFile {
                 crate::file::local::scan::read_saved_file(&catalog, &self.media_uri, path)
                     .await
                     .map_err(failure)?;
-            let files = observation
-                .map(|file| (file, Vec::new()))
-                .into_iter()
-                .collect::<Vec<_>>();
+            let files = observation.into_iter().collect::<Vec<_>>();
             catalog
                 .write_file_observations(&files, vec![track], true)
                 .await
@@ -1592,15 +1598,23 @@ impl NativeFile {
                 .await;
         } else {
             let path = path.clone();
-            let metadata = tokio::task::spawn_blocking(move || {
-                crate::file::local::media::read_local_track_reference(&path)
+            let mut track = tokio::task::spawn_blocking(move || {
+                crate::file::local::media::read_media(
+                    &mut crate::file::media::Worker::default(),
+                    path,
+                    None,
+                )
             })
             .await
-            .map_err(failure)?
-            .ok_or_else(|| Error::Write("Saved media could not be read".into()))?
-            .metadata;
+            .map_err(failure)?;
+            let crate::file::media::MediaRead::Accepted(track) = &mut track else {
+                return Err(Error::Write("Saved media could not be read".into()));
+            };
             database
-                .write_direct_track_metadata(&self.media_uri, &metadata)
+                .write_direct_track_metadata(&self.media_uri, &track.track.metadata)
+                .await
+                .map_err(failure)?;
+            super::cache_native_lyrics(database, &self.media_uri, [0; 32], &mut track.lyrics)
                 .await
                 .map_err(failure)?;
         }

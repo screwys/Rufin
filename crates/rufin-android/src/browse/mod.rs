@@ -183,10 +183,16 @@ pub struct AndroidBrowseQuery {
     opened: tokio::sync::OnceCell<OpenedCollection>,
 }
 
-fn search_rows(rows: library::SearchResults) -> Vec<AndroidBrowseRow> {
+fn search_rows(mut rows: library::SearchResults) -> Vec<AndroidBrowseRow> {
     rows.tracks
         .into_iter()
-        .map(Into::into)
+        .map(|track| {
+            let snippet = rows.lyrics.remove(&track.track_key);
+            AndroidBrowseRow {
+                lyrics_snippet: snippet,
+                ..track.into()
+            }
+        })
         .chain(rows.albums.into_iter().map(Into::into))
         .chain(rows.artists.into_iter().map(|row| artist_row(row, false)))
         .collect()

@@ -834,7 +834,7 @@ fn build_preferences_page(
         PreferencesPageKind::General => general_page(shell, navigation_controls),
         PreferencesPageKind::Customization => appearance_page(shell).upcast(),
         PreferencesPageKind::Theme => themes::page(shell).upcast(),
-        PreferencesPageKind::Privacy => privacy::page(shell, dialog).upcast(),
+        PreferencesPageKind::Privacy => privacy::page(shell, dialog, navigation_controls),
         PreferencesPageKind::Equalizer => equalizer_page(shell).upcast(),
         PreferencesPageKind::Downloads => library::downloads_page(shell, dialog).upcast(),
         PreferencesPageKind::Storage => storage::page(shell, navigation_controls),

@@ -43,6 +43,12 @@ impl Topbar {
         }
     }
 
+    pub fn refresh_lyrics_cache_prompt(&self) {
+        if let Some(popup) = self.search_popup.borrow().as_ref() {
+            popup.refresh_cache_prompt();
+        }
+    }
+
     pub fn refresh_search_playback(
         &self,
         current: Option<&gtk_widgets::mounted_route::RouteCurrentTrack>,

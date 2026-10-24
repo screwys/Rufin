@@ -278,7 +278,7 @@ pub(crate) async fn recover_columns(input: &Path, destination: &Path) -> Library
             sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP TRIGGER \"{trigger}\"")))
                 .execute(&mut *transaction).await?;
         }
-        let tables: Vec<String> = sqlx::query_scalar("SELECT name FROM main.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('folder_children','collection_album_index','collection_totals','playlist_genres')")
+        let tables: Vec<String> = sqlx::query_scalar("SELECT name FROM main.sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB 'lyrics_fts*' AND name NOT IN ('folder_children','collection_album_index','collection_totals','playlist_genres','lyrics_documents')")
             .fetch_all(&mut *transaction).await?;
         let mut copied = 0;
         for table in tables {
@@ -294,6 +294,7 @@ pub(crate) async fn recover_columns(input: &Path, destination: &Path) -> Library
             return Err(LibraryError::Migration("no compatible Store tables were found".into()));
         }
         sqlx::raw_sql(crate::schema::STORE_SCHEMA).execute(&mut *transaction).await?;
+        crate::lyrics_search::initialize(&mut transaction, true).await?;
         crate::connect::initialize(&mut transaction).await?;
         crate::catalog::index::initialize(&mut transaction).await?;
         if sqlx::query("PRAGMA foreign_key_check").fetch_optional(&mut *transaction).await?.is_some() {

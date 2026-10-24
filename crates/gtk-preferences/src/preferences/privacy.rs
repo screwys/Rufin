@@ -7,16 +7,30 @@ use secrets::SecretStorageMode;
 
 use crate::Preferences;
 
-pub(super) fn page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw::PreferencesPage {
+pub(super) fn page(
+    shell: &Rc<Preferences>,
+    dialog: &adw::Dialog,
+    navigation_controls: &super::PreferencesNavigationControls,
+) -> gtk::Widget {
     let resource = crate::ui_resource::PRIVACY_PREFERENCES_RESOURCE;
     let builder = gtk_widgets::ui_resource::builder(resource);
     gtk_widgets::objects!(builder, resource, {
+        navigation: adw::NavigationView,
         privacy_page: adw::PreferencesPage,
         private_row: adw::SwitchRow,
         secret_storage_row: adw::ComboRow,
         cast_proxy_row: adw::SwitchRow,
         cast_network_row: adw::ActionRow,
     });
+    navigation_controls.set_navigation(&navigation);
+    navigation_controls.set_nested_page_visible(false);
+    let controls = navigation_controls.clone();
+    navigation.connect_popped(move |_, _| controls.set_nested_page_visible(false));
+    privacy_page.add(&super::backup::group(
+        shell,
+        &navigation,
+        navigation_controls,
+    ));
     let settings = shell.settings.current.borrow().clone();
     private_row.set_active(settings.application.private_mode);
     let private_shell = Rc::clone(shell);
@@ -108,7 +122,7 @@ pub(super) fn page(shell: &Rc<Preferences>, dialog: &adw::Dialog) -> adw::Prefer
     cast_network_row.add_suffix(&cast_network_dropdown);
     cast_network_row.set_activatable_widget(Some(&cast_network_dropdown));
 
-    privacy_page
+    navigation.upcast()
 }
 
 fn secret_storage_mode_index(mode: SecretStorageMode) -> u32 {
