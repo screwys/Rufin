@@ -741,6 +741,11 @@ msgstr ""
 msgid "Bitrate"
 msgstr ""
 
+#, fuzzy
+#| msgid "Play random"
+msgid "Bitstream"
+msgstr "Přehrát náhodně"
+
 msgid "Blue"
 msgstr "Modrá"
 
