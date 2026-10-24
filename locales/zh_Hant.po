@@ -278,6 +278,11 @@ msgstr "強調色"
 
 #, fuzzy
 #| msgid "Get token"
+msgid "Access denied"
+msgstr "取得登入授權"
+
+#, fuzzy
+#| msgid "Get token"
 msgid "Access token"
 msgstr "取得登入授權"
 
@@ -568,6 +573,11 @@ msgstr "播放/暫停時淡入淡出"
 
 msgid "Audio fingerprints"
 msgstr ""
+
+#, fuzzy
+#| msgid "Audio output"
+msgid "Audio output failed"
+msgstr "音訊輸出"
 
 msgid "Audio output"
 msgstr "音訊輸出"
@@ -1255,8 +1265,18 @@ msgstr "無法更新最愛"
 msgid "Could not update favorites"
 msgstr "無法更新最愛"
 
+#, fuzzy
+#| msgid "Couldn't connect to {service}"
+msgid "Couldn't connect to the server"
+msgstr "無法連接到 {service}"
+
 msgid "Couldn't connect to {service}"
 msgstr "無法連接到 {service}"
+
+#, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "Couldn't decode this track"
+msgstr "無法載入此資料夾"
 
 msgid "Couldn't load this folder"
 msgstr "無法載入此資料夾"
@@ -1986,6 +2006,9 @@ msgid "Forget Source"
 msgstr "遺忘伺服器"
 
 msgid "Forget \"{name}\"?"
+msgstr ""
+
+msgid "Format not supported"
 msgstr ""
 
 msgid "Format"
@@ -4428,6 +4451,11 @@ msgstr "跳過次數"
 msgid "Skip same-album crossfade"
 msgstr ""
 
+#, fuzzy
+#| msgid "Only unplayed tracks"
+msgid "Skip unplayable tracks"
+msgstr "僅未播放過的曲目"
+
 msgid "Slate"
 msgstr ""
 
@@ -4749,6 +4777,11 @@ msgstr "曲目電台"
 
 msgid "Track radio"
 msgstr "曲目電台"
+
+#, fuzzy
+#| msgid "Artist name"
+msgid "Track unavailable"
+msgstr "藝人名稱"
 
 msgid "Track"
 msgstr "曲目"
