@@ -182,6 +182,10 @@ debug = "line-tables-only"
 [profile.android]
 inherits = "dev"
 debug = 0
+opt-level = 1
+
+[profile.android.package."*"]
+opt-level = 2
 
 [profile.android-release]
 inherits = "release"
