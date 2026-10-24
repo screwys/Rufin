@@ -284,9 +284,6 @@ impl FileSource {
         let source_id = catalog.source_id;
         let stamp = catalog.observed;
         let root = self.location("")?;
-        if let Some(stamp) = stamp {
-            catalog.purge_source_file_absences(stamp).await?;
-        }
         let report = |completed| {
             progress(SourceReadProgress {
                 stage: SourceReadStage::Tracks,

@@ -1597,7 +1597,6 @@ mod tests {
             .unwrap()
             .pop()
             .unwrap();
-        physical.parse_version = Some(14);
         physical.root = audio
             .ancestors()
             .last()
