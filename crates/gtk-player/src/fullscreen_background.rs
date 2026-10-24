@@ -1,6 +1,8 @@
 use gtk::{gdk, glib, graphene, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+const TRANSITION: Duration = Duration::from_millis(700);
 
 mod imp {
     use super::*;
@@ -45,10 +47,8 @@ mod imp {
             let dark = adw::StyleManager::default().is_dark();
 
             let t = if let Some(start) = self.start_time.get() {
-                let elapsed = start.elapsed().as_secs_f32();
-                let duration = 0.7; // 700ms smooth transition
                 let p = if obj.settings().is_gtk_enable_animations() {
-                    (elapsed / duration).clamp(0.0, 1.0)
+                    (start.elapsed().as_secs_f32() / TRANSITION.as_secs_f32()).clamp(0.0, 1.0)
                 } else {
                     1.0
                 };
@@ -214,15 +214,17 @@ impl FullscreenBackground {
     fn ensure_tick(&self) {
         let imp = self.imp();
         if imp.tick_id.borrow().is_none() {
+            // Ends by time, since an unmapped background never snapshots.
             let tick = self.add_tick_callback(|widget, _frame_clock| {
                 let imp = widget.imp();
-                if imp.start_time.get().is_some() {
+                if let Some(start) = imp.start_time.get() {
                     widget.queue_draw();
-                    glib::ControlFlow::Continue
-                } else {
-                    *imp.tick_id.borrow_mut() = None;
-                    glib::ControlFlow::Break
+                    if start.elapsed() < TRANSITION {
+                        return glib::ControlFlow::Continue;
+                    }
                 }
+                *imp.tick_id.borrow_mut() = None;
+                glib::ControlFlow::Break
             });
             *imp.tick_id.borrow_mut() = Some(tick);
         }

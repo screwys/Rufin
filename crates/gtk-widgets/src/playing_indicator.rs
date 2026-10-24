@@ -2,13 +2,22 @@ use std::{cell::RefCell, time::Duration};
 
 use gtk::{glib, prelude::*, subclass::prelude::*};
 
+/// Mapped indicators share one timer so a step redraws all of them in one frame.
+#[derive(Default)]
+struct Animation {
+    indicators: Vec<PlayingIndicator>,
+    timer: Option<glib::SourceId>,
+}
+
+thread_local! {
+    static ANIMATION: RefCell<Animation> = RefCell::default();
+}
+
 mod imp {
     use super::*;
 
     #[derive(Default)]
-    pub struct PlayingIndicator {
-        pub timer: RefCell<Option<glib::SourceId>>,
-    }
+    pub struct PlayingIndicator;
 
     #[glib::object_subclass]
     impl ObjectSubclass for PlayingIndicator {
@@ -36,21 +45,35 @@ mod imp {
 
         fn map(&self) {
             self.parent_map();
-            self.obj().sync_animation();
+            let obj = self.obj().clone();
+            ANIMATION.with_borrow_mut(|animation| {
+                animation.indicators.push(obj);
+                animation.timer.get_or_insert_with(|| {
+                    glib::timeout_add_local(Duration::from_millis(33), || {
+                        ANIMATION.with_borrow(|animation| {
+                            animation.indicators.iter().for_each(WidgetExt::queue_draw);
+                        });
+                        glib::ControlFlow::Continue
+                    })
+                });
+            });
         }
 
         fn unmap(&self) {
-            if let Some(timer) = self.timer.take() {
-                timer.remove();
-            }
+            let obj = self.obj();
+            ANIMATION.with_borrow_mut(|animation| {
+                animation.indicators.retain(|indicator| indicator != &*obj);
+                if animation.indicators.is_empty()
+                    && let Some(timer) = animation.timer.take()
+                {
+                    timer.remove();
+                }
+            });
             self.parent_unmap();
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let obj = self.obj();
-            if !obj.settings().is_gtk_enable_animations() {
-                return;
-            }
             let time = obj
                 .frame_clock()
                 .map_or(0.0, |clock| clock.frame_time() as f64 / 1_000_000.0);
@@ -98,27 +121,5 @@ impl PlayingIndicator {
             .sync_create()
             .build();
         indicator
-    }
-
-    fn sync_animation(&self) {
-        if self.settings().is_gtk_enable_animations() {
-            if self.imp().timer.borrow().is_none() {
-                let weak = self.downgrade();
-                self.imp().timer.replace(Some(glib::timeout_add_local(
-                    Duration::from_millis(33),
-                    move || {
-                        let Some(widget) = weak.upgrade() else {
-                            return glib::ControlFlow::Break;
-                        };
-                        widget.queue_draw();
-                        glib::ControlFlow::Continue
-                    },
-                )));
-            }
-        } else if let Some(timer) = self.imp().timer.take() {
-            timer.remove();
-        }
-        self.queue_resize();
-        self.queue_draw();
     }
 }
