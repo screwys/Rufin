@@ -347,6 +347,11 @@ msgstr "Абсолютный"
 msgid "Accent color"
 msgstr "Акцентный цвет"
 
+#, fuzzy
+#| msgid "Access token"
+msgid "Access denied"
+msgstr "Токен доступа"
+
 msgid "Access token"
 msgstr "Токен доступа"
 
@@ -608,6 +613,11 @@ msgstr "Плавное затухание звука при воспроизве
 
 msgid "Audio fingerprints"
 msgstr ""
+
+#, fuzzy
+#| msgid "Audio output"
+msgid "Audio output failed"
+msgstr "Аудиовыход"
 
 msgid "Audio output"
 msgstr "Аудиовыход"
@@ -1205,8 +1215,18 @@ msgstr "Не удалось обновить Rufin на {version}"
 msgid "Could not update favorites"
 msgstr "Не удалось обновить список избранных"
 
+#, fuzzy
+#| msgid "Couldn't connect to {service}"
+msgid "Couldn't connect to the server"
+msgstr "Подключиться к {service}"
+
 msgid "Couldn't connect to {service}"
 msgstr "Подключиться к {service}"
+
+#, fuzzy
+#| msgid "Could not play this track"
+msgid "Couldn't decode this track"
+msgstr "Не удалось воспроизвести этот трек"
 
 msgid "Couldn't load this folder"
 msgstr "Не удалось загрузить эту папку"
@@ -1881,6 +1901,9 @@ msgstr "Удалить источник"
 
 msgid "Forget \"{name}\"?"
 msgstr "Забыть \"{name}\"?"
+
+msgid "Format not supported"
+msgstr ""
 
 msgid "Format"
 msgstr "Формат"
@@ -4112,6 +4135,11 @@ msgstr "Количество пропусков"
 msgid "Skip same-album crossfade"
 msgstr "Пропускать плавный переход между треками одного альбома"
 
+#, fuzzy
+#| msgid "Only unplayed tracks"
+msgid "Skip unplayable tracks"
+msgstr "Только непрослушанные треки"
+
 msgid "Slate"
 msgstr "Серый"
 
@@ -4405,6 +4433,11 @@ msgstr "Радио по треку"
 
 msgid "Track radio"
 msgstr "Радио по треку"
+
+#, fuzzy
+#| msgid "Search unavailable"
+msgid "Track unavailable"
+msgstr "Поиск недоступен"
 
 msgid "Track"
 msgstr "Трек"

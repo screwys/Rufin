@@ -346,6 +346,11 @@ msgstr "Absoluto"
 msgid "Accent color"
 msgstr "Color de acento"
 
+#, fuzzy
+#| msgid "Access token"
+msgid "Access denied"
+msgstr "Token de acceso"
+
 msgid "Access token"
 msgstr "Token de acceso"
 
@@ -603,6 +608,11 @@ msgstr "Desvanecimiento del audio al reproducir/pausar"
 
 msgid "Audio fingerprints"
 msgstr ""
+
+#, fuzzy
+#| msgid "Audio output"
+msgid "Audio output failed"
+msgstr "Salida de audio"
 
 msgid "Audio output"
 msgstr "Salida de audio"
@@ -1194,8 +1204,18 @@ msgstr "No se pudo actualizar Rufin a la {version}"
 msgid "Could not update favorites"
 msgstr "No se pudieron actualizar los favoritos"
 
+#, fuzzy
+#| msgid "Couldn't connect to {service}"
+msgid "Couldn't connect to the server"
+msgstr "No se pudo conectar a {service}"
+
 msgid "Couldn't connect to {service}"
 msgstr "No se pudo conectar a {service}"
+
+#, fuzzy
+#| msgid "Could not play this track"
+msgid "Couldn't decode this track"
+msgstr "No se puede reproducir esta pista"
 
 msgid "Couldn't load this folder"
 msgstr "No se pudo cargar esta carpeta"
@@ -1867,6 +1887,9 @@ msgstr "Olvidar Fuente"
 
 msgid "Forget \"{name}\"?"
 msgstr "Olvidar \"{name}\"?"
+
+msgid "Format not supported"
+msgstr ""
 
 msgid "Format"
 msgstr "Formato"
@@ -4081,6 +4104,11 @@ msgstr "Número de salto"
 msgid "Skip same-album crossfade"
 msgstr "Saltar transición suave en el mismo álbum"
 
+#, fuzzy
+#| msgid "Only unplayed tracks"
+msgid "Skip unplayable tracks"
+msgstr "Solo pistas no reproducidas"
+
 msgid "Slate"
 msgstr "Pizarra"
 
@@ -4369,6 +4397,11 @@ msgstr "Radio de la pista"
 
 msgid "Track radio"
 msgstr "Radio de la pista"
+
+#, fuzzy
+#| msgid "Search unavailable"
+msgid "Track unavailable"
+msgstr "Búsqueda no disponible"
 
 msgid "Track"
 msgstr "Pista"

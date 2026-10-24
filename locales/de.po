@@ -351,6 +351,11 @@ msgstr "Absolut"
 msgid "Accent color"
 msgstr "Akzentfarbe"
 
+#, fuzzy
+#| msgid "Access token"
+msgid "Access denied"
+msgstr "Zugriffstoken"
+
 msgid "Access token"
 msgstr "Zugriffstoken"
 
@@ -593,6 +598,11 @@ msgstr "Sanftes Ein-/Ausblenden bei Play/Pause"
 
 msgid "Audio fingerprints"
 msgstr "Audio-Fingerabdrücke"
+
+#, fuzzy
+#| msgid "Audio output"
+msgid "Audio output failed"
+msgstr "Audioausgabe"
 
 msgid "Audio output"
 msgstr "Audioausgabe"
@@ -1134,8 +1144,18 @@ msgstr "Rufin konnte nicht auf {version} aktualisiert werden"
 msgid "Could not update favorites"
 msgstr "Favoriten konnten nicht aktualisiert werden"
 
+#, fuzzy
+#| msgid "Couldn't connect to {service}"
+msgid "Couldn't connect to the server"
+msgstr "Verbindung mit {service} konnte nicht hergestellt werden"
+
 msgid "Couldn't connect to {service}"
 msgstr "Verbindung mit {service} konnte nicht hergestellt werden"
+
+#, fuzzy
+#| msgid "Could not play this track"
+msgid "Couldn't decode this track"
+msgstr "Dieser Titel konnte nicht abgespielt werden"
 
 msgid "Couldn't load this folder"
 msgstr "Dieser Ordner konnte nicht geladen werden"
@@ -1761,6 +1781,9 @@ msgstr "Quelle vergessen"
 
 msgid "Forget \"{name}\"?"
 msgstr "„{name}“ vergessen?"
+
+msgid "Format not supported"
+msgstr ""
 
 msgid "Format"
 msgstr "Format"
@@ -3879,6 +3902,11 @@ msgstr "Überspringungszähler"
 msgid "Skip same-album crossfade"
 msgstr "Überblendung bei gleichem Album überspringen"
 
+#, fuzzy
+#| msgid "Only unplayed tracks"
+msgid "Skip unplayable tracks"
+msgstr "Nur ungespielte Titel"
+
 msgid "Slate"
 msgstr "Schiefergrau"
 
@@ -4152,6 +4180,11 @@ msgstr "Titel-Peak"
 
 msgid "Track radio"
 msgstr "Titel-Radio"
+
+#, fuzzy
+#| msgid "Search unavailable"
+msgid "Track unavailable"
+msgstr "Suche nicht verfügbar"
 
 msgid "Track"
 msgstr "Titel"

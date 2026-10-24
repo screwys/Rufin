@@ -340,6 +340,11 @@ msgstr "Absoluutne"
 msgid "Accent color"
 msgstr "Aktsentvärv"
 
+#, fuzzy
+#| msgid "Access token"
+msgid "Access denied"
+msgstr "Ligipääsu tunnusluba"
+
 msgid "Access token"
 msgstr "Ligipääsu tunnusluba"
 
@@ -582,6 +587,11 @@ msgstr "Esitamisel/peatamisel hajuta heli sujuvalt"
 
 msgid "Audio fingerprints"
 msgstr ""
+
+#, fuzzy
+#| msgid "Audio output"
+msgid "Audio output failed"
+msgstr "Heliväljund"
 
 msgid "Audio output"
 msgstr "Heliväljund"
@@ -1144,8 +1154,18 @@ msgstr "Rufini uuendamine versioonini {version} ei õnnestunud"
 msgid "Could not update favorites"
 msgstr "Lemmikute uuendamine ei õnnestunud"
 
+#, fuzzy
+#| msgid "Couldn't connect to {service}"
+msgid "Couldn't connect to the server"
+msgstr "{service} muusikaserveriga ühendamine ei õnnestunud"
+
 msgid "Couldn't connect to {service}"
 msgstr "{service} muusikaserveriga ühendamine ei õnnestunud"
+
+#, fuzzy
+#| msgid "Could not play this track"
+msgid "Couldn't decode this track"
+msgstr "Selle loo esitamine ei õnnestunud"
 
 msgid "Couldn't load this folder"
 msgstr "Selle kausta laadimine ei õnnestunud"
@@ -1802,6 +1822,9 @@ msgstr "Unusta allikas"
 
 msgid "Forget \"{name}\"?"
 msgstr "Kas unustad: „{name}“?"
+
+msgid "Format not supported"
+msgstr ""
 
 msgid "Format"
 msgstr "Vorming"
@@ -3982,6 +4005,11 @@ msgstr "Vahelejätmiste arv"
 msgid "Skip same-album crossfade"
 msgstr "Ära kasuta risthajutamist sama albumi lugude vahel"
 
+#, fuzzy
+#| msgid "Only unplayed tracks"
+msgid "Skip unplayable tracks"
+msgstr "Vaid esitamata lood"
+
 msgid "Slate"
 msgstr "Paekarva"
 
@@ -4268,6 +4296,11 @@ msgstr "Lugudepõhine raadio"
 
 msgid "Track radio"
 msgstr "Lugudepõhine raadio"
+
+#, fuzzy
+#| msgid "Search unavailable"
+msgid "Track unavailable"
+msgstr "Otsing pole saadaval"
 
 msgid "Track"
 msgstr "Lugu"

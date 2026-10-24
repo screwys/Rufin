@@ -347,6 +347,11 @@ msgstr "Absolu"
 msgid "Accent color"
 msgstr "Couleur de contraste"
 
+#, fuzzy
+#| msgid "Access token"
+msgid "Access denied"
+msgstr "Jeton d'accès"
+
 msgid "Access token"
 msgstr "Jeton d'accès"
 
@@ -605,6 +610,11 @@ msgstr "Fondu de l'audio lors de lecture/pause"
 
 msgid "Audio fingerprints"
 msgstr ""
+
+#, fuzzy
+#| msgid "Audio output"
+msgid "Audio output failed"
+msgstr "Sortie audio"
 
 msgid "Audio output"
 msgstr "Sortie audio"
@@ -1199,8 +1209,18 @@ msgstr "Impossible de mettre à jour Rufin {version}"
 msgid "Could not update favorites"
 msgstr "Impossible de mettre à jour les favoris"
 
+#, fuzzy
+#| msgid "Couldn't connect to {service}"
+msgid "Couldn't connect to the server"
+msgstr "Impossible de se connecter à {service}"
+
 msgid "Couldn't connect to {service}"
 msgstr "Impossible de se connecter à {service}"
+
+#, fuzzy
+#| msgid "Could not play this track"
+msgid "Couldn't decode this track"
+msgstr "Impossible de jouer ce morceau"
 
 msgid "Couldn't load this folder"
 msgstr "Impossible de charger ce dossier"
@@ -1872,6 +1892,9 @@ msgstr "Oublier la source"
 
 msgid "Forget \"{name}\"?"
 msgstr "Oublier \"{name}\" ?"
+
+msgid "Format not supported"
+msgstr ""
 
 msgid "Format"
 msgstr "Format"
@@ -4099,6 +4122,11 @@ msgstr "Nombre de passages"
 msgid "Skip same-album crossfade"
 msgstr "Ignorer le fondu enchaîné au sein du même album"
 
+#, fuzzy
+#| msgid "Only unplayed tracks"
+msgid "Skip unplayable tracks"
+msgstr "Uniquement les morceaux non lus"
+
 msgid "Slate"
 msgstr "Ardoise"
 
@@ -4389,6 +4417,11 @@ msgstr "Radio de la piste"
 
 msgid "Track radio"
 msgstr "Radio de la piste"
+
+#, fuzzy
+#| msgid "Search unavailable"
+msgid "Track unavailable"
+msgstr "Recherche indisponible"
 
 msgid "Track"
 msgstr "Piste"
