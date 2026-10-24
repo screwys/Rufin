@@ -5332,22 +5332,47 @@ mod tests {
         ResolvedStream::new(gst::glib::filename_to_uri(&path, None).unwrap().as_str())
     }
 
-    fn pull_levels(pipeline: &PlayerPipeline, levels: &mut Vec<f32>) {
+    /// Records levels on the streaming thread as buffers render. Reading them from the
+    /// test loop lets the appsink queue fill, and retiring a pipeline flushes it unread.
+    fn record_levels(
+        pipeline: &PlayerPipeline,
+        levels: &Arc<Mutex<Vec<f32>>>,
+        recording: &mut Option<gstreamer_app::AppSink>,
+    ) {
         let Some(sink) = pipeline
             .audio_output()
             .and_then(|output| output.downcast::<gstreamer_app::AppSink>().ok())
         else {
             return;
         };
-        while let Some(sample) = sink.try_pull_sample(gst::ClockTime::ZERO) {
-            let map = sample.buffer().unwrap().map_readable().unwrap();
-            let values = map
-                .as_slice()
-                .chunks_exact(4)
-                .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
-                .collect::<Vec<_>>();
-            levels.push(values.iter().sum::<f32>() / values.len() as f32);
+        if recording.as_ref() == Some(&sink) {
+            return;
         }
+        let drain = {
+            let levels = Arc::clone(levels);
+            move |sink: &gstreamer_app::AppSink| {
+                let mut levels = lock_recover(&levels);
+                while let Some(sample) = sink.try_pull_sample(gst::ClockTime::ZERO) {
+                    let map = sample.buffer().unwrap().map_readable().unwrap();
+                    let values = map
+                        .as_slice()
+                        .chunks_exact(4)
+                        .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+                        .collect::<Vec<_>>();
+                    levels.push(values.iter().sum::<f32>() / values.len() as f32);
+                }
+            }
+        };
+        drain(&sink);
+        sink.set_callbacks(
+            gstreamer_app::AppSinkCallbacks::builder()
+                .new_sample(move |sink| {
+                    drain(sink);
+                    Ok(gst::FlowSuccess::Ok)
+                })
+                .build(),
+        );
+        *recording = Some(sink);
     }
 
     #[test]
@@ -5377,40 +5402,42 @@ mod tests {
             playback_rate: 1.0,
         });
         let full = 0.25_f32;
-        let (mut outgoing, mut incoming) = (Vec::new(), Vec::new());
+        let outgoing = Arc::new(Mutex::new(Vec::new()));
+        let incoming = Arc::new(Mutex::new(Vec::new()));
+        let (mut outgoing_sink, mut incoming_sink) = (None, None);
+        let rendered = || lock_recover(&outgoing).len() + lock_recover(&incoming).len();
         let mut held: Option<(Instant, PipelineId, usize)> = None;
         let mut released = false;
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline
             && !(released
                 && engine.overlap().is_none()
-                && incoming.last().is_some_and(|level| *level >= full * 0.99))
+                && lock_recover(&incoming)
+                    .last()
+                    .is_some_and(|level| *level >= full * 0.99))
         {
+            record_levels(&engine.primary, &outgoing, &mut outgoing_sink);
+            record_levels(&engine.secondary, &incoming, &mut incoming_sink);
             engine.poll_bus();
             engine.tick();
-            pull_levels(&engine.primary, &mut outgoing);
-            pull_levels(&engine.secondary, &mut incoming);
             for event in lock_recover(&events).drain() {
                 if let BackendEvent::Error { error, .. } = event {
                     panic!("{error:?}");
                 }
             }
-            if held.is_none() && engine.overlap().is_some() && incoming.len() >= 10 {
+            if held.is_none() && engine.overlap().is_some() && lock_recover(&incoming).len() >= 10 {
                 let id = lock_recover(&engine.shared)
                     .pipeline_id(Slot::Secondary)
                     .unwrap();
                 // A refilling incoming stream holds both halves of the crossfade.
                 engine.handle_buffering(Slot::Secondary, id, 50, gst::BufferingMode::Stream);
-                held = Some((Instant::now(), id, outgoing.len() + incoming.len()));
+                held = Some((Instant::now(), id, rendered()));
             }
-            if let Some((started, id, rendered)) = held
+            if let Some((started, id, before)) = held
                 && !released
                 && started.elapsed() >= Duration::from_millis(400)
             {
-                assert!(
-                    outgoing.len() + incoming.len() <= rendered + 20,
-                    "a held crossfade kept rendering"
-                );
+                assert!(rendered() <= before + 20, "a held crossfade kept rendering");
                 engine.handle_buffering(Slot::Secondary, id, 100, gst::BufferingMode::Stream);
                 released = true;
             }
@@ -5418,6 +5445,8 @@ mod tests {
         }
         engine.shutdown();
         assert!(released, "the crossfade never started");
+        let outgoing: Vec<f32> = lock_recover(&outgoing).clone();
+        let incoming: Vec<f32> = lock_recover(&incoming).clone();
         let smooth = |levels: &[f32], falling: bool| {
             levels.windows(2).all(|pair| {
                 let step = if falling {
@@ -5461,19 +5490,20 @@ mod tests {
             start_position_millis: 0,
             playback_rate: 1.0,
         });
-        let mut rendered = Vec::new();
+        let rendered = Arc::new(Mutex::new(Vec::new()));
+        let mut rendering = None;
         let mut rendered_at_failure = None;
         let mut ended = false;
         let deadline = Instant::now() + Duration::from_secs(12);
         while Instant::now() < deadline && !ended {
+            record_levels(&engine.primary, &rendered, &mut rendering);
             engine.poll_bus();
             engine.tick();
-            pull_levels(&engine.primary, &mut rendered);
             for event in lock_recover(&events).drain() {
                 match event {
                     BackendEvent::NextPreparationFailed { error, .. } => {
                         assert_eq!(error.kind(), FailureKind::UnavailableMedia);
-                        rendered_at_failure = Some(rendered.len());
+                        rendered_at_failure = Some(lock_recover(&rendered).len());
                     }
                     BackendEvent::Ended { run } => {
                         assert_eq!(run, current_run);
@@ -5489,7 +5519,7 @@ mod tests {
         let rendered_at_failure = rendered_at_failure.expect("the queued URI did not fail");
         assert!(ended, "the drained track never ended");
         assert!(
-            rendered.len() > rendered_at_failure,
+            lock_recover(&rendered).len() > rendered_at_failure,
             "no queued audio played after the failure"
         );
     }
