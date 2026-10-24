@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-10-18 01:01+0000\n"
+"PO-Revision-Date: 2026-10-24 12:54+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Estonian <https://hosted.weblate.org/projects/rufin/app/et/>\n"
 "Language: et\n"
@@ -69,16 +69,14 @@ msgid ""
 "Do you want to cache all lyrics automatically? You can also enable this from "
 "Preferences -> Storage"
 msgstr ""
+"Kas sa soovid kõik laulusõnad automaatselt puhverdada? Sa saad seda muuta ka "
+"valikust „Eelistused“ → „Andmeruum“"
 
-#, fuzzy
-#| msgid ""
-#| "Downloads from this server will be removed, and automatic rules will be "
-#| "turned off"
 msgid ""
 "Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
-"Sellest serverist tehtud allalaadimised kustutatakse ja automaatsed reeglid "
+"Sellest allikast tehtud allalaadimised kustutatakse ja automaatsed reeglid "
 "lülitatakse välja"
 
 msgid ""
@@ -286,7 +284,7 @@ msgid "1 hour"
 msgstr "1 tund"
 
 msgid "10 bands"
-msgstr ""
+msgstr "10 sagedusriba"
 
 msgid "12 hours"
 msgstr "12 tundi"
@@ -295,7 +293,7 @@ msgid "128 kbps"
 msgstr "128 kbps"
 
 msgid "18 bands"
-msgstr ""
+msgstr "18 sagedusriba"
 
 msgid "192 kbps"
 msgstr "192 kbps"
@@ -307,7 +305,7 @@ msgid "256 kbps"
 msgstr "256 kbps"
 
 msgid "31 bands"
-msgstr ""
+msgstr "31 sagedusriba"
 
 msgid "320 kbps"
 msgstr "320 kbps"
@@ -372,18 +370,14 @@ msgstr "Alustamaks kuulamist lisa muusikaallikas."
 msgid "Add a new source"
 msgstr "Lisa uus allikas"
 
-#, fuzzy
-#| msgid "Add a server to configure downloads."
 msgid "Add a source to configure downloads."
-msgstr "Allalaadimiste seadistamiseks lisa server."
+msgstr "Allalaadimiste seadistamiseks lisa allikas."
 
 msgid "Add a title"
 msgstr "Lisa pealkiri"
 
-#, fuzzy
-#| msgid "Add Last"
 msgid "Add band"
-msgstr "Viimatilisatud"
+msgstr "Lisa sagedusriba"
 
 msgid "Add current"
 msgstr "Lisa praegune"
@@ -406,10 +400,8 @@ msgstr "Lisa esiletõstetuks"
 msgid "Add to Playlist"
 msgstr "Lisa esitusloendisse"
 
-#, fuzzy
-#| msgid "Add folder"
 msgid "Add to folder"
-msgstr "Lisa kaust"
+msgstr "Lisa kausta"
 
 msgid "Add to library"
 msgstr "Lisa muusikakogusse"
@@ -435,20 +427,14 @@ msgstr "Albumi esitaja"
 msgid "Album artists"
 msgstr "Albumi esitajad"
 
-#, fuzzy
-#| msgid "Album title"
 msgid "Album details"
-msgstr "Albumi pealkiri"
+msgstr "Albumi üksikasjad"
 
-#, fuzzy
-#| msgid "Album radio"
 msgid "Album gain"
-msgstr "Albumipõhine raadio"
+msgstr "Albumikohane esitusvaljuse tundlikkus"
 
-#, fuzzy
-#| msgid "Album tracks"
 msgid "Album peak"
-msgstr "Albumi lood"
+msgstr "Albumikohane esitusvaljuse tundlikkuse tipp"
 
 msgid "Album radio"
 msgstr "Albumipõhine raadio"
@@ -534,10 +520,8 @@ msgstr "Rakenda mall"
 msgid "Apply"
 msgstr "Rakenda"
 
-#, fuzzy
-#| msgid "Join profile"
 msgid "Applying profile"
-msgstr "Liitumisprofiil"
+msgstr "Rakendan profiili"
 
 msgid "Approve sign-in in your browser"
 msgstr "Kinnita sisselogimine oma veebibrauseris"
@@ -551,10 +535,8 @@ msgstr "Aprill {year}"
 msgid "Artist albums"
 msgstr "Esitajate albumid"
 
-#, fuzzy
-#| msgid "Artist albums"
 msgid "Artist details"
-msgstr "Esitajate albumid"
+msgstr "Esitaja üksiaksjad"
 
 msgid "Artist name"
 msgstr "Esitaja nimi"
@@ -625,10 +607,8 @@ msgstr "Automaatse diskori muusika täiendamise lävend"
 msgid "Auto DJ"
 msgstr "Automaatne diskor"
 
-#, fuzzy
-#| msgid "Auto DJ"
 msgid "Auto"
-msgstr "Automaatne diskor"
+msgstr "Automaatne"
 
 msgid "AutoEQ / APO"
 msgstr ""
@@ -641,10 +621,8 @@ msgstr "Automaatsed varundused"
 msgid "Automatic headroom"
 msgstr "Automaatne"
 
-#, fuzzy
-#| msgid "Automatic Backups"
 msgid "Automatic preamp"
-msgstr "Automaatsed varundused"
+msgstr "Automaatne eelvõimendus"
 
 msgid "Automatic updates"
 msgstr "Automaatsed uuendused"
@@ -682,22 +660,20 @@ msgstr "Varukoopia on taastatud"
 msgid "Backups"
 msgstr "Varukoopiad"
 
-#, fuzzy
-#| msgid "Dance"
 msgid "Balance"
-msgstr "Tantsumuusika"
+msgstr "Tasakaal"
 
 msgid "Band layout"
-msgstr ""
+msgstr "Sagedusribade paigutus"
 
 msgid "Band"
-msgstr ""
+msgstr "Sagedusriba"
 
 msgid "Bands"
-msgstr ""
+msgstr "Sagedusribad"
 
 msgid "Bandwidth"
-msgstr ""
+msgstr "Ribalaius"
 
 #, fuzzy
 #| msgid "Play count"
@@ -707,10 +683,8 @@ msgstr "Esituskordi"
 msgid "Bar spacing (px)"
 msgstr "Ruum riba ümber (pikslites)"
 
-#, fuzzy
-#| msgid "Full Bass"
 msgid "Bass"
-msgstr "Täisbass"
+msgstr "Bass"
 
 msgid "Bearer token (WebDAV)"
 msgstr "Esitaja tunnusluba (Bearer token - WebDAV)"
@@ -836,10 +810,8 @@ msgstr "Kanaleid"
 msgid "Check for updates"
 msgstr "Kontrolli uuendusi"
 
-#, fuzzy
-#| msgid "Receiving profile"
 msgid "Checking profile"
-msgstr "Vastuvõttev profiil"
+msgstr "Kontrollin profiili"
 
 msgid "Choose Folder"
 msgstr "Vali kaust"
@@ -882,15 +854,11 @@ msgstr "Ringikujuline spekter"
 msgid "Classical"
 msgstr "Klassikaline muusika"
 
-#, fuzzy
-#| msgid "Clear lyrics cache"
 msgid "Clear EBU R128 cache"
-msgstr "Kustuta laulusõnade vahemälu"
+msgstr "Kustuta EBU R128 vahemälu"
 
-#, fuzzy
-#| msgid "Downloading Japanese dictionary..."
 msgid "Clear Japanese dictionary"
-msgstr "Jaapani keele sõnastik on allalaadimisel…"
+msgstr "Eemalda jaapani keele sõnastik"
 
 msgid "Clear Mapping"
 msgstr "Eemalda vastendus"
@@ -898,25 +866,17 @@ msgstr "Eemalda vastendus"
 msgid "Clear album"
 msgstr "Eemalda album"
 
-#, fuzzy
-#| msgid "Clear lyrics cache"
 msgid "Clear all cache"
-msgstr "Kustuta laulusõnade vahemälu"
+msgstr "Kustuta kõik vahemälud"
 
-#, fuzzy
-#| msgid "Clear lyrics cache"
 msgid "Clear all cache?"
-msgstr "Kustuta laulusõnade vahemälu"
+msgstr "Kas kustutad kõik vahemälud?"
 
-#, fuzzy
-#| msgid "Clear album"
 msgid "Clear all data"
-msgstr "Eemalda album"
+msgstr "Kustuta kõik andmed"
 
-#, fuzzy
-#| msgid "Clear album"
 msgid "Clear all data?"
-msgstr "Eemalda album"
+msgstr "Kas kustutad kõik andmed?"
 
 msgid "Clear artist"
 msgstr "Eemalda esitaja"
@@ -927,15 +887,11 @@ msgstr "Tühjenda kaanepiltide puhver"
 msgid "Clear fetched lyrics for this track"
 msgstr "Kustuta see loo jaoks laaditud laulusõnad"
 
-#, fuzzy
-#| msgid "Clear lyrics cache"
 msgid "Clear fingerprint cache"
-msgstr "Kustuta laulusõnade vahemälu"
+msgstr "Kustuta lugude sõrmejälgede vahemälu"
 
-#, fuzzy
-#| msgid "Clear lyrics cache"
 msgid "Clear lookup cache"
-msgstr "Kustuta laulusõnade vahemälu"
+msgstr "Kustuta otsingute vahemälu"
 
 msgid "Clear lyrics cache"
 msgstr "Kustuta laulusõnade vahemälu"
@@ -943,10 +899,8 @@ msgstr "Kustuta laulusõnade vahemälu"
 msgid "Clear queue"
 msgstr "Tühjenda esitusjärjekord"
 
-#, fuzzy
-#| msgid "Clear lyrics cache"
 msgid "Clear this cache?"
-msgstr "Kustuta laulusõnade vahemälu"
+msgstr "Kas kustutad selle vahemälu?"
 
 msgid "Clear title"
 msgstr "Eemalda pealkiri"
@@ -1234,10 +1188,8 @@ msgstr "Praegune kaanepilt"
 msgid "Custom HTTP headers"
 msgstr "Sinu seadistatud HTTP-päised"
 
-#, fuzzy
-#| msgid "Custom"
 msgid "Custom bands"
-msgstr "Kohandatud"
+msgstr "Sinu lisatud sagedusribad"
 
 msgid "Custom"
 msgstr "Kohandatud"
@@ -1324,12 +1276,10 @@ msgstr "Kustuta esitusloendi fail"
 msgid "Delete preset"
 msgstr "Aseta eelseadistus"
 
-#, fuzzy
-#| msgid "Delete Playlist"
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
-msgstr[0] "Kustuta esitusloend"
-msgstr[1] "Kustuta esitusloend"
+msgstr[0] "Kas kustutad {count} esitusloendi?"
+msgstr[1] "Kas kustutad {count} esitusloendit?"
 
 msgid "Delete"
 msgstr "Kustuta"
@@ -1512,10 +1462,8 @@ msgstr "Kestus"
 msgid "Dynamic background"
 msgstr "Dünaamiline taust"
 
-#, fuzzy
-#| msgid "Enable EBU R128 Analysis?"
 msgid "EBU R128 analysis"
-msgstr "Kas lülitad EBU R128 analüüsi sisse?"
+msgstr "EBU R128 analüüs"
 
 msgid "EBU R128 reference level"
 msgstr "EBU R128 viide"
@@ -1737,18 +1685,14 @@ msgstr "Veebruar {year}"
 msgid "Fetching Home"
 msgstr ""
 
-#, fuzzy
-#| msgid "Artist albums"
 msgid "Fetching albums"
-msgstr "Esitajate albumid"
+msgstr "Laadin albumeid"
 
 msgid "Fetching artists"
 msgstr ""
 
-#, fuzzy
-#| msgid "Search artwork"
 msgid "Fetching artwork"
-msgstr "Otsi kaanepilte"
+msgstr "Laadin kaanepilte"
 
 #, fuzzy
 #| msgid "Search genres"
@@ -1760,10 +1704,8 @@ msgstr "Otsi žanre"
 msgid "Fetching lyrics"
 msgstr "Otsi laulusõnu"
 
-#, fuzzy
-#| msgid "Search artwork"
 msgid "Fetching metadata..."
-msgstr "Otsi kaanepilte"
+msgstr "Laadin metateavet…"
 
 #, fuzzy
 #| msgid "Search playlists"
@@ -2070,10 +2012,8 @@ msgstr "Impordi kujundus"
 msgid "Import"
 msgstr "Import"
 
-#, fuzzy
-#| msgid "Join profile"
 msgid "Importing profile"
-msgstr "Liitumisprofiil"
+msgstr "Impordin profiili"
 
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
@@ -2114,10 +2054,8 @@ msgstr "Allikas pole enam saadaval"
 msgid "January {year}"
 msgstr "Jaanuar {year}"
 
-#, fuzzy
-#| msgid "Downloading Japanese dictionary..."
 msgid "Japanese dictionary"
-msgstr "Jaapani keele sõnastik on allalaadimisel…"
+msgstr "Jaapani keele sõnastik"
 
 msgid "Jellyfin"
 msgstr "Jellyfin"
@@ -3119,10 +3057,8 @@ msgstr "Esitamisel selles seadmes"
 msgid "Playing on {device}"
 msgstr "Esitamisel seadmes: {device}"
 
-#, fuzzy
-#| msgid "Playing from"
 msgid "Playing stream"
-msgstr "Esitamisel seadmest"
+msgstr "Voogedastus on esitamisel"
 
 msgid "Playlist File"
 msgstr "Esitusloendi fail"
@@ -3170,7 +3106,7 @@ msgid "Position"
 msgstr "Asukoht"
 
 msgid "Preamp"
-msgstr ""
+msgstr "Eelvõimendus"
 
 msgid "Prefer distinct track covers"
 msgstr "Eelista lugude eraldi kaanepilte"
@@ -3184,10 +3120,8 @@ msgstr "Eelista tõlkeid"
 msgid "Preferences"
 msgstr "Eelistused"
 
-#, fuzzy
-#| msgid "Receiving collection"
 msgid "Preparing collection"
-msgstr "Laadin kogumikku alla"
+msgstr "Valmistan kogumikku ette"
 
 msgid "Preparing library..."
 msgstr "Valmistan muusikakogu ette…"
@@ -3198,15 +3132,11 @@ msgstr "Säilita kanalid"
 msgid "Preserve pitch"
 msgstr "Säilita helikõrgus"
 
-#, fuzzy
-#| msgid "Preset saved"
 msgid "Preset name"
-msgstr "Eelseadistus on salvestatud"
+msgstr "Eelseadistuse nimi"
 
-#, fuzzy
-#| msgid "Preset 1"
 msgid "Preset text"
-msgstr "1. eelseadistus"
+msgstr "Eelseadistuse tekst"
 
 msgid "Preset"
 msgstr "Eelseadistus"
@@ -3232,8 +3162,6 @@ msgstr "Eelmine ajavahemik"
 msgid "Previous"
 msgstr "Eelmine"
 
-#, fuzzy
-#| msgid "Privacy and Security"
 msgid "Privacy & Security"
 msgstr "Privaatsus ja turvalisus"
 
@@ -3253,7 +3181,7 @@ msgid "Profile PIN"
 msgstr "Profiili PIN-kood"
 
 msgid "Profile download is incomplete. Retry to continue."
-msgstr ""
+msgstr "Profiili allalaadimine jäi poolikuks. Jätkamiseks proovi uuesti."
 
 msgid "Profile up to date"
 msgstr "Profiil on ajakohane"
@@ -3306,10 +3234,8 @@ msgstr "Vahemiku valik"
 msgid "Rating"
 msgstr "Hinnang"
 
-#, fuzzy
-#| msgid "Loading..."
 msgid "Reading tags..."
-msgstr "Laadin…"
+msgstr "Loen silte…"
 
 msgid "Ready"
 msgstr "Valmis"
@@ -3338,10 +3264,8 @@ msgstr "Ühenda uuesti"
 msgid "Record label"
 msgstr "Plaadifirma"
 
-#, fuzzy
-#| msgid "Downloading"
 msgid "Recording"
-msgstr "Allalaadimisel"
+msgstr "Salvestis"
 
 msgid "Red"
 msgstr "Punane"
@@ -3388,18 +3312,14 @@ msgstr "Edastusteenus"
 msgid "Release date"
 msgstr "Avaldamise kuupäev"
 
-#, fuzzy
-#| msgid "Release"
 msgid "Release group"
-msgstr "Väljalase"
+msgstr "Väljalaskegrupp"
 
 msgid "Release notifications"
 msgstr "Uute versioonide teave"
 
-#, fuzzy
-#| msgid "Release date"
 msgid "Release type"
-msgstr "Avaldamise kuupäev"
+msgstr "Versiooni tüüp"
 
 msgid "Release"
 msgstr "Väljalase"
@@ -3449,10 +3369,8 @@ msgstr "Eemalda kõik allalaadimised"
 msgid "Remove and Delete"
 msgstr "Eemalda ja kustuta"
 
-#, fuzzy
-#| msgid "Remove and Delete"
 msgid "Remove band"
-msgstr "Eemalda ja kustuta"
+msgstr "Eemalda sagedusriba"
 
 msgid "Remove device"
 msgstr "Eemalda seade"
@@ -3472,10 +3390,8 @@ msgstr "Eemalda esitusloendist"
 msgid "Remove from Queue"
 msgstr "Eemalda esitusjärjekorrast"
 
-#, fuzzy
-#| msgid "Remove folder"
 msgid "Remove from folder"
-msgstr "Eemalda kaust"
+msgstr "Eemalda kaustast"
 
 msgid "Remove rule"
 msgstr "Eemalda reegel"
@@ -3498,10 +3414,8 @@ msgstr "Eemaldatud asukohast"
 msgid "Rename file"
 msgstr "Muuda failinime"
 
-#, fuzzy
-#| msgid "Remove folder"
 msgid "Rename folder"
-msgstr "Eemalda kaust"
+msgstr "Muuda kausta nime"
 
 #, fuzzy
 #| msgid "Paste preset"
@@ -3551,15 +3465,11 @@ msgstr "Eelda SMB puhul krüptimist"
 msgid "Reset appearance"
 msgstr "Lähtesta välimus"
 
-#, fuzzy
-#| msgid "Release date"
 msgid "Reset database"
-msgstr "Avaldamise kuupäev"
+msgstr "Lähtesta andmebaas"
 
-#, fuzzy
-#| msgid "Release date"
 msgid "Reset database?"
-msgstr "Avaldamise kuupäev"
+msgstr "Kas lähtestad andmebaasi?"
 
 msgid "Reset to defaults"
 msgstr "Taasta vaikimisi väärtus"
@@ -4744,13 +4654,10 @@ msgid_plural "{count} days ago"
 msgstr[0] "{count} päev tagasi"
 msgstr[1] "{count} päeva tagasi"
 
-#, fuzzy
-#| msgid "{count} track"
-#| msgid_plural "{count} tracks"
 msgid "{count} entry"
 msgid_plural "{count} entries"
-msgstr[0] "{count} lugu"
-msgstr[1] "{count} lugu"
+msgstr[0] "{count} kirje"
+msgstr[1] "{count} kirjet"
 
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
