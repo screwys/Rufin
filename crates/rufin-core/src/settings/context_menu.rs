@@ -13,7 +13,6 @@ pub enum ContextMenuItem {
     Favorites,
     EditMetadata,
     Pins,
-    #[serde(alias = "GoToArtist", alias = "GoToAlbum")]
     GoTo,
     Download,
 }
@@ -133,30 +132,6 @@ mod tests {
                 .count(),
             1
         );
-    }
-
-    #[test]
-    fn legacy_artist_and_album_destinations_merge_into_one_go_to_setting() {
-        let mut settings: ContextMenuSettings = serde_json::from_value(serde_json::json!({
-            "items": [
-                { "item": "GoToAlbum", "visible": false },
-                { "item": "GoToArtist", "visible": true }
-            ]
-        }))
-        .expect("legacy context menu settings");
-
-        settings.sanitize();
-
-        assert_eq!(
-            settings
-                .items
-                .iter()
-                .filter(|entry| entry.item == ContextMenuItem::GoTo)
-                .count(),
-            1
-        );
-        assert_eq!(settings.items[0].item, ContextMenuItem::GoTo);
-        assert!(!settings.items[0].visible);
     }
 
     #[test]

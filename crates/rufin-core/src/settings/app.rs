@@ -238,7 +238,7 @@ preference_group!(#[cfg_attr(feature = "bindings", derive(uniffi::Record))] Appl
     activity_overview: ActivityOverviewSettings = ActivityOverviewSettings::default();
     #[serde(default)]
     backup: crate::runtime::BackupSettings = crate::runtime::BackupSettings::default();
-    #[serde(default = "legacy_secret_storage_mode")]
+    #[serde(default)]
     secret_storage_mode: SecretStorageMode = SecretStorageMode::default();
 });
 
@@ -299,7 +299,7 @@ pub struct Settings {
     pub show_bottom_bar_rating: bool,
     #[serde(default)]
     pub tray_enabled: bool,
-    #[serde(default, alias = "exit_to_tray")]
+    #[serde(default)]
     pub keep_running_after_close: bool,
     #[serde(default)]
     pub start_minimized: bool,
@@ -544,10 +544,6 @@ pub fn default_home_blocks() -> Vec<HomeBlockKind> {
         HomeBlockKind::RecentlyReleased,
         HomeBlockKind::Genres,
     ]
-}
-
-fn legacy_secret_storage_mode() -> SecretStorageMode {
-    SecretStorageMode::ConfigFile
 }
 
 fn default_starting_page() -> SidebarRouteItem {

@@ -135,40 +135,6 @@ impl SourceSettings {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
-pub(crate) enum LegacyTrackSortKey {
-    TrackNumber,
-    #[default]
-    Title,
-    Artist,
-    Album,
-    Year,
-    Duration,
-    Favorite,
-}
-
-impl LegacyTrackSortKey {
-    fn library_field(self) -> LibraryField {
-        match self {
-            Self::TrackNumber => LibraryField::TrackNumber,
-            Self::Title => LibraryField::Title,
-            Self::Artist => LibraryField::Artist,
-            Self::Album => LibraryField::Album,
-            Self::Year => LibraryField::Year,
-            Self::Duration => LibraryField::Duration,
-            Self::Favorite => LibraryField::Favorite,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
-pub(crate) struct LegacyTrackTableSettings {
-    #[serde(default)]
-    sort_key: LegacyTrackSortKey,
-    #[serde(default)]
-    descending: bool,
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct StoredSettings {
     #[serde(flatten)]
@@ -177,7 +143,7 @@ pub struct StoredSettings {
     pub(crate) equalizer: crate::playback::EqualizerPreferences,
     #[serde(default)]
     pub(crate) scrobbling: ScrobblingSettings,
-    #[serde(default = "legacy_scrobbling_secrets_present")]
+    #[serde(default)]
     pub(crate) scrobbling_secrets_present: bool,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub(crate) scrobbling_credentials: std::collections::BTreeMap<String, Credential>,
@@ -191,10 +157,6 @@ pub struct StoredSettings {
     pub(crate) jellyfin_device_id: String,
     #[serde(default)]
     visualizer_preset_bar_counts_updated: bool,
-    #[serde(default, rename = "home_sections", skip_serializing)]
-    pub(crate) legacy_home_sections: Option<Vec<HomeSectionKind>>,
-    #[serde(default, rename = "track_table", skip_serializing)]
-    pub(crate) legacy_track_table: Option<LegacyTrackTableSettings>,
 }
 
 impl Default for StoredSettings {
@@ -210,26 +172,18 @@ impl Default for StoredSettings {
             secret_scope_id: String::new(),
             jellyfin_device_id: String::new(),
             visualizer_preset_bar_counts_updated: true,
-            legacy_home_sections: None,
-            legacy_track_table: None,
         }
     }
 }
 
 impl StoredSettings {
     pub(crate) fn migrate_defaults(&mut self) {
-        if self.ui.lastfm_api_key.trim().is_empty() && !self.scrobbling.lastfm.api_key.is_empty() {
-            self.ui.lastfm_api_key = self.scrobbling.lastfm.api_key.clone();
-        }
-        self.scrobbling.lastfm.api_key.clear();
         self.scrobbling.sanitize();
         if !self.visualizer_preset_bar_counts_updated {
             self.ui.visualizer.migrate_preset_bar_counts();
             self.visualizer_preset_bar_counts_updated = true;
         }
         self.ui.visualizer.migrate_named_presets();
-        self.migrate_home_blocks();
-        self.migrate_legacy_track_table();
         app::migrate_library_lists(&mut self.ui.library_lists);
         self.ui.sanitize();
     }
@@ -239,72 +193,6 @@ impl StoredSettings {
         settings.lastfm.api_key = self.ui.lastfm_api_key.clone();
         settings
     }
-
-    fn migrate_home_blocks(&mut self) {
-        if self.ui.application.home_blocks.is_empty() {
-            let home_sections = self
-                .legacy_home_sections
-                .take()
-                .filter(|sections| !sections.is_empty())
-                .unwrap_or_else(default_home_sections);
-            self.ui.application.home_blocks = Vec::with_capacity(home_sections.len() + 2);
-            self.ui
-                .application
-                .home_blocks
-                .push(HomeBlockKind::Showcase);
-            for section in home_sections {
-                self.ui.application.home_blocks.push(match section {
-                    HomeSectionKind::Explore => HomeBlockKind::Explore,
-                    HomeSectionKind::MostPlayed => HomeBlockKind::MostPlayed,
-                    HomeSectionKind::NewlyAdded => HomeBlockKind::NewlyAdded,
-                    HomeSectionKind::RecentlyPlayed => HomeBlockKind::RecentlyPlayed,
-                    HomeSectionKind::RecentlyReleased => HomeBlockKind::RecentlyReleased,
-                });
-            }
-            if !self
-                .ui
-                .application
-                .home_blocks
-                .contains(&HomeBlockKind::Genres)
-            {
-                self.ui.application.home_blocks.push(HomeBlockKind::Genres);
-            }
-        } else {
-            self.legacy_home_sections.take();
-        }
-    }
-
-    fn migrate_legacy_track_table(&mut self) {
-        let Some(legacy) = self.legacy_track_table.take() else {
-            return;
-        };
-        if self
-            .ui
-            .library_lists
-            .iter()
-            .any(|entry| entry.key == LibraryListKey::Tracks)
-        {
-            return;
-        }
-
-        let mut settings = LibraryListSettings::for_key(LibraryListKey::Tracks);
-        settings.sort_key = legacy.sort_key.library_field();
-        settings.descending = legacy.descending;
-        self.ui.library_lists.push(LibraryListSettingsEntry {
-            key: LibraryListKey::Tracks,
-            settings,
-        });
-    }
-}
-
-fn default_home_sections() -> Vec<HomeSectionKind> {
-    vec![
-        HomeSectionKind::Explore,
-        HomeSectionKind::MostPlayed,
-        HomeSectionKind::NewlyAdded,
-        HomeSectionKind::RecentlyPlayed,
-        HomeSectionKind::RecentlyReleased,
-    ]
 }
 
 #[derive(Clone)]
@@ -983,10 +871,6 @@ fn scrobbling_secrets_present(settings: &ScrobblingSettings) -> bool {
         .any(|descriptor| !descriptor.value(settings).trim().is_empty())
 }
 
-fn legacy_scrobbling_secrets_present() -> bool {
-    true
-}
-
 pub(crate) fn scrobbling_secret_key(descriptor: scrobbling::SecretDescriptor) -> SecretKey {
     SecretKey::namespaced(
         descriptor.namespace(),
@@ -1254,11 +1138,6 @@ pub(crate) fn decode_settings(
     let fields = raw.as_object().ok_or("settings must be a JSON object")?;
     let mut accepted =
         serde_json::to_value(StoredSettings::default()).map_err(|error| error.to_string())?;
-    // Missing legacy markers still need their deserializer defaults.
-    accepted
-        .as_object_mut()
-        .unwrap()
-        .remove("scrobbling_secrets_present");
     let mut unsupported = Vec::new();
     for (key, value) in fields {
         recover_setting(&mut accepted, vec![key.clone()], value, &mut unsupported);
@@ -1340,15 +1219,6 @@ pub(crate) fn write_settings(path: &Path, value: &StoredSettings) -> Result<(), 
         Some(mut saved) => {
             let (mut previous, unsupported) = decode_settings(&saved)?;
             let mut before = serde_json::to_value(&previous).map_err(|error| error.to_string())?;
-            // These decoded legacy fields are consumed by migration and never serialized.
-            for (key, present) in [
-                ("home_sections", previous.legacy_home_sections.is_some()),
-                ("track_table", previous.legacy_track_table.is_some()),
-            ] {
-                if present {
-                    before[key] = saved[key].clone();
-                }
-            }
             if !unsupported.is_empty() {
                 previous.migrate_defaults();
                 let defaults =
@@ -1588,23 +1458,6 @@ mod tests {
                 0o600
             );
         }
-    }
-
-    #[test]
-    fn fresh_settings_persist_empty_secret_storage_while_legacy_settings_probe_once() {
-        let fresh = StoredSettings::default();
-        let serialized = serde_json::to_value(&fresh).expect("serialize fresh settings");
-        let mut legacy_json = serialized.clone();
-        legacy_json
-            .as_object_mut()
-            .expect("settings object")
-            .remove("scrobbling_secrets_present");
-        let legacy: StoredSettings =
-            serde_json::from_value(legacy_json).expect("deserialize old settings");
-
-        assert_eq!(serialized["scrobbling_secrets_present"], false);
-        assert!(!fresh.scrobbling_secrets_present);
-        assert!(legacy.scrobbling_secrets_present);
     }
 
     #[test]
