@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-10-24 12:54+0000\n"
+"PO-Revision-Date: 2026-10-25 20:06+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Estonian <https://hosted.weblate.org/projects/rufin/app/et/>\n"
 "Language: et\n"
@@ -161,11 +161,15 @@ msgid ""
 "Remove all Rufin data and settings except saved connections and credentials? "
 "Rufin will restart after clearing the data."
 msgstr ""
+"Kas eemaldad kõik Rufini andmed ja seadistused, välja arvatud ühendused ja "
+"autentimisandmed? Peale andmete eemaldamist käivitub Rufin uuesti."
 
 msgid ""
 "Remove all Rufin data, settings and saved logins? Rufin will restart after "
 "clearing the data."
 msgstr ""
+"Kas eemaldad kõik Rufini andmed, seadistused ja autentimisandmed? Peale "
+"andmete eemaldamist käivitub Rufin uuesti."
 
 msgid ""
 "Replace the selected contents and remove these configured sources?\n"
@@ -320,7 +324,7 @@ msgid "A new update is available, restart to apply"
 msgstr "Saadaval on uuendus, selle kasutamiseks käivita rakendus uuesti"
 
 msgid "A"
-msgstr ""
+msgstr "A"
 
 msgid "API key (Subsonic)"
 msgstr "API võtmed (Subsonic)"
@@ -340,10 +344,8 @@ msgstr "Absoluutne"
 msgid "Accent color"
 msgstr "Aktsentvärv"
 
-#, fuzzy
-#| msgid "Access token"
 msgid "Access denied"
-msgstr "Ligipääsu tunnusluba"
+msgstr "Ligipääs on keelatud"
 
 msgid "Access token"
 msgstr "Ligipääsu tunnusluba"
@@ -580,18 +582,16 @@ msgid "Artwork"
 msgstr "Kaanepildid"
 
 msgid "Audio effects"
-msgstr ""
+msgstr "Heliefektid"
 
 msgid "Audio fade on play/pause"
 msgstr "Esitamisel/peatamisel hajuta heli sujuvalt"
 
 msgid "Audio fingerprints"
-msgstr ""
+msgstr "Helifailide sõrmejäljed"
 
-#, fuzzy
-#| msgid "Audio output"
 msgid "Audio output failed"
-msgstr "Heliväljund"
+msgstr "Heliväljundi viga"
 
 msgid "Audio output"
 msgstr "Heliväljund"
@@ -621,7 +621,7 @@ msgid "Auto"
 msgstr "Automaatne"
 
 msgid "AutoEQ / APO"
-msgstr ""
+msgstr "AutoEQ / APO"
 
 msgid "Automatic Backups"
 msgstr "Automaatsed varundused"
@@ -717,7 +717,7 @@ msgid "Blue"
 msgstr "Sinine"
 
 msgid "Brightness (%)"
-msgstr ""
+msgstr "Eredus (%)"
 
 msgid "Browse"
 msgstr "Sirvi"
@@ -733,22 +733,16 @@ msgid "By Title"
 msgstr "Pealkiri"
 
 msgid "C"
-msgstr ""
+msgstr "C"
 
-#, fuzzy
-#| msgid "New file"
 msgid "CUE file"
-msgstr "Uus fail"
+msgstr "CUE-fail"
 
-#, fuzzy
-#| msgid "Cached"
 msgid "Cache"
-msgstr "Puhverdatud"
+msgstr "Vahemälu"
 
-#, fuzzy
-#| msgid "Cached"
 msgid "Cached data"
-msgstr "Puhverdatud"
+msgstr "Puhverdatud andmed"
 
 msgid "Cached"
 msgstr "Puhverdatud"
@@ -760,7 +754,7 @@ msgid "Caching local library..."
 msgstr "Puhverdan kohalikku muusikakogu…"
 
 msgid "Calculating fingerprint..."
-msgstr ""
+msgstr "Arvutan sõrmejälge..."
 
 msgid "Cancel download and clear downloaded items"
 msgstr "Katkesta allalaadimine ja eemalda allalaaditu"
@@ -1002,10 +996,8 @@ msgstr "Heliloojate järjestus"
 msgid "Composer"
 msgstr "Helilooja"
 
-#, fuzzy
-#| msgid "Connection"
 msgid "Condition"
-msgstr "Ühendus"
+msgstr "Tingimus"
 
 msgid "Configure another"
 msgstr "Seadista veel üks"
@@ -1085,10 +1077,8 @@ msgstr "Sisu"
 msgid "Context Menus"
 msgstr "Kontekstimenüüd"
 
-#, fuzzy
-#| msgid "Continue from where {device} left off"
 msgid "Continue from {device}"
-msgstr "Jätka sealt, kus „{device}“ seade jäi pooleli"
+msgstr "Jätka seadmest „{device}“"
 
 msgid "Continue"
 msgstr "Jätka"
@@ -1159,18 +1149,14 @@ msgstr "Rufini uuendamine versioonini {version} ei õnnestunud"
 msgid "Could not update favorites"
 msgstr "Lemmikute uuendamine ei õnnestunud"
 
-#, fuzzy
-#| msgid "Couldn't connect to {service}"
 msgid "Couldn't connect to the server"
-msgstr "{service} muusikaserveriga ühendamine ei õnnestunud"
+msgstr "Serveriga ühendamine ei õnnestunud"
 
 msgid "Couldn't connect to {service}"
 msgstr "{service} muusikaserveriga ühendamine ei õnnestunud"
 
-#, fuzzy
-#| msgid "Could not play this track"
 msgid "Couldn't decode this track"
-msgstr "Selle loo esitamine ei õnnestunud"
+msgstr "Selle loo dekodeerimine ei õnnestunud"
 
 msgid "Couldn't load this folder"
 msgstr "Selle kausta laadimine ei õnnestunud"
@@ -1219,10 +1205,8 @@ msgstr "Sinu lisatud sagedusribad"
 msgid "Custom"
 msgstr "Kohandatud"
 
-#, fuzzy
-#| msgid "Compilation"
 msgid "Customization"
-msgstr "Kogumik"
+msgstr "Kohendamine"
 
 msgid "Customize display"
 msgstr "Kohanda ekraanivaadet"
@@ -1288,18 +1272,14 @@ msgstr "Kustuta esitusloend"
 msgid "Delete \"{name}\"?"
 msgstr "Kas kustutad: „{name}“?"
 
-#, fuzzy
-#| msgid "Selected folders"
 msgid "Delete folder"
-msgstr "Valitud muusikakaustad"
+msgstr "Kustuta kaust"
 
 msgid "Delete playlist file"
 msgstr "Kustuta esitusloendi fail"
 
-#, fuzzy
-#| msgid "Paste preset"
 msgid "Delete preset"
-msgstr "Aseta eelseadistus"
+msgstr "Kustuta eelseadistus"
 
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
@@ -1321,8 +1301,6 @@ msgstr "Lugude üksikasjade veerud"
 msgid "Detail"
 msgstr "Üksikasjad"
 
-#, fuzzy
-#| msgid "Detail"
 msgid "Details"
 msgstr "Üksikasjad"
 
@@ -1412,18 +1390,14 @@ msgstr "Toeta meid rahaliselt"
 msgid "Done"
 msgstr ""
 
-#, fuzzy
-#| msgid "Open automatically"
 msgid "Download Automatically"
-msgstr "Ava automaatselt"
+msgstr "Laadi automaatselt alla"
 
 msgid "Download Folder"
 msgstr "Allalaadimiste kaust"
 
-#, fuzzy
-#| msgid "Download quality"
 msgid "Download Lazily"
-msgstr "Allalaadimiste kvaliteet"
+msgstr "Laadi rahulikult alla"
 
 msgid "Download Queue"
 msgstr "Allalaadimise järjekord"
@@ -1446,18 +1420,14 @@ msgstr "Allalaaditud"
 msgid "Downloading Japanese dictionary..."
 msgstr "Jaapani keele sõnastik on allalaadimisel…"
 
-#, fuzzy
-#| msgid "Download artwork"
 msgid "Downloading artwork"
-msgstr "Laadi kaanepilt alla"
+msgstr "Laadin kaanepilti alla"
 
 msgid "Downloading artwork... {count} checked"
 msgstr "Kaanepildid on allalaadimisel... {count} on kontrollitud"
 
-#, fuzzy
-#| msgid "Download lyrics"
 msgid "Downloading lyrics"
-msgstr "Laadi laulusõnad alla"
+msgstr "Laadin laulusõnu alla"
 
 msgid "Downloading lyrics... {count} checked"
 msgstr "Laulusõnad on allalaadimisel... {count} on kontrollitud"
@@ -1471,15 +1441,11 @@ msgstr "Allalaadimised"
 msgid "Drag to reorder"
 msgstr "Järjekorra muutmiseks lohista"
 
-#, fuzzy
-#| msgid "Paste preset"
 msgid "Duplicate preset"
-msgstr "Aseta eelseadistus"
+msgstr "Tee eelseadistusest koopia"
 
-#, fuzzy
-#| msgid "Don't duplicate"
 msgid "Duplicate"
-msgstr "Ära tee koopiat"
+msgstr "Tee koopia"
 
 msgid "Duration"
 msgstr "Kestus"
@@ -1553,10 +1519,8 @@ msgstr "Lülita automaatne varundus sisse"
 msgid "Enable background image"
 msgstr "Kasuta taustapilti"
 
-#, fuzzy
-#| msgid "Search lyrics"
 msgid "Enable caching lyrics"
-msgstr "Otsi laulusõnu"
+msgstr "Kasuta laulusõnade puhverdamist"
 
 msgid "Enable partial star ratings"
 msgstr "Luba kasutada osalisi reitingutärne"
@@ -1567,18 +1531,14 @@ msgstr "Lülita privaatne režiim sisse"
 msgid "Enable"
 msgstr "Lülita sisse"
 
-#, fuzzy
-#| msgid "Enable"
 msgid "Enabled"
-msgstr "Lülita sisse"
+msgstr "Kasutusel"
 
 msgid "Encoding peak"
-msgstr ""
+msgstr "Kodeerimise tipp"
 
-#, fuzzy
-#| msgid "Downloading"
 msgid "Encoding"
-msgstr "Allalaadimisel"
+msgstr "Kodeering"
 
 msgid "Encrypt backups"
 msgstr "Krüpti varukoopiad"
@@ -1643,10 +1603,8 @@ msgstr "Ekspordivorming"
 msgid "Export playlist"
 msgstr "Ekspordi esitusloend"
 
-#, fuzzy
-#| msgid "Export playlist"
 msgid "Export preset"
-msgstr "Ekspordi esitusloend"
+msgstr "Ekspordi eelseadistus"
 
 msgid "Export to connection"
 msgstr "Ekspordi ühendusse"
@@ -1669,10 +1627,8 @@ msgstr "Metateabe otsing välisest teenusest"
 msgid "External site links"
 msgstr "Väliste veebisaitide lingid"
 
-#, fuzzy
-#| msgid "Files"
 msgid "FFT size"
-msgstr "Failid"
+msgstr "FFT suurus"
 
 msgid "FLAC"
 msgstr ""
@@ -1719,23 +1675,17 @@ msgstr ""
 msgid "Fetching artwork"
 msgstr "Laadin kaanepilte"
 
-#, fuzzy
-#| msgid "Search genres"
 msgid "Fetching genres"
-msgstr "Otsi žanre"
+msgstr "Laadin žanre"
 
-#, fuzzy
-#| msgid "Search lyrics"
 msgid "Fetching lyrics"
-msgstr "Otsi laulusõnu"
+msgstr "Laadin laulusõnu"
 
 msgid "Fetching metadata..."
 msgstr "Laadin metateavet…"
 
-#, fuzzy
-#| msgid "Search playlists"
 msgid "Fetching playlists"
-msgstr "Otsi esitusloenditest"
+msgstr "Laadin esitusloendeid"
 
 msgid "Field"
 msgstr ""
@@ -1746,18 +1696,14 @@ msgstr "Failiühendus"
 msgid "File connections"
 msgstr "Failiühendused"
 
-#, fuzzy
-#| msgid "Format"
 msgid "File format"
-msgstr "Vorming"
+msgstr "Failivorming"
 
 msgid "File path"
 msgstr "Faili asukoht"
 
-#, fuzzy
-#| msgid "Files"
 msgid "File size"
-msgstr "Failid"
+msgstr "Faili suurus"
 
 msgid "Filename"
 msgstr "Failinimi"
@@ -1794,10 +1740,8 @@ msgstr "Fikseeritud asukoht"
 msgid "Flat"
 msgstr "Ühetasane"
 
-#, fuzzy
-#| msgid "Filename"
 msgid "Folder name"
-msgstr "Failinimi"
+msgstr "Kaustanimi"
 
 msgid "Folder path"
 msgstr "Kausta asukoht"
@@ -1858,10 +1802,8 @@ msgstr ""
 msgid "Friday"
 msgstr "Reede"
 
-#, fuzzy
-#| msgid "Full Treble"
 msgid "Full Bass & Treble"
-msgstr "Täiskõrged"
+msgstr "Täisbass ja -kõrged"
 
 msgid "Full Bass"
 msgstr "Täisbass"
@@ -2009,10 +1951,8 @@ msgstr ""
 msgid "If you do not have API keys, create them"
 msgstr "Kui sul pole APi võtmeid, siis saad nad luua"
 
-#, fuzzy
-#| msgid "Choose playback output"
 msgid "Ignore playback volume"
-msgstr "Vali taasesituse väljund"
+msgstr "Eira taasesituse valjust"
 
 msgid "Image files"
 msgstr "Pildifailid"
@@ -2029,10 +1969,8 @@ msgstr "Impordi esitusloend"
 msgid "Import from connection"
 msgstr "Impordi ühendusest"
 
-#, fuzzy
-#| msgid "Import theme"
 msgid "Import preset"
-msgstr "Impordi kujundus"
+msgstr "Impordi eelseadistus"
 
 msgid "Import theme"
 msgstr "Impordi kujundus"
@@ -2074,10 +2012,8 @@ msgstr "Kutsu"
 msgid "Item ID"
 msgstr ""
 
-#, fuzzy
-#| msgid "Source is no longer available"
 msgid "Item is no longer available"
-msgstr "Allikas pole enam saadaval"
+msgstr "Objekt pole enam saadaval"
 
 msgid "January {year}"
 msgstr "Jaanuar {year}"
@@ -2123,10 +2059,8 @@ msgstr ""
 msgid "Keyboard Shortcuts"
 msgstr "Klaviatuuri kiirklahvid"
 
-#, fuzzy
-#| msgid "Spectrum line"
 msgid "LED spectrum"
-msgstr "Spektrijoon"
+msgstr "LED-spekter"
 
 msgid "LRCLIB"
 msgstr "LRCLIB"
@@ -2221,18 +2155,14 @@ msgstr "ListenBrainz"
 msgid "Listening overview"
 msgstr "Kuulamiste ülevaade"
 
-#, fuzzy
-#| msgid "ListenBrainz"
 msgid "Listening"
-msgstr "ListenBrainz"
+msgstr "Kuulan"
 
 msgid "Load file contents"
 msgstr "Laadi faili sisu"
 
-#, fuzzy
-#| msgid "Loading related tracks..."
 msgid "Loading cached lookups..."
-msgstr "Laadin seotud lugusid…"
+msgstr "Laadin puhverdatud otsinguid…"
 
 msgid "Loading related tracks..."
 msgstr "Laadin seotud lugusid…"
@@ -2358,26 +2288,20 @@ msgstr "Vastendatud kohalik kaust"
 msgid "March {year}"
 msgstr "Märts {year}"
 
-#, fuzzy
-#| msgid "Match"
 msgid "Matched"
-msgstr "Sobita"
+msgstr "Vastav"
 
 msgid "Maximum frequency (Hz)"
 msgstr ""
 
-#, fuzzy
-#| msgid "Maximum year"
 msgid "Maximum level (dB)"
-msgstr "Maksimaalne aasta"
+msgstr "Maksimaalne valjus (dB)"
 
 msgid "Maximum year"
 msgstr "Maksimaalne aasta"
 
-#, fuzzy
-#| msgid "Maximum year"
 msgid "Maximum"
-msgstr "Maksimaalne aasta"
+msgstr "Maksimaalne"
 
 msgid "May {year}"
 msgstr "Mai {year}"
@@ -2396,10 +2320,8 @@ msgstr "Metateabe muutmine pole enam saadaval"
 msgid "Metadata editing requires Local access"
 msgstr "Metateabe muutmine eeldab ligipääsu kohalikule seadmele"
 
-#, fuzzy
-#| msgid "Metadata source"
 msgid "Metadata lookups"
-msgstr "Metateabe allikas"
+msgstr "Metateabe otsingud"
 
 msgid "Metadata source"
 msgstr "Metateabe allikas"
@@ -2417,26 +2339,20 @@ msgstr "Minimeeri ülevaade"
 msgid "Minimum frequency (Hz)"
 msgstr ""
 
-#, fuzzy
-#| msgid "Minimum year"
 msgid "Minimum level (dB)"
-msgstr "Minimaalne aasta"
+msgstr "Minimaalne tase (dB)"
 
 msgid "Minimum year"
 msgstr "Minimaalne aasta"
 
-#, fuzzy
-#| msgid "Minimum year"
 msgid "Minimum"
-msgstr "Minimaalne aasta"
+msgstr "Minimaalne"
 
 msgid "Mirrored bars"
 msgstr "Peegeldatud ribad"
 
-#, fuzzy
-#| msgid "Mirrored bars"
 msgid "Mirrored"
-msgstr "Peegeldatud ribad"
+msgstr "Peegeldatud"
 
 msgid "Mode"
 msgstr ""
@@ -2585,10 +2501,8 @@ msgstr "Tuvastamine lähedusest"
 msgid "Needs attention"
 msgstr "Vajab tähelepanu"
 
-#, fuzzy
-#| msgid "Overview"
 msgid "Needs review"
-msgstr "Ülevaade"
+msgstr "Eeldab ülevaatamist"
 
 msgid "NetEase"
 msgstr "NetEase"
@@ -2613,13 +2527,9 @@ msgstr "Uus allalaadimisreegel"
 msgid "New file"
 msgstr "Uus fail"
 
-#, fuzzy
-#| msgid "Use folder"
 msgid "New folder"
-msgstr "Kasuta kausta"
+msgstr "Uus kaust"
 
-#, fuzzy
-#| msgid "New Playlist"
 msgid "New playlist"
 msgstr "Uus esitusloend"
 
@@ -2701,10 +2611,8 @@ msgstr "Laulusõnu pole saadaval."
 msgid "No lyrics"
 msgstr "Laulusõnu pole"
 
-#, fuzzy
-#| msgid "No matching tracks"
 msgid "No matching track in this release"
-msgstr "Sobivaid lugusid pole"
+msgstr "Selles väljaandes pole sobivaid lugusid"
 
 msgid "No matching tracks found"
 msgstr "Sobivaid lugusid ei leidu"
@@ -3661,10 +3569,8 @@ msgstr "Avaleht"
 msgid "Saving..."
 msgstr "Salvestan…"
 
-#, fuzzy
-#| msgid "No matching tracks"
 msgid "Scanning tracks"
-msgstr "Sobivaid lugusid pole"
+msgstr "Skaneerin lugusid"
 
 msgid "Schedule"
 msgstr "Ajagraafik"
@@ -3692,10 +3598,8 @@ msgstr "MusicBrainz"
 msgid "Search artwork"
 msgstr "Otsi kaanepilte"
 
-#, fuzzy
-#| msgid "Search Lyrics"
 msgid "Search by AcoustID"
-msgstr "Otsi laulusõnu"
+msgstr "Otsi AcoustID alusel"
 
 msgid "Search current folder"
 msgstr "Otsi sellest kaustas"
@@ -4033,10 +3937,8 @@ msgstr "Nutika esitusloendi lood"
 msgid "Smart playlists"
 msgstr "Nutikad esitusloendid"
 
-#, fuzzy
-#| msgid "Spectrum line"
 msgid "Soft spectrum"
-msgstr "Spektrijoon"
+msgstr "Pehme spekter"
 
 msgid "Solid bars"
 msgstr "Pidevad/ühtlased ribad"
@@ -4085,18 +3987,14 @@ msgstr "Allikas"
 msgid "Sources"
 msgstr "Allikad"
 
-#, fuzzy
-#| msgid "Spectrum line"
 msgid "Spectrum · dBFS"
-msgstr "Spektrijoon"
+msgstr "Spekter · dBFS"
 
 msgid "Spectrum line"
 msgstr "Spektrijoon"
 
-#, fuzzy
-#| msgid "Spectrum line"
 msgid "Spectrum"
-msgstr "Spektrijoon"
+msgstr "Spekter"
 
 msgid "Start minimized"
 msgstr "Käivita minimeerituna"
@@ -4330,10 +4228,8 @@ msgstr "Lugudevahetuse viis"
 msgid "Translation language"
 msgstr "Tõlke keel"
 
-#, fuzzy
-#| msgid "Full Treble"
 msgid "Treble"
-msgstr "Täiskõrged"
+msgstr "Kõrged"
 
 msgid "Troubleshooting"
 msgstr "Veaotsing"
