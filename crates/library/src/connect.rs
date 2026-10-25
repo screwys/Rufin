@@ -1,6 +1,6 @@
 //! Shared values at the catalog writer boundary. Changes commit with their
 //! versions; received values never enter service outboxes.
-use crate::{Database, LibraryError, LibraryResult};
+use crate::{Catalog, LibraryError, LibraryResult};
 pub(crate) mod catalog;
 mod database;
 use serde::{Deserialize, Serialize};
@@ -375,7 +375,7 @@ pub(crate) async fn initialize(connection: &mut SqliteConnection) -> LibraryResu
     Ok(())
 }
 
-impl Database {
+impl Catalog {
     pub async fn connect_record_on(
         connection: &mut SqliteConnection,
         kind: &str,
@@ -617,7 +617,7 @@ pub(crate) async fn apply_records_on(
         .into_iter()
         .partition(|record| record.kind.starts_with("catalog:"));
     set_receiving_on(connection, true).await?;
-    let mut changed = Database::apply_current_catalog_on(connection, &current).await?;
+    let mut changed = Catalog::apply_current_catalog_on(connection, &current).await?;
     let mut legacy = legacy;
     legacy.sort_by_key(|record| {
         let parent = match record.kind.as_str() {
@@ -1290,11 +1290,11 @@ mod tests {
     #[tokio::test]
     async fn saved_playlist_media_replay_preserves_artwork_without_catalog_membership() {
         let directory = tempfile::tempdir().unwrap();
-        let source = Database::open(directory.path().join("source.sqlite"))
+        let source = Catalog::open(directory.path().join("source.sqlite"))
             .await
             .unwrap();
         let destination_path = directory.path().join("destination.sqlite");
-        let destination = Database::open(&destination_path).await.unwrap();
+        let destination = Catalog::open(&destination_path).await.unwrap();
         let source_profile =
             crate::profile::ProfileStore::open(source.clone(), 1, PROFILE_KEY.parse().unwrap())
                 .await
@@ -1409,9 +1409,9 @@ mod tests {
         .unwrap();
         async {
             let result = {
-                let mut catalog = source.catalog("server", None).await?;
-                catalog.apply_catalog(&scan, true).await?;
-                catalog.into_changes()
+                let mut observation = source.observe("server", None).await?;
+                observation.apply_catalog(&scan, true).await?;
+                observation.into_changes()
             };
             Ok::<_, crate::LibraryError>(result)
         }
@@ -1428,7 +1428,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let binding =
-            Database::load_playlist_rows(&mut source.acquire_reader().await.unwrap(), &[playlist])
+            Catalog::load_playlist_rows(&mut source.acquire_reader().await.unwrap(), &[playlist])
                 .await
                 .unwrap()
                 .pop()
@@ -1564,15 +1564,15 @@ mod tests {
     async fn accepted_edits_survive_restart_and_incoming_replay_does_not_echo() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("profile.sqlite");
-        let database = Database::open(&path).await.unwrap();
+        let catalog = Catalog::open(&path).await.unwrap();
         let profile =
-            crate::profile::ProfileStore::open(database.clone(), 1, PROFILE_KEY.parse().unwrap())
+            crate::profile::ProfileStore::open(catalog.clone(), 1, PROFILE_KEY.parse().unwrap())
                 .await
                 .unwrap();
         profile.bind_profile("shared", "source").await.unwrap();
-        database.connect_set_active(true).await.unwrap();
+        catalog.connect_set_active(true).await.unwrap();
         for index in 0..200 {
-            database
+            catalog
                 .set_favorite(
                     &FavoriteTarget::Track(format!("rufin:source/track/source/{index}")),
                     true,
@@ -1586,10 +1586,10 @@ mod tests {
             .unwrap();
         assert_eq!(page.len(), CONNECT_PAGE_SIZE);
         profile.close().await.unwrap();
-        database.close().await.unwrap();
-        let database = Database::open(&path).await.unwrap();
+        catalog.close().await.unwrap();
+        let catalog = Catalog::open(&path).await.unwrap();
         let reopened_profile =
-            crate::profile::ProfileStore::open(database.clone(), 1, PROFILE_KEY.parse().unwrap())
+            crate::profile::ProfileStore::open(catalog.clone(), 1, PROFILE_KEY.parse().unwrap())
                 .await
                 .unwrap();
         let replay = reopened_profile
@@ -1598,7 +1598,7 @@ mod tests {
             .unwrap();
         assert_eq!(page[0].name, replay[0].name);
         assert_eq!(page[0].version, replay[0].version);
-        let destination = Database::open(directory.path().join("destination.sqlite"))
+        let destination = Catalog::open(directory.path().join("destination.sqlite"))
             .await
             .unwrap();
         let destination_profile = crate::profile::ProfileStore::open(
@@ -1649,7 +1649,7 @@ mod tests {
     #[tokio::test]
     async fn imported_history_never_creates_service_submissions() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("profile.sqlite"))
+        let catalog = Catalog::open(directory.path().join("profile.sqlite"))
             .await
             .unwrap();
         for (started, title, artist, album, duration, listened) in [
@@ -1664,16 +1664,16 @@ mod tests {
             ),
         ] {
             let record = serde_json::json!({"version":1,"listen_key":started,"source_id":"removed","media_uri":"https://example.org/retained","title":title,"artist":artist,"album":album,"started_at":started,"local_period":"2026-10","duration_millis":duration,"listened_millis":listened,"skipped":false});
-            database
+            catalog
                 .import_activity_jsonl(std::io::Cursor::new(serde_json::to_vec(&record).unwrap()))
                 .await
                 .unwrap();
         }
-        database.close().await.unwrap();
-        let database = Database::open(directory.path().join("profile.sqlite"))
+        catalog.close().await.unwrap();
+        let catalog = Catalog::open(directory.path().join("profile.sqlite"))
             .await
             .unwrap();
-        let recovered = database
+        let recovered = catalog
             .tracks_by_uris(
                 &([("https://example.org/retained").to_string()]),
                 &crate::ReadCancellation::new(),
@@ -1689,7 +1689,7 @@ mod tests {
         assert_eq!(recovered.metadata.artist, "Retained artist");
         assert_eq!(recovered.metadata.album, "Retained album");
         {
-            let mut reader = database.acquire_reader().await.unwrap();
+            let mut reader = catalog.acquire_reader().await.unwrap();
             assert_eq!(
                 sqlx::query_scalar::<_, i64>(
                     "SELECT local_play_count FROM tracks WHERE track_key=?1"
@@ -1706,7 +1706,7 @@ mod tests {
         })
         .selection();
         assert_eq!(
-            database
+            catalog
                 .selected_track_keys(&selection, &crate::ReadCancellation::new())
                 .await
                 .unwrap(),
@@ -1719,13 +1719,13 @@ mod tests {
                 "external_id":"shared-listen","source_id":null,"media_uri":"https://example.org/song.flac","track_title":"Song","artist_name":"Artist","album_title":"Album","started_at":1700000000,"local_period":"2023-11","duration_millis":120000,"listened_millis":60000,"skipped":0
             })),
         };
-        database
+        catalog
             .connect_apply(std::slice::from_ref(&record))
             .await
             .unwrap();
-        assert!(!database.connect_apply(&[record]).await.unwrap());
+        assert!(!catalog.connect_apply(&[record]).await.unwrap());
         let history = (&crate::MemberRead::new(crate::Collection::History { source: None }))
-            .rows(&database, 0, 100, &crate::ReadCancellation::new())
+            .rows(&catalog, 0, 100, &crate::ReadCancellation::new())
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -1738,7 +1738,7 @@ mod tests {
         assert_eq!(history[1].metadata.title, "Song");
         assert_eq!(history[1].metadata.artist, "Artist");
         assert_eq!(history[1].metadata.album, "Album");
-        let mut connection = database.acquire_reader().await.unwrap();
+        let mut connection = catalog.acquire_reader().await.unwrap();
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT count(*) FROM listens")
                 .fetch_one(&mut *connection)
@@ -1758,10 +1758,10 @@ mod tests {
     #[tokio::test]
     async fn captured_playlist_entries_replace_a_profile_and_keep_duplicate_occurrences() {
         let directory = tempfile::tempdir().unwrap();
-        let source = Database::open(directory.path().join("source.sqlite"))
+        let source = Catalog::open(directory.path().join("source.sqlite"))
             .await
             .unwrap();
-        let destination = Database::open(directory.path().join("destination.sqlite"))
+        let destination = Catalog::open(directory.path().join("destination.sqlite"))
             .await
             .unwrap();
         let source_profile =
@@ -1891,7 +1891,7 @@ mod tests {
     #[tokio::test]
     async fn playlist_projection_moves_duplicate_tracks_by_occurrence() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("profile.sqlite"))
+        let catalog = Catalog::open(directory.path().join("profile.sqlite"))
             .await
             .unwrap();
         let playlist = "[null,\"playlist\"]";
@@ -1902,21 +1902,21 @@ mod tests {
                 serde_json::json!({"playlist":playlist,"object_id":id,"media_uri":"https://example.org/same.flac","position":position,"snapshot_at":1}),
             ),
         };
-        database
+        catalog
             .connect_apply(&[make("a", 0), make("b", 1), make("c", 2)])
             .await
             .unwrap();
         let before: Vec<(String, i64)> = sqlx::query_as(
             "SELECT object_id,playlist_entry_key FROM playlist_entries ORDER BY object_id",
         )
-        .fetch_all(&mut *database.acquire_reader().await.unwrap())
+        .fetch_all(&mut *catalog.acquire_reader().await.unwrap())
         .await
         .unwrap();
-        database
+        catalog
             .connect_apply(&[make("c", 0), make("a", 1), make("b", 2)])
             .await
             .unwrap();
-        let mut connection = database.acquire_reader().await.unwrap();
+        let mut connection = catalog.acquire_reader().await.unwrap();
         let ids: Vec<String> =
             sqlx::query_scalar("SELECT object_id FROM main.playlist_entries ORDER BY position")
                 .fetch_all(&mut *connection)

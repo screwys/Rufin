@@ -5,10 +5,10 @@ use rufin_core::playback::QueuePlacement;
 use tracing::warn;
 pub(crate) fn download(payload: &MediaDragSource, shell: &Shell) {
     let payload = payload.clone();
-    let database = shell.products.library.clone();
+    let catalog = shell.products.library.clone();
     let source = shell.products.source.clone();
     shell.products.runtime.spawn(async move {
-        match payload.resolve(&database).await {
+        match payload.resolve(&catalog).await {
             Ok((uris, subject)) => source.download_media(subject, uris),
             Err(error) => warn!(%error, "failed to identify download tracks"),
         }
@@ -17,10 +17,10 @@ pub(crate) fn download(payload: &MediaDragSource, shell: &Shell) {
 
 pub(crate) fn remove_download(payload: &MediaDragSource, shell: &Shell) {
     let payload = payload.clone();
-    let database = shell.products.library.clone();
+    let catalog = shell.products.library.clone();
     let source = shell.products.source.clone();
     shell.products.runtime.spawn(async move {
-        match payload.resolve(&database).await {
+        match payload.resolve(&catalog).await {
             Ok((uris, _)) => source.remove_download_media(uris),
             Err(error) => warn!(%error, "failed to identify downloaded tracks"),
         }

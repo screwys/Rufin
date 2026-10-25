@@ -7,7 +7,7 @@ pub struct AndroidLibrary {
     pub(crate) source: SourceHandle,
     pub(crate) playback: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
     pub(crate) settings: rufin_core::SettingsHandle,
-    pub(crate) database: Arc<library::Database>,
+    pub(crate) catalog: Arc<library::Catalog>,
     pub(crate) runtime: tokio::runtime::Handle,
 }
 
@@ -17,7 +17,7 @@ impl AndroidLibrary {
             source: products.source.clone(),
             playback: products.playback.clone(),
             settings: products.settings.clone(),
-            database: products.library.clone(),
+            catalog: products.library.clone(),
             runtime: products.runtime.clone(),
         }
     }

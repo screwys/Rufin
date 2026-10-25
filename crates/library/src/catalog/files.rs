@@ -559,7 +559,7 @@ pub(crate) async fn remove_files_page_on(
     Ok((update, false))
 }
 
-impl Database {
+impl Catalog {
     pub async fn source_file_reuse_candidates(
         &self,
         source_id: &str,
@@ -786,14 +786,14 @@ pub(crate) async fn write_file_observations_on(
     Ok(update)
 }
 
-impl super::Catalog<'_> {
+impl super::Observation<'_> {
     pub async fn write_file_observations(
         &mut self,
         files: &[(LocalFileWrite, Vec<String>)],
         songs: Vec<TrackObservation>,
         admit: bool,
     ) -> LibraryResult<()> {
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut tx = writer.begin().await?;
         let update = write_file_observations_on(
             &mut tx,
@@ -814,7 +814,7 @@ impl super::Catalog<'_> {
         let mut after = String::new();
         loop {
             let paths: Vec<String> = {
-                let mut connection = self.database.acquire_reader().await?;
+                let mut connection = self.catalog.acquire_reader().await?;
                 sqlx::query_scalar("SELECT child.path FROM observed_local_files parent JOIN sources source ON source.source_key=parent.source_key CROSS JOIN observed_local_files child ON child.source_key=parent.source_key AND child.parent_path=rtrim(parent.path,'/'||char(92)) WHERE source.object_id=?1 AND parent.kind='directory' AND parent.observed_stamp=?2 AND json_extract(parent.parsed_stamp,'$[4]')=?2 AND child.observed_stamp<?2 AND child.path>?3 ORDER BY child.path LIMIT 128")
                     .bind(&source_id).bind(observed).bind(&after).fetch_all(&mut *connection).await?
             };
@@ -853,7 +853,7 @@ impl super::Catalog<'_> {
         for indexed in [false, true] {
             let mut after = 0_i64;
             loop {
-                let mut writer = self.database.writer().await?;
+                let mut writer = self.catalog.writer().await?;
                 let mut tx = writer.begin().await?;
                 let tracks: Vec<i64> = sqlx::query_scalar("SELECT track.track_key FROM tracks track JOIN local_track_access location USING(track_key) WHERE track.source_key=?1 AND indexed=?2 AND track.track_key>?3 AND coalesce(location.cue_path,location.source_path) IS NOT NULL AND CASE WHEN ?4 THEN location.local_file_key IS NOT NULL AND EXISTS(SELECT 1 FROM observed_local_files file WHERE file.local_file_key=location.local_file_key AND file.state='accepted') ELSE 1 END AND (track.object_id IS NOT NULL AND (EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='import') OR(EXISTS(SELECT 1 FROM json_each(?5) root WHERE coalesce(location.cue_path,location.source_path)=json_extract(root.value,'$[0]') OR(coalesce(location.cue_path,location.source_path)>=json_extract(root.value,'$[1]') AND coalesce(location.cue_path,location.source_path)<json_extract(root.value,'$[1]')||char(1114111))) AND NOT EXISTS(SELECT 1 FROM json_each(?6) excluded WHERE coalesce(location.cue_path,location.source_path)=json_extract(excluded.value,'$[0]') OR(coalesce(location.cue_path,location.source_path)>=json_extract(excluded.value,'$[1]') AND coalesce(location.cue_path,location.source_path)<json_extract(excluded.value,'$[1]')||char(1114111))))))=?4 ORDER BY track_key LIMIT 128")
                 .bind(self.source).bind(!indexed).bind(after).bind(indexed).bind(&roots).bind(&excluded).fetch_all(&mut *tx).await?;
@@ -877,7 +877,7 @@ impl super::Catalog<'_> {
     ) -> LibraryResult<()> {
         for path in paths {
             loop {
-                let mut writer = self.database.writer().await?;
+                let mut writer = self.catalog.writer().await?;
                 let mut tx = writer.begin().await?;
                 let (update, done) =
                     remove_files_page_on(&mut tx, self.source.raw(), path, observed).await?;
@@ -892,7 +892,7 @@ impl super::Catalog<'_> {
     }
 }
 
-impl super::Catalog<'_> {
+impl super::Observation<'_> {
     pub async fn merge_local_file_uris(
         &mut self,
         aliases: &[(String, String, String)],
@@ -900,7 +900,7 @@ impl super::Catalog<'_> {
         if aliases.is_empty() {
             return Ok(());
         }
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut transaction = writer.begin().await?;
         let update = merge_local_file_uris_on(&mut transaction, aliases).await?;
         transaction.commit().await?;

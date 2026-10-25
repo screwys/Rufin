@@ -357,15 +357,15 @@ mod tests {
                 .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"Items":[{"Id":"track","Name":"Track","AlbumId":"3272","Type":"Audio"}]})))
                 .mount(&server).await;
             let root = tempfile::tempdir().unwrap();
-            let database = library::Database::open(root.path().join("library.sqlite"))
+            let catalog = library::Catalog::open(root.path().join("library.sqlite"))
                 .await
                 .unwrap();
             let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-            database.observe_catalog(move |_, update| {
+            catalog.observe_catalog(move |_, update| {
                 let _ = sender.send(update);
                 std::future::ready(())
             });
-            database
+            catalog
                 .reconcile_source(
                     &library::SourceId::new("source"),
                     kind.source_kind(),
@@ -374,8 +374,8 @@ mod tests {
                 .await
                 .unwrap();
             let catalog_source_id = ("source").to_string();
-            let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-            catalog.start_observation().await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            observation.start_observation().await.unwrap();
             for (id, name) in [("3272", "AG! Calling"), ("other", "Another Album")] {
                 (async {
                     let mut batch = library::CatalogBatch::default();
@@ -387,7 +387,7 @@ mod tests {
                     .unwrap()
                     .unwrap())
                     .clone()]);
-                    catalog.apply_catalog(&batch, true).await?;
+                    observation.apply_catalog(&batch, true).await?;
                     Ok::<_, library::LibraryError>(result)
                 })
                 .await
@@ -406,14 +406,14 @@ mod tests {
                 .unwrap()
                 .unwrap())
                 .clone()]);
-                catalog.apply_catalog(&batch, true).await?;
+                observation.apply_catalog(&batch, true).await?;
                 Ok::<_, library::LibraryError>(result)
             })
             .await
             .unwrap();
             {
-                database
-                    .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+                catalog
+                    .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                     .await;
                 Ok::<_, crate::SourceError>(())
             }
@@ -426,7 +426,7 @@ mod tests {
                 else {
                     panic!("user data must retain the item boundary");
                 };
-                source.apply_changes(&database, items).await.unwrap();
+                source.apply_changes(&catalog, items).await.unwrap();
                 if repeated {
                     assert!(updates.try_recv().is_err());
                 } else {
@@ -434,7 +434,7 @@ mod tests {
                 }
             }
             let cancellation = library::ReadCancellation::new();
-            let track = database
+            let track = catalog
                 .tracks_by_uris(
                     &([(&library::source_entity_uri(
                         &crate::SourceId::new("source"),
@@ -456,7 +456,7 @@ mod tests {
                     "album",
                     &kind.object_id("album", raw),
                 );
-                let album = database
+                let album = catalog
                     .album(&(&uri), false, &cancellation)
                     .await
                     .unwrap()
@@ -474,7 +474,7 @@ mod tests {
             assert!(
                 source
                     .apply_changes(
-                        &database,
+                        &catalog,
                         [
                             ("missing".into(), RemoteItemUpdate::Metadata),
                             (
@@ -498,7 +498,7 @@ mod tests {
                 "one catalog notification after partial failure"
             );
             assert_eq!(
-                database
+                catalog
                     .tracks_by_uris(std::slice::from_ref(&track.media_uri), &cancellation)
                     .await
                     .map(|rows| { rows.into_iter().next() })
@@ -547,7 +547,7 @@ mod tests {
                 // Album membership no longer lists the old track. Resolve the track
                 // itself before deciding whether it moved or was deleted.
                 source
-                    .apply_items(&database, vec![album_id.into()], vec![])
+                    .apply_items(&catalog, vec![album_id.into()], vec![])
                     .await
                     .unwrap();
                 let uri = library::source_entity_uri(
@@ -555,12 +555,12 @@ mod tests {
                     "track",
                     &kind.object_id("track", "track"),
                 );
-                let track = database.track(&(&uri), &cancellation).await.unwrap();
+                let track = catalog.track(&(&uri), &cancellation).await.unwrap();
                 if removed {
                     assert!(track.is_some());
                     assert!(
                         (library::MemberRead::new(library::Collection::Source(source_key)))
-                            .page(&database, library::RouteSeedWindow::top(), &cancellation)
+                            .page(&catalog, library::RouteSeedWindow::top(), &cancellation)
                             .await
                             .map(|page| page
                                 .rows
@@ -585,7 +585,7 @@ mod tests {
                 server.verify().await;
             }
             source
-                .apply_items(&database, vec![], vec!["3272".into()])
+                .apply_items(&catalog, vec![], vec!["3272".into()])
                 .await
                 .unwrap();
             let uri = library::source_entity_uri(
@@ -594,7 +594,7 @@ mod tests {
                 &kind.object_id("album", "3272"),
             );
             assert!(
-                database
+                catalog
                     .album(&(&uri), false, &cancellation)
                     .await
                     .map(|rows| { rows.into_iter().next() })
@@ -614,7 +614,7 @@ mod tests {
                     downloaded_only: false,
                     activity: false
                 }
-                .page_albums(&database, library::RouteSeedWindow::top(), &cancellation)
+                .page_albums(&catalog, library::RouteSeedWindow::top(), &cancellation)
                 .await
                 .map(|page| page.rows)
                 .unwrap()
@@ -622,11 +622,11 @@ mod tests {
                 .all(|album| album.media_uri != uri)
             );
             let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-            database.observe_catalog(move |_, update| {
+            catalog.observe_catalog(move |_, update| {
                 let _ = sender.send(update);
                 std::future::ready(())
             });
-            database
+            catalog
                 .reconcile_source(
                     &library::SourceId::new("source"),
                     kind.source_kind(),
@@ -635,8 +635,8 @@ mod tests {
                 .await
                 .unwrap();
             let catalog_source_id = ("source").to_string();
-            let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-            catalog.start_observation().await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            observation.start_observation().await.unwrap();
             (async {
                 let mut batch = library::CatalogBatch::default();
                 let result = batch.albums.extend_from_slice(&[(album_from_item(
@@ -648,19 +648,19 @@ mod tests {
             )
             .unwrap()
             .unwrap()).clone()]);
-                catalog.apply_catalog(&batch, true).await?;
+                observation.apply_catalog(&batch, true).await?;
                 Ok::<_, library::LibraryError>(result)
             })
             .await
             .unwrap();
             {
-                database
-                    .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+                catalog
+                    .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                     .await;
                 Ok::<_, crate::SourceError>(())
             }
             .unwrap();
-            assert!(!catalog.changes().changed());
+            assert!(!observation.changes().changed());
             assert!(
                 updates.try_recv().is_err(),
                 "unchanged native data stays quiet"

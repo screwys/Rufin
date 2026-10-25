@@ -1,7 +1,7 @@
 //! Indexed Connect snapshots keep SQLite's canonical keys and ready indexes.
 use super::*;
 
-impl Database {
+impl Catalog {
     pub(crate) async fn connect_prepare_export_on(
         connection: &mut SqliteConnection,
     ) -> LibraryResult<()> {

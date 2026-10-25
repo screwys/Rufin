@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use sqlx::{Connection, FromRow, QueryBuilder, Sqlite};
 
 use crate::{
-    Database, LibraryError, LibraryResult, LocalAccessFileKey, LocalFileKey, ReadCancellation,
+    Catalog, LibraryError, LibraryResult, LocalAccessFileKey, LocalFileKey, ReadCancellation,
     SourceKey, TrackKey,
 };
 
@@ -223,7 +223,7 @@ impl LocalAccessOrigin {
     }
 }
 
-impl Database {
+impl Catalog {
     /// Uses the saved file inventory for the shared source folder browser.
     pub async fn local_folder_contents(
         &self,
@@ -1044,7 +1044,7 @@ fn validate_local_access(access: &LocalAccessWrite) -> LibraryResult<()> {
     Ok(())
 }
 
-impl Database {
+impl Catalog {
     pub async fn upsert_local_locator(
         &self,
         locator: &LocalLocatorWrite,
@@ -1146,7 +1146,7 @@ async fn read_local_locators(
     Ok(count)
 }
 
-impl Database {
+impl Catalog {
     pub async fn imported_local_uri_page(
         &self,
         playlist: Option<crate::PlaylistKey>,
@@ -1174,14 +1174,14 @@ impl Database {
     }
 }
 
-impl crate::Catalog<'_> {
+impl crate::Observation<'_> {
     pub async fn record_imported_files(
         &mut self,
         playlist: Option<crate::PlaylistKey>,
     ) -> LibraryResult<()> {
         let mut after = -1_i64;
         loop {
-            let mut writer = self.database.writer().await?;
+            let mut writer = self.catalog.writer().await?;
             let mut tx = writer.begin().await?;
             let (owner, cursor, references) = if playlist.is_some() {
                 (

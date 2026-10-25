@@ -81,10 +81,10 @@ fn open_full_playlist_picker(shell: &Rc<Shell>, source: MediaDragSource) {
         .selected_library()
         .as_deref()
         .map(|selected| selected.source_key);
-    let database = shell.products.library.clone();
+    let catalog = shell.products.library.clone();
     let task = shell.products.runtime.spawn(async move {
-        let (selection, title, preview_uris) = source.playlist_input(&database).await?;
-        let playlists = database
+        let (selection, title, preview_uris) = source.playlist_input(&catalog).await?;
+        let playlists = catalog
             .playlist_destinations(source_key, &library::ReadCancellation::new())
             .await
             .map_err(|error| error.to_string())?;
@@ -159,10 +159,10 @@ fn populate_context_playlist_picker(
         .selected_library()
         .as_deref()
         .map(|selected| selected.source_key);
-    let database = shell.products.library.clone();
+    let catalog = shell.products.library.clone();
     let task = shell.products.runtime.spawn(async move {
-        let (selection, title, preview_uris) = source.playlist_input(&database).await?;
-        let playlists = database
+        let (selection, title, preview_uris) = source.playlist_input(&catalog).await?;
+        let playlists = catalog
             .playlist_destinations(source_key, &library::ReadCancellation::new())
             .await
             .map_err(|error| error.to_string())?;
@@ -224,9 +224,9 @@ fn present_playlist_picker(
         let Some(shell_now) = refresh_shell.upgrade() else {
             return;
         };
-        let database = shell_now.products.library.clone();
+        let catalog = shell_now.products.library.clone();
         let task = shell_now.products.runtime.spawn(async move {
-            database
+            catalog
                 .playlist_destinations(source_key, &library::ReadCancellation::new())
                 .await
         });

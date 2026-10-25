@@ -5,8 +5,8 @@ use super::support::{connection, fixture};
 #[tokio::test]
 async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
     let fixture = fixture().await;
-    let database = &fixture.database;
-    let (_, authored) = database
+    let catalog = &fixture.catalog;
+    let (_, authored) = catalog
         .create_playlist(
             Some(fixture.source),
             "Z saved",
@@ -15,7 +15,7 @@ async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
         .await
         .unwrap()
         .unwrap();
-    database
+    catalog
         .create_playlist(
             None,
             "Global",
@@ -33,14 +33,14 @@ async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
     drop(raw);
     let cancel = ReadCancellation::new();
     assert_eq!(
-        database
+        catalog
             .source_playlist_object_ids(fixture.source, &cancel)
             .await
             .unwrap(),
         ["native".to_string(), authored]
     );
     assert_eq!(
-        database
+        catalog
             .source_playlist_object_ids(other, &cancel)
             .await
             .unwrap(),
@@ -65,7 +65,7 @@ async fn playlist_destinations_keep_global_rank_without_a_current_source() {
     ] {
         keys.push(
             fixture
-                .database
+                .catalog
                 .create_playlist(
                     owner,
                     name,
@@ -79,7 +79,7 @@ async fn playlist_destinations_keep_global_rank_without_a_current_source() {
     }
     let cancel = ReadCancellation::new();
     let without_current = fixture
-        .database
+        .catalog
         .playlist_destinations(None, &cancel)
         .await
         .expect("global destinations");
@@ -91,7 +91,7 @@ async fn playlist_destinations_keep_global_rank_without_a_current_source() {
         [keys[0], keys[3]]
     );
     let captured = fixture
-        .database
+        .catalog
         .playlist_destinations(Some(fixture.source), &cancel)
         .await
         .expect("captured destinations");
@@ -103,7 +103,7 @@ async fn playlist_destinations_keep_global_rank_without_a_current_source() {
         [keys[0], keys[2], keys[3]]
     );
     fixture
-        .database
+        .catalog
         .move_playlist(fixture.source, keys[3], keys[0])
         .await
         .expect("reorder visible subset");
@@ -116,7 +116,7 @@ async fn playlist_destinations_keep_global_rank_without_a_current_source() {
     assert_eq!(order, [keys[3], keys[1], keys[0], keys[2]]);
     drop(raw);
     fixture
-        .database
+        .catalog
         .add_playlist_tracks(
             None,
             keys[0],
@@ -128,7 +128,7 @@ async fn playlist_destinations_keep_global_rank_without_a_current_source() {
         .await
         .expect("global URI edit without Current");
     let rows = fixture
-        .database
+        .catalog
         .playlist_destinations(None, &cancel)
         .await
         .expect("refreshed global destinations");
@@ -145,7 +145,7 @@ async fn playlist_destinations_keep_global_rank_without_a_current_source() {
 async fn playlist_order_is_title_ordered_and_folder_scoped() {
     let fixture = fixture().await;
     let zulu = fixture
-        .database
+        .catalog
         .create_playlist(
             Some(fixture.source),
             "Zulu",
@@ -156,7 +156,7 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
         .expect("Track exists")
         .0;
     let alpha = fixture
-        .database
+        .catalog
         .create_playlist(
             Some(fixture.source),
             "Alpha",
@@ -193,7 +193,7 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
         downloaded_only: false,
         activity: true,
     }
-    .playlists(&fixture.database, 0, 256, &cancellation)
+    .playlists(&fixture.catalog, 0, 256, &cancellation)
     .await
     .map(|rows| {
         rows.into_iter()
@@ -214,7 +214,7 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
         downloaded_only: false,
         activity: true,
     }
-    .playlists(&fixture.database, 0, 256, &cancellation)
+    .playlists(&fixture.catalog, 0, 256, &cancellation)
     .await
     .map(|rows| {
         rows.into_iter()
@@ -224,7 +224,7 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
     .expect("folder-scoped Playlists");
     assert_eq!(scoped, [zulu]);
     let destinations = fixture
-        .database
+        .catalog
         .playlist_destinations(Some(fixture.source), &cancellation)
         .await
         .unwrap();
@@ -239,7 +239,7 @@ async fn playlist_order_is_title_ordered_and_folder_scoped() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playlists(&[zulu], &cancellation)
             .await
             .unwrap()[0]
@@ -256,7 +256,7 @@ async fn playlist_reordering_keeps_one_rank_sequence() {
     for name in ["One", "Two", "Three", "Four"] {
         playlists.push(
             fixture
-                .database
+                .catalog
                 .create_playlist(
                     Some(fixture.source),
                     name,
@@ -270,14 +270,14 @@ async fn playlist_reordering_keeps_one_rank_sequence() {
     }
     assert!(
         fixture
-            .database
+            .catalog
             .move_playlist(fixture.source, playlists[1], playlists[0])
             .await
             .expect("move 2 to 1")
     );
     assert!(
         fixture
-            .database
+            .catalog
             .move_playlist(fixture.source, playlists[3], playlists[2])
             .await
             .expect("move 4 to 3")
@@ -295,7 +295,7 @@ async fn playlist_reordering_keeps_one_rank_sequence() {
             downloaded_only: false,
             activity: true
         }
-        .playlists(&fixture.database, 0, 256, &ReadCancellation::new())
+        .playlists(&fixture.catalog, 0, 256, &ReadCancellation::new())
         .await
         .map(|rows| rows
             .into_iter()
@@ -310,7 +310,7 @@ async fn playlist_reordering_keeps_one_rank_sequence() {
 async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     let fixture = fixture().await;
     let playlist = fixture
-        .database
+        .catalog
         .create_playlist(
             Some(fixture.source),
             "Duplicates",
@@ -330,7 +330,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         .0;
     let cancel = ReadCancellation::new();
     let initial = fixture
-        .database
+        .catalog
         .playlist_edit_entries(
             playlist,
             &library::MemberRead {
@@ -350,7 +350,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         })
         .expect("initial Playlist order");
     let rows = fixture
-        .database
+        .catalog
         .playlist_entries(&((&initial).to_vec()), &cancel)
         .await
         .expect("Playlist entry rows");
@@ -358,7 +358,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     assert_eq!(rows[0].track.media_uri, rows[1].track.media_uri);
     assert_ne!(rows[0].playlist_entry_key, rows[1].playlist_entry_key);
     let edit_entries = fixture
-        .database
+        .catalog
         .playlist_edit_entries(
             playlist,
             &library::MemberSelection::Entries(
@@ -385,7 +385,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     assert_eq!(edit_entries[0].track_key, edit_entries[1].track_key);
     assert!(
         fixture
-            .database
+            .catalog
             .playlist_edit_entries(
                 playlist,
                 &library::MemberSelection::Keys {
@@ -402,7 +402,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
             .is_err()
     );
     let selected = fixture
-        .database
+        .catalog
         .playlist_edit_entries(
             playlist,
             &library::MemberSelection::Members {
@@ -436,7 +436,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
 
     assert_eq!(
         fixture
-            .database
+            .catalog
             .add_playlist_tracks(
                 Some(fixture.source),
                 playlist,
@@ -456,7 +456,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         2
     );
     let added = fixture
-        .database
+        .catalog
         .playlist_edit_entries(
             playlist,
             &library::MemberRead {
@@ -477,13 +477,13 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         .expect("added Playlist order");
     assert!(
         fixture
-            .database
+            .catalog
             .move_playlist_entry(Some(fixture.source), playlist, added[4], 0)
             .await
             .expect("move entry")
     );
     let moved = fixture
-        .database
+        .catalog
         .playlist_edit_entries(
             playlist,
             &library::MemberRead {
@@ -505,7 +505,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     assert_eq!(moved[0], added[4]);
     assert_eq!(
         fixture
-            .database
+            .catalog
             .remove_playlist_entries(Some(fixture.source), playlist, &moved[1..3])
             .await
             .expect("remove entries"),
@@ -515,7 +515,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     let selection = vec![fixture.track_uris[3].clone(); 520];
     assert_eq!(
         fixture
-            .database
+            .catalog
             .add_playlist_tracks(
                 Some(fixture.source),
                 playlist,
@@ -528,7 +528,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playlist_edit_entries(
                 playlist,
                 &library::MemberRead {
@@ -549,7 +549,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         523
     );
     let entries = fixture
-        .database
+        .catalog
         .playlist_edit_entries(
             playlist,
             &library::MemberRead {
@@ -569,7 +569,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         })
         .unwrap();
     let state = super::support::resolve_queue(
-        &fixture.database,
+        &fixture.catalog,
         library::QueueLoad::Tracks(vec![(
             library::MemberSelection::Entries((entries).into()),
             library::QueueProvenance::Context {
@@ -592,7 +592,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
 async fn global_playlist_adds_rufin_media_without_provider_admission() {
     let fixture = fixture().await;
     let (playlist, _) = fixture
-        .database
+        .catalog
         .create_playlist(
             None,
             "Global",
@@ -603,7 +603,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
         .expect("Playlist key");
     assert_eq!(
         fixture
-            .database
+            .catalog
             .add_playlist_tracks(
                 None,
                 playlist,
@@ -623,7 +623,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
         3
     );
     let order = fixture
-        .database
+        .catalog
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Playlist(playlist)).selection(),
             None,
@@ -649,7 +649,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
         .expect("remove source membership");
     drop(raw);
     let entries = fixture
-        .database
+        .catalog
         .playlist_edit_entries(
             playlist,
             &library::MemberRead {
@@ -669,14 +669,14 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
         })
         .expect("unavailable entries");
     let rows = fixture
-        .database
+        .catalog
         .playlist_entries(&((&entries).to_vec()), &ReadCancellation::new())
         .await
         .expect("unavailable Playlist rows");
     assert_eq!(rows[1].track.metadata.title, "Beta");
     assert_eq!(rows[1].track.media_uri, fixture.track_uris[1]);
     let playback = super::support::resolve_queue(
-        &fixture.database,
+        &fixture.catalog,
         library::QueueLoad::Tracks(vec![(
             library::MemberSelection::Entries((entries).into()),
             library::QueueProvenance::Context {
@@ -693,7 +693,7 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
 
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playlist_access(playlist, &ReadCancellation::new())
             .await
             .expect("read global Playlist owner")
@@ -702,21 +702,21 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
     );
     assert!(
         fixture
-            .database
+            .catalog
             .update_playlist(None, playlist, Some("Renamed global"), None)
             .await
             .expect("rename global Playlist")
     );
     assert!(
         fixture
-            .database
+            .catalog
             .delete_playlist(None, playlist)
             .await
             .expect("delete global Playlist")
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playlist_access(playlist, &ReadCancellation::new())
             .await
             .expect("deleted Playlist owner"),
@@ -739,8 +739,8 @@ async fn playlist_automatic_covers_keep_distinct_saved_choices() {
         .unwrap()
     });
     fixture
-        .database
-        .catalog("source", None)
+        .catalog
+        .observe("source", None)
         .await
         .unwrap()
         .set_source_artwork(
@@ -753,7 +753,7 @@ async fn playlist_automatic_covers_keep_distinct_saved_choices() {
         .await
         .unwrap();
     let playlist = fixture
-        .database
+        .catalog
         .create_playlist(
             Some(fixture.source),
             "Positional covers",
@@ -774,7 +774,7 @@ async fn playlist_automatic_covers_keep_distinct_saved_choices() {
         .expect("all Tracks exist")
         .0;
     let row = fixture
-        .database
+        .catalog
         .playlists(&[playlist], &ReadCancellation::new())
         .await
         .expect("Playlist cover samples")
@@ -785,7 +785,7 @@ async fn playlist_automatic_covers_keep_distinct_saved_choices() {
             .unwrap()
             .remove(0);
     let candidate = fixture
-        .database
+        .catalog
         .resolve_playlist_artwork(candidate)
         .await
         .unwrap()
@@ -812,7 +812,7 @@ async fn playlist_automatic_covers_keep_distinct_saved_choices() {
             .await
             .unwrap();
     fixture
-        .database
+        .catalog
         .update_playlist(
             Some(fixture.source),
             playlist,
@@ -837,7 +837,7 @@ async fn playlist_automatic_covers_keep_distinct_saved_choices() {
         Some(saved.clone())
     );
     fixture
-        .database
+        .catalog
         .update_playlist(Some(fixture.source), playlist, None, Some(None))
         .await
         .unwrap();
@@ -854,7 +854,7 @@ async fn playlist_automatic_covers_keep_distinct_saved_choices() {
 async fn provider_playlist_payload_resolves_uri_only_at_the_protocol_boundary() {
     let fixture = fixture().await;
     let playlist = fixture
-        .database
+        .catalog
         .create_playlist(
             Some(fixture.source),
             "Provider list",
@@ -873,7 +873,7 @@ async fn provider_playlist_payload_resolves_uri_only_at_the_protocol_boundary() 
     drop(raw);
     assert_eq!(
         fixture
-            .database
+            .catalog
             .source_playlist_track_ids(
                 fixture.source,
                 Some(playlist),
@@ -905,9 +905,9 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
     sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,metadata,normalized_search,indexed) VALUES (?1,'destination-track',?2,jsonb(json_object('title',COALESCE('Destination Track',''),'artist',COALESCE('',''),'album',COALESCE('',''),'sort_text',COALESCE('destination track',''),'duration_millis',COALESCE(1000,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('Destination Track',''),'artist',COALESCE('',''),'album',COALESCE('',''),'sort_text',COALESCE('destination track',''),'duration_millis',COALESCE(1000,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Destination Track',''),'artist',COALESCE('',''),'album',COALESCE('',''),'sort_text',COALESCE('destination track',''),'duration_millis',COALESCE(1000,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Destination Track',''),'artist',COALESCE('',''),'album',COALESCE('',''),'sort_text',COALESCE('destination track',''),'duration_millis',COALESCE(1000,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('Destination Track',''),'artist',COALESCE('',''),'album',COALESCE('',''),'sort_text',COALESCE('destination track',''),'duration_millis',COALESCE(1000,0))),'$.comment'),'')),1)")
         .bind(destination).bind(&own_uri).execute(&mut raw).await.unwrap();
     drop(raw);
-    let database = &fixture.database;
+    let catalog = &fixture.catalog;
     let cancel = ReadCancellation::new();
-    let playlist = database
+    let playlist = catalog
         .create_playlist(
             Some(destination),
             "Destination",
@@ -918,7 +918,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         .unwrap()
         .0;
     assert_eq!(
-        database
+        catalog
             .source_playlist_track_ids(
                 destination,
                 Some(playlist),
@@ -930,7 +930,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         ["destination-track"]
     );
     assert_eq!(
-        database
+        catalog
             .add_playlist_tracks(
                 Some(destination),
                 playlist,
@@ -945,7 +945,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         vec![fixture.track_uris[0].clone()],
         vec![own_uri.clone(), fixture.track_uris[0].clone()],
     ] {
-        let provider_error = database
+        let provider_error = catalog
             .source_playlist_track_ids(
                 destination,
                 Some(playlist),
@@ -954,7 +954,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
             )
             .await
             .unwrap_err();
-        let authored_error = database
+        let authored_error = catalog
             .add_playlist_tracks(
                 Some(destination),
                 playlist,
@@ -972,14 +972,14 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
     }
     let missing = vec![own_uri.clone(), "test:missing-track".to_string()];
     assert!(matches!(
-        database
+        catalog
             .source_playlist_track_ids(destination,Some(playlist),&library::MemberSelection::Uris(missing.clone().into()),false)
             .await
             .unwrap_err(),
         library::LibraryError::InvalidRequest(message) if message == "Playlist Track is no longer current"
     ));
     assert_eq!(
-        database
+        catalog
             .add_playlist_tracks(
                 Some(destination),
                 playlist,
@@ -991,7 +991,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         0
     );
     assert_eq!(
-        database
+        catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Playlist(playlist)).selection(),
                 None,
@@ -1001,7 +1001,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
             .unwrap(),
         std::slice::from_ref(&own_uri)
     );
-    let global = database
+    let global = catalog
         .create_playlist(
             None,
             "Global",
@@ -1013,7 +1013,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         .0;
     let mixed = vec![own_uri, fixture.track_uris[0].clone()];
     assert_eq!(
-        database
+        catalog
             .add_playlist_tracks(
                 None,
                 global,
@@ -1025,7 +1025,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         2
     );
     assert_eq!(
-        database
+        catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Playlist(global)).selection(),
                 None,
@@ -1044,7 +1044,7 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
     let target = FavoriteTarget::Track(fixture.track_uris[0].clone());
     assert_eq!(
         fixture
-            .database
+            .catalog
             .user_media_state(target.media_uri(), &ReadCancellation::new())
             .await
             .expect("read absent user state"),
@@ -1052,20 +1052,20 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
     );
     assert!(
         fixture
-            .database
+            .catalog
             .set_rating(&target, Some(8))
             .await
             .expect("set Rating")
     );
     assert!(
         fixture
-            .database
+            .catalog
             .set_favorite(&target, true)
             .await
             .expect("set Favorite")
     );
     let row = fixture
-        .database
+        .catalog
         .tracks(&[fixture.tracks[0]], &ReadCancellation::new())
         .await
         .expect("read Track")
@@ -1074,7 +1074,7 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
     assert!(row.state.favorite);
     assert_eq!(
         fixture
-            .database
+            .catalog
             .user_media_state(target.media_uri(), &ReadCancellation::new())
             .await
             .expect("read URI-owned user state"),
@@ -1083,14 +1083,14 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
 
     assert!(
         fixture
-            .database
+            .catalog
             .queue_remote_favorite(&target, false, 100)
             .await
             .expect("queue delivery")
     );
     assert!(
         fixture
-            .database
+            .catalog
             .due_remote_favorites(99, 64, &cancellation)
             .await
             .unwrap()
@@ -1098,13 +1098,13 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
     );
     let album = FavoriteTarget::Album(fixture.album_uris[0].clone());
     fixture
-        .database
+        .catalog
         .queue_remote_favorite(&album, true, 100)
         .await
         .unwrap();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .due_remote_favorites(100, 1, &cancellation)
             .await
             .unwrap(),
@@ -1112,7 +1112,7 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .due_remote_favorites(100, 64, &cancellation)
             .await
             .unwrap(),
@@ -1123,25 +1123,25 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
     );
     assert!(
         fixture
-            .database
+            .catalog
             .acknowledge_remote_favorite(&album, true)
             .await
             .unwrap()
     );
-    assert!(fixture.database.favorite(&album).await.unwrap());
+    assert!(fixture.catalog.favorite(&album).await.unwrap());
     assert!(
         fixture
-            .database
+            .catalog
             .defer_remote_favorite(&target, false, 200)
             .await
             .expect("defer delivery")
     );
-    fixture.database.clone().close().await.unwrap();
-    fixture.database = library::Database::open(&fixture.path).await.unwrap();
-    assert!(!fixture.database.favorite(&target).await.unwrap());
+    fixture.catalog.clone().close().await.unwrap();
+    fixture.catalog = library::Catalog::open(&fixture.path).await.unwrap();
+    assert!(!fixture.catalog.favorite(&target).await.unwrap());
     assert!(
         fixture
-            .database
+            .catalog
             .due_remote_favorites(199, 64, &cancellation)
             .await
             .unwrap()
@@ -1149,56 +1149,56 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .due_remote_favorites(200, 64, &cancellation)
             .await
             .unwrap(),
         [(target.media_uri().to_string(), false)]
     );
     fixture
-        .database
+        .catalog
         .queue_remote_favorite(&target, true, 201)
         .await
         .unwrap();
     assert!(
         !fixture
-            .database
+            .catalog
             .acknowledge_remote_favorite(&target, false)
             .await
             .unwrap()
     );
     assert!(
         !fixture
-            .database
+            .catalog
             .defer_remote_favorite(&target, false, 300)
             .await
             .unwrap()
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .reject_remote_favorite(&target, false)
             .await
             .unwrap(),
         None
     );
-    assert!(fixture.database.favorite(&target).await.unwrap());
+    assert!(fixture.catalog.favorite(&target).await.unwrap());
     assert_eq!(
         fixture
-            .database
+            .catalog
             .due_remote_favorites(201, 64, &cancellation)
             .await
             .unwrap(),
         [(target.media_uri().to_string(), true)]
     );
     fixture
-        .database
+        .catalog
         .queue_remote_favorite(&target, false, 202)
         .await
         .unwrap();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .reject_remote_favorite(&target, false)
             .await
             .expect("reject delivery"),
@@ -1206,7 +1206,7 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
     );
     assert!(
         fixture
-            .database
+            .catalog
             .due_remote_favorites(300, 64, &cancellation)
             .await
             .unwrap()
@@ -1214,7 +1214,7 @@ async fn rating_favorite_and_delivery_are_uri_owned() {
     );
     assert!(
         fixture
-            .database
+            .catalog
             .tracks(&[fixture.tracks[0]], &ReadCancellation::new())
             .await
             .expect("restored Track")[0]

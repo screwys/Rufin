@@ -570,10 +570,10 @@ fn request_artist_releases(
     let query = releases.query(&settings);
     let lane = releases.lane();
     let (generation, cancellation) = lane.begin();
-    let database = Arc::clone(&owner.library);
+    let catalog = Arc::clone(&owner.library);
     let task = owner.runtime.spawn(async move {
         rufin_core::browse::ArtistReleasePage::load(
-            &database,
+            &catalog,
             query,
             library::RouteSeedWindow::top(),
             &cancellation,

@@ -12,11 +12,11 @@ const PAGE: usize = 512;
 impl PlexSource {
     pub(crate) async fn acquire_catalog(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let stamp = catalog.observed;
+        let stamp = observation.observed;
 
         let sections = self.get("/library/sections", &[]).await?;
         let home_prefixes = items(&sections["MediaContainer"]["Directory"])
@@ -48,7 +48,7 @@ impl PlexSource {
             if cancelled() {
                 return Err(crate::SourceError::Cancelled);
             }
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
             for (kind, stage) in [
                 ("8", SourceReadStage::Artists),
                 ("9", SourceReadStage::Albums),
@@ -81,7 +81,7 @@ impl PlexSource {
                     } else {
                         Vec::new()
                     };
-                    self.acquire_metadata_page(catalog, rows, Some(&section_record), cancelled)
+                    self.acquire_metadata_page(observation, rows, Some(&section_record), cancelled)
                         .await?;
                     offset += rows.len();
                     progress(SourceReadProgress {
@@ -98,28 +98,29 @@ impl PlexSource {
                 if cancelled() {
                     return Err(crate::SourceError::Cancelled);
                 }
-                catalog
+                observation
                     .complete_source_folder_membership(&section_record.object_id, stamp)
                     .await?;
             }
-            self.acquire_hubs(catalog, &section_id, cancelled).await?;
+            self.acquire_hubs(observation, &section_id, cancelled)
+                .await?;
         }
         if let Some(stamp) = stamp {
             if cancelled() {
                 return Err(crate::SourceError::Cancelled);
             }
-            catalog
+            observation
                 .complete_source_observation(stamp, &["track", "album", "artist", "folder"], None)
                 .await?;
         }
         if cancelled() {
             return Err(crate::SourceError::Cancelled);
         }
-        catalog
+        observation
             .complete_source_home_sections(&"plex:", &Vec::new(), &home_prefixes)
             .await?;
-        self.acquire_playlists(catalog, cancelled).await?;
-        crate::source::acquire_home(catalog, cancelled, |section| self.home_section(section))
+        self.acquire_playlists(observation, cancelled).await?;
+        crate::source::acquire_home(observation, cancelled, |section| self.home_section(section))
             .await?;
 
         progress(SourceReadProgress {
@@ -132,12 +133,12 @@ impl PlexSource {
 
     pub(super) async fn acquire_metadata_page(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         rows: &[Value],
         folder: Option<&FolderObservation>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
+        let source_id = observation.source_id;
 
         let ids = rows
             .iter()
@@ -186,17 +187,17 @@ impl PlexSource {
             if cancelled() {
                 return Err(SourceError::Cancelled);
             }
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
         }
         Ok(())
     }
 
     async fn acquire_playlists(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
+        let source_id = observation.source_id;
 
         let mut offset = 0;
         loop {
@@ -236,14 +237,18 @@ impl PlexSource {
                     if cancelled() {
                         return Err(crate::SourceError::Cancelled);
                     }
-                    catalog.apply_catalog(&batch, true).await?;
+                    observation.apply_catalog(&batch, true).await?;
                 }
             };
 
             for item in playlists {
                 if let Some(raw) = id(&item["ratingKey"]) {
-                    self.acquire_playlist_entries(catalog, &plex_id("playlist", &raw), cancelled)
-                        .await?;
+                    self.acquire_playlist_entries(
+                        observation,
+                        &plex_id("playlist", &raw),
+                        cancelled,
+                    )
+                    .await?;
                 }
             }
             offset += rows.len();
@@ -255,11 +260,11 @@ impl PlexSource {
 
     pub(crate) async fn acquire_playlist_entries(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         playlist_id: &str,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
+        let source_id = observation.source_id;
 
         let mut offset = 0;
         loop {
@@ -297,13 +302,13 @@ impl PlexSource {
                     if cancelled() {
                         return Err(crate::SourceError::Cancelled);
                     }
-                    catalog.apply_catalog(&batch, false).await?;
+                    observation.apply_catalog(&batch, false).await?;
                 }
             };
             if cancelled() {
                 return Err(crate::SourceError::Cancelled);
             }
-            catalog
+            observation
                 .write_source_playlist_page(&playlist_id, offset, &entries, finished)
                 .await?;
             offset += rows.len();
@@ -315,12 +320,12 @@ impl PlexSource {
 
     pub(crate) async fn acquire_items(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         upserts: Vec<String>,
         mut removals: Vec<String>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
+        let source_id = observation.source_id;
 
         for raw in upserts {
             let item = match self.metadata(&raw).await {
@@ -333,7 +338,7 @@ impl PlexSource {
             };
             if item["type"] == "album" {
                 self.acquire_collection(
-                    catalog,
+                    observation,
                     &crate::SourceCollection::Album(plex_id("album", raw_item_id(&raw))),
                     Some(&item),
                     true,
@@ -369,14 +374,14 @@ impl PlexSource {
                     if cancelled() {
                         return Err(crate::SourceError::Cancelled);
                     }
-                    catalog.apply_catalog(&batch, true).await?;
+                    observation.apply_catalog(&batch, true).await?;
                 }
             };
 
             if item["type"] == "playlist"
                 && let Some(id) = id(&item["ratingKey"])
             {
-                self.acquire_playlist_entries(catalog, &plex_id("playlist", &id), cancelled)
+                self.acquire_playlist_entries(observation, &plex_id("playlist", &id), cancelled)
                     .await?;
             }
         }
@@ -386,7 +391,7 @@ impl PlexSource {
                 return Err(crate::SourceError::Cancelled);
             }
             for kind in ["track", "album", "artist", "playlist"] {
-                catalog
+                observation
                     .remove_source_items(kind, &[plex_id(kind, raw_item_id(&raw))])
                     .await?;
             }
@@ -426,11 +431,11 @@ impl PlexSource {
 
     async fn acquire_hubs(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         section: &str,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
+        let source_id = observation.source_id;
 
         let page = match self
             .get(
@@ -463,12 +468,12 @@ impl PlexSource {
                 if cancelled() {
                     return Err(SourceError::Cancelled);
                 }
-                catalog.apply_catalog(&batch, false).await?;
+                observation.apply_catalog(&batch, false).await?;
             }
             if cancelled() {
                 return Err(SourceError::Cancelled);
             }
-            catalog
+            observation
                 .replace_source_home_section(section_id, title, &entries)
                 .await?;
             Ok::<_, SourceError>(())
@@ -507,7 +512,7 @@ impl PlexSource {
         if cancelled() {
             return Err(SourceError::Cancelled);
         }
-        catalog
+        observation
             .complete_source_home_sections(&format!("plex:{section}:"), &sections, &Vec::new())
             .await?;
         Ok(())
@@ -626,15 +631,15 @@ pub(super) mod tests {
             crate::source::Implementation::Plex(source(&server)),
         );
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
         let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
+        catalog.observe_catalog(move |_, update| {
             let _ = sender.send(update);
             std::future::ready(())
         });
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
             .unwrap();
@@ -688,7 +693,7 @@ pub(super) mod tests {
                 .mount(&server)
                 .await;
             source
-                .apply_items(&database, vec![id.into()], vec![])
+                .apply_items(&catalog, vec![id.into()], vec![])
                 .await
                 .unwrap();
             if identical {
@@ -699,9 +704,9 @@ pub(super) mod tests {
             } else {
                 assert!(updates.try_recv().expect("catalog update").changed());
             }
-            let home = database
+            let home = catalog
                 .home_page(
-                    database
+                    catalog
                         .source_identity_key(&crate::SourceId::new("source"))
                         .await
                         .unwrap()
@@ -828,31 +833,31 @@ pub(super) mod tests {
             .mount(&server)
             .await;
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
         let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
+        catalog.observe_catalog(move |_, update| {
             let _ = sender.send(update);
             std::future::ready(())
         });
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("plex-test"), "plex", "Plex")
             .await
             .unwrap();
         let catalog_source_id = ("plex-test").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
         {
             let result = source
-                .acquire_catalog(&mut catalog, &|_| {}, &|| false)
+                .acquire_catalog(&mut observation, &|_| {}, &|| false)
                 .await;
             result
         }
         .unwrap();
         {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+            catalog
+                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                 .await;
             Ok::<_, crate::SourceError>(())
         }
@@ -865,13 +870,13 @@ pub(super) mod tests {
             "track",
             "plex:track:track",
         );
-        let row = database
+        let row = catalog
             .track(&(&uri), &cancellation)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(row.metadata.title, "Bad � title");
-        let later_page = database
+        let later_page = catalog
             .tracks_by_uris(
                 &([library::source_entity_uri(
                     &crate::SourceId::new("plex-test"),
@@ -900,9 +905,9 @@ pub(super) mod tests {
                 .collect::<Vec<_>>(),
             ["Rock"]
         );
-        let folders = database
+        let folders = catalog
             .folder_page(
-                database
+                catalog
                     .source_identity_key(&library::SourceId::new(&catalog_source_id))
                     .await
                     .unwrap()
@@ -921,7 +926,7 @@ pub(super) mod tests {
             playlist_scope: Default::default(),
             kind: library::ListKind::Moods,
             source: Some(
-                database
+                catalog
                     .source_identity_key(&library::SourceId::new(&catalog_source_id))
                     .await
                     .unwrap()
@@ -935,14 +940,14 @@ pub(super) mod tests {
             downloaded_only: false,
             activity: false,
         }
-        .moods(&database, 0, 10, &cancellation)
+        .moods(&catalog, 0, 10, &cancellation)
         .await
         .unwrap();
         assert_eq!(moods.len(), 1);
         assert_eq!(moods[0].metadata.name, "Calm");
         assert_eq!(moods[0].summary.track_count, 1);
         assert_eq!(
-            database
+            catalog
                 .playback_loudness(&uri, &cancellation)
                 .await
                 .unwrap()
@@ -951,9 +956,9 @@ pub(super) mod tests {
                 .replay_gain_db,
             Some(-4.25)
         );
-        let playlist_key = database
+        let playlist_key = catalog
             .playlist_key_by_object(
-                database
+                catalog
                     .source_identity_key(&library::SourceId::new(&catalog_source_id))
                     .await
                     .unwrap()
@@ -964,7 +969,7 @@ pub(super) mod tests {
             .await
             .unwrap()
             .unwrap();
-        let entries = database
+        let entries = catalog
             .playlist_edit_entries(
                 playlist_key,
                 &library::MemberRead::new(library::Collection::Playlist(playlist_key)).selection(),
@@ -980,15 +985,15 @@ pub(super) mod tests {
             vec!["entry-one", "entry-two"]
         );
         assert!(
-            !database
+            !catalog
                 .playlists(&[playlist_key], &cancellation)
                 .await
                 .unwrap()[0]
                 .writable
         );
-        let home = database
+        let home = catalog
             .home_page(
-                database
+                catalog
                     .source_identity_key(&library::SourceId::new(&catalog_source_id))
                     .await
                     .unwrap()
@@ -1015,28 +1020,28 @@ pub(super) mod tests {
                         && section.rows.tracks.len() == 1
                 )
         );
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("plex-test"), "plex", "Plex")
             .await
             .unwrap();
         let catalog_source_id = ("plex-test").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
         {
             let result = source
-                .acquire_catalog(&mut catalog, &|_| {}, &|| false)
+                .acquire_catalog(&mut observation, &|_| {}, &|| false)
                 .await;
             result
         }
         .unwrap();
         {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+            catalog
+                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                 .await;
             Ok::<_, crate::SourceError>(())
         }
         .unwrap();
-        assert!(!catalog.changes().changed());
+        assert!(!observation.changes().changed());
         assert!(
             updates.try_recv().is_err(),
             "unchanged native data stays quiet"
@@ -1060,32 +1065,32 @@ pub(super) mod tests {
             } else {
                 None
             };
-            database
+            catalog
                 .reconcile_source(&library::SourceId::new("plex-test"), "plex", "Plex")
                 .await
                 .unwrap();
             let catalog_source_id = ("plex-test").to_string();
-            let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-            catalog.start_observation().await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+            observation.start_observation().await.unwrap();
             {
                 let result = source
-                    .acquire_catalog(&mut catalog, &|_| {}, &|| false)
+                    .acquire_catalog(&mut observation, &|_| {}, &|| false)
                     .await;
                 result
             }
             .unwrap();
             {
-                database
-                    .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+                catalog
+                    .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                     .await;
                 Ok::<_, crate::SourceError>(())
             }
             .unwrap();
-            assert!(!catalog.changes().changed());
+            assert!(!observation.changes().changed());
             assert!(updates.try_recv().is_err(), "retained Home stays quiet");
-            let retained = database
+            let retained = catalog
                 .home_page(
-                    database
+                    catalog
                         .source_identity_key(&library::SourceId::new(&catalog_source_id))
                         .await
                         .unwrap()
@@ -1102,7 +1107,7 @@ pub(super) mod tests {
             drop(unavailable_hubs);
         }
         drop(unavailable_stations);
-        database
+        catalog
             .set_favorite(&library::FavoriteTarget::Track(uri.clone()), true)
             .await
             .unwrap();
@@ -1133,10 +1138,10 @@ pub(super) mod tests {
                 .await;
         }
         source_owner
-            .apply_items(&database, vec!["invalid".into(), "track".into()], vec![])
+            .apply_items(&catalog, vec!["invalid".into(), "track".into()], vec![])
             .await
             .unwrap();
-        let row = database
+        let row = catalog
             .track(&(&uri), &cancellation)
             .await
             .unwrap()

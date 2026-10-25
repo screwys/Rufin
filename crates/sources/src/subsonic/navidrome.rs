@@ -229,12 +229,12 @@ impl SubsonicSource {
 
     pub(super) async fn acquire_navidrome_library(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
+        let source_id = observation.source_id;
+        let stamp = observation.observed;
 
         use crate::SourceEntityKind::{Album, Artist, Track};
         for (kind, endpoint, stage) in [
@@ -278,7 +278,7 @@ impl SubsonicSource {
                 if cancelled() {
                     return Err(crate::SourceError::Cancelled);
                 }
-                catalog.apply_catalog(&batch, true).await?;
+                observation.apply_catalog(&batch, true).await?;
                 progress(SourceReadProgress {
                     stage,
                     completed: offset,
@@ -292,7 +292,7 @@ impl SubsonicSource {
                 if cancelled() {
                     return Err(crate::SourceError::Cancelled);
                 }
-                catalog
+                observation
                     .complete_source_observation(stamp, &[kind.as_str()], None)
                     .await?;
             }
@@ -1224,17 +1224,17 @@ mod tests {
             unreachable!()
         };
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
         let source_id = crate::SourceId::new("source");
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "source", "Source")
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
         (async {
             let mut batch = library::CatalogBatch::default();
             let result = batch
@@ -1249,21 +1249,21 @@ mod tests {
                     artwork_binding: None,
                     ..Default::default()
                 }]);
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
             Ok::<_, library::LibraryError>(result)
         })
         .await
         .unwrap();
         {
             let result = source
-                .acquire_navidrome_library(&mut catalog, &|_| {}, &|| false)
+                .acquire_navidrome_library(&mut observation, &|_| {}, &|| false)
                 .await;
             result
         }
         .unwrap();
         {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+            catalog
+                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                 .await;
             Ok::<_, crate::SourceError>(())
         }
@@ -1271,15 +1271,15 @@ mod tests {
         for clear in [false, true] {
             cleared.store(clear, Ordering::Relaxed);
             source_owner
-                .live_search(&database, "Track", 10)
+                .live_search(&catalog, "Track", 10)
                 .await
                 .unwrap();
             let catalog_source_id = ("source").to_string();
-            let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+            let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
             {
                 let result = source
                     .acquire_collection(
-                        &mut catalog,
+                        &mut observation,
                         &crate::SourceCollection::Album("navidrome:album:album".into()),
                         false,
                         &|| false,
@@ -1289,13 +1289,13 @@ mod tests {
             }
             .unwrap();
             {
-                database
-                    .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+                catalog
+                    .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                     .await;
                 Ok::<_, crate::SourceError>(())
             }
             .unwrap();
-            let row = database
+            let row = catalog
                 .track(
                     &(&library::source_entity_uri(&source_id, "track", "navidrome:track:track")),
                     &library::ReadCancellation::new(),
@@ -1511,10 +1511,10 @@ mod tests {
             unreachable!()
         };
         let directory = tempfile::tempdir().expect("Library directory");
-        let database = library::Database::open(directory.path().join("library.sqlite3"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite3"))
             .await
-            .expect("Library database");
-        database
+            .expect("Library Catalog");
+        catalog
             .reconcile_source(
                 &library::SourceId::new("navidrome:test"),
                 "navidrome",
@@ -1523,8 +1523,8 @@ mod tests {
             .await
             .unwrap();
         let catalog_source_id = ("navidrome:test").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
 
         (async {
             let mut batch = library::CatalogBatch::default();
@@ -1540,7 +1540,7 @@ mod tests {
                     artwork_binding: None,
                     ..Default::default()
                 }]);
-            catalog.apply_catalog(&batch, true).await?;
+            observation.apply_catalog(&batch, true).await?;
             Ok::<_, library::LibraryError>(result)
         })
         .await
@@ -1548,20 +1548,20 @@ mod tests {
 
         {
             let result = source
-                .acquire_navidrome_library(&mut catalog, &|_| {}, &|| false)
+                .acquire_navidrome_library(&mut observation, &|_| {}, &|| false)
                 .await;
             result
         }
         .expect("private Navidrome library");
         {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+            catalog
+                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                 .await;
             Ok::<_, crate::SourceError>(())
         }
         .expect("publish Navidrome Inventory");
         let cancellation = library::ReadCancellation::new();
-        let source_key = database
+        let source_key = catalog
             .cached_source("navidrome:test", &cancellation)
             .await
             .expect("cached source")
@@ -1579,7 +1579,7 @@ mod tests {
             downloaded_only: false,
             activity: false,
         }
-        .page_albums(&database, library::RouteSeedWindow::top(), &cancellation)
+        .page_albums(&catalog, library::RouteSeedWindow::top(), &cancellation)
         .await
         .map(|page| page.rows)
         .expect("Album page");
@@ -1608,7 +1608,7 @@ mod tests {
             Some("2026-08-27T00:00:00Z")
         );
         let tracks = (&library::MemberRead::new(library::Collection::Source(source_key)))
-            .page(&database, library::RouteSeedWindow::top(), &cancellation)
+            .page(&catalog, library::RouteSeedWindow::top(), &cancellation)
             .await
             .expect("Track page");
         let track_rows = tracks
@@ -1628,7 +1628,7 @@ mod tests {
             Some("release-track-one")
         );
         assert_eq!(track.metadata.bpm, Some(123));
-        let mapping = database
+        let mapping = catalog
             .mapping_track_page(source_key, None, None, 1, &cancellation)
             .await
             .expect("mapping Track");
@@ -1650,7 +1650,7 @@ mod tests {
             downloaded_only: false,
             activity: false,
         }
-        .page_artists(&database, library::RouteSeedWindow::top(), &cancellation)
+        .page_artists(&catalog, library::RouteSeedWindow::top(), &cancellation)
         .await
         .map(|page| page.rows)
         .expect("Track Artist page");

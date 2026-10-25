@@ -101,19 +101,19 @@ impl AndroidBrowseQuery {
             {
                 page.projection
                     .sections(
-                        &self.database,
+                        &self.catalog,
                         self.selected().source_key,
                         &page.read,
                         &cancel,
                     )
                     .await
             } else if let Some(read) = self.members(&cancel).await.map_err(error)? {
-                read.sections(&self.database, &cancel).await
+                read.sections(&self.catalog, &cancel).await
             } else if let Some(read) = self.list(&cancel).await.map_err(error)? {
                 if self.artist_release_identity().is_some() {
                     return Ok(Vec::new());
                 }
-                read.sections(&self.database, &cancel).await
+                read.sections(&self.catalog, &cancel).await
             } else {
                 Ok(Vec::new())
             }
@@ -245,7 +245,7 @@ impl AndroidBrowseQuery {
                 let track_key = match track_key {
                     Some(key) => library::TrackKey::from_raw(key),
                     None => self
-                        .database
+                        .catalog
                         .track(&media_uri, &cancel)
                         .await
                         .map_err(error)?

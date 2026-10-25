@@ -23,18 +23,18 @@ impl SourceOwner {
             })
             .map(|source| source.id.clone())
             .collect::<Vec<_>>();
-        self.reply(move |_, database| async move {
+        self.reply(move |_, catalog| async move {
             let mut imports = Vec::new();
             let cancellation = ReadCancellation::new();
             for source_id in sources {
-                let Some(source) = database
+                let Some(source) = catalog
                     .source_identity_key(&source_id)
                     .await
                     .map_err(|error| error.to_string())?
                 else {
                     continue;
                 };
-                let ids = database
+                let ids = catalog
                     .source_playlist_object_ids(source, &cancellation)
                     .await
                     .map_err(|error| error.to_string())?;

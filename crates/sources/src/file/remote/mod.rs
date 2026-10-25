@@ -664,7 +664,7 @@ impl FileSource {
 
     pub(crate) async fn stream(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
         media_uri: &str,
     ) -> SourceResult<audio_processing::ResolvedStream> {
         let (source, kind, _) =
@@ -672,7 +672,7 @@ impl FileSource {
         if source != self.source_id || kind != "track" {
             return Err(SourceError::NotFound);
         }
-        let file = database
+        let file = catalog
             .observed_media_file(media_uri)
             .await?
             .ok_or(SourceError::NotFound)?;

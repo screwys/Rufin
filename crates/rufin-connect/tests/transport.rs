@@ -66,7 +66,7 @@ async fn ended(events: &mut mpsc::Receiver<NetworkEvent>, expected_session: &str
 async fn documents(root: &Path, peer: u64) -> Arc<ProfileStore> {
     Arc::new(
         ProfileStore::open(
-            library::Database::open(&root.join("profile.sqlite"))
+            library::Catalog::open(&root.join("profile.sqlite"))
                 .await
                 .unwrap(),
             peer,
@@ -263,40 +263,40 @@ async fn enrollment_after_collection_publication() {
         let (b, mut b_events) = node(b_dir.path(), "Joiner").await;
         let profile = ConnectNetwork::new_profile_id();
         a.open_profile(&profile, true, Vec::new()).await.unwrap();
-        let a_database = library::Database::open(a_dir.path().join("profile.sqlite"))
+        let a_catalog = library::Catalog::open(a_dir.path().join("profile.sqlite"))
             .await
             .unwrap();
-        let b_database = library::Database::open(b_dir.path().join("profile.sqlite"))
+        let b_catalog = library::Catalog::open(b_dir.path().join("profile.sqlite"))
             .await
             .unwrap();
         let a_docs = Arc::new(
-            ProfileStore::open(a_database.clone(), 1, KEY.parse().unwrap())
+            ProfileStore::open(a_catalog.clone(), 1, KEY.parse().unwrap())
                 .await
                 .unwrap(),
         );
         let b_docs = Arc::new(
-            ProfileStore::open(b_database.clone(), 2, KEY.parse().unwrap())
+            ProfileStore::open(b_catalog.clone(), 2, KEY.parse().unwrap())
                 .await
                 .unwrap(),
         );
         let source = library::SourceId::new("music");
-        for (database, documents, identity) in [
-            (&a_database, &a_docs, a.identity()),
-            (&b_database, &b_docs, b.identity()),
+        for (catalog, documents, identity) in [
+            (&a_catalog, &a_docs, a.identity()),
+            (&b_catalog, &b_docs, b.identity()),
         ] {
-            database
+            catalog
                 .reconcile_source(&source, "webdav", "Files")
                 .await
                 .unwrap();
             documents.bind_profile(&profile, &identity).await.unwrap();
-            database.connect_set_active(true).await.unwrap();
+            catalog.connect_set_active(true).await.unwrap();
         }
         let mut records = Vec::new();
         for index in 0..20 {
             let object_id = format!("track-{index}");
             let path = format!("https://files.example.test/music/{object_id}.flac");
-            a_database
-                .catalog("music", None)
+            a_catalog
+                .observe("music", None)
                 .await
                 .unwrap()
                 .write_file_observations(
@@ -341,13 +341,13 @@ async fn enrollment_after_collection_publication() {
             });
         }
         let mut connection = sqlx::SqliteConnection::connect_with(
-            &sqlx::sqlite::SqliteConnectOptions::new().filename(a_database.path()),
+            &sqlx::sqlite::SqliteConnectOptions::new().filename(a_catalog.path()),
         )
         .await
         .unwrap();
         for record in &mut records {
             *record =
-                library::Database::connect_record_on(&mut connection, &record.kind, &record.key)
+                library::Catalog::connect_record_on(&mut connection, &record.kind, &record.key)
                     .await
                     .unwrap();
         }

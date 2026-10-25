@@ -167,7 +167,7 @@ impl TrackListProjection {
         LatestMountedRouteRead<Result<rufin_core::browse::MemberPage, String>, library::MemberRead>,
     > {
         let runtime = shell.runtime.clone();
-        let database = Arc::clone(&shell.library);
+        let catalog = Arc::clone(&shell.library);
         let shell = Rc::downgrade(shell);
         let model = self.model.clone();
         let apply = Rc::new(move |_, result| {
@@ -186,10 +186,10 @@ impl TrackListProjection {
         });
         let load = Arc::new(
             move |query: library::MemberRead, cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&database);
+                let catalog = Arc::clone(&catalog);
                 Box::pin(async move {
                     MemberPage::load(
-                        &database,
+                        &catalog,
                         query,
                         library::RouteSeedWindow::top(),
                         &cancellation,

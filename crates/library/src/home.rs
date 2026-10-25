@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Connection, SqliteConnection};
 
 use crate::{
-    AlbumKey, AlbumView, Database, FolderKey, LibraryResult, ReadCancellation, SourceKey, TrackKey,
+    AlbumKey, AlbumView, Catalog, FolderKey, LibraryResult, ReadCancellation, SourceKey, TrackKey,
     TrackView,
 };
 
@@ -121,7 +121,7 @@ pub struct HomePage {
     pub provider_sections: Vec<HomeProviderSection>,
 }
 
-impl Database {
+impl Catalog {
     pub async fn home_page(
         &self,
         source: SourceKey,

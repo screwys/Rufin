@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct CatalogUi {
-    pub library: std::sync::Arc<library::Database>,
+    pub library: std::sync::Arc<library::Catalog>,
     pub runtime: tokio::runtime::Handle,
     pub source: rufin_core::runtime::SourceHandle,
     pub playback: std::sync::Arc<rufin_core::playback::PlaybackOwner>,

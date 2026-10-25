@@ -71,7 +71,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                             .unwrap()
                             .unwrap();
                         if saved.entries.first().map(|entry| entry.track_key)
-                            == a.database
+                            == a.catalog
                                 .catalog_identity(
                                     library::CatalogKind::Track,
                                     &uri,
@@ -92,12 +92,12 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 })
                 .await
                 .unwrap();
-                b.database
+                b.catalog
                     .remember_media_uris(std::slice::from_ref(&uri))
                     .await
                     .unwrap();
                 let mut entries = b
-                    .database
+                    .catalog
                     .queue_entries(
                         library::QueueLoad::media_uris(
                             vec![uri.clone()],
@@ -112,7 +112,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                     entry.received_from_connect = true;
                 }
                 let rows = b
-                    .database
+                    .catalog
                     .queue_rows_for_entries(
                         &entries.into_iter().enumerate().collect::<Vec<_>>(),
                         &library::ReadCancellation::new(),
@@ -120,7 +120,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                     .await
                     .unwrap();
                 let stream = crate::playback::prepare_stream(
-                    &b.database,
+                    &b.catalog,
                     playback::StreamRequest::original(&uri),
                     None,
                     Some((b.as_ref(), rows[0].as_ref())),
@@ -135,14 +135,14 @@ fn cue_direct_continuation_streams_without_enrollment() {
                     b"complete backing audio"
                 );
                 assert!(
-                    b.database
+                    b.catalog
                         .connect_track_reference(&uri)
                         .await
                         .unwrap()
                         .is_none()
                 );
                 assert!(
-                    b.database
+                    b.catalog
                         .connect_media_file(&uri, "original")
                         .await
                         .unwrap()
@@ -177,7 +177,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 let bytes = format!("shared playlist audio {index}").into_bytes();
                 std::fs::write(&path, &bytes).unwrap();
                 let uri = url::Url::from_file_path(&path).unwrap().to_string();
-                a.database
+                a.catalog
                     .write_direct_track_metadata(
                         &uri,
                         &library::TrackMetadata {
@@ -192,7 +192,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                     )
                     .await
                     .unwrap();
-                a.database
+                a.catalog
                     .write_local_access(
                         None,
                         &[&library::LocalAccessWrite {
@@ -215,7 +215,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 shared.push((uri, bytes));
             }
             let (host_playlist, playlist) = a
-                .database
+                .catalog
                 .create_playlist(
                     None,
                     "Outside sources",
@@ -232,7 +232,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 .unwrap()
                 .unwrap();
             let shared_keys = a
-                .database
+                .catalog
                 .selected_track_keys(
                     &library::MemberSelection::Uris(
                         shared.iter().map(|(uri, _)| uri.clone()).collect(),
@@ -259,13 +259,13 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 .unwrap();
             let cancellation = library::ReadCancellation::new();
             let playlist = b
-                .database
+                .catalog
                 .playlist_key_by_identity(None, &playlist, &cancellation)
                 .await
                 .unwrap()
                 .unwrap();
             let entries = b
-                .database
+                .catalog
                 .queue_entries(
                     library::QueueLoad::tracks(
                         library::MemberRead::new(library::Collection::Playlist(playlist))
@@ -277,7 +277,7 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 .unwrap()
                 .entries;
             let rows = b
-                .database
+                .catalog
                 .queue_rows_for_entries(
                     &entries.into_iter().enumerate().collect::<Vec<_>>(),
                     &cancellation,
@@ -289,14 +289,14 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 assert!(!row.received_from_connect);
                 assert_eq!(&row.track.media_uri, uri);
                 assert!(
-                    b.database
+                    b.catalog
                         .connect_track_reference(uri)
                         .await
                         .unwrap()
                         .is_some()
                 );
                 let stream = crate::playback::prepare_stream(
-                    &b.database,
+                    &b.catalog,
                     playback::StreamRequest::original(uri),
                     None,
                     Some((b.as_ref(), row.as_ref())),
@@ -308,22 +308,18 @@ fn cue_direct_continuation_streams_without_enrollment() {
                 assert!(response.status().is_success());
                 assert_eq!(response.bytes().await.unwrap().as_ref(), bytes);
                 assert!(
-                    b.database
-                        .connect_media_files(uri)
-                        .await
-                        .unwrap()
-                        .is_empty(),
+                    b.catalog.connect_media_files(uri).await.unwrap().is_empty(),
                     "playing does not retain audio"
                 );
             }
             let unadmitted = root.path().join("unadmitted.flac");
             std::fs::write(&unadmitted, b"not shared").unwrap();
             let uri = url::Url::from_file_path(unadmitted).unwrap().to_string();
-            a.database
+            a.catalog
                 .remember_media_uris(std::slice::from_ref(&uri))
                 .await
                 .unwrap();
-            a.database
+            a.catalog
                 .add_playlist_tracks(
                     None,
                     host_playlist,
@@ -566,7 +562,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                     Ok(())
                 })
                 .unwrap();
-            a.database
+            a.catalog
                 .reconcile_source(&source_id, "local", "Cached")
                 .await
                 .unwrap();
@@ -600,7 +596,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
             );
             assert_eq!(failed.settings.profile, b.status().settings.profile);
             assert!(matches!(&failed.settings.pending_import, Some(PendingImport::Peer { profile, .. }) if Some(profile) == a.status().settings.profile.as_ref()));
-            assert_eq!(ProfileStore::database_profile(retry_owner.database.path()).await.unwrap(), failed.settings.profile);
+            assert_eq!(ProfileStore::database_profile(retry_owner.catalog.path()).await.unwrap(), failed.settings.profile);
             assert!(!retry_owner.active().await.unwrap().stop.is_cancelled());
             assert!(execute(retry_owner, Action::Retry).await.is_err());
             assert!(
@@ -622,7 +618,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                 blake3::hash(a.status().settings.profile.as_ref().unwrap().as_bytes()).to_hex()
             )).exists());
             assert_eq!(
-                ProfileStore::database_profile(retry_owner.database.path())
+                ProfileStore::database_profile(retry_owner.catalog.path())
                     .await
                     .unwrap(),
                 a.status().settings.profile
@@ -652,13 +648,13 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                 })
             })
             .await;
-            b.database
+            b.catalog
                 .reconcile_source(&source_id, "local", "Cached")
                 .await
                 .unwrap();
-            let mut catalog = b.database.catalog(source_id.as_str(), None).await.unwrap();
-            let observed = catalog.start_observation().await.unwrap();
-            catalog
+            let mut observation = b.catalog.observe(source_id.as_str(), None).await.unwrap();
+            let observed = observation.start_observation().await.unwrap();
+            observation
                 .apply_catalog(
                     &library::CatalogBatch {
                         tracks: vec![library::TrackObservation {
@@ -675,11 +671,11 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                 )
                 .await
                 .unwrap();
-            catalog
+            observation
                 .complete_source_observation(observed, &[], None)
                 .await
                 .unwrap();
-            drop(catalog);
+            drop(observation);
             let paired = b.status().settings;
             let download_settings = b.source.shared.settings.load().ui.download_settings(&source_id);
             b.source
@@ -719,7 +715,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
             assert_eq!(
                 resumed
                     .shared
-                    .database
+                    .catalog
                     .source_counts(selected.source_key, &library::ReadCancellation::new())
                     .await
                     .unwrap()
@@ -737,7 +733,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                 "track",
                 "cached-track",
             ));
-            b.database.set_favorite(&favorite, true).await.unwrap();
+            b.catalog.set_favorite(&favorite, true).await.unwrap();
             a.connected_network()
                 .await
                 .unwrap()
@@ -750,8 +746,8 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
             assert!(b.status().error.is_none());
             assert_eq!(b.status().settings.profile, paired.profile);
             assert!(b.status().settings.pending_import.is_none());
-            assert!(b.database.favorite(&favorite).await.unwrap());
-            let rows = b.database.tracks_by_uris(&[favorite.media_uri().to_owned()], &library::ReadCancellation::new()).await.unwrap();
+            assert!(b.catalog.favorite(&favorite).await.unwrap());
+            let rows = b.catalog.tracks_by_uris(&[favorite.media_uri().to_owned()], &library::ReadCancellation::new()).await.unwrap();
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].metadata.title, "Cached track");
             execute(b, Action::Retry).await.unwrap();
@@ -829,11 +825,11 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
             std::fs::write(&audio, b"audio").unwrap();
             std::fs::write(audio.with_extension("lrc"), "[00:00.00]Source only").unwrap();
             let uri = url::Url::from_file_path(&audio).unwrap().to_string();
-            a.database
+            a.catalog
                 .remember_media_uris(std::slice::from_ref(&uri))
                 .await
                 .unwrap();
-            b.database
+            b.catalog
                 .remember_media_uris(std::slice::from_ref(&uri))
                 .await
                 .unwrap();
@@ -851,11 +847,11 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                 "cache reads do not acquire the available sidecar"
             );
             b.peer_access()
-                .cache_assets(&b.database, &uri, [0; 32])
+                .cache_assets(&b.catalog, &uri, [0; 32])
                 .await
                 .unwrap();
             let cached = b
-                .database
+                .catalog
                 .lyrics_cache_for_role(
                     &uri,
                     "original",
@@ -882,7 +878,7 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
                     lyrics::lyrics_from_edited_text("[00:00.00]Shared lyrics").unwrap();
                 bundle.origin = origin;
                 let payload = bundle.cache_payload().unwrap();
-                a.database
+                a.catalog
                     .write_lyrics_cache(
                         cached_uri, authority, "original", "", "", [7; 32], &payload, 42,
                     )
@@ -940,12 +936,12 @@ fn connection_test_requires_the_peer_to_still_share_the_profile() {
             pair(a, b).await;
             a.secrets.replace(saved_keys);
             assert_eq!(
-                ProfileStore::database_profile(b.database.path())
+                ProfileStore::database_profile(b.catalog.path())
                     .await
                     .unwrap(),
                 a.status().settings.profile
             );
-            assert!(b.database.favorite(&favorite).await.unwrap());
+            assert!(b.catalog.favorite(&favorite).await.unwrap());
             let previous_identity = b.status().identity;
             b.status.send_modify(|status| {
                 for device in &mut status.devices {
@@ -1111,7 +1107,7 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
             assert_eq!(inputs.products.source.shared.settings.load().sources.integrations.len(), 1);
             let owner = &inputs.products.connect;
             let music = library::SourceId::new("music-server");
-            owner.database.reconcile_source(&music, "webdav", "Music server").await.unwrap();
+            owner.catalog.reconcile_source(&music, "webdav", "Music server").await.unwrap();
             let music_root = format!("http://{address}/music/");
             file.lock().unwrap().0.insert("/music/copied.m3u".into(), b"#EXTM3U\n#PLAYLIST:Disk version\ntrack-0.flac\n".to_vec());
             let playlist_file = library::LocalFileWrite {
@@ -1155,9 +1151,9 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
             tracks[0].user_data = library::NativeUserState { favorite: Some(true), rating: Some(None), play_count: Some(7), ..Default::default() };
             tracks[0].source_path = Some(track_file.path.clone());
             let freshness = library::Freshness::new(b"received-native-catalog".to_vec()).unwrap();
-            let mut catalog = owner.database.catalog(music.as_str(), None).await.unwrap();
-            let observed = catalog.start_observation().await.unwrap();
-            catalog.apply_catalog(&library::CatalogBatch {
+            let mut observation = owner.catalog.observe(music.as_str(), None).await.unwrap();
+            let observed = observation.start_observation().await.unwrap();
+            observation.apply_catalog(&library::CatalogBatch {
                 tracks: tracks.clone(),
                 albums: vec![library::AlbumObservation {
                     object_id: "album".into(),
@@ -1172,38 +1168,38 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
                 playlists: vec![library::PlaylistObservation { object_id: "server-mix".into(), name: "Server mix".into(), sort_text: "server mix".into(), writable: Some(false), metadata_writable: Some(true), ..Default::default() }],
                 ..Default::default()
             }, true).await.unwrap();
-            catalog.write_file_observations(&[(track_file.clone(), Vec::new()), (playlist_file, Vec::new())], vec![tracks[0].clone()], true).await.unwrap();
-            catalog.write_source_playlist_page("server-mix", 0, &(0..130).map(|index| library::PlaylistEntryObservation { object_id: format!("entry-{index}"), track_id: format!("track-{index}") }).collect::<Vec<_>>(), true).await.unwrap();
-            catalog.write_source_playlist_freshness("server-mix", Some("revision-one"), Some(7_000_000_000)).await.unwrap();
-            catalog.replace_source_home_section("featured", Some("Featured"), &[library::HomeEntryInput { position: 0, kind: library::HomeEntryKind::Track, entity_object_id: "track-0".into(), title: "Featured track".into(), subtitle: String::new() }]).await.unwrap();
-            catalog.complete_source_observation(observed, &[], Some(&freshness)).await.unwrap();
-            drop(catalog);
+            observation.write_file_observations(&[(track_file.clone(), Vec::new()), (playlist_file, Vec::new())], vec![tracks[0].clone()], true).await.unwrap();
+            observation.write_source_playlist_page("server-mix", 0, &(0..130).map(|index| library::PlaylistEntryObservation { object_id: format!("entry-{index}"), track_id: format!("track-{index}") }).collect::<Vec<_>>(), true).await.unwrap();
+            observation.write_source_playlist_freshness("server-mix", Some("revision-one"), Some(7_000_000_000)).await.unwrap();
+            observation.replace_source_home_section("featured", Some("Featured"), &[library::HomeEntryInput { position: 0, kind: library::HomeEntryKind::Track, entity_object_id: "track-0".into(), title: "Featured track".into(), subtitle: String::new() }]).await.unwrap();
+            observation.complete_source_observation(observed, &[], Some(&freshness)).await.unwrap();
+            drop(observation);
             let shared_uris = vec![library::source_entity_uri(&music, "track", "track-0"), library::source_entity_uri(&music, "track", "track-1")];
-            let (shared_playlist, shared_id) = owner.database.create_playlist(None, "Shared edit", &library::MemberSelection::Uris((shared_uris.clone()).into())).await.unwrap().unwrap();
+            let (shared_playlist, shared_id) = owner.catalog.create_playlist(None, "Shared edit", &library::MemberSelection::Uris((shared_uris.clone()).into())).await.unwrap().unwrap();
             execute(owner, Action::Create).await.unwrap();
             // A released device link has no canonical file association yet.
-            owner.database.save_playlist_file_link(&library::PlaylistFileLink {
+            owner.catalog.save_playlist_file_link(&library::PlaylistFileLink {
                 playlist: shared_playlist, source_id: Some(music.clone()), path: "music/copied.m3u".into(),
                 auto_refresh: true, auto_save: None, path_mode: library::PlaylistPathMode::Automatic,
                 revision: Some("older disk revision".into()), dirty: true, error: None,
             }).await.unwrap();
-            let music_key = owner.database.cached_source(music.as_str(), &library::ReadCancellation::new()).await.unwrap().unwrap().source;
-            assert!(owner.database.observed_playlist_file_page(music_key, None).await.unwrap()[0].playlist_identity.is_none());
+            let music_key = owner.catalog.cached_source(music.as_str(), &library::ReadCancellation::new()).await.unwrap().unwrap().source;
+            assert!(owner.catalog.observed_playlist_file_page(music_key, None).await.unwrap()[0].playlist_identity.is_none());
             let previous = owner.session.write().await.take().unwrap();
             let profile = previous.profile.clone();
             previous.stop.cancel();
             previous.documents.close().await.unwrap();
             owner.connected_network().await.unwrap().close_profile().await.unwrap();
             owner.open(profile, false).await.unwrap();
-            let reopened = owner.database.observed_playlist_file_page(music_key, None).await.unwrap();
+            let reopened = owner.catalog.observed_playlist_file_page(music_key, None).await.unwrap();
             assert!(reopened[0].playlist_identity.is_some(), "opening an existing profile publishes released file associations without another scan or export");
             assert_eq!(reopened[0].playlist, Some(shared_playlist));
             tracks[0].metadata.title = "Edited track".into();
-            owner.database.catalog(music.as_str(), None).await.unwrap()
+            owner.catalog.observe(music.as_str(), None).await.unwrap()
                 .write_file_observations(&[(track_file, Vec::new())], vec![tracks[0].clone()], true).await.unwrap();
             let uri = library::source_entity_uri(&music, "track", "track-0");
             let cancellation = library::ReadCancellation::new();
-            let rows = owner.database.tracks_by_uris(std::slice::from_ref(&uri), &cancellation).await.unwrap();
+            let rows = owner.catalog.tracks_by_uris(std::slice::from_ref(&uri), &cancellation).await.unwrap();
             let expected_metadata = rows[0].metadata.clone();
             assert_eq!(expected_metadata.title, "Edited track");
             let exported = owner.export().await.unwrap();
@@ -1218,16 +1214,16 @@ fn profile_files_and_pairing_preserve_the_ready_catalog() {
             ] {
                 let receiving = device(root.path(), name, self::diagnostics(), Arc::new(secrets::MemorySecretStore::new())).await;
                 let receiving_owner = &receiving.products.connect;
-                receiving_owner.database.reconcile_source(&music, "webdav", "Music server").await.unwrap();
+                receiving_owner.catalog.reconcile_source(&music, "webdav", "Music server").await.unwrap();
                 let mut previous = tracks[0].clone();
                 previous.user_data = library::NativeUserState { favorite: Some(false), rating: Some(Some(70)), ..Default::default() };
-                receiving_owner.database.catalog(music.as_str(), Some(0)).await.unwrap().apply_catalog(&library::CatalogBatch { tracks: vec![previous], ..Default::default() }, true).await.unwrap();
+                receiving_owner.catalog.observe(music.as_str(), Some(0)).await.unwrap().apply_catalog(&library::CatalogBatch { tracks: vec![previous], ..Default::default() }, true).await.unwrap();
                 if paired {
                     pair(owner, receiving_owner).await;
                 } else {
                     receiving_owner.import_file(exported.path().to_owned(), true, Some(key.clone())).await.unwrap();
                 }
-                let received = &receiving_owner.database;
+                let received = &receiving_owner.catalog;
                 let source = received.cached_source(music.as_str(), &cancellation).await.unwrap().unwrap();
                 assert!(source.catalog_complete, "the native catalog is ready before provider refresh");
                 assert!(received.accept_freshness(music.as_str(), &freshness, &cancellation).await.unwrap());
@@ -1285,7 +1281,7 @@ async fn execute(owner: &Arc<ConnectOwner>, action: Action) -> Result<Status, St
 
 // Finish background startup and history pruning before capturing the profile.
 async fn prepare_profile_snapshot(owner: &Arc<ConnectOwner>) {
-    while owner.database.connect_seed_page().await.unwrap() {}
+    while owner.catalog.connect_seed_page().await.unwrap() {}
     owner.synchronize().await.unwrap();
     let session = owner.active().await.unwrap();
     while session

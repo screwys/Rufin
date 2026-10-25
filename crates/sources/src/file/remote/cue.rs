@@ -16,21 +16,21 @@ use crate::{SourceError, SourceResult};
 impl FileSource {
     pub(super) async fn acquire_cues(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         parent: Option<&str>,
         worker: Arc<Mutex<media::Worker>>,
         progress: &(dyn Fn(usize) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
         rename: Option<&(String, String)>,
     ) -> SourceResult<usize> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
+        let catalog = observation.catalog;
+        let source_id = observation.source_id;
+        let stamp = observation.observed;
         let root = self.location("")?;
         let mut after = None;
         let mut completed = 0;
         loop {
-            let files = database
+            let files = catalog
                 .source_file_page(
                     source_id,
                     LocalFileKind::Cue,
@@ -44,13 +44,13 @@ impl FileSource {
                 break;
             }
             after = files.last().map(|file| file.path.clone());
-            let previous = database
+            let previous = catalog
                 .source_file_reuse_candidates(source_id, &files)
                 .await?;
             for file in files {
                 completed += self
                     .acquire_cue_file(
-                        catalog,
+                        observation,
                         file,
                         &previous,
                         Arc::clone(&worker),
@@ -67,7 +67,7 @@ impl FileSource {
 
     pub(super) async fn acquire_cue_file(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         mut file: library::LocalFileWrite,
         previous: &[library::LocalFileRow],
         worker: Arc<Mutex<media::Worker>>,
@@ -76,9 +76,9 @@ impl FileSource {
         rename: Option<&(String, String)>,
         reuse_unchanged: bool,
     ) -> SourceResult<usize> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
+        let catalog = observation.catalog;
+        let source_id = observation.source_id;
+        let stamp = observation.observed;
         let mut completed = 0;
         check_cancelled(cancelled)?;
         let renamed = if let Some((old, new)) = rename
@@ -87,7 +87,7 @@ impl FileSource {
         {
             let mut from = file.clone();
             from.path = format!("{old}{suffix}");
-            database
+            catalog
                 .source_file_reuse_candidates(source_id, &[from])
                 .await?
         } else {
@@ -105,7 +105,7 @@ impl FileSource {
             && old.current_output
         {
             let input = self.input().await?;
-            self.observe_lyrics_dependencies(catalog, &old.dependencies)
+            self.observe_lyrics_dependencies(observation, &old.dependencies)
                 .await?;
             for paths in old.dependencies.chunks(128) {
                 let mut current = Vec::with_capacity(paths.len());
@@ -120,7 +120,7 @@ impl FileSource {
                             tracing::warn!(%error, "could not read CUE backing facts");
                             file.state = LocalFileState::Unreadable;
                             check_cancelled(cancelled)?;
-                            catalog
+                            observation
                                 .write_file_observations(
                                     &[(file, old.dependencies.clone())],
                                     Vec::new(),
@@ -132,21 +132,21 @@ impl FileSource {
                     }
                 }
                 check_cancelled(cancelled)?;
-                catalog
+                observation
                     .write_file_observations(&current, Vec::new(), true)
                     .await?;
             }
-            if database
+            if catalog
                 .source_cue_dependencies_unchanged(source_id, &file.path)
                 .await?
             {
                 file.state = LocalFileState::Accepted;
                 file.parse_version = old.parse_version;
                 check_cancelled(cancelled)?;
-                catalog
+                observation
                     .write_file_observations(&[(file, old.dependencies.clone())], Vec::new(), true)
                     .await?;
-                let completed = database
+                let completed = catalog
                     .source_file_track_count(source_id, &old.path)
                     .await?;
                 progress(completed);
@@ -172,7 +172,7 @@ impl FileSource {
                 });
                 let first = matches.next();
                 if matches.next().is_none()
-                    && database
+                    && catalog
                         .source_file_native_paths(source_id, id, stamp)
                         .await?
                         == [file.path.clone()]
@@ -206,7 +206,7 @@ impl FileSource {
                 dependencies.push(backing_file.path.clone());
                 backing_file.parse_version = Some(PARSER_VERSION);
                 let mut backing = match self
-                    .read_audio(database, &backing_file, Arc::clone(&worker))
+                    .read_audio(catalog, &backing_file, Arc::clone(&worker))
                     .await
                 {
                     Ok(media::MediaRead::Accepted(backing)) => backing,
@@ -217,7 +217,7 @@ impl FileSource {
                         backing_file.state = LocalFileState::Unreadable;
 
                         check_cancelled(cancelled)?;
-                        catalog
+                        observation
                             .write_file_observations(&[(backing_file, vec![])], Vec::new(), true)
                             .await?;
                         continue;
@@ -249,7 +249,7 @@ impl FileSource {
                             track.track.object_id = format!("{prefix}:{}", cue.number);
                             track.track.cue_path = Some(file.path.clone());
                             if let Err(error) = self
-                                .read_track_lyrics(database, &referenced, &mut track)
+                                .read_track_lyrics(catalog, &referenced, &mut track)
                                 .await
                             {
                                 tracing::warn!(%error, "Could not read CUE track lyrics");
@@ -266,11 +266,13 @@ impl FileSource {
                         Ok(true)
                     }
                     .await;
-                    self.observe_lyrics_dependencies(catalog, &dependencies)
+                    self.observe_lyrics_dependencies(observation, &dependencies)
                         .await?;
                     check_cancelled(cancelled)?;
                     let count = tracks.len();
-                    catalog.write_file_observations(&[], tracks, true).await?;
+                    observation
+                        .write_file_observations(&[], tracks, true)
+                        .await?;
 
                     completed += count;
                     progress(completed);
@@ -280,7 +282,7 @@ impl FileSource {
                 }
                 backing_file.state = LocalFileState::Accepted;
                 check_cancelled(cancelled)?;
-                catalog
+                observation
                     .write_file_observations(&[(backing_file, vec![])], Vec::new(), true)
                     .await?;
             }
@@ -308,7 +310,7 @@ impl FileSource {
             file.parse_version = None;
         }
         check_cancelled(cancelled)?;
-        catalog
+        observation
             .write_file_observations(&[(file, dependencies)], Vec::new(), true)
             .await?;
         Ok(completed)

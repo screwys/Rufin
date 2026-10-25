@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use crate::{DownloadQuality, ResolvedDownload};
 use async_channel::{Receiver, Sender};
 use audio_processing::ResolvedStream;
-use library::{Database, Freshness};
+use library::{Catalog, Freshness};
 use playback::{SourceReportFact, StreamRequest};
 use serde::{Deserialize, Serialize};
 
@@ -63,7 +63,7 @@ pub async fn local_files_available(
 }
 
 pub async fn read_local_lyrics(
-    database: &Database,
+    catalog: &Catalog,
     media_uri: &str,
     title: Option<&str>,
     preferences: &lyrics::UserPreferences,
@@ -74,7 +74,7 @@ pub async fn read_local_lyrics(
             |(_, uri, _, _)| library::file_media_path(&uri),
         )
     };
-    let access = database.playback_access(media_uri).await.ok().flatten();
+    let access = catalog.playback_access(media_uri).await.ok().flatten();
     let Some(path) = access
         .as_ref()
         .and_then(|(uri, _)| local_path(uri))
@@ -85,7 +85,7 @@ pub async fn read_local_lyrics(
     let cue_track = library::cue_media_parts(media_uri).is_some();
     let title = match title {
         Some(title) => title.to_string(),
-        None => database
+        None => catalog
             .track(&(media_uri), &library::ReadCancellation::new())
             .await?
             .map(|row| row.metadata.title)
@@ -119,7 +119,7 @@ pub async fn read_local_lyrics(
 }
 
 pub(crate) async fn cache_native_lyrics(
-    database: &Database,
+    catalog: &Catalog,
     uri: &str,
     input: [u8; 32],
     bundle: &mut Option<lyrics::LyricsBundle>,
@@ -128,7 +128,7 @@ pub(crate) async fn cache_native_lyrics(
         .take()
         .and_then(lyrics::lyrics_with_displayable_content);
     let Some(bundle) = bundle else {
-        database
+        catalog
             .remove_track_lyrics_by_authority(uri, "source")
             .await?;
         return Ok(());
@@ -138,7 +138,7 @@ pub(crate) async fn cache_native_lyrics(
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |time| time.as_secs().min(i64::MAX as u64) as i64);
-    database
+    catalog
         .write_lyrics_cache(uri, "source", "original", "", "", input, &payload, now)
         .await?;
     Ok(())
@@ -236,7 +236,7 @@ impl SelectedFeed {
 
     pub async fn apply_pending(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         _source_key: library::SourceKey,
     ) -> SourceResult<bool> {
         if self.cancelled.load(Ordering::Acquire) {
@@ -255,12 +255,12 @@ impl SelectedFeed {
             | SelectedFeedChange::Local(LocalLiveChange::Rescan) => Ok(false),
             SelectedFeedChange::Remote(RemoteItemChange::Items(items)) => self
                 .source
-                .apply_changes(database, items)
+                .apply_changes(catalog, items)
                 .await
                 .map(|()| true),
             SelectedFeedChange::Files(crate::file::remote::changes::FileChange::FullRefresh) => {
                 self.source
-                    .acquire_catalog(database, &|_| {}, self.cancellation(), true)
+                    .acquire_catalog(catalog, &|_| {}, self.cancellation(), true)
                     .await
                     .map(|_| true)
             }
@@ -269,7 +269,7 @@ impl SelectedFeed {
                 rename,
             }) => self
                 .source
-                .apply_file_paths(database, &paths, rename.as_ref(), &|| {
+                .apply_file_paths(catalog, &paths, rename.as_ref(), &|| {
                     self.cancelled.load(Ordering::Acquire)
                 })
                 .await
@@ -277,7 +277,7 @@ impl SelectedFeed {
             SelectedFeedChange::Local(LocalLiveChange::Paths { paths, rename }) => self
                 .source
                 .apply_file_paths(
-                    database,
+                    catalog,
                     &paths
                         .iter()
                         .map(|path| path.to_string_lossy().into_owned())
@@ -487,7 +487,7 @@ pub(crate) fn optional_collection_error(error: SourceError) -> SourceResult<()> 
 }
 
 pub(crate) async fn acquire_home<F, Work>(
-    changes: &mut library::Catalog<'_>,
+    changes: &mut library::Observation<'_>,
     cancelled: &(dyn Fn() -> bool + Send + Sync),
     mut read: F,
 ) -> SourceResult<()>
@@ -745,8 +745,8 @@ impl Source {
 
     pub(crate) async fn catalog_operation<T, E>(
         &self,
-        database: &Database,
-        work: impl std::ops::AsyncFnOnce(&mut library::Catalog<'_>) -> Result<T, E>,
+        catalog: &Catalog,
+        work: impl std::ops::AsyncFnOnce(&mut library::Observation<'_>) -> Result<T, E>,
     ) -> Result<T, E>
     where
         E: From<SourceError>,
@@ -754,13 +754,13 @@ impl Source {
         if self.is_retired() {
             return Err(SourceError::Cancelled.into());
         }
-        let mut changes = database
-            .catalog(self.source_id.as_str(), None)
+        let mut changes = catalog
+            .observe(self.source_id.as_str(), None)
             .await
             .map_err(SourceError::from)?;
         let result = work(&mut changes).await;
         if !self.is_retired() {
-            database
+            catalog
                 .publish_catalog_update(self.source_id.as_str(), changes.into_changes())
                 .await;
         }
@@ -777,16 +777,16 @@ impl Source {
 
     async fn document_stream(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         media_uri: &str,
     ) -> SourceResult<ResolvedStream> {
-        let file = database
+        let file = catalog
             .observed_media_file(media_uri)
             .await?
             .ok_or(SourceError::NotFound)?;
         self.file_source(Some(&file.path))
             .ok_or(SourceError::NotFound)?
-            .stream(database, media_uri)
+            .stream(catalog, media_uri)
             .await
     }
 
@@ -1105,7 +1105,7 @@ impl Source {
 
     pub async fn acquire_catalog(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: Arc<AtomicBool>,
         refresh: bool,
@@ -1122,10 +1122,10 @@ impl Source {
         if self.is_retired() || (&cancelled_fn)() {
             return Err(SourceError::Cancelled);
         }
-        self.catalog_operation(database, async |changes| {
+        self.catalog_operation(catalog, async |changes| {
             if !refresh {
                 let accepted = if let Some(marker) = &freshness {
-                    database
+                    catalog
                         .accept_freshness(source_id, marker, &library::ReadCancellation::new())
                         .await?
                 } else {
@@ -1162,7 +1162,7 @@ impl Source {
                     source
                         .acquire_catalog(changes, &report, &cancelled_fn)
                         .await?;
-                    database
+                    catalog
                         .source_file_reads_complete(source_id, stamp.unwrap())
                         .await?
                 }
@@ -1207,7 +1207,7 @@ impl Source {
 
     pub async fn catch_up_local(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: Arc<AtomicBool>,
     ) -> SourceResult<()> {
@@ -1220,7 +1220,7 @@ impl Source {
         if self.is_retired() || (&|| cancelled.load(Ordering::Acquire))() {
             return Err(SourceError::Cancelled);
         }
-        self.catalog_operation(database, async |changes| {
+        self.catalog_operation(catalog, async |changes| {
             local.catch_up(changes, progress, &native_cancelled).await
         })
         .await
@@ -1237,10 +1237,10 @@ impl Source {
 
     pub async fn stream(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         request: StreamRequest,
     ) -> SourceResult<ResolvedStream> {
-        if let Some(stream) = direct_stream(database, &request.media_uri).await? {
+        if let Some(stream) = direct_stream(catalog, &request.media_uri).await? {
             return Ok(stream);
         }
         let object_id = self.track_object_id(&request.media_uri)?;
@@ -1254,8 +1254,8 @@ impl Source {
                     )
                     .await
             }
-            Implementation::Files(source) => source.stream(database, &request.media_uri).await,
-            Implementation::Local(_) => self.document_stream(database, &request.media_uri).await,
+            Implementation::Files(source) => source.stream(catalog, &request.media_uri).await,
+            Implementation::Local(_) => self.document_stream(catalog, &request.media_uri).await,
             Implementation::JellyfinEmby(source) => {
                 source
                     .resolve_stream(
@@ -1273,7 +1273,7 @@ impl Source {
 
     pub async fn resolve_download(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         media_uri: &str,
         quality: DownloadQuality,
     ) -> SourceResult<ResolvedDownload> {
@@ -1287,7 +1287,7 @@ impl Source {
                 quality,
             ));
         }
-        if let Some(stream) = direct_stream(database, media_uri).await? {
+        if let Some(stream) = direct_stream(catalog, media_uri).await? {
             return Ok(ResolvedDownload::encode(stream, quality));
         }
         let object_id = self.track_object_id(media_uri)?;
@@ -1297,7 +1297,7 @@ impl Source {
                     .resolve_download(
                         &object_id,
                         quality,
-                        database
+                        catalog
                             .download_metadata(media_uri)
                             .await?
                             .and_then(|metadata| metadata.channels),
@@ -1305,11 +1305,11 @@ impl Source {
                     .await
             }
             Implementation::Files(source) => source
-                .stream(database, media_uri)
+                .stream(catalog, media_uri)
                 .await
                 .map(|stream| ResolvedDownload::encode(stream, quality)),
             Implementation::Local(_) => self
-                .document_stream(database, media_uri)
+                .document_stream(catalog, media_uri)
                 .await
                 .map(|stream| ResolvedDownload::encode(stream, quality)),
             Implementation::JellyfinEmby(source) => {
@@ -1317,7 +1317,7 @@ impl Source {
                     .resolve_download(
                         &object_id,
                         quality,
-                        database
+                        catalog
                             .download_metadata(media_uri)
                             .await?
                             .and_then(|metadata| metadata.channels),
@@ -1355,7 +1355,7 @@ impl Source {
 
     pub async fn live_search(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         query: &str,
         limit: usize,
     ) -> SourceResult<library::SearchResults> {
@@ -1363,9 +1363,9 @@ impl Source {
             self.implementation,
             Implementation::Local(_) | Implementation::Files(_)
         ) {
-            return Err(SourceError::InvalidRequest("File Search is Database-owned"));
+            return Err(SourceError::InvalidRequest("File Search is Catalog-owned"));
         }
-        self.catalog_operation(database, async |changes| {
+        self.catalog_operation(catalog, async |changes| {
             let source_id = self.source_id.as_str();
             let batch = match &self.implementation {
                 Implementation::Plex(source) => source.live_search(source_id, query, limit).await?,
@@ -1375,7 +1375,7 @@ impl Source {
                 Implementation::OpenSubsonic(source) => {
                     source.live_search(source_id, query, limit).await?
                 }
-                _ => return Err(SourceError::InvalidRequest("File Search is Database-owned")),
+                _ => return Err(SourceError::InvalidRequest("File Search is Catalog-owned")),
             };
             let tracks = batch
                 .tracks
@@ -1397,7 +1397,7 @@ impl Source {
             }
             changes.apply_catalog(&(batch), true).await?;
             let source = changes.source;
-            Ok(database
+            Ok(catalog
                 .search_rows_by_objects(
                     source,
                     None,
@@ -1450,11 +1450,11 @@ impl Source {
 
     pub async fn cached_lyrics(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         media_uri: &str,
         input_digest: [u8; 32],
     ) -> SourceResult<Option<lyrics::LyricsBundle>> {
-        match database
+        match catalog
             .lyrics_cache_for_role(
                 media_uri,
                 "original",
@@ -1477,7 +1477,7 @@ impl Source {
                 {
                     return Ok(Some(bundle));
                 }
-                let _ = database
+                let _ = catalog
                     .remove_lyrics_cache(
                         media_uri,
                         "source",
@@ -1490,13 +1490,12 @@ impl Source {
             Ok(None) => {}
             Err(error) => tracing::warn!(%error, "could not read source lyrics cache"),
         }
-        let native = match self.read_lyrics(database, media_uri).await {
+        let native = match self.read_lyrics(catalog, media_uri).await {
             Err(SourceError::NotFound) => None,
             result => result?,
         };
         let mut bundle = native;
-        if let Err(error) =
-            cache_native_lyrics(database, media_uri, input_digest, &mut bundle).await
+        if let Err(error) = cache_native_lyrics(catalog, media_uri, input_digest, &mut bundle).await
         {
             tracing::warn!(%error, "could not save source lyrics cache");
         }
@@ -1505,7 +1504,7 @@ impl Source {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |time| time.as_secs().min(i64::MAX as u64) as i64);
-            database
+            catalog
                 .write_lyrics_cache(
                     media_uri,
                     "source",
@@ -1523,7 +1522,7 @@ impl Source {
 
     async fn read_lyrics(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         media_uri: &str,
     ) -> SourceResult<Option<lyrics::LyricsBundle>> {
         let native_text = |text: String| {
@@ -1535,22 +1534,22 @@ impl Source {
         match &self.implementation {
             Implementation::Plex(source) => source.lyrics(&self.track_object_id(media_uri)?).await,
             Implementation::Files(source) => source
-                .lyrics(database, media_uri)
+                .lyrics(catalog, media_uri)
                 .await
                 .map(|text| text.and_then(native_text)),
             Implementation::Local(_) => {
-                let file = database.observed_media_file(media_uri).await?;
+                let file = catalog.observed_media_file(media_uri).await?;
                 if let Some(source) = file
                     .as_ref()
                     .and_then(|file| self.file_source(Some(&file.path)))
                 {
                     return source
-                        .lyrics(database, media_uri)
+                        .lyrics(catalog, media_uri)
                         .await
                         .map(|text| text.and_then(native_text));
                 }
                 read_local_lyrics(
-                    database,
+                    catalog,
                     media_uri,
                     None,
                     &lyrics::UserPreferences::default(),
@@ -1568,7 +1567,7 @@ impl Source {
 
     pub async fn browse_folder(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         folder_object_id: Option<&str>,
         music_folder_object_id: Option<&str>,
     ) -> SourceResult<LiveFolderPage> {
@@ -1579,7 +1578,7 @@ impl Source {
                     .await
             }
             Implementation::Local(_) | Implementation::Files(_) => {
-                let source = database
+                let source = catalog
                     .source_identity_key(&self.source_id)
                     .await?
                     .ok_or(SourceError::NotFound)?;
@@ -1588,7 +1587,7 @@ impl Source {
                     Implementation::Files(files) => vec![files.location("")?],
                     _ => unreachable!(),
                 };
-                let (folders, tracks) = database
+                let (folders, tracks) = catalog
                     .local_folder_contents(
                         source,
                         folder_object_id.or(music_folder_object_id),
@@ -1644,13 +1643,13 @@ impl Source {
 
     pub async fn import_playlist_files(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         playlist: library::PlaylistKey,
     ) -> SourceResult<()> {
         let Implementation::Local(source) = &self.implementation else {
             return Ok(());
         };
-        self.catalog_operation(database, async |changes| {
+        self.catalog_operation(catalog, async |changes| {
             source
                 .import_playlist_files(changes, playlist, &|| self.is_retired())
                 .await
@@ -1660,7 +1659,7 @@ impl Source {
 
     pub async fn import_local_paths(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         paths: Vec<std::path::PathBuf>,
         name: &str,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
@@ -1669,7 +1668,7 @@ impl Source {
             Implementation::Local(source) => source.roots(),
             _ => &[],
         };
-        self.catalog_operation(database, async |changes| {
+        self.catalog_operation(catalog, async |changes| {
             crate::file::local::scan::import_paths(
                 changes,
                 configured,
@@ -1685,24 +1684,24 @@ impl Source {
 
     pub async fn import_playlist_file(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         path: &str,
         target: Option<library::PlaylistKey>,
     ) -> SourceResult<library::PlaylistImportReport> {
         if let Implementation::Local(local) = &self.implementation
             && let Some((source, path)) = local.document_playlist(path)
         {
-            return source.import_playlist_file(database, &path, target).await;
+            return source.import_playlist_file(catalog, &path, target).await;
         }
         match &self.implementation {
             Implementation::Files(source) => {
-                source.import_playlist_file(database, path, target).await
+                source.import_playlist_file(catalog, path, target).await
             }
             Implementation::Local(_) => {
                 let path = self
                     .local_playlist_path(path)
                     .ok_or(SourceError::NotFound)?;
-                crate::import_local_playlist_file(database, &path, target, |_| None).await
+                crate::import_local_playlist_file(catalog, &path, target, |_| None).await
             }
             _ => Err(SourceError::InvalidRequest(
                 "This source does not store playlist files",
@@ -1712,7 +1711,7 @@ impl Source {
 
     pub async fn save_playlist_file(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         path: &str,
         file: tempfile::TempPath,
         path_mode: library::PlaylistPathMode,
@@ -1722,13 +1721,13 @@ impl Source {
             && let Some((source, path)) = local.document_playlist(path)
         {
             return source
-                .save_playlist_file(database, &path, file, path_mode, expected_revision)
+                .save_playlist_file(catalog, &path, file, path_mode, expected_revision)
                 .await;
         }
         match &self.implementation {
             Implementation::Files(source) => {
                 source
-                    .save_playlist_file(database, path, file, path_mode, expected_revision)
+                    .save_playlist_file(catalog, path, file, path_mode, expected_revision)
                     .await
             }
             _ => Err(SourceError::InvalidRequest(
@@ -1807,11 +1806,11 @@ impl Source {
 
     pub async fn apply_items(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         upserts: Vec<String>,
         removals: Vec<String>,
     ) -> SourceResult<()> {
-        self.catalog_operation(database, async |changes| {
+        self.catalog_operation(catalog, async |changes| {
             self.acquire_items(changes, upserts, removals).await?;
             self.acquire_item_relations(changes).await
         })
@@ -1820,10 +1819,10 @@ impl Source {
 
     pub(crate) async fn apply_changes(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         items: BTreeMap<String, RemoteItemUpdate>,
     ) -> SourceResult<()> {
-        self.catalog_operation(database, async |changes| {
+        self.catalog_operation(catalog, async |changes| {
             let (mut upserts, mut removals) = (Vec::new(), Vec::new());
             let mut user_data =
                 BTreeMap::<&'static str, Vec<(String, library::NativeUserState)>>::new();
@@ -1836,7 +1835,7 @@ impl Source {
                         if let Implementation::JellyfinEmby(provider) = &self.implementation {
                             for kind in ["track", "album", "artist"] {
                                 let object = provider.kind.object_id(kind, &id);
-                                known |= database
+                                known |= catalog
                                     .source_contains_entity(
                                         self.source_id.as_str(),
                                         kind,
@@ -1874,7 +1873,7 @@ impl Source {
 
     async fn apply_file_paths(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         paths: &[String],
         rename: Option<&(String, String)>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
@@ -1882,7 +1881,7 @@ impl Source {
         if self.is_retired() || (cancelled)() {
             return Err(SourceError::Cancelled);
         }
-        self.catalog_operation(database, async |changes| {
+        self.catalog_operation(catalog, async |changes| {
             self.acquire_paths(changes, paths, rename, cancelled).await
         })
         .await
@@ -1890,7 +1889,7 @@ impl Source {
 
     async fn acquire_paths(
         &self,
-        changes: &mut library::Catalog<'_>,
+        changes: &mut library::Observation<'_>,
         paths: &[String],
         rename: Option<&(String, String)>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
@@ -1939,7 +1938,7 @@ impl Source {
 
     pub(crate) async fn acquire_items(
         &self,
-        changes: &mut library::Catalog<'_>,
+        changes: &mut library::Observation<'_>,
         upserts: Vec<String>,
         removals: Vec<String>,
     ) -> SourceResult<()> {
@@ -1992,9 +1991,9 @@ impl Source {
 
     pub(crate) async fn acquire_item_relations(
         &self,
-        changes: &mut library::Catalog<'_>,
+        changes: &mut library::Observation<'_>,
     ) -> SourceResult<()> {
-        let database = changes.database;
+        let catalog = changes.catalog;
         let source_id = self.source_id.as_str();
         let section = SourceHomeSection::NewlyAdded;
         match self.home_section(section).await {
@@ -2006,7 +2005,7 @@ impl Source {
                         library::HomeEntryKind::Track => "track",
                         _ => continue,
                     };
-                    if !database
+                    if !catalog
                         .source_contains_entity(source_id, kind, &entry.entity_object_id, true)
                         .await?
                     {
@@ -2030,11 +2029,7 @@ impl Source {
         Ok(())
     }
 
-    pub async fn prepare_collection(
-        &self,
-        database: &Database,
-        media_uri: &str,
-    ) -> SourceResult<()> {
+    pub async fn prepare_collection(&self, catalog: &Catalog, media_uri: &str) -> SourceResult<()> {
         if matches!(
             self.implementation,
             Implementation::Local(_) | Implementation::Files(_)
@@ -2054,7 +2049,7 @@ impl Source {
             "artist" => SourceCollection::Artist(object_id),
             _ => return Err(SourceError::InvalidRequest("URI is not a collection")),
         };
-        self.catalog_operation(database, async |changes| {
+        self.catalog_operation(catalog, async |changes| {
             match &self.implementation {
                 Implementation::Plex(source) => {
                     source
@@ -2084,15 +2079,15 @@ impl Source {
 
     pub async fn refresh_home_section(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         section: SourceHomeSection,
     ) -> SourceResult<()> {
-        self.catalog_operation(database, async |catalog| {
+        self.catalog_operation(catalog, async |observation| {
             let entries = self.home_section(section).await?;
             if self.is_retired() {
                 return Err(SourceError::Cancelled);
             }
-            catalog
+            observation
                 .replace_source_home_section(section.id(), None, &entries)
                 .await?;
             Ok(())
@@ -2242,14 +2237,14 @@ impl Source {
     #[cfg(test)]
     pub(crate) async fn apply_local_change(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         _source: library::SourceKey,
         change: LocalLiveChange,
     ) -> SourceResult<bool> {
         match change {
             LocalLiveChange::Paths { paths, rename } => self
                 .apply_file_paths(
-                    database,
+                    catalog,
                     &paths
                         .iter()
                         .map(|path| path.to_string_lossy().into_owned())
@@ -2286,7 +2281,7 @@ impl Source {
 
     pub async fn apply_local_mapping(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         source: library::SourceKey,
         root: &std::path::Path,
         server_prefix: Option<&str>,
@@ -2297,7 +2292,7 @@ impl Source {
         if cancelled.load(Ordering::Acquire) {
             return Err(SourceError::Cancelled);
         }
-        let sample = database
+        let sample = catalog
             .mapping_track_page(
                 source,
                 None,
@@ -2340,16 +2335,14 @@ impl Source {
         if cancelled.load(Ordering::Acquire) {
             return Err(SourceError::Cancelled);
         }
-        database.clear_mapping_access(source).await?;
-        database
-            .write_local_access(Some(source), &[&access])
-            .await?;
+        catalog.clear_mapping_access(source).await?;
+        catalog.write_local_access(Some(source), &[&access]).await?;
         Ok((root, server_prefix))
     }
 
     pub async fn complete_local_mapping(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         source: library::SourceKey,
         root: &std::path::Path,
         server_prefix: Option<&str>,
@@ -2363,7 +2356,7 @@ impl Source {
             if cancelled.load(Ordering::Acquire) {
                 return Err(SourceError::Cancelled);
             }
-            let tracks = database
+            let tracks = catalog
                 .mapping_track_page(source, after, None, 128, &library::ReadCancellation::new())
                 .await?;
             if tracks.is_empty() {
@@ -2421,7 +2414,7 @@ impl Source {
             if cancelled.load(Ordering::Acquire) {
                 return Err(SourceError::Cancelled);
             }
-            database
+            catalog
                 .write_local_access(Some(source), &accesses.iter().collect::<Vec<_>>())
                 .await?;
             accepted += accesses.len();
@@ -2430,10 +2423,7 @@ impl Source {
     }
 }
 
-async fn direct_stream(
-    database: &Database,
-    media_uri: &str,
-) -> SourceResult<Option<ResolvedStream>> {
+async fn direct_stream(catalog: &Catalog, media_uri: &str) -> SourceResult<Option<ResolvedStream>> {
     let cue = library::cue_media_parts(media_uri);
     let backing = cue
         .as_ref()
@@ -2441,9 +2431,9 @@ async fn direct_stream(
     let Some(uri) = library::normalize_direct_media_uri(backing) else {
         return Ok(None);
     };
-    let mut access = database.playback_access(media_uri).await?;
+    let mut access = catalog.playback_access(media_uri).await?;
     if access.is_none() && cue.is_some() {
-        access = database.playback_access(backing).await?;
+        access = catalog.playback_access(backing).await?;
     }
     let uri = match access {
         Some((uri, _)) => uri,
@@ -2456,7 +2446,7 @@ async fn direct_stream(
         ResolvedStream::new(uri)
     };
     if cue.is_some()
-        && let Some((start, end)) = database.playback_window(media_uri).await?
+        && let Some((start, end)) = catalog.playback_window(media_uri).await?
     {
         return Ok(Some(stream.with_window(start, end)));
     }
@@ -2732,7 +2722,7 @@ mod live_acquisition_tests {
         assert!(matches!(
             source
                 .live_search(
-                    &Database::open(directory.path().join("search.db"))
+                    &Catalog::open(directory.path().join("search.db"))
                         .await
                         .unwrap(),
                     "track",
@@ -2790,11 +2780,11 @@ mod refresh_laws {
         for name in ["one", "two", "other"] {
             std::fs::write(root.join("Artist").join(format!("{name}.flac")), b"media").unwrap();
         }
-        let database = Database::open(directory.path().join("library.sqlite"))
+        let catalog = Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
         let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |identity, update| {
+        catalog.observe_catalog(move |identity, update| {
             let source_key = identity.unwrap().1;
             let _ = sender.send((source_key, update));
             std::future::ready(())
@@ -2805,19 +2795,19 @@ mod refresh_laws {
                 crate::file::local::LocalSource::from_roots(vec![root.clone()]).unwrap(),
             ),
         );
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("mapping-test"), "server", "Music")
             .await
             .unwrap();
         let catalog_source_id = ("mapping-test").to_string();
         let stamp: Option<i64> = None;
-        let mut catalog = database.catalog(&catalog_source_id, stamp).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id, stamp).await.unwrap();
         for (id, path) in [
             ("one", "/server/music/Artist/one.flac"),
             ("two", "/server/music/Artist/two.flac"),
             ("other", "/different/root/Artist/other.flac"),
         ] {
-            catalog
+            observation
                 .apply_catalog(
                     &library::CatalogBatch {
                         tracks: (&[library::TrackObservation {
@@ -2849,8 +2839,8 @@ mod refresh_laws {
                 .await
                 .unwrap();
         }
-        database
-            .publish_catalog_update(&catalog_source_id, catalog.into_changes())
+        catalog
+            .publish_catalog_update(&catalog_source_id, observation.into_changes())
             .await;
         let publication = updates.try_recv().expect("catalog update");
         assert!(publication.1.metadata);
@@ -2858,7 +2848,7 @@ mod refresh_laws {
         let sample = Some("/server/music/Artist/one.flac");
         let (mapped_root, prefix) = source
             .apply_local_mapping(
-                &database,
+                &catalog,
                 publication.0,
                 &root,
                 None,
@@ -2872,7 +2862,7 @@ mod refresh_laws {
         assert_eq!(
             source
                 .complete_local_mapping(
-                    &database,
+                    &catalog,
                     publication.0,
                     &mapped_root,
                     prefix.as_deref(),
@@ -2883,7 +2873,7 @@ mod refresh_laws {
                 .unwrap(),
             2
         );
-        let tracks = database
+        let tracks = catalog
             .mapping_track_page(
                 publication.0,
                 None,
@@ -2895,7 +2885,7 @@ mod refresh_laws {
             .unwrap();
         for track in &tracks {
             assert_eq!(
-                database
+                catalog
                     .playback_access(&track.media_uri)
                     .await
                     .unwrap()
@@ -2907,7 +2897,7 @@ mod refresh_laws {
         assert!(
             source
                 .apply_local_mapping(
-                    &database,
+                    &catalog,
                     publication.0,
                     &directory.path().join("unavailable-share"),
                     prefix.as_deref(),
@@ -2921,7 +2911,7 @@ mod refresh_laws {
         assert!(
             source
                 .apply_local_mapping(
-                    &database,
+                    &catalog,
                     publication.0,
                     &root,
                     Some("/wrong/prefix"),
@@ -2934,7 +2924,7 @@ mod refresh_laws {
         );
         for track in &tracks {
             assert_eq!(
-                database
+                catalog
                     .playback_access(&track.media_uri)
                     .await
                     .unwrap()
@@ -2981,9 +2971,9 @@ mod refresh_laws {
     #[tokio::test]
     async fn unsupported_freshness_never_widens_to_a_catalog_acquisition() {
         let directory = tempfile::tempdir().expect("Store directory");
-        let database = Database::open(directory.path().join("library.sqlite"))
+        let catalog = Catalog::open(directory.path().join("library.sqlite"))
             .await
-            .expect("Database");
+            .expect("Catalog");
         let source = Source::open(
             SourceConfiguration {
                 source_id: SourceId::new("jellyfin:test"),
@@ -3027,7 +3017,7 @@ mod refresh_laws {
         for source in [source, smb] {
             source
                 .acquire_catalog(
-                    &database,
+                    &catalog,
                     &|_| panic!("unsupported freshness started acquisition progress"),
                     Arc::new(AtomicBool::new(false)),
                     false,
@@ -3035,7 +3025,7 @@ mod refresh_laws {
                 .await
                 .expect("freshness check");
             assert!(
-                database
+                catalog
                     .cached_source(
                         source.source_id().as_str(),
                         &library::ReadCancellation::new()

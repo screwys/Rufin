@@ -93,7 +93,7 @@ pub(crate) struct WaveformOwner {
 pub(crate) struct WaveformMedia {
     pub(crate) media: Arc<CurrentMedia>,
     pub(crate) source: Weak<crate::source::SourceOwner>,
-    pub(crate) database: Arc<library::Database>,
+    pub(crate) catalog: Arc<library::Catalog>,
     pub(crate) request: StreamRequest,
 }
 
@@ -271,11 +271,11 @@ impl WaveformOwner {
         let task_key = key.clone();
         let cache_root = self.cache_root.clone();
         let task = self.runtime.spawn(async move {
-            let analysis_key = input.database.audio_analysis_key(&task_key.media_uri).await.unwrap_or_else(|error| {
+            let analysis_key = input.catalog.audio_analysis_key(&task_key.media_uri).await.unwrap_or_else(|error| {
                 warn!(%error, media_uri = %task_key.media_uri, "failed to read waveform analysis key");
                 None
             });
-            let mut cached = input.database.waveform_cache(&task_key.media_uri).await.unwrap_or_else(|error| {
+            let mut cached = input.catalog.waveform_cache(&task_key.media_uri).await.unwrap_or_else(|error| {
                 warn!(%error, media_uri = %task_key.media_uri, "failed to read waveform cache");
                 None
             }).map(|row| row.peaks);
@@ -284,16 +284,16 @@ impl WaveformOwner {
                 cached = tokio::task::spawn_blocking(move || load_cached(&cache_root, &cache_key)).await.ok().flatten();
                 if let (Some(analysis_key), Some(peaks)) = (analysis_key, cached.as_ref()) {
                     let row = library::WaveformCacheRow { media_uri: task_key.media_uri.clone(), analysis_key, peaks: peaks.clone() };
-                    if let Err(error) = input.database.write_waveform_cache(&row).await { warn!(%error, media_uri = %task_key.media_uri, "failed to cache waveform"); }
+                    if let Err(error) = input.catalog.write_waveform_cache(&row).await { warn!(%error, media_uri = %task_key.media_uri, "failed to cache waveform"); }
                 }
             }
             if let Some(peaks) = cached {
                 if let Some(owner) = owner.upgrade() { owner.accept_peaks(request, &task_key, Arc::new(peaks)); }
                 return;
             }
-            let database = Arc::clone(&input.database);
+            let catalog = Arc::clone(&input.catalog);
             let local = input.source.upgrade().and_then(|source| source.shared.settings.local_configuration());
-            let stream = match prepare_stream(&input.database, input.request, local.as_ref(), None, move |source_id| async move {
+            let stream = match prepare_stream(&input.catalog, input.request, local.as_ref(), None, move |source_id| async move {
                 tokio::task::spawn_blocking(move || {
                     input.source.upgrade().ok_or_else(crate::source::source_access_unavailable)?.client(&source_id)
                 }).await.map_err(|error| error.to_string())?
@@ -351,7 +351,7 @@ impl WaveformOwner {
                 return;
             }
             if let Some(analysis_key) = analysis_key
-                && let Err(error) = database.write_waveform_cache(&library::WaveformCacheRow { media_uri: task_key.media_uri.clone(), analysis_key, peaks: peaks.clone() }).await
+                && let Err(error) = catalog.write_waveform_cache(&library::WaveformCacheRow { media_uri: task_key.media_uri.clone(), analysis_key, peaks: peaks.clone() }).await
             {
                 warn!(%error, media_uri = %task_key.media_uri, "failed to cache waveform");
             }
@@ -472,16 +472,16 @@ mod tests {
     #[tokio::test]
     async fn enabling_waveform_uses_cached_peaks_without_a_provider_or_duration() {
         let directory = tempfile::tempdir().expect("waveform directory");
-        let database = library::Database::open(directory.path().join("library.db"))
+        let catalog = library::Catalog::open(directory.path().join("library.db"))
             .await
-            .expect("database");
+            .expect("catalog");
         let media_uri =
             library::source_entity_uri(&sources::SourceId::new("remote"), "track", "track");
         let media_id = CurrentMediaId {
             run: None,
             media_uri: media_uri.clone(),
         };
-        let entries = database
+        let entries = catalog
             .queue_entries(
                 library::QueueLoad::items(vec![(
                     playback::TrackReference::direct(
@@ -498,7 +498,7 @@ mod tests {
             .await
             .expect("admit track")
             .entries;
-        let row = database
+        let row = catalog
             .queue_rows_for_entries(
                 &entries.into_iter().enumerate().collect::<Vec<_>>(),
                 &library::ReadCancellation::new(),
@@ -531,7 +531,7 @@ mod tests {
             request: StreamRequest::original(media.row.track.media_uri.clone()),
             media,
             source: Weak::new(),
-            database: Arc::new(database),
+            catalog: Arc::new(catalog),
         };
         let (events, received) = async_channel::unbounded();
         let owner = WaveformOwner::new(

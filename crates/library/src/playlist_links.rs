@@ -1,5 +1,5 @@
 //! Durable file associations, independent of playlist ownership and entry identities.
-use crate::{Database, LibraryError, LibraryResult, PlaylistKey, PlaylistPathMode, SourceId};
+use crate::{Catalog, LibraryError, LibraryResult, PlaylistKey, PlaylistPathMode, SourceId};
 use sqlx::{Connection, Row, SqliteConnection};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -48,7 +48,7 @@ mod tests {
     #[tokio::test]
     async fn removing_earlier_roots_keeps_links_on_their_original_files() -> LibraryResult<()> {
         let directory = tempfile::tempdir()?;
-        let database = Database::open(directory.path().join("store.sqlite")).await?;
+        let catalog = Catalog::open(directory.path().join("store.sqlite")).await?;
         let root_a = directory.path().join("A");
         let root_b = directory.path().join("B");
         let root_c = directory.path().join("C");
@@ -57,13 +57,13 @@ mod tests {
             std::fs::write(root.join("music.m3u8"), "#EXTM3U\n")?;
         }
         let source = SourceId::new("local");
-        database
+        catalog
             .set_playlist_file_auto_save(Some(&source), true)
             .await?;
         let mut keys = Vec::new();
         // Deliberately create higher ordinals first to exercise unique-path compaction.
         for index in [2, 1, 0] {
-            let playlist = database
+            let playlist = catalog
                 .create_playlist(
                     None,
                     &format!("Root {index}"),
@@ -72,7 +72,7 @@ mod tests {
                 .await?
                 .unwrap()
                 .0;
-            database
+            catalog
                 .save_playlist_file_link(&PlaylistFileLink {
                     playlist,
                     source_id: Some(source.clone()),
@@ -86,41 +86,37 @@ mod tests {
                 })
                 .await?;
             keys.push(playlist);
-            database
+            catalog
                 .ignore_playlist_file(Some(&source), &format!("@{index}/ignored.pls"))
                 .await?;
         }
-        database
+        catalog
             .remove_playlist_file_roots(&source, &[(0, root_a.clone())])
             .await?;
-        let a = database.get_playlist_file_link(keys[2]).await?.unwrap();
+        let a = catalog.get_playlist_file_link(keys[2]).await?.unwrap();
         check_eq!(a.source_id, None);
         check_eq!(std::path::PathBuf::from(&a.path), root_a.join("music.m3u8"));
         check_eq!(a.auto_save, Some(true));
-        let b = database.get_playlist_file_link(keys[1]).await?.unwrap();
+        let b = catalog.get_playlist_file_link(keys[1]).await?.unwrap();
         check_eq!(b.path, "@0/music.m3u8");
         check_eq!(b.source_id, Some(source.clone()));
         check_eq!(b.auto_save, None);
         check_eq!(
-            database
-                .get_playlist_file_link(keys[0])
-                .await?
-                .unwrap()
-                .path,
+            catalog.get_playlist_file_link(keys[0]).await?.unwrap().path,
             "@1/music.m3u8"
         );
         check!(
-            database
+            catalog
                 .is_playlist_file_ignored(None, &root_a.join("ignored.pls").to_string_lossy())
                 .await?
         );
         check!(
-            database
+            catalog
                 .is_playlist_file_ignored(Some(&source), "@0/ignored.pls")
                 .await?
         );
         check!(
-            database
+            catalog
                 .is_playlist_file_ignored(Some(&source), "@1/ignored.pls")
                 .await?
         );
@@ -129,16 +125,16 @@ mod tests {
             std::fs::read_to_string(root_b.join("music.m3u8"))?,
             "#EXTM3U\n"
         );
-        database.close().await
+        catalog.close().await
     }
 
     #[tokio::test]
     async fn rejected_files_are_scoped_to_their_source_and_observed_playlists_are_paged()
     -> LibraryResult<()> {
         let directory = tempfile::tempdir()?;
-        let database = Database::open(directory.path().join("store.sqlite")).await?;
+        let catalog = Catalog::open(directory.path().join("store.sqlite")).await?;
         {
-            let mut writer = database.writer().await?;
+            let mut writer = catalog.writer().await?;
             sqlx::query("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES(1,'files','Files','files',zeroblob(32))").execute(&mut *writer).await?;
         }
         let files = [
@@ -190,37 +186,37 @@ mod tests {
             )
         })
         .collect::<Vec<_>>();
-        let mut catalog = database.catalog("files", None).await?;
-        catalog
+        let mut observation = catalog.observe("files", None).await?;
+        observation
             .write_file_observations(&files, Vec::new(), true)
             .await?;
-        drop(catalog);
+        drop(observation);
         let source = SourceId::new("files");
         check!(
-            database
+            catalog
                 .file_path_is_rejected(&source, "album/photo.png")
                 .await?
         );
         check!(
-            database
+            catalog
                 .file_path_is_rejected(&source, "album/Music.M3U8")
                 .await?
         );
         check!(
-            !database
+            !catalog
                 .file_path_is_rejected(&source, "album/missing.flac")
                 .await?
         );
         check!(
-            !database
+            !catalog
                 .file_path_is_rejected(&SourceId::new("other"), "album/photo.png")
                 .await?
         );
-        let rows = database
+        let rows = catalog
             .observed_playlist_file_page(crate::SourceKey::from_raw(1), None)
             .await?;
         check_eq!(rows.len(), 2);
-        let next = database
+        let next = catalog
             .observed_playlist_file_page(
                 crate::SourceKey::from_raw(1),
                 Some(rows[0].local_file_key),
@@ -228,7 +224,7 @@ mod tests {
             .await?;
         check_eq!(next.len(), 1);
         check_eq!(next[0].path, "album/other.pls");
-        let playlist = database
+        let playlist = catalog
             .create_playlist(
                 None,
                 "Shared",
@@ -237,34 +233,34 @@ mod tests {
             .await?
             .unwrap()
             .0;
-        database
+        catalog
             .associate_playlist_files(&source, &[(rows[0].path.clone(), playlist)])
             .await?;
-        database
-            .catalog("files", None)
+        catalog
+            .observe("files", None)
             .await?
             .write_file_observations(&files, Vec::new(), true)
             .await?;
-        let associated = database
+        let associated = catalog
             .observed_playlist_file_page(crate::SourceKey::from_raw(1), None)
             .await?;
         check_eq!(associated[0].playlist, Some(playlist));
         check!(associated[0].playlist_identity.is_some());
-        database.delete_playlist(None, playlist).await?;
-        let deleted = database
+        catalog.delete_playlist(None, playlist).await?;
+        let deleted = catalog
             .observed_playlist_file_page(crate::SourceKey::from_raw(1), None)
             .await?;
         check_eq!(deleted[0].playlist, None);
         check!(deleted[0].playlist_identity.is_some());
-        database.close().await
+        catalog.close().await
     }
 
     #[tokio::test]
     async fn associations_survive_restart_and_track_only_edits() -> LibraryResult<()> {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("library.sqlite");
-        let database = Database::open(&path).await?;
-        let playlist = database
+        let catalog = Catalog::open(&path).await?;
+        let playlist = catalog
             .create_playlist(
                 None,
                 "Music",
@@ -287,9 +283,9 @@ mod tests {
             dirty: false,
             error: None,
         };
-        check!(database.save_playlist_file_link(&link).await?);
-        check!(!database.save_playlist_file_link(&link).await?);
-        let second = database
+        check!(catalog.save_playlist_file_link(&link).await?);
+        check!(!catalog.save_playlist_file_link(&link).await?);
+        let second = catalog
             .create_playlist(
                 None,
                 "Second",
@@ -300,28 +296,28 @@ mod tests {
             .0;
         let mut duplicate = link.clone();
         duplicate.playlist = second;
-        check!(database.save_playlist_file_link(&duplicate).await.is_err());
-        check!(!database.playlist_file_auto_save(Some(&source)).await?);
-        database
+        check!(catalog.save_playlist_file_link(&duplicate).await.is_err());
+        check!(!catalog.playlist_file_auto_save(Some(&source)).await?);
+        catalog
             .set_playlist_file_auto_save(Some(&source), true)
             .await?;
-        database
+        catalog
             .ignore_playlist_file(Some(&source), "0/ignored.pls")
             .await?;
         check!(
-            !database
+            !catalog
                 .update_playlist(None, playlist, Some("Music"), None)
                 .await?
         );
         check!(
-            !database
+            !catalog
                 .get_playlist_file_link(playlist)
                 .await?
                 .unwrap()
                 .dirty
         );
         check_eq!(
-            database
+            catalog
                 .add_playlist_tracks(
                     None,
                     playlist,
@@ -334,26 +330,26 @@ mod tests {
             0
         );
         check!(
-            !database
+            !catalog
                 .get_playlist_file_link(playlist)
                 .await?
                 .unwrap()
                 .dirty
         );
-        database
+        catalog
             .update_playlist(None, playlist, Some("New name"), None)
             .await?;
         check!(
-            database
+            catalog
                 .get_playlist_file_link(playlist)
                 .await?
                 .unwrap()
                 .dirty
         );
-        database
+        catalog
             .mark_playlist_file_synced(playlist, "second")
             .await?;
-        database
+        catalog
             .add_playlist_tracks(
                 None,
                 playlist,
@@ -362,16 +358,14 @@ mod tests {
             )
             .await?;
         check!(
-            database
+            catalog
                 .get_playlist_file_link(playlist)
                 .await?
                 .unwrap()
                 .dirty
         );
-        database
-            .mark_playlist_file_synced(playlist, "third")
-            .await?;
-        let entries = database
+        catalog.mark_playlist_file_synced(playlist, "third").await?;
+        let entries = catalog
             .playlist_edit_entries(
                 playlist,
                 &crate::MemberRead {
@@ -389,79 +383,75 @@ mod tests {
                     .map(|entry| entry.playlist_entry_key)
                     .collect::<Vec<_>>()
             })?;
-        database
+        catalog
             .move_playlist_entry(None, playlist, entries[0], 0)
             .await?;
         check!(
-            !database
+            !catalog
                 .get_playlist_file_link(playlist)
                 .await?
                 .unwrap()
                 .dirty
         );
-        database
+        catalog
             .move_playlist_entry(None, playlist, entries[0], 2)
             .await?;
         check!(
-            database
+            catalog
                 .get_playlist_file_link(playlist)
                 .await?
                 .unwrap()
                 .dirty
         );
-        database
-            .mark_playlist_file_synced(playlist, "third")
-            .await?;
-        database
+        catalog.mark_playlist_file_synced(playlist, "third").await?;
+        catalog
             .remove_playlist_entries(None, playlist, &[entries[1]])
             .await?;
         check!(
-            database
+            catalog
                 .get_playlist_file_link(playlist)
                 .await?
                 .unwrap()
                 .dirty
         );
-        database
-            .mark_playlist_file_synced(playlist, "third")
-            .await?;
+        catalog.mark_playlist_file_synced(playlist, "third").await?;
         check_eq!(
-            database
+            catalog
                 .remove_playlist_entries(None, playlist, &[entries[1]])
                 .await?,
             0
         );
         check!(
-            !database
+            !catalog
                 .get_playlist_file_link(playlist)
                 .await?
                 .unwrap()
                 .dirty
         );
-        database.close().await?;
-        let database = Database::open(&path).await?;
-        let restored = database
+        catalog.close().await?;
+        let catalog = Catalog::open(&path).await?;
+        let restored = catalog
             .find_playlist_file_link(Some(&source), &link.path)
             .await?
             .unwrap();
         check_eq!(restored.revision.as_deref(), Some("third"));
         check!(!restored.dirty);
-        check!(database.playlist_file_auto_save(Some(&source)).await?);
+        check!(catalog.playlist_file_auto_save(Some(&source)).await?);
         check!(
-            database
+            catalog
                 .is_playlist_file_ignored(Some(&source), "0/ignored.pls")
                 .await?
         );
-        database.delete_playlist(None, playlist).await?;
-        check!(database.get_playlist_file_link(playlist).await?.is_none());
-        database.close().await
+        catalog.delete_playlist(None, playlist).await?;
+        check!(catalog.get_playlist_file_link(playlist).await?.is_none());
+        catalog.close().await
     }
 
     #[tokio::test]
     async fn backup_restores_links_by_identity() -> LibraryResult<()> {
         let directory = tempfile::tempdir()?;
-        let database = Database::open(directory.path().join("store.sqlite")).await?;
-        let playlist = database
+        let catalog = Catalog::open(directory.path().join("store.sqlite")).await?;
+        let playlist = catalog
             .create_playlist(
                 None,
                 "Playlist",
@@ -485,9 +475,9 @@ mod tests {
             dirty: true,
             error: Some("Unavailable".into()),
         };
-        database.save_playlist_file_link(&link).await?;
-        database.ignore_playlist_file(None, "ignored.m3u").await?;
-        database.set_playlist_file_auto_save(None, true).await?;
+        catalog.save_playlist_file_link(&link).await?;
+        catalog.ignore_playlist_file(None, "ignored.m3u").await?;
+        catalog.set_playlist_file_auto_save(None, true).await?;
         let backup = directory.path().join("backup");
         std::fs::create_dir(&backup)?;
         let groups = crate::StateGroups {
@@ -497,10 +487,10 @@ mod tests {
             activity: false,
             queue: false,
         };
-        let count = database.export_state(&backup, groups).await?;
-        database.unlink_playlist_file(playlist).await?;
-        database.restore_state(&backup, groups, count).await?;
-        let restored = database
+        let count = catalog.export_state(&backup, groups).await?;
+        catalog.unlink_playlist_file(playlist).await?;
+        catalog.restore_state(&backup, groups, count).await?;
+        let restored = catalog
             .find_playlist_file_link(None, &link.path)
             .await?
             .unwrap();
@@ -509,12 +499,12 @@ mod tests {
         check!(restored.dirty);
         check_eq!(restored.error, link.error);
         check!(
-            database
+            catalog
                 .is_playlist_file_ignored(None, "ignored.m3u")
                 .await?
         );
-        check!(database.playlist_file_auto_save(None).await?);
-        database.close().await
+        check!(catalog.playlist_file_auto_save(None).await?);
+        catalog.close().await
     }
 }
 
@@ -677,7 +667,7 @@ pub(crate) async fn restore_record_on(
     Ok(())
 }
 
-impl Database {
+impl Catalog {
     /// Keep file locations attached to the same folders when earlier roots are removed.
     pub async fn remove_playlist_file_roots(
         &self,

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use sqlx::{Connection, Row, SqliteConnection};
 
-use crate::{Database, LibraryError, LibraryResult, ReadCancellation, SourceKey, TrackReference};
+use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation, SourceKey, TrackReference};
 
 pub const QUEUE_CONTEXT_LIMIT: usize = 100;
 
@@ -302,7 +302,7 @@ impl QueueRepeatMode {
     }
 }
 
-impl Database {
+impl Catalog {
     pub async fn track_references_for_uris(
         &self,
         media_uris: &[String],
@@ -318,7 +318,7 @@ impl Database {
     }
 }
 
-impl Database {
+impl Catalog {
     pub async fn queue_search_page(
         &self,
         queue: &QueueRestore,

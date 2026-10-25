@@ -25,60 +25,59 @@ pub(crate) fn reusable_parser_version(version: Option<i64>) -> bool {
 }
 
 pub(crate) async fn read_saved_file(
-    catalog: &library::Catalog<'_>,
+    observation: &library::Observation<'_>,
     media_uri: &str,
     path: &Path,
 ) -> SourceResult<(
     Option<(library::LocalFileWrite, Vec<String>)>,
     library::TrackObservation,
 )> {
-    let (object_id, source_path, previous) = catalog
-        .database
-        .saved_file_observation(catalog.source, media_uri)
+    let (object_id, source_path, previous) = observation
+        .catalog
+        .saved_file_observation(observation.source, media_uri)
         .await?
         .ok_or(SourceError::NotFound)?;
     let path = normalize_observed_path(path);
     let track = media::read_saved_media(&path, path.clone()).await?;
     let saved_path = path.clone();
-    let (mut track, mut observation, revision, audio_revision) =
-        tokio::task::spawn_blocking(move || {
-            let mut track = track;
-            crate::file::lyrics::read_local(&mut track);
-            let observation = previous
-                .map(|previous| {
-                    let roots = BTreeSet::from([Path::new(&previous.root)]);
-                    let (mut observation, _) = file_observation(
-                        &roots,
-                        &saved_path,
-                        library::LocalFileKind::Media,
-                        library::LocalFileState::Accepted,
-                        &[],
-                    )?;
-                    observation.root = previous.root;
-                    observation.relative_path = previous.relative_path;
-                    Ok::<_, SourceError>(observation)
-                })
-                .transpose()?;
-            Ok::<_, SourceError>((
-                track,
-                observation,
-                super::artwork::revision(&saved_path).unwrap_or_default(),
-                super::media::audio_revision(
-                    &saved_path.to_string_lossy(),
-                    &super::media::local_media_identity_path(&saved_path),
-                ),
-            ))
-        })
-        .await
-        .map_err(|error| SourceError::Other(error.to_string()))??;
-    if let Some(observation) = &mut observation {
-        track.observe_images(observation)?;
+    let (mut track, mut file, revision, audio_revision) = tokio::task::spawn_blocking(move || {
+        let mut track = track;
+        crate::file::lyrics::read_local(&mut track);
+        let observation = previous
+            .map(|previous| {
+                let roots = BTreeSet::from([Path::new(&previous.root)]);
+                let (mut observation, _) = file_observation(
+                    &roots,
+                    &saved_path,
+                    library::LocalFileKind::Media,
+                    library::LocalFileState::Accepted,
+                    &[],
+                )?;
+                observation.root = previous.root;
+                observation.relative_path = previous.relative_path;
+                Ok::<_, SourceError>(observation)
+            })
+            .transpose()?;
+        Ok::<_, SourceError>((
+            track,
+            observation,
+            super::artwork::revision(&saved_path).unwrap_or_default(),
+            super::media::audio_revision(
+                &saved_path.to_string_lossy(),
+                &super::media::local_media_identity_path(&saved_path),
+            ),
+        ))
+    })
+    .await
+    .map_err(|error| SourceError::Other(error.to_string()))??;
+    if let Some(file) = &mut file {
+        track.observe_images(file)?;
     }
     track.local_artwork = track
         .picture_index
         .and_then(|index| u32::try_from(index).ok())
         .map(|picture_index| crate::LocalImageRef::Embedded {
-            source_id: crate::SourceId::new(catalog.source_id),
+            source_id: crate::SourceId::new(observation.source_id),
             path: path.to_string_lossy().into_owned(),
             picture_index,
             revision,
@@ -89,12 +88,12 @@ pub(crate) async fn read_saved_file(
         track.track.source_path = source_path;
     }
     track.audio_revision = audio_revision;
-    let observation = observation.map(|file| (file, std::mem::take(&mut track.lyrics_paths)));
-    Ok((observation, track.into_observation(media::accepted_at())))
+    let file = file.map(|file| (file, std::mem::take(&mut track.lyrics_paths)));
+    Ok((file, track.into_observation(media::accepted_at())))
 }
 
 pub(crate) async fn read_saved_document(
-    catalog: &library::Catalog<'_>,
+    observation: &library::Observation<'_>,
     media_uri: &str,
     document_uri: &str,
     temporary: &Path,
@@ -102,9 +101,9 @@ pub(crate) async fn read_saved_document(
     Option<(library::LocalFileWrite, Vec<String>)>,
     library::TrackObservation,
 )> {
-    let (object_id, source_path, mut observation) = catalog
-        .database
-        .saved_file_observation(catalog.source, media_uri)
+    let (object_id, source_path, mut file) = observation
+        .catalog
+        .saved_file_observation(observation.source, media_uri)
         .await?
         .ok_or(SourceError::NotFound)?;
     let stat_uri = document_uri.to_owned();
@@ -113,13 +112,13 @@ pub(crate) async fn read_saved_document(
         .map_err(|error| SourceError::Other(error.to_string()))??;
     let mut track = media::read_saved_media(temporary, PathBuf::from(&entry.name)).await?;
     let path = source_path.unwrap_or_else(|| document_uri.to_owned());
-    if let Some(observation) = &mut observation {
-        observation.size_bytes = entry.size.and_then(|size| i64::try_from(size).ok());
-        observation.revision = entry.revision.clone();
-        observation.native_id = Some(entry.native_id);
-        track.observe_images(observation)?;
-        observation.parse_version = Some(super::super::remote::scan::PARSER_VERSION);
-        observation.state = library::LocalFileState::Accepted;
+    if let Some(file) = &mut file {
+        file.size_bytes = entry.size.and_then(|size| i64::try_from(size).ok());
+        file.revision = entry.revision.clone();
+        file.native_id = Some(entry.native_id);
+        track.observe_images(file)?;
+        file.parse_version = Some(super::super::remote::scan::PARSER_VERSION);
+        file.state = library::LocalFileState::Accepted;
     }
     track.track.object_id = object_id;
     track.track.media_uri = Some(media_uri.to_owned());
@@ -133,32 +132,32 @@ pub(crate) async fn read_saved_document(
         .picture_index
         .and_then(|index| u32::try_from(index).ok())
         .map(|picture_index| crate::LocalImageRef::Embedded {
-            source_id: crate::SourceId::new(catalog.source_id),
+            source_id: crate::SourceId::new(observation.source_id),
             path,
             revision: entry.revision.unwrap_or_default(),
             picture_index,
         });
-    let observation = observation.map(|file| (file, std::mem::take(&mut track.lyrics_paths)));
-    Ok((observation, track.into_observation(media::accepted_at())))
+    let file = file.map(|file| (file, std::mem::take(&mut track.lyrics_paths)));
+    Ok((file, track.into_observation(media::accepted_at())))
 }
 
 pub(crate) async fn catch_up(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     local: &LocalSource,
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<()> {
-    let database = catalog.database;
-    let source_id = catalog.source_id;
-    require_roots(database, source_id, local, local.roots()).await?;
-    let stamp = Some(catalog.start_observation().await?);
+    let catalog = observation.catalog;
+    let source_id = observation.source_id;
+    require_roots(catalog, source_id, local, local.roots()).await?;
+    let stamp = Some(observation.start_observation().await?);
     let mut after = None;
     let mut tracks = 0;
     loop {
         check_cancelled(cancelled)?;
-        let page = database
+        let page = catalog
             .local_file_page(
-                catalog.source,
+                observation.source,
                 after,
                 LOCAL_BATCH_SIZE,
                 &library::ReadCancellation::new(),
@@ -178,7 +177,7 @@ pub(crate) async fn catch_up(
             })
             .collect::<Vec<_>>();
         observe_lyrics_dependencies(
-            catalog,
+            observation,
             &local.roots().iter().map(PathBuf::as_path).collect(),
             &single_files
                 .iter()
@@ -186,7 +185,7 @@ pub(crate) async fn catch_up(
                 .collect::<Vec<_>>(),
         )
         .await?;
-        let changed = database
+        let changed = catalog
             .source_changed_file_dependencies(
                 source_id,
                 &single_files
@@ -213,7 +212,7 @@ pub(crate) async fn catch_up(
                 total: None,
             });
             tracks += acquire_paths(
-                catalog,
+                observation,
                 local,
                 &paths,
                 None,
@@ -228,12 +227,12 @@ pub(crate) async fn catch_up(
             .await?;
         }
     }
-    acquire_imported_paths(catalog, local, None, &|_| {}, cancelled).await?;
-    if catalog.changes().metadata {
-        catalog.record_imported_files(None).await?;
+    acquire_imported_paths(observation, local, None, &|_| {}, cancelled).await?;
+    if observation.changes().metadata {
+        observation.record_imported_files(None).await?;
     }
     check_cancelled(cancelled)?;
-    catalog
+    observation
         .purge_source_file_absences(stamp.expect("file observation"))
         .await?;
     Ok(())
@@ -265,15 +264,15 @@ fn cached_observation_changed(file: &library::LocalFileRow) -> bool {
 }
 
 pub(crate) async fn acquire_paths(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     local: &LocalSource,
     paths: &[PathBuf],
     rename: Option<&(PathBuf, PathBuf)>,
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<usize> {
-    let database = catalog.database;
-    let source_id = catalog.source_id;
+    let catalog = observation.catalog;
+    let source_id = observation.source_id;
     let roots = local
         .roots()
         .iter()
@@ -284,7 +283,7 @@ pub(crate) async fn acquire_paths(
         .map(|path| normalize_observed_path(path))
         .filter(|path| !local.excludes(path))
         .collect::<Vec<_>>();
-    require_roots(database, source_id, local, &paths).await?;
+    require_roots(catalog, source_id, local, &paths).await?;
     let seeds = paths
         .iter()
         .filter(|path| {
@@ -308,7 +307,7 @@ pub(crate) async fn acquire_paths(
         .collect::<Vec<_>>();
     let parsers = local_workers();
     let mut completed = acquire_directories(
-        catalog,
+        observation,
         local,
         &directories,
         progress,
@@ -336,7 +335,7 @@ pub(crate) async fn acquire_paths(
         })
         .collect::<Vec<_>>();
     completed += acquire_component(
-        catalog,
+        observation,
         &roots,
         local,
         &seeds,
@@ -354,13 +353,13 @@ pub(crate) async fn acquire_paths(
     )
     .await?;
     crate::file::artwork::ArtworkFiles::Local
-        .acquire(catalog, cancelled)
+        .acquire(observation, cancelled)
         .await?;
     Ok(completed)
 }
 
 async fn require_roots(
-    database: &library::Database,
+    catalog: &library::Catalog,
     source_id: &str,
     local: &LocalSource,
     paths: &[PathBuf],
@@ -374,7 +373,7 @@ async fn require_roots(
             .try_exists()
             .map_err(|error| SourceError::Other(error.to_string()))?
         {
-            let previous = database
+            let previous = catalog
                 .source_files(source_id, &[root.to_string_lossy().into_owned()])
                 .await?;
             if !previous.first().is_some_and(|file| {
@@ -417,7 +416,7 @@ pub(crate) fn normalize_observed_path(path: &Path) -> PathBuf {
 
 #[allow(clippy::too_many_arguments)]
 async fn acquire_component(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     roots: &BTreeSet<&Path>,
     local: &LocalSource,
     seeds: &[String],
@@ -428,9 +427,9 @@ async fn acquire_component(
     cancelled: &(dyn Fn() -> bool + Send + Sync),
     parsers: &[Arc<Mutex<media::Worker>>],
 ) -> SourceResult<usize> {
-    let database = catalog.database;
-    let source_id = catalog.source_id;
-    let stamp = catalog.observed;
+    let catalog = observation.catalog;
+    let source_id = observation.source_id;
+    let stamp = observation.observed;
     let mut parsed = 0;
     progress(SourceReadProgress {
         stage: SourceReadStage::Tracks,
@@ -441,7 +440,7 @@ async fn acquire_component(
     let mut after = None;
     let mut renamed_missing = None;
     loop {
-        let page = database
+        let page = catalog
             .source_component_page(source_id, seeds, prefixes, after.as_deref())
             .await?;
         if page.is_empty() {
@@ -488,19 +487,19 @@ async fn acquire_component(
         }
         if !missing.is_empty() {
             check_cancelled(cancelled)?;
-            catalog
+            observation
                 .remove_source_files(&missing, stamp.expect("file observation"))
                 .await?;
         }
         for path in cues {
-            parsed += acquire_exact_cue(catalog, roots, &path, true, true, cancelled).await?;
+            parsed += acquire_exact_cue(observation, roots, &path, true, true, cancelled).await?;
             progress(SourceReadProgress {
                 stage: SourceReadStage::Tracks,
                 completed: parsed,
                 total: None,
             });
         }
-        let dependencies = database
+        let dependencies = catalog
             .source_dependency_paths(
                 source_id,
                 &audio
@@ -518,7 +517,7 @@ async fn acquire_component(
         });
         if !audio.is_empty() {
             parsed += acquire_audio_batch(
-                catalog,
+                observation,
                 roots,
                 &audio,
                 cancelled,
@@ -543,14 +542,14 @@ async fn acquire_component(
         }
         if !observations.is_empty() {
             check_cancelled(cancelled)?;
-            catalog
+            observation
                 .write_file_observations(&observations, Vec::new(), true)
                 .await?;
         }
     }
 
     if let Some(path) = renamed_missing {
-        catalog
+        observation
             .remove_source_files(&[path], stamp.expect("file observation"))
             .await?;
     }
@@ -558,15 +557,15 @@ async fn acquire_component(
 }
 
 async fn acquire_exact_cue(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     roots: &BTreeSet<&Path>,
     path: &Path,
     retain_unreadable: bool,
     admit: bool,
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<usize> {
-    let database = catalog.database;
-    let source_id = catalog.source_id;
+    let catalog = observation.catalog;
+    let source_id = observation.source_id;
     let (state, mut dependencies, tracks, retain, dependencies_observed) = match read_cue(path) {
         CueRead::Accepted(sheet) => {
             let dependencies = sheet
@@ -610,7 +609,7 @@ async fn acquire_exact_cue(
         ),
     };
     if retain {
-        for path in retained_cue_dependencies(database, source_id, roots, path).await? {
+        for path in retained_cue_dependencies(catalog, source_id, roots, path).await? {
             if !dependencies.contains(&path) {
                 dependencies.push(path);
             }
@@ -621,7 +620,7 @@ async fn acquire_exact_cue(
             dependencies.push(dependency.clone());
         }
     }
-    observe_lyrics_dependencies(catalog, roots, &dependencies).await?;
+    observe_lyrics_dependencies(observation, roots, &dependencies).await?;
     let accepted = tracks.len();
     let mut observations = vec![file_observation(
         roots,
@@ -657,21 +656,21 @@ async fn acquire_exact_cue(
         .map(|track| track.into_observation(media::accepted_at()))
         .collect::<Vec<_>>();
     check_cancelled(cancelled)?;
-    catalog
+    observation
         .write_file_observations(&observations, observed_tracks, admit)
         .await?;
     Ok(accepted)
 }
 
 pub(crate) async fn acquire_catalog(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     local: &LocalSource,
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
     reuse_unchanged: bool,
 ) -> SourceResult<usize> {
     acquire_directories(
-        catalog,
+        observation,
         local,
         local.roots(),
         progress,
@@ -684,7 +683,7 @@ pub(crate) async fn acquire_catalog(
 }
 
 pub(crate) async fn import_paths(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     configured: &[PathBuf],
     paths: Vec<PathBuf>,
     name: &str,
@@ -699,9 +698,9 @@ pub(crate) async fn import_paths(
             .any(|configured| root.starts_with(configured))
     });
     local.roots.extend_from_slice(configured);
-    let stamp = Some(catalog.start_observation().await?);
+    let stamp = Some(observation.start_observation().await?);
     acquire_directories(
-        catalog,
+        observation,
         &local,
         &starts,
         progress,
@@ -712,21 +711,21 @@ pub(crate) async fn import_paths(
     )
     .await?;
     check_cancelled(cancelled)?;
-    catalog
+    observation
         .purge_source_file_absences(stamp.expect("file observation"))
         .await?;
     crate::file::artwork::ArtworkFiles::Local
-        .acquire(catalog, cancelled)
+        .acquire(observation, cancelled)
         .await?;
-    let playlist = catalog
+    let playlist = observation
         .create_observed_playlist(stamp.unwrap(), name)
         .await?;
-    catalog.record_imported_files(Some(playlist)).await?;
+    observation.record_imported_files(Some(playlist)).await?;
     Ok(playlist)
 }
 
 async fn acquire_directories(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     local: &LocalSource,
     starts: &[PathBuf],
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
@@ -735,9 +734,9 @@ async fn acquire_directories(
     admit: bool,
     parsers: &[Arc<Mutex<media::Worker>>],
 ) -> SourceResult<usize> {
-    let database = catalog.database;
-    let source_id = catalog.source_id;
-    let stamp = catalog.observed;
+    let catalog = observation.catalog;
+    let source_id = observation.source_id;
+    let stamp = observation.observed;
     if starts.is_empty() {
         return Ok(0);
     }
@@ -751,7 +750,7 @@ async fn acquire_directories(
         check_cancelled(cancelled)?;
         let metadata = fs::metadata(path).map_err(|error| SourceError::Other(error.to_string()))?;
         if metadata.is_dir() {
-            catalog
+            observation
                 .write_file_observations(
                     &[file_observation(
                         &roots,
@@ -766,12 +765,14 @@ async fn acquire_directories(
                 .await?;
         } else if is_cue(path) {
             completed += match if reuse_unchanged {
-                unchanged_cue(catalog, &roots, path, admit, cancelled).await?
+                unchanged_cue(observation, &roots, path, admit, cancelled).await?
             } else {
                 None
             } {
                 Some(count) => count,
-                None => acquire_exact_cue(catalog, &roots, path, true, admit, cancelled).await?,
+                None => {
+                    acquire_exact_cue(observation, &roots, path, true, admit, cancelled).await?
+                }
             };
             progress(SourceReadProgress {
                 stage: SourceReadStage::Tracks,
@@ -784,7 +785,7 @@ async fn acquire_directories(
             } else {
                 library::LocalFileKind::Media
             };
-            catalog
+            observation
                 .write_file_observations(
                     &[file_observation(
                         &roots,
@@ -801,7 +802,7 @@ async fn acquire_directories(
     }
     for root in local.roots() {
         let mut after = None;
-        while let Some(directory) = database
+        while let Some(directory) = catalog
             .source_next_directory(source_id, stamp, after.as_deref(), &root.to_string_lossy())
             .await?
         {
@@ -826,13 +827,13 @@ async fn acquire_directories(
                     .map_err(|error| SourceError::Other(error.to_string()))?;
                 if kind.is_file() && is_cue(&path) {
                     completed += match if reuse_unchanged {
-                        unchanged_cue(catalog, &roots, &path, admit, cancelled).await?
+                        unchanged_cue(observation, &roots, &path, admit, cancelled).await?
                     } else {
                         None
                     } {
                         Some(count) => count,
                         None => {
-                            acquire_exact_cue(catalog, &roots, &path, true, admit, cancelled)
+                            acquire_exact_cue(observation, &roots, &path, true, admit, cancelled)
                                 .await?
                         }
                     };
@@ -861,7 +862,7 @@ async fn acquire_directories(
                 )?);
                 if observations.len() == LOCAL_BATCH_SIZE {
                     check_cancelled(cancelled)?;
-                    catalog
+                    observation
                         .write_file_observations(&observations, Vec::new(), admit)
                         .await?;
                     observations.clear();
@@ -880,7 +881,7 @@ async fn acquire_directories(
                 &[],
             )?);
             check_cancelled(cancelled)?;
-            catalog
+            observation
                 .write_file_observations(&observations, Vec::new(), admit)
                 .await?;
             progress(SourceReadProgress {
@@ -898,7 +899,7 @@ async fn acquire_directories(
     for root in local.roots() {
         let mut after = None;
         loop {
-            let page = database
+            let page = catalog
                 .source_file_page(
                     source_id,
                     library::LocalFileKind::Media,
@@ -912,7 +913,7 @@ async fn acquire_directories(
                 break;
             }
             after = page.last().map(|file| file.path.clone());
-            let dependencies = database
+            let dependencies = catalog
                 .source_dependency_paths(
                     source_id,
                     &page
@@ -934,7 +935,7 @@ async fn acquire_directories(
                 .map(|file| PathBuf::from(file.path))
                 .collect::<Vec<_>>();
             completed += acquire_audio_batch(
-                catalog,
+                observation,
                 &roots,
                 &paths,
                 cancelled,
@@ -962,15 +963,15 @@ async fn acquire_directories(
 }
 
 async fn unchanged_cue(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     roots: &BTreeSet<&Path>,
     path: &Path,
     admit: bool,
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<Option<usize>> {
-    let database = catalog.database;
-    let source_id = catalog.source_id;
-    let observation = file_observation(
+    let catalog = observation.catalog;
+    let source_id = observation.source_id;
+    let cue = file_observation(
         roots,
         path,
         library::LocalFileKind::Cue,
@@ -978,7 +979,7 @@ async fn unchanged_cue(
         &[],
     )?
     .0;
-    let Some(stored) = cached_cue(database, source_id, &observation).await? else {
+    let Some(stored) = cached_cue(catalog, source_id, &cue).await? else {
         return Ok(None);
     };
     if !stored.current_output
@@ -986,14 +987,14 @@ async fn unchanged_cue(
             .dependencies
             .iter()
             .any(|path| normalize_observed_path(Path::new(path)) != Path::new(path))
-        || stored.size_bytes != observation.size_bytes
-        || stored.mtime_ns != observation.mtime_ns
+        || stored.size_bytes != cue.size_bytes
+        || stored.mtime_ns != cue.mtime_ns
         || !reusable_parser_version(stored.parse_version)
         || stored.state != library::LocalFileState::Accepted
     {
         return Ok(None);
     }
-    observe_lyrics_dependencies(catalog, roots, &stored.dependencies).await?;
+    observe_lyrics_dependencies(observation, roots, &stored.dependencies).await?;
     let backing = stored
         .dependencies
         .iter()
@@ -1011,34 +1012,30 @@ async fn unchanged_cue(
         })
         .collect::<SourceResult<Vec<_>>>()?;
     check_cancelled(cancelled)?;
-    catalog
+    observation
         .write_file_observations(&backing, Vec::new(), admit)
         .await?;
-    if !database
-        .source_cue_dependencies_unchanged(source_id, &observation.path)
+    if !catalog
+        .source_cue_dependencies_unchanged(source_id, &cue.path)
         .await?
     {
         return Ok(None);
     }
-    let mut observation = observation;
-    observation.state = library::LocalFileState::Accepted;
+    let mut cue = cue;
+    cue.state = library::LocalFileState::Accepted;
     check_cancelled(cancelled)?;
-    catalog
-        .write_file_observations(
-            &[(observation, stored.dependencies.clone())],
-            Vec::new(),
-            admit,
-        )
+    observation
+        .write_file_observations(&[(cue, stored.dependencies.clone())], Vec::new(), admit)
         .await?;
     Ok(Some(
-        database
+        catalog
             .source_file_track_count(source_id, &stored.path)
             .await?,
     ))
 }
 
 async fn retained_cue_dependencies(
-    database: &library::Database,
+    catalog: &library::Catalog,
     source_id: &str,
     roots: &BTreeSet<&Path>,
     path: &Path,
@@ -1051,18 +1048,18 @@ async fn retained_cue_dependencies(
         &[],
     )?
     .0;
-    Ok(cached_cue(database, source_id, &observation)
+    Ok(cached_cue(catalog, source_id, &observation)
         .await?
         .map(|file| file.dependencies)
         .unwrap_or_default())
 }
 
 async fn cached_cue(
-    database: &library::Database,
+    catalog: &library::Catalog,
     source_id: &str,
     observation: &library::LocalFileWrite,
 ) -> SourceResult<Option<library::LocalFileRow>> {
-    Ok(database
+    Ok(catalog
         .source_file_reuse_candidates(source_id, std::slice::from_ref(observation))
         .await?
         .into_iter()
@@ -1070,7 +1067,7 @@ async fn cached_cue(
 }
 
 async fn acquire_audio_batch(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     roots: &BTreeSet<&Path>,
     paths: &[PathBuf],
     cancelled: &(dyn Fn() -> bool + Send + Sync),
@@ -1083,9 +1080,9 @@ async fn acquire_audio_batch(
     if paths.is_empty() {
         return Ok(0);
     }
-    let database = catalog.database;
+    let catalog = observation.catalog;
     let reuse = if reuse_unchanged {
-        path_reuse(catalog, roots, paths, explicit_rename).await?
+        path_reuse(observation, roots, paths, explicit_rename).await?
     } else {
         PathReuse::default()
     };
@@ -1154,7 +1151,7 @@ async fn acquire_audio_batch(
                 track.observe_images(&mut observation.0)?;
                 observations.push(observation);
                 if let Some(uri) = track.track.media_uri.as_deref()
-                    && let Some((object_id, _)) = database.source_track_file(uri).await?
+                    && let Some((object_id, _)) = catalog.source_track_file(uri).await?
                 {
                     track.track.object_id = object_id;
                 }
@@ -1176,7 +1173,7 @@ async fn acquire_audio_batch(
                     {
                         track.track.object_id = existing.track.object_id.clone();
                     } else if let Some((object_id, _)) =
-                        database.source_track_file(canonical).await?
+                        catalog.source_track_file(canonical).await?
                     {
                         track.track.object_id = object_id;
                     }
@@ -1219,17 +1216,17 @@ async fn acquire_audio_batch(
         .iter()
         .flat_map(|track| track.lyrics_paths.iter().cloned())
         .collect::<Vec<_>>();
-    observe_lyrics_dependencies(catalog, roots, &facts).await?;
+    observe_lyrics_dependencies(observation, roots, &facts).await?;
     let facts = accepted
         .into_iter()
         .map(|track| track.into_observation(media::accepted_at()))
         .collect::<Vec<_>>();
     if !aliases.is_empty() {
         check_cancelled(cancelled)?;
-        catalog.merge_local_file_uris(&aliases).await?;
+        observation.merge_local_file_uris(&aliases).await?;
     }
     check_cancelled(cancelled)?;
-    catalog
+    observation
         .write_file_observations(&observations, facts, admit)
         .await?;
     progress(accepted_count);
@@ -1254,13 +1251,13 @@ struct PathReuse {
 }
 
 async fn path_reuse(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     roots: &BTreeSet<&Path>,
     paths: &[PathBuf],
     explicit_rename: Option<&(PathBuf, PathBuf)>,
 ) -> SourceResult<PathReuse> {
-    let database = catalog.database;
-    let source_id = catalog.source_id;
+    let catalog = observation.catalog;
+    let source_id = observation.source_id;
     let mut facts = Vec::new();
     for path in paths {
         let observation = file_observation(
@@ -1290,11 +1287,11 @@ async fn path_reuse(
         old.inode = None;
         facts.push(old);
     }
-    let current = database
+    let current = catalog
         .source_file_reuse_candidates(source_id, &facts)
         .await?;
     observe_lyrics_dependencies(
-        catalog,
+        observation,
         roots,
         &current
             .iter()
@@ -1302,7 +1299,7 @@ async fn path_reuse(
             .collect::<Vec<_>>(),
     )
     .await?;
-    let changed = database
+    let changed = catalog
         .source_changed_file_dependencies(
             source_id,
             &facts
@@ -1361,7 +1358,7 @@ async fn path_reuse(
         {
             Some(id)
         } else {
-            database
+            catalog
                 .source_file_track_identity(source_id, &old_path)
                 .await?
         };
@@ -1373,7 +1370,7 @@ async fn path_reuse(
 }
 
 async fn observe_lyrics_dependencies(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     roots: &BTreeSet<&Path>,
     dependencies: &[String],
 ) -> SourceResult<()> {
@@ -1417,20 +1414,20 @@ async fn observe_lyrics_dependencies(
         }
     }
     if !observations.is_empty() {
-        catalog
+        observation
             .write_file_observations(&observations, Vec::new(), true)
             .await?;
     }
     if !missing.is_empty() {
-        let missing = catalog
-            .database
-            .source_files(catalog.source_id, &missing)
+        let missing = observation
+            .catalog
+            .source_files(observation.source_id, &missing)
             .await?
             .into_iter()
             .map(|file| file.path)
             .collect::<Vec<_>>();
-        catalog
-            .remove_source_files(&missing, catalog.observed.unwrap_or(i64::MAX))
+        observation
+            .remove_source_files(&missing, observation.observed.unwrap_or(i64::MAX))
             .await?;
     }
     Ok(())
@@ -1583,25 +1580,25 @@ fn is_cue(path: &Path) -> bool {
 }
 
 pub(crate) async fn acquire_imported_paths(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     local: &LocalSource,
     playlist: Option<library::PlaylistKey>,
     progress: &(dyn Fn(usize) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<usize> {
-    let database = catalog.database;
-    let source_id = catalog.source_id;
-    let stamp = catalog.observed;
+    let catalog = observation.catalog;
+    let source_id = observation.source_id;
+    let stamp = observation.observed;
     let mut after = String::new();
     let parsers = local_workers();
     let mut completed = 0;
     loop {
-        let page = database.imported_local_uri_page(playlist, &after).await?;
+        let page = catalog.imported_local_uri_page(playlist, &after).await?;
         if page.is_empty() {
             break;
         }
         after = page.last().unwrap().0.clone();
-        let mut staged = database
+        let mut staged = catalog
             .source_observed_media_uris(
                 source_id,
                 stamp.unwrap_or(0),
@@ -1618,7 +1615,7 @@ pub(crate) async fn acquire_imported_paths(
                 let access = if uri.starts_with("content:") {
                     Some(uri.clone())
                 } else {
-                    database
+                    catalog
                         .playback_access(&uri)
                         .await?
                         .map(|(access, _)| access)
@@ -1634,7 +1631,7 @@ pub(crate) async fn acquire_imported_paths(
             {
                 continue;
             }
-            let observed = database.observed_media_file(&uri).await?;
+            let observed = catalog.observed_media_file(&uri).await?;
             if let Some(document) = observed.as_ref().and_then(|file| {
                 library::document_access_uri(&file.path)
                     .or_else(|| file.path.starts_with("content:").then(|| file.path.clone()))
@@ -1652,7 +1649,7 @@ pub(crate) async fn acquire_imported_paths(
                 {
                     Some(access)
                 } else {
-                    database
+                    catalog
                         .playback_access(&uri)
                         .await?
                         .and_then(|(uri, _)| library::file_media_path(&uri))
@@ -1666,7 +1663,7 @@ pub(crate) async fn acquire_imported_paths(
                     .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
                 {
                     check_cancelled(cancelled)?;
-                    catalog
+                    observation
                         .remove_source_files(
                             &[path.to_string_lossy().into_owned()],
                             stamp.expect("file observation"),
@@ -1679,7 +1676,7 @@ pub(crate) async fn acquire_imported_paths(
                     && canonical.as_str() != uri
                 {
                     let canonical = canonical.to_string();
-                    let object_id = database
+                    let object_id = catalog
                         .source_track_file(&canonical)
                         .await?
                         .map_or_else(|| media::track_id(&identity), |(id, _)| id);
@@ -1693,7 +1690,7 @@ pub(crate) async fn acquire_imported_paths(
             uris.push((uri, cue, access));
         }
         completed += acquire_imported_documents(
-            catalog,
+            observation,
             documents,
             &|count| progress(completed + count),
             cancelled,
@@ -1701,14 +1698,14 @@ pub(crate) async fn acquire_imported_paths(
         .await?;
         if !aliases.is_empty() {
             check_cancelled(cancelled)?;
-            catalog.merge_local_file_uris(&aliases).await?;
+            observation.merge_local_file_uris(&aliases).await?;
             uris.sort_unstable_by(|a, b| {
                 a.0.cmp(&b.0)
                     .then_with(|| a.2.is_none().cmp(&b.2.is_none()))
             });
             uris.dedup_by(|a, b| a.0 == b.0);
             staged.extend(
-                database
+                catalog
                     .source_observed_media_uris(
                         source_id,
                         stamp.unwrap_or(0),
@@ -1737,14 +1734,14 @@ pub(crate) async fn acquire_imported_paths(
             .chain(local.roots().iter().map(PathBuf::as_path))
             .collect::<BTreeSet<_>>();
         for path in &cues {
-            completed += match unchanged_cue(catalog, &roots, path, true, cancelled).await? {
+            completed += match unchanged_cue(observation, &roots, path, true, cancelled).await? {
                 Some(count) => count,
-                None => acquire_exact_cue(catalog, &roots, path, true, true, cancelled).await?,
+                None => acquire_exact_cue(observation, &roots, path, true, true, cancelled).await?,
             };
             progress(completed);
         }
         completed += acquire_audio_batch(
-            catalog,
+            observation,
             &roots,
             &paths,
             cancelled,
@@ -1760,7 +1757,7 @@ pub(crate) async fn acquire_imported_paths(
 }
 
 async fn acquire_imported_documents(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     documents: Vec<(String, String)>,
     progress: &(dyn Fn(usize) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
@@ -1776,13 +1773,13 @@ async fn acquire_imported_documents(
         let entry = match entry {
             Ok(entry) => entry,
             Err(SourceError::NotFound) => {
-                let path = catalog
-                    .database
+                let path = observation
+                    .catalog
                     .source_track_file(&uri)
                     .await?
                     .map_or(access, |(_, path)| path);
-                catalog
-                    .remove_source_files(&[path], catalog.observed.expect("file observation"))
+                observation
+                    .remove_source_files(&[path], observation.observed.expect("file observation"))
                     .await?;
                 continue;
             }
@@ -1811,10 +1808,10 @@ async fn acquire_imported_documents(
     if files.is_empty() {
         return Ok(0);
     }
-    let candidates = catalog
-        .database
+    let candidates = observation
+        .catalog
         .source_file_reuse_candidates(
-            catalog.source_id,
+            observation.source_id,
             &files
                 .iter()
                 .map(|(_, file)| file.clone())
@@ -1852,12 +1849,15 @@ async fn acquire_imported_documents(
             file.parse_version = previous.parse_version;
         } else {
             let read =
-                crate::file::documents::read_document_media(&access, catalog.source_id).await;
+                crate::file::documents::read_document_media(&access, observation.source_id).await;
             check_cancelled(cancelled)?;
             match read {
                 Ok((_, MediaRead::Accepted(mut track))) => {
-                    track.track.object_id =
-                        catalog.database.source_track_file(&uri).await?.map_or_else(
+                    track.track.object_id = observation
+                        .catalog
+                        .source_track_file(&uri)
+                        .await?
+                        .map_or_else(
                             || {
                                 previous
                                     .and_then(|previous| previous.track_object_id.clone())
@@ -1892,7 +1892,7 @@ async fn acquire_imported_documents(
         }
         observations.push((file, Vec::new()));
     }
-    catalog
+    observation
         .write_file_observations(&observations, tracks, true)
         .await?;
     Ok(completed)

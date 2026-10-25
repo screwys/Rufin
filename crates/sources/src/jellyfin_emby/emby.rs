@@ -292,30 +292,30 @@ mod tests {
             .await;
         Mock::given(path("/music/emby/Playlists/playlist/Items")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"Items":[{"Id":"11","PlaylistItemId":"first"},{"Id":"11","PlaylistItemId":"second"}],"TotalRecordCount":2}))).mount(&server).await;
         let root = tempfile::tempdir().unwrap();
-        let database = library::Database::open(root.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(root.path().join("library.sqlite"))
             .await
             .unwrap();
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "music", "Music")
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
 
         source
-            .acquire_catalog(&mut catalog, &|_| {}, &|| false)
+            .acquire_catalog(&mut observation, &|_| {}, &|| false)
             .await
             .unwrap();
         {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+            catalog
+                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                 .await;
             Ok::<_, crate::SourceError>(())
         }
         .unwrap();
         let uri = library::source_entity_uri(&SourceId::new("source"), "track", "emby:track:11");
-        let track = database
+        let track = catalog
             .track(&(&uri), &library::ReadCancellation::new())
             .await
             .unwrap()
@@ -323,31 +323,31 @@ mod tests {
         assert_eq!(track.object_id.as_deref(), Some("emby:track:11"));
         assert_eq!(track.state.rating, Some(7));
         assert!(track.state.last_played.is_some());
-        database
+        catalog
             .set_rating(&library::FavoriteTarget::Track(uri.clone()), Some(9))
             .await
             .unwrap();
         source.set_rating("emby:track:11", Some(9)).await.unwrap();
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "music", "Music")
             .await
             .unwrap();
         let catalog_source_id = ("source").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
 
         source
-            .acquire_catalog(&mut catalog, &|_| {}, &|| false)
+            .acquire_catalog(&mut observation, &|_| {}, &|| false)
             .await
             .unwrap();
         {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+            catalog
+                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                 .await;
             Ok::<_, crate::SourceError>(())
         }
         .unwrap();
-        let rated = database
+        let rated = catalog
             .track(&(&uri), &library::ReadCancellation::new())
             .await
             .unwrap()

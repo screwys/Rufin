@@ -21,7 +21,7 @@ pub(super) struct PlexPlayback {
     settings: SettingsFile,
     output: PlaybackOutput,
     playback: Playback,
-    database: Arc<Database>,
+    catalog: Arc<Catalog>,
     queue: tokio::sync::Mutex<Option<PlexQueueWindow>>,
     timeline: Mutex<Timeline>,
     commands: tokio::sync::Mutex<()>,
@@ -80,7 +80,7 @@ impl PlexPlayback {
         };
         let items = self.all_items(&timeline, &self.cancelled).await?;
         snapshot.queue.entries = self
-            .database
+            .catalog
             .queue_entries(
                 library::QueueLoad::media_uris(
                     items.iter().map(|item| item.media_uri.clone()),
@@ -214,19 +214,14 @@ impl PlexPlayback {
             .projection()
             .is_ok_and(|projection| projection.view.controls.shuffle_enabled);
         let page = request
-            .prepare(&self.database, shuffled, random_u64())
+            .prepare(&self.catalog, shuffled, random_u64())
             .await
             .map_err(string_error)?;
         if page.entries.is_empty() {
             return Ok(());
         }
         let anchor = page.current_index;
-        let keys = queue_keys(
-            &self.database,
-            &page.entries,
-            &self.connection().1.source_id,
-        )
-        .await?;
+        let keys = queue_keys(&self.catalog, &page.entries, &self.connection().1.source_id).await?;
         if keys.is_empty() {
             return Ok(());
         }
@@ -553,7 +548,7 @@ impl PlexPlayback {
         timeline: &Timeline,
     ) -> Result<library::QueueRestore, String> {
         let entries = self
-            .database
+            .catalog
             .queue_entries(
                 library::QueueLoad::media_uris(
                     window.items.iter().map(|item| item.media_uri.clone()),
@@ -565,7 +560,7 @@ impl PlexPlayback {
             .map_err(string_error)?
             .entries;
         let rows = self
-            .database
+            .catalog
             .queue_rows_for_entries(
                 &entries.iter().cloned().enumerate().collect::<Vec<_>>(),
                 &ReadCancellation::new(),
@@ -876,11 +871,11 @@ impl PlexPlayback {
 }
 
 async fn queue_keys(
-    database: &Database,
+    catalog: &Catalog,
     entries: &[library::QueueEntry],
     source: &sources::SourceId,
 ) -> Result<Vec<String>, String> {
-    let uris = database
+    let uris = catalog
         .selected_track_uris(
             &library::MemberSelection::Keys {
                 source: None,
@@ -1059,7 +1054,7 @@ impl PlaybackOwner {
                     return Ok(());
                 }
                 let candidates = crate::radio::radio_candidates(
-                    &plex.database,
+                    &plex.catalog,
                     plex.source_owner.clone(),
                     selected,
                     library::RadioSeed::Track(request.seed_media_uri.clone()),
@@ -1116,7 +1111,7 @@ impl PlaybackOwner {
         self.runtime.spawn(async move {
             let result = async {
                 let candidates = crate::radio::radio_candidates(
-                    &plex.database,
+                    &plex.catalog,
                     plex.source_owner.clone(),
                     selected,
                     request.seed,
@@ -1156,7 +1151,7 @@ impl PlaybackOwner {
         self.runtime.spawn(async move {
             let result = async {
                 let candidates = plex
-                    .database
+                    .catalog
                     .random_candidates(
                         selected.source_key,
                         selected.music_folder_key,
@@ -1213,7 +1208,7 @@ impl PlaybackOwner {
             let entry = local.entries.first().unwrap();
             let uris = self
                 .runtime
-                .block_on(self.database.selected_track_uris(
+                .block_on(self.catalog.selected_track_uris(
                     &library::MemberSelection::Keys {
                         source: None,
                         keys: vec![entry.track_key].into(),
@@ -1262,7 +1257,7 @@ impl PlaybackOwner {
         // Validate every occurrence before sending a command to the receiver.
         let keys = if transferring {
             Some(self.runtime.block_on(queue_keys(
-                &self.database,
+                &self.catalog,
                 &local.entries,
                 &context.source_id,
             ))?)
@@ -1284,7 +1279,7 @@ impl PlaybackOwner {
             settings: self.settings.clone(),
             output: output.clone(),
             playback: active.clone(),
-            database: self.database.clone(),
+            catalog: self.catalog.clone(),
             queue: tokio::sync::Mutex::new(None),
             timeline: Mutex::new(stopped_timeline()),
             commands: tokio::sync::Mutex::new(()),
@@ -1512,7 +1507,7 @@ impl PlaybackOwner {
             };
             let mut queue = plex.restore(&nearby, &timeline).await?;
             queue.entries = self
-                .database
+                .catalog
                 .queue_entries(
                     library::QueueLoad::media_uris(
                         window.items.iter().map(|item| item.media_uri.clone()),
@@ -1545,7 +1540,7 @@ impl PlaybackOwner {
             let source = plex.connection().0.clone();
             let local = self.settings.local_configuration();
             let stream = prepare_stream(
-                &self.database,
+                &self.catalog,
                 request,
                 local.as_ref(),
                 None,
@@ -1553,7 +1548,7 @@ impl PlaybackOwner {
             )
             .await?;
             let loudness = super::cached_loudness(
-                &self.database,
+                &self.catalog,
                 &row.track.media_uri,
                 self.settings.load().ui.playback.loudness_normalization,
             )

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Connection, FromRow, SqliteConnection};
 
 use crate::{
-    Database, LibraryError, LibraryResult, ListenKey, ListenOutboxKey, ReadCancellation, SourceId,
+    Catalog, LibraryError, LibraryResult, ListenKey, ListenOutboxKey, ReadCancellation, SourceId,
     TrackKey, source_entity_parts,
 };
 
@@ -96,7 +96,7 @@ pub struct PendingListenDelivery {
     pub skipped: bool,
 }
 
-impl Database {
+impl Catalog {
     pub async fn record_listen(
         &self,
         listen: &ListenWrite,

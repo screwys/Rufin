@@ -292,14 +292,14 @@ impl AndroidRuntime {
 
     pub async fn open_uris(&self, uris: Vec<String>) -> Result<(), AndroidError> {
         let queue = self.products.playback.clone();
-        let database = self.products.library.clone();
+        let catalog = self.products.library.clone();
         let local = self.products.settings.local_configuration();
         self.products
             .runtime
             .spawn(async move {
                 rufin_core::open::arguments(
                     queue,
-                    &database,
+                    &catalog,
                     local.as_ref(),
                     uris.into_iter().map(Into::into).collect(),
                 )

@@ -3,7 +3,7 @@
 
 use sqlx::{Connection, Sqlite, Transaction, sqlite::SqliteConnection};
 
-use crate::{Database, LibraryError, LibraryResult, ReadCancellation};
+use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation};
 
 /// Sparse source facts. An absent field leaves the stored value alone.
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -61,7 +61,7 @@ impl FavoriteTarget {
     }
 }
 
-impl Database {
+impl Catalog {
     pub async fn favorite(&self, target: &FavoriteTarget) -> LibraryResult<bool> {
         let mut connection = self.acquire_reader().await?;
         let mut transaction = connection.begin().await?;
@@ -306,7 +306,7 @@ pub struct UserMediaStateWrite {
     pub rating: Option<i64>,
 }
 
-impl Database {
+impl Catalog {
     pub async fn import_user_media_state_jsonl(
         &self,
         input: impl std::io::BufRead,

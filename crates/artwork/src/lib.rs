@@ -312,10 +312,10 @@ impl Artwork {
 
     pub async fn clear_cache(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
         active_media_uris: &[String],
     ) -> Result<(), ArtworkError> {
-        let mut retention = database.artwork_cache_retention(active_media_uris).await?;
+        let mut retention = catalog.artwork_cache_retention(active_media_uris).await?;
         loop {
             let bindings = retention.next_bindings().await?;
             if bindings.is_empty() {
@@ -398,8 +398,8 @@ impl Artwork {
         self.pipeline.cache_revision()
     }
 
-    pub fn install_database(&self, database: Arc<library::Database>) {
-        self.pipeline.install_database(database);
+    pub fn install_catalog(&self, catalog: Arc<library::Catalog>) {
+        self.pipeline.install_catalog(catalog);
     }
     pub fn new(cache_root: impl AsRef<Path>, runtime: Handle) -> Result<Self, ArtworkError> {
         let cache_root = cache::current_layout(cache_root.as_ref())?;
@@ -627,10 +627,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("covers");
         let artwork = Artwork::new(&root, Handle::current()).unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite3"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite3"))
             .await
             .unwrap();
-        artwork.install_database(Arc::new(database.clone()));
+        artwork.install_catalog(Arc::new(catalog.clone()));
         let encoded = sources::native_artwork_binding(
             "source",
             &sources::NativeImageRef::new("cover", Some("revision".into())),
@@ -717,12 +717,12 @@ mod tests {
             "display size does not trigger another source request"
         );
 
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "server", "Source")
             .await
             .unwrap();
-        database
-            .catalog("source", None)
+        catalog
+            .observe("source", None)
             .await
             .unwrap()
             .apply_catalog(
@@ -739,7 +739,7 @@ mod tests {
             .await
             .unwrap();
         let uri = library::source_entity_uri(&SourceId::new("source"), "track", "track");
-        let before = database
+        let before = catalog
             .artwork_bindings(
                 std::slice::from_ref(&uri),
                 &library::ReadCancellation::new(),
@@ -755,13 +755,13 @@ mod tests {
                 .is_some()
         );
         let (updates, mut received) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, change| {
+        catalog.observe_catalog(move |_, change| {
             let _ = updates.send(change);
             std::future::ready(())
         });
         let update = {
-            let mut catalog = database.catalog("source", None).await.unwrap();
-            catalog
+            let mut observation = catalog.observe("source", None).await.unwrap();
+            observation
                 .apply_catalog(
                     &library::CatalogBatch {
                         tracks: vec![library::TrackObservation {
@@ -775,16 +775,16 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            catalog.into_changes()
+            observation.into_changes()
         };
         assert!(
             !update.changed(),
             "unchanged artwork must not invalidate catalog rows: {update:?}"
         );
-        database.publish_catalog_update("source", update).await;
+        catalog.publish_catalog_update("source", update).await;
         assert!(received.try_recv().is_err());
         assert_eq!(
-            database
+            catalog
                 .artwork_bindings(
                     std::slice::from_ref(&uri),
                     &library::ReadCancellation::new()
@@ -811,7 +811,7 @@ mod tests {
         cache.mark_missing(candidate).unwrap();
         artwork
             .clear_cache(
-                &database,
+                &catalog,
                 &[library::source_entity_uri(
                     &SourceId::new("source"),
                     "track",
@@ -824,11 +824,11 @@ mod tests {
         assert!(!discarded.exists());
         assert!(!cache.is_missing(candidate));
         assert_eq!(artwork.key(&request), key);
-        artwork.clear_cache(&database, &[]).await.unwrap();
+        artwork.clear_cache(&catalog, &[]).await.unwrap();
         assert!(!original.exists());
         let reopened = Artwork::new(&root, Handle::current()).unwrap();
-        reopened.install_database(Arc::new(database.clone()));
-        let restored = database
+        reopened.install_catalog(Arc::new(catalog.clone()));
+        let restored = catalog
             .artwork_bindings(
                 &[library::source_entity_uri(
                     &SourceId::new("source"),

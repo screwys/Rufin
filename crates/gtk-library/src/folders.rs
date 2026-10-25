@@ -136,18 +136,18 @@ fn folder_page(
         .map(library::MemberRow::into_track)
         .collect::<Vec<_>>();
     let applied_query = Rc::new(RefCell::new(query.clone()));
-    let database = Arc::clone(&shell.library);
+    let catalog = Arc::clone(&shell.library);
     let source_key = selected.source_key;
     let folder_source = source.clone();
     let folder_query = Rc::clone(&applied_query);
     let folder_load = Rc::new(
         move |_: Vec<FolderLink>, range: std::ops::Range<usize>, cancellation: ReadCancellation| {
-            let database = Arc::clone(&database);
+            let catalog = Arc::clone(&catalog);
             let source = folder_source.clone();
             let query = folder_query.borrow().clone();
             Box::pin(async move {
                 Ok(source
-                    .child_page(&database, source_key, &query, range, &cancellation)
+                    .child_page(&catalog, source_key, &query, range, &cancellation)
                     .await
                     .map_err(|error| error.to_string())?
                     .1
@@ -181,17 +181,17 @@ fn folder_page(
         .current
         .borrow()
         .library_list(LibraryListKey::Folders);
-    let row_database = Arc::clone(&shell.library);
+    let row_catalog = Arc::clone(&shell.library);
     let load_input = Rc::clone(&applied_query);
     let track_load = Rc::new(
         move |_: Vec<library::TrackKey>,
               range: std::ops::Range<usize>,
               cancellation: ReadCancellation| {
-            let database = Arc::clone(&row_database);
+            let catalog = Arc::clone(&row_catalog);
             let query = load_input.borrow().clone();
             Box::pin(async move {
                 Ok(query
-                    .rows(&database, range.start, range.len(), &cancellation)
+                    .rows(&catalog, range.start, range.len(), &cancellation)
                     .await
                     .map(|rows| {
                         rows.into_iter()
@@ -306,15 +306,15 @@ fn folder_page(
             },
         )
     };
-    let database = Arc::clone(&shell.library);
+    let catalog = Arc::clone(&shell.library);
     let load = Arc::new(
         move |(query, window): (library::MemberRead, library::RouteSeedWindow),
               cancellation: ReadCancellation| {
-            let database = Arc::clone(&database);
+            let catalog = Arc::clone(&catalog);
             let source = source.clone();
             Box::pin(async move {
                 rufin_core::browse::FolderPage::load(
-                    &database,
+                    &catalog,
                     source_key,
                     source,
                     query,

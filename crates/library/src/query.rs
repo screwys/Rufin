@@ -152,7 +152,7 @@ pub struct CatalogIdentity {
     pub media_uri: String,
 }
 
-impl Database {
+impl Catalog {
     pub async fn catalog_identity(
         &self,
         kind: CatalogKind,
@@ -218,16 +218,16 @@ impl MemberRead {
     }
     pub async fn count(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<usize> {
-        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let (_permit, mut connection) = catalog.acquire_general(cancellation).await?;
         let query = member_query_on(&mut connection, self).await?;
         member_count(&mut connection, self, &query).await
     }
     pub async fn rows(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         offset: usize,
         limit: usize,
         cancellation: &ReadCancellation,
@@ -235,7 +235,7 @@ impl MemberRead {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let (_permit, mut connection) = catalog.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let query = member_query_on(&mut transaction, self).await?;
         let rows = member_rows(&mut transaction, self, &query, offset, limit.min(256)).await?;
@@ -244,11 +244,11 @@ impl MemberRead {
     }
     pub async fn page(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         window: RouteSeedWindow,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Page<MemberRow>> {
-        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let (_permit, mut connection) = catalog.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let query = member_query_on(&mut transaction, self).await?;
         let count = member_count(&mut transaction, self, &query).await?;
@@ -263,10 +263,10 @@ impl MemberRead {
     }
     pub async fn sections(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<ScrollSection>> {
-        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let (_permit, mut connection) = catalog.acquire_general(cancellation).await?;
         member_query_on(&mut connection, self)
             .await?
             .sections(&mut connection)
@@ -274,10 +274,10 @@ impl MemberRead {
     }
     pub async fn disc_sections(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<(u32, i64)>> {
-        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let (_permit, mut connection) = catalog.acquire_general(cancellation).await?;
         let query = member_query_on(&mut connection, self).await?;
         crate::collections::album_disc_sections(
             &query,
@@ -335,10 +335,10 @@ impl ListRead {
     }
     pub async fn artist_release_counts(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<[usize; 6]> {
-        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let (_permit, mut connection) = catalog.acquire_general(cancellation).await?;
         let query = list_query_on(&mut connection, self).await?;
         let rows = sqlx::query_as_with::<_, (i64, i64), _>(
             sqlx::AssertSqlSafe(format!(
@@ -357,10 +357,10 @@ impl ListRead {
     }
     pub async fn count(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<usize> {
-        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let (_permit, mut connection) = catalog.acquire_general(cancellation).await?;
         let mut read = self.clone();
         if matches!(read.kind, ListKind::SmartPlaylists { .. }) {
             read.sort = CatalogSort::Title;
@@ -370,10 +370,10 @@ impl ListRead {
     }
     pub async fn sections(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<ScrollSection>> {
-        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let (_permit, mut connection) = catalog.acquire_general(cancellation).await?;
         list_query_on(&mut connection, self)
             .await?
             .sections(&mut connection)
@@ -387,12 +387,12 @@ macro_rules! list_windows {
         impl ListRead {
             pub async fn $rows(
                 &self,
-                database: &Database,
+                catalog: &Catalog,
                 offset: usize,
                 limit: usize,
                 cancellation: &ReadCancellation,
             ) -> LibraryResult<Vec<$row>> {
-                let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+                let (_permit, mut connection) = catalog.acquire_general(cancellation).await?;
                 let mut transaction = connection.begin().await?;
                 let query = list_query_on(&mut transaction, self).await?;
                 let rows = {
@@ -406,11 +406,11 @@ macro_rules! list_windows {
             }
             $(pub async fn $page(
                 &self,
-                database: &Database,
+                catalog: &Catalog,
                 window: RouteSeedWindow,
                 cancellation: &ReadCancellation,
             ) -> LibraryResult<Page<$row>> {
-                let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+                let (_permit, mut connection) = catalog.acquire_general(cancellation).await?;
                 let mut transaction = connection.begin().await?;
                 let query = list_query_on(&mut transaction, self).await?;
                 let count = list_count(&mut transaction, self, &query).await?;
@@ -448,7 +448,7 @@ list_windows!(moods, page_moods, MoodView, connection, read, requested => {
     crate::collections::load_mood_requested(connection, requested, read.folder)
 });
 list_windows!(playlists, , PlaylistRow, connection, _read, requested => {
-    Database::load_playlist_requested(connection, requested)
+    Catalog::load_playlist_requested(connection, requested)
 });
 list_windows!(playlist_items, page_playlist_items, PlaylistListRow, connection, read, requested => {
     crate::playlist_folders::load_items_on(connection, read, requested)
@@ -847,7 +847,7 @@ where
     Ok(rows)
 }
 
-impl Database {
+impl Catalog {
     pub async fn track(
         &self,
         uri: &str,
@@ -930,7 +930,7 @@ impl Database {
 
 macro_rules! collection_points {
     ($point:ident,$batch:ident,$kind:ident,$key:ty,$row:ty,$load:ident, $( $argument:ident : $argument_type:ty ),*) => {
-        impl Database {
+        impl Catalog {
             pub async fn $point(&self, uri: &str, $( $argument:$argument_type, )* cancellation: &ReadCancellation) -> LibraryResult<Option<$row>> {
                 let (_permit,mut connection)=self.acquire_general(cancellation).await?;
                 Ok(crate::collections::$load(&mut connection,RequestedKeys::uris(CatalogKind::$kind,&[uri])?, $( $argument, )*).await?.pop())

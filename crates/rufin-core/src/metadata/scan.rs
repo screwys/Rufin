@@ -22,7 +22,7 @@ impl MetadataEditor {
         mode: metadata_lookup::CacheMode,
     ) -> Arc<metadata_lookup::LookupCache> {
         Arc::new(metadata_lookup::LookupCache::new(
-            self.source.shared.database.as_ref().clone(),
+            self.source.shared.catalog.as_ref().clone(),
             self.source.shared.runtime.clone(),
             mode,
         ))
@@ -74,20 +74,20 @@ impl MetadataEditor {
         report: &LookupProgress,
         cached_only: bool,
     ) -> Result<Option<AudioFingerprint>, Error> {
-        let database = &self.source.shared.database;
+        let catalog = &self.source.shared.catalog;
         let uri = &session.media_uri;
-        database
+        catalog
             .remember_media_uris(std::slice::from_ref(uri))
             .await
             .map_err(scan_error)?;
         let revision = match &session.destination {
             EditDestination::Files(files) => files.audio_revision().await?,
             EditDestination::Server { .. } => {
-                database.audio_analysis_key(uri).await.map_err(scan_error)?
+                catalog.audio_analysis_key(uri).await.map_err(scan_error)?
             }
         };
         let cached = if let Some(revision) = revision {
-            database
+            catalog
                 .fingerprint_cache(uri, &revision, FINGERPRINT_VERSION)
                 .await
                 .map_err(scan_error)?
@@ -104,7 +104,7 @@ impl MetadataEditor {
             let local = self.source.shared.settings.local_configuration();
             let owner = self.source.clone();
             let stream = crate::playback::prepare_stream(
-                database,
+                catalog,
                 StreamRequest::new(uri, StreamQuality::Original),
                 local.as_ref(),
                 None,
@@ -112,7 +112,7 @@ impl MetadataEditor {
             )
             .await
             .map_err(scan_error)?;
-            let duration = database
+            let duration = catalog
                 .track(uri, &ReadCancellation::new())
                 .await
                 .map_err(scan_error)?
@@ -128,7 +128,7 @@ impl MetadataEditor {
                 .map_err(scan_error)?
                 .map_err(scan_error)?;
             if let Some(revision) = revision {
-                database
+                catalog
                     .write_fingerprint_cache(
                         uri,
                         &revision,

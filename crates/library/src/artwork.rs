@@ -6,7 +6,7 @@ use md5_digest::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use sqlx::{Connection, QueryBuilder, Sqlite};
 
-use crate::{Database, FolderKey, LibraryError, LibraryResult, ReadCancellation, SourceKey};
+use crate::{Catalog, FolderKey, LibraryError, LibraryResult, ReadCancellation, SourceKey};
 
 const ARTWORK_PAGE_LIMIT: usize = 128;
 
@@ -688,7 +688,7 @@ impl ArtworkCacheRetention<'_> {
     }
 }
 
-impl Database {
+impl Catalog {
     pub async fn refresh_incomplete_playlist_artwork(
         &self,
         playlist: Option<crate::PlaylistKey>,
@@ -814,7 +814,7 @@ impl Database {
         active_media_uris: &[String],
     ) -> LibraryResult<ArtworkCacheRetention<'_>> {
         let (permit, mut connection) = self.acquire_export().await?;
-        // The main database stays read-only. Temporary rows live only on this connection.
+        // The main Store stays read-only. Temporary rows live only on this connection.
         connection.close_on_drop();
         sqlx::raw_sql("PRAGMA query_only=OFF; CREATE TEMP TABLE retained_artwork_families(family TEXT PRIMARY KEY) WITHOUT ROWID;")
             .execute(&mut *connection).await?;

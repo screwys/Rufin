@@ -10,7 +10,7 @@ use playback::{
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn canceled_queue_preparation_publishes_loading_completion() {
-    let (_directory, _database, sequence, owner, commands, _mailbox, _inbox) =
+    let (_directory, _catalog, sequence, owner, commands, _mailbox, _inbox) =
         seeded(Vec::new()).await;
     let (playback, _) = Playback::start(
         sequence,
@@ -55,7 +55,7 @@ async fn canceled_queue_preparation_publishes_loading_completion() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn repeated_operation_failures_publish_notices_without_a_current_track() {
-    let (_directory, _database, sequence, owner, commands, _mailbox, _inbox) =
+    let (_directory, _catalog, sequence, owner, commands, _mailbox, _inbox) =
         seeded(Vec::new()).await;
     let (playback, _) = Playback::start(
         sequence,
@@ -91,7 +91,7 @@ async fn repeated_operation_failures_publish_notices_without_a_current_track() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stream_and_backend_failures_publish_notices_and_keep_diagnostics() {
     for backend_failure in [false, true] {
-        let (_directory, _database, sequence, owner, commands, _mailbox, _inbox) = seeded(vec![(
+        let (_directory, _catalog, sequence, owner, commands, _mailbox, _inbox) = seeded(vec![(
             TrackReference::direct(
                 "https://example.test/track",
                 "Track",
@@ -175,7 +175,7 @@ async fn published_queue_snapshot(
         tokio::task::spawn_blocking(move || done.recv().unwrap())
             .await
             .unwrap();
-        return owner.database.restore_queue().await.unwrap();
+        return owner.catalog.restore_queue().await.unwrap();
     }
 }
 
@@ -204,7 +204,7 @@ fn replace_queue(owner: &PlaybackOwner, prefix: &str, count: usize) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runtime_queue_edits_publish_restorable_bounded_snapshots() {
-    let (_directory, database, sequence, owner, commands, _mailbox, _inbox) =
+    let (_directory, catalog, sequence, owner, commands, _mailbox, _inbox) =
         seeded(Vec::new()).await;
     let (playback, _) = Playback::start(
         sequence,
@@ -278,7 +278,7 @@ async fn runtime_queue_edits_publish_restorable_bounded_snapshots() {
     playback.projection().unwrap();
     let projection = updates.recv().await.unwrap().unwrap();
     assert_eq!(projection.view.controls.volume, 0.137);
-    let after_volume = database.restore_queue().await.unwrap();
+    let after_volume = catalog.restore_queue().await.unwrap();
     assert_eq!(after_volume.entries, before_volume.entries);
     assert_eq!(after_volume.order, before_volume.order);
     assert_eq!(after_volume.current_index, before_volume.current_index);

@@ -260,17 +260,17 @@ impl Shell {
             let Some(path) = file.path() else {
                 return;
             };
-            let database = Arc::clone(&shell.products.library);
+            let catalog = Arc::clone(&shell.products.library);
             let task = shell.products.runtime.spawn(async move {
                 let mut output = std::io::BufWriter::new(std::fs::File::create(path)?);
                 let count = match format {
                     Some(format) => {
-                        database
+                        catalog
                             .export_activity_csv(&mut output, format, source_id.as_ref())
                             .await
                     }
                     None => {
-                        database
+                        catalog
                             .export_activity_jsonl(&mut output, source_id.as_ref())
                             .await
                     }

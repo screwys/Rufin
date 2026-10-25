@@ -150,7 +150,7 @@ pub(crate) async fn write_home_on(
     Ok(update)
 }
 
-impl Database {
+impl Catalog {
     pub async fn source_contains_entity(
         &self,
         source_id: &str,
@@ -199,7 +199,7 @@ impl Database {
     }
 }
 
-impl super::Catalog<'_> {
+impl super::Observation<'_> {
     pub async fn replace_source_home_section(
         &mut self,
         section: &str,
@@ -218,7 +218,7 @@ impl super::Catalog<'_> {
         after: i64,
         last: bool,
     ) -> LibraryResult<()> {
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut tx = writer.begin().await?;
         let update = write_home_on(
             &mut tx,
@@ -242,7 +242,7 @@ impl super::Catalog<'_> {
         complete: bool,
     ) -> LibraryResult<()> {
         let source_id = self.source_id;
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut tx = writer.begin().await?;
         let source = self.source.raw();
         let playlist:i64=sqlx::query_scalar("SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=?2 AND owner='source'").bind(source).bind(id).fetch_one(&mut *tx).await?;
@@ -296,7 +296,7 @@ impl super::Catalog<'_> {
         kind: &str,
         rows: &[(String, NativeUserState)],
     ) -> LibraryResult<()> {
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut tx = writer.begin().await?;
         let source = self.source.raw();
         let update = super::cache::users(
@@ -319,7 +319,7 @@ impl super::Catalog<'_> {
         kind: &str,
         ids: &[String],
     ) -> LibraryResult<()> {
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut tx = writer.begin().await?;
         let source = self.source.raw();
         let (table, _) = super::cache::table(kind);
@@ -331,7 +331,7 @@ impl super::Catalog<'_> {
     }
     pub async fn remove_source_items(&mut self, kind: &str, ids: &[String]) -> LibraryResult<()> {
         for page in ids.chunks(128) {
-            let mut writer = self.database.writer().await?;
+            let mut writer = self.catalog.writer().await?;
             let mut tx = writer.begin().await?;
             let update =
                 remove_items_on(&mut tx, self.source.raw(), kind, page, self.observed, false)
@@ -348,7 +348,7 @@ impl super::Catalog<'_> {
     ) -> LibraryResult<()> {
         let mut update = CatalogUpdate::default();
         loop {
-            let mut writer = self.database.writer().await?;
+            let mut writer = self.catalog.writer().await?;
             let mut tx = writer.begin().await?;
             let source = self.source.raw();
             let result = &mut update;
@@ -381,7 +381,7 @@ impl super::Catalog<'_> {
         revision: Option<&str>,
         valid_until: Option<i64>,
     ) -> LibraryResult<()> {
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut tx = writer.begin().await?;
         let source = self.source.raw();
         sqlx::query("UPDATE playlists SET provider_revision=?3,valid_until=?4 WHERE source_key=?1 AND object_id=?2 AND(provider_revision,valid_until) IS NOT(?3,?4)").bind(source).bind(id).bind(revision).bind(valid_until).execute(&mut *tx).await?;
@@ -393,7 +393,7 @@ impl super::Catalog<'_> {
         observed: i64,
         name: &str,
     ) -> LibraryResult<crate::PlaylistKey> {
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut tx = writer.begin().await?;
         let source = self.source.raw();
         let (key, _) = crate::playlists::create_playlist_identity(&mut tx, None, name).await?;
@@ -409,7 +409,7 @@ impl super::Catalog<'_> {
         id: &str,
         observed: i64,
     ) -> LibraryResult<()> {
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut tx = writer.begin().await?;
         let source = self.source.raw();
         let tracks:Vec<i64>=sqlx::query_scalar("DELETE FROM track_folders WHERE folder_key=(SELECT folder_key FROM folders WHERE source_key=?1 AND object_id=?2) AND observed_stamp<?3 RETURNING track_key").bind(source).bind(id).bind(observed).fetch_all(&mut *tx).await?;
@@ -419,14 +419,14 @@ impl super::Catalog<'_> {
     }
 }
 
-impl crate::Catalog<'_> {
+impl crate::Observation<'_> {
     pub async fn complete_source_home_sections(
         &mut self,
         prefix: &str,
         sections: &[String],
         retained_prefixes: &[String],
     ) -> LibraryResult<()> {
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut transaction = writer.begin().await?;
         let source = self.source;
         let removed = sqlx::query("DELETE FROM home_entries WHERE source_key=?1 AND substr(section_id,1,length(?2))=?2 AND section_id NOT IN(SELECT value FROM json_each(?3)) AND NOT EXISTS(SELECT 1 FROM json_each(?4) retained WHERE substr(section_id,1,length(retained.value))=retained.value)")

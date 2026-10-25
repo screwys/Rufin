@@ -76,7 +76,7 @@ struct AlbumDetailModelInner {
 }
 impl AlbumCollectionModels {
     pub fn new(
-        database: &Arc<library::Database>,
+        catalog: &Arc<library::Catalog>,
         runtime: &tokio::runtime::Handle,
         content: rufin_core::browse::AlbumListContent,
         request: Rc<RefCell<library::ListRead>>,
@@ -85,17 +85,17 @@ impl AlbumCollectionModels {
             rufin_core::browse::AlbumListContent::Detail { index, page } => {
                 let native = DetailRowsModel::new(Arc::new(DetailLayout::new(index, [0, 0])));
                 let reader = native.clone();
-                let database = database.clone();
+                let catalog = catalog.clone();
                 let rows = SparseRouteModel::new(
                     SparseSource::Query { count: page.count },
                     32,
                     runtime.clone(),
                     Rc::new(move |_, range, cancel| {
                         let index = reader.layout().index.clone();
-                        let database = database.clone();
+                        let catalog = catalog.clone();
                         Box::pin(async move {
                             index
-                                .rows(&database, range.start, range.len(), &cancel)
+                                .rows(&catalog, range.start, range.len(), &cancel)
                                 .await
                                 .map_err(|error| error.to_string())
                         })
@@ -125,16 +125,16 @@ impl AlbumCollectionModels {
             rows: first_rows,
         } = page;
         let read_request = request.clone();
-        let reader = database.clone();
+        let reader = catalog.clone();
         let rows = SparseRouteModel::new(
             SparseSource::Query { count },
             32,
             runtime.clone(),
             Rc::new(move |_, range, cancel| {
                 let read = read_request.borrow().clone();
-                let database = reader.clone();
+                let catalog = reader.clone();
                 Box::pin(async move {
-                    read.albums(&database, range.start, range.len(), &cancel)
+                    read.albums(&catalog, range.start, range.len(), &cancel)
                         .await
                         .map_err(|error| error.to_string())
                 })

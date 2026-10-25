@@ -4,7 +4,7 @@
 use sqlx::{Arguments, Connection, FromRow, SqliteConnection};
 
 use crate::{
-    AlbumKey, ArtistKey, CatalogSort, Database, FolderKey, GenreKey, LibraryError, LibraryResult,
+    AlbumKey, ArtistKey, Catalog, CatalogSort, FolderKey, GenreKey, LibraryError, LibraryResult,
     MoodKey, ReadCancellation, SourceKey, TrackView,
 };
 
@@ -183,7 +183,7 @@ pub enum AlbumReleaseResult {
     Missing,
 }
 
-impl Database {
+impl Catalog {
     pub async fn ordered_name_sections<'a>(
         &self,
         names: impl Iterator<Item = &'a str>,
@@ -1048,10 +1048,10 @@ pub struct AlbumDetailIndex {
 impl crate::ListRead {
     pub async fn album_detail_index(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<std::sync::Arc<AlbumDetailIndex>> {
-        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let (_permit, mut connection) = catalog.acquire_general(cancellation).await?;
         let relation = collection_query(self);
         let count = album_summary_field("track_count", self.folder);
         let facts=sqlx::query_as_with::<_,(AlbumKey,i64,bool),_>(sqlx::AssertSqlSafe(relation.select(&format!("album.album_key,{count},EXISTS(SELECT 1 FROM album_genres WHERE album_key=album.album_key)"))),relation.arguments).fetch_all(&mut *connection).await?;
@@ -1092,7 +1092,7 @@ impl AlbumDetailIndex {
     }
     pub async fn page(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         window: crate::RouteSeedWindow,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<crate::Page<AlbumDetailRow>> {
@@ -1101,13 +1101,13 @@ impl AlbumDetailIndex {
             count: self.count,
             first_row_position: range.start,
             rows: self
-                .rows(database, range.start, range.len(), cancellation)
+                .rows(catalog, range.start, range.len(), cancellation)
                 .await?,
         })
     }
     pub async fn rows(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         offset: usize,
         limit: usize,
         cancellation: &ReadCancellation,
@@ -1125,7 +1125,7 @@ impl AlbumDetailIndex {
             .take_while(|album| album.first < end)
             .map(|album| (album.key, album.count as i64, album.first as i64))
             .collect();
-        let (_permit, mut connection) = database.acquire_general(cancellation).await?;
+        let (_permit, mut connection) = catalog.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let rows =
             load_album_detail_spans(&mut transaction, &self.read, offset, limit.min(256), spans)

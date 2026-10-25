@@ -15,26 +15,26 @@ pub(crate) enum FetchOutcome {
 #[derive(Clone)]
 pub(crate) struct FetchContext {
     source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>,
-    database: Arc<Mutex<Option<Arc<library::Database>>>>,
+    catalog: Arc<Mutex<Option<Arc<library::Catalog>>>>,
 }
 
 impl FetchContext {
     pub(crate) fn new(source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>) -> Self {
         Self {
             source_resolver,
-            database: Arc::new(Mutex::new(None)),
+            catalog: Arc::new(Mutex::new(None)),
         }
     }
 
-    pub(crate) fn install_database(&self, database: Arc<library::Database>) {
+    pub(crate) fn install_catalog(&self, catalog: Arc<library::Catalog>) {
         *self
-            .database
+            .catalog
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(database);
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(catalog);
     }
 
-    pub(crate) fn database(&self) -> Option<Arc<library::Database>> {
-        self.database
+    pub(crate) fn catalog(&self) -> Option<Arc<library::Catalog>> {
+        self.catalog
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone()
@@ -59,11 +59,11 @@ impl FetchContext {
     ) -> Result<FetchOutcome, String> {
         match &candidate.image {
             library::ArtworkImage::Playlist { .. } => {
-                let database = self
-                    .database()
+                let catalog = self
+                    .catalog()
                     .ok_or_else(|| "Playlist artwork storage is unavailable".to_string())?;
                 runtime
-                    .block_on(database.playlist_image(&candidate.image))
+                    .block_on(catalog.playlist_image(&candidate.image))
                     .map(|bytes| {
                         bytes
                             .map(FetchOutcome::Ready)

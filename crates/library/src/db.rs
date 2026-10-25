@@ -69,7 +69,7 @@ type CatalogObserver = dyn Fn(
     + Send
     + Sync;
 
-struct DatabaseInner {
+struct CatalogInner {
     path: PathBuf,
     writer: Arc<Mutex<Option<SqliteConnection>>>,
     readers: SqlitePool,
@@ -83,11 +83,11 @@ struct DatabaseInner {
 
 /// Final ownership of one fixed writer and the bounded read-only pool.
 #[derive(Clone)]
-pub struct Database {
-    inner: Arc<DatabaseInner>,
+pub struct Catalog {
+    inner: Arc<CatalogInner>,
 }
 
-/// Holds the writer lock. `Database::writer` creates it only while the writer is open.
+/// Holds the writer lock. `Catalog::writer` creates it only while the writer is open.
 pub(crate) struct WriterGuard<'a>(tokio::sync::MutexGuard<'a, Option<SqliteConnection>>);
 
 impl std::ops::Deref for WriterGuard<'_> {
@@ -104,7 +104,7 @@ impl std::ops::DerefMut for WriterGuard<'_> {
     }
 }
 
-impl Database {
+impl Catalog {
     pub fn path(&self) -> &Path {
         &self.inner.path
     }
@@ -249,7 +249,7 @@ impl Database {
         let readers = open_readers(path, MIN_READERS, MAX_READERS, ROW_BUFFER).await?;
         let export_readers = open_readers(path, 0, 1, 1).await?;
         Ok(Self {
-            inner: Arc::new(DatabaseInner {
+            inner: Arc::new(CatalogInner {
                 path: path.to_owned(),
                 writer: Arc::new(Mutex::new(Some(writer))),
                 readers,
@@ -365,7 +365,7 @@ impl Database {
     ) -> LibraryResult<(OwnedSemaphorePermit, PoolConnection<Sqlite>)> {
         let permit = tokio::select! {
             permit = Arc::clone(&self.inner.general_read).acquire_owned() => {
-                permit.expect("Database retains the general-read semaphore")
+                permit.expect("Catalog retains the general-read semaphore")
             }
             () = cancellation.cancelled() => return Err(LibraryError::ReadCancelled),
         };
@@ -555,55 +555,55 @@ mod tests {
     use sqlx::Row;
     use tokio::time::{Instant, sleep, timeout};
 
-    async fn database() -> (tempfile::TempDir, Database) {
+    async fn catalog() -> (tempfile::TempDir, Catalog) {
         let directory = tempfile::tempdir().expect("temporary Store directory");
-        let database = Database::open(directory.path().join("library.sqlite3"))
+        let catalog = Catalog::open(directory.path().join("library.sqlite3"))
             .await
             .expect("open SQLx Library");
-        (directory, database)
+        (directory, catalog)
     }
 
     #[tokio::test]
     async fn close_waits_for_exports_and_closes_both_reader_pools() {
         use futures_util::FutureExt;
 
-        let (_directory, database) = database().await;
-        let export = database.acquire_export().await.unwrap();
-        let mut closing = Box::pin(database.clone().close());
+        let (_directory, catalog) = catalog().await;
+        let export = catalog.acquire_export().await.unwrap();
+        let mut closing = Box::pin(catalog.clone().close());
         assert!(closing.as_mut().now_or_never().is_none());
-        assert!(database.inner.readers.is_closed());
-        assert!(database.inner.export_readers.is_closed());
+        assert!(catalog.inner.readers.is_closed());
+        assert!(catalog.inner.export_readers.is_closed());
         drop(export);
         timeout(Duration::from_secs(1), closing)
             .await
             .unwrap()
             .unwrap();
-        assert!(database.acquire_export().await.is_err());
+        assert!(catalog.acquire_export().await.is_err());
     }
 
     #[tokio::test]
     async fn fixed_writer_and_steady_reader_have_explicit_limits() {
-        let (_directory, database) = database().await;
-        assert_eq!(database.reader_pool().size(), MIN_READERS);
+        let (_directory, catalog) = catalog().await;
+        assert_eq!(catalog.reader_pool().size(), MIN_READERS);
         assert_eq!(
-            database.reader_pool().options().get_min_connections(),
+            catalog.reader_pool().options().get_min_connections(),
             MIN_READERS
         );
         assert_eq!(
-            database.reader_pool().options().get_max_connections(),
+            catalog.reader_pool().options().get_max_connections(),
             MAX_READERS
         );
         assert_eq!(
-            database.reader_pool().options().get_acquire_timeout(),
+            catalog.reader_pool().options().get_acquire_timeout(),
             ACQUIRE_TIMEOUT
         );
         assert_eq!(
-            database.reader_pool().options().get_idle_timeout(),
+            catalog.reader_pool().options().get_idle_timeout(),
             Some(READER_IDLE_TIMEOUT)
         );
 
         let cancellation = ReadCancellation::new();
-        let (_permit, mut reader) = database
+        let (_permit, mut reader) = catalog
             .acquire_general(&cancellation)
             .await
             .expect("acquire general reader");
@@ -636,7 +636,7 @@ mod tests {
             "pooled reader accepted a write"
         );
 
-        let mut writer = database.writer().await.expect("acquire fixed writer");
+        let mut writer = catalog.writer().await.expect("acquire fixed writer");
         let writer_options = sqlx::query_as::<_, (String, i64)>(
             "SELECT
                  (SELECT journal_mode FROM pragma_journal_mode),
@@ -662,18 +662,18 @@ mod tests {
 
     #[tokio::test]
     async fn playback_bypass_uses_second_slot_but_third_general_read_waits_fairly() {
-        let (_directory, database) = database().await;
-        let mut writer = database.writer().await.unwrap();
+        let (_directory, catalog) = catalog().await;
+        let mut writer = catalog.writer().await.unwrap();
         sqlx::raw_sql("INSERT INTO sources(object_id,kind) VALUES('source','local'); INSERT INTO tracks(source_key,object_id,media_uri) SELECT source_key,'track','file:///point.flac' FROM sources WHERE object_id='source'")
             .execute(&mut *writer).await.unwrap();
         drop(writer);
         let cancellation = ReadCancellation::new();
-        let (permit, general) = database
+        let (permit, general) = catalog
             .acquire_general(&cancellation)
             .await
             .expect("acquire suspended general read");
 
-        let mut playback = database
+        let mut playback = catalog
             .acquire_reader()
             .await
             .expect("acquire Playback bypass");
@@ -684,11 +684,11 @@ mod tests {
                 .expect("run Playback point read"),
             1
         );
-        assert_eq!(database.reader_pool().size(), MAX_READERS);
+        assert_eq!(catalog.reader_pool().size(), MAX_READERS);
 
-        let waiting_database = database.clone();
+        let waiting_catalog = catalog.clone();
         let waiting = tokio::spawn(async move {
-            waiting_database
+            waiting_catalog
                 .acquire_general(&ReadCancellation::new())
                 .await
         });
@@ -701,7 +701,7 @@ mod tests {
         assert_eq!(
             timeout(
                 Duration::from_secs(1),
-                database.playback_loudness("file:///not-present", &cancellation)
+                catalog.playback_loudness("file:///not-present", &cancellation)
             )
             .await
             .expect("cached gain bypasses the browsing permit")
@@ -721,7 +721,7 @@ mod tests {
         })).unwrap();
         timeout(
             Duration::from_secs(1),
-            database.record_listen(&listen, Some(crate::TrackKey::from_raw(1)), &[]),
+            catalog.record_listen(&listen, Some(crate::TrackKey::from_raw(1)), &[]),
         )
         .await
         .expect("accepted listen does not wait on the browsing permit")
@@ -738,13 +738,13 @@ mod tests {
 
     #[tokio::test]
     async fn cancelled_general_read_returns_a_clean_usable_connection() {
-        let (_directory, database) = database().await;
+        let (_directory, catalog) = catalog().await;
         let cancellation = ReadCancellation::new();
-        let task_database = database.clone();
+        let task_catalog = catalog.clone();
         let task_cancellation = cancellation.clone();
         let read = tokio::spawn(async move {
             let (_permit, mut connection) =
-                task_database.acquire_general(&task_cancellation).await?;
+                task_catalog.acquire_general(&task_cancellation).await?;
             sqlx::query_scalar::<_, i64>(
                 "WITH RECURSIVE count(value) AS (
                      VALUES(0) UNION ALL SELECT value + 1 FROM count
@@ -763,7 +763,7 @@ mod tests {
             .expect_err("progress handler interrupted the read");
         assert!(error.to_string().contains("interrupted"), "{error}");
 
-        let (_permit, mut connection) = database
+        let (_permit, mut connection) = catalog
             .acquire_general(&ReadCancellation::new())
             .await
             .expect("reacquire cleaned reader");
@@ -778,18 +778,18 @@ mod tests {
 
     #[tokio::test]
     async fn dynamic_reader_skips_journal_mode_and_is_idle_reapable() {
-        let (directory, database) = database().await;
+        let (directory, catalog) = catalog().await;
         let cancellation = ReadCancellation::new();
-        let (_permit, general) = database
+        let (_permit, general) = catalog
             .acquire_general(&cancellation)
             .await
             .expect("hold steady reader");
-        let mut writer = database.writer().await.expect("acquire writer");
+        let mut writer = catalog.writer().await.expect("acquire writer");
         sqlx::raw_sql("BEGIN IMMEDIATE")
             .execute(&mut *writer)
             .await
             .expect("hold writer transaction");
-        let mut optional = database
+        let mut optional = catalog
             .acquire_reader()
             .await
             .expect("open optional reader without journal write");
@@ -808,7 +808,7 @@ mod tests {
         drop(optional);
         drop(general);
         assert_eq!(
-            database.reader_pool().options().get_idle_timeout(),
+            catalog.reader_pool().options().get_idle_timeout(),
             Some(READER_IDLE_TIMEOUT)
         );
 
@@ -833,15 +833,15 @@ mod tests {
 
     #[tokio::test]
     async fn reader_replacement_preserves_idempotent_reads() {
-        let (_directory, database) = database().await;
+        let (_directory, catalog) = catalog().await;
         {
-            let mut writer = database.writer().await.expect("acquire writer");
+            let mut writer = catalog.writer().await.expect("acquire writer");
             sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('source','Source','source',zeroblob(32))")
                 .execute(&mut *writer)
                 .await
                 .expect("insert idempotent read row");
         }
-        let mut reader = database
+        let mut reader = catalog
             .acquire_reader()
             .await
             .expect("acquire reader to replace");
@@ -856,10 +856,10 @@ mod tests {
         drop(reader);
 
         let deadline = Instant::now() + Duration::from_secs(2);
-        while database.reader_pool().size() < MIN_READERS && Instant::now() < deadline {
+        while catalog.reader_pool().size() < MIN_READERS && Instant::now() < deadline {
             sleep(Duration::from_millis(20)).await;
         }
-        let mut replacement = database
+        let mut replacement = catalog
             .acquire_reader()
             .await
             .expect("acquire replacement reader");

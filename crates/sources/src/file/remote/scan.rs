@@ -79,7 +79,7 @@ impl FileSource {
 
     pub(crate) async fn read_saved_file(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
         media_uri: &str,
         relative: &str,
         input: &Arc<FileInputServer>,
@@ -94,7 +94,7 @@ impl FileSource {
             relative.to_owned()
         };
         let mut track = media::read_saved_media(temporary, display_path.into()).await?;
-        self.read_track_lyrics(database, relative, &mut track)
+        self.read_track_lyrics(catalog, relative, &mut track)
             .await?;
         track.observe_images(&mut observation)?;
         observation.state = LocalFileState::Accepted;
@@ -142,13 +142,13 @@ impl FileSource {
     }
     pub(crate) async fn acquire_catalog(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<usize> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
+        let catalog = observation.catalog;
+        let source_id = observation.source_id;
+        let stamp = observation.observed;
         let input = self.input().await?;
         let root_scope = self.location("")?;
         progress(SourceReadProgress {
@@ -167,7 +167,7 @@ impl FileSource {
                 ));
             }
             check_cancelled(cancelled)?;
-            catalog
+            observation
                 .write_file_observations(&[(root, vec![])], Vec::new(), true)
                 .await?;
         }
@@ -177,7 +177,7 @@ impl FileSource {
         let mut after = None;
         loop {
             check_cancelled(cancelled)?;
-            let Some(directory) = database
+            let Some(directory) = catalog
                 .source_next_directory(source_id, stamp, after.as_deref(), &root_scope)
                 .await?
             else {
@@ -191,7 +191,7 @@ impl FileSource {
             };
             completed += self
                 .acquire_directory(
-                    catalog,
+                    observation,
                     &input,
                     &directory,
                     Arc::clone(&workers[0]),
@@ -203,11 +203,11 @@ impl FileSource {
             after = Some(directory);
         }
         completed = self
-            .acquire_media_files(catalog, &workers, progress, cancelled, None, completed)
+            .acquire_media_files(observation, &workers, progress, cancelled, None, completed)
             .await?;
         if self.document_access().is_none() {
             crate::file::artwork::ArtworkFiles::Remote(self)
-                .acquire(catalog, cancelled)
+                .acquire(observation, cancelled)
                 .await?;
         }
         Ok(completed)
@@ -215,7 +215,7 @@ impl FileSource {
 
     pub(super) async fn acquire_directory(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         input: &Arc<FileInputServer>,
         directory: &str,
         worker: Arc<Mutex<media::Worker>>,
@@ -223,27 +223,27 @@ impl FileSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
         rename: Option<&(String, String)>,
     ) -> SourceResult<usize> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
+        let catalog = observation.catalog;
+        let source_id = observation.source_id;
         let unchanged = if matches!(input.input(), FileInput::WebDav(client) if client.recursive_etags())
         {
-            let mut observation = database
+            let mut file = catalog
                 .source_files(source_id, &[directory.to_owned()])
                 .await?
                 .pop()
                 .ok_or(SourceError::NotFound)?;
-            observation.parse_version = Some(self.directory_version);
-            catalog.observe_cached_file_tree(&observation).await?
+            file.parse_version = Some(self.directory_version);
+            observation.observe_cached_file_tree(&file).await?
         } else {
             false
         };
         if unchanged
             || self
-                .retain_synced_directory(catalog, input, directory, cancelled)
+                .retain_synced_directory(observation, input, directory, cancelled)
                 .await?
         {
             self.acquire_cues(
-                catalog,
+                observation,
                 Some(directory),
                 worker,
                 &|completed| {
@@ -259,7 +259,7 @@ impl FileSource {
             .await
         } else {
             self.list_directory(
-                catalog,
+                observation,
                 input,
                 &self.relative(directory)?,
                 worker,
@@ -273,16 +273,16 @@ impl FileSource {
 
     pub(super) async fn acquire_media_files(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         workers: &[Arc<Mutex<media::Worker>>; 4],
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
         rename: Option<&(String, String)>,
         mut completed: usize,
     ) -> SourceResult<usize> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
+        let catalog = observation.catalog;
+        let source_id = observation.source_id;
+        let stamp = observation.observed;
         let root = self.location("")?;
         let report = |completed| {
             progress(SourceReadProgress {
@@ -295,7 +295,7 @@ impl FileSource {
         let mut after = None;
         loop {
             check_cancelled(cancelled)?;
-            let observations = database
+            let observations = catalog
                 .source_file_page(
                     source_id,
                     LocalFileKind::Media,
@@ -309,12 +309,12 @@ impl FileSource {
                 break;
             }
             after = observations.last().map(|file| file.path.clone());
-            let candidates = database
+            let candidates = catalog
                 .source_file_reuse_candidates(source_id, &observations)
                 .await?;
             if self.document_access().is_some() {
                 self.observe_lyrics_dependencies(
-                    catalog,
+                    observation,
                     &candidates
                         .iter()
                         .flat_map(|file| file.dependencies.iter().cloned())
@@ -326,10 +326,10 @@ impl FileSource {
                 .iter()
                 .map(|file| file.path.clone())
                 .collect::<Vec<_>>();
-            let dependencies = database
+            let dependencies = catalog
                 .source_dependency_paths(source_id, &paths, stamp, true)
                 .await?;
-            let changed = database
+            let changed = catalog
                 .source_changed_file_dependencies(source_id, &paths)
                 .await?;
             let files = observations
@@ -360,7 +360,7 @@ impl FileSource {
                         let parsed = if dependency || reusable.is_some() || cancelled() {
                             None
                         } else {
-                            Some(self.read_audio(database, &file, worker).await)
+                            Some(self.read_audio(catalog, &file, worker).await)
                         };
                         (file, reusable, parsed)
                     }
@@ -399,7 +399,7 @@ impl FileSource {
                     {
                         let mut from = file.clone();
                         from.path = format!("{old}{suffix}");
-                        database
+                        catalog
                             .source_file_reuse_candidates(source_id, &[from])
                             .await?
                     } else {
@@ -414,7 +414,7 @@ impl FileSource {
                         });
                         let first = matches.next();
                         if matches.next().is_none()
-                            && database
+                            && catalog
                                 .source_file_native_paths(source_id, id, stamp)
                                 .await?
                                 == [file.path.clone()]
@@ -473,7 +473,7 @@ impl FileSource {
                 check_cancelled(cancelled)?;
                 if self.document_access().is_some() {
                     self.observe_lyrics_dependencies(
-                        catalog,
+                        observation,
                         &observations
                             .iter()
                             .flat_map(|(_, paths)| paths.iter().cloned())
@@ -481,7 +481,7 @@ impl FileSource {
                     )
                     .await?;
                 }
-                catalog
+                observation
                     .write_file_observations(&observations, accepted, true)
                     .await?;
                 report(completed);
@@ -493,24 +493,20 @@ impl FileSource {
 
     async fn retain_synced_directory(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         input: &FileInputServer,
         path: &str,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<bool> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
+        let catalog = observation.catalog;
+        let source_id = observation.source_id;
         let FileInput::WebDav(client) = input.input() else {
             return Ok(false);
         };
-        let Some(mut file) = database
-            .source_files(source_id, &[path.into()])
-            .await?
-            .pop()
-        else {
+        let Some(mut file) = catalog.source_files(source_id, &[path.into()]).await?.pop() else {
             return Ok(false);
         };
-        let previous = database
+        let previous = catalog
             .source_file_reuse_candidates(source_id, std::slice::from_ref(&file))
             .await?;
         let Some(token) = previous
@@ -545,11 +541,11 @@ impl FileSource {
             .await;
         match result {
             Ok(Some(_)) if !changed => {
-                catalog.observe_file_children(path).await?;
+                observation.observe_file_children(path).await?;
                 file.state = LocalFileState::Accepted;
                 file.parse_version = Some(self.directory_version);
                 check_cancelled(cancelled)?;
-                catalog
+                observation
                     .write_file_observations(&[(file, vec![])], Vec::new(), true)
                     .await?;
                 Ok(true)
@@ -565,7 +561,7 @@ impl FileSource {
 
     pub(crate) async fn read_audio(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
         file: &LocalFileWrite,
         worker: Arc<Mutex<media::Worker>>,
     ) -> SourceResult<media::MediaRead> {
@@ -611,7 +607,7 @@ impl FileSource {
         .await
         .map_err(|e| SourceError::Other(e.to_string()))?;
         if let media::MediaRead::Accepted(track) = &mut parsed {
-            if let Err(error) = self.read_track_lyrics(database, &relative, track).await {
+            if let Err(error) = self.read_track_lyrics(catalog, &relative, track).await {
                 tracing::warn!(%error, "Could not read file lyrics");
                 track.lyrics = None;
             }
@@ -621,7 +617,7 @@ impl FileSource {
 
     pub(crate) async fn list_directory(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         input: &Arc<FileInputServer>,
         relative: &str,
         worker: Arc<Mutex<media::Worker>>,
@@ -629,8 +625,8 @@ impl FileSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
         rename: Option<&(String, String)>,
     ) -> SourceResult<usize> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
+        let catalog = observation.catalog;
+        let source_id = observation.source_id;
         let (send, receive) = async_channel::bounded(128);
         let listing = async {
             match input.input() {
@@ -755,15 +751,15 @@ impl FileSource {
             while let Ok(file) = receive.recv().await {
                 check_cancelled(cancelled)?;
                 if file.kind == LocalFileKind::Cue {
-                    let previous = database
+                    let previous = catalog
                         .source_file_reuse_candidates(source_id, std::slice::from_ref(&file))
                         .await?;
-                    catalog
+                    observation
                         .write_file_observations(&[(file.clone(), vec![])], Vec::new(), true)
                         .await?;
                     completed += self
                         .acquire_cue_file(
-                            catalog,
+                            observation,
                             file,
                             &previous,
                             Arc::clone(&worker),
@@ -784,7 +780,7 @@ impl FileSource {
                 batch.push((file, vec![]));
                 if batch.len() == 128 {
                     check_cancelled(cancelled)?;
-                    catalog
+                    observation
                         .write_file_observations(&batch, Vec::new(), true)
                         .await?;
                     batch.clear();
@@ -797,7 +793,7 @@ impl FileSource {
             }
             if !batch.is_empty() {
                 check_cancelled(cancelled)?;
-                catalog
+                observation
                     .write_file_observations(&batch, Vec::new(), true)
                     .await?;
             }
@@ -809,7 +805,7 @@ impl FileSource {
             Ok::<_, SourceError>(completed)
         };
         let (_, completed) = tokio::try_join!(listing, staging)?;
-        if let Some(mut directory) = database
+        if let Some(mut directory) = catalog
             .source_files(source_id, &[self.location(relative)?])
             .await?
             .pop()
@@ -817,7 +813,7 @@ impl FileSource {
             directory.state = LocalFileState::Accepted;
             directory.parse_version = Some(self.directory_version);
             check_cancelled(cancelled)?;
-            catalog
+            observation
                 .write_file_observations(&[(directory, vec![])], Vec::new(), true)
                 .await?;
         }

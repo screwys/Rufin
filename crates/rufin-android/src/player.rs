@@ -164,7 +164,7 @@ impl AndroidPlayer {
         media_uri: String,
         origin_route: Option<rufin_core::route::Route>,
     ) -> Result<Option<AndroidPlayerMetadata>, AndroidError> {
-        let database = self.products.library.clone();
+        let catalog = self.products.library.clone();
         let source = self.products.source.clone();
         let selected = source.selected_library();
         self.products
@@ -179,7 +179,7 @@ impl AndroidPlayer {
                 let entity = library::source_entity_parts(&media_uri);
                 let (artists, album, source_id) = match entity {
                     Some((source, kind, _)) if kind == "album" => {
-                        let Some(album) = database
+                        let Some(album) = catalog
                             .album(&media_uri, false, &cancellation)
                             .await
                             .map_err(error)?
@@ -196,7 +196,7 @@ impl AndroidPlayer {
                         )
                     }
                     Some((source, kind, _)) if kind == "artist" => {
-                        let Some(artist) = database
+                        let Some(artist) = catalog
                             .artist(
                                 &media_uri,
                                 matches!(origin_route, Some(Route::AlbumArtistDetail(_))),
@@ -222,7 +222,7 @@ impl AndroidPlayer {
                         )
                     }
                     _ => {
-                        let Some(track) = database
+                        let Some(track) = catalog
                             .track(&media_uri, &cancellation)
                             .await
                             .map_err(error)?
@@ -292,7 +292,7 @@ impl AndroidPlayer {
                 let mut bindings = Vec::with_capacity(media_uris.len());
                 for window in media_uris.chunks(128) {
                     bindings.extend(
-                        database
+                        catalog
                             .artwork_bindings(window, &cancellation)
                             .await
                             .map_err(error)?,

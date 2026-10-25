@@ -92,17 +92,17 @@ impl ConnectOwner {
             if page.rows.is_empty() {
                 return Err("The source queue changed during transfer".into());
             }
-            self.database
+            self.catalog
                 .stage_queue_transfer_page(&transfer, &page)
                 .await
                 .map_err(error)?;
         }
         let mut queue = self
-            .database
+            .catalog
             .prepare_queue_transfer(&transfer, header.total, header.current)
             .await
             .map_err(error)?;
-        self.database
+        self.catalog
             .discard_queue_transfer(&transfer)
             .await
             .map_err(error)?;
@@ -187,7 +187,7 @@ impl ConnectOwner {
                     .await?;
             }
             let (input, anchor_index) = self
-                .database
+                .catalog
                 .queue_from_transfer(&transfer, header.total, header.current)
                 .await
                 .map_err(error)?;

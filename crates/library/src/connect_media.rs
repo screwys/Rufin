@@ -1,5 +1,5 @@
 //! Device-local representations of shared collection entries.
-use crate::{Database, LibraryResult, LocalFileWrite, LocalMediaLocation};
+use crate::{Catalog, LibraryResult, LocalFileWrite, LocalMediaLocation};
 use serde::{Deserialize, Serialize};
 use sqlx::Connection;
 
@@ -62,13 +62,13 @@ mod tests {
     async fn cue_receipts_share_the_backing_index_after_reopen() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("library.sqlite");
-        let database = Database::open(&path).await.unwrap();
+        let catalog = Catalog::open(&path).await.unwrap();
         let backing = url::Url::from_file_path(root.path().join("album.flac"))
             .unwrap()
             .to_string();
         std::fs::write(root.path().join("album.flac"), b"original").unwrap();
         let source_id = crate::SourceId::new("local");
-        database
+        catalog
             .reconcile_source(&source_id, "local", "Local")
             .await
             .unwrap();
@@ -80,8 +80,8 @@ mod tests {
                 (index + 1) * 1000,
             );
             if index == 0 {
-                database
-                    .catalog(source_id.as_str(), None)
+                catalog
+                    .observe(source_id.as_str(), None)
                     .await
                     .unwrap()
                     .apply_catalog(
@@ -97,7 +97,7 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                database
+                catalog
                     .write_local_access(
                         None,
                         &[&crate::LocalAccessWrite {
@@ -122,7 +122,7 @@ mod tests {
                     .await
                     .unwrap();
             }
-            database
+            catalog
                 .connect_save_media_file(&ConnectMediaFile {
                     media_uri: uri,
                     encoding: "original".into(),
@@ -134,18 +134,18 @@ mod tests {
                 .await
                 .unwrap();
         }
-        assert_eq!(database.downloaded_count(None).await.unwrap(), 1);
-        database.close().await.unwrap();
-        let database = Database::open(&path).await.unwrap();
+        assert_eq!(catalog.downloaded_count(None).await.unwrap(), 1);
+        catalog.close().await.unwrap();
+        let catalog = Catalog::open(&path).await.unwrap();
         assert_eq!(
-            database
+            catalog
                 .downloaded_count(Some(source_id.as_str()))
                 .await
                 .unwrap(),
             1
         );
-        assert_eq!(database.downloaded_count(None).await.unwrap(), 0);
-        let records = database
+        assert_eq!(catalog.downloaded_count(None).await.unwrap(), 0);
+        let records = catalog
             .download_files_page(
                 Some(source_id.as_str()),
                 &(String::new(), String::new()),
@@ -159,7 +159,7 @@ mod tests {
             std::fs::read(root.path().join("album.flac")).unwrap(),
             b"original"
         );
-        let mut reader = database.acquire_reader().await.unwrap();
+        let mut reader = catalog.acquire_reader().await.unwrap();
         let count: i64 =
             sqlx::query_scalar("SELECT count(*) FROM connect_media_files WHERE backing_uri=?1")
                 .bind(&backing)
@@ -169,26 +169,26 @@ mod tests {
         assert_eq!(count, 130);
         drop(reader);
         let uri = crate::cue_media_uri("new-track", &backing, 130_000, 131_000);
-        let shared = database
+        let shared = catalog
             .connect_backing_media_file(&uri, "original", "v1")
             .await
             .unwrap()
             .unwrap();
         assert_eq!(shared.path, backing);
-        assert!(database.connect_media_file_users(&shared).await.unwrap());
+        assert!(catalog.connect_media_file_users(&shared).await.unwrap());
     }
 
     #[tokio::test]
     async fn download_receipt_removal_preserves_original_and_borrowed_access() {
         let root = tempfile::tempdir().unwrap();
-        let database = Database::open(root.path().join("library.sqlite"))
+        let catalog = Catalog::open(root.path().join("library.sqlite"))
             .await
             .unwrap();
         let original = root.path().join("original.flac");
         std::fs::write(&original, b"original").unwrap();
         let uri = url::Url::from_file_path(&original).unwrap().to_string();
         let item = crate::TrackReference::direct(&uri, "Track", "Artist", "Album", 180_000);
-        database
+        catalog
             .write_direct_track_metadata(&uri, &item.metadata)
             .await
             .unwrap();
@@ -208,9 +208,9 @@ mod tests {
             access_uri: url::Url::from_file_path(&copy).unwrap().to_string(),
             loudness_analysis_key: None,
         };
-        database.write_local_access(None, &[&access]).await.unwrap();
+        catalog.write_local_access(None, &[&access]).await.unwrap();
         assert!(
-            database
+            catalog
                 .connect_original_file(&uri, |path| path)
                 .await
                 .unwrap()
@@ -224,14 +224,14 @@ mod tests {
             managed: true,
             ..Default::default()
         };
-        database.connect_save_media_file(&receipt).await.unwrap();
+        catalog.connect_save_media_file(&receipt).await.unwrap();
         assert_eq!(
-            database.playback_access(&uri).await.unwrap().unwrap().0,
+            catalog.playback_access(&uri).await.unwrap().unwrap().0,
             receipt.path
         );
         assert_eq!(
             {
-                let rows = database
+                let rows = catalog
                     .tracks_by_uris(std::slice::from_ref(&uri), &crate::ReadCancellation::new())
                     .await
                     .unwrap();
@@ -240,7 +240,7 @@ mod tests {
             "Track"
         );
         assert!(
-            database
+            catalog
                 .connect_track_reference(&uri)
                 .await
                 .unwrap()
@@ -264,23 +264,20 @@ mod tests {
         alternate_access.access_uri = alternate.path.clone();
         alternate_access.relative_path = "download.opus".into();
         alternate_access.size_bytes = 11;
-        database
+        catalog
             .commit_download(&alternate, None, &alternate_access)
             .await
             .unwrap();
-        database
-            .connect_forget_media_file(&alternate)
-            .await
-            .unwrap();
+        catalog.connect_forget_media_file(&alternate).await.unwrap();
         assert_eq!(
-            database.playback_access(&uri).await.unwrap().unwrap().0,
+            catalog.playback_access(&uri).await.unwrap().unwrap().0,
             receipt.path
         );
-        database.connect_forget_media_file(&receipt).await.unwrap();
-        assert!(database.playback_access(&uri).await.unwrap().is_none());
+        catalog.connect_forget_media_file(&receipt).await.unwrap();
+        assert!(catalog.playback_access(&uri).await.unwrap().is_none());
         assert_eq!(
             {
-                let rows = database
+                let rows = catalog
                     .tracks_by_uris(std::slice::from_ref(&uri), &crate::ReadCancellation::new())
                     .await
                     .unwrap();
@@ -295,35 +292,32 @@ mod tests {
         access.path = original.to_string_lossy().into_owned();
         access.relative_path = "original.flac".into();
         access.access_uri = uri.clone();
-        database.write_local_access(None, &[&access]).await.unwrap();
+        catalog.write_local_access(None, &[&access]).await.unwrap();
         assert!(matches!(
-            database.connect_original_file(&uri, |path| path).await.unwrap(),
+            catalog.connect_original_file(&uri, |path| path).await.unwrap(),
             Some(LocalMediaLocation::File(path)) if path == original
         ));
         let cue = crate::cue_media_uri("mapped", &uri, 0, 1_000);
         assert!(matches!(
-            database.connect_original_file(&cue, |path| path).await.unwrap(),
+            catalog.connect_original_file(&cue, |path| path).await.unwrap(),
             Some(LocalMediaLocation::File(path)) if path == original
         ));
-        database.connect_save_media_file(&borrowed).await.unwrap();
-        database.connect_forget_media_file(&borrowed).await.unwrap();
-        assert_eq!(
-            database.playback_access(&uri).await.unwrap().unwrap().0,
-            uri
-        );
+        catalog.connect_save_media_file(&borrowed).await.unwrap();
+        catalog.connect_forget_media_file(&borrowed).await.unwrap();
+        assert_eq!(catalog.playback_access(&uri).await.unwrap().unwrap().0, uri);
         assert_eq!(std::fs::read(original).unwrap(), b"original");
         access.path = "content://provider/document/original.flac".into();
         access.access_uri = access.path.clone();
         access.root = "content://provider/tree/music".into();
-        database.write_local_access(None, &[&access]).await.unwrap();
+        catalog.write_local_access(None, &[&access]).await.unwrap();
         assert!(matches!(
-            database.connect_original_file(&uri, |path| path).await.unwrap(),
+            catalog.connect_original_file(&uri, |path| path).await.unwrap(),
             Some(LocalMediaLocation::Document(document)) if document == access.access_uri
         ));
     }
 }
 
-impl Database {
+impl Catalog {
     pub async fn connect_original_file(
         &self,
         uri: &str,

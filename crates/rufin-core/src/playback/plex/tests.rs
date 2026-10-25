@@ -65,12 +65,12 @@ fn queue_load_confirmation_waits_through_stop_and_the_wrong_duplicate() {
 #[tokio::test]
 async fn plex_queue_admission_retains_duplicates_and_rejects_mixed_sources() {
     let directory = tempfile::tempdir().unwrap();
-    let database = Database::open(directory.path().join("queue.sqlite3"))
+    let catalog = Catalog::open(directory.path().join("queue.sqlite3"))
         .await
         .unwrap();
     let source = sources::SourceId::new("plex-test");
     let uri = library::source_entity_uri(&source, "track", "plex:track:42");
-    let entries = database
+    let entries = catalog
         .queue_entries(
             library::QueueLoad::media_uris(
                 vec![
@@ -91,10 +91,10 @@ async fn plex_queue_admission_retains_duplicates_and_rejects_mixed_sources() {
         .unwrap()
         .entries;
     assert_eq!(
-        queue_keys(&database, &entries[..3], &source).await.unwrap(),
+        queue_keys(&catalog, &entries[..3], &source).await.unwrap(),
         ["42", "42", "42"]
     );
-    assert!(queue_keys(&database, &entries, &source).await.is_err());
+    assert!(queue_keys(&catalog, &entries, &source).await.is_err());
     assert_eq!(entries.len(), 4);
 }
 
@@ -133,8 +133,8 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
             Ok(())
         })
         .unwrap();
-    let database = Arc::new(
-        Database::open(root.path().join("store.sqlite"))
+    let catalog = Arc::new(
+        Catalog::open(root.path().join("store.sqlite"))
             .await
             .unwrap(),
     );
@@ -151,14 +151,14 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         )
         .unwrap(),
         root.path().join("downloads"),
-        database.as_ref().clone(),
+        catalog.as_ref().clone(),
         runtime.clone(),
         async_channel::unbounded().0,
         Vec::new(),
     );
     let source = SourceOwner::open_dormant(
         artwork.clone(),
-        database.clone(),
+        catalog.clone(),
         downloads,
         settings.clone(),
         secrets,
@@ -176,7 +176,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     );
     let stored = settings.load();
     let lyrics = LyricsService::new(
-        database.as_ref().clone(),
+        catalog.as_ref().clone(),
         source.clone(),
         runtime.clone(),
         stored.ui.lyrics.clone(),
@@ -186,7 +186,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     );
     let scrobbler = Arc::new(tokio::task::block_in_place(|| {
         Scrobbler::new(
-            database.as_ref().clone(),
+            catalog.as_ref().clone(),
             runtime.clone(),
             stored.scrobbling_runtime_settings(),
             true,
@@ -195,7 +195,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
     }));
     let (visualizer, visualizer_drain) = async_channel::bounded(1);
     let owner = PlaybackOwner::new(
-        database,
+        catalog,
         settings,
         runtime,
         visualizer,
@@ -251,7 +251,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
             protocol: RemoteOutputProtocol::PlexCompanion,
         }),
         playback: owner.active().unwrap(),
-        database: owner.database.clone(),
+        catalog: owner.catalog.clone(),
         queue: tokio::sync::Mutex::new(Some(cached)),
         timeline: Mutex::new(stopped_timeline()),
         commands: tokio::sync::Mutex::new(()),

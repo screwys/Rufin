@@ -188,9 +188,9 @@ fn populate_folder_picker(
             );
         }),
     );
-    let database = menus.library.clone();
+    let catalog = menus.library.clone();
     let task = menus.runtime.spawn(async move {
-        database
+        catalog
             .playlist_folder_choices(smart, &library::ReadCancellation::new())
             .await
     });
@@ -335,10 +335,10 @@ pub fn drop_playlist_on_folder(
         MediaDragSource::Targets { targets, .. } => targets,
         _ => return false,
     };
-    let database = menus.library.clone();
+    let catalog = menus.library.clone();
     let task = menus
         .runtime
-        .spawn(async move { targets.collections(&database).await });
+        .spawn(async move { targets.collections(&catalog).await });
     let source = menus.source.clone();
     let menus = Rc::downgrade(menus);
     gtk::glib::spawn_future_local(async move {

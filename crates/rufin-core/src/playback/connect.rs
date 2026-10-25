@@ -18,7 +18,7 @@ pub(super) struct RufinPlayback {
     peer: String,
     connect: std::sync::Weak<ConnectOwner>,
     playback: Playback,
-    database: Arc<Database>,
+    catalog: Arc<Catalog>,
     output: PlaybackOutput,
     commands: tokio::sync::Mutex<()>,
     volume: Mutex<VolumeRequests>,
@@ -66,7 +66,7 @@ impl RufinPlayback {
                     .map(|row| (&row.item.media_uri, row.position)));
         let restore = if changed {
             let mut page = self
-                .database
+                .catalog
                 .queue_entries(
                     library::QueueLoad::items(
                         state
@@ -83,7 +83,7 @@ impl RufinPlayback {
                 entry.received_from_connect = row.received_from_connect;
             }
             let rows = self
-                .database
+                .catalog
                 .queue_rows_for_entries(
                     &page.entries.iter().cloned().enumerate().collect::<Vec<_>>(),
                     &ReadCancellation::new(),
@@ -162,7 +162,7 @@ impl RufinPlayback {
             .projection()
             .is_ok_and(|projection| projection.view.controls.shuffle_enabled);
         let page = request
-            .prepare(&self.database, shuffled, random_u64())
+            .prepare(&self.catalog, shuffled, random_u64())
             .await
             .map_err(string_error)?;
         if page.entries.is_empty() {
@@ -260,7 +260,7 @@ impl PlaybackOwner {
                 .receiver_queue_page(&receiver.peer, offset, limit, filter)
                 .await?;
             let page_entries = self
-                .database
+                .catalog
                 .queue_entries(
                     library::QueueLoad::items(
                         page.rows
@@ -282,7 +282,7 @@ impl PlaybackOwner {
                 })
                 .collect::<Vec<_>>();
             let rows = self
-                .database
+                .catalog
                 .queue_rows_for_entries(&entries, &ReadCancellation::new())
                 .await
                 .map_err(string_error)?;
@@ -307,7 +307,7 @@ impl PlaybackOwner {
         } else {
             let queue = active.handoff_snapshot().map_err(string_error)?.0;
             let (positions, total) = self
-                .database
+                .catalog
                 .queue_search_page(&queue, &filter, offset, limit)
                 .await
                 .map_err(string_error)?;
@@ -329,7 +329,7 @@ impl PlaybackOwner {
             .map(|(position, _, entry)| (*position, entry.clone()))
             .collect::<Vec<_>>();
         let mut rows = self
-            .database
+            .catalog
             .queue_rows_for_entries(&entries, &ReadCancellation::new())
             .await
             .map_err(string_error)?;
@@ -434,7 +434,7 @@ impl PlaybackOwner {
             peer: remote.id.clone(),
             connect: Arc::downgrade(&connect),
             playback: active.clone(),
-            database: self.database.clone(),
+            catalog: self.catalog.clone(),
             output: output.clone(),
             commands: tokio::sync::Mutex::new(()),
             volume: Mutex::new(VolumeRequests::default()),
@@ -578,7 +578,7 @@ impl PlaybackOwner {
         self.runtime.spawn(async move {
             let result = async {
                 let candidates = crate::radio::radio_candidates(
-                    &receiver.database,
+                    &receiver.catalog,
                     source,
                     selected,
                     request.seed,
@@ -623,7 +623,7 @@ impl PlaybackOwner {
         self.runtime.spawn(async move {
             let result = async {
                 let candidates = receiver
-                    .database
+                    .catalog
                     .random_candidates(
                         selected.source_key,
                         selected.music_folder_key,

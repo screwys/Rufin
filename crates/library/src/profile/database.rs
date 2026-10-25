@@ -69,16 +69,16 @@ impl ProfileStore {
     }
 
     /// Install an owned input already normalized with this installation's key.
-    pub async fn install_prepared_database(database: Database, path: &Path) -> Result<()> {
+    pub async fn install_prepared_database(catalog: Catalog, path: &Path) -> Result<()> {
         let mut incoming =
             SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(path)).await?;
         let installed = async {
             let mut transaction = incoming.begin().await?;
             acknowledge_snapshot_on(&mut transaction, "").await?;
             transaction.commit().await?;
-            let mut connection = database.writer().await?;
-            let (_export, _reader) = database.acquire_export().await?;
-            Database::connect_adopt_database_on(&mut connection, &mut incoming).await?;
+            let mut connection = catalog.writer().await?;
+            let (_export, _reader) = catalog.acquire_export().await?;
+            Catalog::connect_adopt_database_on(&mut connection, &mut incoming).await?;
             Result::<()>::Ok(())
         }
         .await;
@@ -86,7 +86,7 @@ impl ProfileStore {
         installed
     }
 
-    /// Pin the committed application database before copying.
+    /// Pin the committed application Store before copying.
     pub async fn export_database(
         &self,
         path: &Path,
@@ -101,7 +101,7 @@ impl ProfileStore {
         let mut connection = SqliteConnection::connect_with(&options).await?;
         let result = async {
             {
-                let (_export, mut reader) = self.database.acquire_export().await?;
+                let (_export, mut reader) = self.catalog.acquire_export().await?;
                 if self.closed.load(Ordering::Acquire) {
                     bail!("Connect profile is closed");
                 }
@@ -113,7 +113,7 @@ impl ProfileStore {
                 snapshot.commit().await?;
             }
             let mut transaction = connection.begin().await?;
-            Database::connect_prepare_export_on(&mut transaction).await?;
+            Catalog::connect_prepare_export_on(&mut transaction).await?;
             sqlx::raw_sql("CREATE TABLE IF NOT EXISTS exported_settings(kind TEXT NOT NULL,object_key TEXT NOT NULL,stamp TEXT,personal INTEGER NOT NULL,payload TEXT,PRIMARY KEY(kind,object_key)) STRICT; DELETE FROM exported_settings;")
                 .execute(&mut *transaction).await?;
             rewrap(&mut transaction, &self.identity, transport_key).await?;

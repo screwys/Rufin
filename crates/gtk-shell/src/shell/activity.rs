@@ -72,10 +72,10 @@ impl Shell {
         if periods.iter().all(Option::is_none) {
             return;
         }
-        let db = self.products.library.clone();
+        let catalog = self.products.library.clone();
         let (sender, receiver) = async_channel::bounded(1);
         self.products.runtime.spawn(async move {
-            let _ = sender.send(db.activity_months().await).await;
+            let _ = sender.send(catalog.activity_months().await).await;
         });
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -432,10 +432,10 @@ impl ActivityView {
         let Some(shell) = self.shell.upgrade() else {
             return;
         };
-        let db = shell.products.library.clone();
+        let catalog = shell.products.library.clone();
         let (sender, receiver) = async_channel::bounded(1);
         let task = shell.products.runtime.spawn(async move {
-            let _ = sender.send(db.activity_months().await).await;
+            let _ = sender.send(catalog.activity_months().await).await;
         });
         self.task.replace(Some(task.abort_handle()));
         let weak = Rc::downgrade(self);
@@ -554,11 +554,12 @@ impl ActivityView {
         self.previous
             .set_sensitive((self.period.selected() as usize + 1) < self.periods.borrow().len());
         self.next.set_sensitive(self.period.selected() > 0);
-        let db = shell.products.library.clone();
+        let catalog = shell.products.library.clone();
         let (sender, receiver) = async_channel::bounded(1);
         let task = shell.products.runtime.spawn(async move {
             let result = async {
-                db.activity_overview(period, 10, &library::ReadCancellation::new())
+                catalog
+                    .activity_overview(period, 10, &library::ReadCancellation::new())
                     .await
             }
             .await;

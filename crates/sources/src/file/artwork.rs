@@ -262,15 +262,15 @@ impl<'a> ArtworkFiles<'a> {
 
     pub(crate) async fn acquire(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
+        let catalog = observation.catalog;
+        let source_id = observation.source_id;
+        let stamp = observation.observed;
         let mut after_album = String::new();
         loop {
-            let albums = database
+            let albums = catalog
                 .source_artwork_album_page(source_id, &after_album, stamp)
                 .await?;
             if albums.is_empty() {
@@ -283,7 +283,7 @@ impl<'a> ArtworkFiles<'a> {
                 let mut folder_cover = None;
                 let mut directories: [Option<(String, Option<LocalImageRef>)>; 2] = [None, None];
                 loop {
-                    let tracks = database
+                    let tracks = catalog
                         .source_artwork_track_page(source_id, &album, after.as_ref())
                         .await?;
                     if tracks.is_empty() {
@@ -300,14 +300,13 @@ impl<'a> ArtworkFiles<'a> {
                                 .is_none_or(|(previous, _)| previous != &prefix)
                             {
                                 let image = if slot == 0
-                                    || database
+                                    || catalog
                                         .source_artwork_directory_is_single_album(
                                             source_id, &prefix,
                                         )
                                         .await?
                                 {
-                                    self.folder_image(database, source_id, &prefix, None)
-                                        .await?
+                                    self.folder_image(catalog, source_id, &prefix, None).await?
                                 } else {
                                     None
                                 };
@@ -327,11 +326,11 @@ impl<'a> ArtworkFiles<'a> {
                         break;
                     }
                 }
-                if folder_cover.is_none() || database.distinct_track_covers() {
+                if folder_cover.is_none() || catalog.distinct_track_covers() {
                     let mut after = None;
                     let mut found = false;
                     loop {
-                        let tracks = database
+                        let tracks = catalog
                             .source_artwork_track_page(source_id, &album, after.as_ref())
                             .await?;
                         if tracks.is_empty() {
@@ -357,21 +356,21 @@ impl<'a> ArtworkFiles<'a> {
                                 image.map(|image| image.artwork_binding()),
                             ));
                             after = Some(track);
-                            if found && !database.distinct_track_covers() {
+                            if found && !catalog.distinct_track_covers() {
                                 break;
                             }
                         }
-                        catalog.record_source_file_images(&inspected).await?;
+                        observation.record_source_file_images(&inspected).await?;
                         check_cancelled(cancelled)?;
-                        catalog.set_source_artwork("track", &bindings).await?;
-                        if found && !database.distinct_track_covers() {
+                        observation.set_source_artwork("track", &bindings).await?;
+                        if found && !catalog.distinct_track_covers() {
                             break;
                         }
                     }
                 }
                 check_cancelled(cancelled)?;
                 check_cancelled(cancelled)?;
-                catalog
+                observation
                     .set_source_artwork(
                         "album",
                         &[(album, folder_cover.map(|image| image.artwork_binding()))],
@@ -379,24 +378,24 @@ impl<'a> ArtworkFiles<'a> {
                     .await?;
             }
         }
-        self.acquire_artist_artwork(catalog, cancelled).await?;
+        self.acquire_artist_artwork(observation, cancelled).await?;
         if matches!(self, Self::Local) {
-            catalog.clear_partial_file_image_observations().await?;
+            observation.clear_partial_file_image_observations().await?;
         }
         Ok(())
     }
 
     async fn acquire_artist_artwork(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
+        let catalog = observation.catalog;
+        let source_id = observation.source_id;
+        let stamp = observation.observed;
         let mut after_artist = String::new();
         loop {
-            let artists = database
+            let artists = catalog
                 .source_artwork_artist_page(source_id, &after_artist, stamp)
                 .await?;
             if artists.is_empty() {
@@ -413,7 +412,7 @@ impl<'a> ArtworkFiles<'a> {
                         let mut directories: Vec<Option<(String, Option<LocalImageRef>)>> =
                             Vec::new();
                         loop {
-                            let tracks = database
+                            let tracks = catalog
                                 .source_artwork_artist_track_page(source_id, &artist, &after)
                                 .await?;
                             if tracks.is_empty() {
@@ -444,8 +443,7 @@ impl<'a> ArtworkFiles<'a> {
                                             {
                                                 let found = self
                                                     .directory_artist_image(
-                                                        database, source_id, &prefix, &artist,
-                                                        &name,
+                                                        catalog, source_id, &prefix, &artist, &name,
                                                     )
                                                     .await?;
                                                 directories[slot] = Some((prefix, found));
@@ -465,7 +463,7 @@ impl<'a> ArtworkFiles<'a> {
                                 Ok(())
                             }
                             .await;
-                            catalog.record_source_file_images(&pictures).await?;
+                            observation.record_source_file_images(&pictures).await?;
                             result?;
                             if image.is_some() {
                                 break;
@@ -482,7 +480,7 @@ impl<'a> ArtworkFiles<'a> {
             .await;
             check_cancelled(cancelled)?;
             check_cancelled(cancelled)?;
-            catalog.set_source_artwork("artist", &bindings).await?;
+            observation.set_source_artwork("artist", &bindings).await?;
             result?;
         }
         Ok(())
@@ -549,7 +547,7 @@ impl<'a> ArtworkFiles<'a> {
 
     async fn folder_image(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
         source_id: &str,
         prefix: &str,
         artist: Option<&str>,
@@ -568,7 +566,7 @@ impl<'a> ArtworkFiles<'a> {
             }
             Self::Documents => {
                 crate::file::remote::artwork::directory_image_by_role(
-                    database,
+                    catalog,
                     source_id,
                     prefix,
                     artist.map(|name| (name, true)),
@@ -578,24 +576,24 @@ impl<'a> ArtworkFiles<'a> {
             Self::Remote(source) => match artist {
                 Some(name) => {
                     source
-                        .directory_artist_image_for(database, source_id, prefix, name, true)
+                        .directory_artist_image_for(catalog, source_id, prefix, name, true)
                         .await
                 }
-                None => source.directory_image(database, source_id, prefix).await,
+                None => source.directory_image(catalog, source_id, prefix).await,
             },
         }
     }
 
     async fn directory_artist_image(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
         source_id: &str,
         prefix: &str,
         artist: &str,
         name: &str,
     ) -> SourceResult<Option<LocalImageRef>> {
         let found = self
-            .folder_image(database, source_id, prefix, Some(name))
+            .folder_image(catalog, source_id, prefix, Some(name))
             .await?;
         if let Some(LocalImageRef::File { path, .. }) = &found {
             let filename = match self.for_path(path) {
@@ -624,7 +622,7 @@ impl<'a> ArtworkFiles<'a> {
                 }
             };
             if artist_image_rank_for(&filename, name, false) == usize::MAX
-                && !database
+                && !catalog
                     .source_artwork_directory_has_artist(source_id, prefix, artist)
                     .await?
             {

@@ -152,7 +152,7 @@ impl MetadataBatch {
             let mut seen = HashSet::new();
             let uris = source
                 .shared
-                .database
+                .catalog
                 .selected_track_uris(&selection, None, &library::ReadCancellation::new())
                 .await
                 .map_err(error)?
@@ -341,7 +341,7 @@ impl MetadataBatch {
                 let titles = self
                     .source
                     .shared
-                    .database
+                    .catalog
                     .tracks_by_uris(&missing, &library::ReadCancellation::new())
                     .await
                     .map_err(error)?
@@ -535,7 +535,7 @@ impl MetadataBatch {
         let (pending, changed) = (&followups, &changed);
         let result = files
             .save_tracks(
-                &self.source.shared.database,
+                &self.source.shared.catalog,
                 edit,
                 uris,
                 |position| async move {
@@ -782,7 +782,7 @@ impl MetadataBatch {
         loop {
             let page = source
                 .shared
-                .database
+                .catalog
                 .file_edit_rows(&session.media_uri, after, &library::ReadCancellation::new())
                 .await
                 .map_err(error)?;

@@ -155,17 +155,17 @@ pub fn download_subject_title(subject: &DownloadSubject) -> String {
 
 pub fn media_artwork(
     artwork: &Rc<crate::artwork::ArtworkState>,
-    database: &Arc<library::Database>,
+    catalog: &Arc<library::Catalog>,
     runtime: &tokio::runtime::Handle,
     media_uris: &[String],
     size: i32,
 ) -> gtk::Widget {
     let projection = artwork.cover_group_projection_for_artwork(&[], size, size, true);
     let widget = projection.widget();
-    let database = Arc::clone(database);
+    let catalog = Arc::clone(catalog);
     let media_uris = media_uris.iter().take(4).cloned().collect::<Vec<_>>();
     let task = runtime.spawn(async move {
-        database
+        catalog
             .track_artwork_bindings(&media_uris, &library::ReadCancellation::new())
             .await
     });
@@ -189,7 +189,7 @@ pub fn media_artwork(
 
 pub fn download_rule_artwork(
     artwork: &Rc<crate::artwork::ArtworkState>,
-    database: &Arc<library::Database>,
+    catalog: &Arc<library::Catalog>,
     runtime: &tokio::runtime::Handle,
     source_id: SourceId,
     rule: downloads::DownloadRule,
@@ -197,10 +197,10 @@ pub fn download_rule_artwork(
 ) -> gtk::Widget {
     let projection = artwork.cover_group_projection_for_artwork(&[], size, size, true);
     let widget = projection.widget();
-    let database = Arc::clone(database);
+    let catalog = Arc::clone(catalog);
     let task = runtime.spawn(async move {
         let cancellation = library::ReadCancellation::new();
-        let Some(source) = database
+        let Some(source) = catalog
             .cached_source(source_id.as_str(), &cancellation)
             .await?
         else {
@@ -220,7 +220,7 @@ pub fn download_rule_artwork(
                 library::RepresentativeArtworkScope::LatestAlbums(5)
             }
         };
-        database
+        catalog
             .representative_artwork_page(source.source, None, scope, 4, &cancellation)
             .await
     });

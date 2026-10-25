@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_channel::Sender;
-use library::{Database, ReadCancellation};
+use library::{Catalog, ReadCancellation};
 use playback::{CurrentMedia, CurrentMediaId};
 use sources::Source;
 use tokio::sync::Semaphore;
@@ -37,7 +37,7 @@ impl LyricsService {
             Some((source, kind, _)) if kind == "track" => source,
             Some(_) => return None,
             None => self
-                .database
+                .catalog
                 .track_source_by_uri(&context.media.id.media_uri, &ReadCancellation::new())
                 .await
                 .ok()??,
@@ -129,7 +129,7 @@ enum LyricsAuthority {
 pub struct LyricsService {
     dictionary_directory: PathBuf,
     dictionary_status: Mutex<::lyrics::JapaneseDictionaryStatus>,
-    database: Database,
+    catalog: Catalog,
     source_owner: Arc<crate::source::SourceOwner>,
     connect: Mutex<std::sync::Weak<crate::connect::ConnectOwner>>,
     runtime: tokio::runtime::Handle,
@@ -149,7 +149,7 @@ pub struct LyricsHandle {
 
 impl LyricsService {
     pub fn new(
-        database: Database,
+        catalog: Catalog,
         source_owner: Arc<crate::source::SourceOwner>,
         runtime: tokio::runtime::Handle,
         settings: Settings,
@@ -160,7 +160,7 @@ impl LyricsService {
         Arc::new(Self {
             dictionary_directory,
             dictionary_status: Mutex::new(::lyrics::JapaneseDictionaryStatus::Idle),
-            database,
+            catalog,
             source_owner,
             connect: Mutex::new(std::sync::Weak::new()),
             runtime,
@@ -243,7 +243,7 @@ impl LyricsService {
             let writable = match service.source(&context).await {
                 Some(source) => {
                     source
-                        .lyrics_writable(&service.database, &context.media.id.media_uri, sidecar)
+                        .lyrics_writable(&service.catalog, &context.media.id.media_uri, sidecar)
                         .await
                 }
                 None => false,
@@ -476,7 +476,7 @@ impl LyricsService {
     async fn resolve_current(self: &Arc<Self>, request: LyricsRequest, use_cache: bool) {
         let mut fallback = LyricsFallback::default();
         let document = sources::read_local_lyrics(
-            &self.database,
+            &self.catalog,
             request.media_uri(),
             Some(&request.context.media.row.track.metadata.title),
             &selection_settings(&request.plan),
@@ -551,7 +551,7 @@ impl LyricsService {
             LyricsAuthority::External => "external",
         };
         let mut cached = self
-            .database
+            .catalog
             .lyrics_cache_for_role(
                 request.media_uri(),
                 &role,
@@ -617,7 +617,7 @@ impl LyricsService {
         }
         if self.matches_current(request.id) {
             let _ = self
-                .database
+                .catalog
                 .remove_lyrics_cache(
                     request.media_uri(),
                     authority,
@@ -645,7 +645,7 @@ impl LyricsService {
         }
         match source
             .cached_lyrics(
-                &self.database,
+                &self.catalog,
                 request.media_uri(),
                 request.context.input_digest,
             )
@@ -745,7 +745,7 @@ impl LyricsService {
             match cache_write(&request.plan, &document) {
                 Ok((authority, role, language, script, payload, updated_at)) => {
                     if let Err(error) = self
-                        .database
+                        .catalog
                         .write_lyrics_cache(
                             request.media_uri(),
                             &authority,
@@ -811,7 +811,7 @@ impl LyricsService {
         };
         if !source
             .lyrics_writable(
-                &self.database,
+                &self.catalog,
                 &target.context.media.id.media_uri,
                 target.sidecar,
             )
@@ -824,7 +824,7 @@ impl LyricsService {
         };
         let result = source
             .write_lyrics(
-                &self.database,
+                &self.catalog,
                 &target.context.media.id.media_uri,
                 &target.content,
                 target.sidecar,
@@ -1142,7 +1142,7 @@ impl LyricsService {
                         cache_write(&request.plan, &document)
                     {
                         let _ = service
-                            .database
+                            .catalog
                             .write_lyrics_cache(
                                 request.media_uri(),
                                 &authority,
@@ -1311,11 +1311,11 @@ impl LyricsService {
                 return;
             };
             match source
-                .write_lyrics(&service.database, request.media_uri(), &content, sidecar)
+                .write_lyrics(&service.catalog, request.media_uri(), &content, sidecar)
                 .await
             {
                 Ok(()) => {
-                    source.refresh_written_lyrics(&service.database);
+                    source.refresh_written_lyrics(&service.catalog);
                     service.cache_and_accept(&request, bundle).await;
                 }
                 Err(error) => {
@@ -1341,9 +1341,9 @@ impl LyricsService {
         let Some(uri) = uri else {
             return;
         };
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         let _task = self.runtime.spawn(async move {
-            if let Err(error) = database
+            if let Err(error) = catalog
                 .remove_track_lyrics_by_authority(&uri, "external")
                 .await
             {
@@ -1747,9 +1747,9 @@ mod tests {
     #[tokio::test]
     async fn current_lyrics_reads_local_cue_mapped_and_downloaded_files_by_logical_identity() {
         let directory = tempfile::tempdir().expect("temporary directory");
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
-            .expect("database");
+            .expect("catalog");
         let audio = directory.path().join("album.flac");
         std::fs::write(&audio, []).expect("audio file");
         std::fs::write(audio.with_extension("lrc"), "[00:01.00]Whole file lyrics")
@@ -1793,7 +1793,7 @@ mod tests {
             );
             locators.push('\n');
         }
-        database
+        catalog
             .import_local_locators_jsonl(std::io::Cursor::new(locators))
             .await
             .expect("local access");
@@ -1801,7 +1801,7 @@ mod tests {
         let runtime = tokio::runtime::Handle::current();
         let source_owner = crate::source::SourceOwner::open_dormant(
             artwork::Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
-            Arc::new(database.clone()),
+            Arc::new(catalog.clone()),
             downloads::Downloads::new(
                 artwork::Artwork::new(
                     (directory.path().join("downloads")).join("artwork"),
@@ -1809,7 +1809,7 @@ mod tests {
                 )
                 .unwrap(),
                 directory.path().join("downloads"),
-                database.clone(),
+                catalog.clone(),
                 runtime.clone(),
                 async_channel::unbounded().0,
                 Vec::new(),
@@ -1825,7 +1825,7 @@ mod tests {
             },
         );
         let service = LyricsService::new(
-            database.clone(),
+            catalog.clone(),
             source_owner,
             tokio::runtime::Handle::current(),
             Settings {
@@ -1900,7 +1900,7 @@ mod tests {
             assert_eq!(document.lines[0].text, expected);
         }
         assert_eq!(
-            database
+            catalog
                 .original_file(&downloaded_uri)
                 .await
                 .expect("original path")
@@ -1919,17 +1919,17 @@ mod tests {
         .into_parts();
         assert!(
             source
-                .cached_lyrics(&database, &cue_uri, [0; 32])
+                .cached_lyrics(&catalog, &cue_uri, [0; 32])
                 .await
                 .expect("CUE without stored title")
                 .is_none()
         );
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("local"), "local", "Local")
             .await
             .unwrap();
-        database
-            .catalog("local", None)
+        catalog
+            .observe("local", None)
             .await
             .expect("store CUE title")
             .apply_catalog(
@@ -1961,7 +1961,7 @@ mod tests {
             .await
             .expect("store CUE title");
         let cue = source
-            .cached_lyrics(&database, &cue_uri, [0; 32])
+            .cached_lyrics(&catalog, &cue_uri, [0; 32])
             .await
             .expect("cache CUE title sidecar")
             .expect("CUE lyrics");
@@ -2018,7 +2018,7 @@ mod tests {
         .expect("cached CUE lyrics remain displayable");
         assert_eq!(document.lines[0].text, "Segment lyrics");
         let cached = source
-            .cached_lyrics(&database, &file_uri, [0; 32])
+            .cached_lyrics(&catalog, &file_uri, [0; 32])
             .await
             .expect("cache native local lyrics")
             .expect("sidecar lyrics");
@@ -2026,13 +2026,13 @@ mod tests {
             .expect("change sidecar");
         assert_eq!(
             source
-                .cached_lyrics(&database, &file_uri, [0; 32])
+                .cached_lyrics(&catalog, &file_uri, [0; 32])
                 .await
                 .expect("reuse source cache"),
             Some(cached),
         );
         let refreshed = source
-            .cached_lyrics(&database, &file_uri, [1; 32])
+            .cached_lyrics(&catalog, &file_uri, [1; 32])
             .await
             .expect("new source input")
             .expect("updated sidecar");

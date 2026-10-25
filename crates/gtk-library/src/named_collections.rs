@@ -92,13 +92,13 @@ impl CatalogUi {
         let reload_read = captured.clone();
         let favorites_only = captured.favorites_only;
         let favorite_read = captured.clone();
-        let database = self.library.clone();
+        let catalog = self.library.clone();
         let order_load: crate::routes::ListPageLoad<library::Page<R>> =
             Arc::new(move |request, cancel| {
                 let read = request;
-                let database = database.clone();
+                let catalog = catalog.clone();
                 Box::pin(async move {
-                    let page = R::page(&read, &database, library::RouteSeedWindow::top(), &cancel)
+                    let page = R::page(&read, &catalog, library::RouteSeedWindow::top(), &cancel)
                         .await
                         .map_err(|error| error.to_string())?;
                     Ok(page)
@@ -106,16 +106,16 @@ impl CatalogUi {
             });
         let applied = Rc::new(RefCell::new(captured.clone()));
         let load_request = Rc::clone(&applied);
-        let row_database = self.library.clone();
+        let row_catalog = self.library.clone();
         let sparse = SparseRouteModel::new(
             SparseSource::Query { count },
             32,
             self.runtime.clone(),
             Rc::new(move |_, range, cancellation| {
                 let request = load_request.borrow().clone();
-                let database = row_database.clone();
+                let catalog = row_catalog.clone();
                 Box::pin(async move {
-                    R::read(&request, &database, range.start, range.len(), &cancellation)
+                    R::read(&request, &catalog, range.start, range.len(), &cancellation)
                         .await
                         .map_err(|error| error.to_string())
                 })
@@ -255,14 +255,14 @@ pub trait CollectionRow: Clone + PartialEq + Send + Sync + 'static {
     const FAVORITES: bool = false;
     fn read<'a>(
         read: &'a library::ListRead,
-        database: &'a library::Database,
+        catalog: &'a library::Catalog,
         offset: usize,
         limit: usize,
         cancel: &'a library::ReadCancellation,
     ) -> impl std::future::Future<Output = library::LibraryResult<Vec<Self>>> + Send + 'a;
     fn page<'a>(
         read: &'a library::ListRead,
-        database: &'a library::Database,
+        catalog: &'a library::Catalog,
         window: library::RouteSeedWindow,
         cancel: &'a library::ReadCancellation,
     ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a;
@@ -328,21 +328,21 @@ impl CollectionRow for ArtistView {
     const FAVORITES: bool = true;
     fn read<'a>(
         read: &'a library::ListRead,
-        database: &'a library::Database,
+        catalog: &'a library::Catalog,
         offset: usize,
         limit: usize,
         cancel: &'a library::ReadCancellation,
     ) -> impl std::future::Future<Output = library::LibraryResult<Vec<Self>>> + Send + 'a {
-        read.artists(database, offset, limit, cancel)
+        read.artists(catalog, offset, limit, cancel)
     }
     fn page<'a>(
         read: &'a library::ListRead,
-        database: &'a library::Database,
+        catalog: &'a library::Catalog,
         window: library::RouteSeedWindow,
         cancel: &'a library::ReadCancellation,
     ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a
     {
-        read.page_artists(database, window, cancel)
+        read.page_artists(catalog, window, cancel)
     }
     fn playback(&self, key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
         Some(gtk_widgets::selection::artist_play_request(
@@ -379,22 +379,22 @@ impl CollectionRow for GenreView {
     type Key = GenreKey;
     fn read<'a>(
         read: &'a library::ListRead,
-        database: &'a library::Database,
+        catalog: &'a library::Catalog,
         offset: usize,
         limit: usize,
         cancel: &'a library::ReadCancellation,
     ) -> impl std::future::Future<Output = library::LibraryResult<Vec<Self>>> + Send + 'a {
-        read.genres(database, offset, limit, cancel)
+        read.genres(catalog, offset, limit, cancel)
     }
 
     fn page<'a>(
         read: &'a library::ListRead,
-        database: &'a library::Database,
+        catalog: &'a library::Catalog,
         window: library::RouteSeedWindow,
         cancel: &'a library::ReadCancellation,
     ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a
     {
-        read.page_genres(database, window, cancel)
+        read.page_genres(catalog, window, cancel)
     }
 
     fn set_downloaded(&mut self, downloaded: bool) {
@@ -472,22 +472,22 @@ impl CollectionRow for MoodView {
     type Key = MoodKey;
     fn read<'a>(
         read: &'a library::ListRead,
-        database: &'a library::Database,
+        catalog: &'a library::Catalog,
         offset: usize,
         limit: usize,
         cancel: &'a library::ReadCancellation,
     ) -> impl std::future::Future<Output = library::LibraryResult<Vec<Self>>> + Send + 'a {
-        read.moods(database, offset, limit, cancel)
+        read.moods(catalog, offset, limit, cancel)
     }
 
     fn page<'a>(
         read: &'a library::ListRead,
-        database: &'a library::Database,
+        catalog: &'a library::Catalog,
         window: library::RouteSeedWindow,
         cancel: &'a library::ReadCancellation,
     ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a
     {
-        read.page_moods(database, window, cancel)
+        read.page_moods(catalog, window, cancel)
     }
 
     fn set_downloaded(&mut self, downloaded: bool) {
@@ -561,21 +561,21 @@ impl CollectionRow for library::PlaylistListRow {
     type Key = (u8, i64);
     fn read<'a>(
         read: &'a library::ListRead,
-        database: &'a library::Database,
+        catalog: &'a library::Catalog,
         offset: usize,
         limit: usize,
         cancel: &'a library::ReadCancellation,
     ) -> impl std::future::Future<Output = library::LibraryResult<Vec<Self>>> + Send + 'a {
-        read.playlist_items(database, offset, limit, cancel)
+        read.playlist_items(catalog, offset, limit, cancel)
     }
     fn page<'a>(
         read: &'a library::ListRead,
-        database: &'a library::Database,
+        catalog: &'a library::Catalog,
         window: library::RouteSeedWindow,
         cancel: &'a library::ReadCancellation,
     ) -> impl std::future::Future<Output = library::LibraryResult<library::Page<Self>>> + Send + 'a
     {
-        read.page_playlist_items(database, window, cancel)
+        read.page_playlist_items(catalog, window, cancel)
     }
     fn playback(&self, _key: LibraryListKey) -> Option<rufin_core::playback::PlayRequest> {
         match self {

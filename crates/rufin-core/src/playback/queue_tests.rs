@@ -1,13 +1,13 @@
 use super::queue::Sequence;
 use super::{PlaybackStoreWork, enqueue_queue_save, save_pending_queue};
 use crate::playback::QueueSelection;
-use library::{Database, QueueRestore};
+use library::{Catalog, QueueRestore};
 use playback::RepeatMode;
 use std::sync::Mutex;
 
 async fn replace_queue(
     sequence: &mut Sequence,
-    database: &Database,
+    catalog: &Catalog,
     replacement: usize,
     count: usize,
 ) {
@@ -22,7 +22,7 @@ async fn replace_queue(
         ),
         library::QueuePlacement::Now,
     )
-    .prepare(database, false, 0)
+    .prepare(catalog, false, 0)
     .await
     .unwrap();
     sequence.add_page(page, library::QueueReorderTarget::End, true);
@@ -41,7 +41,7 @@ fn assert_restored_state(restored: &QueueRestore, expected: &QueueRestore) {
 #[tokio::test]
 async fn paused_queue_writer_retains_only_latest_membership_and_one_wakeup() {
     let directory = tempfile::tempdir().unwrap();
-    let database = Database::open(directory.path().join("queue.sqlite3"))
+    let catalog = Catalog::open(directory.path().join("queue.sqlite3"))
         .await
         .unwrap();
     let mut sequence = Sequence::new();
@@ -49,7 +49,7 @@ async fn paused_queue_writer_retains_only_latest_membership_and_one_wakeup() {
     let (sender, work) = async_channel::unbounded();
 
     for replacement in 0..12 {
-        replace_queue(&mut sequence, &database, replacement, 512).await;
+        replace_queue(&mut sequence, &catalog, replacement, 512).await;
         let update = sequence.take_persistence().unwrap();
         assert!(update.replace);
         enqueue_queue_save(&pending, &sender, update);
@@ -82,25 +82,25 @@ async fn paused_queue_writer_retains_only_latest_membership_and_one_wakeup() {
         work.try_recv().unwrap(),
         PlaybackStoreWork::Settings
     ));
-    save_pending_queue(&database, &pending, &mut None)
+    save_pending_queue(&catalog, &pending, &mut None)
         .await
         .unwrap();
     assert!(pending.lock().unwrap().is_none());
     assert!(work.is_empty());
-    assert_restored_state(&database.restore_queue().await.unwrap(), &expected);
+    assert_restored_state(&catalog.restore_queue().await.unwrap(), &expected);
 }
 
 #[tokio::test]
 async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
     let directory = tempfile::tempdir().unwrap();
-    let database = Database::open(directory.path().join("queue.sqlite3"))
+    let catalog = Catalog::open(directory.path().join("queue.sqlite3"))
         .await
         .unwrap();
     let mut sequence = Sequence::new();
     let pending = Mutex::new(None);
     let (sender, work) = async_channel::unbounded();
 
-    replace_queue(&mut sequence, &database, 0, 24).await;
+    replace_queue(&mut sequence, &catalog, 0, 24).await;
     let membership = sequence.take_persistence().unwrap();
     assert!(membership.replace);
     enqueue_queue_save(&pending, &sender, membership);
@@ -136,10 +136,10 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
         work.try_recv().unwrap(),
         PlaybackStoreWork::Settings
     ));
-    save_pending_queue(&database, &pending, &mut None)
+    save_pending_queue(&catalog, &pending, &mut None)
         .await
         .unwrap();
-    assert_restored_state(&database.restore_queue().await.unwrap(), &expected);
+    assert_restored_state(&catalog.restore_queue().await.unwrap(), &expected);
 
     sequence.shuffle(false, 0);
     enqueue_queue_save(&pending, &sender, sequence.take_persistence().unwrap());
@@ -158,10 +158,10 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
         work.try_recv().unwrap(),
         PlaybackStoreWork::Settings
     ));
-    save_pending_queue(&database, &pending, &mut None)
+    save_pending_queue(&catalog, &pending, &mut None)
         .await
         .unwrap();
-    assert_restored_state(&database.restore_queue().await.unwrap(), &expected);
+    assert_restored_state(&catalog.restore_queue().await.unwrap(), &expected);
 
     sequence.set_progress_millis(43_000);
     sequence.persist_state();
@@ -174,14 +174,14 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
         work.try_recv().unwrap(),
         PlaybackStoreWork::Settings
     ));
-    save_pending_queue(&database, &pending, &mut None)
+    save_pending_queue(&catalog, &pending, &mut None)
         .await
         .unwrap();
-    assert_restored_state(&database.restore_queue().await.unwrap(), &expected);
+    assert_restored_state(&catalog.restore_queue().await.unwrap(), &expected);
     assert!(work.is_empty());
 
     let mut failed = None;
-    let later = database
+    let later = catalog
         .queue_entries(
             library::QueueLoad::media_uris(
                 ["failed", "later"].map(|suffix| format!("https://example.test/{suffix}")),
@@ -191,7 +191,7 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
         )
         .await
         .unwrap();
-    database.clone().close().await.unwrap();
+    catalog.clone().close().await.unwrap();
     for (index, entry) in later.entries.into_iter().enumerate() {
         sequence.add_page(
             super::commands::QueueBatch {
@@ -206,14 +206,14 @@ async fn queue_save_coalesces_membership_order_and_latest_scalar_state() {
         enqueue_queue_save(&pending, &sender, sequence.take_persistence().unwrap());
         if index == 0 {
             assert!(
-                save_pending_queue(&database, &pending, &mut failed)
+                save_pending_queue(&catalog, &pending, &mut failed)
                     .await
                     .is_err()
             );
             assert!(failed.is_some());
         }
     }
-    let reopened = Database::open(directory.path().join("queue.sqlite3"))
+    let reopened = Catalog::open(directory.path().join("queue.sqlite3"))
         .await
         .unwrap();
     save_pending_queue(&reopened, &pending, &mut failed)

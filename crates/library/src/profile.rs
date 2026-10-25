@@ -7,7 +7,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use crate::{CONNECT_PAGE_SIZE, ConnectRecord, Database};
+use crate::{CONNECT_PAGE_SIZE, Catalog, ConnectRecord};
 use anyhow::{Context, Result, bail};
 use loro::{ExportMode, LoroDoc, ToJson, VersionVector};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ use encryption::{expose, expose_payload, protect, sensitive};
 #[cfg(test)]
 mod history_tests;
 
-// Wire format, independent of Rufin releases and local database migrations.
+// Wire format, independent of Rufin releases and local Store migrations.
 const FORMAT: u32 = 1;
 const CURRENT_FORMAT: u32 = 4;
 pub const INCOMPATIBLE_PROFILE: &str =
@@ -29,7 +29,7 @@ pub const INCOMPATIBLE_PROFILE: &str =
 pub(crate) const SCHEMA_VERSION: i64 = 3;
 
 pub struct ProfileStore {
-    database: Database,
+    catalog: Catalog,
     peer_id: u64,
     identity: Arc<age::x25519::Identity>,
     closed: AtomicBool,
@@ -61,19 +61,15 @@ pub enum SyncStream {
 }
 
 impl ProfileStore {
-    pub async fn open(
-        database: Database,
-        peer_id: u64,
-        key: age::x25519::Identity,
-    ) -> Result<Self> {
-        let mut writer = database.writer().await?;
+    pub async fn open(catalog: Catalog, peer_id: u64, key: age::x25519::Identity) -> Result<Self> {
+        let mut writer = catalog.writer().await?;
         sqlx::query("UPDATE connect_profile SET actor=?1 WHERE singleton=1 AND actor IS NOT ?1")
             .bind(peer_id.to_string())
             .execute(&mut *writer)
             .await?;
         drop(writer);
         Ok(Self {
-            database,
+            catalog,
             peer_id,
             identity: Arc::new(key),
             closed: AtomicBool::new(false),
@@ -81,8 +77,8 @@ impl ProfileStore {
     }
 
     /// Whether this Store still holds Connect state from an earlier version.
-    pub async fn reset_pending(database: &Database) -> Result<bool> {
-        let mut writer = database.writer().await?;
+    pub async fn reset_pending(catalog: &Catalog) -> Result<bool> {
+        let mut writer = catalog.writer().await?;
         Ok(
             sqlx::query_scalar("SELECT schema_version<?1 FROM connect_profile WHERE singleton=1")
                 .bind(SCHEMA_VERSION)
@@ -93,13 +89,13 @@ impl ProfileStore {
 
     pub async fn close(&self) -> Result<()> {
         self.closed.store(true, Ordering::Release);
-        let _writer = self.database.writer().await?;
-        let _export = self.database.acquire_export().await?;
+        let _writer = self.catalog.writer().await?;
+        let _export = self.catalog.acquire_export().await?;
         Ok(())
     }
 
     async fn writer(&self) -> Result<crate::db::WriterGuard<'_>> {
-        let guard = self.database.writer().await?;
+        let guard = self.catalog.writer().await?;
         if self.closed.load(Ordering::Acquire) {
             bail!("Connect profile is closed");
         }
@@ -366,12 +362,12 @@ impl ProfileStore {
     /// Return Connect's tables to the state of a new install and remove the
     /// Store records of files in the Connect directory. This also records that
     /// Connect state from earlier versions has been reset.
-    pub async fn clear_database(database: &Database, directory: &Path) -> Result<()> {
+    pub async fn clear_database(catalog: &Catalog, directory: &Path) -> Result<()> {
         let files = url::Url::from_directory_path(directory)
             .ok()
             .context("The Connect directory is not absolute")?
             .to_string();
-        let mut writer = database.writer().await?;
+        let mut writer = catalog.writer().await?;
         let mut transaction = writer.begin().await?;
         sqlx::raw_sql("DELETE FROM documents; DELETE FROM connect_versions; DELETE FROM sync_cursors; DELETE FROM history_peers; DELETE FROM history_acknowledgements; DELETE FROM history_pending; UPDATE file_revision SET revision=0 WHERE id=1;
             UPDATE connect_seed SET cursor=0,complete=0; UPDATE connect_playlist_seed SET playlist=0,position=-1; DELETE FROM queue_transfer_pages;")
@@ -442,7 +438,7 @@ async fn current_record(
             value: None,
         });
     }
-    Ok(Database::connect_record_on(connection, kind, key).await?)
+    Ok(Catalog::connect_record_on(connection, kind, key).await?)
 }
 
 async fn save_current_version(
@@ -1065,7 +1061,7 @@ mod tests {
     async fn synced_device_names_remain_available_after_restart() {
         let directory = tempfile::tempdir().unwrap();
         let a = ProfileStore::open(
-            crate::Database::open(&directory.path().join("a.sqlite"))
+            crate::Catalog::open(&directory.path().join("a.sqlite"))
                 .await
                 .unwrap(),
             1,
@@ -1075,7 +1071,7 @@ mod tests {
         .unwrap();
         let path = directory.path().join("b.sqlite");
         let b = ProfileStore::open(
-            crate::Database::open(&path).await.unwrap(),
+            crate::Catalog::open(&path).await.unwrap(),
             2,
             KEY.parse().unwrap(),
         )
@@ -1091,7 +1087,7 @@ mod tests {
         deliver(&a, &b).await;
         drop(b);
         let b = ProfileStore::open(
-            crate::Database::open(&path).await.unwrap(),
+            crate::Catalog::open(&path).await.unwrap(),
             2,
             KEY.parse().unwrap(),
         )
@@ -1108,14 +1104,14 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let a_path = directory.path().join("a.sqlite");
         let a = ProfileStore::open(
-            crate::Database::open(&a_path).await.unwrap(),
+            crate::Catalog::open(&a_path).await.unwrap(),
             1,
             KEY.parse().unwrap(),
         )
         .await
         .unwrap();
         let b = ProfileStore::open(
-            crate::Database::open(&directory.path().join("b.sqlite"))
+            crate::Catalog::open(&directory.path().join("b.sqlite"))
                 .await
                 .unwrap(),
             2,
@@ -1136,7 +1132,7 @@ mod tests {
         assert_eq!(a.revision().await.unwrap(), revision);
         drop(a);
         let a = ProfileStore::open(
-            crate::Database::open(&a_path).await.unwrap(),
+            crate::Catalog::open(&a_path).await.unwrap(),
             1,
             KEY.parse().unwrap(),
         )
@@ -1220,7 +1216,7 @@ mod tests {
     async fn update_page_rolls_back_on_invalid_document() {
         let directory = tempfile::tempdir().unwrap();
         let a = ProfileStore::open(
-            crate::Database::open(&directory.path().join("a.sqlite"))
+            crate::Catalog::open(&directory.path().join("a.sqlite"))
                 .await
                 .unwrap(),
             1,
@@ -1229,7 +1225,7 @@ mod tests {
         .await
         .unwrap();
         let b = ProfileStore::open(
-            crate::Database::open(&directory.path().join("b.sqlite"))
+            crate::Catalog::open(&directory.path().join("b.sqlite"))
                 .await
                 .unwrap(),
             2,
@@ -1263,7 +1259,7 @@ mod tests {
     async fn artwork_added_to_an_existing_profile_reaches_saved_tracks() {
         let directory = tempfile::tempdir().unwrap();
         let host = ProfileStore::open(
-            Database::open(directory.path().join("host.sqlite"))
+            Catalog::open(directory.path().join("host.sqlite"))
                 .await
                 .unwrap(),
             1,
@@ -1272,7 +1268,7 @@ mod tests {
         .await
         .unwrap();
         let guest = ProfileStore::open(
-            Database::open(directory.path().join("guest.sqlite"))
+            Catalog::open(directory.path().join("guest.sqlite"))
                 .await
                 .unwrap(),
             2,
@@ -1293,13 +1289,13 @@ mod tests {
                 .await
                 .unwrap();
             profile
-                .database
+                .catalog
                 .reconcile_source(&crate::SourceId::new("server"), "jellyfin", "Server")
                 .await
                 .unwrap();
-            profile.database.connect_set_active(true).await.unwrap();
+            profile.catalog.connect_set_active(true).await.unwrap();
         }
-        let source = &host.database;
+        let source = &host.catalog;
         let uri = crate::source_entity_uri(&crate::SourceId::new("server"), "track", "track");
         let mut track = crate::TrackObservation {
             object_id: "track".into(),
@@ -1312,7 +1308,7 @@ mod tests {
             ..Default::default()
         };
         source
-            .catalog("server", None)
+            .observe("server", None)
             .await
             .unwrap()
             .apply_catalog(
@@ -1363,7 +1359,7 @@ mod tests {
         .unwrap();
         track.artwork_binding = Some(art.clone());
         source
-            .catalog("server", None)
+            .observe("server", None)
             .await
             .unwrap()
             .apply_catalog(
@@ -1390,7 +1386,7 @@ mod tests {
         let cancellation = crate::ReadCancellation::new();
         assert!(
             !guest
-                .database
+                .catalog
                 .cached_source("server", &cancellation)
                 .await
                 .unwrap()
@@ -1399,7 +1395,7 @@ mod tests {
         );
         assert_eq!(
             guest
-                .database
+                .catalog
                 .track_artwork_bindings(&[uri], &cancellation)
                 .await
                 .unwrap(),
@@ -1411,7 +1407,7 @@ mod tests {
     async fn older_models_preserve_new_fields_and_settings_without_echoing_them() {
         let directory = tempfile::tempdir().unwrap();
         let a = ProfileStore::open(
-            crate::Database::open(&directory.path().join("newer.sqlite"))
+            crate::Catalog::open(&directory.path().join("newer.sqlite"))
                 .await
                 .unwrap(),
             1,
@@ -1420,7 +1416,7 @@ mod tests {
         .await
         .unwrap();
         let b = ProfileStore::open(
-            crate::Database::open(&directory.path().join("older.sqlite"))
+            crate::Catalog::open(&directory.path().join("older.sqlite"))
                 .await
                 .unwrap(),
             2,
@@ -1485,8 +1481,8 @@ mod tests {
         .await
         .unwrap();
         b.bind_profile("profile", "b").await.unwrap();
-        b.database.connect_set_active(true).await.unwrap();
-        b.database
+        b.catalog.connect_set_active(true).await.unwrap();
+        b.catalog
             .set_favorite(&crate::FavoriteTarget::Track(state(true, false).key), true)
             .await
             .unwrap();
@@ -1525,7 +1521,7 @@ mod tests {
     async fn incompatible_updates_leave_persisted_profile_ready_to_resume() {
         let directory = tempfile::tempdir().unwrap();
         let sender = ProfileStore::open(
-            crate::Database::open(&directory.path().join("sender.sqlite"))
+            crate::Catalog::open(&directory.path().join("sender.sqlite"))
                 .await
                 .unwrap(),
             1,
@@ -1535,7 +1531,7 @@ mod tests {
         .unwrap();
         let path = directory.path().join("receiver.sqlite");
         let receiver = ProfileStore::open(
-            crate::Database::open(&path).await.unwrap(),
+            crate::Catalog::open(&path).await.unwrap(),
             2,
             KEY.parse().unwrap(),
         )
@@ -1568,7 +1564,7 @@ mod tests {
         );
         drop(receiver);
         let receiver = ProfileStore::open(
-            crate::Database::open(&path).await.unwrap(),
+            crate::Catalog::open(&path).await.unwrap(),
             2,
             KEY.parse().unwrap(),
         )
@@ -1592,7 +1588,7 @@ mod tests {
     async fn concurrent_playlist_occurrences_and_credential_edits_converge_after_restart() {
         let directory = tempfile::tempdir().unwrap();
         let a = ProfileStore::open(
-            crate::Database::open(&directory.path().join("a.sqlite"))
+            crate::Catalog::open(&directory.path().join("a.sqlite"))
                 .await
                 .unwrap(),
             1,
@@ -1601,7 +1597,7 @@ mod tests {
         .await
         .unwrap();
         let b = ProfileStore::open(
-            crate::Database::open(&directory.path().join("b.sqlite"))
+            crate::Catalog::open(&directory.path().join("b.sqlite"))
                 .await
                 .unwrap(),
             2,
@@ -1639,7 +1635,7 @@ mod tests {
         };
         drop(b);
         let b = ProfileStore::open(
-            crate::Database::open(&directory.path().join("b.sqlite"))
+            crate::Catalog::open(&directory.path().join("b.sqlite"))
                 .await
                 .unwrap(),
             2,
@@ -1675,7 +1671,7 @@ mod tests {
     async fn server_playlist_pins_resolve_after_profile_sync_and_source_refresh() {
         let directory = tempfile::tempdir().unwrap();
         let a = ProfileStore::open(
-            crate::Database::open(&directory.path().join("a.sqlite"))
+            crate::Catalog::open(&directory.path().join("a.sqlite"))
                 .await
                 .unwrap(),
             1,
@@ -1684,7 +1680,7 @@ mod tests {
         .await
         .unwrap();
         let mut b = ProfileStore::open(
-            crate::Database::open(&directory.path().join("b.sqlite"))
+            crate::Catalog::open(&directory.path().join("b.sqlite"))
                 .await
                 .unwrap(),
             2,
@@ -1694,8 +1690,8 @@ mod tests {
         .unwrap();
         a.bind_profile("profile", "source").await.unwrap();
         b.bind_profile("profile", "target").await.unwrap();
-        let source = a.database.clone();
-        let target = b.database.clone();
+        let source = a.catalog.clone();
+        let target = b.catalog.clone();
         let id = crate::SourceId::new("server");
         let cancel = crate::ReadCancellation::new();
         let art = serde_json::to_vec(&[crate::ArtworkCandidate::new(
@@ -1709,7 +1705,7 @@ mod tests {
         .unwrap();
         let sidebar = json!({"pins":[{"Playlist":{"source_id":"server","playlist_id":"mix"}}]});
         for revision in 0..3 {
-            for (receiving, database) in [(false, &source), (true, &target)] {
+            for (receiving, catalog) in [(false, &source), (true, &target)] {
                 if receiving {
                     if revision == 0 {
                         source.connect_initialize_profile().await.unwrap();
@@ -1782,14 +1778,14 @@ mod tests {
                         );
                     }
                 }
-                database
+                catalog
                     .reconcile_source(&crate::SourceId::new("server"), "server", "Server")
                     .await
                     .unwrap();
-                let mut catalog = database.catalog("server", None).await.unwrap();
-                let stamp = catalog.start_observation().await.unwrap();
+                let mut observation = catalog.observe("server", None).await.unwrap();
+                let stamp = observation.start_observation().await.unwrap();
                 if revision < 2 {
-                    catalog
+                    observation
                         .apply_catalog(
                             &crate::CatalogBatch {
                                 playlists: vec![crate::PlaylistObservation {
@@ -1822,7 +1818,7 @@ mod tests {
                                 }
                             })
                             .collect::<Vec<_>>();
-                        catalog
+                        observation
                             .write_source_playlist_page(
                                 "mix",
                                 offset,
@@ -1833,12 +1829,12 @@ mod tests {
                             .unwrap();
                     }
                 }
-                catalog
+                observation
                     .complete_source_observation(stamp, &["playlist"], None)
                     .await
                     .unwrap();
-                database
-                    .publish_catalog_update("server", catalog.into_changes())
+                catalog
+                    .publish_catalog_update("server", observation.into_changes())
                     .await;
             }
             let key = target
@@ -1907,7 +1903,7 @@ mod tests {
     async fn playlist_order_and_setup_snapshot_preserve_profile_boundaries() {
         let directory = tempfile::tempdir().unwrap();
         let a = ProfileStore::open(
-            crate::Database::open(&directory.path().join("a.sqlite"))
+            crate::Catalog::open(&directory.path().join("a.sqlite"))
                 .await
                 .unwrap(),
             1,
@@ -1916,7 +1912,7 @@ mod tests {
         .await
         .unwrap();
         let mut b = ProfileStore::open(
-            crate::Database::open(&directory.path().join("b.sqlite"))
+            crate::Catalog::open(&directory.path().join("b.sqlite"))
                 .await
                 .unwrap(),
             2,
@@ -1939,7 +1935,7 @@ mod tests {
             .await
             .unwrap();
         deliver(&a, &b).await;
-        let db = b.database.clone();
+        let catalog = b.catalog.clone();
         let names: Vec<String> = sqlx::query_scalar(
             "SELECT object_id FROM playlists WHERE owner='rufin' ORDER BY position",
         )
@@ -1948,16 +1944,16 @@ mod tests {
         .unwrap();
         assert_eq!(names, ["c", "a", "b"]);
         let definition = crate::SmartPlaylistDefinition::default();
-        a.database
+        a.catalog
             .create_smart_playlist("First", &definition, None)
             .await
             .unwrap();
         let middle = a
-            .database
+            .catalog
             .create_smart_playlist("Middle", &definition, None)
             .await
             .unwrap();
-        a.database
+        a.catalog
             .create_smart_playlist("Last", &definition, None)
             .await
             .unwrap();
@@ -1967,8 +1963,8 @@ mod tests {
                 .await
                 .unwrap();
         a.bind_profile("profile", "sender").await.unwrap();
-        a.database.connect_initialize_profile().await.unwrap();
-        assert!(a.database.connect_seed_page().await.unwrap());
+        a.catalog.connect_initialize_profile().await.unwrap();
+        assert!(a.catalog.connect_seed_page().await.unwrap());
         let order = records(
             &a.load_document(&mut *a.writer().await.unwrap(), "smart_order")
                 .await
@@ -1985,7 +1981,7 @@ mod tests {
             .unwrap(),
             0
         );
-        while a.database.connect_seed_page().await.unwrap() {}
+        while a.catalog.connect_seed_page().await.unwrap() {}
         let snapshot = directory.path().join("setup.sqlite");
         a.export_database(&snapshot, &KEY.parse().unwrap(), &[], &[])
             .await
@@ -1994,15 +1990,15 @@ mod tests {
         ProfileStore::prepare_database(&snapshot, &KEY.parse().unwrap(), &KEY.parse().unwrap())
             .await
             .unwrap();
-        ProfileStore::install_prepared_database(db.clone(), &snapshot)
+        ProfileStore::install_prepared_database(catalog.clone(), &snapshot)
             .await
             .unwrap();
-        b = ProfileStore::open(db.clone(), 2, KEY.parse().unwrap())
+        b = ProfileStore::open(catalog.clone(), 2, KEY.parse().unwrap())
             .await
             .unwrap();
         b.bind_profile("profile", "receiver").await.unwrap();
-        db.connect_set_active(true).await.unwrap();
-        a.database
+        catalog.connect_set_active(true).await.unwrap();
+        a.catalog
             .update_smart_playlist(middle, "Renamed", &definition, None)
             .await
             .unwrap();
@@ -2018,7 +2014,7 @@ mod tests {
                 .unwrap(),
             expected
         );
-        a.database
+        a.catalog
             .create_smart_playlist("Appended", &definition, None)
             .await
             .unwrap();
@@ -2040,7 +2036,7 @@ mod tests {
         .unwrap();
         let names = ["preference:theme".to_owned()];
         let updates = a.updates(&b.versions(&names).await.unwrap()).await.unwrap();
-        ProfileStore::clear_database(&b.database, directory.path())
+        ProfileStore::clear_database(&b.catalog, directory.path())
             .await
             .unwrap();
         b.import_updates(&updates).await.unwrap();
@@ -2055,7 +2051,7 @@ mod tests {
     async fn authored_and_current_changes_keep_separate_cursors_and_converge() {
         let directory = tempfile::tempdir().unwrap();
         let store = ProfileStore::open(
-            Database::open(directory.path().join("profile.sqlite"))
+            Catalog::open(directory.path().join("profile.sqlite"))
                 .await
                 .unwrap(),
             1,
@@ -2064,7 +2060,7 @@ mod tests {
         .await
         .unwrap();
         let peer = ProfileStore::open(
-            Database::open(directory.path().join("peer.sqlite"))
+            Catalog::open(directory.path().join("peer.sqlite"))
                 .await
                 .unwrap(),
             2,
@@ -2086,11 +2082,11 @@ mod tests {
                 .await
                 .unwrap();
             profile
-                .database
+                .catalog
                 .reconcile_source(&source, "webdav", "Files")
                 .await
                 .unwrap();
-            profile.database.connect_set_active(true).await.unwrap();
+            profile.catalog.connect_set_active(true).await.unwrap();
         }
         let uri = crate::source_entity_uri(&source, "track", "one");
         let state = |favorite| ConnectRecord {
@@ -2163,8 +2159,8 @@ mod tests {
             state: crate::LocalFileState::Accepted,
         };
         store
-            .database
-            .catalog("server", None)
+            .catalog
+            .observe("server", None)
             .await
             .unwrap()
             .write_file_observations(
@@ -2186,7 +2182,7 @@ mod tests {
         let keys = vec![("catalog:file".into(), key.clone())];
         let native = store.current_records(&keys).await.unwrap().remove(0);
         let revision = store.revision().await.unwrap();
-        let mut retry = store.database.catalog("server", None).await.unwrap();
+        let mut retry = store.catalog.observe("server", None).await.unwrap();
         retry
             .write_file_observations(
                 &[(file.clone(), Vec::new())],
@@ -2225,8 +2221,8 @@ mod tests {
                 serde_json::from_value(native.value.as_ref().unwrap()["tracks"].clone()).unwrap();
             tracks[0].metadata.title = title.into();
             profile
-                .database
-                .catalog("server", None)
+                .catalog
+                .observe("server", None)
                 .await
                 .unwrap()
                 .write_file_observations(&[(file.clone(), Vec::new())], tracks, true)
@@ -2251,17 +2247,17 @@ mod tests {
             .await
             .unwrap();
         store
-            .database
+            .catalog
             .set_favorite(&crate::FavoriteTarget::Track(uri.clone()), true)
             .await
             .unwrap();
         let smart = store
-            .database
+            .catalog
             .create_smart_playlist("Saved", &crate::SmartPlaylistDefinition::default(), None)
             .await
             .unwrap();
         let (_, playlist) = store
-            .database
+            .catalog
             .create_playlist(
                 None,
                 "Saved tracks",
@@ -2294,7 +2290,7 @@ mod tests {
         for deleted in [false, true] {
             if deleted {
                 let smart = store
-                    .database
+                    .catalog
                     .smart_playlist_key_by_object(
                         &scalar_keys[1].1,
                         &crate::ReadCancellation::new(),
@@ -2302,13 +2298,13 @@ mod tests {
                     .await
                     .unwrap()
                     .unwrap();
-                store.database.delete_smart_playlist(smart).await.unwrap();
+                store.catalog.delete_smart_playlist(smart).await.unwrap();
                 let reset = format!(
                     "{{\"version\":1}}\n{}\n",
                     json!({"media_uri":uri,"favorite":null,"rating":null})
                 );
                 store
-                    .database
+                    .catalog
                     .import_user_media_state_jsonl(std::io::Cursor::new(reset))
                     .await
                     .unwrap();
@@ -2409,19 +2405,19 @@ mod tests {
                 listened_millis: 100_000,
                 skipped: false,
             };
-            peer.database
+            peer.catalog
                 .record_listen(&listen, None, &[])
                 .await
                 .unwrap();
             store
-                .database
+                .catalog
                 .set_favorite(&crate::FavoriteTarget::Track(uri.clone()), lower_first)
                 .await
                 .unwrap();
             listen.listened_millis = 40_000;
             listen.skipped = true;
             store
-                .database
+                .catalog
                 .record_listen(&listen, None, &[])
                 .await
                 .unwrap();
@@ -2522,8 +2518,8 @@ mod tests {
         .unwrap();
         tracks[0].metadata.title = "Delta".into();
         store
-            .database
-            .catalog("server", None)
+            .catalog
+            .observe("server", None)
             .await
             .unwrap()
             .write_file_observations(&[(file.clone(), Vec::new())], tracks, true)
@@ -2537,8 +2533,8 @@ mod tests {
         analyzed_file.relative_path = "two.flac".into();
         analyzed_file.revision = Some("two-v1".into());
         store
-            .database
-            .catalog("server", None)
+            .catalog
+            .observe("server", None)
             .await
             .unwrap()
             .write_file_observations(
@@ -2561,7 +2557,7 @@ mod tests {
         let (source_key, track_key): (crate::SourceKey, crate::TrackKey) =
             sqlx::query_as("SELECT source_key,track_key FROM tracks WHERE media_uri=?1")
                 .bind(&analyzed_uri)
-                .fetch_one(&mut *store.database.acquire_reader().await.unwrap())
+                .fetch_one(&mut *store.catalog.acquire_reader().await.unwrap())
                 .await
                 .unwrap();
         let loudness = crate::LoudnessMeasurement {
@@ -2573,7 +2569,7 @@ mod tests {
         };
         assert!(
             store
-                .database
+                .catalog
                 .write_track_analyzed_loudness(source_key, track_key, &loudness)
                 .await
                 .unwrap()
@@ -2583,15 +2579,9 @@ mod tests {
             analysis_key,
             peaks: vec![(0.25, 0.5), (0.75, 1.0)],
         };
+        assert!(store.catalog.write_waveform_cache(&waveform).await.unwrap());
         assert!(
-            store
-                .database
-                .write_waveform_cache(&waveform)
-                .await
-                .unwrap()
-        );
-        assert!(
-            peer.database
+            peer.catalog
                 .audio_analysis_key(&analyzed_uri)
                 .await
                 .unwrap()
@@ -2617,7 +2607,7 @@ mod tests {
             "Delta"
         );
         assert_eq!(
-            peer.database
+            peer.catalog
                 .playback_loudness(&analyzed_uri, &crate::ReadCancellation::new())
                 .await
                 .unwrap()
@@ -2625,7 +2615,7 @@ mod tests {
             Some(loudness)
         );
         let received_waveform = peer
-            .database
+            .catalog
             .waveform_cache(&analyzed_uri)
             .await
             .unwrap()
@@ -2636,8 +2626,8 @@ mod tests {
         assert!(!peer.import_updates(&updates).await.unwrap());
         assert_eq!(peer.revision().await.unwrap(), revision);
         store
-            .database
-            .catalog("server", None)
+            .catalog
+            .observe("server", None)
             .await
             .unwrap()
             .remove_source_files(&[media_path.to_owned()], i64::MAX)
@@ -2652,7 +2642,7 @@ mod tests {
     async fn newer_local_edits_supersede_received_values() {
         let directory = tempfile::tempdir().unwrap();
         let a = ProfileStore::open(
-            crate::Database::open(&directory.path().join("a.sqlite"))
+            crate::Catalog::open(&directory.path().join("a.sqlite"))
                 .await
                 .unwrap(),
             1,
@@ -2661,7 +2651,7 @@ mod tests {
         .await
         .unwrap();
         let b = ProfileStore::open(
-            crate::Database::open(&directory.path().join("b.sqlite"))
+            crate::Catalog::open(&directory.path().join("b.sqlite"))
                 .await
                 .unwrap(),
             2,
@@ -2683,17 +2673,17 @@ mod tests {
         a.bind_profile("profile", "a").await.unwrap();
         b.bind_profile("profile", "b").await.unwrap();
         let source_id = crate::SourceId::new("server");
-        for database in [&a.database, &b.database] {
-            database
+        for catalog in [&a.catalog, &b.catalog] {
+            catalog
                 .reconcile_source(&source_id, "jellyfin", "Server")
                 .await
                 .unwrap();
-            database.connect_set_active(true).await.unwrap();
+            catalog.connect_set_active(true).await.unwrap();
         }
         {
-            let mut catalog = a.database.catalog("server", None).await.unwrap();
-            catalog.start_observation().await.unwrap();
-            catalog
+            let mut observation = a.catalog.observe("server", None).await.unwrap();
+            observation.start_observation().await.unwrap();
+            observation
                 .apply_catalog(
                     &crate::CatalogBatch {
                         playlists: vec![crate::PlaylistObservation {
@@ -2713,15 +2703,15 @@ mod tests {
         a.export_database(&snapshot, &KEY.parse().unwrap(), &[], &[])
             .await
             .unwrap();
-        let database = b.database.clone();
+        let catalog = b.catalog.clone();
         b.close().await.unwrap();
         ProfileStore::prepare_database(&snapshot, &KEY.parse().unwrap(), &KEY.parse().unwrap())
             .await
             .unwrap();
-        ProfileStore::install_prepared_database(database.clone(), &snapshot)
+        ProfileStore::install_prepared_database(catalog.clone(), &snapshot)
             .await
             .unwrap();
-        let b = ProfileStore::open(database, 2, KEY.parse().unwrap())
+        let b = ProfileStore::open(catalog, 2, KEY.parse().unwrap())
             .await
             .unwrap();
         let initial: String = sqlx::query_scalar(
@@ -2732,9 +2722,9 @@ mod tests {
         .unwrap();
         assert_eq!(initial, "Remote");
         {
-            let mut catalog = b.database.catalog("server", None).await.unwrap();
-            catalog.start_observation().await.unwrap();
-            catalog
+            let mut observation = b.catalog.observe("server", None).await.unwrap();
+            observation.start_observation().await.unwrap();
+            observation
                 .apply_catalog(
                     &crate::CatalogBatch {
                         playlists: vec![crate::PlaylistObservation {
@@ -2776,7 +2766,7 @@ mod tests {
     async fn file_edits_are_delivered_to_peers_after_offline_import() {
         let directory = tempfile::tempdir().unwrap();
         let original = ProfileStore::open(
-            crate::Database::open(&directory.path().join("original.sqlite"))
+            crate::Catalog::open(&directory.path().join("original.sqlite"))
                 .await
                 .unwrap(),
             1,
@@ -2785,7 +2775,7 @@ mod tests {
         .await
         .unwrap();
         let offline = ProfileStore::open(
-            crate::Database::open(&directory.path().join("offline.sqlite"))
+            crate::Catalog::open(&directory.path().join("offline.sqlite"))
                 .await
                 .unwrap(),
             2,
@@ -2794,7 +2784,7 @@ mod tests {
         .await
         .unwrap();
         let joining = ProfileStore::open(
-            crate::Database::open(&directory.path().join("joining.sqlite"))
+            crate::Catalog::open(&directory.path().join("joining.sqlite"))
                 .await
                 .unwrap(),
             3,
@@ -2869,9 +2859,9 @@ mod tests {
                 .contains(&record(false))
         );
         joining.bind_profile("profile", "joining").await.unwrap();
-        joining.database.connect_set_active(true).await.unwrap();
+        joining.catalog.connect_set_active(true).await.unwrap();
         joining
-            .database
+            .catalog
             .set_favorite(&crate::FavoriteTarget::Track("track".into()), true)
             .await
             .unwrap();
@@ -2883,7 +2873,7 @@ mod tests {
         let path = directory.path().join("profile.sqlite");
         let snapshot = directory.path().join("profile.jsonl");
         let profile = ProfileStore::open(
-            crate::Database::open(&path).await.unwrap(),
+            crate::Catalog::open(&path).await.unwrap(),
             1,
             KEY.parse().unwrap(),
         )
@@ -2926,7 +2916,7 @@ mod tests {
             .unwrap();
         drop(profile);
         let profile = ProfileStore::open(
-            crate::Database::open(&path).await.unwrap(),
+            crate::Catalog::open(&path).await.unwrap(),
             1,
             KEY.parse().unwrap(),
         )
@@ -2982,15 +2972,15 @@ mod tests {
             24
         );
         std::fs::write(&snapshot, bytes).unwrap();
-        let database = profile.database.clone();
+        let catalog = profile.catalog.clone();
         profile.close().await.unwrap();
         ProfileStore::prepare_database(&snapshot, &KEY.parse().unwrap(), &KEY.parse().unwrap())
             .await
             .unwrap();
-        ProfileStore::install_prepared_database(database.clone(), &snapshot)
+        ProfileStore::install_prepared_database(catalog.clone(), &snapshot)
             .await
             .unwrap();
-        let profile = ProfileStore::open(database, 1, KEY.parse().unwrap())
+        let profile = ProfileStore::open(catalog, 1, KEY.parse().unwrap())
             .await
             .unwrap();
         assert_eq!(
@@ -3011,15 +3001,15 @@ mod tests {
             .acknowledge_sync_in("peer", SyncStream::NativeCache, 30)
             .await
             .unwrap();
-        let database = profile.database.clone();
+        let catalog = profile.catalog.clone();
         profile.close().await.unwrap();
         ProfileStore::prepare_database(&snapshot, &KEY.parse().unwrap(), &KEY.parse().unwrap())
             .await
             .unwrap();
-        ProfileStore::install_prepared_database(database.clone(), &snapshot)
+        ProfileStore::install_prepared_database(catalog.clone(), &snapshot)
             .await
             .unwrap();
-        let profile = ProfileStore::open(database, 1, KEY.parse().unwrap())
+        let profile = ProfileStore::open(catalog, 1, KEY.parse().unwrap())
             .await
             .unwrap();
         assert_eq!(
@@ -3041,15 +3031,15 @@ mod tests {
             .await
             .unwrap();
         profile
-            .database
+            .catalog
             .reconcile_source(&crate::SourceId::new("server"), "webdav", "Files")
             .await
             .unwrap();
-        profile.database.connect_set_active(true).await.unwrap();
+        profile.catalog.connect_set_active(true).await.unwrap();
         let path = "https://files.example.test/music/one.flac";
         profile
-            .database
-            .catalog("server", None)
+            .catalog
+            .observe("server", None)
             .await
             .unwrap()
             .write_file_observations(
@@ -3087,7 +3077,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let native = Database::connect_record_on(
+        let native = Catalog::connect_record_on(
             &mut *profile.writer().await.unwrap(),
             "catalog:file",
             &json!(["server", path]).to_string(),
@@ -3119,7 +3109,7 @@ mod tests {
                 .any(|bytes| bytes == b"private-connect-token")
         );
         let copied = ProfileStore::open(
-            crate::Database::open(&copied_path).await.unwrap(),
+            crate::Catalog::open(&copied_path).await.unwrap(),
             99,
             transport.clone(),
         )
@@ -3163,12 +3153,12 @@ mod tests {
                 .await
                 .is_err()
         );
-        copied.database.clone().close().await.unwrap();
+        copied.catalog.clone().close().await.unwrap();
 
         let recipient_path = directory.path().join("recipient.sqlite");
         let recipient_key = age::x25519::Identity::generate();
         let recipient = ProfileStore::open(
-            crate::Database::open(&recipient_path).await.unwrap(),
+            crate::Catalog::open(&recipient_path).await.unwrap(),
             2,
             recipient_key.clone(),
         )
@@ -3238,7 +3228,7 @@ mod tests {
         edited_secret.value =
             Some(json!({"name":"Receiver server","password":"private-connect-token"}));
         recipient.bind_profile("shared", "receiver").await.unwrap();
-        recipient.database.connect_set_active(true).await.unwrap();
+        recipient.catalog.connect_set_active(true).await.unwrap();
         let file_name = format!("{}:{}", native.kind, native.key);
         let previous_file = recipient
             .versions(std::slice::from_ref(&file_name))
@@ -3246,8 +3236,8 @@ mod tests {
             .unwrap()
             .remove(0);
         recipient
-            .database
-            .catalog("server", None)
+            .catalog
+            .observe("server", None)
             .await
             .unwrap()
             .write_file_observations(
@@ -3294,7 +3284,7 @@ mod tests {
         );
         recipient.close().await.unwrap();
         let recipient = ProfileStore::open(
-            crate::Database::open(&recipient_path).await.unwrap(),
+            crate::Catalog::open(&recipient_path).await.unwrap(),
             2,
             recipient_key,
         )
@@ -3320,7 +3310,7 @@ mod tests {
     async fn stale_profile_file_keeps_newer_edits() {
         let directory = tempfile::tempdir().unwrap();
         let a = ProfileStore::open(
-            crate::Database::open(&directory.path().join("a.sqlite"))
+            crate::Catalog::open(&directory.path().join("a.sqlite"))
                 .await
                 .unwrap(),
             1,
@@ -3329,7 +3319,7 @@ mod tests {
         .await
         .unwrap();
         let b = ProfileStore::open(
-            crate::Database::open(&directory.path().join("b.sqlite"))
+            crate::Catalog::open(&directory.path().join("b.sqlite"))
                 .await
                 .unwrap(),
             2,

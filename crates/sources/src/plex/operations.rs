@@ -240,18 +240,18 @@ impl PlexSource {
     }
     pub(crate) async fn acquire_collection(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         collection: &crate::SourceCollection,
         header: Option<&serde_json::Value>,
         complete_membership: bool,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
+        let catalog = observation.catalog;
+        let source_id = observation.source_id;
+        let stamp = observation.observed;
 
         let stamp = if complete_membership && stamp.is_none() {
-            Some(catalog.start_observation().await?)
+            Some(observation.start_observation().await?)
         } else {
             stamp
         };
@@ -277,7 +277,7 @@ impl PlexSource {
                 if cancelled() {
                     return Err(crate::SourceError::Cancelled);
                 }
-                catalog.apply_catalog(&batch, true).await?;
+                observation.apply_catalog(&batch, true).await?;
             }
         }
         let (object, suffix) = match collection {
@@ -297,7 +297,7 @@ impl PlexSource {
                 .await?;
             let entries = items(&response["MediaContainer"]["Metadata"]);
             let finished = super::catalog::page_finished(&response, offset, entries.len())?;
-            self.acquire_metadata_page(catalog, entries, None, cancelled)
+            self.acquire_metadata_page(observation, entries, None, cancelled)
                 .await?;
 
             offset += entries.len();
@@ -308,7 +308,7 @@ impl PlexSource {
         if complete_membership && let crate::SourceCollection::Album(id) = collection {
             let mut after = None;
             loop {
-                let missing = database
+                let missing = catalog
                     .omitted_album_track_page(source_id, id, stamp.unwrap(), after.as_deref(), 100)
                     .await?;
                 if missing.is_empty() {
@@ -319,12 +319,12 @@ impl PlexSource {
                     .iter()
                     .map(|id| raw_item_id(id).to_owned())
                     .collect();
-                Box::pin(self.acquire_items(catalog, ids, Vec::new(), cancelled)).await?;
+                Box::pin(self.acquire_items(observation, ids, Vec::new(), cancelled)).await?;
             }
             if cancelled() {
                 return Err(crate::SourceError::Cancelled);
             }
-            catalog
+            observation
                 .complete_album_observation(&id, stamp.unwrap())
                 .await?;
         }

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use library::{Database, ReadCancellation, SourceId};
+use library::{Catalog, ReadCancellation, SourceId};
 use sqlx::Connection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 
@@ -8,7 +8,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 async fn reopening_without_statistics_preserves_library_order() {
     let fixture = super::support::fixture().await;
     let before = fixture
-        .database
+        .catalog
         .selected_track_uris(
             &library::MemberRead {
                 collection: library::Collection::Source(fixture.source),
@@ -29,11 +29,11 @@ async fn reopening_without_statistics_preserves_library_order() {
         .await
         .unwrap();
     raw.close().await.unwrap();
-    fixture.database.close().await.unwrap();
+    fixture.catalog.close().await.unwrap();
     let durable = durable_rows(&fixture.path).await;
-    let database = Database::open(&fixture.path).await.unwrap();
+    let catalog = Catalog::open(&fixture.path).await.unwrap();
     assert_eq!(durable_rows(&fixture.path).await, durable);
-    let after = database
+    let after = catalog
         .selected_track_uris(
             &library::MemberRead {
                 collection: library::Collection::Source(fixture.source),
@@ -48,14 +48,14 @@ async fn reopening_without_statistics_preserves_library_order() {
         .unwrap();
     assert_eq!(before, after);
     assert_eq!(after.len(), fixture.tracks.len());
-    database.close().await.unwrap();
+    catalog.close().await.unwrap();
     let mut raw = super::support::connection(&fixture.path).await;
     let schema_version: i64 = sqlx::query_scalar("PRAGMA schema_version")
         .fetch_one(&mut raw)
         .await
         .unwrap();
     raw.close().await.unwrap();
-    let reopened = Database::open(&fixture.path).await.unwrap();
+    let reopened = Catalog::open(&fixture.path).await.unwrap();
     assert_eq!(durable_rows(&fixture.path).await, durable);
     let mut raw = super::support::connection(&fixture.path).await;
     assert_eq!(
@@ -81,7 +81,7 @@ async fn reopening_without_statistics_preserves_library_order() {
         PRAGMA user_version=53;")
         .execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
-    let migrated = Database::open(&fixture.path).await.unwrap();
+    let migrated = Catalog::open(&fixture.path).await.unwrap();
     assert_eq!(durable_rows(&fixture.path).await, durable);
     let mut raw = connection(&fixture.path, false).await;
     let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as("EXPLAIN QUERY PLAN SELECT access.source_path FROM tracks track JOIN local_track_access access USING(track_key) WHERE media_uri=?1")
@@ -125,7 +125,7 @@ async fn reopening_without_statistics_preserves_library_order() {
         .await
         .unwrap();
     raw.close().await.unwrap();
-    let migrated = Database::open(&old_paths[0]).await.unwrap();
+    let migrated = Catalog::open(&old_paths[0]).await.unwrap();
     assert_eq!(
         migrated
             .selected_track_uris(
@@ -175,7 +175,7 @@ async fn reopening_without_statistics_preserves_library_order() {
         .await
         .unwrap();
     raw.close().await.unwrap();
-    let migrated = Database::open(&old_paths[1]).await.unwrap();
+    let migrated = Catalog::open(&old_paths[1]).await.unwrap();
     let mut raw = connection(&old_paths[1], false).await;
     let legacy = migrated
         .download_metadata("https://media.example/legacy-access.flac")
@@ -205,7 +205,7 @@ async fn reopening_without_statistics_preserves_library_order() {
 #[tokio::test]
 async fn missing_indexed_column_returns_error_without_replacing_the_library() {
     let fixture = super::support::fixture().await;
-    fixture.database.close().await.unwrap();
+    fixture.catalog.close().await.unwrap();
     let mut raw = super::support::connection(&fixture.path).await;
     let triggers: Vec<String> = sqlx::query_scalar(
         "SELECT name FROM sqlite_schema WHERE type='trigger' AND sql LIKE '%local_play_count%'",
@@ -229,7 +229,7 @@ async fn missing_indexed_column_returns_error_without_replacing_the_library() {
     .unwrap();
     raw.close().await.unwrap();
     let before = durable_rows(&fixture.path).await;
-    assert!(Database::open(&fixture.path).await.is_err());
+    assert!(Catalog::open(&fixture.path).await.is_err());
     assert_eq!(durable_rows(&fixture.path).await, before);
 }
 
@@ -237,7 +237,7 @@ async fn missing_indexed_column_returns_error_without_replacing_the_library() {
 async fn index_setup_failure_returns_error_without_replacing_the_library() {
     let fixture = super::support::fixture().await;
     fixture
-        .database
+        .catalog
         .create_playlist(
             None,
             "Keep me",
@@ -245,7 +245,7 @@ async fn index_setup_failure_returns_error_without_replacing_the_library() {
         )
         .await
         .unwrap();
-    fixture.database.close().await.unwrap();
+    fixture.catalog.close().await.unwrap();
     let mut raw = super::support::connection(&fixture.path).await;
     sqlx::raw_sql(
         "DROP INDEX tracks_local_shuffle_idx; CREATE TABLE tracks_local_shuffle_idx(value TEXT);",
@@ -255,19 +255,19 @@ async fn index_setup_failure_returns_error_without_replacing_the_library() {
     .unwrap();
     raw.close().await.unwrap();
     let before = durable_rows(&fixture.path).await;
-    assert!(Database::open(&fixture.path).await.is_err());
+    assert!(Catalog::open(&fixture.path).await.is_err());
     assert_eq!(durable_rows(&fixture.path).await, before);
 }
 
 #[tokio::test]
 async fn malformed_library_schema_returns_error_without_replacing_the_file() {
     let fixture = super::support::fixture().await;
-    fixture.database.close().await.unwrap();
+    fixture.catalog.close().await.unwrap();
     let mut raw = super::support::connection(&fixture.path).await;
     sqlx::raw_sql("PRAGMA writable_schema=ON; UPDATE sqlite_schema SET sql=replace(sql,'CREATE TABLE','BROKEN TABLE') WHERE name='sources';").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
     let before = std::fs::read(&fixture.path).unwrap();
-    assert!(Database::open(&fixture.path).await.is_err());
+    assert!(Catalog::open(&fixture.path).await.is_err());
     assert_eq!(std::fs::read(&fixture.path).unwrap(), before);
 }
 
@@ -286,17 +286,17 @@ async fn unreadable_library_returns_error_and_preserves_the_file() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("library.sqlite3");
     std::fs::write(&path, b"not a sqlite database").unwrap();
-    assert!(Database::open(&path).await.is_err());
+    assert!(Catalog::open(&path).await.is_err());
     assert_eq!(std::fs::read(&path).unwrap(), b"not a sqlite database");
 }
 #[tokio::test]
 async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_locators() {
     let fixture = super::support::fixture().await;
     let path = fixture.path.clone();
-    let catalog = path.with_extension("catalog.sqlite");
+    let catalog_file = path.with_extension("catalog.sqlite");
     let uri = &fixture.track_uris[0];
     fixture
-        .database
+        .catalog
         .create_playlist(
             None,
             "Durable duplicate list",
@@ -305,23 +305,23 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
         .await
         .unwrap();
     fixture
-        .database
+        .catalog
         .import_user_media_state_jsonl(std::io::Cursor::new(format!(
             "{{\"version\":1}}\n{{\"media_uri\":{},\"favorite\":true,\"rating\":87}}\n",
             serde_json::to_string(uri).unwrap()
         )))
         .await
         .unwrap();
-    fixture.database.import_local_locators_jsonl(std::io::Cursor::new(format!("{{\"version\":1}}\n{{\"source_id\":\"source\",\"media_uri\":{},\"origin\":\"mapping\",\"path\":\"/music/original.flac\",\"root\":\"/music\",\"relative_path\":\"original.flac\",\"access_uri\":\"file:///music/original.flac\"}}\n",serde_json::to_string(uri).unwrap()))).await.unwrap();
+    fixture.catalog.import_local_locators_jsonl(std::io::Cursor::new(format!("{{\"version\":1}}\n{{\"source_id\":\"source\",\"media_uri\":{},\"origin\":\"mapping\",\"path\":\"/music/original.flac\",\"root\":\"/music\",\"relative_path\":\"original.flac\",\"access_uri\":\"file:///music/original.flac\"}}\n",serde_json::to_string(uri).unwrap()))).await.unwrap();
     let mut raw = connection(&path, false).await;
     sqlx::query("INSERT INTO listens(external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) VALUES(NULL,'source',?1,'Snapshot','Artist','Album',100,'1970-01',100000,90000,0)").bind(uri).execute(&mut raw).await.unwrap();
     sqlx::raw_sql("INSERT INTO listen_outbox(listen_key,service,account_id,attempts,next_attempt_at,last_error) SELECT listen_key,'lastfm','account',3,200,'retry' FROM listens; INSERT INTO legacy_activity VALUES('source','lifetime','track','track-a',4,2,90);").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
-    fixture.database.close().await.unwrap();
+    fixture.catalog.close().await.unwrap();
     let mut before = durable_rows(&path).await;
     for damage in 0..3 {
         for suffix in ["", "-wal", "-shm"] {
-            let mut file = catalog.as_os_str().to_os_string();
+            let mut file = catalog_file.as_os_str().to_os_string();
             file.push(suffix);
             match std::fs::remove_file(file) {
                 Ok(()) => {}
@@ -330,11 +330,11 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
             }
         }
         match damage {
-            1 => std::fs::write(&catalog, b"damaged catalog").unwrap(),
+            1 => std::fs::write(&catalog_file, b"damaged catalog").unwrap(),
             2 => {
                 let mut old = SqliteConnection::connect_with(
                     &SqliteConnectOptions::new()
-                        .filename(&catalog)
+                        .filename(&catalog_file)
                         .create_if_missing(true),
                 )
                 .await
@@ -347,7 +347,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
             }
             _ => {}
         }
-        let database = Database::open(&path).await.unwrap();
+        let catalog = Catalog::open(&path).await.unwrap();
         assert_eq!(durable_rows(&path).await, before);
         let mut raw = connection(&path, false).await;
         assert_eq!(
@@ -374,13 +374,13 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
         raw.close().await.unwrap();
         // Ordinary rescan rejoins effective favorites/ratings by the unchanged media URI.
         let (_, _, object) = library::source_entity_parts(uri).unwrap();
-        database
+        catalog
             .reconcile_source(&SourceId::new("source"), "subsonic", "Source")
             .await
             .unwrap();
-        let mut catalog = database.catalog("source", None).await.unwrap();
-        let observed = catalog.start_observation().await.unwrap();
-        catalog
+        let mut observation = catalog.observe("source", None).await.unwrap();
+        let observed = observation.start_observation().await.unwrap();
+        observation
             .apply_catalog(
                 &library::CatalogBatch {
                     tracks: vec![library::TrackObservation {
@@ -407,7 +407,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
             )
             .await
             .unwrap();
-        catalog
+        observation
             .complete_source_observation(observed, &["track"], None)
             .await
             .unwrap();
@@ -423,7 +423,7 @@ async fn deleting_or_corrupting_catalog_preserves_exact_durable_records_and_loca
         );
         raw.close().await.unwrap();
         before = durable_rows(&path).await;
-        database.close().await.unwrap();
+        catalog.close().await.unwrap();
     }
 }
 
@@ -461,8 +461,8 @@ async fn durable_rows(path: &Path) -> Vec<(String, Vec<String>)> {
 #[tokio::test]
 async fn forgetting_source_retains_canonical_metadata_for_global_playlists() {
     let fixture = super::support::fixture().await;
-    let database = &fixture.database;
-    database
+    let catalog = &fixture.catalog;
+    catalog
         .create_playlist(
             None,
             "Snapshot",
@@ -481,7 +481,7 @@ async fn forgetting_source_retains_canonical_metadata_for_global_playlists() {
     }
     raw.close().await.unwrap();
     assert!(
-        database
+        catalog
             .remove_source(&library::SourceId::new("source"))
             .await
             .unwrap()
@@ -507,7 +507,7 @@ async fn forgetting_source_retains_canonical_metadata_for_global_playlists() {
 async fn unsupported_version_preserves_library_data() {
     let fixture = super::support::fixture().await;
     fixture
-        .database
+        .catalog
         .create_playlist(
             None,
             "Keep me",
@@ -515,15 +515,15 @@ async fn unsupported_version_preserves_library_data() {
         )
         .await
         .unwrap();
-    fixture.database.close().await.unwrap();
+    fixture.catalog.close().await.unwrap();
     let supported = durable_rows(&fixture.path).await;
     let mut raw = connection(&fixture.path, false).await;
     sqlx::raw_sql("ALTER TABLE playlists ADD COLUMN irrelevant TEXT; ALTER TABLE playlists DROP COLUMN artwork_mime; CREATE TABLE extra(value TEXT); INSERT INTO extra VALUES('keep in the original'); PRAGMA user_version=999;").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
     let before = durable_rows(&fixture.path).await;
-    assert!(Database::open(&fixture.path).await.is_err());
+    assert!(Catalog::open(&fixture.path).await.is_err());
     assert_eq!(durable_rows(&fixture.path).await, before);
-    let recovered = Database::open_installation(
+    let recovered = Catalog::open_installation(
         &fixture.path,
         &fixture.path.with_extension("catalog.sqlite"),
     )
@@ -603,7 +603,7 @@ async fn released_store_imports_old_playlist_artwork_and_known_roots() {
         PRAGMA user_version=51;"))).execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
 
-    Database::open_installation(&store, &catalog)
+    Catalog::open_installation(&store, &catalog)
         .await
         .unwrap()
         .close()
@@ -632,7 +632,7 @@ async fn released_store_imports_old_playlist_artwork_and_known_roots() {
 async fn missing_listen_identity_returns_error_without_replacing_user_data() {
     let fixture = super::support::fixture().await;
     fixture
-        .database
+        .catalog
         .create_playlist(
             None,
             "Keep me",
@@ -640,7 +640,7 @@ async fn missing_listen_identity_returns_error_without_replacing_user_data() {
         )
         .await
         .unwrap();
-    fixture.database.close().await.unwrap();
+    fixture.catalog.close().await.unwrap();
     let mut raw = connection(&fixture.path, false).await;
     let triggers: Vec<String> = sqlx::query_scalar(
         "SELECT name FROM sqlite_schema WHERE type='trigger' AND sql LIKE '%listens%'",
@@ -657,6 +657,6 @@ async fn missing_listen_identity_returns_error_without_replacing_user_data() {
     sqlx::raw_sql("DROP INDEX listens_media_activity_idx; DROP INDEX listens_connect_key_idx; ALTER TABLE listens DROP COLUMN media_uri;").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
     let before = durable_rows(&fixture.path).await;
-    assert!(Database::open(&fixture.path).await.is_err());
+    assert!(Catalog::open(&fixture.path).await.is_err());
     assert_eq!(durable_rows(&fixture.path).await, before);
 }

@@ -5,7 +5,7 @@ use sqlx::{Connection, FromRow, QueryBuilder, Sqlite, SqliteConnection};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
 use crate::{
-    CatalogSort, Database, FolderKey, LibraryError, LibraryResult, MemberSelection,
+    Catalog, CatalogSort, FolderKey, LibraryError, LibraryResult, MemberSelection,
     PlaylistEntryKey, PlaylistKey, ReadCancellation, SourceKey, TrackKey,
 };
 
@@ -44,7 +44,7 @@ impl PlaylistEntryRemovals {
 
     pub async fn apply(
         mut self,
-        database: &Database,
+        catalog: &Catalog,
         source: Option<SourceKey>,
         playlist: PlaylistKey,
     ) -> LibraryResult<usize> {
@@ -59,7 +59,7 @@ impl PlaylistEntryRemovals {
             reader.read_exact(&mut bytes)?;
             Ok(PlaylistEntryKey::from_raw(i64::from_le_bytes(bytes)))
         });
-        database
+        catalog
             .remove_playlist_entry_iter(source, playlist, entries)
             .await
     }
@@ -116,7 +116,7 @@ impl From<PlaylistEntryView> for crate::TrackReference {
     }
 }
 
-impl Database {
+impl Catalog {
     pub async fn playlist_access(
         &self,
         playlist: PlaylistKey,
@@ -661,7 +661,7 @@ pub(crate) async fn sync_playlist_header_on(
     } else {
         &["playlist_order"][..]
     } {
-        records.push(Database::connect_record_on(connection, kind, &key).await?);
+        records.push(Catalog::connect_record_on(connection, kind, &key).await?);
     }
     crate::profile::write_local_on(connection, &records).await
 }
@@ -683,9 +683,9 @@ pub(crate) async fn playlist_entry_records_on(
     let mut references = std::collections::HashSet::new();
     for (key, uri, missing) in keys {
         if missing && references.insert(uri.clone()) {
-            records.push(Database::connect_record_on(connection, "reference", &uri).await?);
+            records.push(Catalog::connect_record_on(connection, "reference", &uri).await?);
         }
-        records.push(Database::connect_record_on(connection, "entry", &key).await?);
+        records.push(Catalog::connect_record_on(connection, "entry", &key).await?);
     }
     Ok(records)
 }
@@ -768,10 +768,10 @@ mod point_projection_tests {
             atomic::{AtomicUsize, Ordering},
         };
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.sqlite3"))
+        let catalog = Catalog::open(directory.path().join("library.sqlite3"))
             .await
             .unwrap();
-        let mut writer = database.writer().await.unwrap();
+        let mut writer = catalog.writer().await.unwrap();
         sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32));\n          INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,normalized_name,sort_text,position)\n          VALUES(1,1,'source','small','Small','small','small',0),(2,1,'source','large','Large','large','large',1);\n          WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<15)\n          INSERT INTO tracks(track_key,source_key,object_id,media_uri,native_artwork,metadata) SELECT x,1,CAST(x AS TEXT),'track:'||x,X'01',jsonb(json_object('title',COALESCE('Title',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('title',''),'duration_millis',COALESCE(1000,0))) FROM n;\n          INSERT INTO playlist_entries(playlist_key,object_id,track_key,position)\n          SELECT 1,object_id,track_key,track_key FROM tracks;")
             .execute(&mut *writer).await.unwrap();
         for grow in [false, true] {
@@ -789,7 +789,7 @@ mod point_projection_tests {
                     counter.fetch_add(100, Ordering::Relaxed);
                     true
                 });
-            let rows = Database::load_playlist_rows(&mut *writer, &[PlaylistKey::from_raw(1)])
+            let rows = Catalog::load_playlist_rows(&mut *writer, &[PlaylistKey::from_raw(1)])
                 .await
                 .unwrap();
             let entry: String = sqlx::query_scalar(
@@ -828,7 +828,7 @@ mod point_projection_tests {
     }
 }
 
-impl Database {
+impl Catalog {
     pub(crate) async fn load_playlist_requested(
         connection: &mut SqliteConnection,
         requested: crate::query::RequestedKeys,

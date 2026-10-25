@@ -30,14 +30,14 @@ async fn converged_playlist_history_prunes_without_changing_saved_values() {
     let directory = tempfile::tempdir().unwrap();
     let a_path = directory.path().join("a.sqlite");
     let a = ProfileStore::open(
-        crate::Database::open(&a_path).await.unwrap(),
+        crate::Catalog::open(&a_path).await.unwrap(),
         1,
         KEY.parse().unwrap(),
     )
     .await
     .unwrap();
     let b = ProfileStore::open(
-        crate::Database::open(&directory.path().join("b.sqlite"))
+        crate::Catalog::open(&directory.path().join("b.sqlite"))
             .await
             .unwrap(),
         2,
@@ -70,13 +70,13 @@ async fn converged_playlist_history_prunes_without_changing_saved_values() {
             .await
             .unwrap();
     }
-    a.database.connect_set_active(true).await.unwrap();
-    a.database
+    a.catalog.connect_set_active(true).await.unwrap();
+    a.catalog
         .reconcile_source(&crate::SourceId::new("server"), "server", "Server")
         .await
         .unwrap();
-    a.database
-        .catalog("server", None)
+    a.catalog
+        .observe("server", None)
         .await
         .unwrap()
         .apply_catalog(
@@ -122,7 +122,7 @@ async fn converged_playlist_history_prunes_without_changing_saved_values() {
 
     drop(a);
     let a = ProfileStore::open(
-        crate::Database::open(&a_path).await.unwrap(),
+        crate::Catalog::open(&a_path).await.unwrap(),
         1,
         KEY.parse().unwrap(),
     )
@@ -183,7 +183,7 @@ async fn converged_playlist_history_prunes_without_changing_saved_values() {
     assert_eq!(updated_doc.oplog_vv(), full_doc.oplog_vv());
 
     let c = ProfileStore::open(
-        crate::Database::open(&directory.path().join("c.sqlite"))
+        crate::Catalog::open(&directory.path().join("c.sqlite"))
             .await
             .unwrap(),
         3,
@@ -225,7 +225,7 @@ async fn converged_playlist_history_prunes_without_changing_saved_values() {
 async fn offline_member_blocks_pruning_until_removed() {
     let directory = tempfile::tempdir().unwrap();
     let a = ProfileStore::open(
-        crate::Database::open(&directory.path().join("a.sqlite"))
+        crate::Catalog::open(&directory.path().join("a.sqlite"))
             .await
             .unwrap(),
         1,
@@ -261,7 +261,7 @@ async fn offline_member_blocks_pruning_until_removed() {
 async fn acknowledging_an_unseen_concurrent_branch_does_not_prune_it_away() {
     let directory = tempfile::tempdir().unwrap();
     let a = ProfileStore::open(
-        crate::Database::open(&directory.path().join("a.sqlite"))
+        crate::Catalog::open(&directory.path().join("a.sqlite"))
             .await
             .unwrap(),
         1,
@@ -270,7 +270,7 @@ async fn acknowledging_an_unseen_concurrent_branch_does_not_prune_it_away() {
     .await
     .unwrap();
     let b = ProfileStore::open(
-        crate::Database::open(&directory.path().join("b.sqlite"))
+        crate::Catalog::open(&directory.path().join("b.sqlite"))
             .await
             .unwrap(),
         2,

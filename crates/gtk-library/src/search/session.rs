@@ -31,7 +31,7 @@ pub const SEARCH_PREVIEW_LIMIT: usize = 30;
 /// One current query shared by the header and the Search route.
 pub struct SearchSession {
     source: rufin_core::runtime::SourceHandle,
-    database: Arc<library::Database>,
+    catalog: Arc<library::Catalog>,
     runtime: tokio::runtime::Handle,
     selected: RefCell<Option<SelectedLibrary>>,
     query: RefCell<String>,
@@ -49,12 +49,12 @@ pub struct SearchSession {
 impl SearchSession {
     pub fn new(
         source: rufin_core::runtime::SourceHandle,
-        database: Arc<library::Database>,
+        catalog: Arc<library::Catalog>,
         runtime: tokio::runtime::Handle,
     ) -> Self {
         Self {
             source,
-            database,
+            catalog,
             runtime,
             selected: RefCell::new(None),
             query: RefCell::new(String::new()),
@@ -96,9 +96,9 @@ impl SearchSession {
             operations: catalog.source.clone(),
         };
         let queue = catalog.playback.clone();
-        let database = catalog.library.clone();
+        let library = catalog.library.clone();
         catalog.runtime.spawn(async move {
-            match source.play_request(&database).await {
+            match source.play_request(&library).await {
                 Ok(mut request) => {
                     request.placement = placement;
                     queue.play_selection(request);
@@ -273,11 +273,11 @@ impl SearchSession {
         let mode = self.mode();
         let weak = Rc::downgrade(self);
         let source = self.source.clone();
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         let task = self.runtime.spawn(async move {
             rufin_core::source::search::acquire_search(
                 &source,
-                &database,
+                &catalog,
                 selected.as_ref(),
                 mode,
                 query,

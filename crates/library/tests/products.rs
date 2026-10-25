@@ -11,7 +11,7 @@ use super::support::{connection, fixture};
 async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
     use library::CatalogSort;
     let fixture = fixture().await;
-    let db = &fixture.database;
+    let catalog = &fixture.catalog;
     let cancel = ReadCancellation::new();
     for sort in [
         CatalogSort::Title,
@@ -40,7 +40,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                             downloaded_only: false,
                             activity: true,
                         }
-                        .page_artists(&db, RouteSeedWindow::top(), &cancel)
+                        .page_artists(&catalog, RouteSeedWindow::top(), &cancel)
                         .await
                         .map(|page| (page.count, page.first_row_position, page.rows))
                         .unwrap();
@@ -63,7 +63,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                                     downloaded_only: false,
                                     activity: true,
                                 }
-                                .artists(&db, offset, 1, &cancel)
+                                .artists(&catalog, offset, 1, &cancel)
                                 .await
                                 .unwrap()
                                 .into_iter()
@@ -94,7 +94,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                 downloaded_only: false,
                 activity: true,
             }
-            .page_genres(&db, RouteSeedWindow::top(), &cancel)
+            .page_genres(&catalog, RouteSeedWindow::top(), &cancel)
             .await
             .map(|page| (page.count, page.first_row_position, page.rows))
             .unwrap();
@@ -115,7 +115,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                         downloaded_only: false,
                         activity: true,
                     }
-                    .genres(&db, offset, 1, &cancel)
+                    .genres(&catalog, offset, 1, &cancel)
                     .await
                     .unwrap()
                     .into_iter()
@@ -126,7 +126,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         }
     }
     let external = "https://example.test/outside-catalog.flac".to_string();
-    let (_, outside_id) = db
+    let (_, outside_id) = catalog
         .create_playlist(
             None,
             "Outside",
@@ -135,21 +135,22 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         .await
         .unwrap()
         .unwrap();
-    let all = db
+    let all = catalog
         .create_smart_playlist("All", &SmartPlaylistDefinition::default(), None)
         .await
         .unwrap();
-    db.create_smart_playlist(
-        "Source",
-        &SmartPlaylistDefinition {
-            source_id: Some(library::SourceId::new("source")),
-            ..Default::default()
-        },
-        None,
-    )
-    .await
-    .unwrap();
-    let limited = db
+    catalog
+        .create_smart_playlist(
+            "Source",
+            &SmartPlaylistDefinition {
+                source_id: Some(library::SourceId::new("source")),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    let limited = catalog
         .create_smart_playlist(
             "Limited",
             &SmartPlaylistDefinition {
@@ -160,7 +161,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         )
         .await
         .unwrap();
-    let empty = db
+    let empty = catalog
         .create_smart_playlist(
             "Empty",
             &SmartPlaylistDefinition {
@@ -171,7 +172,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         )
         .await
         .unwrap();
-    let other = db
+    let other = catalog
         .reconcile_source(&library::SourceId::new("other"), "local", "Other")
         .await
         .unwrap()
@@ -197,7 +198,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                         downloaded_only: false,
                         activity: true,
                     }
-                    .smart_playlists(&db, 0, 64, &cancel)
+                    .smart_playlists(&catalog, 0, 64, &cancel)
                     .await
                     .unwrap();
                     let order = rows
@@ -236,7 +237,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                                 downloaded_only: false,
                                 activity: true,
                             }
-                            .smart_playlists(&db, offset, 1, &cancel)
+                            .smart_playlists(&catalog, offset, 1, &cancel)
                             .await
                             .unwrap()
                             .into_iter()
@@ -254,47 +255,50 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
     let artist_id = library::source_entity_parts(&fixture.artist_uris[0])
         .unwrap()
         .2;
-    let genre = db
+    let genre = catalog
         .genres(&[fixture.genre], None, &cancel)
         .await
         .unwrap()
         .pop()
         .unwrap();
-    let smart_rows = db
+    let smart_rows = catalog
         .smart_playlist_rows(&[all, limited, empty], 1000, &cancel)
         .await
         .unwrap();
-    let regular_folder = db
+    let regular_folder = catalog
         .create_playlist_folder("Pinned playlists", false)
         .await
         .unwrap();
-    let smart_folder = db
+    let smart_folder = catalog
         .create_playlist_folder("Pinned smart playlists", true)
         .await
         .unwrap();
-    let outside = db
+    let outside = catalog
         .playlist_key_by_identity(None, &outside_id, &cancel)
         .await
         .unwrap()
         .unwrap();
-    db.move_playlist_to_folder(
-        library::PlaylistFolderMember::Playlist { key: outside },
-        Some(regular_folder),
-    )
-    .await
-    .unwrap();
-    db.move_playlist_to_folder(
-        library::PlaylistFolderMember::SmartPlaylist { key: limited },
-        Some(smart_folder),
-    )
-    .await
-    .unwrap();
-    db.move_playlist_to_folder(
-        library::PlaylistFolderMember::SmartPlaylist { key: all },
-        Some(smart_folder),
-    )
-    .await
-    .unwrap();
+    catalog
+        .move_playlist_to_folder(
+            library::PlaylistFolderMember::Playlist { key: outside },
+            Some(regular_folder),
+        )
+        .await
+        .unwrap();
+    catalog
+        .move_playlist_to_folder(
+            library::PlaylistFolderMember::SmartPlaylist { key: limited },
+            Some(smart_folder),
+        )
+        .await
+        .unwrap();
+    catalog
+        .move_playlist_to_folder(
+            library::PlaylistFolderMember::SmartPlaylist { key: all },
+            Some(smart_folder),
+        )
+        .await
+        .unwrap();
     let mut raw = connection(&fixture.path).await;
     let folders: Vec<(i64, String)> =
         sqlx::query_as("SELECT folder_key,object_id FROM playlist_folders ORDER BY folder_key")
@@ -347,7 +351,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             album_id: "missing".into(),
         },
     ];
-    let headers = db.sidebar_pin_rows(&pins, &cancel).await.unwrap();
+    let headers = catalog.sidebar_pin_rows(&pins, &cancel).await.unwrap();
     assert_eq!(
         headers.iter().map(|row| &row.pin).collect::<Vec<_>>(),
         pins[..10].iter().collect::<Vec<_>>()
@@ -357,7 +361,10 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
     assert!(
         headers[5].totals.is_none() && headers[6].totals.is_none() && headers[8].totals.is_none()
     );
-    let rows = db.sidebar_pin_totals(headers, 1000, &cancel).await.unwrap();
+    let rows = catalog
+        .sidebar_pin_totals(headers, 1000, &cancel)
+        .await
+        .unwrap();
     assert_eq!(
         rows[5].totals,
         Some((smart_rows[0].track_count, smart_rows[0].duration_millis))
@@ -375,7 +382,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
     );
     assert_eq!(rows[7].totals, Some((1, 0)));
     assert_eq!(rows[9].totals, Some((0, 0)));
-    let album = db
+    let album = catalog
         .album(&fixture.album_uris[0], false, &cancel)
         .await
         .unwrap()
@@ -389,7 +396,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         album.artwork_binding.iter().cloned().collect::<Vec<_>>()
     );
     for (index, role) in [(1, false), (2, true)] {
-        let artist = db
+        let artist = catalog
             .artist(&fixture.artist_uris[0], role, false, &cancel)
             .await
             .unwrap()
@@ -411,7 +418,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             .map(std::slice::from_ref)
             .unwrap_or(&genre.representative_artwork)
     );
-    let order = db
+    let order = catalog
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Smart {
                 key: all,
@@ -431,7 +438,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                 key: all,
                 now: 1000,
             }))
-                .rows(&db, offset, 1, &cancel)
+                .rows(&catalog, offset, 1, &cancel)
                 .await
                 .map(|rows| {
                     rows.into_iter()
@@ -452,7 +459,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
                 now: 1000
             })
         })
-            .rows(&db, 0, 10, &cancel)
+            .rows(&catalog, 0, 10, &cancel)
             .await
             .map(|rows| rows
                 .into_iter()
@@ -476,7 +483,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
             now: 1000,
         })
     })
-        .rows(&db, 0, 10, &cancel)
+        .rows(&catalog, 0, 10, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -492,7 +499,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
         [&fixture.track_uris[0]]
     );
     let captured = super::support::resolve_queue(
-        db,
+        catalog,
         library::QueueLoad::Tracks(vec![(
             library::MemberRead {
                 collection: library::Collection::Smart {
@@ -530,7 +537,7 @@ async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
 async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
     use library::CatalogSort;
     let fixture = fixture().await;
-    let database = &fixture.database;
+    let catalog = &fixture.catalog;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
     sqlx::query("UPDATE albums SET metadata=jsonb(json_set(metadata,'$.year',CASE object_id WHEN 'album-a' THEN 2020 ELSE 1990 END)) ")
@@ -584,7 +591,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         downloaded_only: false,
                         activity: true,
                     }
-                    .page_albums(&database, RouteSeedWindow::top(), &cancel)
+                    .page_albums(&catalog, RouteSeedWindow::top(), &cancel)
                     .await
                     .map(|page| (page.count, page.first_row_position, page.rows))
                     .unwrap();
@@ -618,7 +625,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                                 favorites_only: false,
                                 downloaded_only: false
                             }
-                            .albums(&database, 0, 64, &cancel)
+                            .albums(&catalog, 0, 64, &cancel)
                             .await
                             .unwrap()
                             .into_iter()
@@ -639,10 +646,10 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                                 activity: true,
                                 downloaded_only: false
                             }
-                            .album_detail_index(&database, &cancel)
+                            .album_detail_index(&catalog, &cancel)
                             .await
                             .unwrap()
-                            .rows(&database, 0, 128, &cancel)
+                            .rows(&catalog, 0, 128, &cancel)
                             .await
                             .unwrap()
                             .into_iter()
@@ -673,7 +680,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                             downloaded_only: false,
                             activity: true,
                         }
-                        .albums(&database, offset, 1, &cancel)
+                        .albums(&catalog, offset, 1, &cancel)
                         .await
                         .unwrap();
                         assert!(page.len() <= 1);
@@ -692,7 +699,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                 folder: folder,
                 ..library::MemberRead::new(library::Collection::Album(*album))
             })
-                .page(&database, RouteSeedWindow::top(), &cancel)
+                .page(&catalog, RouteSeedWindow::top(), &cancel)
                 .await
                 .unwrap();
             let mut paged = Vec::new();
@@ -704,7 +711,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         folder: folder,
                         ..library::MemberRead::new(library::Collection::Album(*album))
                     })
-                        .rows(&database, offset, 1, &cancel)
+                        .rows(&catalog, offset, 1, &cancel)
                         .await
                         .map(|rows| {
                             rows.into_iter()
@@ -734,7 +741,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
         fixture.track_uris[1].clone(),
         fixture.track_uris[0].clone(),
     ];
-    let playlist = database
+    let playlist = catalog
         .create_playlist(
             None,
             "Global",
@@ -744,7 +751,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
         .unwrap()
         .unwrap()
         .0;
-    database
+    catalog
         .create_playlist(
             Some(fixture.source),
             "Source",
@@ -773,7 +780,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         downloaded_only: false,
                         activity: true,
                     }
-                    .playlists(&database, 0, 64, &cancel)
+                    .playlists(&catalog, 0, 64, &cancel)
                     .await
                     .unwrap();
                     let order = rows.iter().map(|row| row.playlist_key).collect::<Vec<_>>();
@@ -792,7 +799,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                                 downloaded_only: false,
                                 activity: true,
                             }
-                            .playlists(&database, offset, 1, &cancel)
+                            .playlists(&catalog, offset, 1, &cancel)
                             .await
                             .unwrap()
                             .into_iter()
@@ -832,7 +839,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                     ..library::MemberRead::new(library::Collection::Playlist(playlist))
                 };
                 let order = (&query)
-                    .rows(&database, 0, 256, &cancel)
+                    .rows(&catalog, 0, 256, &cancel)
                     .await
                     .map(|rows| {
                         rows.into_iter()
@@ -843,7 +850,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                     .into_iter()
                     .map(|entry| entry.playlist_entry_key)
                     .collect::<Vec<_>>();
-                let edit_entries = database
+                let edit_entries = catalog
                     .playlist_edit_entries(playlist, &query.selection(), &cancel)
                     .await
                     .unwrap();
@@ -865,7 +872,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                             descending: descending,
                             ..library::MemberRead::new(library::Collection::Playlist(playlist))
                         })
-                            .rows(&database, offset, 1, &cancel)
+                            .rows(&catalog, offset, 1, &cancel)
                             .await
                             .map(|rows| {
                                 rows.into_iter()
@@ -888,7 +895,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
         let mut paged = Vec::new();
         for offset in 0..=order.len() {
             paged.extend(
-                database
+                catalog
                     .folder_page(fixture.source, parent, offset, 1, &cancel)
                     .await
                     .unwrap()
@@ -938,7 +945,7 @@ async fn track_pages_preserve_sort_filter_and_source_scope() {
         for descending in [false, true] {
             for folder in [None, Some(fixture.folder)] {
                 let order = fixture
-                    .database
+                    .catalog
                     .selected_track_uris(
                         &library::MemberRead {
                             collection: library::Collection::Source(fixture.source),
@@ -980,7 +987,7 @@ async fn track_pages_preserve_sort_filter_and_source_scope() {
                         descending: descending,
                         ..library::MemberRead::new(library::Collection::Source(fixture.source))
                     })
-                        .rows(&fixture.database, offset, 2, &cancel)
+                        .rows(&fixture.catalog, offset, 2, &cancel)
                         .await
                         .map(|rows| {
                             rows.into_iter()
@@ -1001,7 +1008,7 @@ async fn track_pages_preserve_sort_filter_and_source_scope() {
         filter: ("beta").into(),
         ..library::MemberRead::new(library::Collection::Source(fixture.source))
     })
-        .rows(&fixture.database, 0, 10, &cancel)
+        .rows(&fixture.catalog, 0, 10, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -1017,7 +1024,7 @@ async fn track_pages_preserve_sort_filter_and_source_scope() {
             sort: Some(library::CatalogSort::Title),
             ..library::MemberRead::new(library::Collection::Source(fixture.source))
         })
-            .rows(&fixture.database, usize::MAX, 10, &cancel)
+            .rows(&fixture.catalog, usize::MAX, 10, &cancel)
             .await
             .map(|rows| rows
                 .into_iter()
@@ -1032,7 +1039,7 @@ async fn track_pages_preserve_sort_filter_and_source_scope() {
             sort: Some(library::CatalogSort::Title),
             ..library::MemberRead::new(library::Collection::Source(fixture.source))
         })
-            .rows(&fixture.database, 0, 0, &cancel)
+            .rows(&fixture.catalog, 0, 0, &cancel)
             .await
             .map(|rows| rows
                 .into_iter()
@@ -1050,7 +1057,7 @@ async fn track_pages_preserve_sort_filter_and_source_scope() {
         sort: Some(library::CatalogSort::Title),
         ..library::MemberRead::new(library::Collection::Source(fixture.source))
     })
-        .rows(&fixture.database, 0, usize::MAX, &cancel)
+        .rows(&fixture.catalog, 0, usize::MAX, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -1076,7 +1083,7 @@ async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
             RadioSeed::Track(fixture.track_uris[0].clone()),
         ] {
             let mut candidates = fixture
-                .database
+                .catalog
                 .radio_candidates(
                     fixture.source,
                     seed.clone(),
@@ -1115,7 +1122,7 @@ async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
     ] {
         assert_eq!(
             fixture
-                .database
+                .catalog
                 .radio_candidates(
                     fixture.source,
                     seed,
@@ -1146,13 +1153,13 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
     sqlx::query("INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) SELECT playlist_key,'entry',(SELECT track_key FROM tracks WHERE media_uri=?1),0 FROM playlists WHERE object_id='native'")
         .bind(&fixture.track_uris[0]).execute(&mut raw).await.unwrap();
     let native = fixture
-        .database
+        .catalog
         .playlist_key_by_object(fixture.source, "native", &cancel)
         .await
         .unwrap()
         .unwrap();
     let local = fixture
-        .database
+        .catalog
         .create_playlist(
             None,
             "Mixed",
@@ -1165,7 +1172,7 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
         .unwrap()
         .0;
     let (owned, _) = fixture
-        .database
+        .catalog
         .create_playlist(
             Some(fixture.source),
             "Owned",
@@ -1192,7 +1199,7 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
         (RadioSeed::Genre(fixture.genre), Some("genre")),
     ] {
         assert_eq!(
-            fixture.database.radio_source(&seed, &cancel).await.unwrap(),
+            fixture.catalog.radio_source(&seed, &cancel).await.unwrap(),
             Some((
                 fixture.source,
                 library::SourceId::new("source"),
@@ -1202,7 +1209,7 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
         let ids = ["track-2", "track-1", "track-2", "missing", "track-3"].map(String::from);
         assert_eq!(
             fixture
-                .database
+                .catalog
                 .recommended_track_keys(fixture.source, &seed, &ids, &cancel)
                 .await
                 .unwrap(),
@@ -1217,14 +1224,14 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
     ] {
         assert!(
             fixture
-                .database
+                .catalog
                 .recommended_track_keys(fixture.source, &seed, &["track-0".into()], &cancel)
                 .await
                 .unwrap()
                 .is_empty()
         );
         let result = fixture
-            .database
+            .catalog
             .radio_candidates(fixture.source, seed, &[], 20, false, 0, &cancel)
             .await
             .unwrap();
@@ -1253,7 +1260,7 @@ async fn radio_prefers_related_album_and_track_metadata_before_source_fill() {
         .unwrap();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .radio_candidates(
                 fixture.source,
                 RadioSeed::Track(fixture.track_uris[0].clone()),
@@ -1270,7 +1277,7 @@ async fn radio_prefers_related_album_and_track_metadata_before_source_fill() {
     // Album radio also recognizes the candidate's direct track genre.
     assert_eq!(
         fixture
-            .database
+            .catalog
             .radio_candidates(
                 fixture.source,
                 RadioSeed::Album(fixture.albums[1]),
@@ -1290,7 +1297,7 @@ async fn radio_prefers_related_album_and_track_metadata_before_source_fill() {
 async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definition_limits() {
     use library::CatalogSort;
     let fixture = fixture().await;
-    let database = &fixture.database;
+    let catalog = &fixture.catalog;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
     sqlx::query("UPDATE sources SET kind='local' WHERE source_key=?1")
@@ -1333,7 +1340,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
             .unwrap();
         uris.push(uri);
     }
-    let playlist = database
+    let playlist = catalog
         .create_playlist(
             None,
             "Toolbar order",
@@ -1352,11 +1359,11 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         descending: true,
         ..SmartPlaylistDefinition::default()
     };
-    let key = database
+    let key = catalog
         .create_smart_playlist("Toolbar", &definition, None)
         .await
         .unwrap();
-    let members = database
+    let members = catalog
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
                 .selection(),
@@ -1388,7 +1395,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
             sort: Some(sort),
             ..library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
         })
-            .rows(&database, 0, 64, &cancel)
+            .rows(&catalog, 0, 64, &cancel)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -1405,7 +1412,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
             descending: true,
             ..library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
         })
-            .rows(&database, 0, 64, &cancel)
+            .rows(&catalog, 0, 64, &cancel)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -1424,7 +1431,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
                 descending: reverse,
                 ..library::MemberRead::new(library::Collection::Source(fixture.source))
             })
-                .rows(&database, 0, 64, &cancel)
+                .rows(&catalog, 0, 64, &cancel)
                 .await
                 .map(|rows| {
                     rows.into_iter()
@@ -1441,7 +1448,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
                 descending: reverse,
                 ..library::MemberRead::new(library::Collection::Playlist(playlist))
             })
-                .rows(&database, 0, 64, &cancel)
+                .rows(&catalog, 0, 64, &cancel)
                 .await
                 .map(|rows| {
                     rows.into_iter()
@@ -1506,7 +1513,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
             filter: (query).into(),
             ..library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
         })
-            .rows(&database, 0, 64, &cancel)
+            .rows(&catalog, 0, 64, &cancel)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -1519,7 +1526,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
             .collect::<Vec<_>>();
         assert_eq!(order, expected, "{query}");
     }
-    let rows = database
+    let rows = catalog
         .tracks_by_uris(&((&uris).to_vec()), &cancel)
         .await
         .unwrap();
@@ -1527,11 +1534,11 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         == Some(&fixture.album_uris[0])
         && !row.links.album_artists.is_empty()));
     definition.limit = Some(3);
-    database
+    catalog
         .update_smart_playlist(key, "Toolbar", &definition, None)
         .await
         .unwrap();
-    let limited = database
+    let limited = catalog
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
                 .selection(),
@@ -1546,7 +1553,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         sort: Some(CatalogSort::TrackNumber),
         ..library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
     })
-        .rows(&database, 0, 64, &cancel)
+        .rows(&catalog, 0, 64, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -1559,7 +1566,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         .collect::<Vec<_>>();
     assert_eq!(order, uris[8..]);
     definition.limit = None;
-    database
+    catalog
         .update_smart_playlist(key, "Toolbar", &definition, None)
         .await
         .unwrap();
@@ -1575,7 +1582,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
             descending: descending,
             ..library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
         })
-            .rows(&database, 0, 64, &cancel)
+            .rows(&catalog, 0, 64, &cancel)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -1589,7 +1596,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         assert_eq!(order.last(), Some(&uris[0]));
     }
     assert_eq!(
-        database.tracks_by_uris(&uris[..1], &cancel).await.unwrap()[0]
+        catalog.tracks_by_uris(&uris[..1], &cancel).await.unwrap()[0]
             .state
             .last_played,
         None
@@ -1602,7 +1609,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         filter: ("Toolbar Intro").into(),
         ..library::MemberRead::new(library::Collection::Source(fixture.source))
     })
-        .rows(&database, 0, 64, &cancel)
+        .rows(&catalog, 0, 64, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -1619,7 +1626,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         filter: ("Toolbar Intro").into(),
         ..library::MemberRead::new(library::Collection::Playlist(playlist))
     })
-        .rows(&database, 0, 64, &cancel)
+        .rows(&catalog, 0, 64, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -1636,7 +1643,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
         filter: ("Toolbar Intro").into(),
         ..library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
     })
-        .rows(&database, 0, 64, &cancel)
+        .rows(&catalog, 0, 64, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -1655,7 +1662,7 @@ async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definit
 #[tokio::test]
 async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_entries() {
     let fixture = fixture().await;
-    let database = &fixture.database;
+    let catalog = &fixture.catalog;
     let cancel = ReadCancellation::new();
     let local_uri = "file:///music/local.flac";
     let mut raw = connection(&fixture.path).await;
@@ -1675,7 +1682,7 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
         fixture.track_uris[0].clone(),
         local_uri.into(),
     ];
-    let playlist = database
+    let playlist = catalog
         .create_playlist(
             None,
             "Links",
@@ -1685,7 +1692,7 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
         .unwrap()
         .unwrap()
         .0;
-    let order = database
+    let order = catalog
         .playlist_edit_entries(
             playlist,
             &library::MemberRead {
@@ -1704,16 +1711,16 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
                 .collect::<Vec<_>>()
         })
         .unwrap();
-    let entries = database
+    let entries = catalog
         .playlist_entries(&((&order).to_vec()), &cancel)
         .await
         .unwrap();
-    let smart = database
+    let smart = catalog
         .tracks_by_uris(&((&uris).to_vec()), &cancel)
         .await
         .unwrap();
     let captured = super::support::resolve_queue(
-        database,
+        catalog,
         library::QueueLoad::media_uris(
             uris.clone(),
             library::QueueProvenance::Context {
@@ -1786,7 +1793,7 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
         entries[3].track.metadata.date_added
     );
     assert!(entries[1].track.metadata.date_added.is_none());
-    let tracks = database
+    let tracks = catalog
         .tracks_by_uris(&[local_uri.to_owned()], &cancel)
         .await
         .unwrap();
@@ -1794,7 +1801,7 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
         tracks[0].metadata.date_added,
         entries[3].track.metadata.date_added
     );
-    let added = database
+    let added = catalog
         .create_smart_playlist(
             "Added",
             &SmartPlaylistDefinition {
@@ -1810,7 +1817,7 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
         )
         .await
         .unwrap();
-    let dated = database
+    let dated = catalog
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Smart {
                 key: added,
@@ -1828,10 +1835,10 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
 #[tokio::test]
 async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() {
     let fixture = fixture().await;
-    let database = &fixture.database;
+    let catalog = &fixture.catalog;
     let cancel = ReadCancellation::new();
     let uri = &fixture.track_uris[0];
-    let global = database
+    let global = catalog
         .create_playlist(
             None,
             "Global artwork",
@@ -1841,7 +1848,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         .unwrap()
         .unwrap()
         .0;
-    let current = database
+    let current = catalog
         .create_playlist(
             Some(fixture.source),
             "Current artwork",
@@ -1851,7 +1858,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         .unwrap()
         .unwrap()
         .0;
-    let smart = database
+    let smart = catalog
         .create_smart_playlist(
             "All artwork",
             &SmartPlaylistDefinition {
@@ -1908,8 +1915,8 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                     .await
                     .unwrap();
             fixture
-                .database
-                .catalog("source", None)
+                .catalog
+                .observe("source", None)
                 .await
                 .unwrap()
                 .set_source_artwork(
@@ -1926,7 +1933,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             binding.clone()
         } else {
             let view = {
-                let mut rows = database
+                let mut rows = catalog
                     .tracks_by_uris(std::slice::from_ref(&uri), &cancel)
                     .await
                     .unwrap();
@@ -1966,7 +1973,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                     downloaded_only: false,
                     activity: true,
                 }
-                .playlists(&database, 0, 64, &cancel)
+                .playlists(&catalog, 0, 64, &cancel)
                 .await
                 .unwrap();
                 let order = rows.iter().map(|row| row.playlist_key).collect::<Vec<_>>();
@@ -1979,7 +1986,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 folder,
                 ..library::MemberRead::new(library::Collection::Playlist(global))
             }
-            .page(&database, RouteSeedWindow::top(), &cancel)
+            .page(&catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap();
             assert_eq!(detail.count, 2);
@@ -1993,7 +2000,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 assert_eq!(&row.track.media_uri, uri);
                 assert_eq!(row.track.artwork_binding, expected_binding);
             }
-            let summary = database
+            let summary = catalog
                 .smart_playlist_rows(&[smart], 500, &cancel)
                 .await
                 .unwrap()
@@ -2011,7 +2018,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                     now: 500,
                 })
             })
-                .rows(&database, 0, 64, &cancel)
+                .rows(&catalog, 0, 64, &cancel)
                 .await
                 .map(|rows| {
                     rows.into_iter()
@@ -2026,7 +2033,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             )
             .unwrap()
             .remove(0);
-            let candidate = database
+            let candidate = catalog
                 .resolve_playlist_artwork(candidate)
                 .await
                 .unwrap()
@@ -2046,13 +2053,13 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 expected_sample
             );
         }
-        let current_rows = database.playlists(&[current], &cancel).await.unwrap();
+        let current_rows = catalog.playlists(&[current], &cancel).await.unwrap();
         assert!(
             library::authored_playlist_artwork(current_rows[0].artwork_binding.as_ref().unwrap())
                 .unwrap()
                 .is_none()
         );
-        let preview = database
+        let preview = catalog
             .track_artwork_bindings(
                 &[
                     uri.clone(),
@@ -2068,32 +2075,29 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             [expected_sample.clone(), expected_sample.clone()].concat()
         );
         assert!(
-            database
+            catalog
                 .track_artwork_bindings(&["https://example.test/no-catalog.flac".into()], &cancel)
                 .await
                 .unwrap()
                 .is_empty(),
             "an unavailable URI never borrows an unrelated catalog cover"
         );
-        let catalog = database
-            .tracks(&[fixture.tracks[0]], &cancel)
-            .await
-            .unwrap();
-        assert_eq!(catalog[0].artwork_binding, expected_binding);
-        let smart_rows = database
+        let track_rows = catalog.tracks(&[fixture.tracks[0]], &cancel).await.unwrap();
+        assert_eq!(track_rows[0].artwork_binding, expected_binding);
+        let smart_rows = catalog
             .tracks_by_uris(std::slice::from_ref(uri), &cancel)
             .await
             .unwrap();
         assert_eq!(smart_rows[0].artwork_binding, expected_binding);
-        let queue = database.restore_queue().await.unwrap().rows;
+        let queue = catalog.restore_queue().await.unwrap().rows;
         assert_eq!(queue[0].track.artwork_binding, expected_binding);
-        let restored = database.restore_queue().await.unwrap();
+        let restored = catalog.restore_queue().await.unwrap();
         assert_eq!(restored.rows[0].track.artwork_binding, expected_binding);
         let history = (&library::MemberRead {
             descending: true,
             ..library::MemberRead::new(library::Collection::History { source: None })
         })
-            .rows(&database, 0, 100, &cancel)
+            .rows(&catalog, 0, 100, &cancel)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -2102,7 +2106,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             })
             .unwrap();
         assert_eq!(history[0].artwork_binding, expected_binding);
-        let scoped_samples = database
+        let scoped_samples = catalog
             .representative_artwork_page(
                 fixture.source,
                 Some(fixture.folder),
@@ -2114,7 +2118,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             .unwrap();
         assert_eq!(scoped_samples, expected_sample);
     }
-    let scoped = database
+    let scoped = catalog
         .playlist_edit_entries(
             current,
             &library::MemberRead {
@@ -2138,7 +2142,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         scoped.is_empty(),
         "folder scope still selects Current membership"
     );
-    let all_entries = database
+    let all_entries = catalog
         .playlist_edit_entries(
             current,
             &library::MemberRead {
@@ -2158,7 +2162,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         })
         .unwrap();
     assert_eq!(
-        database
+        catalog
             .playlist_entries(&((&all_entries).to_vec()), &cancel)
             .await
             .unwrap()
@@ -2173,7 +2177,7 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let rows = fixture
-        .database
+        .catalog
         .tracks(&fixture.tracks[..2], &cancel)
         .await
         .expect("initial Track rows");
@@ -2185,7 +2189,7 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
     {
         let track = &rows[index];
         fixture
-            .database
+            .catalog
             .write_local_access(
                 Some(fixture.source),
                 &[&LocalAccessWrite {
@@ -2216,7 +2220,7 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
             .expect("write accepted Local access provenance");
     }
     let rows = fixture
-        .database
+        .catalog
         .tracks(&fixture.tracks[..2], &cancel)
         .await
         .expect("provenance Track rows");
@@ -2230,7 +2234,7 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
     );
 
     let album = fixture
-        .database
+        .catalog
         .albums(&[fixture.albums[0]], true, &cancel)
         .await
         .expect("Album download aggregate")
@@ -2239,7 +2243,7 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
     assert_eq!(album.summary.track_count, 2);
     assert_eq!(album.summary.downloaded_count, 1);
     let artist = fixture
-        .database
+        .catalog
         .artists(&[fixture.artists[0]], false, true, &cancel)
         .await
         .expect("Artist download aggregate")
@@ -2247,7 +2251,7 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
         .expect("Artist row");
     assert_eq!(artist.summary.downloaded_count, 1);
     let genre = fixture
-        .database
+        .catalog
         .genres(&[fixture.genre], None, &cancel)
         .await
         .expect("Genre download aggregate")
@@ -2255,7 +2259,7 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
         .expect("Genre row");
     assert_eq!(genre.summary.downloaded_count, 1);
     let mood = fixture
-        .database
+        .catalog
         .moods(&[fixture.mood], None, &cancel)
         .await
         .expect("Mood download aggregate")
@@ -2269,7 +2273,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let authored = fixture
-        .database
+        .catalog
         .create_playlist(
             Some(fixture.source),
             "Authored",
@@ -2286,7 +2290,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
     let other = library::SourceKey::from_raw(55);
     let genre = library::GenreKey::from_raw(55);
     let row = fixture
-        .database
+        .catalog
         .genres(&[genre], None, &cancel)
         .await
         .unwrap()
@@ -2294,7 +2298,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
         .unwrap();
     assert_eq!(row.source_id, "other-source");
     let detail = fixture
-        .database
+        .catalog
         .genres(&[genre], None, &cancel)
         .await
         .map(|rows| {
@@ -2305,7 +2309,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
         .unwrap();
     assert_eq!(detail.source_id, row.source_id);
     let original = fixture
-        .database
+        .catalog
         .genres(&[fixture.genre], None, &cancel)
         .await
         .unwrap()
@@ -2319,7 +2323,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
         library::PlaylistKey::from_raw(57),
         authored,
     ];
-    let rows = fixture.database.playlists(&keys, &cancel).await.unwrap();
+    let rows = fixture.catalog.playlists(&keys, &cancel).await.unwrap();
     assert_eq!(
         rows.iter().map(|row| row.playlist_key).collect::<Vec<_>>(),
         keys
@@ -2346,7 +2350,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
             .map(|id| library::SourceId::new(id.clone()));
         assert_eq!(
             fixture
-                .database
+                .catalog
                 .playlist_key_by_identity(source.as_ref(), &row.object_id, &cancel)
                 .await
                 .unwrap(),
@@ -2355,7 +2359,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
     }
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playlist_key_by_identity(None, "offline-authored", &cancel)
             .await
             .unwrap(),
@@ -2363,7 +2367,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playlist_key_by_identity(
                 Some(&library::SourceId::new("missing-source")),
                 "global",
@@ -2379,7 +2383,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
         let collection = library::Collection::Playlist(key);
         assert_eq!(
             fixture
-                .database
+                .catalog
                 .selected_track_uris(
                     &library::MemberRead::new(collection.clone()).selection(),
                     None,
@@ -2415,7 +2419,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
                 },
             )]),
         ] {
-            let captured = super::support::resolve_queue(&fixture.database, input, 0).await;
+            let captured = super::support::resolve_queue(&fixture.catalog, input, 0).await;
             assert_eq!(captured.entries.len(), 2);
             assert!(
                 captured
@@ -2466,8 +2470,8 @@ async fn genre_rows_prepare_one_cover_per_member_album() {
                     .await
                     .unwrap();
             fixture
-                .database
-                .catalog("source", None)
+                .catalog
+                .observe("source", None)
                 .await
                 .unwrap()
                 .set_source_artwork(
@@ -2484,7 +2488,7 @@ async fn genre_rows_prepare_one_cover_per_member_album() {
     drop(raw);
 
     let row = fixture
-        .database
+        .catalog
         .genres(&[fixture.genre], None, &ReadCancellation::new())
         .await
         .expect("read Genre row")
@@ -2521,7 +2525,7 @@ async fn genre_routes_reject_an_artwork_only_identity_without_track_membership()
             activity: true,
         }
         .page_genres(
-            &fixture.database,
+            &fixture.catalog,
             RouteSeedWindow::top(),
             &ReadCancellation::new(),
         )
@@ -2542,13 +2546,13 @@ async fn artist_play_order_stays_complete_beside_the_favorite_section() {
         let media_uri =
             fixture.track_uris[fixture.tracks.iter().position(|key| key == track).unwrap()].clone();
         fixture
-            .database
+            .catalog
             .set_favorite(&library::FavoriteTarget::Track(media_uri), false)
             .await
             .unwrap();
     }
     fixture
-        .database
+        .catalog
         .set_favorite(
             &library::FavoriteTarget::Track(fixture.track_uris[0].clone()),
             true,
@@ -2566,7 +2570,7 @@ async fn artist_play_order_stays_complete_beside_the_favorite_section() {
             album_artist: false,
         })
     })
-        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .unwrap()
         .rows)
@@ -2588,7 +2592,7 @@ async fn artist_play_order_stays_complete_beside_the_favorite_section() {
             album_artist: false,
         })
     })
-        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .unwrap()
         .rows)
@@ -2636,18 +2640,18 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
                 .fetch_all(&mut raw)
                 .await
                 .unwrap();
-        fixture.database.catalog("source", None).await.unwrap().set_source_artwork("album", &objects.into_iter().map(|id|(id,Some((br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/d453ddcc6a2bb4616a7509452b0c0edb","image":{"kind":"native","source_id":"source","item_id":"album-art","tag":null},"blur_hash":null}]"#.as_slice()).to_vec()))).collect::<Vec<_>>()).await.unwrap();
+        fixture.catalog.observe("source", None).await.unwrap().set_source_artwork("album", &objects.into_iter().map(|id|(id,Some((br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/d453ddcc6a2bb4616a7509452b0c0edb","image":{"kind":"native","source_id":"source","item_id":"album-art","tag":null},"blur_hash":null}]"#.as_slice()).to_vec()))).collect::<Vec<_>>()).await.unwrap();
     };
 
     let track_artist = fixture
-        .database
+        .catalog
         .artists(&[fixture.artists[0]], false, true, &cancel)
         .await
         .expect("Track Artist row")
         .pop()
         .unwrap();
     let album_artist = fixture
-        .database
+        .catalog
         .artists(&[album_owner], true, true, &cancel)
         .await
         .expect("Album Artist row")
@@ -2696,7 +2700,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
             album_artist: false,
         })
     })
-        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .unwrap()
         .rows)
@@ -2717,7 +2721,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
             album_artist: true,
         })
     })
-        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .unwrap()
         .rows)
@@ -2741,7 +2745,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
                 album_artist: true
             })
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap()
             .rows)
@@ -2765,7 +2769,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
                 album_artist: false
             })
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap()
             .rows)
@@ -2796,7 +2800,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
             favorites_only: false,
             downloaded_only: false
         }
-        .albums(&fixture.database, 0, 64, &cancel)
+        .albums(&fixture.catalog, 0, 64, &cancel)
         .await
         .unwrap()
         .into_iter()
@@ -2822,7 +2826,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
             favorites_only: false,
             downloaded_only: false
         }
-        .albums(&fixture.database, 0, 64, &cancel)
+        .albums(&fixture.catalog, 0, 64, &cancel)
         .await
         .unwrap()
         .into_iter()
@@ -2839,8 +2843,8 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
                 .await
                 .unwrap();
         fixture
-            .database
-            .catalog("source", None)
+            .catalog
+            .observe("source", None)
             .await
             .unwrap()
             .set_source_artwork(
@@ -2851,7 +2855,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
             .unwrap();
     };
     let album = fixture
-        .database
+        .catalog
         .albums(&[fixture.albums[0]], true, &cancel)
         .await
         .expect("Album artwork fallback")
@@ -2888,8 +2892,8 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
             .expect("insert role fixture Artist"),
         );
         fixture
-            .database
-            .catalog("source", None)
+            .catalog
+            .observe("source", None)
             .await
             .unwrap()
             .write_native_user_data(
@@ -2957,7 +2961,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
                         downloaded_only: false,
                         activity: true,
                     }
-                    .page_artists(&fixture.database, RouteSeedWindow::top(), &cancel)
+                    .page_artists(&fixture.catalog, RouteSeedWindow::top(), &cancel)
                     .await
                     .map(|page| (page.count, page.first_row_position, page.rows))
                     .expect("Track Artist order")
@@ -2981,7 +2985,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
                         downloaded_only: false,
                         activity: true,
                     }
-                    .page_artists(&fixture.database, RouteSeedWindow::top(), &cancel)
+                    .page_artists(&fixture.catalog, RouteSeedWindow::top(), &cancel)
                     .await
                     .map(|page| (page.count, page.first_row_position, page.rows))
                     .expect("Album Artist order")
@@ -2998,7 +3002,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
     }
 
     let track_row = fixture
-        .database
+        .catalog
         .artists(&[track_only], false, true, &cancel)
         .await
         .expect("Track Artist row")
@@ -3009,7 +3013,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
         (1, 1)
     );
     let album_row = fixture
-        .database
+        .catalog
         .artists(&[album_only], true, true, &cancel)
         .await
         .expect("Album Artist row")
@@ -3026,7 +3030,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
         (uncredited, true),
     ] {
         let row = fixture
-            .database
+            .catalog
             .artists(&[artist], album_artist, true, &cancel)
             .await
             .expect("known artist row")
@@ -3035,7 +3039,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
         assert_eq!(row.artist_key, artist);
         assert_eq!(row.summary.track_count, 0);
         let detail = fixture
-            .database
+            .catalog
             .artists(&[artist], album_artist, true, &cancel)
             .await
             .expect("known &[artist] detail")
@@ -3056,7 +3060,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
                 album_artist: false
             })
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .expect("Track Artist Tracks")
             .rows)
@@ -3086,7 +3090,7 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
             favorites_only: false,
             downloaded_only: false
         }
-        .albums(&fixture.database, 0, 64, &cancel)
+        .albums(&fixture.catalog, 0, 64, &cancel)
         .await
         .expect("Album Artist Albums")
         .into_iter()
@@ -3100,8 +3104,8 @@ async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
 async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("library.sqlite3");
-    let database = library::Database::open(&path).await.unwrap();
-    let source = database
+    let catalog = library::Catalog::open(&path).await.unwrap();
+    let source = catalog
         .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
         .await
         .unwrap()
@@ -3119,7 +3123,7 @@ async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
         downloaded_only: false,
         activity: true,
     }
-    .smart_playlists(&database, 0, 64, &cancellation)
+    .smart_playlists(&catalog, 0, 64, &cancellation)
     .await
     .expect("read default Smart Playlists");
     let order = rows
@@ -3143,9 +3147,9 @@ async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
         SmartPlaylistRuleField::Played
     );
     assert_eq!(rows[2].definition.sort_field, SmartPlaylistSort::SkipCount);
-    assert!(database.delete_smart_playlist(order[2]).await.unwrap());
-    database.close().await.unwrap();
-    let database = library::Database::open(&path).await.unwrap();
+    assert!(catalog.delete_smart_playlist(order[2]).await.unwrap());
+    catalog.close().await.unwrap();
+    let catalog = library::Catalog::open(&path).await.unwrap();
     let mut raw = connection(&path).await;
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT object_id FROM smart_playlists ORDER BY position")
@@ -3155,10 +3159,10 @@ async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
         ["builtin:most_played", "builtin:never_played"]
     );
     for key in &order[..2] {
-        assert!(database.delete_smart_playlist(*key).await.unwrap());
+        assert!(catalog.delete_smart_playlist(*key).await.unwrap());
     }
-    database.close().await.unwrap();
-    let database = library::Database::open(&path).await.unwrap();
+    catalog.close().await.unwrap();
+    let catalog = library::Catalog::open(&path).await.unwrap();
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM smart_playlists")
             .fetch_one(&mut raw)
@@ -3166,7 +3170,7 @@ async fn default_activity_smart_playlists_stay_deleted_after_reopening() {
             .unwrap(),
         0
     );
-    database.close().await.unwrap();
+    catalog.close().await.unwrap();
 }
 
 #[tokio::test]
@@ -3180,7 +3184,7 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
         .bind(&direct).execute(&mut raw).await.unwrap();
     drop(raw);
     let (playlist, _) = fixture
-        .database
+        .catalog
         .create_playlist(
             None,
             "Direct",
@@ -3191,7 +3195,7 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
         .expect("Playlist key");
     assert_eq!(
         fixture
-            .database
+            .catalog
             .add_playlist_tracks(
                 None,
                 playlist,
@@ -3204,7 +3208,7 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .add_playlist_tracks(
                 None,
                 playlist,
@@ -3229,13 +3233,13 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
         limit: None,
     };
     let smart = fixture
-        .database
+        .catalog
         .create_smart_playlist("Direct", &definition, None)
         .await
         .expect("create All Smart Playlist");
     let cancel = ReadCancellation::new();
     let all = fixture
-        .database
+        .catalog
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
                 .selection(),
@@ -3248,13 +3252,13 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
 
     definition.source_id = Some(library::SourceId::new("source"));
     fixture
-        .database
+        .catalog
         .update_smart_playlist(smart, "Direct", &definition, None)
         .await
         .expect("make Smart Playlist Current");
     assert!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
                     .selection(),
@@ -3274,7 +3278,7 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
         .unwrap();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
                     .selection(),
@@ -3287,13 +3291,13 @@ async fn smart_playlists_exclude_known_media_until_it_is_indexed() {
     );
     definition.source_id = None;
     fixture
-        .database
+        .catalog
         .update_smart_playlist(smart, "Direct", &definition, None)
         .await
         .unwrap();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
                     .selection(),
@@ -3311,7 +3315,7 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
     let fixture = fixture().await;
     let direct = "https://media.example/download.flac".to_string();
     fixture
-        .database
+        .catalog
         .write_direct_track_metadata(
             &direct,
             &library::TrackMetadata {
@@ -3323,7 +3327,7 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
         .await
         .unwrap();
     fixture
-        .database
+        .catalog
         .write_local_access(
             None,
             &[&LocalAccessWrite {
@@ -3345,7 +3349,7 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
         .expect("record completed direct download");
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playback_access(&direct)
             .await
             .expect("resolve direct download access")
@@ -3364,14 +3368,14 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
         ..SmartPlaylistDefinition::default()
     };
     let smart = fixture
-        .database
+        .catalog
         .create_smart_playlist("Downloaded direct", &definition, None)
         .await
         .expect("create direct download Smart Playlist");
     let cancel = ReadCancellation::new();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
                     .selection(),
@@ -3384,13 +3388,13 @@ async fn completed_direct_download_keeps_access_without_smart_membership() {
     );
     definition.source_id = Some(library::SourceId::new("source"));
     fixture
-        .database
+        .catalog
         .update_smart_playlist(smart, "Downloaded direct", &definition, None)
         .await
         .expect("make direct download Smart Playlist Current");
     assert!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
                     .selection(),
@@ -3414,13 +3418,13 @@ async fn canonical_rows_keep_uri_order_after_smart_membership_changes() {
         .bind(&direct).execute(&mut raw).await.unwrap();
     let mut definition = SmartPlaylistDefinition::default();
     let key = fixture
-        .database
+        .catalog
         .create_smart_playlist("Window", &definition, None)
         .await
         .unwrap();
     let cancel = ReadCancellation::new();
     let order = fixture
-        .database
+        .catalog
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Smart { key: key, now: 500 })
                 .selection(),
@@ -3431,7 +3435,7 @@ async fn canonical_rows_keep_uri_order_after_smart_membership_changes() {
         .unwrap();
     assert!(!order.contains(&direct));
     let detail = fixture
-        .database
+        .catalog
         .smart_playlist_rows(&[key], 500, &cancel)
         .await
         .unwrap()
@@ -3444,13 +3448,13 @@ async fn canonical_rows_keep_uri_order_after_smart_membership_changes() {
         value: Some(SmartPlaylistRuleValue::Text("No match".into())),
     });
     fixture
-        .database
+        .catalog
         .update_smart_playlist(key, "Window", &definition, None)
         .await
         .unwrap();
     let requested = vec![direct.clone(), fixture.track_uris[0].clone(), direct];
     let rows = fixture
-        .database
+        .catalog
         .tracks_by_uris(&((&requested).to_vec()), &cancel)
         .await
         .unwrap();
@@ -3470,7 +3474,7 @@ async fn canonical_rows_keep_uri_order_after_smart_membership_changes() {
         .await
         .unwrap();
     let rows = fixture
-        .database
+        .catalog
         .tracks_by_uris(&((&requested).to_vec()), &cancel)
         .await
         .unwrap();
@@ -3482,7 +3486,7 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
     let fixture = fixture().await;
     let retained = fixture.track_uris[0].clone();
     let (playlist, _) = fixture
-        .database
+        .catalog
         .create_playlist(
             None,
             "Retained",
@@ -3508,14 +3512,14 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
         ..SmartPlaylistDefinition::default()
     };
     let smart = fixture
-        .database
+        .catalog
         .create_smart_playlist("Retained", &definition, None)
         .await
         .expect("create retained-source Smart Playlist");
     let cancellation = ReadCancellation::new();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
                     .selection(),
@@ -3528,13 +3532,13 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
     );
     definition.source_id = Some(library::SourceId::new("source"));
     fixture
-        .database
+        .catalog
         .update_smart_playlist(smart, "Retained", &definition, None)
         .await
         .expect("make retained-source Smart Playlist Current");
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
                     .selection(),
@@ -3547,13 +3551,13 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
     );
 
     fixture
-        .database
+        .catalog
         .remove_source(&library::SourceId::new("source"))
         .await
         .expect("forget source");
     assert!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
                     .selection(),
@@ -3566,13 +3570,13 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
     );
     definition.source_id = None;
     fixture
-        .database
+        .catalog
         .update_smart_playlist(smart, "Retained", &definition, None)
         .await
         .expect("make retained-source Smart Playlist All");
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
                     .selection(),
@@ -3585,7 +3589,7 @@ async fn global_playlist_keeps_unindexed_media_outside_smart_membership() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Playlist(playlist)).selection(),
                 None,
@@ -3623,7 +3627,7 @@ async fn smart_membership_excludes_retained_queue_and_activity() {
         .unwrap();
     drop(raw);
     let key = fixture
-        .database
+        .catalog
         .create_smart_playlist(
             "All",
             &SmartPlaylistDefinition {
@@ -3637,7 +3641,7 @@ async fn smart_membership_excludes_retained_queue_and_activity() {
     let cancellation = ReadCancellation::new();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart { key: key, now: 10 })
                     .selection(),
@@ -3670,8 +3674,8 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
             .await
             .unwrap();
         fixture
-            .database
-            .catalog("source", None)
+            .catalog
+            .observe("source", None)
             .await
             .unwrap()
             .set_source_artwork(
@@ -3693,7 +3697,7 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
             ..SmartPlaylistDefinition::default()
         };
         fixture
-            .database
+            .catalog
             .create_smart_playlist(&format!("List {index:02}"), &definition, None)
             .await
             .unwrap();
@@ -3716,7 +3720,7 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
                 downloaded_only: false,
                 activity: true,
             }
-            .smart_playlists(&fixture.database, 64, 64, &cancel)
+            .smart_playlists(&fixture.catalog, 64, 64, &cancel)
             .await
             .unwrap();
             let order = rows
@@ -3725,7 +3729,7 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
                 .collect::<Vec<_>>();
             assert_eq!(rows.len(), 6);
             let expected = fixture
-                .database
+                .catalog
                 .smart_playlist_rows(&order, 0, &cancel)
                 .await
                 .unwrap();
@@ -3742,14 +3746,14 @@ async fn smart_overview_keeps_the_full_order_and_only_the_requested_summary_wind
         .map(|playlist_id| library::SidebarPin::SmartPlaylist { playlist_id })
         .collect::<Vec<_>>();
     let headers = fixture
-        .database
+        .catalog
         .sidebar_pin_rows(&pins, &cancel)
         .await
         .unwrap();
     assert_eq!(headers.len(), 70);
     assert!(headers.iter().all(|row| row.totals.is_none()));
     let rows = fixture
-        .database
+        .catalog
         .sidebar_pin_totals(headers, 0, &cancel)
         .await
         .unwrap();
@@ -3767,7 +3771,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let suggestions = fixture
-        .database
+        .catalog
         .smart_playlist_value_suggestions(fixture.source, None, &cancel)
         .await
         .expect("bounded Smart Playlist value suggestions");
@@ -3787,7 +3791,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         limit: None,
     };
     let smart = fixture
-        .database
+        .catalog
         .create_smart_playlist("Never Played", &never, None)
         .await
         .expect("create Never Played");
@@ -3800,13 +3804,13 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         ..SmartPlaylistDefinition::default()
     };
     let policy = fixture
-        .database
+        .catalog
         .create_smart_playlist("Policy Defaults", &policy_definition, None)
         .await
         .expect("Library-owned editor defaults pass Library validation");
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart { key: smart, now: 0 })
                     .selection(),
@@ -3872,14 +3876,14 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         played.activity_period = period;
         assert!(
             fixture
-                .database
+                .catalog
                 .update_smart_playlist(smart, "Played", &played, None)
                 .await
                 .expect("update period template")
         );
         assert_eq!(
             fixture
-                .database
+                .catalog
                 .selected_track_uris(
                     &library::MemberRead::new(library::Collection::Smart {
                         key: smart,
@@ -3896,7 +3900,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         );
     }
     let facts = fixture
-        .database
+        .catalog
         .smart_playlist_rows(&[smart], now, &cancel)
         .await
         .expect("Smart Playlist row")
@@ -3925,13 +3929,13 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         limit: None,
     };
     let second = fixture
-        .database
+        .catalog
         .create_smart_playlist("Optional", &optional, None)
         .await
         .expect("create second Smart Playlist");
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart {
                     key: second,
@@ -3950,14 +3954,14 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     optional.match_all[0].value = None;
     assert!(
         fixture
-            .database
+            .catalog
             .update_smart_playlist(second, "Optional", &optional, None)
             .await
             .expect("update optional rule")
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart {
                     key: second,
@@ -3972,14 +3976,14 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         [fixture.track_uris[0].clone()]
     );
     let smart_rows = fixture
-        .database
+        .catalog
         .smart_playlist_rows(&[smart, second], now, &cancel)
         .await
         .expect("consistent Smart Playlist rows");
     assert_eq!(
         smart_rows[0].track_count as usize,
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart {
                     key: smart,
@@ -3996,7 +4000,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     assert_eq!(
         smart_rows[1].track_count as usize,
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(library::Collection::Smart {
                     key: second,
@@ -4023,7 +4027,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             activity: true,
             downloaded_only: false
         }
-        .smart_playlists(&fixture.database, 0, 64, &cancel)
+        .smart_playlists(&fixture.catalog, 0, 64, &cancel)
         .await
         .expect("sorted Smart Playlist order")
         .into_iter()
@@ -4044,7 +4048,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             activity: true,
             downloaded_only: false
         }
-        .smart_playlists(&fixture.database, 0, 64, &cancel)
+        .smart_playlists(&fixture.catalog, 0, 64, &cancel)
         .await
         .expect("duration-sorted Smart Playlist order")
         .into_iter()
@@ -4080,7 +4084,7 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
     let cancel = ReadCancellation::new();
     for album_artist in [false, true] {
         let rows = fixture
-            .database
+            .catalog
             .artists(&[fixture.artists[0]], album_artist, true, &cancel)
             .await
             .unwrap();
@@ -4088,7 +4092,7 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
         assert_eq!(rows[0].state.last_played, Some(200));
     }
     let home = fixture
-        .database
+        .catalog
         .home_page(
             fixture.source,
             Some(fixture.folder),
@@ -4137,7 +4141,7 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
             .await
             .unwrap();
         let home = fixture
-            .database
+            .catalog
             .home_page(
                 fixture.source,
                 Some(fixture.folder),
@@ -4197,7 +4201,7 @@ async fn home_reads_only_enabled_blocks_and_preserves_provider_sections() {
         .unwrap();
     let cancel = ReadCancellation::new();
     let all = fixture
-        .database
+        .catalog
         .home_page(fixture.source, None, 0, 0, &HomeBlockKind::all(), &cancel)
         .await
         .unwrap();
@@ -4212,7 +4216,7 @@ async fn home_reads_only_enabled_blocks_and_preserves_provider_sections() {
 
     for block in HomeBlockKind::all() {
         let selected = fixture
-            .database
+            .catalog
             .home_page(fixture.source, None, 0, 0, &[block], &cancel)
             .await
             .unwrap();
@@ -4237,7 +4241,7 @@ async fn home_reads_only_enabled_blocks_and_preserves_provider_sections() {
         );
     }
     let disabled = fixture
-        .database
+        .catalog
         .home_page(fixture.source, None, 0, 0, &[], &cancel)
         .await
         .unwrap();
@@ -4249,7 +4253,7 @@ async fn home_reads_only_enabled_blocks_and_preserves_provider_sections() {
         }
     );
     let enabled_again = fixture
-        .database
+        .catalog
         .home_page(fixture.source, None, 0, 0, &HomeBlockKind::all(), &cancel)
         .await
         .unwrap();
@@ -4264,7 +4268,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let search = fixture
-        .database
+        .catalog
         .search(
             fixture.source,
             None,
@@ -4284,7 +4288,7 @@ async fn home_search_and_radio_results_stay_bounded() {
         .map(|track| track.object_id.clone().expect("indexed track object"))
         .collect::<Vec<_>>();
     let resolved = fixture
-        .database
+        .catalog
         .search_rows_by_objects(fixture.source, None, false, &object_ids, &[], &[], &cancel)
         .await
         .expect("live Search identity rows");
@@ -4303,14 +4307,14 @@ async fn home_search_and_radio_results_stay_bounded() {
             filter: ("artist a").into(),
             ..library::MemberRead::new(library::Collection::Source(fixture.source))
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .expect("complete Track filter")
             .count
             >= 2
     );
     let initial_home = fixture
-        .database
+        .catalog
         .home_page(
             fixture.source,
             None,
@@ -4334,7 +4338,7 @@ async fn home_search_and_radio_results_stay_bounded() {
         1
     );
     let alternate_showcase_home = fixture
-        .database
+        .catalog
         .home_page(
             fixture.source,
             None,
@@ -4360,7 +4364,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     );
     assert_eq!(alternate_showcase.album.album_key, fixture.albums[1]);
     let alternate_explore_home = fixture
-        .database
+        .catalog
         .home_page(
             fixture.source,
             None,
@@ -4382,7 +4386,7 @@ async fn home_search_and_radio_results_stay_bounded() {
         .await
         .unwrap();
     let albums = fixture
-        .database
+        .catalog
         .albums(&fixture.albums, true, &cancel)
         .await
         .unwrap();
@@ -4404,7 +4408,7 @@ async fn home_search_and_radio_results_stay_bounded() {
             downloaded_only: false,
             activity: true,
         }
-        .albums(&fixture.database, 0, 10, &cancel)
+        .albums(&fixture.catalog, 0, 10, &cancel)
         .await
         .unwrap();
         let expected = if descending {
@@ -4421,7 +4425,7 @@ async fn home_search_and_radio_results_stay_bounded() {
         );
     }
     let newly_added = fixture
-        .database
+        .catalog
         .home_page(
             fixture.source,
             None,
@@ -4448,7 +4452,7 @@ async fn home_search_and_radio_results_stay_bounded() {
         .unwrap();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .home_page(
                 fixture.source,
                 None,
@@ -4468,7 +4472,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .home_page(
                 fixture.source,
                 None,
@@ -4485,7 +4489,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     );
 
     let random = fixture
-        .database
+        .catalog
         .random_candidates(
             fixture.source,
             None,
@@ -4506,7 +4510,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(random.len(), 2);
     assert!(!random.contains(&fixture.tracks[0]));
     let radio = fixture
-        .database
+        .catalog
         .radio_candidates(
             fixture.source,
             RadioSeed::Genre(fixture.genre),
@@ -4528,7 +4532,7 @@ async fn home_search_and_radio_results_stay_bounded() {
         .execute(&mut raw).await.unwrap();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .radio_candidates(
                 fixture.source,
                 RadioSeed::Genre(fixture.genre),
@@ -4545,7 +4549,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     );
     assert!(
         fixture
-            .database
+            .catalog
             .radio_candidates(
                 fixture.source,
                 RadioSeed::Genre(fixture.genre),
@@ -4560,7 +4564,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     );
 
     let album_radio = fixture
-        .database
+        .catalog
         .radio_candidates(
             fixture.source,
             RadioSeed::Album(fixture.albums[0]),
@@ -4578,7 +4582,7 @@ async fn home_search_and_radio_results_stay_bounded() {
             .all(|track| fixture.tracks[2..].contains(track))
     );
     let playlist = fixture
-        .database
+        .catalog
         .create_playlist(
             Some(fixture.source),
             "Seed",
@@ -4589,7 +4593,7 @@ async fn home_search_and_radio_results_stay_bounded() {
         .unwrap()
         .0;
     let playlist_radio = fixture
-        .database
+        .catalog
         .radio_candidates(
             fixture.source,
             RadioSeed::Playlist(playlist),

@@ -812,7 +812,7 @@ pub(super) async fn observation_stamp(
     Ok(sqlx::query_scalar("UPDATE sources SET observation_stamp=observation_stamp+1 WHERE source_key=?1 RETURNING observation_stamp").bind(source).fetch_one(connection).await?)
 }
 
-impl Database {
+impl Catalog {
     pub async fn write_direct_track_metadata(
         &self,
         uri: &str,
@@ -1087,9 +1087,9 @@ pub(crate) async fn apply_on(
     Ok(update)
 }
 
-impl super::Catalog<'_> {
+impl super::Observation<'_> {
     pub async fn apply_catalog(&mut self, batch: &CatalogBatch, admit: bool) -> LibraryResult<()> {
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut tx = writer.begin().await?;
         let update = apply_on(
             &mut tx,
@@ -1114,7 +1114,7 @@ impl super::Catalog<'_> {
         for kind in kinds {
             let mut after = 0_i64;
             loop {
-                let mut writer = self.database.writer().await?;
+                let mut writer = self.catalog.writer().await?;
                 let mut tx = writer.begin().await?;
                 let source = self.source.raw();
                 let (table, key) = if *kind == "playlist" {
@@ -1177,7 +1177,7 @@ impl super::Catalog<'_> {
             }
         }
         if kinds.is_empty() {
-            let mut writer = self.database.writer().await?;
+            let mut writer = self.catalog.writer().await?;
             let mut tx = writer.begin().await?;
             let share: Option<bool> = sqlx::query_scalar("UPDATE sources SET catalog_complete=1,freshness=?2 WHERE source_key=?1 AND(catalog_complete,freshness) IS NOT(1,?2) RETURNING coalesce(kind IN('local','webdav','smb'),0)")
                 .bind(self.source.raw()).bind(freshness.map(Freshness::as_bytes)).fetch_optional(&mut *tx).await?;
@@ -1197,9 +1197,9 @@ impl super::Catalog<'_> {
     }
 }
 
-impl super::Catalog<'_> {
+impl super::Observation<'_> {
     pub async fn start_observation(&mut self) -> LibraryResult<i64> {
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut tx = writer.begin().await?;
         let stamp = sqlx::query_scalar("UPDATE sources SET observation_stamp=observation_stamp+1 WHERE source_key=?1 RETURNING observation_stamp")
             .bind(self.source).fetch_one(&mut *tx).await?;

@@ -20,7 +20,7 @@ pub struct SelectedPlaybackState {
 pub struct PlayerUi {
     pub artwork: Rc<gtk_widgets::artwork::ArtworkState>,
     pub control_feedback: Rc<gtk_widgets::feedback::ControlFeedbackState>,
-    database: std::sync::Arc<library::Database>,
+    catalog: std::sync::Arc<library::Catalog>,
     runtime: tokio::runtime::Handle,
     navigate: Rc<dyn Fn(gtk_widgets::route::Route)>,
     refresh_current_controls: Rc<dyn Fn()>,
@@ -57,7 +57,7 @@ impl PlayerUi {
         panel_slot: &gtk::ScrolledWindow,
         artwork: Rc<gtk_widgets::artwork::ArtworkState>,
         control_feedback: Rc<gtk_widgets::feedback::ControlFeedbackState>,
-        database: std::sync::Arc<library::Database>,
+        catalog: std::sync::Arc<library::Catalog>,
         runtime: tokio::runtime::Handle,
         navigate: Rc<dyn Fn(gtk_widgets::route::Route)>,
         refresh_current_controls: Rc<dyn Fn()>,
@@ -70,7 +70,7 @@ impl PlayerUi {
         Self {
             artwork,
             control_feedback,
-            database,
+            catalog,
             runtime,
             navigate,
             refresh_current_controls,

@@ -218,7 +218,7 @@ impl ConnectOwner {
         use tokio::io::AsyncReadExt;
         let uri = request.uri.as_str();
         let reference = self
-            .database
+            .catalog
             .connect_track_reference(uri)
             .await
             .map_err(error)?;
@@ -240,7 +240,7 @@ impl ConnectOwner {
                 }
             };
             let identity = self
-                .database
+                .catalog
                 .catalog_identity(
                     library::CatalogKind::Track,
                     uri,
@@ -258,7 +258,7 @@ impl ConnectOwner {
         }
         let encoding_key = library::media_encoding_key(request.encoding);
         let mut receipt = self
-            .database
+            .catalog
             .connect_media_file(uri, &encoding_key)
             .await
             .map_err(error)?
@@ -272,7 +272,7 @@ impl ConnectOwner {
             && let Some(reference) = reference.as_ref()
         {
             receipt = self
-                .database
+                .catalog
                 .connect_backing_media_file(uri, &encoding_key, &revision(reference))
                 .await
                 .map_err(error)?;
@@ -291,7 +291,7 @@ impl ConnectOwner {
         let access = match cached {
             Some(access) => access,
             None => original
-                .or(self.database.connect_local_file(uri).await.map_err(error)?)
+                .or(self.catalog.connect_local_file(uri).await.map_err(error)?)
                 .or_else(|| {
                     library::cue_media_parts(uri)
                         .map_or_else(|| location(uri), |(_, backing, _, _)| location(&backing))
@@ -304,7 +304,7 @@ impl ConnectOwner {
                 LocalMediaLocation::Document(uri) => uri.clone(),
             };
             if self
-                .database
+                .catalog
                 .connect_media_files(uri)
                 .await
                 .map_err(error)?
@@ -349,7 +349,7 @@ impl ConnectOwner {
                 }
                 let end = requested_end
                     .or(self
-                        .database
+                        .catalog
                         .download_metadata(uri)
                         .await
                         .map_err(error)?
@@ -438,7 +438,7 @@ impl ConnectOwner {
         uri: &str,
     ) -> Result<Option<library::LyricsCacheRow>, String> {
         let Some(track) = self
-            .database
+            .catalog
             .track(uri, &library::ReadCancellation::new())
             .await
             .map_err(error)?
@@ -454,7 +454,7 @@ impl ConnectOwner {
             self.source.source_input_digest(&source)
         });
         let cached = self
-            .database
+            .catalog
             .lyrics_cache_for_role(
                 uri,
                 "original",
@@ -477,11 +477,11 @@ impl ConnectOwner {
             Some(bundle) => Some(bundle),
             None => match self.source.media_client(uri).await {
                 Ok(source) => source
-                    .cached_lyrics(&self.database, uri, input)
+                    .cached_lyrics(&self.catalog, uri, input)
                     .await
                     .map_err(error)?,
                 Err(_) => sources::read_local_lyrics(
-                    &self.database,
+                    &self.catalog,
                     uri,
                     Some(&track.metadata.title),
                     &lyrics::UserPreferences::default(),
@@ -570,7 +570,7 @@ impl ConnectOwner {
 
     async fn original_media_file(&self, uri: &str) -> Result<Option<LocalMediaLocation>, String> {
         let location = self
-            .database
+            .catalog
             .connect_original_file(uri, |path| self.local_file_path(path))
             .await
             .map_err(error)?;
@@ -596,7 +596,7 @@ impl ConnectOwner {
             return Ok(true);
         }
         Ok(self
-            .database
+            .catalog
             .connect_track_reference(uri)
             .await
             .map_err(error)?

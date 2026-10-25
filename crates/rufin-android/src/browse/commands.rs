@@ -18,9 +18,9 @@ impl AndroidLibrary {
         &self,
         item: library::DownloadItem,
     ) -> Result<library::DownloadStatus, AndroidError> {
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         run_read(&self.runtime, move |cancel| async move {
-            database
+            catalog
                 .item_download_status(&item, &cancel)
                 .await
                 .map_err(error)
@@ -33,7 +33,7 @@ impl AndroidLibrary {
         path: Vec<rufin_core::route::FolderPathItem>,
     ) -> Result<library::DownloadStatus, AndroidError> {
         let query = self.target_query(Route::Folders { path })?;
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         run_read(&self.runtime, move |cancel| async move {
             let mut read = query
                 .members(&cancel)
@@ -41,9 +41,9 @@ impl AndroidLibrary {
                 .map_err(error)?
                 .expect("Folder query has members")
                 .clone();
-            let total = read.count(&database, &cancel).await.map_err(error)? as u64;
+            let total = read.count(&catalog, &cancel).await.map_err(error)? as u64;
             read.downloaded_only = true;
-            let downloaded = read.count(&database, &cancel).await.map_err(error)? as u64;
+            let downloaded = read.count(&catalog, &cancel).await.map_err(error)? as u64;
             Ok(library::DownloadStatus { total, downloaded })
         })
         .await
@@ -120,7 +120,7 @@ impl AndroidLibrary {
         }
         Ok(Arc::new(AndroidBrowseQuery {
             selected,
-            database: self.database.clone(),
+            catalog: self.catalog.clone(),
             runtime: self.runtime.clone(),
             playback: self.playback.clone(),
             route,
@@ -254,22 +254,22 @@ impl AndroidLibrary {
             library::RadioSeed::Track(media_uri)
         } else {
             let route = route.ok_or_else(|| error("Choose a radio seed"))?;
-            let database = self.database.clone();
+            let catalog = self.catalog.clone();
             self.runtime
                 .spawn(async move {
                     let cancel = ReadCancellation::new();
                     match route {
-                        Route::AlbumDetail(uri) => database
+                        Route::AlbumDetail(uri) => catalog
                             .album(&uri, false, &cancel)
                             .await
                             .map_err(error)?
                             .map(|row| library::RadioSeed::Album(row.album_key)),
-                        Route::ArtistDetail(uri) => database
+                        Route::ArtistDetail(uri) => catalog
                             .artist(&uri, false, false, &cancel)
                             .await
                             .map_err(error)?
                             .map(|row| library::RadioSeed::Artist(row.artist_key)),
-                        Route::AlbumArtistDetail(uri) => database
+                        Route::AlbumArtistDetail(uri) => catalog
                             .artist(&uri, true, false, &cancel)
                             .await
                             .map_err(error)?
@@ -425,10 +425,10 @@ impl AndroidLibrary {
             .source
             .selected_library()
             .ok_or_else(|| error("No source selected"))?;
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         self.runtime
             .spawn(async move {
-                let genre = database
+                let genre = catalog
                     .genres(&[key], selected.music_folder_key, &ReadCancellation::new())
                     .await
                     .map_err(error)?
@@ -451,11 +451,11 @@ impl AndroidLibrary {
         let Some(selected) = self.source.selected_library() else {
             return Ok(localization::tr("Any genre"));
         };
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         let genre = self
             .runtime
             .spawn(async move {
-                rufin_core::radio::saved_random_genre(&database, &settings, &selected).await
+                rufin_core::radio::saved_random_genre(&catalog, &settings, &selected).await
             })
             .await
             .map_err(error)?
@@ -519,12 +519,12 @@ impl AndroidLibrary {
     ) -> Result<Vec<AndroidBrowseRow>, AndroidError> {
         let selected = self.source.selected_library();
         let source = self.source.clone();
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         self.runtime
             .spawn(async move {
                 rufin_core::source::search::acquire_search(
                     &source,
-                    &database,
+                    &catalog,
                     selected.as_ref(),
                     mode,
                     text,
@@ -552,11 +552,11 @@ impl AndroidLibrary {
         &self,
         target: library::FavoriteTarget,
     ) -> Result<Option<u8>, AndroidError> {
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         self.runtime
             .spawn(async move {
                 let cancellation = ReadCancellation::new();
-                let user_rating = database
+                let user_rating = catalog
                     .user_media_state(target.media_uri(), &cancellation)
                     .await
                     .map_err(error)?
@@ -565,17 +565,17 @@ impl AndroidLibrary {
                     user_rating
                 } else {
                     let rating = match &target {
-                        library::FavoriteTarget::Track(uri) => database
+                        library::FavoriteTarget::Track(uri) => catalog
                             .track(uri, &cancellation)
                             .await
                             .map_err(error)?
                             .and_then(|row| row.state.rating),
-                        library::FavoriteTarget::Album(uri) => database
+                        library::FavoriteTarget::Album(uri) => catalog
                             .album(uri, false, &cancellation)
                             .await
                             .map_err(error)?
                             .and_then(|row| row.state.rating),
-                        library::FavoriteTarget::Artist(uri) => database
+                        library::FavoriteTarget::Artist(uri) => catalog
                             .artist(uri, false, false, &cancellation)
                             .await
                             .map_err(error)?
@@ -604,7 +604,7 @@ impl AndroidLibrary {
             .map_err(error)?
             .map_err(error)?;
         let row = self
-            .database
+            .catalog
             .playlists(&[imported.playlist], &ReadCancellation::new())
             .await
             .map_err(error)?
@@ -644,7 +644,7 @@ impl AndroidLibrary {
             .collect::<Vec<_>>();
         let consumed = offset.saturating_add(pins.len() as u64);
         let next_offset = (consumed < total).then_some(consumed);
-        let db = self.database.clone();
+        let catalog = self.catalog.clone();
         let selected = self.source.selected_library();
         self.runtime
             .spawn(async move {
@@ -657,7 +657,8 @@ impl AndroidLibrary {
                             album_id,
                         } => {
                             let uri = library::source_entity_uri(source_id, "album", album_id);
-                            db.album(&uri, false, &cancel)
+                            catalog
+                                .album(&uri, false, &cancel)
                                 .await
                                 .map_err(error)?
                                 .map(Into::into)
@@ -668,7 +669,8 @@ impl AndroidLibrary {
                             album_artist,
                         } => {
                             let uri = library::source_entity_uri(source_id, "artist", artist_id);
-                            db.artist(&uri, *album_artist, false, &cancel)
+                            catalog
+                                .artist(&uri, *album_artist, false, &cancel)
                                 .await
                                 .map_err(error)?
                                 .map(|row| artist_row(row, *album_artist))
@@ -678,7 +680,8 @@ impl AndroidLibrary {
                             genre_id,
                         } => {
                             let uri = library::source_entity_uri(source_id, "genre", genre_id);
-                            db.genre(&uri, None, &cancel)
+                            catalog
+                                .genre(&uri, None, &cancel)
                                 .await
                                 .map_err(error)?
                                 .map(Into::into)
@@ -687,12 +690,13 @@ impl AndroidLibrary {
                             source_id,
                             playlist_id,
                         } => {
-                            if let Some(key) = db
+                            if let Some(key) = catalog
                                 .playlist_key_by_identity(source_id.as_ref(), playlist_id, &cancel)
                                 .await
                                 .map_err(error)?
                             {
-                                db.playlists(&[key], &cancel)
+                                catalog
+                                    .playlists(&[key], &cancel)
                                     .await
                                     .map_err(error)?
                                     .pop()
@@ -701,7 +705,7 @@ impl AndroidLibrary {
                                 None
                             }
                         }
-                        SidebarPin::PlaylistFolder { folder_id, .. } => db
+                        SidebarPin::PlaylistFolder { folder_id, .. } => catalog
                             .playlist_folder_by_id(
                                 folder_id,
                                 selected.as_ref().map(|selected| selected.source_key),
@@ -714,7 +718,7 @@ impl AndroidLibrary {
                             .map_err(error)?
                             .map(Into::into),
                         SidebarPin::SmartPlaylist { playlist_id } => {
-                            if let Some(key) = db
+                            if let Some(key) = catalog
                                 .smart_playlist_key_by_object(playlist_id, &cancel)
                                 .await
                                 .map_err(error)?
@@ -723,7 +727,8 @@ impl AndroidLibrary {
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .map_err(error)?
                                     .as_secs() as i64;
-                                db.smart_playlist_rows(&[key], now, &cancel)
+                                catalog
+                                    .smart_playlist_rows(&[key], now, &cancel)
                                     .await
                                     .map_err(error)?
                                     .pop()

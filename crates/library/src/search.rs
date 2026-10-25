@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use crate::query::{OrderedQuery, RequestedKeys};
 use crate::{
-    AlbumView, ArtistView, CatalogSort, Collection, Database, FolderKey, LibraryResult, ListKind,
+    AlbumView, ArtistView, Catalog, CatalogSort, Collection, FolderKey, LibraryResult, ListKind,
     ListRead, MemberRead, ReadCancellation, SourceKey, TrackView,
 };
 
@@ -78,7 +78,7 @@ pub struct SearchResults {
     pub lyrics: BTreeMap<crate::TrackKey, LyricsSnippet>,
 }
 
-impl Database {
+impl Catalog {
     pub async fn search_rows_by_objects(
         &self,
         source: SourceKey,

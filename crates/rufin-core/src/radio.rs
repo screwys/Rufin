@@ -1,9 +1,9 @@
-//! Provider-first Radio/AutoDJ with bounded Database fallback; Random is Database-owned.
+//! Provider-first Radio/AutoDJ with bounded Catalog fallback; Random is Catalog-owned.
 
 use std::sync::Weak;
 
 use crate::playback::RandomPlayRequest;
-use library::{Database, RadioSeed, ReadCancellation, SourceKey};
+use library::{Catalog, RadioSeed, ReadCancellation, SourceKey};
 use playback::Provenance;
 use sources::{Source, SourceRadioSeed};
 
@@ -19,9 +19,9 @@ pub async fn play_saved_random(
     placement: crate::playback::QueuePlacement,
 ) -> Result<bool, String> {
     owner
-        .reply(move |owner, database| async move {
+        .reply(move |owner, catalog| async move {
             let selected = owner.selected_library().ok_or("No source selected")?;
-            let genre = saved_random_genre(&database, &settings, &selected).await?;
+            let genre = saved_random_genre(&catalog, &settings, &selected).await?;
             let request = RandomPlayRequest {
                 placement,
                 requested: settings.limit,
@@ -38,7 +38,7 @@ pub async fn play_saved_random(
             };
             let queue = owner.shared.playback()?;
             queue_random(
-                &database,
+                &catalog,
                 selected.source_key,
                 selected.music_folder_key,
                 request,
@@ -53,7 +53,7 @@ pub async fn play_saved_random(
 
 /// Finds the saved Random Play genre when it was saved for this library.
 pub async fn saved_random_genre(
-    database: &Database,
+    catalog: &Catalog,
     settings: &RandomPlaySettings,
     selected: &SelectedLibrary,
 ) -> Result<Option<library::GenreView>, String> {
@@ -64,7 +64,7 @@ pub async fn saved_random_genre(
         return Ok(None);
     };
     let cancellation = ReadCancellation::new();
-    let Some(key) = database
+    let Some(key) = catalog
         .catalog_keys(
             library::CatalogKind::Genre,
             Some(selected.source_key),
@@ -77,7 +77,7 @@ pub async fn saved_random_genre(
     else {
         return Ok(None);
     };
-    database
+    catalog
         .genres(
             &[library::GenreKey::from_raw(key)],
             selected.music_folder_key,
@@ -89,14 +89,14 @@ pub async fn saved_random_genre(
 }
 
 pub async fn queue_random(
-    database: &Database,
+    catalog: &Catalog,
     source: SourceKey,
     folder: Option<library::FolderKey>,
     request: RandomPlayRequest,
     queue: &crate::playback::PlaybackOwner,
 ) -> Result<bool, String> {
     let cancellation = ReadCancellation::new();
-    let order = database
+    let order = catalog
         .random_candidates(
             source,
             folder,
@@ -118,7 +118,7 @@ pub async fn queue_random(
 }
 
 pub(crate) async fn radio_candidates(
-    database: &Database,
+    catalog: &Catalog,
     source_owner: Weak<SourceOwner>,
     selected: Option<SelectedLibrary>,
     seed: RadioSeed,
@@ -127,7 +127,7 @@ pub(crate) async fn radio_candidates(
 ) -> Result<Vec<library::TrackKey>, String> {
     let requested = requested.min(library::QUEUE_CONTEXT_LIMIT);
     let owner = source_owner.upgrade();
-    let seed_source = database
+    let seed_source = catalog
         .radio_source(&seed, cancellation)
         .await
         .map_err(|error| error.to_string())?;
@@ -145,7 +145,7 @@ pub(crate) async fn radio_candidates(
                 .generated_track_object_ids(&native_seed, requested.min(256))
                 .await
         {
-            candidates = database
+            candidates = catalog
                 .recommended_track_keys(source_key, &seed, &ids, cancellation)
                 .await
                 .map_err(|error| error.to_string())?;
@@ -166,7 +166,7 @@ pub(crate) async fn radio_candidates(
         if candidates.len() == requested {
             break;
         }
-        let fallback = database
+        let fallback = catalog
             .radio_candidates(
                 source_key,
                 seed.clone(),

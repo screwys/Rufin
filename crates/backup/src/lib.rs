@@ -3,7 +3,7 @@
 uniffi::setup_scaffolding!();
 
 use chrono::{Datelike, TimeZone};
-use library::{BackupRestoreReport, Database, LibraryError, StateGroups};
+use library::{BackupRestoreReport, Catalog, LibraryError, StateGroups};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
@@ -153,7 +153,7 @@ fn write_json_file(path: &Path, value: &[u8]) -> BackupResult<()> {
     Ok(())
 }
 pub async fn write_backup(
-    database: &Database,
+    catalog: &Catalog,
     output: impl Write,
     options: BackupOptions<'_>,
 ) -> BackupResult<BackupManifest> {
@@ -181,7 +181,7 @@ pub async fn write_backup(
             options.playlist_pins.unwrap_or(b"{}"),
         )?;
     }
-    let ordinal = database
+    let ordinal = catalog
         .export_state(directory.path(), contents.state_groups())
         .await?;
     let manifest = BackupManifest {
@@ -217,12 +217,12 @@ pub async fn write_backup(
 }
 
 pub async fn restore_backup(
-    database: &Database,
+    catalog: &Catalog,
     backup: &StagedBackup,
     contents: BackupContents,
 ) -> BackupResult<BackupRestoreReport> {
     let contents = contents.intersect(backup.manifest.contents);
-    Ok(database
+    Ok(catalog
         .restore_state(
             backup.directory.path(),
             contents.state_groups(),
@@ -454,13 +454,13 @@ pub fn scheduled_backup_timestamp(filename: &str, schedule_id: &str) -> Option<i
 mod tests {
     use super::*;
     use std::io::Cursor;
-    async fn database(directory: &Path, name: &str) -> Database {
-        Database::open(directory.join(name)).await.unwrap()
+    async fn catalog(directory: &Path, name: &str) -> Catalog {
+        Catalog::open(directory.join(name)).await.unwrap()
     }
-    async fn archive(database: &Database, passphrase: Option<&str>) -> Vec<u8> {
+    async fn archive(catalog: &Catalog, passphrase: Option<&str>) -> Vec<u8> {
         let mut bytes = Vec::new();
         write_backup(
-            database,
+            catalog,
             &mut bytes,
             BackupOptions {
                 contents: BackupContents::default(),
@@ -479,7 +479,7 @@ mod tests {
     #[tokio::test]
     async fn age_authentication_and_truncated_gzip_fail_before_restore() {
         let directory = tempfile::tempdir().unwrap();
-        let source = database(directory.path(), "source").await;
+        let source = catalog(directory.path(), "source").await;
         let bytes = archive(&source, Some("correct passphrase")).await;
         assert!(bytes.starts_with(b"age-encryption.org/v1\n"));
         assert!(stage_backup(Cursor::new(&bytes), || None).is_err());
@@ -500,7 +500,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_members_are_ignored_but_duplicate_and_traversal_members_are_rejected() {
         let directory = tempfile::tempdir().unwrap();
-        let source = database(directory.path(), "source").await;
+        let source = catalog(directory.path(), "source").await;
         let bytes = archive(&source, None).await;
         let mut raw = Vec::new();
         flate2::read::GzDecoder::new(Cursor::new(bytes))
@@ -573,8 +573,8 @@ mod tests {
             }
         }
         let directory = tempfile::tempdir().unwrap();
-        let database = database(directory.path(), "export").await;
-        let export = database.clone();
+        let catalog = catalog(directory.path(), "export").await;
+        let export = catalog.clone();
         let (started, ready) = tokio::sync::oneshot::channel();
         let (resume, blocked) = std::sync::mpsc::channel();
         let runtime = tokio::runtime::Handle::current();
@@ -601,7 +601,7 @@ mod tests {
             .unwrap();
         let read = tokio::time::timeout(
             std::time::Duration::from_secs(1),
-            database.user_media_state(
+            catalog.user_media_state(
                 "https://example.test/song",
                 &library::ReadCancellation::new(),
             ),
@@ -615,8 +615,8 @@ mod tests {
     #[tokio::test]
     async fn restore_intersects_requested_and_present_groups_before_replacement() {
         let directory = tempfile::tempdir().unwrap();
-        let empty = database(directory.path(), "empty").await;
-        let target = database(directory.path(), "target").await;
+        let empty = catalog(directory.path(), "empty").await;
+        let target = catalog(directory.path(), "target").await;
         let uri = "https://example.test/song";
         target
             .set_rating(&library::FavoriteTarget::Track(uri.into()), Some(2))
@@ -677,8 +677,8 @@ mod tests {
     #[tokio::test]
     async fn archive_roundtrip_restores_selected_data_and_application_members() {
         let directory = tempfile::tempdir().unwrap();
-        let source = database(directory.path(), "source").await;
-        let target = database(directory.path(), "target").await;
+        let source = catalog(directory.path(), "source").await;
+        let target = catalog(directory.path(), "target").await;
         let uri = "https://example.test/song";
         let favorite = library::FavoriteTarget::Track(uri.into());
         source.set_rating(&favorite, Some(7)).await.unwrap();

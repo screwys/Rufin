@@ -17,8 +17,8 @@ fn queue_row(item: TrackReference, position: usize) -> QueueTransferRow {
 #[tokio::test]
 async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue_until_commit() {
     let fixture = fixture().await;
-    let database = &fixture.database;
-    let captured = database
+    let catalog = &fixture.catalog;
+    let captured = catalog
         .queue_entries(
             library::QueueLoad::items(
                 (0..205)
@@ -49,13 +49,13 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
         shuffled: true,
         ..Default::default()
     };
-    database.save_queue(&queue).await.unwrap();
+    catalog.save_queue(&queue).await.unwrap();
     let receiver_directory = tempfile::tempdir().unwrap();
-    let receiver = library::Database::open(receiver_directory.path().join("receiver.sqlite3"))
+    let receiver = library::Catalog::open(receiver_directory.path().join("receiver.sqlite3"))
         .await
         .unwrap();
     for offset in (0..205).step_by(library::QUEUE_CONTEXT_LIMIT) {
-        let page = database.queue_transfer_page(&queue, offset).await.unwrap();
+        let page = catalog.queue_transfer_page(&queue, offset).await.unwrap();
         assert!(page.rows.len() <= library::QUEUE_CONTEXT_LIMIT);
         receiver
             .stage_queue_transfer_page("transfer", &page)
@@ -95,7 +95,7 @@ async fn continuation_pages_preserve_duplicate_identity_and_do_not_replace_queue
             )
             .await
             .unwrap(),
-        database
+        catalog
             .selected_track_uris(
                 &library::MemberSelection::Keys {
                     source: None,
@@ -198,8 +198,8 @@ async fn continuation_uses_local_artwork_before_starting_the_current_track() {
                 .await
                 .unwrap();
         fixture
-            .database
-            .catalog("source", None)
+            .catalog
+            .observe("source", None)
             .await
             .unwrap()
             .set_source_artwork(
@@ -226,12 +226,12 @@ async fn continuation_uses_local_artwork_before_starting_the_current_track() {
         order: vec![0],
     };
     fixture
-        .database
+        .catalog
         .stage_queue_transfer_page("artwork", &page)
         .await
         .unwrap();
     let prepared = fixture
-        .database
+        .catalog
         .prepare_queue_transfer("artwork", 1, 0)
         .await
         .unwrap();
@@ -245,8 +245,8 @@ async fn continuation_uses_local_artwork_before_starting_the_current_track() {
 #[tokio::test]
 async fn interrupted_or_invalid_continuation_retains_saved_queue() {
     let fixture = fixture().await;
-    let database = &fixture.database;
-    let before = database.restore_queue().await.unwrap();
+    let catalog = &fixture.catalog;
+    let before = catalog.restore_queue().await.unwrap();
     let row = queue_row(
         TrackReference::direct(
             "https://example.test/track",
@@ -262,24 +262,24 @@ async fn interrupted_or_invalid_continuation_retains_saved_queue() {
         rows: vec![row],
         order: vec![99],
     };
-    database
+    catalog
         .stage_queue_transfer_page("incomplete", &page)
         .await
         .unwrap();
     assert!(
-        database
+        catalog
             .prepare_queue_transfer("incomplete", 101, 0)
             .await
             .is_err()
     );
     assert!(
-        database
+        catalog
             .prepare_queue_transfer("incomplete", 1, 0)
             .await
             .is_err()
     );
-    assert_eq!(database.restore_queue().await.unwrap(), before);
-    database.discard_queue_transfer("incomplete").await.unwrap();
+    assert_eq!(catalog.restore_queue().await.unwrap(), before);
+    catalog.discard_queue_transfer("incomplete").await.unwrap();
 }
 
 #[tokio::test]
@@ -287,7 +287,7 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut media = fixture
-        .database
+        .catalog
         .track_references_for_uris(&fixture.track_uris[..2], &cancel)
         .await
         .expect("materialize catalog media");
@@ -300,7 +300,7 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
                 .fetch_all(&mut raw)
                 .await
                 .unwrap();
-        fixture.database.catalog("source", None).await.unwrap().set_source_artwork("track", &objects.into_iter().map(|id|(id,Some((br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/72fc22518d84ba750d9fd4179a8fd2c4","image":{"kind":"native","source_id":"source","item_id":"shared-art","tag":null},"blur_hash":null}]"#.as_slice()).to_vec()))).collect::<Vec<_>>()).await.unwrap();
+        fixture.catalog.observe("source", None).await.unwrap().set_source_artwork("track", &objects.into_iter().map(|id|(id,Some((br#"[{"key":"native/36cd38f49b9afa08222c0dc9ebfe35eb/72fc22518d84ba750d9fd4179a8fd2c4","image":{"kind":"native","source_id":"source","item_id":"shared-art","tag":null},"blur_hash":null}]"#.as_slice()).to_vec()))).collect::<Vec<_>>()).await.unwrap();
     };
     let mut unavailable = media[1].clone();
     unavailable.media_uri = "https://example.invalid/offline.flac".to_string();
@@ -313,7 +313,7 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
         queue_row(media[0].clone(), 1),
     ];
     persist_queue(
-        &fixture.database,
+        &fixture.catalog,
         &occurrences,
         Some(0),
         1_500,
@@ -323,7 +323,7 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
     .await;
 
     let restored = fixture
-        .database
+        .catalog
         .restore_queue()
         .await
         .expect("restore Queue");
@@ -359,7 +359,7 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
 async fn occurrence_media_and_progress_follow_the_exact_uri() {
     let fixture = fixture().await;
     let mut media = fixture
-        .database
+        .catalog
         .track_references_for_uris(&fixture.track_uris[..3], &ReadCancellation::new())
         .await
         .expect("materialize media");
@@ -372,7 +372,7 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
         .map(|(position, media)| queue_row(media, position))
         .collect::<Vec<_>>();
     persist_queue(
-        &fixture.database,
+        &fixture.catalog,
         &occurrences,
         Some(0),
         0,
@@ -383,7 +383,7 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
 
     for position in 0..occurrences.len() {
         fixture
-            .database
+            .catalog
             .apply_queue_update(&library::QueueUpdate {
                 current_index: Some(position),
                 progress_millis: (position as i64 + 1) * 1_000,
@@ -392,7 +392,7 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
             .await
             .expect("persist progress");
         let restored = fixture
-            .database
+            .catalog
             .restore_queue()
             .await
             .expect("restore progress");
@@ -424,7 +424,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
             sort: Some(CatalogSort::TrackNumber),
             ..library::MemberRead::new(library::Collection::Album(fixture.albums[0]))
         })
-            .page(&fixture.database, library::RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, library::RouteSeedWindow::top(), &cancel)
             .await
             .expect("Album Track order")
             .rows)
@@ -437,7 +437,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
     .map(|row| row.media_uri)
     .collect::<Vec<_>>();
     let playlist_key = fixture
-        .database
+        .catalog
         .create_playlist(
             Some(fixture.source),
             "Collection",
@@ -448,7 +448,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
         .expect("Playlist key")
         .0;
     let playlist = fixture
-        .database
+        .catalog
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Playlist(playlist_key)).selection(),
             None,
@@ -457,12 +457,12 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
         .await
         .expect("Playlist URI order");
     let smart_key = fixture
-        .database
+        .catalog
         .create_smart_playlist("Everything", &SmartPlaylistDefinition::default(), None)
         .await
         .expect("create Smart Playlist");
     let smart = fixture
-        .database
+        .catalog
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Smart {
                 key: smart_key,
@@ -478,7 +478,7 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
     for (name, order) in [("album", album), ("playlist", playlist), ("smart", smart)] {
         assert!(!order.is_empty(), "{name} order");
         let media = fixture
-            .database
+            .catalog
             .track_references_for_uris(&order, &cancel)
             .await
             .expect("materialize URI order");
@@ -493,18 +493,18 @@ async fn album_playlist_and_smart_playlist_materialize_the_same_uri_identity() {
 }
 
 async fn source_items(
-    database: &library::Database,
+    catalog: &library::Catalog,
     input: library::QueueLoad,
     seed: Option<u64>,
 ) -> Vec<TrackReference> {
-    let page = database.queue_entries(input, None).await.unwrap();
+    let page = catalog.queue_entries(input, None).await.unwrap();
     let mut entries = page.entries;
     if seed.is_some() {
         entries.reverse();
     }
     let mut items = Vec::new();
     for chunk in entries.chunks(100) {
-        let page = database
+        let page = catalog
             .queue_rows_for_entries(
                 &chunk.iter().cloned().enumerate().collect::<Vec<_>>(),
                 &ReadCancellation::new(),
@@ -549,7 +549,7 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
                     ..library::MemberRead::new(library::Collection::Source(fixture.source))
                 })
                     .page(
-                        &fixture.database,
+                        &fixture.catalog,
                         library::RouteSeedWindow::top(),
                         &ReadCancellation::new(),
                     )
@@ -570,7 +570,7 @@ async fn source_membership_matches_track_view_sort_filter_and_null_order() {
                         source_rank: 0,
                     },
                 )]);
-                let items = source_items(&fixture.database, input, None).await;
+                let items = source_items(&fixture.catalog, input, None).await;
                 assert_eq!(
                     items.iter().map(|row| &row.media_uri).collect::<Vec<_>>(),
                     ({
@@ -600,7 +600,7 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
         "#EXTINF:3,Repeated\nhttps://example.test/repeated\n".repeat(140)
     );
     let imported = fixture
-        .database
+        .catalog
         .import_playlist_file(std::io::Cursor::new(content), &file, None, |_| None)
         .await
         .unwrap();
@@ -624,7 +624,7 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
         .await
         .unwrap();
         let page = fixture
-            .database
+            .catalog
             .queue_entries(input.clone(), Some((selected.0, Some(selected.1))))
             .await
             .unwrap();
@@ -635,7 +635,7 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
                 .iter()
                 .all(|entry| entry.track_key == page.entries[0].track_key)
         );
-        let items = source_items(&fixture.database, input, seed).await;
+        let items = source_items(&fixture.catalog, input, seed).await;
         assert_eq!(items.len(), 140);
         assert!(items.iter().all(|item| item == &items[0]));
         assert_eq!(items[0].metadata.title, "Repeated");
@@ -646,7 +646,7 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
             ..Default::default()
         };
         let (positions, count) = fixture
-            .database
+            .catalog
             .queue_search_page(&queue, &items[0].metadata.title, 100, 40)
             .await
             .unwrap();
@@ -659,7 +659,7 @@ async fn source_playlist_preserves_duplicate_members_with_shared_uri_metadata() 
 async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
     let fixture = fixture().await;
     let mut state = super::support::resolve_queue(
-        &fixture.database,
+        &fixture.catalog,
         library::QueueLoad::media_uris(
             (0..500).map(|i| format!("https://example.test/{i}")),
             library::QueueProvenance::Context {
@@ -677,8 +677,8 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
     for row in &mut state.rows {
         std::sync::Arc::make_mut(row).occurrence_id = Some(state.ids[row.position]);
     }
-    fixture.database.save_queue(&state).await.unwrap();
-    let restored = fixture.database.restore_queue().await.unwrap();
+    fixture.catalog.save_queue(&state).await.unwrap();
+    let restored = fixture.catalog.restore_queue().await.unwrap();
     assert_eq!(restored, state);
     let mut raw = connection(&fixture.path).await;
     assert_eq!(
@@ -691,17 +691,17 @@ async fn saved_queue_keeps_compact_choices_and_reads_only_the_window() {
     assert_eq!(restored.entries.len(), 500);
     let mut exported = Vec::new();
     fixture
-        .database
+        .catalog
         .export_queue_jsonl(&mut exported)
         .await
         .unwrap();
     let target = super::support::fixture().await;
     target
-        .database
+        .catalog
         .import_queue_jsonl(std::io::Cursor::new(exported))
         .await
         .unwrap();
-    assert_eq!(target.database.restore_queue().await.unwrap(), state);
+    assert_eq!(target.catalog.restore_queue().await.unwrap(), state);
 }
 
 #[tokio::test]
@@ -759,7 +759,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
     })
     .collect::<Vec<_>>();
     persist_queue(
-        &fixture.database,
+        &fixture.catalog,
         &rows,
         Some(4),
         42000,
@@ -767,7 +767,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         true,
     )
     .await;
-    let mut state = fixture.database.restore_queue().await.unwrap();
+    let mut state = fixture.catalog.restore_queue().await.unwrap();
     let mut entries = state.entries.to_vec();
     entries[6].track_key = fixture.tracks[0];
     let missing_uri = library::source_entity_uri(
@@ -776,7 +776,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         "missing-catalog-track",
     );
     let missing = fixture
-        .database
+        .catalog
         .queue_entries(
             library::QueueLoad::items(vec![(
                 TrackReference::direct(&missing_uri, "Missing", "", "", 0),
@@ -792,8 +792,8 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
 
     let mut raw = connection(&fixture.path).await;
     {
-        fixture.database.save_queue(&state).await.unwrap();
-        let restored = fixture.database.restore_queue().await.unwrap();
+        fixture.catalog.save_queue(&state).await.unwrap();
+        let restored = fixture.catalog.restore_queue().await.unwrap();
         assert_eq!(restored.entries, state.entries);
         assert_eq!(restored.order, state.order);
         assert_eq!(restored.current_index, state.current_index);
@@ -813,14 +813,14 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
             }
         }
         let mut source_members = fixture
-            .database
+            .catalog
             .queue_positions_for_source(&state, fixture.source)
             .await
             .unwrap();
         source_members.sort();
         assert_eq!(source_members, [6, 7]);
         fixture
-            .database
+            .catalog
             .queue_entries(
                 library::QueueLoad::items(vec![(unavailable.clone(), QueueProvenance::Manual)]),
                 None,
@@ -836,7 +836,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         assert_eq!(retained, [unavailable.media_uri.clone()]);
         let mut exported = Vec::new();
         fixture
-            .database
+            .catalog
             .export_queue_jsonl(&mut exported)
             .await
             .unwrap();
@@ -856,11 +856,11 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         );
         let target = super::support::fixture().await;
         target
-            .database
+            .catalog
             .import_queue_jsonl(std::io::Cursor::new(exported))
             .await
             .unwrap();
-        assert_eq!(target.database.restore_queue().await.unwrap(), restored);
+        assert_eq!(target.catalog.restore_queue().await.unwrap(), restored);
         let mut released = header["queue"].clone();
         for (index, entry) in released["entries"]
             .as_array_mut()
@@ -892,7 +892,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
             })
             .collect::<Vec<_>>();
         target
-            .database
+            .catalog
             .import_queue_jsonl(std::io::Cursor::new(
                 serde_json::to_vec(&serde_json::json!({
                     "version":3,"queue":released,"snapshots":snapshots,
@@ -901,7 +901,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
             ))
             .await
             .unwrap();
-        assert_eq!(target.database.restore_queue().await.unwrap(), restored);
+        assert_eq!(target.catalog.restore_queue().await.unwrap(), restored);
     }
     state.entries = state.entries[..6].to_vec().into();
     state.ids = state.ids[..6].to_vec().into();
@@ -911,8 +911,8 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         .copied()
         .filter(|index| *index < 6)
         .collect();
-    fixture.database.save_queue(&state).await.unwrap();
-    let removed = fixture.database.restore_queue().await.unwrap();
+    fixture.catalog.save_queue(&state).await.unwrap();
+    let removed = fixture.catalog.restore_queue().await.unwrap();
     assert_eq!(removed.entries, state.entries);
     assert_eq!(removed.order, state.order);
     assert_eq!(removed.current_index, state.current_index);
@@ -929,14 +929,14 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
         .await
         .unwrap();
     fixture
-        .database
+        .catalog
         .apply_queue_update(&library::QueueUpdate {
             repeat_mode: QueueRepeatMode::One,
             ..Default::default()
         })
         .await
         .unwrap();
-    let stopped = fixture.database.restore_queue().await.unwrap();
+    let stopped = fixture.catalog.restore_queue().await.unwrap();
     assert_eq!(stopped.entries, state.entries);
     assert_eq!(stopped.current_index, None);
     assert_eq!(stopped.progress_millis, 0);
@@ -975,7 +975,7 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
         })
         .collect::<Vec<_>>();
     persist_queue(
-        &fixture.database,
+        &fixture.catalog,
         &rows,
         Some(150),
         900,
@@ -985,7 +985,7 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
     .await;
     let mut exported = Vec::new();
     fixture
-        .database
+        .catalog
         .export_queue_jsonl(&mut exported)
         .await
         .unwrap();
@@ -1010,7 +1010,7 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
         row.provenance = QueueProvenance::Radio;
     }
     persist_queue(
-        &fixture.database,
+        &fixture.catalog,
         &rows,
         Some(54),
         1200,
@@ -1018,10 +1018,10 @@ async fn imported_metadata_batches_keep_member_order_and_known_song_facts() {
         false,
     )
     .await;
-    let restored = fixture.database.restore_queue().await.unwrap();
+    let restored = fixture.catalog.restore_queue().await.unwrap();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberSelection::Keys {
                     source: None,
@@ -1069,7 +1069,7 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
     let mut latest = library::QueueRestore::default();
     for activation in 0..12 {
         let page = fixture
-            .database
+            .catalog
             .queue_entries(
                 library::QueueLoad::items(
                     (0..2)
@@ -1098,7 +1098,7 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
             ..Default::default()
         };
     }
-    fixture.database.save_queue(&latest).await.unwrap();
+    fixture.catalog.save_queue(&latest).await.unwrap();
     let mut raw = connection(&fixture.path).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -1121,7 +1121,7 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
     latest.progress_millis = 1234;
     latest.repeat_mode = QueueRepeatMode::All;
     fixture
-        .database
+        .catalog
         .apply_queue_update(&library::QueueUpdate {
             order: Some(library::QueueOrderUpdate {
                 rows: latest
@@ -1147,7 +1147,7 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
             .unwrap(),
         membership
     );
-    fixture.database.save_queue(&latest).await.unwrap();
+    fixture.catalog.save_queue(&latest).await.unwrap();
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM song_writes")
             .fetch_one(&mut raw)
@@ -1155,7 +1155,7 @@ async fn queue_replacement_retains_uri_metadata_without_writes_on_order_changes(
             .unwrap(),
         0
     );
-    let restored = fixture.database.restore_queue().await.unwrap();
+    let restored = fixture.catalog.restore_queue().await.unwrap();
     assert_eq!(restored.entries, latest.entries);
     assert_eq!(restored.order, latest.order);
     assert_eq!(restored.current_index, latest.current_index);
@@ -1181,7 +1181,7 @@ async fn large_source_membership_keeps_metadata_reads_bounded() {
         .await
         .unwrap();
         let page = fixture
-            .database
+            .catalog
             .queue_entries(
                 library::QueueLoad::Tracks(vec![(
                     library::MemberRead {
@@ -1206,7 +1206,7 @@ async fn large_source_membership_keeps_metadata_reads_bounded() {
         let mut order = (0..20000_u32).collect::<Vec<_>>();
         order.rotate_left(selected_index);
         let projection = fixture
-            .database
+            .catalog
             .queue_rows_for_entries(
                 &order
                     .iter()
@@ -1227,7 +1227,7 @@ async fn large_source_membership_keeps_metadata_reads_bounded() {
             shuffled: true,
             ..Default::default()
         };
-        fixture.database.save_queue(&state).await.unwrap();
+        fixture.catalog.save_queue(&state).await.unwrap();
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_entries")
                 .fetch_one(&mut raw)
@@ -1243,7 +1243,7 @@ async fn large_source_membership_keeps_metadata_reads_bounded() {
         order[1..].reverse();
         state.order = order.into();
         fixture
-            .database
+            .catalog
             .apply_queue_update(&library::QueueUpdate {
                 order: Some(library::QueueOrderUpdate {
                     rows: state

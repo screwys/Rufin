@@ -1,5 +1,5 @@
 //! Indexed sidebar facts; smart totals are evaluated separately from row loading.
-use crate::{Database, LibraryResult, ReadCancellation, SmartPlaylistKey, SourceId};
+use crate::{Catalog, LibraryResult, ReadCancellation, SmartPlaylistKey, SourceId};
 use serde::{Deserialize, Serialize};
 use sqlx::{AssertSqlSafe, FromRow};
 use std::collections::HashMap;
@@ -57,7 +57,7 @@ const REQUESTED: &str = "WITH requested AS (
     coalesce(json_extract(kind.value,'$.album_artist'),0) role
     FROM json_each(?1) pin CROSS JOIN json_each(pin.value) kind)";
 
-impl Database {
+impl Catalog {
     pub async fn sidebar_pin_rows(
         &self,
         pins: &[SidebarPin],

@@ -71,8 +71,8 @@ impl SourceOwner {
         stage: SourceProgressStage,
     ) -> Result<(), String> {
         let source_id = &configuration.source_id;
-        let database = &self.shared.database;
-        let Some(source_key) = database
+        let catalog = &self.shared.catalog;
+        let Some(source_key) = catalog
             .source_identity_key(source_id)
             .await
             .map_err(super::string_error)?
@@ -98,7 +98,7 @@ impl SourceOwner {
         if stage == SourceProgressStage::Artwork {
             let mut after = None;
             loop {
-                let page = database
+                let page = catalog
                     .source_artwork_page(source_key, after.as_deref(), 128, &cancel_read)
                     .await
                     .map_err(super::string_error)?;
@@ -130,7 +130,7 @@ impl SourceOwner {
             let mut source = None;
             let mut after = None;
             loop {
-                let page = database
+                let page = catalog
                     .uncached_source_lyrics_page(source_key, input, after, &cancel_read)
                     .await
                     .map_err(super::string_error)?;
@@ -154,7 +154,7 @@ impl SourceOwner {
                     } else {
                         [0; 32]
                     };
-                    match source.cached_lyrics(database, &uri, input).await {
+                    match source.cached_lyrics(catalog, &uri, input).await {
                         Ok(_) => {}
                         Err(
                             error @ (SourceError::Network(_)
@@ -200,8 +200,8 @@ impl SourceOwner {
         context: String,
         title: Option<String>,
     ) -> Receiver<Result<(), String>> {
-        self.reply(move |owner, database| async move {
-            let uris = database
+        self.reply(move |owner, catalog| async move {
+            let uris = catalog
                 .selected_track_uris(&selection, None, &library::ReadCancellation::new())
                 .await
                 .map_err(|error| error.to_string())?;
@@ -216,8 +216,8 @@ impl SourceOwner {
         &self,
         selection: library::MemberSelection,
     ) -> Receiver<Result<(), String>> {
-        self.reply(move |owner, database| async move {
-            let uris = database
+        self.reply(move |owner, catalog| async move {
+            let uris = catalog
                 .selected_track_uris(&selection, None, &library::ReadCancellation::new())
                 .await
                 .map_err(|error| error.to_string())?;

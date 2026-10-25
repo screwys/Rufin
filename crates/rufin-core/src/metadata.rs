@@ -17,7 +17,7 @@ pub use editor::{
     MetadataEditor, MetadataEditorSnapshot, MetadataFieldPresentation, MetadataSaveSummary,
     mixed_field_label,
 };
-use library::Database;
+use library::Catalog;
 pub use lyrics::MetadataLyricsSettings;
 pub use metadata_lookup::{ArtworkQuery, ArtworkResult};
 pub use metadata_lookup::{MetadataCandidate, MetadataMatchKind};
@@ -86,7 +86,7 @@ impl EditSession {
         owner: &SourceOwner,
         item: &MetadataItemId,
     ) -> Result<(Arc<Self>, MetadataDraft), SourceMetadataError> {
-        let database = &owner.shared.database;
+        let catalog = &owner.shared.catalog;
         let cancel = library::ReadCancellation::new();
         let source_id = owner
             .media_source_id(item.media_uri())
@@ -113,12 +113,12 @@ impl EditSession {
                 |error: library::LibraryError| SourceMetadataError::Write(error.to_string());
             let (object, mut draft, binding) = match item.kind() {
                 SourceEntityKind::Track => {
-                    let row = database
+                    let row = catalog
                         .track(item.media_uri(), &cancel)
                         .await
                         .map_err(error)?
                         .ok_or(SourceMetadataError::Unavailable)?;
-                    let binding = track_artwork_binding(database, &row).await?;
+                    let binding = track_artwork_binding(catalog, &row).await?;
                     let object = row
                         .object_id
                         .clone()
@@ -133,7 +133,7 @@ impl EditSession {
                     (object, draft, binding)
                 }
                 SourceEntityKind::Album => {
-                    let row = database
+                    let row = catalog
                         .album(item.media_uri(), false, &cancel)
                         .await
                         .map_err(error)?
@@ -150,7 +150,7 @@ impl EditSession {
                     (object, draft, binding)
                 }
                 SourceEntityKind::Artist => {
-                    let row = database
+                    let row = catalog
                         .artist(item.media_uri(), false, false, &cancel)
                         .await
                         .map_err(error)?
@@ -180,7 +180,7 @@ impl EditSession {
         } else {
             let (target, draft) = sources::FileEditSession::open(
                 source.clone(),
-                database,
+                catalog,
                 item.media_uri().into(),
                 item.kind(),
             )
@@ -240,7 +240,7 @@ impl EditSession {
         let artwork_changed = edit.artwork.is_some();
         let result = async {
             match &self.destination {
-                EditDestination::Files(target) => target.save(&owner.shared.database, edit).await,
+                EditDestination::Files(target) => target.save(&owner.shared.catalog, edit).await,
                 EditDestination::Server { object, revision } => {
                     let source = self
                         .source
@@ -268,7 +268,7 @@ impl EditSession {
                         _ => unreachable!(),
                     };
                     let refresh = source
-                        .apply_items(&owner.shared.database, vec![object], Vec::new())
+                        .apply_items(&owner.shared.catalog, vec![object], Vec::new())
                         .await
                         .map_err(|error| {
                             SourceMetadataError::SavedRefreshFailed(error.to_string())
@@ -295,7 +295,7 @@ impl EditSession {
             && let EditDestination::Files(target) = &self.destination
             && owner
                 .shared
-                .database
+                .catalog
                 .track_source_by_uri(target.media_uri(), &library::ReadCancellation::new())
                 .await
                 .map_err(|error| SourceMetadataError::SavedRefreshFailed(error.to_string()))?
@@ -425,7 +425,7 @@ fn checked_artwork(bytes: Vec<u8>) -> Result<Arc<sources::ImageBytes>, String> {
 }
 
 async fn track_artwork_binding(
-    database: &Database,
+    catalog: &Catalog,
     track: &library::TrackView,
 ) -> Result<Option<Vec<u8>>, SourceMetadataError> {
     if track.artwork_binding.is_some() {
@@ -434,7 +434,7 @@ async fn track_artwork_binding(
     let Some(uri) = &track.links.album_media_uri else {
         return Ok(None);
     };
-    Ok(database
+    Ok(catalog
         .album(uri, false, &library::ReadCancellation::new())
         .await
         .map_err(|error| SourceMetadataError::Write(error.to_string()))?

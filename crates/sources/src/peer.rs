@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use audio_processing::ResolvedStream;
-use library::{AudioChannels, AudioCodec, AudioEncoding, Database, LocalMediaLocation};
+use library::{AudioChannels, AudioCodec, AudioEncoding, Catalog, LocalMediaLocation};
 
 use crate::file::remote::input::{FileInput, FileInputServer};
 use crate::{DownloadQuality, ResolvedDownload, SourceError, SourceResult};
@@ -68,7 +68,7 @@ pub struct PeerAccess {
 impl PeerAccess {
     pub async fn cache_assets(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         uri: &str,
         input: [u8; 32],
     ) -> SourceResult<()> {
@@ -93,7 +93,7 @@ impl PeerAccess {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |time| time.as_secs().min(i64::MAX as u64) as i64);
-        database
+        catalog
             .write_lyrics_cache(uri, "source", "original", "", "", input, &row.lyrics, now)
             .await?;
         Ok(())
@@ -149,18 +149,18 @@ impl PeerAccess {
 
     pub async fn original_file(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         uri: &str,
     ) -> SourceResult<Option<LocalMediaLocation>> {
-        if let Some(location) = database.connect_original_file(uri, |path| path).await?
+        if let Some(location) = catalog.connect_original_file(uri, |path| path).await?
             && crate::local_files_available(vec![vec![location.clone()]]).await?[0]
         {
             return Ok(Some(location));
         }
-        let Some(location) = self.mapped_file(database, uri).await? else {
+        let Some(location) = self.mapped_file(catalog, uri).await? else {
             return Ok(None);
         };
-        if let Some(previous) = database.connect_media_file(uri, "original").await? {
+        if let Some(previous) = catalog.connect_media_file(uri, "original").await? {
             let previous_location = if previous.path.starts_with("content://") {
                 Some(LocalMediaLocation::Document(previous.path.clone()))
             } else {
@@ -169,7 +169,7 @@ impl PeerAccess {
             if previous_location
                 .as_ref()
                 .is_some_and(|previous| same_location(previous, &location))
-                && database
+                && catalog
                     .connect_track_reference(uri)
                     .await?
                     .is_some_and(|reference| {
@@ -186,11 +186,11 @@ impl PeerAccess {
 
     pub async fn download(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         uri: &str,
         quality: DownloadQuality,
     ) -> SourceResult<ResolvedDownload> {
-        if let Some(location) = self.original_file(database, uri).await? {
+        if let Some(location) = self.original_file(catalog, uri).await? {
             let stream = match location {
                 LocalMediaLocation::File(path) => ResolvedStream::new(
                     url::Url::from_file_path(path)
@@ -209,10 +209,10 @@ impl PeerAccess {
 
     pub async fn mapped_file(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         uri: &str,
     ) -> SourceResult<Option<LocalMediaLocation>> {
-        let Some((root, parts)) = self.destination(database, uri).await? else {
+        let Some((root, parts)) = self.destination(catalog, uri).await? else {
             return Ok(None);
         };
         mapped_location(root, &parts).await
@@ -220,10 +220,10 @@ impl PeerAccess {
 
     pub async fn destination(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         uri: &str,
     ) -> SourceResult<Option<(LocalMediaLocation, Vec<String>)>> {
-        let Some(reference) = database.connect_track_reference(uri).await? else {
+        let Some(reference) = catalog.connect_track_reference(uri).await? else {
             return Ok(None);
         };
         let Some(relative) = reference["relative_path"].as_str() else {

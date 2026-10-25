@@ -219,7 +219,7 @@ impl AndroidBrowseQuery {
         limit: usize,
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<Vec<AndroidBrowseRow>> {
-        let db = &self.database;
+        let catalog = &self.catalog;
         Ok(match self.opened(&cancel).await? {
             OpenedCollection::Tracks(page)
             | OpenedCollection::Detail(Some(rufin_core::browse::DetailPage {
@@ -230,53 +230,67 @@ impl AndroidBrowseQuery {
                     &page.page,
                     offset,
                     limit,
-                    page.read.rows(db, offset, limit, cancel),
+                    page.read.rows(catalog, offset, limit, cancel),
                 )
                 .await?,
                 offset,
             ),
             OpenedCollection::Albums(opened) => match &opened.content {
                 rufin_core::browse::AlbumListContent::Detail { index, page } => self.album_rows(
-                    prepared_rows(page, offset, limit, index.rows(db, offset, limit, cancel))
-                        .await?,
+                    prepared_rows(
+                        page,
+                        offset,
+                        limit,
+                        index.rows(catalog, offset, limit, cancel),
+                    )
+                    .await?,
                 ),
                 rufin_core::browse::AlbumListContent::Rows(page) => prepared_rows(
                     page,
                     offset,
                     limit,
-                    opened.read.albums(db, offset, limit, cancel),
+                    opened.read.albums(catalog, offset, limit, cancel),
                 )
                 .await?
                 .into_iter()
                 .map(Into::into)
                 .collect(),
             },
-            OpenedCollection::Artists { read, page } => {
-                prepared_rows(page, offset, limit, read.artists(db, offset, limit, cancel))
-                    .await?
-                    .into_iter()
-                    .map(|row| artist_row(row, matches!(self.route, Route::AlbumArtists)))
-                    .collect()
-            }
-            OpenedCollection::Genres { read, page } => {
-                prepared_rows(page, offset, limit, read.genres(db, offset, limit, cancel))
-                    .await?
-                    .into_iter()
-                    .map(Into::into)
-                    .collect()
-            }
-            OpenedCollection::Moods { read, page } => {
-                prepared_rows(page, offset, limit, read.moods(db, offset, limit, cancel))
-                    .await?
-                    .into_iter()
-                    .map(Into::into)
-                    .collect()
-            }
+            OpenedCollection::Artists { read, page } => prepared_rows(
+                page,
+                offset,
+                limit,
+                read.artists(catalog, offset, limit, cancel),
+            )
+            .await?
+            .into_iter()
+            .map(|row| artist_row(row, matches!(self.route, Route::AlbumArtists)))
+            .collect(),
+            OpenedCollection::Genres { read, page } => prepared_rows(
+                page,
+                offset,
+                limit,
+                read.genres(catalog, offset, limit, cancel),
+            )
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+            OpenedCollection::Moods { read, page } => prepared_rows(
+                page,
+                offset,
+                limit,
+                read.moods(catalog, offset, limit, cancel),
+            )
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
             OpenedCollection::Playlists { read, page } => prepared_rows(
                 page,
                 offset,
                 limit,
-                read.playlist_items(db, offset, limit, cancel),
+                read.playlist_items(catalog, offset, limit, cancel),
             )
             .await?
             .into_iter()
@@ -286,7 +300,7 @@ impl AndroidBrowseQuery {
                 page,
                 offset,
                 limit,
-                read.playlist_items(db, offset, limit, cancel),
+                read.playlist_items(catalog, offset, limit, cancel),
             )
             .await?
             .into_iter()
@@ -301,7 +315,7 @@ impl AndroidBrowseQuery {
                     &page.page,
                     offset,
                     limit,
-                    read.albums(db, offset, limit, cancel),
+                    read.albums(catalog, offset, limit, cancel),
                 )
                 .await?
                 .into_iter()

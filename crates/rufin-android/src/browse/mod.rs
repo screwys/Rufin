@@ -162,7 +162,7 @@ fn artist_row(row: library::ArtistView, album_artist: bool) -> AndroidBrowseRow 
 #[derive(uniffi::Object)]
 pub struct AndroidBrowseQuery {
     selected: Option<SelectedLibrary>,
-    database: Arc<library::Database>,
+    catalog: Arc<library::Catalog>,
     runtime: tokio::runtime::Handle,
     playback: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
     route: Route,

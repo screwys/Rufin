@@ -31,26 +31,22 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
             ..library::MemberRead::new(library::Collection::Album(fixture.albums[0]))
         };
         let page = read
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap();
         assert_eq!(
-            read.disc_sections(&fixture.database, &cancel)
-                .await
-                .unwrap(),
+            read.disc_sections(&fixture.catalog, &cancel).await.unwrap(),
             expected
         );
         assert_eq!(page.count, 3);
         assert_eq!(page.rows.len(), 3);
         for offset in 0..3 {
             let rows = read
-                .rows(&fixture.database, offset, 1, &cancel)
+                .rows(&fixture.catalog, offset, 1, &cancel)
                 .await
                 .unwrap();
             assert_eq!(
-                read.disc_sections(&fixture.database, &cancel)
-                    .await
-                    .unwrap(),
+                read.disc_sections(&fixture.catalog, &cancel).await.unwrap(),
                 expected
             );
             assert_eq!(rows.len(), 1);
@@ -69,11 +65,11 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
             filter: filter.into(),
             ..library::MemberRead::new(library::Collection::Album(fixture.albums[0]))
         };
-        read.page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        read.page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap();
         assert!(
-            read.disc_sections(&fixture.database, &cancel)
+            read.disc_sections(&fixture.catalog, &cancel)
                 .await
                 .unwrap()
                 .is_empty()
@@ -82,11 +78,11 @@ async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
     // One known disc, even if numbered 2 or accompanied by unknown tracks, needs no heading.
     sqlx::query("UPDATE tracks SET metadata=jsonb(json_set(metadata,'$.disc_number',2)) WHERE album_key=?1 AND disc_number>0").bind(fixture.albums[0]).execute(&mut raw).await.unwrap();
     let read = library::MemberRead::new(library::Collection::Album(fixture.albums[0]));
-    read.page(&fixture.database, RouteSeedWindow::top(), &cancel)
+    read.page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .unwrap();
     assert!(
-        read.disc_sections(&fixture.database, &cancel)
+        read.disc_sections(&fixture.catalog, &cancel)
             .await
             .unwrap()
             .is_empty()
@@ -123,7 +119,7 @@ async fn track_sorts_keep_nulls_last_and_title_ties_in_both_directions() {
                 ..library::MemberRead::new(library::Collection::Source(fixture.source))
             })
                 .page(
-                    &fixture.database,
+                    &fixture.catalog,
                     RouteSeedWindow::top(),
                     &ReadCancellation::new(),
                 )
@@ -153,7 +149,7 @@ async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {
 
     let cancel = ReadCancellation::new();
     let keys = [fixture.albums[0], fixture.albums[0]];
-    let rows = fixture.database.albums(&keys, true, &cancel).await.unwrap();
+    let rows = fixture.catalog.albums(&keys, true, &cancel).await.unwrap();
     assert_eq!(rows.len(), 2);
     for row in &rows {
         assert_eq!(row.summary.track_count, 2);
@@ -170,14 +166,14 @@ async fn repeated_album_cards_keep_whole_counts_and_separate_source_activity() {
         .execute(&mut raw)
         .await
         .unwrap();
-    let rows = fixture.database.albums(&keys, true, &cancel).await.unwrap();
+    let rows = fixture.catalog.albums(&keys, true, &cancel).await.unwrap();
     for row in &rows {
         assert_eq!(row.summary.track_count, 2);
         assert_eq!(row.state.play_count, 106);
         assert_eq!(row.state.last_played, Some(900));
     }
     let artist = fixture
-        .database
+        .catalog
         .artists(&[fixture.artists[0]], false, true, &cancel)
         .await
         .unwrap();
@@ -209,8 +205,8 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
                     .await
                     .unwrap();
             fixture
-                .database
-                .catalog("source", None)
+                .catalog
+                .observe("source", None)
                 .await
                 .unwrap()
                 .set_source_artwork(
@@ -235,7 +231,7 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
     let cancel = ReadCancellation::new();
     for (folder, count) in [(None, 4), (Some(fixture.folder), 4)] {
         let genres = fixture
-            .database
+            .catalog
             .genres(
                 &[
                     fixture.genre,
@@ -252,7 +248,7 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
         assert_eq!(genres[0].summary.track_count, count);
         assert_eq!(genres[0].representative_artwork, covers);
         let single = fixture
-            .database
+            .catalog
             .genres(&[fixture.genre], folder, &cancel)
             .await
             .unwrap();
@@ -261,7 +257,7 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
             single[0].summary.duration_millis
         );
         let moods = fixture
-            .database
+            .catalog
             .moods(&[fixture.mood, fixture.mood], folder, &cancel)
             .await
             .unwrap();
@@ -270,7 +266,7 @@ async fn named_card_batches_preserve_requested_rows_and_whole_cover_order() {
         assert_eq!(moods[0].summary.track_count, count);
         assert_eq!(moods[0].representative_artwork, covers);
         let single = fixture
-            .database
+            .catalog
             .moods(&[fixture.mood], folder, &cancel)
             .await
             .unwrap();
@@ -293,7 +289,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
     drop(raw);
     let folder = Some(fixture.folder);
     let genre = fixture
-        .database
+        .catalog
         .genres(&[fixture.genre], folder, &cancel)
         .await
         .unwrap()
@@ -310,7 +306,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
     );
     assert!(genre.representative_artwork.is_empty());
     let mood = fixture
-        .database
+        .catalog
         .moods(&[fixture.mood], folder, &cancel)
         .await
         .unwrap()
@@ -326,7 +322,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
     );
     assert!(mood.representative_artwork.is_empty());
     let genre = fixture
-        .database
+        .catalog
         .genres(&[fixture.genre], folder, &cancel)
         .await
         .map(|rows| {
@@ -345,7 +341,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
     );
     assert!(genre.representative_artwork.is_empty());
     let mood = fixture
-        .database
+        .catalog
         .moods(&[fixture.mood], folder, &cancel)
         .await
         .map(|rows| {
@@ -372,7 +368,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
             downloaded_only: false,
             activity: true,
         }
-        .page_genres(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_genres(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .unwrap();
@@ -393,7 +389,7 @@ async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty(
             downloaded_only: false,
             activity: true,
         }
-        .page_moods(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_moods(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .unwrap();
@@ -443,44 +439,44 @@ async fn detail_folder_bounds_follow_collection_roles_and_selected_folder() {
         .await
         .unwrap();
     drop(raw);
-    let database = &fixture.database;
+    let catalog = &fixture.catalog;
     assert_eq!(
-        database
+        catalog
             .collection_source_path_bounds(&fixture.track_uris[2], false, Some(fixture.folder))
             .await
             .unwrap(),
         Some((paths[2].clone(), paths[2].clone()))
     );
     assert_eq!(
-        database
+        catalog
             .collection_source_path_bounds(&fixture.album_uris[0], false, None)
             .await
             .unwrap(),
         Some((paths[0].clone(), paths[1].clone()))
     );
     assert_eq!(
-        database
+        catalog
             .collection_source_path_bounds(&fixture.artist_uris[0], false, None)
             .await
             .unwrap(),
         Some((paths[0].clone(), paths[2].clone()))
     );
     assert_eq!(
-        database
+        catalog
             .collection_source_path_bounds(&fixture.artist_uris[0], true, None)
             .await
             .unwrap(),
         Some((paths[0].clone(), paths[1].clone()))
     );
     assert_eq!(
-        database
+        catalog
             .collection_source_path_bounds(&fixture.artist_uris[0], false, Some(fixture.folder))
             .await
             .unwrap(),
         Some((paths[0].clone(), paths[0].clone()))
     );
     assert_eq!(
-        database
+        catalog
             .collection_source_path_bounds(&fixture.album_uris[1], false, Some(fixture.folder))
             .await
             .unwrap(),
@@ -526,7 +522,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             sort: Some(CatalogSort::TrackNumber),
             ..library::MemberRead::new(library::Collection::Album(fixture.albums[0]))
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap(),
         (&library::MemberRead {
@@ -540,7 +536,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
                 album_artist: false,
             })
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap(),
         (&library::MemberRead {
@@ -554,7 +550,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
                 album_artist: true,
             })
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap(),
         (&library::MemberRead {
@@ -562,7 +558,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             sort: Some(CatalogSort::Title),
             ..library::MemberRead::new(library::Collection::Genre(fixture.genre))
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap(),
         (&library::MemberRead {
@@ -570,7 +566,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             sort: Some(CatalogSort::Title),
             ..library::MemberRead::new(library::Collection::Mood(fixture.mood))
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap(),
     ];
@@ -615,7 +611,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             .all(|row| row.source_key == Some(fixture.source))
         );
         let order = fixture
-            .database
+            .catalog
             .selected_track_uris(
                 &library::MemberRead::new(collection.clone()).selection(),
                 None,
@@ -641,7 +637,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             .collect::<Vec<_>>()
         );
         let state = super::support::resolve_queue(
-            &fixture.database,
+            &fixture.catalog,
             library::QueueLoad::Tracks(vec![(
                 library::MemberRead::new(collection).selection(),
                 library::QueueProvenance::Context {
@@ -656,7 +652,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
         assert_eq!(state.entries.len(), total);
         assert_eq!(
             fixture
-                .database
+                .catalog
                 .selected_track_uris(
                     &library::MemberSelection::Keys {
                         source: None,
@@ -683,7 +679,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             folder: Some(fixture.folder),
             ..library::MemberRead::new(library::Collection::Album(fixture.albums[0]))
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap()
             .count,
@@ -695,7 +691,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             sort: Some(CatalogSort::TrackNumber),
             ..library::MemberRead::new(library::Collection::Album(library::AlbumKey::from_raw(999)))
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap()
             .rows)
@@ -714,12 +710,12 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
     let fixture = fixture().await;
     let cancellation = ReadCancellation::new();
     fixture
-        .database
+        .catalog
         .set_favorite(&FavoriteTarget::Album(fixture.album_uris[0].clone()), true)
         .await
         .expect("favorite Album");
     fixture
-        .database
+        .catalog
         .set_favorite(
             &FavoriteTarget::Artist(fixture.artist_uris[1].clone()),
             true,
@@ -740,7 +736,7 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
             activity: true,
             downloaded_only: false
         }
-        .page_albums(&fixture.database, RouteSeedWindow::top(), &cancellation)
+        .page_albums(&fixture.catalog, RouteSeedWindow::top(), &cancellation)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("favorite Album order")
@@ -765,7 +761,7 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
             activity: true,
             downloaded_only: false
         }
-        .page_artists(&fixture.database, RouteSeedWindow::top(), &cancellation)
+        .page_artists(&fixture.catalog, RouteSeedWindow::top(), &cancellation)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("favorite Artist order")
@@ -785,10 +781,10 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
             CatalogSort::Title,
         )
     }
-    .album_detail_index(&fixture.database, &cancellation)
+    .album_detail_index(&fixture.catalog, &cancellation)
     .await
     .unwrap()
-    .rows(&fixture.database, 0, 64, &cancellation)
+    .rows(&fixture.catalog, 0, 64, &cancellation)
     .await
     .expect("favorite Album detail page");
     assert_eq!(
@@ -819,7 +815,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let title = fixture
-        .database
+        .catalog
         .selected_track_uris(
             &library::MemberRead {
                 collection: library::Collection::Source(fixture.source),
@@ -850,7 +846,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         };
         assert_eq!(
             fixture
-                .database
+                .catalog
                 .selected_track_uris(&selection, Some(2), &cancel)
                 .await
                 .unwrap(),
@@ -866,7 +862,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     ]);
     assert_eq!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(&combined, Some(3), &cancel)
             .await
             .unwrap(),
@@ -874,14 +870,14 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert!(
         fixture
-            .database
+            .catalog
             .selected_track_uris(&combined, Some(0), &cancel)
             .await
             .unwrap()
             .is_empty()
     );
     let numbered = fixture
-        .database
+        .catalog
         .selected_track_uris(
             &library::MemberRead {
                 collection: library::Collection::Source(fixture.source),
@@ -900,7 +896,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         fixture.track_uris.iter().cloned().rev().collect::<Vec<_>>()
     );
     let favorites = fixture
-        .database
+        .catalog
         .selected_track_uris(
             &library::MemberRead {
                 collection: library::Collection::Source(fixture.source),
@@ -916,7 +912,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         .expect("favorite Track order");
     assert_eq!(favorites.len(), 1);
     let folder = fixture
-        .database
+        .catalog
         .selected_track_uris(
             &library::MemberRead {
                 collection: library::Collection::Source(fixture.source),
@@ -934,7 +930,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
 
     let supplied = [title[2].clone(), title[0].clone()];
     let rows = fixture
-        .database
+        .catalog
         .tracks_by_uris(&supplied, &cancel)
         .await
         .expect("bounded Track rows");
@@ -953,7 +949,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(rows[0].state.last_played, None);
     assert_eq!(
         fixture
-            .database
+            .catalog
             .tracks_by_uris(&vec![title[0].clone(); 257], &cancel)
             .await
             .unwrap()
@@ -974,7 +970,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             activity: true,
             downloaded_only: false
         }
-        .page_albums(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_albums(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("Album order")
@@ -997,7 +993,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             activity: true,
             downloaded_only: false
         }
-        .page_albums(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_albums(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("sorted Album order")
@@ -1020,7 +1016,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             activity: true,
             downloaded_only: false
         }
-        .page_artists(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_artists(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("Album Artist order")
@@ -1045,7 +1041,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             activity: true,
             downloaded_only: false
         }
-        .page_artists(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_artists(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("sorted Artist order")
@@ -1068,7 +1064,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             activity: true,
             downloaded_only: false
         }
-        .page_genres(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_genres(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("Genre order")
@@ -1091,7 +1087,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             activity: true,
             downloaded_only: false
         }
-        .page_genres(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_genres(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("sorted Genre order")
@@ -1114,7 +1110,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             activity: true,
             downloaded_only: false
         }
-        .page_moods(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_moods(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("sorted Mood order")
@@ -1125,7 +1121,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         [fixture.mood]
     );
     let album_rows = fixture
-        .database
+        .catalog
         .albums(&fixture.albums, true, &cancel)
         .await
         .expect("bounded Album rows");
@@ -1137,7 +1133,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         sort: Some(library::CatalogSort::TrackNumber),
         ..library::MemberRead::new(library::Collection::Album(album_rows[0].album_key))
     })
-        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .expect("Album detail");
     assert_eq!(album_detail.count, 2);
@@ -1147,7 +1143,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         descending: true,
         ..library::MemberRead::new(library::Collection::Album(album_rows[0].album_key))
     })
-        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .expect("descending Album detail");
     assert_eq!(
@@ -1175,7 +1171,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(album_rows[0].metadata.is_compilation, Some(true));
     assert_eq!(album_rows[0].metadata.release_types, ["Album".to_string()]);
     let candidates = fixture
-        .database
+        .catalog
         .album_release_candidates(fixture.source, 100, &cancel)
         .await
         .expect("Album release candidates");
@@ -1187,7 +1183,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(first.lookup_identity, "release-group:group-a");
     assert_eq!(
         fixture
-            .database
+            .catalog
             .accept_album_release_result(
                 fixture.source,
                 first.album_key,
@@ -1199,7 +1195,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         Some(first.album_key)
     );
     let missing_row = fixture
-        .database
+        .catalog
         .albums(&[first.album_key], true, &cancel)
         .await
         .unwrap()
@@ -1211,7 +1207,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         Some("release-group:group-a")
     );
 
-    let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+    let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
     {
         let write = library::CatalogBatch {
             albums: vec![library::AlbumObservation {
@@ -1247,23 +1243,23 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             ..Default::default()
         };
 
-        scan_catalog.apply_catalog(&write, true).await.unwrap();
+        scan_observation.apply_catalog(&write, true).await.unwrap();
     };
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    fixture.database.observe_catalog(move |_, update| {
+    fixture.catalog.observe_catalog(move |_, update| {
         let _ = updates_tx.send(update);
         std::future::ready(())
     });
     {
-        let update = scan_catalog.into_changes();
-        (&fixture.database)
+        let update = scan_observation.into_changes();
+        (&fixture.catalog)
             .publish_catalog_update("source", update)
             .await;
     };
     let update = updates.try_recv().unwrap();
     assert!(update.metadata);
     let changed = fixture
-        .database
+        .catalog
         .album_release_candidates(fixture.source, 100, &cancel)
         .await
         .unwrap()
@@ -1273,7 +1269,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(changed.lookup_identity, "release-group:group-a2");
     assert_eq!(
         fixture
-            .database
+            .catalog
             .accept_album_release_result(
                 fixture.source,
                 first.album_key,
@@ -1288,7 +1284,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .accept_album_release_result(
                 fixture.source,
                 changed.album_key,
@@ -1302,7 +1298,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         Some(changed.album_key)
     );
     let found = fixture
-        .database
+        .catalog
         .albums(&[changed.album_key], true, &cancel)
         .await
         .unwrap()
@@ -1329,7 +1325,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             .await
             .unwrap();
     let resolved = fixture
-        .database
+        .catalog
         .artist(&album_artist_uri, false, false, &cancel)
         .await
         .expect("resolve an artist credited only on albums")
@@ -1337,7 +1333,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(resolved.artist_key, fixture.artists[0]);
     assert_eq!(resolved.source_key, fixture.source);
     let detail = fixture
-        .database
+        .catalog
         .artists(&[resolved.artist_key], false, true, &cancel)
         .await
         .expect("known artist can open with no tracks in the requested role")
@@ -1357,7 +1353,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 album_artist: true
             })
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .expect("Album Artist Tracks")
             .count,
@@ -1375,7 +1371,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 album_artist: false
             })
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .expect("direct Artist Tracks")
             .count,
@@ -1383,7 +1379,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .artists(&[fixture.artists[0]], true, true, &cancel)
             .await
             .expect("Album Artist row")[0]
@@ -1393,7 +1389,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .artists(&[fixture.artists[0]], false, true, &cancel)
             .await
             .expect("known artist without direct track credits")[0]
@@ -1403,7 +1399,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .artists(&[fixture.artists[0]], true, true, &cancel)
             .await
             .expect("Album Artist detail")
@@ -1415,7 +1411,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .genres(&[fixture.genre], Some(fixture.folder), &cancel)
             .await
             .map(|rows| {
@@ -1436,7 +1432,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             filter: ("beta").into(),
             ..library::MemberRead::new(library::Collection::Album(fixture.albums[0]))
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .expect("scoped filtered Album Tracks")
             .rows)
@@ -1455,7 +1451,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             descending: true,
             ..library::MemberRead::new(library::Collection::Album(fixture.albums[0]))
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .expect("Activity-sorted Album Tracks")
             .count,
@@ -1470,7 +1466,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             descending: true,
             ..library::MemberRead::new(library::Collection::Genre(fixture.genre))
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .expect("scoped filtered Genre Tracks")
             .count,
@@ -1483,7 +1479,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             filter: ("2023").into(),
             ..library::MemberRead::new(library::Collection::Mood(fixture.mood))
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .expect("filtered Mood Tracks")
             .rows)
@@ -1510,7 +1506,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             activity: true,
             downloaded_only: false
         }
-        .page_artists(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_artists(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("direct Artist filter")
@@ -1533,7 +1529,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             activity: true,
             downloaded_only: false
         }
-        .page_artists(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_artists(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("Album Artist filter")
@@ -1545,7 +1541,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .search(
                 fixture.source,
                 None,
@@ -1563,7 +1559,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .search(
                 fixture.source,
                 None,
@@ -1579,7 +1575,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .moods(&[fixture.mood], Some(fixture.folder), &cancel)
             .await
             .map(|rows| {
@@ -1607,7 +1603,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             activity: true,
             downloaded_only: false
         }
-        .page_albums(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_albums(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("empty Folder scope")
@@ -1648,7 +1644,7 @@ async fn empty_named_collection_routes_return_empty_pages() {
         downloaded_only: false,
         activity: true,
     }
-    .page_genres(&fixture.database, RouteSeedWindow::top(), &cancellation)
+    .page_genres(&fixture.catalog, RouteSeedWindow::top(), &cancellation)
     .await
     .map(|page| (page.count, page.first_row_position, page.rows))
     .expect("empty Genre route");
@@ -1664,7 +1660,7 @@ async fn empty_named_collection_routes_return_empty_pages() {
         downloaded_only: false,
         activity: true,
     }
-    .page_moods(&fixture.database, RouteSeedWindow::top(), &cancellation)
+    .page_moods(&fixture.catalog, RouteSeedWindow::top(), &cancellation)
     .await
     .map(|page| (page.count, page.first_row_position, page.rows))
     .expect("empty Mood route");
@@ -1679,7 +1675,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
     let cancel = ReadCancellation::new();
     let track = fixture.tracks[0];
     for refresh in 0..2 {
-        let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+        let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
         {
             let write = library::CatalogBatch {
                 tracks: vec![library::TrackObservation {
@@ -1726,7 +1722,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
                 ..Default::default()
             };
 
-            scan_catalog.apply_catalog(&write, true).await.unwrap();
+            scan_observation.apply_catalog(&write, true).await.unwrap();
         };
         {
             let write = library::CatalogBatch {
@@ -1760,7 +1756,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
                 ..Default::default()
             };
 
-            scan_catalog.apply_catalog(&write, true).await.unwrap();
+            scan_observation.apply_catalog(&write, true).await.unwrap();
         };
         {
             let write = library::CatalogBatch {
@@ -1780,16 +1776,16 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
                 ..Default::default()
             };
 
-            scan_catalog.apply_catalog(&write, true).await.unwrap();
+            scan_observation.apply_catalog(&write, true).await.unwrap();
         };
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        fixture.database.observe_catalog(move |_, update| {
+        fixture.catalog.observe_catalog(move |_, update| {
             let _ = updates_tx.send(update);
             std::future::ready(())
         });
         {
-            let update = scan_catalog.into_changes();
-            (&fixture.database)
+            let update = scan_observation.into_changes();
+            (&fixture.catalog)
                 .publish_catalog_update("source", update)
                 .await;
         };
@@ -1806,7 +1802,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         }
     }
     let row = fixture
-        .database
+        .catalog
         .tracks(&[track], &cancel)
         .await
         .unwrap()
@@ -1820,7 +1816,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
         filter: ("changed").into(),
         ..library::MemberRead::new(library::Collection::Source(fixture.source))
     })
-        .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .expect("filter edited Track")
         .rows)
@@ -1838,7 +1834,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
             filter: ("2025").into(),
             ..library::MemberRead::new(library::Collection::Source(fixture.source))
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .expect("Track Year filter")
             .rows)
@@ -1863,7 +1859,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
             activity: true,
             downloaded_only: false
         }
-        .page_albums(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_albums(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("Album Genre filter")
@@ -1886,7 +1882,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
             activity: true,
             downloaded_only: false
         }
-        .page_albums(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_albums(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("Album Artist filter")
@@ -1909,7 +1905,7 @@ async fn metadata_refresh_publishes_changes_and_leaves_no_ops_unchanged() {
             activity: true,
             downloaded_only: false
         }
-        .page_albums(&fixture.database, RouteSeedWindow::top(), &cancel)
+        .page_albums(&fixture.catalog, RouteSeedWindow::top(), &cancel)
         .await
         .map(|page| (page.count, page.first_row_position, page.rows))
         .expect("Album Year filter")
@@ -1960,8 +1956,8 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
                 .await
                 .unwrap();
         fixture
-            .database
-            .catalog("source", None)
+            .catalog
+            .observe("source", None)
             .await
             .unwrap()
             .set_source_artwork(
@@ -1978,7 +1974,7 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
     let cancel = ReadCancellation::new();
     for folder in [None, Some(fixture.folder)] {
         let detail = fixture
-            .database
+            .catalog
             .genres(&[fixture.genre], folder, &cancel)
             .await
             .map(|rows| {
@@ -1999,7 +1995,7 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
             folder: folder,
             ..library::MemberRead::new(library::Collection::Genre(fixture.genre))
         })
-            .page(&fixture.database, RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, RouteSeedWindow::top(), &cancel)
             .await
             .unwrap();
         assert_eq!(route.count, 2);
@@ -2009,7 +2005,7 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
             folder: folder,
             ..library::MemberRead::new(library::Collection::Genre(fixture.genre))
         })
-            .rows(&fixture.database, 0, 10, &cancel)
+            .rows(&fixture.catalog, 0, 10, &cancel)
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -2020,7 +2016,7 @@ async fn album_genres_supply_browsing_and_playback_without_changing_track_tags()
         assert_eq!(tracks.len(), 2);
         assert!(tracks.iter().any(|track| track.links.genres.is_empty()));
         let home = fixture
-            .database
+            .catalog
             .home_page(
                 fixture.source,
                 folder,

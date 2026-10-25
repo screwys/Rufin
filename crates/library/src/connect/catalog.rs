@@ -104,7 +104,7 @@ pub(super) async fn current_on(
     })?))
 }
 
-impl Database {
+impl Catalog {
     pub(crate) async fn apply_current_catalog_on(
         connection: &mut SqliteConnection,
         records: &[ConnectRecord],

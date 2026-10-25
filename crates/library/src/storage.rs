@@ -1,6 +1,6 @@
 //! Usage and removal of disposable data stored with the library.
 
-use crate::{Database, LibraryResult};
+use crate::{Catalog, LibraryResult};
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 #[derive(Clone, Copy, Debug, Default)]
@@ -9,7 +9,7 @@ pub struct CacheUsage {
     pub bytes: u64,
 }
 
-impl Database {
+impl Catalog {
     pub async fn metadata_lookup_cache_usage(&self) -> LibraryResult<CacheUsage> {
         self.cached_table_usage("metadata_lookup_cache").await
     }

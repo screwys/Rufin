@@ -160,8 +160,8 @@ impl Pipeline {
         lock_state(&self.shared).cache_epoch
     }
 
-    pub(crate) fn install_database(&self, database: Arc<library::Database>) {
-        self.shared.fetch.install_database(database);
+    pub(crate) fn install_catalog(&self, catalog: Arc<library::Catalog>) {
+        self.shared.fetch.install_catalog(catalog);
     }
     pub(crate) fn new(
         cache_root: &Path,
@@ -715,13 +715,13 @@ fn resolve_request(
     } = &candidate.image
     {
         let Some(recipes) = resolved else {
-            let database = shared
+            let catalog = shared
                 .fetch
-                .database()
+                .catalog()
                 .ok_or("Playlist artwork storage is unavailable")?;
             return match shared
                 .runtime
-                .block_on(database.resolve_playlist_artwork(candidate.clone()))
+                .block_on(catalog.resolve_playlist_artwork(candidate.clone()))
                 .map_err(|error| error.to_string())?
             {
                 Some(resolved) => resolve_request(shared, work, &resolved),
@@ -972,16 +972,16 @@ fn cache_preview(
     if !refresh && cached_preview(shared, candidate, candidate.blur_hash()).is_some() {
         return;
     }
-    let database = shared.fetch.database();
+    let catalog = shared.fetch.catalog();
     let result: Result<String, ArtworkError> = shared.runtime.block_on(async {
-        if let Some(database) = &database {
-            if !refresh && let Some(hash) = database.artwork_preview(&candidate.key).await? {
+        if let Some(catalog) = &catalog {
+            if !refresh && let Some(hash) = catalog.artwork_preview(&candidate.key).await? {
                 return Ok(hash);
             }
         }
         let hash = encode()?;
-        if let Some(database) = database {
-            database
+        if let Some(catalog) = catalog {
+            catalog
                 .write_artwork_preview(&candidate.key, &hash, refresh)
                 .await?;
         }

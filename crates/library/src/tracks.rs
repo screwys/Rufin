@@ -4,7 +4,7 @@
 use sqlx::{FromRow, Sqlite, SqliteConnection};
 
 use crate::{
-    AlbumKey, ArtistKey, Database, FolderKey, GenreKey, LibraryError, LibraryResult,
+    AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, LibraryError, LibraryResult,
     ReadCancellation, SourceKey, TrackKey,
 };
 
@@ -299,7 +299,7 @@ impl From<TrackView> for crate::TrackReference {
     }
 }
 
-impl Database {
+impl Catalog {
     pub async fn track_source_by_uri(
         &self,
         media_uri: &str,
@@ -482,7 +482,7 @@ mod tests {
             .execute(&mut connection)
             .await
             .unwrap();
-        let database = Database::open(file.path()).await.unwrap();
+        let catalog = Catalog::open(file.path()).await.unwrap();
         for sort in [
             CatalogSort::Artist,
             CatalogSort::AlbumArtist,
@@ -520,7 +520,7 @@ mod tests {
                         descending,
                         ..crate::MemberRead::new(crate::Collection::Source(source))
                     }
-                    .sections(&database, &ReadCancellation::new())
+                    .sections(&catalog, &ReadCancellation::new())
                     .await
                     .unwrap();
                     assert_eq!(
@@ -554,15 +554,15 @@ mod tests {
             .bind(source).execute(&mut connection).await.expect("insert large Folder Track order");
         drop(connection);
 
-        let database = Database::open(file.path())
+        let catalog = Catalog::open(file.path())
             .await
-            .expect("open Track identity Database");
+            .expect("open Track identity Catalog");
         let object_ids = (0..300)
             .map(|index| format!("track-{index:03}"))
             .collect::<Vec<_>>();
         let cancel = ReadCancellation::new();
         assert_eq!(
-            database
+            catalog
                 .catalog_keys(
                     crate::CatalogKind::Track,
                     Some(source),
@@ -587,12 +587,12 @@ mod tests {
                     .into(),
             })
         };
-        assert_eq!((&query).count(&database, &cancel).await.unwrap(), 300);
+        assert_eq!((&query).count(&catalog, &cancel).await.unwrap(), 300);
         let mut ordered = Vec::new();
         for offset in (0..300).step_by(64) {
             ordered.extend(
                 (&query)
-                    .rows(&database, offset, 64, &cancel)
+                    .rows(&catalog, offset, 64, &cancel)
                     .await
                     .unwrap()
                     .into_iter()
@@ -606,14 +606,14 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert_eq!(
-            database
+            catalog
                 .selected_track_keys(&query.clone().selection(), &cancel)
                 .await
                 .unwrap(),
             ordered
         );
         assert_eq!(
-            database
+            catalog
                 .selected_track_keys(
                     &crate::MemberSelection::Members {
                         read: query.clone(),
@@ -627,7 +627,7 @@ mod tests {
         );
         assert_eq!(
             (&query)
-                .sections(&database, &cancel)
+                .sections(&catalog, &cancel)
                 .await
                 .unwrap()
                 .into_iter()
@@ -640,7 +640,7 @@ mod tests {
                 sort: Some(CatalogSort::TrackNumber),
                 ..query.clone()
             })
-                .disc_sections(&database, &cancel)
+                .disc_sections(&catalog, &cancel)
                 .await
                 .unwrap()
                 .is_empty()
@@ -650,7 +650,7 @@ mod tests {
                 favorites_only: true,
                 ..query.clone()
             })
-                .count(&database, &cancel)
+                .count(&catalog, &cancel)
                 .await
                 .unwrap(),
             0
@@ -660,7 +660,7 @@ mod tests {
                 filter: "missing".into(),
                 ..query
             })
-                .count(&database, &cancel)
+                .count(&catalog, &cancel)
                 .await
                 .unwrap(),
             0

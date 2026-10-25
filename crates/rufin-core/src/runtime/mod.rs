@@ -36,7 +36,7 @@ pub struct ProductHandles {
     pub appearance: tokio::sync::watch::Sender<std::collections::BTreeMap<String, String>>,
     pub backup: BackupHandle,
     pub connect: Arc<crate::connect::ConnectOwner>,
-    pub library: Arc<library::Database>,
+    pub library: Arc<library::Catalog>,
     pub runtime: tokio::runtime::Handle,
     pub source: SourceHandle,
     pub downloads: downloads::Downloads,

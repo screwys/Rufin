@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{AssertSqlSafe, Connection, FromRow, Row, SqliteConnection};
 
 use crate::{
-    CatalogSort, Database, FolderKey, LibraryError, LibraryResult, ReadCancellation,
+    Catalog, CatalogSort, FolderKey, LibraryError, LibraryResult, ReadCancellation,
     SmartPlaylistKey, SourceKey,
 };
 
@@ -515,7 +515,7 @@ pub(crate) async fn sync_smart_on(
     .await
 }
 
-impl Database {
+impl Catalog {
     pub async fn smart_playlist_value_suggestions(
         &self,
         source: SourceKey,
@@ -830,7 +830,7 @@ mod source_window_tests {
             atomic::{AtomicUsize, Ordering},
         };
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("store.sqlite"))
+        let catalog = Catalog::open(directory.path().join("store.sqlite"))
             .await
             .unwrap();
         let definition = SmartPlaylistDefinition {
@@ -845,11 +845,11 @@ mod source_window_tests {
             descending: true,
             ..Default::default()
         };
-        let key = database
+        let key = catalog
             .create_smart_playlist("Recent", &definition, None)
             .await
             .unwrap();
-        let mut writer = database.writer().await.unwrap();
+        let mut writer = catalog.writer().await.unwrap();
         sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32));\n          INSERT INTO tracks(track_key,indexed,source_key,object_id,media_uri,metadata) VALUES (1,1,1,'one','track:1',jsonb(json_object('title',COALESCE('One',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('one',''),'duration_millis',COALESCE(1000,0))));\n          INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis)\n          VALUES('track:1','One','','',1000000,'1970-01',1000,1000),\n                ('https://example.test/missing','Missing','','',395200,'1970-01',1000,1000),\n                ('https://example.test/old','Old','','',395199,'1970-01',1000,1000),\n                ('https://example.test/future','Future','','',1000001,'1970-01',1000,1000);")
             .execute(&mut *writer).await.unwrap();
         for grow in [false, true] {
@@ -1422,7 +1422,7 @@ pub(crate) async fn write_smart_playlist(
     sync_smart_on(connection, key).await
 }
 
-impl Database {
+impl Catalog {
     pub async fn export_smart_playlist_file(
         &self,
         key: SmartPlaylistKey,

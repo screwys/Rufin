@@ -632,7 +632,7 @@ impl SidebarPinItem {
         shell: &Rc<Shell>,
         position: Option<(f64, f64)>,
     ) {
-        let database = shell.products.library.clone();
+        let catalog = shell.products.library.clone();
         let pin = self.0.pin.clone();
         let key = self.0.key;
         let task = shell.products.runtime.spawn(async move {
@@ -641,7 +641,7 @@ impl SidebarPinItem {
                 SidebarPin::Album {
                     source_id,
                     album_id,
-                } => database
+                } => catalog
                     .album(
                         &library::source_entity_uri(&source_id, "album", &album_id),
                         false,
@@ -664,7 +664,7 @@ impl SidebarPinItem {
                     source_id,
                     artist_id,
                     album_artist,
-                } => database
+                } => catalog
                     .artist(
                         &library::source_entity_uri(&source_id, "artist", &artist_id),
                         album_artist,
@@ -687,7 +687,7 @@ impl SidebarPinItem {
                 SidebarPin::Genre {
                     source_id,
                     genre_id,
-                } => database
+                } => catalog
                     .genre(
                         &library::source_entity_uri(&source_id, "genre", &genre_id),
                         None,
@@ -705,7 +705,7 @@ impl SidebarPinItem {
                             )
                         }) as PinMenu
                     }),
-                SidebarPin::Playlist { .. } => database
+                SidebarPin::Playlist { .. } => catalog
                     .playlists(&[library::PlaylistKey::from_raw(key)], &cancel)
                     .await?
                     .pop()
@@ -724,7 +724,7 @@ impl SidebarPinItem {
                             )
                         }) as PinMenu
                     }),
-                SidebarPin::SmartPlaylist { .. } => database
+                SidebarPin::SmartPlaylist { .. } => catalog
                     .smart_playlist_rows(
                         &[library::SmartPlaylistKey::from_raw(key)],
                         SystemTime::now()
@@ -746,7 +746,7 @@ impl SidebarPinItem {
                             )
                         }) as PinMenu
                     }),
-                SidebarPin::PlaylistFolder { folder_id, .. } => database
+                SidebarPin::PlaylistFolder { folder_id, .. } => catalog
                     .playlist_folder_by_id(&folder_id, None, None, &cancel)
                     .await?
                     .map(|row| {
@@ -845,10 +845,10 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
         .navigation
         .pin_cancellation
         .replace(Some(cancellation.clone()));
-    let database = Arc::clone(&shell.products.library);
+    let catalog = Arc::clone(&shell.products.library);
     let runtime = shell.products.runtime.clone();
     let read_pins = pins;
-    let read_database = database.clone();
+    let read_database = catalog.clone();
     let read_cancel = cancellation.clone();
     let task = runtime.spawn(async move {
         read_database
@@ -906,7 +906,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
             return;
         }
         let task = runtime.spawn(async move {
-            database
+            catalog
                 .sidebar_pin_totals(
                     pending,
                     SystemTime::now()

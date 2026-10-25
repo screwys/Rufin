@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use audio_processing::{LoudnessAnalysis, album_loudness, analyze_loudness_cancellable};
-use library::{Database, LoudnessMeasurement, ReadCancellation, SourceKey};
+use library::{Catalog, LoudnessMeasurement, ReadCancellation, SourceKey};
 use playback::{LoudnessNormalization, LoudnessNormalizationScope, StreamQuality, StreamRequest};
 use sources::SourceConfiguration;
 use tracing::{info, warn};
@@ -225,7 +225,7 @@ async fn analyze_selected(
     write_tags: bool,
     cancelled: Arc<AtomicBool>,
 ) -> bool {
-    let database = Arc::clone(&source_owner.shared.database);
+    let catalog = Arc::clone(&source_owner.shared.catalog);
     if write_tags && configuration.is_file_library() {
         let owner = Arc::clone(&source_owner);
         let source_id = configuration.source_id.clone();
@@ -233,7 +233,7 @@ async fn analyze_selected(
         if let Ok(Ok(source)) = source {
             let result = async {
                 source
-                    .backfill_file_r128_tags(&database, source_key)
+                    .backfill_file_r128_tags(&catalog, source_key)
                     .await
                     .map_err(|error| error.to_string())
             }
@@ -251,7 +251,7 @@ async fn analyze_selected(
             return false;
         }
         if !albums_done {
-            match database
+            match catalog
                 .next_missing_album_loudness(source_key, album_after, &ReadCancellation::new())
                 .await
             {
@@ -261,7 +261,7 @@ async fn analyze_selected(
                     for track in &work.tracks {
                         match analyze_uri(
                             &source_owner,
-                            &database,
+                            &catalog,
                             &configuration,
                             &track.media_uri,
                             &cancelled,
@@ -277,7 +277,7 @@ async fn analyze_selected(
                                     replay_gain_db: None,
                                     replay_gain_peak: None,
                                 };
-                                if let Err(error) = database
+                                if let Err(error) = catalog
                                     .write_track_analyzed_loudness(
                                         source_key,
                                         track.track_key,
@@ -308,7 +308,7 @@ async fn analyze_selected(
                                     replay_gain_db: None,
                                     replay_gain_peak: None,
                                 };
-                                if let Err(error) = database
+                                if let Err(error) = catalog
                                     .write_album_analyzed_loudness(
                                         source_key,
                                         work.album_key,
@@ -328,7 +328,7 @@ async fn analyze_selected(
                                         .collect::<Vec<_>>();
                                     if let Err(error) = write_local_tags(
                                         &source_owner,
-                                        &database,
+                                        &catalog,
                                         source_key,
                                         &configuration,
                                         &measurements,
@@ -352,13 +352,13 @@ async fn analyze_selected(
                 }
             }
         }
-        match database
+        match catalog
             .next_missing_track_loudness(source_key, track_after, &ReadCancellation::new())
             .await
         {
             Ok(Some(work)) => match analyze_uri(
                 &source_owner,
-                &database,
+                &catalog,
                 &configuration,
                 &work.media_uri,
                 &cancelled,
@@ -374,7 +374,7 @@ async fn analyze_selected(
                         replay_gain_db: None,
                         replay_gain_peak: None,
                     };
-                    if let Err(error) = database
+                    if let Err(error) = catalog
                         .write_track_analyzed_loudness(source_key, work.track_key, &measurement)
                         .await
                     {
@@ -385,7 +385,7 @@ async fn analyze_selected(
                         let measurements = [(work.track_key, value.integrated_lufs, None)];
                         if let Err(error) = write_local_tags(
                             &source_owner,
-                            &database,
+                            &catalog,
                             source_key,
                             &configuration,
                             &measurements,
@@ -422,7 +422,7 @@ async fn analyze_selected(
 
 async fn write_local_tags(
     source_owner: &Arc<SourceOwner>,
-    database: &Database,
+    catalog: &Catalog,
     source_key: SourceKey,
     configuration: &SourceConfiguration,
     measurements: &[(library::TrackKey, Option<f64>, Option<f64>)],
@@ -436,14 +436,14 @@ async fn write_local_tags(
         .await
         .map_err(|error| error.to_string())??;
     source
-        .write_file_r128_tags(database, source_key, measurements)
+        .write_file_r128_tags(catalog, source_key, measurements)
         .await
         .map_err(|error| error.to_string())
 }
 
 async fn analyze_uri(
     source_owner: &Arc<SourceOwner>,
-    database: &Database,
+    catalog: &Catalog,
     configuration: &SourceConfiguration,
     media_uri: &str,
     cancelled: &Arc<AtomicBool>,
@@ -451,7 +451,7 @@ async fn analyze_uri(
     let request = StreamRequest::new(media_uri, StreamQuality::Original);
     let owner = Arc::clone(source_owner);
     let stream = prepare_stream(
-        database,
+        catalog,
         request,
         Some(configuration),
         None,

@@ -210,14 +210,14 @@ impl PlayRequest {
     }
     pub(crate) async fn prepare(
         self,
-        database: &library::Database,
+        catalog: &library::Catalog,
         shuffled: bool,
         seed: u64,
     ) -> library::LibraryResult<QueueBatch> {
         let replacing = matches!(self.placement, Placement::Replace { .. });
         let random_start = replacing && shuffled && self.start == QueueStart::RandomIfShuffled;
         let selected = if random_start { None } else { self.anchor };
-        let mut batch = database.queue_entries(self.input, selected).await?;
+        let mut batch = catalog.queue_entries(self.input, selected).await?;
         let fallback = match self.placement {
             Placement::Replace { anchor_index } => anchor_index,
             _ => 0,
@@ -245,7 +245,7 @@ impl PlayRequest {
             .map(|entry| (selected, entry))
             .into_iter()
             .collect::<Vec<_>>();
-        let rows = database
+        let rows = catalog
             .queue_rows_for_entries(&requested, &library::ReadCancellation::new())
             .await?;
         Ok(QueueBatch {

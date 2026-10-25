@@ -80,9 +80,9 @@ pub use artwork::{
 };
 pub use backup::{BackupRestoreReport, StateGroups};
 pub use catalog::{
-    AlbumObservation, ArtistObservation, CachedSource, Catalog, CatalogBatch, CatalogUpdate,
+    AlbumObservation, ArtistObservation, CachedSource, CatalogBatch, CatalogUpdate,
     FolderObservation, Freshness, GenreObservation, LocalArtworkCandidate, MoodObservation,
-    PlaylistEntryObservation, PlaylistObservation, TrackObservation,
+    Observation, PlaylistEntryObservation, PlaylistObservation, TrackObservation,
 };
 pub use collections::{
     AlbumArtistLink, AlbumDetailIndex, AlbumDetailRow, AlbumGenreLink, AlbumLinks,
@@ -90,7 +90,7 @@ pub use collections::{
     CollectionSummary, FolderChoice, FolderView, GenreChoice, GenreView, MoodView,
 };
 pub use connect::{CONNECT_PAGE_SIZE, ConnectRecord, ConnectRoot, RecordStamp, StampedRecord};
-pub use db::{Database, ReadCancellation};
+pub use db::{Catalog, ReadCancellation};
 pub use favorites::{FavoriteTarget, NativeUserState, UserMediaStateWrite};
 pub use home::{
     HomeAlbumRow, HomeBlockKind, HomeEntryInput, HomeEntryKind, HomePage, HomeProviderSection,

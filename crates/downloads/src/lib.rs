@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
 use audio_processing::ResolvedStream;
-use library::{Database, FolderKey, SourceKey, TrackKey};
+use library::{Catalog, FolderKey, SourceKey, TrackKey};
 use serde::{Deserialize, Serialize};
 use sources::{DownloadQuality, ResolvedDownload};
 use sources::{Source, SourceError, SourceId};
@@ -130,7 +130,7 @@ struct AttachedSource {
 
 #[derive(Clone)]
 struct RuleIntent {
-    database: Database,
+    catalog: Catalog,
     source_key: SourceKey,
     folder: Option<FolderKey>,
     rules: DownloadRules,
@@ -271,7 +271,7 @@ fn read_queue_file(
 async fn load_queue(
     root: &Path,
     source_id: &SourceId,
-    database: &Database,
+    catalog: &Catalog,
     source_key: SourceKey,
     custom_directory: Option<&DownloadDirectory>,
 ) -> Result<Vec<DownloadJob>, String> {
@@ -296,14 +296,14 @@ async fn load_queue(
             let mut remaining = Vec::new();
             for identity in job.completed {
                 if let Some((media_uri, _)) =
-                    released_queue_media_uri(database, source_key, &identity, &cancellation).await?
+                    released_queue_media_uri(catalog, source_key, &identity, &cancellation).await?
                 {
                     completed.push(media_uri);
                 }
             }
             for identity in job.remaining {
                 if let Some((media_uri, staging_identity)) =
-                    released_queue_media_uri(database, source_key, &identity, &cancellation).await?
+                    released_queue_media_uri(catalog, source_key, &identity, &cancellation).await?
                 {
                     migrate_released_staging(
                         root,
@@ -348,7 +348,7 @@ async fn load_queue(
 
 async fn load_direct_queue(
     root: &Path,
-    database: &Database,
+    catalog: &Catalog,
     settings: &HashMap<SourceId, SourceDownloadSettings>,
 ) -> Result<Vec<DownloadJob>, String> {
     let Some((bytes, recovered, path, part)) = read_queue_file(root, None)? else {
@@ -373,7 +373,7 @@ async fn load_direct_queue(
             .map(|uri| (true, uri))
             .chain(remaining.into_iter().map(|uri| (false, uri)))
         {
-            let source = media_source_id(database, &uri).await;
+            let source = media_source_id(catalog, &uri).await;
             let part = split.entry(source).or_insert_with(|| job.clone());
             if completed {
                 part.completed.push(uri);
@@ -390,7 +390,7 @@ async fn load_direct_queue(
     let direct = grouped.remove(&None).unwrap_or_default();
     for (source, jobs) in grouped {
         let source = source.unwrap();
-        let key = database
+        let key = catalog
             .source_identity_key(&source)
             .await
             .map_err(|error| error.to_string())?
@@ -398,7 +398,7 @@ async fn load_direct_queue(
         let directory = settings
             .get(&source)
             .and_then(|settings| settings.directory.as_ref());
-        let mut saved = load_queue(root, &source, database, key, directory).await?;
+        let mut saved = load_queue(root, &source, catalog, key, directory).await?;
         for job in jobs {
             if let Some(existing) = saved.iter_mut().find(|existing| existing.id == job.id) {
                 let mut completed = existing.completed.iter().cloned().collect::<HashSet<_>>();
@@ -432,13 +432,13 @@ async fn load_direct_queue(
 }
 
 async fn released_queue_media_uri(
-    database: &Database,
+    catalog: &Catalog,
     source: SourceKey,
     identity: &serde_json::Value,
     cancellation: &library::ReadCancellation,
 ) -> Result<Option<(String, String)>, String> {
     let (key, staging_identity) = if let Some(object_id) = identity.as_str() {
-        let Some(key) = database
+        let Some(key) = catalog
             .catalog_keys(
                 library::CatalogKind::Track,
                 Some(source),
@@ -457,7 +457,7 @@ async fn released_queue_media_uri(
     } else {
         return Err("the saved download queue has an invalid media identity".to_string());
     };
-    Ok(database
+    Ok(catalog
         .selected_track_uris(
             &library::MemberSelection::Keys {
                 source: Some(source),
@@ -472,11 +472,11 @@ async fn released_queue_media_uri(
         .map(|uri| (uri, staging_identity)))
 }
 
-async fn media_source_id(database: &Database, media_uri: &str) -> Option<SourceId> {
+async fn media_source_id(catalog: &Catalog, media_uri: &str) -> Option<SourceId> {
     if let Some((source, _, _)) = library::source_entity_parts(media_uri) {
         return Some(source);
     }
-    database
+    catalog
         .track_source_by_uri(media_uri, &library::ReadCancellation::new())
         .await
         .ok()
@@ -655,7 +655,7 @@ impl SourceDownloadSettings {
 }
 
 async fn rule_media_uris(
-    database: &Database,
+    catalog: &Catalog,
     source: SourceKey,
     folder: Option<FolderKey>,
     rule: DownloadRule,
@@ -666,17 +666,17 @@ async fn rule_media_uris(
             let mut query = library::MemberRead::new(library::Collection::Source(source));
             query.folder = folder;
             query.favorites_only = matches!(rule, DownloadRule::Favorites);
-            database
+            catalog
                 .selected_track_uris(&query.selection(), None, &cancellation)
                 .await
         }
         DownloadRule::AllPlaylists => {
-            database
+            catalog
                 .all_playlist_track_order(source, folder, &cancellation)
                 .await
         }
         DownloadRule::LatestFiveAlbums => {
-            database
+            catalog
                 .latest_album_track_order(source, folder, 5, &cancellation)
                 .await
         }
@@ -688,14 +688,14 @@ type PreparedRules = Result<Vec<(DownloadRule, Vec<String>)>, String>;
 fn prepare_rules(intent: RuleIntent, prepared: Sender<PreparedRules>) {
     tokio::spawn(async move {
         let RuleIntent {
-            database,
+            catalog,
             source_key,
             folder,
             rules,
         } = intent;
         let mut result = Vec::new();
         for rule in rules.active() {
-            match rule_media_uris(&database, source_key, folder, rule).await {
+            match rule_media_uris(&catalog, source_key, folder, rule).await {
                 Ok(media_uris) => result.push((rule, media_uris)),
                 Err(error) => {
                     drop(prepared.try_send(Err(error.to_string())));
@@ -801,7 +801,7 @@ pub enum DownloadEvent {
 struct Actor {
     artwork: artwork::Artwork,
     root: Arc<PathBuf>,
-    database: Database,
+    catalog: Catalog,
     events: DownloadEvents,
     transfers: Arc<TransferClients>,
     peer: sources::PeerAccess,
@@ -827,7 +827,7 @@ impl Downloads {
     pub fn new(
         artwork: artwork::Artwork,
         root: PathBuf,
-        database: Database,
+        catalog: Catalog,
         runtime: tokio::runtime::Handle,
         events: Sender<DownloadEvent>,
         settings: Vec<SourceDownloadSettings>,
@@ -845,7 +845,7 @@ impl Downloads {
             Actor {
                 artwork,
                 root: Arc::clone(&downloads.root),
-                database,
+                catalog,
                 events: DownloadEvents {
                     sender: events,
                     status,
@@ -1005,10 +1005,10 @@ impl Downloads {
 }
 
 async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiver<PreparedRules>) {
-    if let Err(error) = migrate_download_records(&actor.root, &actor.database, None, None).await {
+    if let Err(error) = migrate_download_records(&actor.root, &actor.catalog, None, None).await {
         warn!(%error, "could not restore direct download access");
     }
-    match load_direct_queue(&actor.root, &actor.database, &actor.settings).await {
+    match load_direct_queue(&actor.root, &actor.catalog, &actor.settings).await {
         Ok(jobs) if !jobs.is_empty() => {
             actor.jobs.insert(None, jobs);
         }
@@ -1097,7 +1097,7 @@ impl Actor {
                     .collect();
                 let result = self
                     .artwork
-                    .clear_cache(&self.database, &active_uris)
+                    .clear_cache(&self.catalog, &active_uris)
                     .await
                     .map_err(|error| error.to_string());
                 let _ = response.send(result).await;
@@ -1108,7 +1108,7 @@ impl Actor {
                     .map(|download| download.media_uri.clone())
                     .collect();
                 let result = self
-                    .database
+                    .catalog
                     .clear_lyrics_cache(&active_uris)
                     .await
                     .map_err(|error| error.to_string());
@@ -1171,7 +1171,7 @@ impl Actor {
                 let mut grouped = HashMap::<Option<SourceId>, Vec<String>>::new();
                 for media_uri in media_uris {
                     grouped
-                        .entry(media_source_id(&self.database, &media_uri).await)
+                        .entry(media_source_id(&self.catalog, &media_uri).await)
                         .or_default()
                         .push(media_uri);
                 }
@@ -1209,7 +1209,7 @@ impl Actor {
                 let mut grouped = HashMap::<Option<SourceId>, Vec<String>>::new();
                 for media_uri in media_uris {
                     grouped
-                        .entry(media_source_id(&self.database, &media_uri).await)
+                        .entry(media_source_id(&self.catalog, &media_uri).await)
                         .or_default()
                         .push(media_uri);
                 }
@@ -1352,7 +1352,7 @@ impl Actor {
             let mut after = (String::new(), String::new());
             loop {
                 let records = match self
-                    .database
+                    .catalog
                     .download_files_page(Some(source_id.as_str()), &after, None)
                     .await
                 {
@@ -1405,7 +1405,7 @@ impl Actor {
             return;
         };
         let mut intent = RuleIntent {
-            database: self.database.clone(),
+            catalog: self.catalog.clone(),
             source_key: attached.source_key,
             folder: attached.folder,
             rules,
@@ -1516,7 +1516,7 @@ impl Actor {
         let mut attachment_error = None;
         if let Err(error) = migrate_download_records(
             &self.root,
-            &self.database,
+            &self.catalog,
             Some((source_key, &source_id)),
             directory.as_ref(),
         )
@@ -1536,7 +1536,7 @@ impl Actor {
             match load_queue(
                 &self.root,
                 &source_id,
-                &self.database,
+                &self.catalog,
                 source_key,
                 directory.as_ref(),
             )
@@ -1592,7 +1592,7 @@ impl Actor {
     ) -> Result<bool, String> {
         let automatic = matches!(owner, DownloadOwner::Subject(DownloadSubject::Rule(_)));
         let reference = self
-            .database
+            .catalog
             .connect_track_reference(media_uri)
             .await
             .map_err(|error| error.to_string())?
@@ -1604,7 +1604,7 @@ impl Actor {
             });
         let encoding = library::media_encoding_key(quality.encoding());
         let previous = self
-            .database
+            .catalog
             .connect_media_file(media_uri, &encoding)
             .await
             .map_err(|error| error.to_string())?;
@@ -1623,14 +1623,14 @@ impl Actor {
             && let Some(revision) = &revision
         {
             saved = self
-                .database
+                .catalog
                 .connect_backing_media_file(media_uri, &encoding, revision)
                 .await
                 .map_err(|error| error.to_string())?;
         }
         if saved.is_none() && reference.is_none() && !replace_unknown {
             saved = self
-                .database
+                .catalog
                 .connect_media_file(media_uri, "unknown")
                 .await
                 .map_err(|error| error.to_string())?;
@@ -1641,7 +1641,7 @@ impl Actor {
             && quality == DownloadQuality::Original
             && let Some(location) = self
                 .peer
-                .original_file(&self.database, media_uri)
+                .original_file(&self.catalog, media_uri)
                 .await
                 .map_err(|error| error.to_string())?
         {
@@ -1693,7 +1693,7 @@ impl Actor {
             && saved.as_ref().is_none_or(|(file, _)| !file.managed)
             && self
                 .peer
-                .original_file(&self.database, media_uri)
+                .original_file(&self.catalog, media_uri)
                 .await
                 .map_err(|error| error.to_string())?
                 .is_some()
@@ -1718,12 +1718,11 @@ impl Actor {
         let source = source_id
             .and_then(|source| self.attached.get(source))
             .map(|source| source.source_key);
-        let access =
-            download_access(&self.database, media_uri, &paths, file.completed_size).await?;
+        let access = download_access(&self.catalog, media_uri, &paths, file.completed_size).await?;
         file.storage_root = access.root.clone();
         file.relative_path = access.relative_path.clone();
         file.completed_size = Some(access.size_bytes);
-        self.database
+        self.catalog
             .commit_download(&file, source, &access)
             .await
             .map_err(|error| error.to_string())?;
@@ -1904,7 +1903,7 @@ impl Actor {
         let mut after = (String::new(), String::new());
         loop {
             let records = match self
-                .database
+                .catalog
                 .download_files_page(Some(source_id.as_str()), &after, Some(&owner_key))
                 .await
             {
@@ -2083,7 +2082,7 @@ impl Actor {
                 }
             }
             let peer_reference = self
-                .database
+                .catalog
                 .connect_track_reference(&media_uri)
                 .await
                 .ok()
@@ -2095,12 +2094,10 @@ impl Actor {
                         || library::document_media_id(&media_uri).is_some()
                 });
             let resolved = if peer_reference.is_some() {
-                self.peer
-                    .download(&self.database, &media_uri, quality)
-                    .await
+                self.peer.download(&self.catalog, &media_uri, quality).await
             } else if let Some(source) = source.as_ref() {
                 source
-                    .resolve_download(&self.database, &media_uri, quality)
+                    .resolve_download(&self.catalog, &media_uri, quality)
                     .await
             } else {
                 Some(media_uri.as_str())
@@ -2119,7 +2116,7 @@ impl Actor {
                 Err(_) => None,
             };
             let metadata = self
-                .database
+                .catalog
                 .download_metadata(&media_uri)
                 .await
                 .ok()
@@ -2146,10 +2143,10 @@ impl Actor {
                 .to_string();
                 if custom_directory.is_none()
                     && let Ok(Some((root, mut relative))) =
-                        self.peer.destination(&self.database, &media_uri).await
+                        self.peer.destination(&self.catalog, &media_uri).await
                 {
                     let previous = self
-                        .database
+                        .catalog
                         .connect_media_file(
                             &media_uri,
                             &library::media_encoding_key(quality.encoding()),
@@ -2198,7 +2195,7 @@ impl Actor {
                     .map(|reference| reference["revision"].to_string()),
             ));
             let uri = media_uri.clone();
-            let database = self.database.clone();
+            let catalog = self.catalog.clone();
             let artwork = self.artwork.clone();
             let input = attached
                 .as_ref()
@@ -2262,7 +2259,7 @@ impl Actor {
                             | ResolvedDownload::Encode {
                                 stream: original, ..
                             }) = source
-                                .resolve_download(&database, &uri, DownloadQuality::Original)
+                                .resolve_download(&catalog, &uri, DownloadQuality::Original)
                                 .await
                                 .map_err(download_source_failure)?;
                             let encoding = quality
@@ -2282,7 +2279,7 @@ impl Actor {
                 // Companion failures do not discard successfully downloaded audio.
                 tokio::select! {
                     _ = &mut cancelled => {},
-                    _ = cache_track_assets(&database, &artwork, source.as_deref(), peer_assets.as_ref(), &uri, input) => {},
+                    _ = cache_track_assets(&catalog, &artwork, source.as_deref(), peer_assets.as_ref(), &uri, input) => {},
                 }
                 Ok(())
             });
@@ -2435,7 +2432,7 @@ impl Actor {
             ..Default::default()
         };
         let previous = self
-            .database
+            .catalog
             .connect_media_file(media_uri, &file.encoding)
             .await
             .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
@@ -2470,7 +2467,7 @@ impl Actor {
             .filter(|old| old.managed && old.path != file.path)
         {
             let used = self
-                .database
+                .catalog
                 .connect_media_file_users(previous)
                 .await
                 .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
@@ -2485,7 +2482,7 @@ impl Actor {
             .and_then(|id| self.attached.get(id))
             .map(|source| source.source_key);
         let access = download_access(
-            &self.database,
+            &self.catalog,
             media_uri,
             &finished.paths,
             file.completed_size,
@@ -2494,7 +2491,7 @@ impl Actor {
         .map_err(DownloadFailure::NeedsAttention)?;
         file.storage_root = access.root.clone();
         file.relative_path = access.relative_path.clone();
-        self.database
+        self.catalog
             .commit_download(&file, source, &access)
             .await
             .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
@@ -2536,7 +2533,7 @@ impl Actor {
             retired.remove(0);
             file.retired_documents =
                 serde_json::to_string(&retired).map_err(|error| error.to_string())?;
-            self.database
+            self.catalog
                 .connect_save_media_file(file)
                 .await
                 .map_err(|error| error.to_string())?;
@@ -2862,7 +2859,7 @@ impl Actor {
         let mut removed = 0;
         let mut failed = 0;
         for uri in media_uris {
-            match self.database.connect_media_files(&uri).await {
+            match self.catalog.connect_media_files(&uri).await {
                 Ok(files) => {
                     for file in files {
                         match self.retire_receipt(&file).await {
@@ -2888,7 +2885,7 @@ impl Actor {
         file: &library::ConnectMediaFile,
     ) -> Result<usize, String> {
         let used = self
-            .database
+            .catalog
             .connect_media_file_users(file)
             .await
             .map_err(|error| error.to_string())?;
@@ -2903,12 +2900,12 @@ impl Actor {
         let mut file = file.clone();
         self.retire_previous_files(&mut file).await?;
         let removed = self.remove_representation_bytes(&file).await?;
-        self.database
+        self.catalog
             .connect_forget_media_file(&file)
             .await
             .map_err(|error| error.to_string())?;
         let downloaded = !self
-            .database
+            .catalog
             .connect_media_files(&file.media_uri)
             .await
             .map_err(|error| error.to_string())?
@@ -3042,7 +3039,7 @@ impl Actor {
         let mut after = (String::new(), String::new());
         loop {
             let records = match self
-                .database
+                .catalog
                 .download_files_page(Some(source_id.as_str()), &after, Some(&owner_key))
                 .await
             {
@@ -3083,7 +3080,7 @@ impl Actor {
             self.retire_receipt(file).await.map(|_| ())
         } else {
             file.owners = serde_json::to_string(&owners).map_err(|error| error.to_string())?;
-            self.database
+            self.catalog
                 .connect_save_media_file(file)
                 .await
                 .map_err(|error| error.to_string())
@@ -3148,7 +3145,7 @@ impl Actor {
             let mut after = (String::new(), String::new());
             loop {
                 let records = self
-                    .database
+                    .catalog
                     .download_files_page(Some(source_id.as_str()), &after, None)
                     .await
                     .map_err(|error| error.to_string())?;
@@ -3238,7 +3235,7 @@ impl Actor {
             .unwrap_or_else(|p| p.into_inner())
             .remove(&group);
         let downloaded_tracks = if changed || previous.is_none() {
-            self.database
+            self.catalog
                 .downloaded_count(source_id.map(SourceId::as_str))
                 .await
                 .unwrap_or_default() as u64
@@ -3260,7 +3257,7 @@ impl Actor {
 }
 
 async fn cache_track_assets(
-    database: &Database,
+    catalog: &Catalog,
     artwork: &artwork::Artwork,
     source: Option<&Source>,
     peer: Option<&sources::PeerAccess>,
@@ -3268,12 +3265,12 @@ async fn cache_track_assets(
     input_digest: [u8; 32],
 ) {
     if let Some(peer) = peer
-        && let Err(error) = peer.cache_assets(database, media_uri, input_digest).await
+        && let Err(error) = peer.cache_assets(catalog, media_uri, input_digest).await
     {
         warn!(%error, %media_uri, "could not download accompanying media");
     }
     let images = async {
-        let bindings = database
+        let bindings = catalog
             .track_artwork_bindings(&[media_uri.to_owned()], &library::ReadCancellation::new())
             .await
             .map_err(|error| error.to_string())?;
@@ -3293,7 +3290,7 @@ async fn cache_track_assets(
                 [0; 32]
             };
             source
-                .cached_lyrics(database, media_uri, input)
+                .cached_lyrics(catalog, media_uri, input)
                 .await
                 .map_err(|error| error.to_string())?;
         }
@@ -3366,18 +3363,18 @@ mod tests {
     async fn download_fixture(
         source_id: &str,
         track_object_id: &str,
-    ) -> (tempfile::TempDir, Database, SourceKey, TrackKey) {
+    ) -> (tempfile::TempDir, Catalog, SourceKey, TrackKey) {
         let directory = tempfile::tempdir().expect("temporary download fixture");
-        let database = Database::open(&directory.path().join("library.sqlite3"))
+        let catalog = Catalog::open(&directory.path().join("library.sqlite3"))
             .await
             .expect("open Library");
-        let source = database
+        let source = catalog
             .reconcile_source(&library::SourceId::new(source_id), "server", "Source")
             .await
             .unwrap()
             .source;
-        database
-            .catalog(source_id, None)
+        catalog
+            .observe(source_id, None)
             .await
             .unwrap()
             .apply_catalog(
@@ -3405,7 +3402,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let track = database
+        let track = catalog
             .catalog_keys(
                 library::CatalogKind::Track,
                 Some(source),
@@ -3416,18 +3413,18 @@ mod tests {
             .map(|keys| keys.into_iter().next().map(library::TrackKey::from_raw))
             .expect("read Track key")
             .expect("Track exists");
-        (directory, database, source, track)
+        (directory, catalog, source, track)
     }
 
     #[tokio::test]
     async fn queued_media_survives_restart_serialization() {
         let source_id = SourceId::new("source");
-        let (root, database, source, _) = download_fixture("source", "track").await;
+        let (root, catalog, source, _) = download_fixture("source", "track").await;
         let media_uri = reqwest::Url::from_file_path(root.path().join("track.flac"))
             .unwrap()
             .to_string();
-        database
-            .catalog(source_id.as_str(), None)
+        catalog
+            .observe(source_id.as_str(), None)
             .await
             .unwrap()
             .apply_catalog(
@@ -3487,11 +3484,11 @@ mod tests {
         std::fs::write(&http.audio_part, b"http partial").unwrap();
         let settings = HashMap::new();
         for _ in 0..2 {
-            let direct_queue = load_direct_queue(root.path(), &database, &settings)
+            let direct_queue = load_direct_queue(root.path(), &catalog, &settings)
                 .await
                 .unwrap();
             assert_eq!(direct_queue[0].remaining, std::slice::from_ref(&direct));
-            let ordinary = load_queue(root.path(), &source_id, &database, source, None)
+            let ordinary = load_queue(root.path(), &source_id, &catalog, source, None)
                 .await
                 .unwrap();
             assert_eq!(ordinary.len(), 1);
@@ -3499,7 +3496,7 @@ mod tests {
         }
         assert!(!old.audio_part.exists());
         assert!(http.audio_part.exists());
-        let mut actor = actor_for_test(root.path(), database, &source_id, source);
+        let mut actor = actor_for_test(root.path(), catalog, &source_id, source);
         let mut settings = SourceDownloadSettings::for_source(source_id.clone());
         settings.quality = DownloadQuality::Transcoded(library::AudioEncoding {
             codec: library::AudioCodec::Opus,
@@ -3532,11 +3529,11 @@ mod tests {
             completed_size: Some(11),
         };
         std::fs::write(&paths.record, serde_json::to_vec(&record).unwrap()).unwrap();
-        migrate_download_records(root.path(), &actor.database, None, None)
+        migrate_download_records(root.path(), &actor.catalog, None, None)
             .await
             .unwrap();
         let receipt = actor
-            .database
+            .catalog
             .connect_media_file(&media_uri, "original")
             .await
             .unwrap()
@@ -3545,7 +3542,7 @@ mod tests {
         assert_eq!(std::fs::read(audio).unwrap(), b"saved audio");
         assert_eq!(
             actor
-                .database
+                .catalog
                 .downloaded_count(Some(source_id.as_str()))
                 .await
                 .unwrap(),
@@ -3565,13 +3562,13 @@ mod tests {
 
     #[tokio::test]
     async fn direct_http_media_uses_the_application_download_queue_without_a_source() {
-        let (_library, database, source_key, _) = download_fixture("unused", "track").await;
+        let (_library, catalog, source_key, _) = download_fixture("unused", "track").await;
         let root = tempfile::Builder::new()
             .prefix("downloads café %")
             .tempdir()
             .expect("Downloads root");
         let source_id = SourceId::new("unused");
-        let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
+        let mut actor = actor_for_test(root.path(), catalog, &source_id, source_key);
         let media_uri = "https://media.example/direct.flac".to_string();
         let (events, received) = async_channel::unbounded();
         actor.events.sender = events;
@@ -3636,7 +3633,7 @@ mod tests {
             }
         );
         let access = actor
-            .database
+            .catalog
             .playback_access(&media_uri)
             .await
             .unwrap()
@@ -3662,7 +3659,7 @@ mod tests {
         assert_eq!(summary.downloaded_tracks, 1);
         for source_id in ["unused", "missing"] {
             let count = actor
-                .database
+                .catalog
                 .downloaded_count(Some(source_id))
                 .await
                 .unwrap();
@@ -3686,7 +3683,7 @@ mod tests {
             }
         );
         let access = actor
-            .database
+            .catalog
             .playback_access(&media_uri)
             .await
             .unwrap()
@@ -3708,12 +3705,12 @@ mod tests {
 
     #[tokio::test]
     async fn peer_representation_is_recorded_only_after_download_commit() {
-        let (_library, database, source_key, track) =
+        let (_library, catalog, source_key, track) =
             download_fixture("connect-copy", "track").await;
         let root = tempfile::tempdir().unwrap();
         let source = SourceId::new("connect-copy");
         let uri = test_media(&source, source_key, track);
-        let mut actor = actor_for_test(root.path(), database.clone(), &source, source_key);
+        let mut actor = actor_for_test(root.path(), catalog.clone(), &source, source_key);
         let subject =
             DownloadSubject::for_media_uris("connect", Some("Track"), std::slice::from_ref(&uri));
         let _ = actor
@@ -3729,7 +3726,7 @@ mod tests {
         std::fs::create_dir_all(paths.audio_part.parent().unwrap()).unwrap();
         std::fs::write(&paths.audio_part, b"verified peer bytes").unwrap();
         assert!(
-            database
+            catalog
                 .connect_media_file(&uri, "mp3")
                 .await
                 .unwrap()
@@ -3752,7 +3749,7 @@ mod tests {
             b"verified peer bytes"
         );
         assert!(!paths.audio_part.exists());
-        let saved = database
+        let saved = catalog
             .connect_media_file(&uri, "mp3")
             .await
             .unwrap()
@@ -3764,7 +3761,7 @@ mod tests {
         );
         assert!(saved.managed);
         assert!(
-            database
+            catalog
                 .catalog_keys(
                     library::CatalogKind::Track,
                     Some(source_key),
@@ -3781,10 +3778,10 @@ mod tests {
     #[tokio::test]
     async fn collection_completion_follows_its_download_jobs_across_sources() {
         for fail_first in [false, true] {
-            let (_directory, database, source_key, _) = download_fixture("source", "track").await;
+            let (_directory, catalog, source_key, _) = download_fixture("source", "track").await;
             let root = tempfile::tempdir().unwrap();
             let source = SourceId::new("source");
-            let mut actor = actor_for_test(root.path(), database, &source, source_key);
+            let mut actor = actor_for_test(root.path(), catalog, &source, source_key);
             let (events, received) = async_channel::unbounded();
             actor.events.sender = events;
             let subject = DownloadSubject::Prepared {
@@ -3858,7 +3855,7 @@ mod tests {
 
     #[tokio::test]
     async fn released_completed_and_partial_downloads_rebind_on_attach() {
-        let (_database_directory, database, source_key, _track_key) =
+        let (_database_directory, catalog, source_key, _track_key) =
             download_fixture("source", "track-object").await;
         let downloads = tempfile::tempdir().expect("temporary Downloads root");
         let source_id = SourceId::new("source");
@@ -3905,13 +3902,13 @@ mod tests {
 
         migrate_download_records(
             downloads.path(),
-            &database,
+            &catalog,
             Some((source_key, &source_id)),
             None,
         )
         .await
         .expect("attach released download");
-        let records = database
+        let records = catalog
             .download_files_page(
                 Some(source_id.as_str()),
                 &(String::new(), String::new()),
@@ -3935,7 +3932,7 @@ mod tests {
         );
         assert!(audio.is_file());
 
-        let jobs = load_queue(downloads.path(), &source_id, &database, source_key, None)
+        let jobs = load_queue(downloads.path(), &source_id, &catalog, source_key, None)
             .await
             .expect("migrate released Queue");
         assert_eq!(
@@ -3956,7 +3953,7 @@ mod tests {
 
     #[tokio::test]
     async fn released_custom_download_is_authorized_by_current_configuration() {
-        let (_database_directory, database, source_key, _track_key) =
+        let (_database_directory, catalog, source_key, _track_key) =
             download_fixture("custom-source", "custom-track").await;
         let downloads = tempfile::tempdir().expect("temporary Downloads root");
         let custom = tempfile::tempdir().expect("configured custom root");
@@ -3988,13 +3985,13 @@ mod tests {
 
         migrate_download_records(
             downloads.path(),
-            &database,
+            &catalog,
             Some((source_key, &source_id)),
             Some(&DownloadDirectory::Native(custom.path().to_owned())),
         )
         .await
         .expect("attach released custom download");
-        let records = database
+        let records = catalog
             .download_files_page(
                 Some(source_id.as_str()),
                 &(String::new(), String::new()),
@@ -4044,14 +4041,14 @@ mod tests {
             ),
             ("document", true, false, DownloadQuality::Original, true),
         ] {
-            let (_db_root, database, source, _) = download_fixture(case, "track").await;
+            let (_db_root, catalog, source, _) = download_fixture(case, "track").await;
             let folder = root.path().join(case);
             std::fs::create_dir_all(&folder).unwrap();
             let original = folder.join("album.flac");
             if original_exists {
                 std::fs::write(&original, b"whole audio").unwrap();
             }
-            let mut actor = actor_for_test(root.path(), database, &SourceId::new(case), source);
+            let mut actor = actor_for_test(root.path(), catalog, &SourceId::new(case), source);
             let source_id = SourceId::new(case);
             let client = Arc::new(
                 Source::open(
@@ -4098,7 +4095,7 @@ mod tests {
                     index * 1000,
                     (index + 1) * 1000,
                 );
-                actor.database.connect_apply(&[library::ConnectRecord {
+                actor.catalog.connect_apply(&[library::ConnectRecord {
                     kind: "track".into(), key: uri.clone(), value: Some(serde_json::json!({
                         "object_id":format!("{case}:{index}"), "media_uri":uri, "source_id":case,
                         "title":format!("Track {index}"), "display_album":"Album", "display_artist":"Artist", "duration_millis":1000,
@@ -4106,7 +4103,7 @@ mod tests {
                     })),
                 }]).await.unwrap();
                 actor
-                    .database
+                    .catalog
                     .create_playlist(
                         None,
                         "Saved",
@@ -4133,7 +4130,7 @@ mod tests {
                     );
                     if own {
                         actor
-                            .database
+                            .catalog
                             .upsert_local_locator(&library::LocalLocatorWrite {
                                 source_id: Some(case.into()),
                                 media_uri: remote.clone(),
@@ -4163,7 +4160,7 @@ mod tests {
                     }
                     assert!(
                         actor
-                            .database
+                            .catalog
                             .connect_media_files(&uri)
                             .await
                             .unwrap()
@@ -4207,7 +4204,7 @@ mod tests {
             let mut paths = Vec::new();
             for uri in &uris {
                 let file = actor
-                    .database
+                    .catalog
                     .connect_media_file(uri, &library::media_encoding_key(quality.encoding()))
                     .await
                     .unwrap()
@@ -4230,7 +4227,7 @@ mod tests {
                             .unwrap()
                     );
                     let retained = actor
-                        .database
+                        .catalog
                         .connect_media_file(uri, &file.encoding)
                         .await
                         .unwrap()
@@ -4259,8 +4256,8 @@ mod tests {
     async fn cue_concurrent_completion_and_revision_changes() {
         let root = tempfile::tempdir().unwrap();
         for original_exists in [false, true] {
-            let (_db_root, database, source, _) = download_fixture("cue", "track").await;
-            let mut actor = actor_for_test(root.path(), database, &SourceId::new("cue"), source);
+            let (_db_root, catalog, source, _) = download_fixture("cue", "track").await;
+            let mut actor = actor_for_test(root.path(), catalog, &SourceId::new("cue"), source);
             let folder = root.path().join(format!("mapped-{original_exists}"));
             std::fs::create_dir_all(&folder).unwrap();
             let client = Arc::new(
@@ -4300,7 +4297,7 @@ mod tests {
                     index * 1000,
                     (index + 1) * 1000,
                 );
-                actor.database.connect_apply(&[library::ConnectRecord {
+                actor.catalog.connect_apply(&[library::ConnectRecord {
                     kind:"track".into(), key:uri.clone(), value:Some(serde_json::json!({
                         "object_id":format!("{original_exists}:{index}"), "media_uri":uri, "source_id":"cue", "title":"Track", "display_album":"Album", "display_artist":"Artist", "duration_millis":1000,
                         "relative_path":"album.flac", "source_format":"flac", "revision":"v1", "local_media":true
@@ -4309,7 +4306,7 @@ mod tests {
                 uris.push(uri);
             }
             actor
-                .database
+                .catalog
                 .create_playlist(
                     None,
                     "Saved",
@@ -4320,14 +4317,14 @@ mod tests {
             for (version, bytes) in [("v1", b"old audio"), ("v2", b"new audio")] {
                 for (index, uri) in uris.iter().enumerate() {
                     let mut reference = actor
-                        .database
+                        .catalog
                         .connect_track_reference(uri)
                         .await
                         .unwrap()
                         .unwrap();
                     reference["revision"] = version.into();
                     actor
-                        .database
+                        .catalog
                         .connect_apply(&[library::ConnectRecord {
                             kind: "track".into(),
                             key: uri.clone(),
@@ -4353,7 +4350,7 @@ mod tests {
                         assert!(matches!(
                             actor
                                 .peer
-                                .download(&actor.database, uri, DownloadQuality::Original)
+                                .download(&actor.catalog, uri, DownloadQuality::Original)
                                 .await,
                             Err(SourceError::Network(_))
                         ));
@@ -4377,7 +4374,7 @@ mod tests {
                         actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
                     }
                     let file = actor
-                        .database
+                        .catalog
                         .connect_media_file(uri, "original")
                         .await
                         .unwrap()
@@ -4395,7 +4392,7 @@ mod tests {
                 for uri in &uris {
                     paths.push(
                         actor
-                            .database
+                            .catalog
                             .connect_media_file(uri, "original")
                             .await
                             .unwrap()
@@ -4411,7 +4408,7 @@ mod tests {
 
     fn actor_for_test(
         root: &Path,
-        database: Database,
+        catalog: Catalog,
         source_id: &SourceId,
         source_key: SourceKey,
     ) -> Actor {
@@ -4421,7 +4418,7 @@ mod tests {
             artwork: artwork::Artwork::new(root.join("artwork"), tokio::runtime::Handle::current())
                 .unwrap(),
             root: Arc::new(root.to_path_buf()),
-            database,
+            catalog,
             events: DownloadEvents {
                 sender: events,
                 status: tokio::sync::watch::channel(DownloadStatus::default()).0,
@@ -4472,10 +4469,10 @@ mod tests {
 
     #[tokio::test]
     async fn pausing_cancels_active_work_and_keeps_the_job_queued() {
-        let (_library, database, source_key, track) = download_fixture("pause", "track").await;
+        let (_library, catalog, source_key, track) = download_fixture("pause", "track").await;
         let root = tempfile::tempdir().expect("Downloads root");
         let source_id = SourceId::new("pause");
-        let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
+        let mut actor = actor_for_test(root.path(), catalog, &source_id, source_key);
         let media_uri = test_media(&source_id, source_key, track);
         actor
             .jobs
@@ -4514,10 +4511,10 @@ mod tests {
 
     #[tokio::test]
     async fn restore_suspension_drains_active_work_and_holds_following_commands() {
-        let (_library, database, source_key, track) = download_fixture("suspend", "track").await;
+        let (_library, catalog, source_key, track) = download_fixture("suspend", "track").await;
         let root = tempfile::tempdir().expect("Downloads root");
         let source_id = SourceId::new("suspend");
-        let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
+        let mut actor = actor_for_test(root.path(), catalog, &source_id, source_key);
         let media_uri = test_media(&source_id, source_key, track);
         actor
             .jobs
@@ -4578,10 +4575,10 @@ mod tests {
 
     #[tokio::test]
     async fn cancelling_removes_the_job_and_reconciles_its_staging_file() {
-        let (_library, database, source_key, track) = download_fixture("cancel", "track").await;
+        let (_library, catalog, source_key, track) = download_fixture("cancel", "track").await;
         let root = tempfile::tempdir().expect("Downloads root");
         let source_id = SourceId::new("cancel");
-        let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
+        let mut actor = actor_for_test(root.path(), catalog, &source_id, source_key);
         let media_uri = test_media(&source_id, source_key, track);
         actor
             .jobs
@@ -4620,10 +4617,10 @@ mod tests {
 
     #[tokio::test]
     async fn stale_completed_transfer_cannot_commit_after_its_job_was_removed() {
-        let (_library, database, source_key, track) = download_fixture("stale", "track").await;
+        let (_library, catalog, source_key, track) = download_fixture("stale", "track").await;
         let root = tempfile::tempdir().expect("Downloads root");
         let source_id = SourceId::new("stale");
-        let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
+        let mut actor = actor_for_test(root.path(), catalog, &source_id, source_key);
         let media_uri = test_media(&source_id, source_key, track);
         let paths = download_paths(root.path(), Some(&source_id), &media_uri);
         std::fs::create_dir_all(paths.audio_part.parent().expect("staging parent"))
@@ -4653,10 +4650,10 @@ mod tests {
 
     #[tokio::test]
     async fn authoritative_rule_change_is_retained_while_prior_rules_prepare() {
-        let (_library, database, source_key, _) = download_fixture("rules", "track").await;
+        let (_library, catalog, source_key, _) = download_fixture("rules", "track").await;
         let root = tempfile::tempdir().expect("Downloads root");
         let source_id = SourceId::new("rules");
-        let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
+        let mut actor = actor_for_test(root.path(), catalog, &source_id, source_key);
         let mut first = DownloadRules::default();
         first.set(DownloadRule::Favorites, true);
         actor.schedule_rules(&source_id, first, true);
@@ -4808,7 +4805,7 @@ impl Actor {
             .filter_map(|job| job.preview_uris.first().cloned())
             .collect::<Vec<_>>();
         let previews = self
-            .database
+            .catalog
             .tracks_by_uris(&uris, &library::ReadCancellation::new())
             .await
             .map_err(|error| error.to_string())?;

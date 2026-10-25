@@ -76,7 +76,7 @@ impl PlaybackOwner {
             })
             .collect::<Vec<_>>();
         let rows = self
-            .database
+            .catalog
             .queue_rows_for_entries(&entries, &ReadCancellation::new())
             .await
             .map_err(string_error)?;
@@ -95,14 +95,14 @@ impl PlaybackOwner {
         transfer: &str,
         page: &library::QueueTransferPage,
     ) -> Result<(), String> {
-        self.database
+        self.catalog
             .stage_queue_transfer_page(transfer, page)
             .await
             .map_err(string_error)
     }
 
     pub(crate) async fn discard_continuation(&self, transfer: &str) -> Result<(), String> {
-        self.database
+        self.catalog
             .discard_queue_transfer(transfer)
             .await
             .map_err(string_error)
@@ -114,7 +114,7 @@ impl PlaybackOwner {
         header: playback::ContinuationHeader,
     ) -> Result<PreparedContinuation, String> {
         let mut queue = self
-            .database
+            .catalog
             .prepare_queue_transfer(&transfer, header.total, header.current)
             .await
             .map_err(string_error)?;
@@ -139,7 +139,7 @@ impl PlaybackOwner {
         let source = self.source_owner();
         let local = self.settings.local_configuration();
         let stream = prepare_stream(
-            &self.database,
+            &self.catalog,
             request,
             local.as_ref(),
             connect
@@ -157,7 +157,7 @@ impl PlaybackOwner {
         )
         .await?;
         let loudness = super::cached_loudness(
-            &self.database,
+            &self.catalog,
             &occurrence.track.media_uri,
             self.settings.load().ui.playback.loudness_normalization,
         )
@@ -228,7 +228,7 @@ impl PlaybackOwner {
     ) -> Result<(), String> {
         // Queue persistence has one writer. Older local saves complete before
         // transferred metadata becomes the active queue.
-        save_pending_queue(&self.database, &self.pending_queue, failed_queue_save)
+        save_pending_queue(&self.catalog, &self.pending_queue, failed_queue_save)
             .await
             .map_err(string_error)?;
         let active = self.active().ok_or("Playback is unavailable")?;
@@ -240,7 +240,7 @@ impl PlaybackOwner {
             plex.stop_for_continuation().await?;
             self.plex.lock().unwrap_or_else(|p| p.into_inner()).take();
         }
-        self.database
+        self.catalog
             .commit_queue_transfer(&prepared.transfer, &prepared.continuation.queue)
             .await
             .map_err(string_error)?;
@@ -250,7 +250,7 @@ impl PlaybackOwner {
         .await
         .map_err(string_error)?
         .map_err(string_error)?;
-        save_pending_queue(&self.database, &self.pending_queue, failed_queue_save)
+        save_pending_queue(&self.catalog, &self.pending_queue, failed_queue_save)
             .await
             .map_err(string_error)?;
         self.output

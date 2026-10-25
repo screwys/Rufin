@@ -1,5 +1,5 @@
 //! Fixed semantic data export and transactional restore.
-use crate::{Database, LibraryResult, PlaylistKey};
+use crate::{Catalog, LibraryResult, PlaylistKey};
 use sqlx::Connection;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Write};
@@ -42,7 +42,7 @@ pub struct BackupRestoreReport {
     pub listens: u64,
     pub skipped_listens: u64,
     pub local_locators: u64,
-    /// Database groups are committed even if explicitly selected external writes fail.
+    /// Store groups are committed even if explicitly selected external writes fail.
     pub warnings: Vec<String>,
 }
 
@@ -56,7 +56,7 @@ fn private_file(path: &Path) -> LibraryResult<BufWriter<File>> {
     }
     Ok(BufWriter::new(options.open(path)?))
 }
-impl Database {
+impl Catalog {
     pub async fn export_state(
         &self,
         directory: &Path,
@@ -278,7 +278,7 @@ async fn sync_restore_on(
                     value: None,
                 });
             } else {
-                records.push(Database::connect_record_on(connection, &kind, &key).await?);
+                records.push(Catalog::connect_record_on(connection, &kind, &key).await?);
                 if let Some(playlist) = playlist {
                     records.extend(
                         crate::playlists::playlist_entry_records_on(
@@ -299,7 +299,7 @@ async fn sync_restore_on(
                         value: None,
                     }
                 } else {
-                    Database::connect_record_on(connection, "playlist_artwork", &key).await?
+                    Catalog::connect_record_on(connection, "playlist_artwork", &key).await?
                 });
             }
         }
@@ -310,15 +310,15 @@ async fn sync_restore_on(
 #[cfg(test)]
 mod tests {
     use super::*;
-    async fn database(directory: &Path, name: &str) -> Database {
-        Database::open(directory.join(name)).await.unwrap()
+    async fn catalog(directory: &Path, name: &str) -> Catalog {
+        Catalog::open(directory.join(name)).await.unwrap()
     }
-    async fn seed(database: &Database, rating: i64) {
-        let mut writer = database.writer().await.unwrap();
+    async fn seed(catalog: &Catalog, rating: i64) {
+        let mut writer = catalog.writer().await.unwrap();
         sqlx::query("INSERT INTO user_media_state(media_uri,favorite,rating) VALUES('https://example.test/song',1,?1)").bind(rating).execute(&mut *writer).await.unwrap();
     }
-    async fn rating(database: &Database) -> i64 {
-        let mut writer = database.writer().await.unwrap();
+    async fn rating(catalog: &Catalog) -> i64 {
+        let mut writer = catalog.writer().await.unwrap();
         sqlx::query_scalar("SELECT rating FROM user_media_state LIMIT 1")
             .fetch_one(&mut *writer)
             .await
@@ -334,9 +334,9 @@ mod tests {
             queue: true,
         }
     }
-    async fn exported(database: &Database) -> (tempfile::TempDir, u64) {
+    async fn exported(catalog: &Catalog) -> (tempfile::TempDir, u64) {
         let directory = tempfile::tempdir().unwrap();
-        let count = database
+        let count = catalog
             .export_state(directory.path(), all_groups())
             .await
             .unwrap();
@@ -345,16 +345,16 @@ mod tests {
     #[tokio::test]
     async fn export_runs_alongside_browsing_and_playback_and_releases_its_reader() {
         let directory = tempfile::tempdir().unwrap();
-        let database = database(directory.path(), "export").await;
-        let (_permit, _foreground) = database
+        let catalog = catalog(directory.path(), "export").await;
+        let (_permit, _foreground) = catalog
             .acquire_general(&crate::ReadCancellation::new())
             .await
             .unwrap();
-        let mut playback = database.acquire_reader().await.unwrap();
+        let mut playback = catalog.acquire_reader().await.unwrap();
         let output = tempfile::tempdir().unwrap();
         tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            database.export_state(output.path(), all_groups()),
+            catalog.export_state(output.path(), all_groups()),
         )
         .await
         .unwrap()
@@ -367,7 +367,7 @@ mod tests {
             1
         );
         let _reader =
-            tokio::time::timeout(std::time::Duration::from_secs(2), database.acquire_export())
+            tokio::time::timeout(std::time::Duration::from_secs(2), catalog.acquire_export())
                 .await
                 .expect("Export must return its reader before archive output begins")
                 .unwrap();
@@ -375,12 +375,12 @@ mod tests {
     #[tokio::test]
     async fn selected_restore_is_atomic_and_preserves_downloads() {
         let directory = tempfile::tempdir().unwrap();
-        let source = database(directory.path(), "source").await;
-        let target = database(directory.path(), "target").await;
+        let source = catalog(directory.path(), "source").await;
+        let target = catalog(directory.path(), "target").await;
         seed(&source, 73).await;
         seed(&target, 19).await;
-        for (database, path) in [(&source, "/old/song.flac"), (&target, "/current/song.flac")] {
-            let mut writer = database.writer().await.unwrap();
+        for (catalog, path) in [(&source, "/old/song.flac"), (&target, "/current/song.flac")] {
+            let mut writer = catalog.writer().await.unwrap();
             sqlx::query("INSERT INTO main.local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES('https://example.test/song','download',?1,'/','song.flac','file:///song.flac')").bind(path).execute(&mut *writer).await.unwrap();
         }
         let (staged, playlist_count) = exported(&source).await;
@@ -427,8 +427,8 @@ mod tests {
     #[tokio::test]
     async fn empty_catalog_roundtrip_preserves_native_rank_and_authored_duplicates() {
         let directory = tempfile::tempdir().unwrap();
-        let source = database(directory.path(), "source").await;
-        let target = database(directory.path(), "target").await;
+        let source = catalog(directory.path(), "source").await;
+        let target = catalog(directory.path(), "target").await;
         {
             let mut writer = source.writer().await.unwrap();
             sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'missing-source');INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,position) VALUES(1,1,'source','native',NULL,0),(2,NULL,'rufin','authored','Mine',1);INSERT INTO tracks(track_key,media_uri,metadata) VALUES(1,'https://example.test/song',jsonb(json_object('title','Saved')));INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(2,'a',1,0),(2,'b',1,1);INSERT INTO listens(listen_key,external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(7,NULL,'missing-source','https://example.test/song','Saved','Artist','Album',1,'2026-09',100,90);").execute(&mut *writer).await.unwrap();
@@ -623,8 +623,8 @@ mod tests {
     #[tokio::test]
     async fn selected_groups_preserve_catalog_and_absent_groups_but_replace_empty_groups() {
         let directory = tempfile::tempdir().unwrap();
-        let source = database(directory.path(), "source").await;
-        let target = database(directory.path(), "target").await;
+        let source = catalog(directory.path(), "source").await;
+        let target = catalog(directory.path(), "target").await;
         seed(&source, 73).await;
         seed(&target, 19).await;
         {
@@ -663,7 +663,7 @@ mod tests {
                 "Keep me"
             );
         }
-        let empty = database(directory.path(), "empty").await;
+        let empty = catalog(directory.path(), "empty").await;
         let staged = tempfile::tempdir().unwrap();
         let count = empty.export_state(staged.path(), favorites).await.unwrap();
         target

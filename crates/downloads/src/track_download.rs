@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use audio_processing::ResolvedStream;
-use library::{Database, SourceKey, TrackKey};
+use library::{Catalog, SourceKey, TrackKey};
 use reqwest::header::{
     ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, DATE, ETAG, IF_RANGE,
     LAST_MODIFIED, RANGE,
@@ -763,12 +763,12 @@ pub(super) async fn finalize_download(
 }
 
 pub(super) async fn download_access(
-    database: &Database,
+    catalog: &Catalog,
     media_uri: &str,
     paths: &DownloadPaths,
     completed_size: Option<i64>,
 ) -> Result<library::LocalAccessWrite, String> {
-    let loudness_analysis_key = database
+    let loudness_analysis_key = catalog
         .audio_analysis_key(media_uri)
         .await
         .map_err(|error| error.to_string())?;
@@ -800,14 +800,14 @@ pub(super) async fn download_access(
 
 async fn import_download_record(
     root: &Path,
-    database: &Database,
+    catalog: &Catalog,
     source: Option<(SourceKey, &SourceId)>,
     record: ReleasedDownloadRecord,
     custom_directory: Option<&DownloadDirectory>,
 ) -> Result<(), String> {
     let paths = record_download_paths(root, source.map(|(_, id)| id), &record, custom_directory)?;
     let access = download_access(
-        database,
+        catalog,
         &record.media_uri,
         &paths,
         record
@@ -822,7 +822,7 @@ async fn import_download_record(
         return Err("The downloaded file size changed".into());
     }
     let path = paths.audio.access_uri()?;
-    let mut file = database
+    let mut file = catalog
         .connect_media_files(&record.media_uri)
         .await
         .map_err(|error| error.to_string())?
@@ -846,7 +846,7 @@ async fn import_download_record(
         owners.extend(download_owners(&file)?);
     }
     let inferred = if source.is_none() {
-        database
+        catalog
             .track_source_by_uri(&file.media_uri, &library::ReadCancellation::new())
             .await
             .map_err(|error| error.to_string())?
@@ -854,7 +854,7 @@ async fn import_download_record(
         None
     };
     let inferred_key = if let Some(id) = &inferred {
-        database
+        catalog
             .source_identity_key(id)
             .await
             .map_err(|error| error.to_string())?
@@ -869,7 +869,7 @@ async fn import_download_record(
     file.completed_size = Some(access.size_bytes);
     file.retired_documents =
         serde_json::to_string(&record.retired_documents).map_err(|error| error.to_string())?;
-    database
+    catalog
         .commit_download(&file, source.map(|(key, _)| key), &access)
         .await
         .map_err(|error| error.to_string())
@@ -877,12 +877,12 @@ async fn import_download_record(
 
 pub(super) async fn migrate_download_records(
     root: &Path,
-    database: &Database,
+    catalog: &Catalog,
     source: Option<(SourceKey, &SourceId)>,
     custom_directory: Option<&DownloadDirectory>,
 ) -> Result<(), String> {
     if let Some((key, id)) = source {
-        migrate_released_download_records(root, database, key, id, custom_directory).await?;
+        migrate_released_download_records(root, catalog, key, id, custom_directory).await?;
     }
     let directory = source_directory(root, source.map(|(_, id)| id));
     let mut entries = match tokio::fs::read_dir(&directory).await {
@@ -936,7 +936,7 @@ pub(super) async fn migrate_download_records(
             quarantine_record(&path);
             continue;
         }
-        match import_download_record(root, database, source, record, custom_directory).await {
+        match import_download_record(root, catalog, source, record, custom_directory).await {
             Ok(()) => remove_file_if_present(&path).await?,
             Err(error) => {
                 warn!(%error, path = %path.display(), "could not migrate a completed download")
@@ -948,7 +948,7 @@ pub(super) async fn migrate_download_records(
 
 async fn migrate_released_download_records(
     root: &Path,
-    database: &Database,
+    catalog: &Catalog,
     source_key: SourceKey,
     source_id: &SourceId,
     custom_directory: Option<&DownloadDirectory>,
@@ -985,7 +985,7 @@ async fn migrate_released_download_records(
             && released.version == 4
             && released.source_id == *source_id
         {
-            let Some(media_uri) = database
+            let Some(media_uri) = catalog
                 .tracks(&[released.track_id], &cancellation)
                 .await
                 .map_err(|error| error.to_string())?
@@ -1020,7 +1020,7 @@ async fn migrate_released_download_records(
             };
             import_download_record(
                 root,
-                database,
+                catalog,
                 Some((source_key, source_id)),
                 record,
                 custom_directory,
@@ -1096,7 +1096,7 @@ async fn migrate_released_download_records(
         }
         import_download_record(
             root,
-            database,
+            catalog,
             Some((source_key, source_id)),
             record,
             custom_directory,
@@ -1743,24 +1743,24 @@ mod tests {
         )
         .expect("write record");
 
-        let database = Database::open(directory.path().join("library.sqlite"))
+        let catalog = Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        let source_key = database
+        let source_key = catalog
             .reconcile_source(&source, "server", "Source")
             .await
             .unwrap()
             .source;
         migrate_download_records(
             directory.path(),
-            &database,
+            &catalog,
             Some((source_key, &source)),
             None,
         )
         .await
         .unwrap();
         assert!(
-            database
+            catalog
                 .connect_media_files(&identity)
                 .await
                 .unwrap()

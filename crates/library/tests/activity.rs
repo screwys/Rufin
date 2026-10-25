@@ -24,7 +24,7 @@ async fn overview_uses_full_duration_qualified_plays_and_calendar_comparisons() 
     drop(raw);
     let cancel = ReadCancellation::new();
     let month = fixture
-        .database
+        .catalog
         .activity_overview(
             CalendarActivityPeriod::Month {
                 year: 2026,
@@ -52,7 +52,7 @@ async fn overview_uses_full_duration_qualified_plays_and_calendar_comparisons() 
     assert_eq!(month.artists[0].state.play_count, 3);
     assert_eq!(month.genres[0].plays, 3);
     let year = fixture
-        .database
+        .catalog
         .activity_overview(CalendarActivityPeriod::Year(2026), 5, &cancel)
         .await
         .unwrap();
@@ -60,7 +60,7 @@ async fn overview_uses_full_duration_qualified_plays_and_calendar_comparisons() 
     assert_eq!(year.totals.duration_millis, 960_000);
     assert_eq!(year.previous.plays, 1);
     let empty = fixture
-        .database
+        .catalog
         .activity_overview(CalendarActivityPeriod::Year(2024), 5, &cancel)
         .await
         .unwrap();
@@ -86,7 +86,7 @@ async fn overview_keeps_monthly_baselines_and_bounds_history_results() {
     drop(raw);
     let cancel = ReadCancellation::new();
     let overview = fixture
-        .database
+        .catalog
         .activity_overview(
             CalendarActivityPeriod::Month {
                 year: 2025,
@@ -110,7 +110,7 @@ async fn overview_keeps_monthly_baselines_and_bounds_history_results() {
     assert_eq!(overview.albums[0].state.play_count, 9);
     for (limit, expected) in [(3, 3), (10, 8)] {
         let report = fixture
-            .database
+            .catalog
             .activity_overview(
                 CalendarActivityPeriod::Month {
                     year: 2025,
@@ -125,7 +125,7 @@ async fn overview_keeps_monthly_baselines_and_bounds_history_results() {
         assert_eq!(report.totals, overview.totals);
     }
     assert_eq!(
-        fixture.database.activity_months().await.unwrap(),
+        fixture.catalog.activity_months().await.unwrap(),
         ["2025-06"]
     );
 }
@@ -134,7 +134,7 @@ async fn overview_keeps_monthly_baselines_and_bounds_history_results() {
 async fn listens_accept_empty_optional_recording_ids() {
     let fixture = fixture().await;
     let (published, mut observed) = tokio::sync::mpsc::unbounded_channel();
-    fixture.database.observe_catalog(move |source, update| {
+    fixture.catalog.observe_catalog(move |source, update| {
         let _ = published.send((source, update));
         std::future::ready(())
     });
@@ -158,7 +158,7 @@ async fn listens_accept_empty_optional_recording_ids() {
         skipped: false,
     };
     let key = fixture
-        .database
+        .catalog
         .record_listen(&listen, None, &[])
         .await
         .unwrap();
@@ -167,7 +167,7 @@ async fn listens_accept_empty_optional_recording_ids() {
     assert!(update.activity && !update.metadata);
     assert_eq!(
         fixture
-            .database
+            .catalog
             .record_listen(&listen, None, &[])
             .await
             .unwrap(),
@@ -185,14 +185,14 @@ async fn listens_accept_empty_optional_recording_ids() {
         },
     };
     let report = fixture
-        .database
+        .catalog
         .import_activity_jsonl(std::io::Cursor::new(serde_json::to_vec(&record).unwrap()))
         .await
         .unwrap();
     assert_eq!((report.accepted, report.skipped), (1, 0));
     let mut exported = Vec::new();
     fixture
-        .database
+        .catalog
         .export_activity_jsonl(&mut exported, None)
         .await
         .unwrap();
@@ -213,7 +213,7 @@ async fn listens_accept_empty_optional_recording_ids() {
 async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     let fixture = fixture().await;
     let (updates, mut observed) = tokio::sync::mpsc::unbounded_channel();
-    fixture.database.observe_catalog(move |_, update| {
+    fixture.catalog.observe_catalog(move |_, update| {
         updates.send(update).unwrap();
         std::future::ready(())
     });
@@ -249,7 +249,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         })
         .collect::<Vec<_>>();
     let key = fixture
-        .database
+        .catalog
         .record_listen(&listen, None, &targets)
         .await
         .expect("record listen");
@@ -258,7 +258,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     assert!(!update.metadata);
     assert_eq!(
         fixture
-            .database
+            .catalog
             .record_listen(&listen, None, &targets)
             .await
             .expect("record listen idempotently"),
@@ -272,7 +272,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
             source: (Some(&SourceId::new("source"))).cloned(),
         })
     })
-        .rows(&fixture.database, 0, 100, &cancel)
+        .rows(&fixture.catalog, 0, 100, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -309,7 +309,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .bind(fixture.source).execute(&mut raw).await.unwrap();
     drop(raw);
     let never = fixture
-        .database
+        .catalog
         .create_smart_playlist(
             "Local never played",
             &library::SmartPlaylistDefinition {
@@ -332,7 +332,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .await
         .unwrap();
     let unplayed = fixture
-        .database
+        .catalog
         .selected_track_uris(
             &library::MemberRead::new(library::Collection::Smart {
                 key: never,
@@ -350,7 +350,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     );
     assert!(!unplayed.contains(&listen.media_uri));
     let catalog = fixture
-        .database
+        .catalog
         .tracks_by_uris(&([(&listen.media_uri).to_string()]), &cancel)
         .await
         .map(|rows| {
@@ -363,7 +363,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         descending: true,
         ..library::MemberRead::new(library::Collection::History { source: None })
     })
-        .rows(&fixture.database, 0, 100, &cancel)
+        .rows(&fixture.catalog, 0, 100, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -380,7 +380,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     assert_eq!(row.metadata.genres[0].name, "Rock");
     assert_eq!(row.state.play_count, 4);
     let (playlist, _) = fixture
-        .database
+        .catalog
         .create_playlist(
             None,
             "History track",
@@ -392,7 +392,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .unwrap()
         .unwrap();
     let entries = fixture
-        .database
+        .catalog
         .playlist_edit_entries(
             playlist,
             &library::MemberRead {
@@ -412,7 +412,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         })
         .unwrap();
     let entries = fixture
-        .database
+        .catalog
         .playlist_entries(&((&entries).to_vec()), &cancel)
         .await
         .unwrap();
@@ -429,7 +429,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     assert_eq!(entry.track.state.play_count, catalog.state.play_count);
     assert_eq!(entry.track.state.last_played, catalog.state.last_played);
     let due = fixture
-        .database
+        .catalog
         .due_listen_deliveries(10, 100, &cancel)
         .await
         .expect("due listen deliveries");
@@ -438,14 +438,14 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     assert_eq!(due[0].listened_millis, 90_000);
     assert!(
         fixture
-            .database
+            .catalog
             .complete_listen_delivery(due[0].outbox_key)
             .await
             .expect("complete one delivery")
     );
     assert!(
         fixture
-            .database
+            .catalog
             .defer_listen_delivery(due[1].outbox_key, 20, Some("offline"))
             .await
             .expect("defer one delivery")
@@ -457,7 +457,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
                 source: (Some(&SourceId::new("source"))).cloned()
             })
         })
-            .rows(&fixture.database, 0, 100, &cancel)
+            .rows(&fixture.catalog, 0, 100, &cancel)
             .await
             .map(|rows| rows
                 .into_iter()
@@ -469,7 +469,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .due_listen_deliveries(10, 100, &cancel)
             .await
             .expect("completed target removed")
@@ -484,7 +484,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     };
     assert_eq!(
         fixture
-            .database
+            .catalog
             .record_listen(&completed, None, &[])
             .await
             .unwrap(),
@@ -494,7 +494,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     for repeated in [&listen, &completed] {
         assert_eq!(
             fixture
-                .database
+                .catalog
                 .record_listen(repeated, None, &[])
                 .await
                 .unwrap(),
@@ -568,13 +568,13 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
         skipped: false,
     };
     let current_track = fixture
-        .database
+        .catalog
         .catalog_identity(library::CatalogKind::Track, &file, &ReadCancellation::new())
         .await
         .map(|identity| identity.map(|identity| library::TrackKey::from_raw(identity.key)))
         .unwrap();
     let file_key = fixture
-        .database
+        .catalog
         .record_listen(&listen, current_track, &[])
         .await
         .unwrap();
@@ -592,7 +592,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     listen.title = "Recorded CUE".into();
     listen.started_at = 200;
     let cue_key = fixture
-        .database
+        .catalog
         .record_listen(&listen, None, &[])
         .await
         .unwrap();
@@ -619,7 +619,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
     listen.title = "Remote".into();
     listen.started_at = 500;
     fixture
-        .database
+        .catalog
         .record_listen(&listen, None, &[])
         .await
         .unwrap();
@@ -630,7 +630,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
             source: (Some(&SourceId::new("source"))).cloned(),
         })
     })
-        .rows(&fixture.database, 0, 100, &cancel)
+        .rows(&fixture.catalog, 0, 100, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -652,7 +652,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
             source: (Some(&SourceId::new("source"))).cloned(),
         })
     })
-        .rows(&fixture.database, 0, 100, &cancel)
+        .rows(&fixture.catalog, 0, 100, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -673,7 +673,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
             source: (Some(&SourceId::new("remote"))).cloned(),
         })
     })
-        .rows(&fixture.database, 0, 100, &cancel)
+        .rows(&fixture.catalog, 0, 100, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -692,7 +692,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
         },
     ] {
         let summary = fixture
-            .database
+            .catalog
             .activity_overview(period, 100, &cancel)
             .await
             .unwrap();
@@ -719,7 +719,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
             descending: true,
             ..library::MemberRead::new(library::Collection::Source(fixture.source))
         })
-            .page(&fixture.database, library::RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, library::RouteSeedWindow::top(), &cancel)
             .await
             .unwrap();
         assert_eq!(
@@ -742,7 +742,7 @@ async fn current_activity_includes_recorded_and_unattributed_local_and_cue_liste
             descending: true,
             ..library::MemberRead::new(library::Collection::Album(fixture.albums[0]))
         })
-            .page(&fixture.database, library::RouteSeedWindow::top(), &cancel)
+            .page(&fixture.catalog, library::RouteSeedWindow::top(), &cancel)
             .await
             .unwrap();
         assert_eq!(
@@ -799,7 +799,7 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
     .join("\n");
     assert_eq!(
         fixture
-            .database
+            .catalog
             .import_activity_jsonl(std::io::Cursor::new(records))
             .await
             .unwrap()
@@ -811,7 +811,7 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
         descending: true,
         ..library::MemberRead::new(library::Collection::History { source: None })
     })
-        .rows(&fixture.database, 0, 100, &cancel)
+        .rows(&fixture.catalog, 0, 100, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -837,7 +837,7 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
             source: (Some(&SourceId::new("source"))).cloned(),
         })
     })
-        .rows(&fixture.database, 0, 100, &cancel)
+        .rows(&fixture.catalog, 0, 100, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -851,7 +851,7 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
         descending: true,
         ..library::MemberRead::new(library::Collection::History { source: None })
     })
-        .rows(&fixture.database, 0, 100, &cancel)
+        .rows(&fixture.catalog, 0, 100, &cancel)
         .await
         .map(|rows| {
             rows.into_iter()
@@ -871,7 +871,7 @@ async fn history_preserves_latest_matching_facts_and_source_scope() {
                 source: (Some(&SourceId::new("other"))).cloned()
             })
         })
-            .rows(&fixture.database, 0, 100, &cancel)
+            .rows(&fixture.catalog, 0, 100, &cancel)
             .await
             .map(|rows| rows
                 .into_iter()
@@ -913,7 +913,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     let valid = serde_json::to_string(&input).unwrap();
     let data = format!("malformed\n{valid}\n{{\"version\":999}}\n{valid}\n");
     let report = fixture
-        .database
+        .catalog
         .import_activity_jsonl(std::io::Cursor::new(data))
         .await
         .unwrap();
@@ -922,7 +922,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     let mut exported = Vec::new();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .export_activity_jsonl(&mut exported, None)
             .await
             .unwrap(),
@@ -933,22 +933,22 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     assert_eq!(restored.current_media_uri, input.current_media_uri);
     assert_eq!(restored.listen, input.listen);
     let empty = tempfile::tempdir().unwrap();
-    let database = library::Database::open(empty.path().join("store.sqlite"))
+    let catalog = library::Catalog::open(empty.path().join("store.sqlite"))
         .await
         .unwrap();
-    database
+    catalog
         .import_activity_jsonl(std::io::Cursor::new(&exported))
         .await
         .unwrap();
-    database.close().await.unwrap();
-    let database = library::Database::open(empty.path().join("store.sqlite"))
+    catalog.close().await.unwrap();
+    let catalog = library::Catalog::open(empty.path().join("store.sqlite"))
         .await
         .unwrap();
     let history = (&library::MemberRead {
         descending: true,
         ..library::MemberRead::new(library::Collection::History { source: None })
     })
-        .rows(&database, 0, 100, &ReadCancellation::new())
+        .rows(&catalog, 0, 100, &ReadCancellation::new())
         .await
         .map(|rows| {
             rows.into_iter()
@@ -962,13 +962,13 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     );
     assert_eq!(history[0].metadata.title, input.listen.title);
     let mut again = Vec::new();
-    database
+    catalog
         .export_activity_jsonl(&mut again, None)
         .await
         .unwrap();
     assert_eq!(again, exported);
     assert!(
-        database
+        catalog
             .due_listen_deliveries(i64::MAX, 100, &ReadCancellation::new())
             .await
             .unwrap()
@@ -976,7 +976,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     );
     let mut csv = Vec::new();
     assert_eq!(
-        database
+        catalog
             .export_activity_csv(&mut csv, library::ActivityCsvFormat::LastFm, None)
             .await
             .unwrap(),
@@ -992,7 +992,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     assert!(!csv.contains("forgotten-server"));
     assert!(!csv.contains("example.org"));
     let mut csv = Vec::new();
-    database
+    catalog
         .export_activity_csv(&mut csv, library::ActivityCsvFormat::ListenBrainz, None)
         .await
         .unwrap();
@@ -1011,7 +1011,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
             current_media_uri: None,
             listen,
         };
-        database
+        catalog
             .import_activity_jsonl(std::io::Cursor::new(serde_json::to_vec(&record).unwrap()))
             .await
             .unwrap();
@@ -1019,7 +1019,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     let source = SourceId::new("forgotten-server");
     let mut scoped = Vec::new();
     assert_eq!(
-        database
+        catalog
             .export_activity_jsonl(&mut scoped, Some(&source))
             .await
             .unwrap(),
@@ -1027,7 +1027,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     );
     assert_eq!(scoped, exported);
     assert_eq!(
-        database
+        catalog
             .export_activity_jsonl(std::io::sink(), None)
             .await
             .unwrap(),
@@ -1035,7 +1035,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     );
     let missing = SourceId::new("missing");
     assert_eq!(
-        database
+        catalog
             .export_activity_jsonl(std::io::sink(), Some(&missing))
             .await
             .unwrap(),
@@ -1047,7 +1047,7 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
     ] {
         let mut scoped = Vec::new();
         assert_eq!(
-            database
+            catalog
                 .export_activity_csv(&mut scoped, format, Some(&source))
                 .await
                 .unwrap(),
@@ -1057,14 +1057,14 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
         assert!(scoped.contains("Björk"));
         assert!(!scoped.contains("Extra"));
         assert_eq!(
-            database
+            catalog
                 .export_activity_csv(std::io::sink(), format, None)
                 .await
                 .unwrap(),
             3
         );
         assert_eq!(
-            database
+            catalog
                 .export_activity_csv(std::io::sink(), format, Some(&missing))
                 .await
                 .unwrap(),

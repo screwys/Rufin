@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use library::{Database, TrackKey, TrackView};
+use library::{Catalog, TrackKey, TrackView};
 use rufin_core::playback::{PlayRequest, QueuePlacement};
 
 use rufin_core::settings::LibraryListSettings;
@@ -52,7 +52,7 @@ pub struct TrackCollectionModel(Rc<TrackModelState>);
 
 impl TrackCollectionModel {
     pub fn new(
-        database: Arc<Database>,
+        catalog: Arc<Catalog>,
         runtime: tokio::runtime::Handle,
         page: rufin_core::browse::MemberPage,
     ) -> Self {
@@ -72,14 +72,14 @@ impl TrackCollectionModel {
             TRACK_OVERSCAN,
             runtime,
             Rc::new(move |_, range, cancellation| {
-                let database = database.clone();
+                let catalog = catalog.clone();
                 let request = load_request.borrow().clone();
                 Box::pin(async move {
                     let TrackRead::Members(request) = request else {
                         unreachable!()
                     };
                     request
-                        .rows(&database, range.start, range.len(), &cancellation)
+                        .rows(&catalog, range.start, range.len(), &cancellation)
                         .await
                         .map(|rows| {
                             rows.into_iter()
@@ -100,7 +100,7 @@ impl TrackCollectionModel {
     }
 
     pub fn related(
-        database: Arc<Database>,
+        catalog: Arc<Catalog>,
         runtime: tokio::runtime::Handle,
         rows: Vec<TrackView>,
     ) -> Self {
@@ -110,9 +110,9 @@ impl TrackCollectionModel {
             TRACK_OVERSCAN,
             runtime,
             Rc::new(move |keys, _, cancel| {
-                let database = database.clone();
+                let catalog = catalog.clone();
                 Box::pin(async move {
-                    database
+                    catalog
                         .tracks(&keys, &cancel)
                         .await
                         .map_err(|error| error.to_string())
@@ -357,11 +357,11 @@ mod tests {
             ..library::MemberRead::new(library::Collection::History { source: None })
         };
         let directory = tempfile::tempdir().unwrap();
-        let database = runtime
-            .block_on(Database::open(directory.path().join("catalog.sqlite3")))
+        let catalog = runtime
+            .block_on(Catalog::open(directory.path().join("catalog.sqlite3")))
             .unwrap();
         let model = TrackCollectionModel::new(
-            Arc::new(database),
+            Arc::new(catalog),
             runtime.handle().clone(),
             rufin_core::browse::MemberPage {
                 read: query,

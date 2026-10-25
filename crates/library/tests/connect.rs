@@ -1,5 +1,5 @@
 use super::support;
-use library::{Database, SourceId};
+use library::{Catalog, SourceId};
 const PROFILE_KEY: &str =
     "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33";
 
@@ -23,8 +23,8 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
         .execute(&mut connection)
         .await
         .unwrap();
-    let mut catalog = fixture.database.catalog("source", None).await.unwrap();
-    catalog
+    let mut observation = fixture.catalog.observe("source", None).await.unwrap();
+    observation
         .write_file_observations(
             &[(
                 library::LocalFileWrite {
@@ -50,7 +50,7 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
         )
         .await
         .unwrap();
-    drop(catalog);
+    drop(observation);
     let file_key: i64 = sqlx::query_scalar(
         "SELECT local_file_key FROM local_files WHERE source_key=?1 AND path=?2",
     )
@@ -62,7 +62,7 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
     sqlx::query("UPDATE tracks SET local_file_key=(SELECT local_file_key FROM local_files WHERE source_key=tracks.source_key AND path=tracks.source_path) WHERE media_uri=?1").bind(uri).execute(&mut connection).await.unwrap();
     assert!(matches!(
         fixture
-            .database
+            .catalog
             .connect_original_file(uri, |path| path)
             .await
             .unwrap(),
@@ -70,14 +70,14 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
     ));
     assert!(
         fixture
-            .database
+            .catalog
             .connect_local_file(uri)
             .await
             .unwrap()
             .is_none()
     );
     fixture
-        .database
+        .catalog
         .create_playlist(
             None,
             "Saved",
@@ -86,7 +86,7 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
         .await
         .unwrap();
     let original_reference = fixture
-        .database
+        .catalog
         .connect_track_reference(uri)
         .await
         .unwrap()
@@ -98,12 +98,7 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
     assert!(value["root_id"].as_str().is_some());
     assert!(value.get("_local_root").is_none());
     assert_eq!(
-        fixture
-            .database
-            .connect_roots("source")
-            .await
-            .unwrap()
-            .len(),
+        fixture.catalog.connect_roots("source").await.unwrap().len(),
         1
     );
 
@@ -119,7 +114,7 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
         ..Default::default()
     };
     fixture
-        .database
+        .catalog
         .commit_download(
             &receipt,
             Some(fixture.source),
@@ -145,17 +140,17 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
         ..receipt.clone()
     };
     fixture
-        .database
+        .catalog
         .connect_save_media_file(&next)
         .await
         .unwrap();
     fixture
-        .database
+        .catalog
         .connect_forget_media_file(&receipt)
         .await
         .unwrap();
     assert!(matches!(
-        fixture.database.connect_local_file(uri).await.unwrap(),
+        fixture.catalog.connect_local_file(uri).await.unwrap(),
         Some(library::LocalMediaLocation::File(path)) if path == copy
     ));
     assert_eq!(std::fs::read(&original).unwrap(), b"original audio");
@@ -176,7 +171,7 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
     );
     let preview_hash = "LEHV6nWB2yk8pyo0adR*.7kCMdnj";
     fixture
-        .database
+        .catalog
         .write_artwork_preview(&cover.key, preview_hash, false)
         .await
         .unwrap();
@@ -192,15 +187,15 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
             .await
             .unwrap();
     fixture
-        .database
-        .catalog("source", Some(0))
+        .catalog
+        .observe("source", Some(0))
         .await
         .unwrap()
         .complete_source_observation(0, &[], None)
         .await
         .unwrap();
     let profile = library::profile::ProfileStore::open(
-        fixture.database.clone(),
+        fixture.catalog.clone(),
         1,
         PROFILE_KEY.parse().unwrap(),
     )
@@ -219,7 +214,7 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
             .unwrap();
     assert_eq!(after, before);
     let receiver_path = fixture._directory.path().join("receiver.sqlite");
-    let receiver = Database::open(&receiver_path).await.unwrap();
+    let receiver = Catalog::open(&receiver_path).await.unwrap();
     let receiver_cover = library::ArtworkCandidate::new(
         library::ArtworkImage::Artist {
             name: "Cached artist".into(),
@@ -343,7 +338,7 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
         .unwrap();
     let file_identity = serde_json::json!(["source", original.to_str().unwrap()]).to_string();
     let mut mapped = [
-        Database::connect_record_on(&mut received, "catalog:file", &file_identity)
+        Catalog::connect_record_on(&mut received, "catalog:file", &file_identity)
             .await
             .unwrap(),
     ];
@@ -370,11 +365,11 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
     assert_eq!(reused[0].parse_version, Some(7));
     assert_eq!(reused[0].state, library::LocalFileState::Accepted);
     assert!(reused[0].current_output);
-    let mut catalog = receiver.catalog("source", None).await.unwrap();
+    let mut observation = receiver.observe("source", None).await.unwrap();
     let mut observed = mapped_file.file.clone();
     observed.state = library::LocalFileState::Observed;
     observed.parse_version = None;
-    catalog
+    observation
         .write_file_observations(&[(observed, Vec::new())], Vec::new(), true)
         .await
         .unwrap();
@@ -385,11 +380,11 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
     assert_eq!(reused[0].parse_version, Some(7));
     assert_eq!(reused[0].state, library::LocalFileState::Accepted);
     assert!(reused[0].current_output);
-    catalog
+    observation
         .write_file_observations(&[(mapped_file.file, Vec::new())], Vec::new(), true)
         .await
         .unwrap();
-    drop(catalog);
+    drop(observation);
     receiving_profile
         .merge_database(&exported, &PROFILE_KEY.parse().unwrap())
         .await
@@ -424,7 +419,7 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
     .await
     .unwrap();
     let current = [
-        Database::connect_record_on(&mut received, "catalog:file", &file_identity)
+        Catalog::connect_record_on(&mut received, "catalog:file", &file_identity)
             .await
             .unwrap(),
     ];
@@ -435,7 +430,7 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
         .await
         .unwrap();
     let mut forwarded = support::connection(&forwarded).await;
-    let file = Database::connect_record_on(&mut forwarded, "catalog:file", &file_identity)
+    let file = Catalog::connect_record_on(&mut forwarded, "catalog:file", &file_identity)
         .await
         .unwrap();
     assert_eq!(file, current[0]);
@@ -499,7 +494,7 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
             ..Default::default()
         };
         fixture
-            .database
+            .catalog
             .reconcile_source(
                 &source,
                 if scheme == "smb" { "smb" } else { "webdav" },
@@ -508,8 +503,8 @@ async fn connect_uses_scanned_originals_and_seeds_saved_media_references() {
             .await
             .unwrap();
         fixture
-            .database
-            .catalog(source.as_str(), None)
+            .catalog
+            .observe(source.as_str(), None)
             .await
             .unwrap()
             .write_file_observations(&[(file, Vec::new())], vec![track], true)
@@ -577,7 +572,7 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_and_source_catalog(
         fixture.track_uris[0].clone(),
     ];
     let source_profile = library::profile::ProfileStore::open(
-        fixture.database.clone(),
+        fixture.catalog.clone(),
         1,
         PROFILE_KEY.parse().unwrap(),
     )
@@ -587,14 +582,14 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_and_source_catalog(
         .bind_profile("shared", "source")
         .await
         .unwrap();
-    fixture.database.connect_set_active(true).await.unwrap();
+    fixture.catalog.connect_set_active(true).await.unwrap();
     let snapshot = fixture._directory.path().join("native-index.sqlite");
     source_profile
         .export_database(&snapshot, &PROFILE_KEY.parse().unwrap(), &[], &[])
         .await
         .unwrap();
     let (playlist, identity) = fixture
-        .database
+        .catalog
         .create_playlist(
             None,
             "Saved",
@@ -603,8 +598,8 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_and_source_catalog(
         .await
         .unwrap()
         .unwrap();
-    fixture.database.connect_set_active(true).await.unwrap();
-    while fixture.database.connect_seed_page().await.unwrap() {}
+    fixture.catalog.connect_set_active(true).await.unwrap();
+    while fixture.catalog.connect_seed_page().await.unwrap() {}
     let identity_key = serde_json::json!([null, identity]).to_string();
     let entry_keys: Vec<String> = sqlx::query_scalar(
         "SELECT json_array(NULL,?1,object_id) FROM playlist_entries WHERE playlist_key=?2",
@@ -621,7 +616,7 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_and_source_catalog(
     let mut records = Vec::new();
     for (kind, key) in &keys {
         records.push(
-            Database::connect_record_on(&mut connection, kind, key)
+            Catalog::connect_record_on(&mut connection, kind, key)
                 .await
                 .unwrap(),
         );
@@ -643,7 +638,7 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_and_source_catalog(
     .unwrap();
     assert_eq!(references, fixture.track_uris[..2]);
     let path = fixture._directory.path().join("received.sqlite");
-    let received = Database::open(&path).await.unwrap();
+    let received = Catalog::open(&path).await.unwrap();
     let receiver_profile =
         library::profile::ProfileStore::open(received.clone(), 2, PROFILE_KEY.parse().unwrap())
             .await
@@ -750,12 +745,12 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_and_source_catalog(
             .is_some()
     );
     fixture
-        .database
+        .catalog
         .delete_playlist(None, playlist)
         .await
         .unwrap();
     let tombstones = vec![
-        Database::connect_record_on(
+        Catalog::connect_record_on(
             &mut support::connection(&fixture.path).await,
             "playlist",
             &identity_key,
@@ -809,7 +804,7 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_and_source_catalog(
     let path = file_path.to_str().unwrap();
     for object_id in ["discovered", "renamed"] {
         received
-            .catalog("source", None)
+            .observe("source", None)
             .await
             .unwrap()
             .write_file_observations(
@@ -860,7 +855,7 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_and_source_catalog(
             .any(|(_, key, deleted)| key == &identity && !*deleted)
     );
     assert!(!changes.iter().any(|(kind, _, _)| kind == "catalog:track"));
-    let result = Database::connect_record_on(&mut imported, "catalog:file", &identity)
+    let result = Catalog::connect_record_on(&mut imported, "catalog:file", &identity)
         .await
         .unwrap();
     let accepted = result.value.unwrap()["tracks"].as_array().unwrap().clone();

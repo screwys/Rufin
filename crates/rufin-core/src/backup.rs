@@ -40,7 +40,7 @@ struct PlaylistPins {
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct BackupOwner {
     default_directory: std::path::PathBuf,
-    database: Arc<library::Database>,
+    catalog: Arc<library::Catalog>,
     settings: SettingsFile,
     settings_apply: SettingsOwner,
     secrets: Arc<SwitchableSecretStore>,
@@ -52,7 +52,7 @@ pub struct BackupOwner {
 }
 impl BackupOwner {
     pub(crate) fn new(
-        database: Arc<library::Database>,
+        catalog: Arc<library::Catalog>,
         settings: SettingsFile,
         settings_apply: SettingsOwner,
         secrets: Arc<SwitchableSecretStore>,
@@ -63,7 +63,7 @@ impl BackupOwner {
     ) -> Arc<Self> {
         Arc::new(Self {
             default_directory,
-            database,
+            catalog,
             settings,
             settings_apply,
             secrets,
@@ -157,7 +157,7 @@ impl BackupOwner {
         };
         let mut output = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
         backup::write_backup(
-            &self.database,
+            &self.catalog,
             &mut output,
             backup::BackupOptions {
                 contents,
@@ -332,7 +332,7 @@ impl BackupOwner {
                             .await
                             .map_err(|e| e.to_string())?;
                     }
-                    let result = backup::restore_backup(&self.database, &preview.staged, contents)
+                    let result = backup::restore_backup(&self.catalog, &preview.staged, contents)
                         .await
                         .map_err(|e| e.to_string());
                     if let Err(error) = result {

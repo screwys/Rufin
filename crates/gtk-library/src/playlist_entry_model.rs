@@ -31,7 +31,7 @@ struct PlaylistEntryModelState {
 
 impl PlaylistEntryModel {
     pub fn new(
-        database: Arc<library::Database>,
+        catalog: Arc<library::Catalog>,
         runtime: tokio::runtime::Handle,
         playlist_key: PlaylistKey,
         count: usize,
@@ -47,17 +47,17 @@ impl PlaylistEntryModel {
         };
         let applied = Rc::new(RefCell::new(request.clone()));
         let load_request = Rc::clone(&applied);
-        let loader_database = Arc::clone(&database);
+        let loader_catalog = Arc::clone(&catalog);
         let load = Rc::new(
             move |_: Vec<PlaylistEntryKey>,
                   range: std::ops::Range<usize>,
                   cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&loader_database);
+                let catalog = Arc::clone(&loader_catalog);
                 let request = load_request.borrow().clone();
                 Box::pin(async move {
                     request
                         .query
-                        .rows(&database, range.start, range.len(), &cancellation)
+                        .rows(&catalog, range.start, range.len(), &cancellation)
                         .await
                         .map(|rows| {
                             rows.into_iter()

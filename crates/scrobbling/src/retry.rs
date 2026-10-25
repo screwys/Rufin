@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[cfg(test)]
 use library::ListenWrite;
 use library::TrackMetadata;
-use library::{Database, ListenDeliveryTarget, PendingListenDelivery, ReadCancellation};
+use library::{Catalog, ListenDeliveryTarget, PendingListenDelivery, ReadCancellation};
 use md5_digest::{Digest, Md5};
 use reqwest::blocking::Client;
 use tracing::warn;
@@ -197,7 +197,7 @@ struct Worker {
 
 impl Worker {
     fn new(
-        database: Database,
+        catalog: Catalog,
         runtime: tokio::runtime::Handle,
         state: Arc<Mutex<DeliveryState>>,
     ) -> Result<Self, String> {
@@ -211,7 +211,7 @@ impl Worker {
         let worker_pending = Arc::clone(&pending);
         let thread = std::thread::Builder::new()
             .name("rufin-scrobbling".to_string())
-            .spawn(move || run_worker(client, database, runtime, state, receiver, worker_pending))
+            .spawn(move || run_worker(client, catalog, runtime, state, receiver, worker_pending))
             .map_err(|error| error.to_string())?;
         Ok(Self {
             sender,
@@ -257,7 +257,7 @@ impl Drop for Worker {
 }
 
 pub struct Scrobbler {
-    database: Database,
+    catalog: Catalog,
     runtime: tokio::runtime::Handle,
     state: Arc<Mutex<DeliveryState>>,
     worker: Worker,
@@ -269,7 +269,7 @@ impl Scrobbler {
     }
 
     pub fn new(
-        database: Database,
+        catalog: Catalog,
         runtime: tokio::runtime::Handle,
         mut settings: Settings,
         private_mode: bool,
@@ -279,9 +279,9 @@ impl Scrobbler {
             settings,
             private_mode,
         }));
-        let worker = Worker::new(database.clone(), runtime.clone(), Arc::clone(&state))?;
+        let worker = Worker::new(catalog.clone(), runtime.clone(), Arc::clone(&state))?;
         Ok(Self {
-            database,
+            catalog,
             runtime,
             state,
             worker,
@@ -395,7 +395,7 @@ impl Scrobbler {
             {
                 self.runtime
                     .block_on(
-                        self.database
+                        self.catalog
                             .remove_listen_deliveries(service.as_str(), &account_id),
                     )
                     .map_err(|error| error.to_string())?;
@@ -405,7 +405,7 @@ impl Scrobbler {
         for (service, account_id) in reauthorized {
             self.runtime
                 .block_on(
-                    self.database
+                    self.catalog
                         .wake_listen_deliveries(service.as_str(), &account_id, now),
                 )
                 .map_err(|error| error.to_string())?;
@@ -464,7 +464,7 @@ impl Scrobbler {
 
 fn run_worker(
     client: Client,
-    database: Database,
+    catalog: Catalog,
     runtime: tokio::runtime::Handle,
     state: Arc<Mutex<DeliveryState>>,
     receiver: Receiver<()>,
@@ -483,7 +483,7 @@ fn run_worker(
             Err(_) => return,
         };
         if wake || now >= retry_at {
-            deliver_due(&client, &database, &runtime, &state, &pending);
+            deliver_due(&client, &catalog, &runtime, &state, &pending);
             retry_at = Instant::now() + RETRY_POLL;
             continue;
         }
@@ -535,7 +535,7 @@ fn deliver_now_playing(
 
 fn deliver_due(
     client: &Client,
-    database: &Database,
+    catalog: &Catalog,
     runtime: &tokio::runtime::Handle,
     state: &Arc<Mutex<DeliveryState>>,
     work: &Mutex<PendingWork>,
@@ -545,7 +545,7 @@ fn deliver_due(
     }
     let now = unix_seconds();
     let cancellation = ReadCancellation::new();
-    let pending = match runtime.block_on(database.due_listen_deliveries(
+    let pending = match runtime.block_on(catalog.due_listen_deliveries(
         now,
         DELIVERY_BATCH_SIZE,
         &cancellation,
@@ -562,7 +562,7 @@ fn deliver_due(
             return;
         }
         let Some(service) = DeliveryService::parse(&pending.service) else {
-            let _ = runtime.block_on(database.complete_listen_delivery(pending.outbox_key));
+            let _ = runtime.block_on(catalog.complete_listen_delivery(pending.outbox_key));
             continue;
         };
         let account = (service, pending.account_id.clone());
@@ -577,7 +577,7 @@ fn deliver_due(
             started_at_unix_seconds: pending.started_at,
         };
         if finish_delivery(
-            database,
+            catalog,
             runtime,
             pending,
             now,
@@ -590,7 +590,7 @@ fn deliver_due(
 }
 
 fn finish_delivery(
-    database: &Database,
+    catalog: &Catalog,
     runtime: &tokio::runtime::Handle,
     pending: PendingListenDelivery,
     now: i64,
@@ -599,7 +599,7 @@ fn finish_delivery(
     match result {
         Ok(()) => {
             if let Err(error) =
-                runtime.block_on(database.complete_listen_delivery(pending.outbox_key))
+                runtime.block_on(catalog.complete_listen_delivery(pending.outbox_key))
             {
                 warn!(%error, "could not complete external scrobbling work");
             }
@@ -610,7 +610,7 @@ fn finish_delivery(
             let next_attempt_at = now.saturating_add(retry_delay(
                 u32::try_from(pending.attempts).unwrap_or(u32::MAX),
             ));
-            if let Err(store_error) = runtime.block_on(database.defer_listen_delivery(
+            if let Err(store_error) = runtime.block_on(catalog.defer_listen_delivery(
                 pending.outbox_key,
                 next_attempt_at,
                 Some(&error),
@@ -626,7 +626,7 @@ fn finish_delivery(
         }
         Err(DeliveryError::CredentialBlocked(error)) => {
             let service = pending.service.clone();
-            if let Err(store_error) = runtime.block_on(database.block_listen_deliveries(
+            if let Err(store_error) = runtime.block_on(catalog.block_listen_deliveries(
                 &pending.service,
                 &pending.account_id,
                 &error,
@@ -648,7 +648,7 @@ fn finish_delivery(
                 "external scrobble was rejected"
             );
             if let Err(store_error) =
-                runtime.block_on(database.complete_listen_delivery(pending.outbox_key))
+                runtime.block_on(catalog.complete_listen_delivery(pending.outbox_key))
             {
                 warn!(%store_error, "could not discard rejected external scrobble");
             }
@@ -813,7 +813,7 @@ fn unix_seconds() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use library::{CatalogSort, Database, ReadCancellation, SourceId};
+    use library::{Catalog, CatalogSort, ReadCancellation, SourceId};
 
     use super::*;
 
@@ -844,11 +844,11 @@ mod tests {
     fn delayed_credentials_preserve_private_mode_preferences_and_new_account() {
         let directory = tempfile::tempdir().unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let database = runtime
-            .block_on(Database::open(directory.path().join("state.sqlite")))
+        let catalog = runtime
+            .block_on(Catalog::open(directory.path().join("state.sqlite")))
             .unwrap();
         let scrobbler = Scrobbler::new(
-            database,
+            catalog,
             runtime.handle().clone(),
             Settings::default(),
             false,
@@ -875,15 +875,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn one_completed_play_owns_activity_and_each_delivery_target_once() {
         let directory = tempfile::tempdir().expect("temporary Store");
-        let database = Database::open(directory.path().join("library.sqlite3"))
+        let catalog = Catalog::open(directory.path().join("library.sqlite3"))
             .await
-            .expect("open Database");
-        database
+            .expect("open Catalog");
+        catalog
             .reconcile_source(&library::SourceId::new("source"), "server", "Source")
             .await
             .unwrap();
-        database
-            .catalog("source", None)
+        catalog
+            .observe("source", None)
             .await
             .unwrap()
             .apply_catalog(
@@ -911,13 +911,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let source = database
+        let source = catalog
             .source_identity_key(&library::SourceId::new("source"))
             .await
             .unwrap()
             .unwrap();
         let cancellation = ReadCancellation::new();
-        let track_uri = database
+        let track_uri = catalog
             .selected_track_uris(
                 &library::MemberRead {
                     collection: library::Collection::Source(source),
@@ -950,14 +950,14 @@ mod tests {
         };
         let scrobbler = tokio::task::block_in_place(|| {
             Scrobbler::new(
-                database.clone(),
+                catalog.clone(),
                 tokio::runtime::Handle::current(),
                 settings,
                 false,
             )
         })
         .expect("start Scrobbler");
-        let track = database
+        let track = catalog
             .track_references_for_uris(std::slice::from_ref(&track_uri), &cancellation)
             .await
             .expect("materialize Track")
@@ -990,11 +990,11 @@ mod tests {
         early = listen.clone();
         early.skipped = true;
         assert!(scrobbler.listen_delivery_targets(&early).is_empty());
-        database
+        catalog
             .record_listen(&listen, None, &deliveries)
             .await
             .expect("record Activity");
-        database
+        catalog
             .record_listen(&listen, None, &deliveries)
             .await
             .expect("record Activity idempotently");
@@ -1006,12 +1006,12 @@ mod tests {
                     source: Some(SourceId::new("source"))
                 })
             }
-            .count(&database, &cancellation)
+            .count(&catalog, &cancellation)
             .await
             .expect("Activity"),
             1
         );
-        let due = database
+        let due = catalog
             .due_listen_deliveries(i64::MAX, 10, &cancellation)
             .await
             .expect("delivery outbox");
@@ -1021,14 +1021,14 @@ mod tests {
         assert_eq!(due[0].listened_millis, 90_000);
         let lastfm_account = opaque_account_id(DeliveryService::LastFm, "listener");
         assert_eq!(
-            database
+            catalog
                 .block_listen_deliveries("lastfm", &lastfm_account, "invalid session")
                 .await
                 .expect("block account"),
             1
         );
         assert_eq!(
-            database
+            catalog
                 .due_listen_deliveries(i64::MAX, 10, &cancellation)
                 .await
                 .expect("blocked outbox")
@@ -1036,14 +1036,14 @@ mod tests {
             1
         );
         assert_eq!(
-            database
+            catalog
                 .wake_listen_deliveries("lastfm", &lastfm_account, 101)
                 .await
                 .expect("wake account"),
             1
         );
         assert_eq!(
-            database
+            catalog
                 .remove_listen_deliveries("lastfm", &lastfm_account)
                 .await
                 .expect("remove account"),
@@ -1056,7 +1056,7 @@ mod tests {
                     source: Some(SourceId::new("source"))
                 })
             }
-            .count(&database, &cancellation)
+            .count(&catalog, &cancellation)
             .await
             .expect("Activity after account removal"),
             1

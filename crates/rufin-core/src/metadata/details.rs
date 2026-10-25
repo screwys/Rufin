@@ -77,14 +77,14 @@ pub async fn media_details(
 ) -> LibraryResult<MediaDetails> {
     let runtime = source.shared.runtime.clone();
     super::on_runtime(runtime, async {
-        let db = &source.shared.database;
+        let catalog = &source.shared.catalog;
         let cancel = ReadCancellation::new();
         let unavailable = || LibraryError::InvalidRequest(tr(msgid("Item is no longer available")));
         let mut origin = section(msgid("Source"));
         let mut ids = section(msgid("MusicBrainz"));
         let (mut details, source_id, object_id, state) = match &item {
             MediaDetailsItem::Track(uri) => {
-                let track = db.track(uri, &cancel).await?.ok_or_else(unavailable)?;
+                let track = catalog.track(uri, &cancel).await?.ok_or_else(unavailable)?;
                 let mut details = MediaDetails {
                     heading: tr(msgid("Track details")),
                     title: track.metadata.title.clone(),
@@ -240,7 +240,7 @@ pub async fn media_details(
                     msgid("File path"),
                     track.access.source_path.clone(),
                 );
-                if let Some(size) = db.media_file_size(uri).await? {
+                if let Some(size) = catalog.media_file_size(uri).await? {
                     add(
                         &mut origin,
                         if track.access.cue_path.is_some() {
@@ -303,7 +303,7 @@ pub async fn media_details(
                 (details, track.source_id, track.object_id, track.state)
             }
             MediaDetailsItem::Album(uri) => {
-                let album = db
+                let album = catalog
                     .album(uri, true, &cancel)
                     .await?
                     .ok_or_else(unavailable)?;
@@ -378,7 +378,7 @@ pub async fn media_details(
                 media_uri: uri,
                 album_artist,
             } => {
-                let artist = db
+                let artist = catalog
                     .artist(uri, *album_artist, true, &cancel)
                     .await?
                     .ok_or_else(unavailable)?;

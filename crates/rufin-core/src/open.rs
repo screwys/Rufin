@@ -8,13 +8,13 @@ use library::{PlaylistFile, PlaylistFormat, QueueProvenance, TrackReference};
 
 pub async fn arguments(
     queue: Arc<crate::playback::PlaybackOwner>,
-    database: &library::Database,
+    catalog: &library::Catalog,
     local: Option<&sources::SourceConfiguration>,
     arguments: Vec<std::ffi::OsString>,
 ) -> Result<(), String> {
     files(
         queue,
-        database,
+        catalog,
         local,
         arguments
             .into_iter()
@@ -26,12 +26,12 @@ pub async fn arguments(
 
 pub async fn files(
     queue: Arc<crate::playback::PlaybackOwner>,
-    database: &library::Database,
+    catalog: &library::Catalog,
     local: Option<&sources::SourceConfiguration>,
     files: Vec<gio::File>,
 ) -> Result<(), String> {
     let local = local.cloned();
-    let database = database.clone();
+    let catalog = catalog.clone();
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         let document_roots = match local
@@ -68,7 +68,7 @@ pub async fn files(
                     .collect(),
             );
             let entries = runtime
-                .block_on(database.queue_entries(input, None))
+                .block_on(catalog.queue_entries(input, None))
                 .map_err(|error| error.to_string())?
                 .entries;
             queue.play_selection(crate::playback::PlayRequest::from_input(
@@ -177,7 +177,7 @@ pub async fn files(
                         sources::document_identity(&uri).map_err(|error| error.to_string())?;
                     item.media_uri = library::document_media_uri(&identity);
                     runtime
-                        .block_on(database.upsert_local_locator(&library::LocalLocatorWrite {
+                        .block_on(catalog.upsert_local_locator(&library::LocalLocatorWrite {
                             source_id: None,
                             media_uri: item.media_uri.clone(),
                             origin: "import".into(),

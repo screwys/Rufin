@@ -20,7 +20,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
 async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {
     let settings = products.settings.load();
     let sidebar = settings.sidebar;
-    let database = &products.library;
+    let catalog = &products.library;
     let cancellation = ReadCancellation::new();
     let configured = products.source.list_sources();
     let mut items = Vec::new();
@@ -32,7 +32,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 source_id,
             } => {
                 let uri = library::source_entity_uri(source_id, "album", album_id);
-                let row = database
+                let row = catalog
                     .album(&uri, false, &cancellation)
                     .await
                     .map_err(internal)?;
@@ -44,7 +44,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 album_artist,
             } => {
                 let uri = library::source_entity_uri(source_id, "artist", artist_id);
-                let row = database
+                let row = catalog
                     .artist(&uri, *album_artist, false, &cancellation)
                     .await
                     .map_err(internal)?;
@@ -55,7 +55,7 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 source_id,
             } => {
                 let uri = library::source_entity_uri(source_id, "genre", genre_id);
-                let row = database
+                let row = catalog
                     .genre(&uri, None, &cancellation)
                     .await
                     .map_err(internal)?;
@@ -65,14 +65,14 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                 source_id,
                 playlist_id,
             } => {
-                let Some(key) = database
+                let Some(key) = catalog
                     .playlist_key_by_identity(source_id.as_ref(), playlist_id, &cancellation)
                     .await
                     .map_err(internal)?
                 else {
                     continue;
                 };
-                let row = database
+                let row = catalog
                     .playlists(&[key], &cancellation)
                     .await
                     .map_err(internal)?
@@ -83,14 +83,14 @@ async fn list(State(products): State<ProductHandles>) -> Result<Response<Body>, 
                     })
             }
             SidebarPin::SmartPlaylist { playlist_id } => {
-                let Some(key) = database
+                let Some(key) = catalog
                     .smart_playlist_key_by_object(playlist_id, &cancellation)
                     .await
                     .map_err(internal)?
                 else {
                     continue;
                 };
-                let row = database
+                let row = catalog
                     .smart_playlist_rows(&[key], catalog::now(), &cancellation)
                     .await
                     .map_err(internal)?

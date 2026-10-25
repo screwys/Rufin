@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{Connection, FromRow};
 
-use crate::{Database, LibraryError, LibraryResult, ReadCancellation};
+use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation};
 
 const LYRICS_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 
@@ -50,7 +50,7 @@ impl TryFrom<LyricsScalar> for LyricsCacheRow {
     }
 }
 
-impl Database {
+impl Catalog {
     pub async fn uncached_source_lyrics_page(
         &self,
         source: crate::SourceKey,

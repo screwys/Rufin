@@ -28,7 +28,7 @@ use artwork::Artwork;
 use async_channel::{Receiver, Sender};
 use downloads::Downloads;
 use library::{
-    CatalogUpdate, Database, FavoriteTarget, FolderChoice, FolderKey, ReadCancellation, SourceKey,
+    Catalog, CatalogUpdate, FavoriteTarget, FolderChoice, FolderKey, ReadCancellation, SourceKey,
 };
 use secrets::{SecretStorageMode, SwitchableSecretStore};
 use sources::{
@@ -107,7 +107,7 @@ pub(crate) struct Shared {
     home_showcase_variation: i64,
     home_explore_variation: std::sync::atomic::AtomicI64,
     pub(crate) artwork: Artwork,
-    pub(crate) database: Arc<Database>,
+    pub(crate) catalog: Arc<Catalog>,
     downloads: Downloads,
     pub(crate) settings: SettingsFile,
     pub(crate) secrets: Arc<SwitchableSecretStore>,
@@ -149,7 +149,7 @@ impl Shared {
         source: SourceKey,
     ) -> Result<(usize, usize), String> {
         let counts = self
-            .database
+            .catalog
             .source_counts(source, &ReadCancellation::new())
             .await
             .map_err(string_error)?;
@@ -162,7 +162,7 @@ impl Shared {
 
     async fn load_source_counts(&self) -> Result<(), String> {
         let counts = self
-            .database
+            .catalog
             .all_source_counts()
             .await
             .map_err(string_error)?;
@@ -286,7 +286,7 @@ impl Shared {
             ids
         };
         for id in retired {
-            self.database
+            self.catalog
                 .invalidate_source_observation(&id)
                 .await
                 .map_err(string_error)?;
@@ -426,7 +426,7 @@ impl Shared {
 impl SourceOwner {
     pub(crate) fn open_dormant(
         artwork: Artwork,
-        database: Arc<Database>,
+        catalog: Arc<Catalog>,
         downloads: Downloads,
         settings: SettingsFile,
         secrets: Arc<SwitchableSecretStore>,
@@ -452,7 +452,7 @@ impl SourceOwner {
             home_showcase_variation: home_variation,
             home_explore_variation: std::sync::atomic::AtomicI64::new(home_variation),
             artwork,
-            database,
+            catalog,
             downloads,
             settings,
             secrets,
@@ -477,7 +477,7 @@ impl SourceOwner {
             started: AtomicBool::new(false),
         });
         let weak = Arc::downgrade(&shared);
-        shared.database.observe_catalog(move |source, update| {
+        shared.catalog.observe_catalog(move |source, update| {
             let shared = weak.upgrade();
             async move {
                 if let Some(shared) = shared {
@@ -713,7 +713,7 @@ impl SourceOwner {
         self.shared.downloads.clear(source_id.clone(), false);
         if let Err(error) = self
             .shared
-            .database
+            .catalog
             .clear_source_waveform_cache(source_id)
             .await
         {
@@ -788,7 +788,7 @@ impl SourceOwner {
         let configured = configured_source(&self.shared.settings.load().sources, &source_id)?;
         let publication = match self
             .shared
-            .database
+            .catalog
             .cached_source(source_id.as_str(), &ReadCancellation::new())
             .await
             .map_err(string_error)?
@@ -796,7 +796,7 @@ impl SourceOwner {
             Some(cached) => cached,
             None => self
                 .shared
-                .database
+                .catalog
                 .reconcile_source(
                     &source_id,
                     &configured.configuration.kind,
@@ -885,11 +885,7 @@ impl SourceOwner {
                                 .refresh_progress(&source_id, &token, value)
                         };
                         let result = refresh_source
-                            .catch_up_local(
-                                &refresh_owner.shared.database,
-                                &progress,
-                                token.clone(),
-                            )
+                            .catch_up_local(&refresh_owner.shared.catalog, &progress, token.clone())
                             .await;
                         refresh_owner
                             .finish_source_refresh(&source_id, &token, result)
@@ -916,14 +912,14 @@ impl SourceOwner {
     ) -> Result<(Arc<[FolderChoice]>, Option<FolderKey>), String> {
         let folders = self
             .shared
-            .database
+            .catalog
             .music_folders(source_key)
             .await
             .map_err(string_error)?;
         let selected = match configured.music_folder_id.as_deref() {
             Some(object_id) => self
                 .shared
-                .database
+                .catalog
                 .folder_identity_key(source_key, object_id)
                 .await
                 .map_err(string_error)?,
@@ -1081,7 +1077,7 @@ impl SourceOwner {
                 continue;
             }
             match observer
-                .apply_pending(&owner.shared.database, source_key)
+                .apply_pending(&owner.shared.catalog, source_key)
                 .await
             {
                 Ok(true) => continue,
@@ -1117,7 +1113,7 @@ impl SourceOwner {
         }
         let progress = |value| self.shared.refresh_progress(source_id, &token, value);
         let outcome = source
-            .acquire_catalog(&self.shared.database, &progress, token.clone(), force)
+            .acquire_catalog(&self.shared.catalog, &progress, token.clone(), force)
             .await;
         let outcome = outcome.map(|_| ());
         let result = outcome
@@ -1260,7 +1256,7 @@ impl SourceOwner {
                 || credential.is_some()
             {
                 self.shared
-                    .database
+                    .catalog
                     .invalidate_source_observation(&replacement.configuration.source_id)
                     .await
                     .map_err(string_error)?;
@@ -1279,7 +1275,7 @@ impl SourceOwner {
                     .collect::<Vec<_>>();
                 if let Err(error) = self
                     .shared
-                    .database
+                    .catalog
                     .remove_playlist_file_roots(&replacement.configuration.source_id, &removed)
                     .await
                 {
@@ -1291,7 +1287,7 @@ impl SourceOwner {
             let source = self.cache_connected(&replacement, Arc::new(source));
             let publication = self
                 .shared
-                .database
+                .catalog
                 .reconcile_source(
                     &replacement.configuration.source_id,
                     &replacement.configuration.kind,
@@ -1423,7 +1419,7 @@ impl SourceOwner {
                 }
                 if !same_native_input(&configured.configuration, &configuration) {
                     self.shared
-                        .database
+                        .catalog
                         .invalidate_source_observation(&source_id)
                         .await
                         .map_err(string_error)?;
@@ -1445,7 +1441,7 @@ impl SourceOwner {
                     Ok(())
                 })?;
                 self.shared
-                    .database
+                    .catalog
                     .reconcile_source(&source_id, &configuration.kind, &configuration.name)
                     .await
                     .map_err(string_error)?;
@@ -1553,7 +1549,7 @@ impl SourceOwner {
     pub(crate) async fn artwork_invalidated(&self, source_id: &SourceId, change: CatalogChange) {
         let source = match self
             .shared
-            .database
+            .catalog
             .cached_source(source_id.as_str(), &ReadCancellation::new())
             .await
         {
@@ -1831,9 +1827,9 @@ impl SourceOwner {
     }
 
     pub fn prepare_collection(&self, media_uri: String) -> Receiver<Result<(), String>> {
-        self.reply(move |owner, database| async move {
+        self.reply(move |owner, catalog| async move {
             let source = owner.media_client(&media_uri).await?;
-            let result = source.prepare_collection(&database, &media_uri).await;
+            let result = source.prepare_collection(&catalog, &media_uri).await;
             result.map_err(string_error)
         })
     }
@@ -1874,7 +1870,7 @@ impl SourceOwner {
         self.open_client(source_id)
             .await?
             .browse_folder(
-                &self.shared.database,
+                &self.shared.catalog,
                 folder_object_id.as_deref(),
                 music_folder_object_id.as_deref(),
             )
@@ -1907,7 +1903,7 @@ impl SourceOwner {
         album_artist: bool,
         folder: Option<library::FolderKey>,
     ) -> Receiver<Result<String, String>> {
-        self.reply(move |owner, database| async move {
+        self.reply(move |owner, catalog| async move {
             let Some(source_id) = owner.media_source_id(&media_uri).await? else {
                 let path = url::Url::parse(&media_uri)
                     .ok()
@@ -1922,7 +1918,7 @@ impl SourceOwner {
             let configuration = owner
                 .configuration(&source_id)
                 .ok_or_else(source_access_unavailable)?;
-            let (first, last) = database
+            let (first, last) = catalog
                 .collection_source_path_bounds(&media_uri, album_artist, folder)
                 .await
                 .map_err(string_error)?
@@ -2012,7 +2008,7 @@ impl SourceOwner {
                 persisted_source_id = Some(configuration.source_id.clone());
                 let source_state = owner
                     .shared
-                    .database
+                    .catalog
                     .reconcile_source(
                         &configuration.source_id,
                         &configuration.kind,
@@ -2297,7 +2293,7 @@ impl SourceOwner {
             })?
         };
         self.shared
-            .database
+            .catalog
             .reconcile_source(
                 &configuration.source_id,
                 &configuration.kind,
@@ -2461,9 +2457,9 @@ impl SourceOwner {
         &self,
         source_id: SourceId,
     ) -> sources::SourceResult<LocalAccessStatus> {
-        self.reply(move |owner, database| async move {
+        self.reply(move |owner, catalog| async move {
             let configured = configured_source(&owner.shared.settings.load().sources, &source_id)?;
-            let Some(source) = database
+            let Some(source) = catalog
                 .source_identity_key(&source_id)
                 .await
                 .map_err(string_error)?
@@ -2471,12 +2467,12 @@ impl SourceOwner {
                 return Ok(LocalAccessStatus::default());
             };
             let cancellation = ReadCancellation::new();
-            let (_, total_track_count) = database
+            let (_, total_track_count) = catalog
                 .source_counts(source, &cancellation)
                 .await
                 .map_err(string_error)?;
             let matched_track_count = match configured.local_access {
-                Some(access) => database
+                Some(access) => catalog
                     .mapping_formula_match_count(
                         source,
                         access.root_path.to_string_lossy().as_ref(),
@@ -2487,7 +2483,7 @@ impl SourceOwner {
                     .map_err(string_error)?,
                 None => 0,
             };
-            let sample_source_path = database
+            let sample_source_path = catalog
                 .mapping_track_page(source, None, None, 1, &cancellation)
                 .await
                 .map_err(string_error)?
@@ -2530,7 +2526,7 @@ impl SourceOwner {
                 }
                 let (root_path, server_prefix) = source
                     .apply_local_mapping(
-                        &owner.shared.database,
+                        &owner.shared.catalog,
                         source_key,
                         &input.root_path,
                         input.server_prefix.as_deref(),
@@ -2582,7 +2578,7 @@ impl SourceOwner {
                 }
                 source
                     .complete_local_mapping(
-                        &owner.shared.database,
+                        &owner.shared.catalog,
                         source_key,
                         &root_path,
                         input.server_prefix.as_deref(),
@@ -2629,8 +2625,8 @@ impl SourceOwner {
                 token.store(true, Ordering::Release);
             }
 
-            if let Ok(Some(source)) = owner.shared.database.source_identity_key(&source_id).await {
-                let _ = owner.shared.database.clear_mapping_access(source).await;
+            if let Ok(Some(source)) = owner.shared.catalog.source_identity_key(&source_id).await {
+                let _ = owner.shared.catalog.clear_mapping_access(source).await;
                 let _ = owner
                     .shared
                     .playback()
@@ -2697,7 +2693,7 @@ impl SourceOwner {
             let playback = owner.shared.playback().ok();
             let identity = owner
                 .shared
-                .database
+                .catalog
                 .source_identity_key(&source_id)
                 .await
                 .ok()
@@ -2713,7 +2709,7 @@ impl SourceOwner {
             }
             let removed = owner
                 .shared
-                .database
+                .catalog
                 .remove_source(&source_id)
                 .await
                 .map(|_| ())
@@ -2780,7 +2776,7 @@ impl SourceOwner {
                     Some((source, kind, _)) if kind == "track" => Some(source),
                     _ => owner
                         .shared
-                        .database
+                        .catalog
                         .track_source_by_uri(media_uri, &ReadCancellation::new())
                         .await
                         .ok()
@@ -2881,7 +2877,7 @@ impl SourceOwner {
             self.shared
                 .runtime
                 .spawn(crate::album_release::run_selected_album_release_lookup(
-                    self.shared.database.clone(),
+                    self.shared.catalog.clone(),
                     self.shared.settings.clone(),
                     self.shared.outputs.events.clone(),
                     selected.source_key,
@@ -2904,7 +2900,7 @@ impl SourceOwner {
                     .map_err(string_error)
             });
         }
-        self.reply(move |owner, database| async move {
+        self.reply(move |owner, catalog| async move {
             if kind == HomeSectionKind::Explore {
                 owner
                     .shared
@@ -2927,7 +2923,7 @@ impl SourceOwner {
                 HomeSectionKind::RecentlyReleased => sources::SourceHomeSection::RecentlyReleased,
                 HomeSectionKind::Explore | HomeSectionKind::NewlyAdded => unreachable!(),
             };
-            if let Err(error) = source.refresh_home_section(&database, section).await {
+            if let Err(error) = source.refresh_home_section(&catalog, section).await {
                 warn!(%error,"could not refresh Home section");
             }
             Ok(())
@@ -2945,7 +2941,7 @@ impl SourceOwner {
             let result = async {
                 let source_key = owner
                     .shared
-                    .database
+                    .catalog
                     .source_identity_key(&source_id)
                     .await
                     .map_err(string_error)?
@@ -2953,7 +2949,7 @@ impl SourceOwner {
                 let key = match folder_object_id.as_deref() {
                     Some(id) => owner
                         .shared
-                        .database
+                        .catalog
                         .folder_identity_key(source_key, id)
                         .await
                         .map_err(string_error)?,
@@ -3030,7 +3026,7 @@ impl SourceOwner {
         let source = self.client(source_id)?;
         let publication = self
             .shared
-            .database
+            .catalog
             .cached_source(source_id.as_str(), &ReadCancellation::new())
             .await
             .map_err(string_error)?
@@ -3047,7 +3043,7 @@ impl SourceOwner {
             _ => match target {
                 FavoriteTarget::Track(media_uri) => self
                     .shared
-                    .database
+                    .catalog
                     .track_source_by_uri(media_uri, &ReadCancellation::new())
                     .await
                     .ok()
@@ -3057,7 +3053,7 @@ impl SourceOwner {
         };
         let source_key = self
             .shared
-            .database
+            .catalog
             .cached_source(source_id.as_str(), &ReadCancellation::new())
             .await
             .ok()
@@ -3072,11 +3068,11 @@ impl SourceOwner {
         let source = self.favorite_source(&target).await;
         let changed = if source.as_ref().is_some_and(|(_, _, local)| !local) {
             self.shared
-                .database
+                .catalog
                 .queue_remote_favorite(&target, favorite, unix_seconds())
                 .await
         } else {
-            self.shared.database.set_favorite(&target, favorite).await
+            self.shared.catalog.set_favorite(&target, favorite).await
         }
         .map_err(string_error)?;
         if !changed {
@@ -3101,7 +3097,7 @@ impl SourceOwner {
         let lane = self.shared.lane.lock().await;
         if !self
             .shared
-            .database
+            .catalog
             .set_rating(&target, rating)
             .await
             .unwrap_or(false)
@@ -3121,7 +3117,7 @@ impl SourceOwner {
             match &target {
                 FavoriteTarget::Track(uri) if local => {
                     if let Err(error) = source
-                        .write_file_track_rating(&self.shared.database, source_key, uri, rating)
+                        .write_file_track_rating(&self.shared.catalog, source_key, uri, rating)
                         .await
                     {
                         warn!(%error,"could not write file Track rating");
@@ -3142,14 +3138,14 @@ impl SourceOwner {
     pub(crate) fn reply<T, F, Work>(&self, work: F) -> Receiver<T>
     where
         T: Send + 'static,
-        F: FnOnce(SourceOwner, Arc<Database>) -> Work + Send + 'static,
+        F: FnOnce(SourceOwner, Arc<Catalog>) -> Work + Send + 'static,
         Work: Future<Output = T> + Send + 'static,
     {
         let (sender, receiver) = async_channel::bounded(1);
         let owner = self.clone();
-        let database = Arc::clone(&self.shared.database);
+        let catalog = Arc::clone(&self.shared.catalog);
         self.shared.runtime.spawn(async move {
-            let _ = sender.send(work(owner, database).await).await;
+            let _ = sender.send(work(owner, catalog).await).await;
         });
         receiver
     }
@@ -3162,7 +3158,7 @@ impl SourceOwner {
             Some((source_id, _, _)) => Ok(Some(source_id)),
             None => self
                 .shared
-                .database
+                .catalog
                 .track_source_by_uri(media_uri, &ReadCancellation::new())
                 .await
                 .map_err(string_error),
@@ -3357,7 +3353,7 @@ impl SourceOwner {
             Ok(()) => {
                 let acknowledgement = self
                     .shared
-                    .database
+                    .catalog
                     .acknowledge_remote_favorite(&target, favorite)
                     .await;
                 info!(
@@ -3373,7 +3369,7 @@ impl SourceOwner {
                 info!(favorite, "Favorite delivery deferred");
                 let _ = self
                     .shared
-                    .database
+                    .catalog
                     .defer_remote_favorite(&target, favorite, unix_seconds().saturating_add(30))
                     .await;
                 return true;
@@ -3382,7 +3378,7 @@ impl SourceOwner {
                 info!(favorite, "Favorite delivery rejected");
                 let previous = match self
                     .shared
-                    .database
+                    .catalog
                     .reject_remote_favorite(&target, favorite)
                     .await
                 {
@@ -3418,7 +3414,7 @@ impl SourceOwner {
         let now = unix_seconds();
         let pending = match self
             .shared
-            .database
+            .catalog
             .due_remote_favorites(now, 64, &ReadCancellation::new())
             .await
         {
@@ -3448,7 +3444,7 @@ impl SourceOwner {
             if unavailable.contains(&source_id) {
                 let _ = self
                     .shared
-                    .database
+                    .catalog
                     .defer_remote_favorite(&target, favorite, unix_seconds().saturating_add(30))
                     .await;
                 completed = false;
@@ -3769,8 +3765,8 @@ mod source_tests {
     #[tokio::test]
     async fn plex_sources_share_login_until_last_removal_and_cannot_resurrect_secrets() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Arc::new(
-            Database::open(directory.path().join("library.sqlite"))
+        let catalog = Arc::new(
+            Catalog::open(directory.path().join("library.sqlite"))
                 .await
                 .unwrap(),
         );
@@ -3793,12 +3789,12 @@ mod source_tests {
             .unwrap();
         let owner = SourceOwner::open_dormant(
             Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
-            Arc::clone(&database),
+            Arc::clone(&catalog),
             Downloads::new(
                 artwork::Artwork::new(directory.path().join("downloads/artwork"), runtime.clone())
                     .unwrap(),
                 directory.path().join("downloads"),
-                database.as_ref().clone(),
+                catalog.as_ref().clone(),
                 runtime.clone(),
                 async_channel::unbounded().0,
                 Vec::new(),
@@ -3879,17 +3875,17 @@ mod source_tests {
     #[tokio::test]
     async fn acquisition_progress_belongs_to_its_source() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Arc::new(
-            Database::open(directory.path().join("library.sqlite"))
+        let catalog = Arc::new(
+            Catalog::open(directory.path().join("library.sqlite"))
                 .await
                 .unwrap(),
         );
         let source_id = SourceId::new("test");
-        database
+        catalog
             .reconcile_source(&source_id, "local", "Test")
             .await
             .unwrap();
-        let cached = database
+        let cached = catalog
             .cached_source(source_id.as_str(), &ReadCancellation::new())
             .await
             .unwrap()
@@ -3898,12 +3894,12 @@ mod source_tests {
         let (events, receiver) = async_channel::unbounded();
         let owner = SourceOwner::open_dormant(
             Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
-            Arc::clone(&database),
+            Arc::clone(&catalog),
             Downloads::new(
                 artwork::Artwork::new(directory.path().join("downloads/artwork"), runtime.clone())
                     .unwrap(),
                 directory.path().join("downloads"),
-                database.as_ref().clone(),
+                catalog.as_ref().clone(),
                 runtime.clone(),
                 async_channel::unbounded().0,
                 Vec::new(),
@@ -3943,7 +3939,7 @@ mod source_tests {
             Arc::new(Source::open(configuration, None, None).unwrap()),
         );
         let other_id = SourceId::new("other");
-        database
+        catalog
             .reconcile_source(&other_id, "local", "Other")
             .await
             .unwrap();
@@ -4180,7 +4176,7 @@ mod source_tests {
         })).unwrap();
         owner
             .shared
-            .database
+            .catalog
             .record_listen(&listen, None, &[])
             .await
             .unwrap();
@@ -4194,7 +4190,7 @@ mod source_tests {
         assert_eq!(revision.activity, before.activity + 1);
         owner
             .shared
-            .database
+            .catalog
             .record_listen(&listen, None, &[])
             .await
             .unwrap();
@@ -4208,8 +4204,8 @@ mod source_tests {
             let directory = tempfile::tempdir().unwrap();
             let music = directory.path().join("music");
             std::fs::create_dir(&music).unwrap();
-            let database = Arc::new(
-                Database::open(directory.path().join("library.sqlite"))
+            let catalog = Arc::new(
+                Catalog::open(directory.path().join("library.sqlite"))
                     .await
                     .unwrap(),
             );
@@ -4217,7 +4213,7 @@ mod source_tests {
             let (events, receiver) = async_channel::unbounded();
             let owner = SourceOwner::open_dormant(
                 Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
-                Arc::clone(&database),
+                Arc::clone(&catalog),
                 Downloads::new(
                     artwork::Artwork::new(
                         directory.path().join("downloads/artwork"),
@@ -4225,7 +4221,7 @@ mod source_tests {
                     )
                     .unwrap(),
                     directory.path().join("downloads"),
-                    database.as_ref().clone(),
+                    catalog.as_ref().clone(),
                     runtime.clone(),
                     async_channel::unbounded().0,
                     Vec::new(),
@@ -4262,7 +4258,7 @@ mod source_tests {
                     })
                     .unwrap();
                 assert!(
-                    database
+                    catalog
                         .cached_source(source_id.as_str(), &ReadCancellation::new())
                         .await
                         .unwrap()
@@ -4333,7 +4329,7 @@ mod source_tests {
             ));
             let source_id = owner.selected_library().unwrap().source_id;
             assert!(
-                database
+                catalog
                     .cached_source(source_id.as_str(), &ReadCancellation::new())
                     .await
                     .unwrap()
@@ -4366,24 +4362,24 @@ mod source_tests {
         }
         for switch_while_held in [false, true] {
             let directory = tempfile::tempdir().unwrap();
-            let database = Arc::new(
-                Database::open(directory.path().join("library.sqlite"))
+            let catalog = Arc::new(
+                Catalog::open(directory.path().join("library.sqlite"))
                     .await
                     .unwrap(),
             );
             let source_id = SourceId::new("held-credential-source");
-            database
+            catalog
                 .reconcile_source(&source_id, "subsonic", "Music")
                 .await
                 .unwrap();
-            let source_key = database
+            let source_key = catalog
                 .source_identity_key(&source_id)
                 .await
                 .unwrap()
                 .unwrap();
             let update = {
-                let mut catalog = database.catalog(source_id.as_str(), None).await.unwrap();
-                catalog
+                let mut observation = catalog.observe(source_id.as_str(), None).await.unwrap();
+                observation
                     .apply_catalog(
                         &library::CatalogBatch {
                             folders: vec![library::FolderObservation {
@@ -4414,9 +4410,9 @@ mod source_tests {
                     )
                     .await
                     .unwrap();
-                catalog.into_changes()
+                observation.into_changes()
             };
-            database
+            catalog
                 .publish_catalog_update(source_id.as_str(), update)
                 .await;
             let settings = SettingsFile::memory();
@@ -4445,7 +4441,7 @@ mod source_tests {
             let (events, receiver) = async_channel::unbounded();
             let owner = SourceOwner::open_dormant(
                 Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
-                Arc::clone(&database),
+                Arc::clone(&catalog),
                 Downloads::new(
                     artwork::Artwork::new(
                         directory.path().join("downloads/artwork"),
@@ -4453,7 +4449,7 @@ mod source_tests {
                     )
                     .unwrap(),
                     directory.path().join("downloads"),
-                    database.as_ref().clone(),
+                    catalog.as_ref().clone(),
                     runtime.clone(),
                     async_channel::unbounded().0,
                     Vec::new(),
@@ -4535,7 +4531,7 @@ mod source_tests {
                     .unwrap(),
                     value
                 );
-                assert_eq!(database.favorite(&favorite).await.unwrap(), value);
+                assert_eq!(catalog.favorite(&favorite).await.unwrap(), value);
             }
             while receiver.try_recv().is_ok() {}
             let local_uri = url::Url::from_file_path(directory.path().join("local.flac"))
@@ -4544,7 +4540,7 @@ mod source_tests {
             let local_stream = tokio::time::timeout(
                 Duration::from_secs(2),
                 crate::playback::prepare_stream(
-                    &database,
+                    &catalog,
                     playback::StreamRequest::new(&local_uri, playback::StreamQuality::Original),
                     None,
                     None,
@@ -4564,8 +4560,8 @@ mod source_tests {
                 })
                 .unwrap();
             let update = {
-                let mut catalog = database.catalog(source_id.as_str(), None).await.unwrap();
-                catalog
+                let mut observation = catalog.observe(source_id.as_str(), None).await.unwrap();
+                observation
                     .apply_catalog(
                         &library::CatalogBatch {
                             folders: vec![library::FolderObservation {
@@ -4602,9 +4598,9 @@ mod source_tests {
                     )
                     .await
                     .unwrap();
-                catalog.into_changes()
+                observation.into_changes()
             };
-            database
+            catalog
                 .publish_catalog_update(source_id.as_str(), update)
                 .await;
             tokio::time::timeout(Duration::from_secs(2), async {
@@ -4654,7 +4650,7 @@ mod source_tests {
                         Ok(())
                     })
                     .unwrap();
-                database
+                catalog
                     .reconcile_source(&local_id, "local", "Local")
                     .await
                     .unwrap();
@@ -4684,14 +4680,14 @@ mod source_tests {
                 );
                 assert_eq!(configured.local_access[1].track_count, 0);
                 let update = {
-                    let mut catalog = database.catalog(source_id.as_str(), None).await.unwrap();
-                    catalog
+                    let mut observation = catalog.observe(source_id.as_str(), None).await.unwrap();
+                    observation
                         .remove_source_items("track", &["new-track".to_string()])
                         .await
                         .unwrap();
-                    catalog.into_changes()
+                    observation.into_changes()
                 };
-                database
+                catalog
                     .publish_catalog_update(source_id.as_str(), update)
                     .await;
                 tokio::time::timeout(Duration::from_secs(2), async {
@@ -4736,7 +4732,7 @@ mod source_tests {
                 "new-folder"
             );
             assert_eq!(
-                database
+                catalog
                     .cached_source(source_id.as_str(), &ReadCancellation::new())
                     .await
                     .unwrap()
@@ -4752,9 +4748,9 @@ mod source_tests {
                 (1, 1)
             );
             owner.deliver_pending_favorites().await;
-            assert!(!database.favorite(&favorite).await.unwrap());
+            assert!(!catalog.favorite(&favorite).await.unwrap());
             assert!(
-                database
+                catalog
                     .due_remote_favorites(unix_seconds(), 64, &ReadCancellation::new())
                     .await
                     .unwrap()
@@ -4762,7 +4758,7 @@ mod source_tests {
                 "offline delivery is deferred without losing the local edit"
             );
             assert_eq!(
-                database
+                catalog
                     .due_remote_favorites(unix_seconds() + 60, 64, &ReadCancellation::new())
                     .await
                     .unwrap(),
@@ -4775,8 +4771,8 @@ mod source_tests {
     async fn source_switch_and_removal_complete_without_an_event_consumer() {
         for keep_receiver in [true, false] {
             let directory = tempfile::tempdir().unwrap();
-            let database = Arc::new(
-                Database::open(directory.path().join("library.sqlite"))
+            let catalog = Arc::new(
+                Catalog::open(directory.path().join("library.sqlite"))
                     .await
                     .unwrap(),
             );
@@ -4802,7 +4798,7 @@ mod source_tests {
                         Ok(())
                     })
                     .unwrap();
-                database
+                catalog
                     .reconcile_source(&id, "local", id.as_str())
                     .await
                     .unwrap();
@@ -4812,7 +4808,7 @@ mod source_tests {
             let receiver = keep_receiver.then_some(receiver);
             let owner = SourceOwner::open_dormant(
                 Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
-                Arc::clone(&database),
+                Arc::clone(&catalog),
                 Downloads::new(
                     artwork::Artwork::new(
                         directory.path().join("downloads/artwork"),
@@ -4820,7 +4816,7 @@ mod source_tests {
                     )
                     .unwrap(),
                     directory.path().join("downloads"),
-                    database.as_ref().clone(),
+                    catalog.as_ref().clone(),
                     runtime.clone(),
                     async_channel::unbounded().0,
                     Vec::new(),
@@ -4883,7 +4879,7 @@ mod source_tests {
             assert_eq!(owner.list_sources().sources.len(), 1);
             assert!(owner.shared.selected().is_none());
             assert!(
-                database
+                catalog
                     .source_identity_key(&second)
                     .await
                     .unwrap()

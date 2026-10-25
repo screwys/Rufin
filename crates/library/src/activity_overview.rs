@@ -1,7 +1,7 @@
 //! Calendar reports over the existing accepted-listen history.
 
 use crate::{
-    AlbumView, ArtistView, CalendarActivityPeriod, Database, LibraryResult, ReadCancellation,
+    AlbumView, ArtistView, CalendarActivityPeriod, Catalog, LibraryResult, ReadCancellation,
     TrackView,
 };
 
@@ -74,7 +74,7 @@ impl CalendarActivityPeriod {
     }
 }
 
-impl Database {
+impl Catalog {
     pub async fn activity_overview(
         &self,
         period: CalendarActivityPeriod,

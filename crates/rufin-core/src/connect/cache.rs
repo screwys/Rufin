@@ -68,7 +68,7 @@ impl ConnectOwner {
         match request {
             CacheRequest::Lyrics { query } => {
                 let row = self
-                    .database
+                    .catalog
                     .lyrics_cache_for_role(
                         &query.media_uri,
                         &query.role,
@@ -235,7 +235,7 @@ impl ConnectOwner {
                 }
                 let row = found?;
                 if let Err(error) = self
-                    .database
+                    .catalog
                     .import_lyrics_cache(vec![row.clone()], true)
                     .await
                 {

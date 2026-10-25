@@ -20,7 +20,7 @@ async fn loudness_forward_passes_revisit_invalidated_earlier_keys() {
     let mut after = None;
     for expected in &fixture.tracks {
         let work = fixture
-            .database
+            .catalog
             .next_missing_track_loudness(fixture.source, after, &cancel)
             .await
             .unwrap()
@@ -29,7 +29,7 @@ async fn loudness_forward_passes_revisit_invalidated_earlier_keys() {
         measurement.analysis_key = work.expected_analysis_key;
         assert!(
             fixture
-                .database
+                .catalog
                 .write_track_analyzed_loudness(fixture.source, work.track_key, &measurement,)
                 .await
                 .unwrap()
@@ -46,14 +46,14 @@ async fn loudness_forward_passes_revisit_invalidated_earlier_keys() {
         .unwrap();
     assert!(
         fixture
-            .database
+            .catalog
             .next_missing_track_loudness(fixture.source, after, &cancel)
             .await
             .unwrap()
             .is_none()
     );
     let changed = fixture
-        .database
+        .catalog
         .next_missing_track_loudness(fixture.source, None, &cancel)
         .await
         .unwrap()
@@ -63,14 +63,14 @@ async fn loudness_forward_passes_revisit_invalidated_earlier_keys() {
     measurement.analysis_key = changed.expected_analysis_key;
     assert!(
         fixture
-            .database
+            .catalog
             .write_track_analyzed_loudness(fixture.source, changed.track_key, &measurement,)
             .await
             .unwrap()
     );
     assert!(
         fixture
-            .database
+            .catalog
             .next_missing_track_loudness(fixture.source, None, &cancel)
             .await
             .unwrap()
@@ -81,7 +81,7 @@ async fn loudness_forward_passes_revisit_invalidated_earlier_keys() {
     let mut album_tracks = Vec::new();
     for expected in &fixture.albums {
         let work = fixture
-            .database
+            .catalog
             .next_missing_album_loudness(fixture.source, after, &cancel)
             .await
             .unwrap()
@@ -91,7 +91,7 @@ async fn loudness_forward_passes_revisit_invalidated_earlier_keys() {
         measurement.analysis_key = work.expected_analysis_key;
         assert!(
             fixture
-                .database
+                .catalog
                 .write_album_analyzed_loudness(fixture.source, work.album_key, &measurement,)
                 .await
                 .unwrap()
@@ -107,14 +107,14 @@ async fn loudness_forward_passes_revisit_invalidated_earlier_keys() {
         .unwrap();
     assert!(
         fixture
-            .database
+            .catalog
             .next_missing_album_loudness(fixture.source, after, &cancel)
             .await
             .unwrap()
             .is_none()
     );
     let changed = fixture
-        .database
+        .catalog
         .next_missing_album_loudness(fixture.source, None, &cancel)
         .await
         .unwrap()
@@ -124,14 +124,14 @@ async fn loudness_forward_passes_revisit_invalidated_earlier_keys() {
     measurement.analysis_key = changed.expected_analysis_key;
     assert!(
         fixture
-            .database
+            .catalog
             .write_album_analyzed_loudness(fixture.source, changed.album_key, &measurement,)
             .await
             .unwrap()
     );
     assert!(
         fixture
-            .database
+            .catalog
             .next_missing_album_loudness(fixture.source, None, &cancel)
             .await
             .unwrap()
@@ -144,7 +144,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let work = fixture
-        .database
+        .catalog
         .next_missing_track_loudness(fixture.source, None, &cancel)
         .await
         .expect("missing Track loudness")
@@ -159,14 +159,14 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     };
     assert!(
         fixture
-            .database
+            .catalog
             .write_track_analyzed_loudness(fixture.source, work.track_key, &below_gate)
             .await
             .expect("store completed analysis below the loudness gate")
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playback_loudness(&work.media_uri, &cancel)
             .await
             .unwrap()
@@ -175,7 +175,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     );
     assert!(
         fixture
-            .database
+            .catalog
             .r128_tag_write_page(fixture.source, None, 64, &cancel)
             .await
             .unwrap()
@@ -183,7 +183,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     );
     assert_ne!(
         fixture
-            .database
+            .catalog
             .next_missing_track_loudness(fixture.source, None, &cancel)
             .await
             .unwrap()
@@ -200,13 +200,13 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     };
     assert!(
         fixture
-            .database
+            .catalog
             .write_track_analyzed_loudness(fixture.source, work.track_key, &analyzed)
             .await
             .expect("write analyzed loudness")
     );
     let tag_page = fixture
-        .database
+        .catalog
         .r128_tag_write_page(fixture.source, None, 64, &cancel)
         .await
         .expect("read Rufin-owned R128 tag page");
@@ -215,7 +215,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     assert_eq!(tag_page[0].track_lufs, Some(-14.0));
     assert!(
         !fixture
-            .database
+            .catalog
             .write_track_analyzed_loudness(
                 fixture.source,
                 work.track_key,
@@ -268,24 +268,24 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         ..Default::default()
     };
 
-    let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+    let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
     {
         let write = library::CatalogBatch {
             tracks: vec![input.clone()],
             ..Default::default()
         };
 
-        scan_catalog.apply_catalog(&write, true).await.unwrap();
+        scan_observation.apply_catalog(&write, true).await.unwrap();
     };
     {
-        let update = scan_catalog.into_changes();
-        (&fixture.database)
+        let update = scan_observation.into_changes();
+        (&fixture.catalog)
             .publish_catalog_update("source", update)
             .await;
     };
     assert!(
         fixture
-            .database
+            .catalog
             .r128_tag_write_page(fixture.source, None, 64, &cancel)
             .await
             .expect("source R128 tag is not Rufin-owned")
@@ -293,7 +293,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playback_loudness(&fixture.track_uris[0], &cancel)
             .await
             .expect("read Track loudness")
@@ -301,7 +301,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         Some(source_fact.clone())
     );
 
-    let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+    let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
     input.cue_path = Some("/music/changed.cue".into());
     input.cue_start_millis = Some(1_000);
     input.cue_end_millis = Some(181_000);
@@ -328,23 +328,23 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             ..Default::default()
         };
 
-        scan_catalog.apply_catalog(&write, true).await.unwrap();
+        scan_observation.apply_catalog(&write, true).await.unwrap();
     };
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    fixture.database.observe_catalog(move |_, update| {
+    fixture.catalog.observe_catalog(move |_, update| {
         let _ = updates_tx.send(update);
         std::future::ready(())
     });
     {
-        let update = scan_catalog.into_changes();
-        (&fixture.database)
+        let update = scan_observation.into_changes();
+        (&fixture.catalog)
             .publish_catalog_update("source", update)
             .await;
     };
     let update = updates.try_recv().unwrap();
     assert!(update.metadata);
     let changed = fixture
-        .database
+        .catalog
         .next_missing_track_loudness(fixture.source, None, &cancel)
         .await
         .expect("changed Track loudness work")
@@ -354,7 +354,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
 
     assert!(
         !fixture
-            .database
+            .catalog
             .write_track_analyzed_loudness(
                 fixture.source,
                 changed.track_key,
@@ -381,24 +381,24 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         ..Default::default()
     });
 
-    let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+    let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
     {
         let write = library::CatalogBatch {
             tracks: vec![input.clone()],
             ..Default::default()
         };
 
-        scan_catalog.apply_catalog(&write, true).await.unwrap();
+        scan_observation.apply_catalog(&write, true).await.unwrap();
     };
     {
-        let update = scan_catalog.into_changes();
-        (&fixture.database)
+        let update = scan_observation.into_changes();
+        (&fixture.catalog)
             .publish_catalog_update("source", update)
             .await;
     };
     assert!(
         !fixture
-            .database
+            .catalog
             .write_track_analyzed_loudness(
                 fixture.source,
                 changed.track_key,
@@ -415,7 +415,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playback_loudness(&fixture.track_uris[0], &cancel)
             .await
             .unwrap()
@@ -424,7 +424,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     );
 
     let album = fixture
-        .database
+        .catalog
         .next_missing_album_loudness(fixture.source, None, &cancel)
         .await
         .expect("missing Album loudness")
@@ -432,7 +432,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     assert_eq!(album.tracks.len(), 2);
     assert!(
         fixture
-            .database
+            .catalog
             .write_album_analyzed_loudness(
                 fixture.source,
                 album.album_key,
@@ -449,7 +449,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     );
     assert_ne!(
         fixture
-            .database
+            .catalog
             .next_missing_album_loudness(fixture.source, None, &cancel)
             .await
             .unwrap()
@@ -466,7 +466,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     };
     assert!(
         fixture
-            .database
+            .catalog
             .write_album_analyzed_loudness(fixture.source, album.album_key, &album_measurement)
             .await
             .expect("write Album loudness")
@@ -479,7 +479,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         .unwrap();
     assert!(
         fixture
-            .database
+            .catalog
             .write_track_analyzed_loudness(
                 fixture.source,
                 quiet_track.track_key,
@@ -492,7 +492,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             .unwrap()
     );
     let tag_page = fixture
-        .database
+        .catalog
         .r128_tag_write_page(fixture.source, None, 64, &cancel)
         .await
         .unwrap();
@@ -503,7 +503,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     assert_eq!(quiet_tags.track_lufs, None);
     assert_eq!(quiet_tags.album_lufs, Some(-13.0));
     fixture
-        .database
+        .catalog
         .write_local_access(
             Some(fixture.source),
             &[&LocalAccessWrite {
@@ -532,27 +532,27 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     };
     assert!(
         fixture
-            .database
+            .catalog
             .write_track_analyzed_loudness(fixture.source, fixture.tracks[1], &local_analysis)
             .await
             .unwrap()
     );
 
-    let mut scan_catalog = async {
-        if (&fixture.database)
+    let mut scan_observation = async {
+        if (&fixture.catalog)
             .source_identity_key(&library::SourceId::new("source"))
             .await?
             .is_none()
         {
-            (&fixture.database)
+            (&fixture.catalog)
                 .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
                 .await?;
         }
-        fixture.database.catalog("source", None).await
+        fixture.catalog.observe("source", None).await
     }
     .await
     .expect("begin membership-changing Inventory");
-    let scan = scan_catalog.start_observation().await.unwrap();
+    let scan = scan_observation.start_observation().await.unwrap();
     for (id, title, artist, sort, date) in [
         ("album-a", "Album A", "Artist A", "album a", "2024-01-02"),
         ("album-b", "Album B", "Artist B", "album b", "2023-01-02"),
@@ -580,7 +580,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                 ..Default::default()
             };
 
-            scan_catalog.apply_catalog(&write, true).await.unwrap();
+            scan_observation.apply_catalog(&write, true).await.unwrap();
         };
     }
     for (index, album_id, artist, title) in [
@@ -641,17 +641,17 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                 ..Default::default()
             };
 
-            scan_catalog.apply_catalog(&write, true).await.unwrap();
+            scan_observation.apply_catalog(&write, true).await.unwrap();
         };
     }
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    fixture.database.observe_catalog(move |_, update| {
+    fixture.catalog.observe_catalog(move |_, update| {
         let _ = updates_tx.send(update);
         std::future::ready(())
     });
     {
         let update = {
-            scan_catalog
+            scan_observation
                 .complete_source_observation(
                     scan,
                     &[
@@ -662,14 +662,14 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                 .await
                 .unwrap();
 
-            scan_catalog
+            scan_observation
                 .complete_source_observation(scan, &[], None)
                 .await
                 .unwrap();
 
-            scan_catalog.into_changes()
+            scan_observation.into_changes()
         };
-        (&fixture.database)
+        (&fixture.catalog)
             .publish_catalog_update("source", update)
             .await;
     };
@@ -677,7 +677,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     assert!(update.metadata);
     assert!(
         fixture
-            .database
+            .catalog
             .playback_loudness(&fixture.track_uris[0], &cancel)
             .await
             .unwrap()
@@ -687,7 +687,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playback_loudness(&fixture.track_uris[1], &cancel)
             .await
             .unwrap()
@@ -696,13 +696,13 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         "a source fact cannot replace analysis of current local audio"
     );
     let next = fixture
-        .database
+        .catalog
         .next_missing_track_loudness(fixture.source, Some(fixture.tracks[0]), &cancel)
         .await
         .unwrap();
     assert!(next.is_none_or(|work| work.track_key != fixture.tracks[1]));
     let staged_track = fixture
-        .database
+        .catalog
         .playback_loudness(&fixture.track_uris[2], &cancel)
         .await
         .unwrap()
@@ -714,7 +714,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     assert_eq!(staged_track.replay_gain_peak, Some(0.9));
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playback_loudness(&fixture.track_uris[3], &cancel)
             .await
             .unwrap()
@@ -724,7 +724,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         Some(-13.0)
     );
     let changed_album = fixture
-        .database
+        .catalog
         .next_missing_album_loudness(fixture.source, None, &cancel)
         .await
         .expect("changed Album membership work")
@@ -733,7 +733,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     assert_ne!(changed_album.expected_analysis_key, old_album_key);
     assert!(
         fixture
-            .database
+            .catalog
             .write_album_analyzed_loudness(
                 fixture.source,
                 changed_album.album_key,
@@ -749,7 +749,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             .expect("replace stale analyzed Album value")
     );
 
-    let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+    let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
     {
         let write = library::CatalogBatch {
             tracks: vec![library::TrackObservation {
@@ -766,17 +766,17 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             ..Default::default()
         };
 
-        scan_catalog.apply_catalog(&write, true).await.unwrap();
+        scan_observation.apply_catalog(&write, true).await.unwrap();
     };
     {
-        let update = scan_catalog.into_changes();
-        (&fixture.database)
+        let update = scan_observation.into_changes();
+        (&fixture.catalog)
             .publish_catalog_update("source", update)
             .await;
     };
     assert!(
         fixture
-            .database
+            .catalog
             .playback_loudness(&fixture.track_uris[3], &cancel)
             .await
             .unwrap()
@@ -791,7 +791,7 @@ async fn loudness_keeps_canonical_provider_uri_without_direct_access() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let track = fixture
-        .database
+        .catalog
         .next_missing_track_loudness(fixture.source, None, &cancel)
         .await
         .expect("select provider-resolved Track loudness")
@@ -800,7 +800,7 @@ async fn loudness_keeps_canonical_provider_uri_without_direct_access() {
     assert_eq!(track.media_uri, fixture.track_uris[0]);
 
     let album = fixture
-        .database
+        .catalog
         .next_missing_album_loudness(fixture.source, None, &cancel)
         .await
         .expect("select provider-resolved Album loudness")
@@ -848,13 +848,13 @@ async fn source_artwork_pages_distinct_bindings() {
         .expect("hydrate Artist artwork");
     let cancel = ReadCancellation::new();
     let first = fixture
-        .database
+        .catalog
         .source_artwork_page(fixture.source, None, 1, &cancel)
         .await
         .expect("first artwork page");
     assert_eq!(first.len(), 1);
     let second = fixture
-        .database
+        .catalog
         .source_artwork_page(fixture.source, Some(&first[0]), 128, &cancel)
         .await
         .expect("resume artwork page");
@@ -865,8 +865,8 @@ async fn source_artwork_pages_distinct_bindings() {
     sqlx::query("WITH RECURSIVE numbers(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM numbers WHERE n<259)\n        INSERT INTO tracks(source_key,object_id,media_uri,native_artwork,metadata,normalized_search,indexed) SELECT ?1,'artwork-'||n,'test:artwork-'||n,NULL,jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),lower(COALESCE(json_extract(jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object('title',COALESCE('',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('',''),'duration_millis',COALESCE(0,0))),'$.comment'),'')),1 FROM numbers")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
     fixture
-        .database
-        .catalog("source", None)
+        .catalog
+        .observe("source", None)
         .await
         .unwrap()
         .set_source_artwork(
@@ -908,7 +908,7 @@ async fn source_artwork_pages_distinct_bindings() {
     let mut actual = Vec::<Vec<u8>>::new();
     loop {
         let page = fixture
-            .database
+            .catalog
             .source_artwork_page(
                 fixture.source,
                 actual.last().map(Vec::as_slice),
@@ -928,7 +928,7 @@ async fn source_artwork_pages_distinct_bindings() {
     sqlx::query("INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) SELECT media_uri,'download',media_uri,'','',media_uri FROM tracks WHERE object_id LIKE 'artwork-%' AND CAST(substr(object_id,9) AS INTEGER)%2=0")
         .execute(&mut raw).await.unwrap();
     let mut retention = fixture
-        .database
+        .catalog
         .artwork_cache_retention(&["test:artwork-1".into()])
         .await
         .unwrap();
@@ -984,12 +984,12 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     let dependencies = (0..300)
         .map(|index| format!("/generic/component-{index:03}.bin"))
         .collect::<Vec<_>>();
-    let mut catalog = fixture.database.catalog("source", None).await.unwrap();
-    catalog
+    let mut observation = fixture.catalog.observe("source", None).await.unwrap();
+    observation
         .write_file_observations(&[(cue.clone(), dependencies.clone())], Vec::new(), true)
         .await
         .unwrap();
-    drop(catalog);
+    drop(observation);
     let mut raw = connection(&fixture.path).await;
     let key = sqlx::query_scalar::<_, library::LocalFileKey>(
         "SELECT local_file_key FROM local_files WHERE source_key=?1 AND path=?2",
@@ -1002,7 +1002,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     drop(raw);
     let cancel = ReadCancellation::new();
     let page = fixture
-        .database
+        .catalog
         .local_file_page(fixture.source, None, 128, &cancel)
         .await
         .expect("Local file page");
@@ -1024,7 +1024,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         loudness_analysis_key: Some([7; 32]),
     };
     fixture
-        .database
+        .catalog
         .write_direct_track_metadata(
             &metadata.media_uri,
             &library::TrackMetadata {
@@ -1040,7 +1040,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         .await
         .unwrap();
     fixture
-        .database
+        .catalog
         .write_local_access(Some(fixture.source), &[&metadata])
         .await
         .expect("write metadata Local access");
@@ -1053,12 +1053,12 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         ..metadata.clone()
     };
     fixture
-        .database
+        .catalog
         .write_local_access(Some(fixture.source), &[&exact])
         .await
         .expect("write exact Local access");
     let local_loudness = fixture
-        .database
+        .catalog
         .next_missing_track_loudness(fixture.source, None, &cancel)
         .await
         .expect("Local loudness identity")
@@ -1066,7 +1066,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     assert_eq!(local_loudness.track_key, fixture.tracks[0]);
     assert_eq!(local_loudness.expected_analysis_key, [8; 32]);
     let resolved = fixture
-        .database
+        .catalog
         .playback_access(&fixture.track_uris[0])
         .await
         .expect("resolve exact Local access")
@@ -1075,7 +1075,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     assert_eq!(resolved.1, library::LocalAccessOrigin::Mapping);
     assert_eq!(
         fixture
-            .database
+            .catalog
             .playback_access(&metadata.media_uri)
             .await
             .unwrap()
@@ -1085,7 +1085,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .download_metadata(&metadata.media_uri)
             .await
             .unwrap()
@@ -1095,7 +1095,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .download_metadata(&fixture.track_uris[0])
             .await
             .unwrap()
@@ -1105,7 +1105,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     );
     assert!(
         fixture
-            .database
+            .catalog
             .playback_access("rufin://source/track/missing")
             .await
             .unwrap()
@@ -1124,14 +1124,14 @@ async fn local_mapping_selects_one_exact_or_representative_track_without_a_libra
         .await
         .expect("install provider source path");
     let representative = fixture
-        .database
+        .catalog
         .mapping_track_page(fixture.source, None, None, 1, &cancel)
         .await
         .expect("representative mapping Track")
         .pop()
         .expect("mapping Track");
     let exact_path = fixture
-        .database
+        .catalog
         .mapping_track_source_path(fixture.source, representative.track_key, &cancel)
         .await
         .expect("exact mapping Track")
@@ -1156,7 +1156,7 @@ async fn local_mapping_counts_formula_coverage_without_probing_local_files() {
 
     assert_eq!(
         fixture
-            .database
+            .catalog
             .mapping_formula_match_count(fixture.source, "/local/music", Some("/music"), &cancel)
             .await
             .expect("count prefixed paths"),
@@ -1164,7 +1164,7 @@ async fn local_mapping_counts_formula_coverage_without_probing_local_files() {
     );
     assert_eq!(
         fixture
-            .database
+            .catalog
             .mapping_formula_match_count(fixture.source, "/local/music", None, &cancel)
             .await
             .expect("count relative paths"),
@@ -1178,7 +1178,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     let cancel = ReadCancellation::new();
     let capacity_payload = "x".repeat(8 * 1024 * 1024);
     fixture
-        .database
+        .catalog
         .write_lyrics_cache(
             &fixture.track_uris[0],
             "source",
@@ -1192,7 +1192,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         .await
         .expect("write lyrics");
     fixture
-        .database
+        .catalog
         .write_lyrics_cache(
             &fixture.track_uris[0],
             "external",
@@ -1206,7 +1206,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         .await
         .expect("write external lyrics");
     let row = fixture
-        .database
+        .catalog
         .lyrics_cache_for_role(
             &fixture.track_uris[0],
             "original",
@@ -1221,7 +1221,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         .unwrap();
     assert_eq!(row.lyrics, "First");
     let external = fixture
-        .database
+        .catalog
         .lyrics_cache_for_role(
             &fixture.track_uris[0],
             "lyrics",
@@ -1237,7 +1237,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     assert_eq!(external.lyrics, "External");
     assert!(
         fixture
-            .database
+            .catalog
             .lyrics_cache_for_role(
                 &fixture.track_uris[0],
                 "original",
@@ -1253,7 +1253,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     );
     assert!(
         fixture
-            .database
+            .catalog
             .lyrics_cache_for_role(
                 &fixture.track_uris[0],
                 "lyrics",
@@ -1268,7 +1268,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
             .is_none()
     );
     fixture
-        .database
+        .catalog
         .write_lyrics_cache(
             &fixture.track_uris[1],
             "source",
@@ -1283,7 +1283,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         .expect("write second lyrics");
     assert_eq!(
         fixture
-            .database
+            .catalog
             .lyrics_cache_for_role(
                 &fixture.track_uris[1],
                 "lyrics",
@@ -1304,7 +1304,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     oversized.push('x');
     assert!(
         fixture
-            .database
+            .catalog
             .write_lyrics_cache(
                 &fixture.track_uris[2],
                 "source",
@@ -1320,7 +1320,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     );
     assert!(
         fixture
-            .database
+            .catalog
             .remove_lyrics_cache(&fixture.track_uris[1], "source", "lyrics", "", "")
             .await
             .expect("remove lyrics")
@@ -1332,7 +1332,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     for index in [1, 2] {
         for authority in ["source", "external"] {
             fixture
-                .database
+                .catalog
                 .write_lyrics_cache(
                     &fixture.track_uris[index],
                     authority,
@@ -1348,7 +1348,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         }
     }
     fixture
-        .database
+        .catalog
         .clear_lyrics_cache(&[fixture.track_uris[1].clone()])
         .await
         .unwrap();
@@ -1356,7 +1356,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         for authority in ["source", "external"] {
             assert_eq!(
                 fixture
-                    .database
+                    .catalog
                     .lyrics_cache_for_role(
                         &fixture.track_uris[index],
                         "lyrics",
@@ -1385,7 +1385,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     };
     assert_eq!(
         fixture
-            .database
+            .catalog
             .import_lyrics_cache(vec![imported], false)
             .await
             .unwrap()
@@ -1393,7 +1393,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         1
     );
     fixture
-        .database
+        .catalog
         .write_lyrics_cache(
             &fixture.track_uris[2],
             "source",
@@ -1408,7 +1408,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         .unwrap();
     assert_eq!(
         fixture
-            .database
+            .catalog
             .lyrics_cache_for_role(
                 &fixture.track_uris[2],
                 "original",
@@ -1430,7 +1430,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
 async fn source_removal_preserves_listens_and_pending_delivery_only() {
     let fixture = fixture().await;
     fixture
-        .database
+        .catalog
         .record_listen(
             &ListenWrite {
                 external_id: Some("remove-play".to_string()),
@@ -1461,7 +1461,7 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
         .await
         .expect("record retained listen");
     fixture
-        .database
+        .catalog
         .write_lyrics_cache(
             &fixture.track_uris[0],
             "source",
@@ -1475,7 +1475,7 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
         .await
         .expect("write source lyrics");
 
-    let mut scan_catalog = fixture.database.catalog("source", None).await.unwrap();
+    let mut scan_observation = fixture.catalog.observe("source", None).await.unwrap();
     {
         let write = library::CatalogBatch {
             tracks: vec![library::TrackObservation {
@@ -1496,22 +1496,22 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
             ..Default::default()
         };
 
-        scan_catalog.apply_catalog(&write, true).await.unwrap();
+        scan_observation.apply_catalog(&write, true).await.unwrap();
     };
     {
-        let update = scan_catalog.into_changes();
-        (&fixture.database)
+        let update = scan_observation.into_changes();
+        (&fixture.catalog)
             .publish_catalog_update("source", update)
             .await;
     };
     let queue_media = fixture
-        .database
+        .catalog
         .track_references_for_uris(&fixture.track_uris[..1], &ReadCancellation::new())
         .await
         .expect("materialize Queue media")
         .remove(0);
     persist_queue(
-        &fixture.database,
+        &fixture.catalog,
         &[QueueTransferRow {
             received_from_connect: false,
             item: queue_media,
@@ -1526,7 +1526,7 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
     .await;
     assert!(
         fixture
-            .database
+            .catalog
             .remove_source(&library::SourceId::new("source"))
             .await
             .expect("remove source")

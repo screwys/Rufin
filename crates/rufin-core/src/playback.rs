@@ -30,7 +30,7 @@ use crate::runtime::VisualizerPublication;
 use actor::{Playback, WeakPlayback};
 use async_channel::{Receiver, Sender as EventSender, TrySendError};
 use library::QueueUpdate;
-use library::{Database, ListenWrite, ReadCancellation};
+use library::{Catalog, ListenWrite, ReadCancellation};
 use playback::{
     PlaybackBackend, PlaybackProjection, PreparedStream, RepeatMode, RunId, StreamRequest,
 };
@@ -52,7 +52,7 @@ struct OutputSelection {
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct PlaybackOwner {
-    database: Arc<Database>,
+    catalog: Arc<Catalog>,
     settings: SettingsFile,
     runtime: tokio::runtime::Handle,
     pub updates: playback::PlaybackUpdates,
@@ -120,7 +120,7 @@ fn enqueue_queue_save(
 }
 
 async fn save_pending_queue(
-    database: &Database,
+    catalog: &Catalog,
     pending: &Mutex<Option<QueueUpdate>>,
     failed: &mut Option<QueueUpdate>,
 ) -> library::LibraryResult<()> {
@@ -133,7 +133,7 @@ async fn save_pending_queue(
         (Some(update), None) | (None, Some(update)) => update,
         (None, None) => return Ok(()),
     };
-    if let Err(error) = database.apply_queue_update(&update).await {
+    if let Err(error) = catalog.apply_queue_update(&update).await {
         *failed = Some(update);
         return Err(error);
     }
@@ -147,7 +147,7 @@ impl PlaybackOwner {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new<StartBackend>(
-        database: Arc<Database>,
+        catalog: Arc<Catalog>,
         settings: SettingsFile,
         runtime: tokio::runtime::Handle,
         visualizer_events: EventSender<crate::runtime::VisualizerPublication>,
@@ -186,7 +186,7 @@ impl PlaybackOwner {
             )
         };
         let owner = Arc::new(Self {
-            database,
+            catalog,
             settings,
             runtime: runtime.clone(),
             updates: playback::PlaybackUpdates::default(),
@@ -260,7 +260,7 @@ impl PlaybackOwner {
 
     pub(crate) async fn start(self: &Arc<Self>) -> Result<PlaybackProjection, String> {
         let stored = self.settings.load();
-        let sequence = match self.database.restore_queue().await {
+        let sequence = match self.catalog.restore_queue().await {
             Ok(mut restore) => {
                 if restore.entries.is_empty() {
                     restore.repeat_mode = stored.ui.repeat_mode;
@@ -302,7 +302,7 @@ impl PlaybackOwner {
 
     pub async fn waveform_cache_usage(&self) -> Result<library::CacheUsage, String> {
         let mut usage = self
-            .database
+            .catalog
             .waveform_cache_usage()
             .await
             .map_err(string_error)?;
@@ -325,7 +325,7 @@ impl PlaybackOwner {
             .await
             .map_err(string_error)?
             .map_err(string_error)?;
-        self.database
+        self.catalog
             .clear_waveform_cache()
             .await
             .map_err(string_error)
@@ -343,7 +343,7 @@ impl PlaybackOwner {
         };
         let queue = active.handoff_snapshot().map_err(string_error)?.0;
         let positions = self
-            .database
+            .catalog
             .queue_positions_for_source(&queue, source)
             .await
             .map_err(string_error)?;
@@ -416,7 +416,7 @@ impl PlaybackOwner {
             PlaybackStoreWork::Activity(key, activity) => self.store_activity(key, *activity).await,
             PlaybackStoreWork::Flush(reply) => {
                 if let Err(error) =
-                    save_pending_queue(&self.database, &self.pending_queue, failed_queue_save).await
+                    save_pending_queue(&self.catalog, &self.pending_queue, failed_queue_save).await
                 {
                     warn!(%error, "could not persist Queue");
                 }
@@ -436,7 +436,7 @@ impl PlaybackOwner {
             }
             PlaybackStoreWork::Settings => {
                 if let Err(error) =
-                    save_pending_queue(&self.database, &self.pending_queue, failed_queue_save).await
+                    save_pending_queue(&self.catalog, &self.pending_queue, failed_queue_save).await
                 {
                     warn!(%error, "could not persist Queue");
                 }
@@ -463,13 +463,13 @@ impl PlaybackOwner {
         if self.request_plex_auto_dj(&request) {
             return;
         }
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         let source = self.source_owner();
         let selected = source.as_ref().and_then(|owner| owner.selected_library());
         let source = source.as_ref().map(Arc::downgrade).unwrap_or_default();
         self.runtime.spawn(async move {
             let candidates = crate::radio::radio_candidates(
-                &database,
+                &catalog,
                 source,
                 selected,
                 library::RadioSeed::Track(request.seed_media_uri.clone()),
@@ -503,7 +503,7 @@ impl PlaybackOwner {
     async fn store_activity(&self, current_track: library::TrackKey, listen: ListenWrite) {
         let deliveries = self.scrobbler.listen_delivery_targets(&listen);
         match self
-            .database
+            .catalog
             .record_listen(&listen, Some(current_track), &deliveries)
             .await
         {
@@ -520,7 +520,7 @@ impl PlaybackOwner {
         request: StreamRequest,
         normalization: playback::LoudnessNormalization,
     ) -> tokio::task::JoinHandle<()> {
-        let database = Arc::clone(&self.database);
+        let catalog = Arc::clone(&self.catalog);
         let source_owner = self.source_owner();
         let local = self.settings.local_configuration();
         let connect = self
@@ -530,9 +530,9 @@ impl PlaybackOwner {
             .upgrade();
         self.runtime.spawn(async move {
             let loudness =
-                cached_loudness(&database, &occurrence.track.media_uri, normalization).await;
+                cached_loudness(&catalog, &occurrence.track.media_uri, normalization).await;
             let result = prepare_stream(
-                &database,
+                &catalog,
                 request,
                 local.as_ref(),
                 connect
@@ -570,10 +570,10 @@ impl PlaybackOwner {
         run: RunId,
         mut stream: PreparedStream,
     ) -> tokio::task::JoinHandle<()> {
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         self.runtime.spawn(async move {
             stream.loudness = cached_loudness(
-                &database,
+                &catalog,
                 &stream
                     .row
                     .as_ref()
@@ -692,7 +692,7 @@ impl PlaybackOwner {
                 .source_owner()
                 .map(|source| Arc::downgrade(&source))
                 .unwrap_or_default(),
-            database: Arc::clone(&self.database),
+            catalog: Arc::clone(&self.catalog),
         }
     }
 
@@ -913,7 +913,7 @@ impl PlaybackOwner {
         cancellation: library::ReadCancellation,
     ) -> impl std::future::Future<Output = Result<Vec<library::TrackKey>, String>> + Send + 'static + use<>
     {
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         let source = self
             .source
             .lock()
@@ -922,7 +922,7 @@ impl PlaybackOwner {
         let selected = source.upgrade().and_then(|owner| owner.selected_library());
         async move {
             crate::radio::radio_candidates(
-                &database,
+                &catalog,
                 source,
                 selected,
                 seed,
@@ -1137,7 +1137,7 @@ impl PlaybackOwner {
 }
 
 pub(crate) async fn prepare_stream<F>(
-    database: &Database,
+    catalog: &Catalog,
     request: StreamRequest,
     local: Option<&sources::SourceConfiguration>,
     file_transfer: Option<(&crate::connect::ConnectOwner, &playback::QueueRow)>,
@@ -1146,7 +1146,7 @@ pub(crate) async fn prepare_stream<F>(
 where
     F: std::future::Future<Output = Result<Arc<sources::Source>, String>> + Send,
 {
-    let mut access = database
+    let mut access = catalog
         .playback_access(&request.media_uri)
         .await
         .ok()
@@ -1156,7 +1156,7 @@ where
         .as_ref()
         .map_or(request.media_uri.as_str(), |(_, uri, _, _)| uri);
     if access.is_none() && cue.is_some() && library::document_media_id(file_uri).is_some() {
-        access = database
+        access = catalog
             .playback_access(file_uri)
             .await
             .map_err(string_error)?;
@@ -1187,7 +1187,7 @@ where
             access = None;
         }
         let remote = received_document
-            || database
+            || catalog
                 .file_media_is_remote(&request.media_uri, occurrence.received_from_connect)
                 .await
                 .map_err(string_error)?;
@@ -1201,7 +1201,7 @@ where
         if !available {
             let peer = connect.peer_access();
             if let Some(location) = peer
-                .mapped_file(database, &request.media_uri)
+                .mapped_file(catalog, &request.media_uri)
                 .await
                 .map_err(string_error)?
             {
@@ -1213,7 +1213,7 @@ where
                 });
             } else {
                 let mut stream = peer.stream(request.clone()).await.map_err(string_error)?;
-                if let Some((start, end)) = database
+                if let Some((start, end)) = catalog
                     .playback_window(&request.media_uri)
                     .await
                     .map_err(string_error)?
@@ -1254,7 +1254,7 @@ where
         None
     };
     let access_uri = access.map(|(uri, _)| uri).or(fetched_uri);
-    let window = database
+    let window = catalog
         .playback_window(&request.media_uri)
         .await
         .map_err(string_error)?;
@@ -1275,7 +1275,7 @@ where
         return Err(crate::source::source_access_unavailable());
     }
     let source = source(source_id).await?;
-    source.stream(database, request).await.map_err(string_error)
+    source.stream(catalog, request).await.map_err(string_error)
 }
 
 // Catches a removed local file before it reaches playback, where a failed
@@ -1313,14 +1313,14 @@ async fn direct_stream(uri: String) -> Result<audio_processing::ResolvedStream, 
 }
 
 async fn cached_loudness(
-    database: &Database,
+    catalog: &Catalog,
     uri: &str,
     mode: playback::LoudnessNormalization,
 ) -> Option<playback::TrackLoudness> {
     if mode == playback::LoudnessNormalization::Off {
         return None;
     }
-    let (track, album) = database
+    let (track, album) = catalog
         .playback_loudness(uri, &ReadCancellation::new())
         .await
         .unwrap_or_default();
@@ -1507,11 +1507,11 @@ mod tests {
     #[tokio::test]
     async fn downloaded_transcode_keeps_its_actual_format_and_canonical_occurrence() {
         let folder = tempfile::tempdir().unwrap();
-        let database = library::Database::open(folder.path().join("library.sqlite3"))
+        let catalog = library::Catalog::open(folder.path().join("library.sqlite3"))
             .await
             .unwrap();
         let occurrence = test_occurrence("flac");
-        database
+        catalog
             .queue_entries(
                 library::QueueLoad::items(vec![(
                     occurrence.track.clone().into(),
@@ -1524,7 +1524,7 @@ mod tests {
         let path = folder.path().join("track.opus");
         std::fs::write(&path, b"downloaded audio").unwrap();
         let uri = url::Url::from_file_path(&path).unwrap().to_string();
-        database
+        catalog
             .write_local_access(
                 None,
                 &[&library::LocalAccessWrite {
@@ -1545,7 +1545,7 @@ mod tests {
             .await
             .unwrap();
         let stream = super::prepare_stream(
-            &database,
+            &catalog,
             playback::StreamRequest::new(
                 occurrence.track.media_uri.clone(),
                 playback::StreamQuality::Original,

@@ -662,11 +662,11 @@ impl crate::PlayerUi {
             20,
             cancellation.clone(),
         );
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         let read_cancellation = cancellation.clone();
         let task = self.runtime.spawn(async move {
             let keys = candidates.await?;
-            database
+            catalog
                 .tracks(&keys, &read_cancellation)
                 .await
                 .map_err(|error| error.to_string())

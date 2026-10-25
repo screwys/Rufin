@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Connection, FromRow, SqliteConnection};
 
 use crate::{
-    AlbumKey, Database, LibraryError, LibraryResult, NativeGain, ReadCancellation, SourceKey,
+    AlbumKey, Catalog, LibraryError, LibraryResult, NativeGain, ReadCancellation, SourceKey,
     TrackKey,
 };
 
@@ -86,7 +86,7 @@ impl TryFrom<MeasurementScalar> for LoudnessMeasurement {
     }
 }
 
-impl Database {
+impl Catalog {
     pub async fn playback_loudness(
         &self,
         media_uri: &str,
@@ -220,19 +220,19 @@ impl Database {
 }
 
 async fn write_analyzed_loudness(
-    database: &Database,
+    catalog: &Catalog,
     source: SourceKey,
     kind: &'static str,
     key: i64,
     measurement: &LoudnessMeasurement,
 ) -> LibraryResult<bool> {
-    let mut writer = database.writer().await?;
+    let mut writer = catalog.writer().await?;
     let mut transaction = writer.begin().await?;
     let accepted = write_measurement_on(&mut transaction, source, kind, key, measurement).await?;
     transaction.commit().await?;
     drop(writer);
     if accepted {
-        database.cache_written();
+        catalog.cache_written();
     }
     Ok(accepted)
 }

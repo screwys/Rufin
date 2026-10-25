@@ -280,14 +280,14 @@ pub(crate) async fn initialize_choices(connection: &mut SqliteConnection) -> Lib
     Ok(())
 }
 
-impl super::Catalog<'_> {
+impl super::Observation<'_> {
     pub async fn set_source_artwork(
         &mut self,
         kind: &str,
         rows: &[(String, Option<Vec<u8>>)],
     ) -> LibraryResult<()> {
         let observed = self.observed;
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let mut tx = writer.begin().await?;
         let source = self.source.raw();
         let observed = super::cache::observation_stamp(&mut tx, source, observed).await?;

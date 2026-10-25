@@ -44,13 +44,13 @@ impl AndroidLibrary {
         } else {
             library::PlaylistScope::All
         };
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         self.runtime
             .spawn(async move {
                 let cancel = library::ReadCancellation::new();
-                let count = read.count(&database, &cancel).await.map_err(error)? as u64;
+                let count = read.count(&catalog, &cancel).await.map_err(error)? as u64;
                 let rows = read
-                    .playlist_items(&database, offset as usize, limit as usize, &cancel)
+                    .playlist_items(&catalog, offset as usize, limit as usize, &cancel)
                     .await
                     .map_err(error)?
                     .into_iter()
@@ -96,10 +96,10 @@ impl AndroidLibrary {
     }
 
     pub async fn playlist_name(&self, playlist: PlaylistKey) -> Result<String, AndroidError> {
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         self.runtime
             .spawn(async move {
-                database
+                catalog
                     .playlists(&[playlist], &library::ReadCancellation::new())
                     .await
                     .map_err(error)?
@@ -238,10 +238,10 @@ impl AndroidLibrary {
         &self,
         member: library::PlaylistFolderMember,
     ) -> Result<Option<library::PlaylistFolderKey>, AndroidError> {
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         self.runtime
             .spawn(async move {
-                database
+                catalog
                     .playlist_member_folder(&member, &library::ReadCancellation::new())
                     .await
                     .map_err(error)

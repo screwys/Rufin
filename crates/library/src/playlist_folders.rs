@@ -81,7 +81,7 @@ fn folder_name(name: &str) -> LibraryResult<&str> {
     }
     Ok(name)
 }
-impl Database {
+impl Catalog {
     pub async fn create_playlist_folder(
         &self,
         name: &str,
@@ -389,7 +389,7 @@ pub(crate) async fn load_items_on(
         .await;
     }
     if read.playlist_scope == PlaylistScope::All {
-        return Ok(Database::load_playlist_requested(connection, requested)
+        return Ok(Catalog::load_playlist_requested(connection, requested)
             .await?
             .into_iter()
             .map(PlaylistListRow::Playlist)
@@ -419,7 +419,7 @@ pub(crate) async fn load_items_on(
             loaded.insert(-row.folder_key.raw(), PlaylistListRow::Folder(row));
         }
     }
-    for row in Database::load_playlist_requested(
+    for row in Catalog::load_playlist_requested(
         connection,
         crate::query::RequestedKeys::batch(&playlist_keys)?,
     )

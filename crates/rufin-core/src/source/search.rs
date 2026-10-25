@@ -3,7 +3,7 @@ use library::{ReadCancellation, SearchMode, SearchRequest, SearchResults};
 
 pub async fn acquire_search(
     owner: &super::SourceOwner,
-    database: &library::Database,
+    catalog: &library::Catalog,
     selected: Option<&SelectedLibrary>,
     mode: SearchMode,
     query: String,
@@ -11,7 +11,7 @@ pub async fn acquire_search(
     cancellation: ReadCancellation,
 ) -> Result<SearchResults, String> {
     if mode == SearchMode::Lyrics {
-        return database
+        return catalog
             .search_tracks_by_lyrics(&SearchRequest::with_limit(query, limit), &cancellation)
             .await
             .map_err(|error| error.to_string());
@@ -20,7 +20,7 @@ pub async fn acquire_search(
     if selected.source_id.as_str() != sources::LOCAL_LIBRARY_SOURCE_ID
         && let Some(source) = owner.cached_client(&selected.source_id)
     {
-        let live = source.live_search(database, &query, limit);
+        let live = source.live_search(catalog, &query, limit);
         let result = tokio::select! {
             result = live => result,
             () = cancellation.cancelled() => return Err(library::LibraryError::ReadCancelled.to_string()),
@@ -29,7 +29,7 @@ pub async fn acquire_search(
             return Ok(rows);
         }
     }
-    database
+    catalog
         .search(
             selected.source_key,
             selected.music_folder_key,

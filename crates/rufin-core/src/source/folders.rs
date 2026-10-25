@@ -51,7 +51,7 @@ impl FolderProjection {
 
 pub async fn resolve_folder(
     owner: &super::SourceOwner,
-    database: &library::Database,
+    catalog: &library::Catalog,
     selected: &SelectedLibrary,
     folder_object_id: Option<&str>,
     cancellation: &ReadCancellation,
@@ -62,7 +62,7 @@ pub async fn resolve_folder(
             .ok_or(sources::SourceError::NotFound)?;
         source
             .browse_folder(
-                database,
+                catalog,
                 folder_object_id,
                 selected.music_folder_object_id.as_deref(),
             )
@@ -78,7 +78,7 @@ pub async fn resolve_folder(
                 source: selected.source_key,
                 ids: page.tracks.clone().into(),
             })
-            .count(database, cancellation)
+            .count(catalog, cancellation)
             .await?;
             if known as usize == page.tracks.len() {
                 let mut folders = page.folders;
@@ -95,7 +95,7 @@ pub async fn resolve_folder(
         }
     }
     let resolved = match folder_object_id {
-        Some(object) => database
+        Some(object) => catalog
             .catalog_keys(
                 library::CatalogKind::Folder,
                 Some(selected.source_key),

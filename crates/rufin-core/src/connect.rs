@@ -423,7 +423,7 @@ struct ImportOperation {
 #[cfg_attr(feature = "bindings", derive(uniffi::Object))]
 pub struct ConnectOwner {
     directory: PathBuf,
-    database: Arc<library::Database>,
+    catalog: Arc<library::Catalog>,
     settings_apply: SettingsOwner,
     secrets: Arc<SwitchableSecretStore>,
     source: Arc<SourceOwner>,
@@ -441,7 +441,7 @@ pub struct ConnectOwner {
 impl ConnectOwner {
     pub(crate) fn new(
         directory: PathBuf,
-        database: Arc<library::Database>,
+        catalog: Arc<library::Catalog>,
         settings_apply: SettingsOwner,
         secrets: Arc<SwitchableSecretStore>,
         source: Arc<SourceOwner>,
@@ -472,7 +472,7 @@ impl ConnectOwner {
         };
         let owner = Arc::new(Self {
             directory: directory.clone(),
-            database,
+            catalog,
             settings_apply,
             secrets,
             source,
@@ -577,10 +577,10 @@ impl ConnectOwner {
         {
             return Ok(Vec::new());
         }
-        let database = self.database.clone();
+        let catalog = self.catalog.clone();
         self.runtime
             .spawn(async move {
-                database
+                catalog
                     .connect_roots(&source)
                     .await
                     .map_err(|error| ActionError::Failed(error.to_string()))
@@ -596,7 +596,7 @@ impl ConnectOwner {
         self.runtime.spawn(async move {
             let _action = owner.actions.lock().await;
             let result = async {
-                let working = ProfileStore::database_profile(owner.database.path())
+                let working = ProfileStore::database_profile(owner.catalog.path())
                     .await
                     .map_err(error)?;
                 let settings = owner.status().settings;
@@ -653,7 +653,7 @@ impl ConnectOwner {
         let mut configuration = self.source.configuration_changes();
         let mut catalog = self.source.catalog_changes();
         let mut settings = self.settings_apply.shared_changes();
-        let mut cache = self.database.subscribe_cache_writes();
+        let mut cache = self.catalog.subscribe_cache_writes();
         self.runtime.spawn(async move {
             stop.run_until_cancelled(async move {
                 let mut configure = true;
@@ -666,7 +666,7 @@ impl ConnectOwner {
                     }
                     loop {
                         let mut busy = false;
-                        match owner.database.connect_seed_page().await {
+                        match owner.catalog.connect_seed_page().await {
                             Ok(seeded) => busy |= seeded,
                             Err(error) => owner.failed(error.to_string()),
                         }
@@ -1008,7 +1008,7 @@ impl ConnectOwner {
                 .try_into()
                 .unwrap(),
         );
-        let working = ProfileStore::database_profile(self.database.path())
+        let working = ProfileStore::database_profile(self.catalog.path())
             .await
             .map_err(error)?;
         if working.as_deref() != Some(&profile) && !create {
@@ -1018,7 +1018,7 @@ impl ConnectOwner {
         }
         let local_key = self.local_key(&profile, create).await?;
         let documents = Arc::new(
-            ProfileStore::open(self.database.as_ref().clone(), peer, local_key)
+            ProfileStore::open(self.catalog.as_ref().clone(), peer, local_key)
                 .await
                 .map_err(error)?,
         );
@@ -1089,10 +1089,7 @@ impl ConnectOwner {
                 .map_err(error)?;
             self.publish_device().await?;
         }
-        self.database
-            .connect_set_active(true)
-            .await
-            .map_err(error)?;
+        self.catalog.connect_set_active(true).await.map_err(error)?;
         crate::playlist_files::backfill_file_playlists(&self.source).await?;
         self.save(|config| config.profile = Some(profile.clone()))?;
         self.start_session(self.active().await?);
@@ -1101,11 +1098,11 @@ impl ConnectOwner {
 
     async fn create_profile(self: &Arc<Self>) -> Result<(), String> {
         self.open(ConnectNetwork::new_profile_id(), true).await?;
-        self.database
+        self.catalog
             .connect_initialize_profile()
             .await
             .map_err(error)?;
-        self.database.connect_seed_page().await.map_err(error)?;
+        self.catalog.connect_seed_page().await.map_err(error)?;
         Ok(())
     }
 
@@ -1202,7 +1199,7 @@ impl ConnectOwner {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clear();
-        let inactive = self.database.connect_set_active(false).await.map_err(error);
+        let inactive = self.catalog.connect_set_active(false).await.map_err(error);
         let closed = if let Some(network) = network {
             if let Some(profile) = profile {
                 if let Err(error) = network.leave_profile(&profile).await {
@@ -1216,7 +1213,7 @@ impl ConnectOwner {
         if let Some(session) = session {
             session.documents.close().await.map_err(error)?;
         }
-        ProfileStore::clear_database(&self.database, &self.directory)
+        ProfileStore::clear_database(&self.catalog, &self.directory)
             .await
             .map_err(error)?;
         self.cleanup_profiles().await?;
@@ -2280,7 +2277,7 @@ impl ConnectOwner {
                 }
                 Some(PendingImport::Peer { profile, peer }) => {
                     let network = self.network().await?;
-                    if ProfileStore::database_profile(self.database.path())
+                    if ProfileStore::database_profile(self.catalog.path())
                         .await
                         .map_err(error)?
                         .as_deref()
@@ -2804,7 +2801,7 @@ impl ConnectOwner {
                     .map_err(error)?
             }
             Request::TrackReference { uri } => serde_json::to_value(
-                self.database
+                self.catalog
                     .connect_track_reference(&uri)
                     .await
                     .map_err(error)?,
@@ -2815,7 +2812,7 @@ impl ConnectOwner {
                     return Err("Too many media availability requests".into());
                 }
                 let paths = self
-                    .database
+                    .catalog
                     .local_media_locations(&uris)
                     .await
                     .map_err(error)?;
@@ -2940,7 +2937,7 @@ impl ConnectOwner {
                 );
             } else if self.is_local_media(&current.media_uri).await?
                 && self
-                    .database
+                    .catalog
                     .connect_track_reference(&current.media_uri)
                     .await
                     .map_err(error)?
@@ -2955,7 +2952,7 @@ impl ConnectOwner {
                     )
                     .await?;
                 if !reference.is_null() {
-                    self.database
+                    self.catalog
                         .connect_apply(&[ConnectRecord {
                             kind: "track".into(),
                             key: current.media_uri.clone(),
@@ -3062,7 +3059,7 @@ impl ConnectOwner {
             {
                 break;
             }
-            if !self.database.connect_seed_page().await.map_err(error)? {
+            if !self.catalog.connect_seed_page().await.map_err(error)? {
                 break;
             }
             tokio::task::yield_now().await;
@@ -3174,7 +3171,7 @@ impl ConnectOwner {
             return Err("Transfer cancelled".into());
         }
         let current = self.session.read().await.clone();
-        let working_profile = ProfileStore::database_profile(self.database.path())
+        let working_profile = ProfileStore::database_profile(self.catalog.path())
             .await
             .map_err(error)?;
         let adoption = working_profile.as_deref() != Some(&profile);
@@ -3291,14 +3288,14 @@ impl ConnectOwner {
             return Ok(());
         };
         let local_key = self.local_key(&profile, false).await?;
-        let previous_profile = ProfileStore::database_profile(self.database.path())
+        let previous_profile = ProfileStore::database_profile(self.catalog.path())
             .await
             .map_err(error)?;
         let replacing = previous_profile.as_deref() != Some(&profile);
         let settings_path = if tokio::fs::try_exists(&path).await.map_err(error)? {
             path.as_path()
         } else if !replacing {
-            self.database.path()
+            self.catalog.path()
         } else {
             return Err(
                 "The prepared profile is unavailable. Pair with a trusted device again".into(),
@@ -3325,7 +3322,7 @@ impl ConnectOwner {
                         }
                         self.collection_progress(CollectionStage::Applying, 0, None);
                         ProfileStore::install_prepared_database(
-                            self.database.as_ref().clone(),
+                            self.catalog.as_ref().clone(),
                             &path,
                         )
                         .await
@@ -3419,10 +3416,10 @@ impl ConnectOwner {
 /// Store is marked last, so an interrupted reset runs again on the next start.
 pub(crate) async fn reset_earlier_state(
     directory: PathBuf,
-    database: &library::Database,
+    catalog: &library::Catalog,
     settings: &SettingsOwner,
 ) -> Result<(), String> {
-    if !ProfileStore::reset_pending(database).await.map_err(error)? {
+    if !ProfileStore::reset_pending(catalog).await.map_err(error)? {
         return Ok(());
     }
     let settings = settings.clone();
@@ -3430,7 +3427,7 @@ pub(crate) async fn reset_earlier_state(
     tokio::task::spawn_blocking(move || settings.reset_connect(&files))
         .await
         .map_err(error)??;
-    ProfileStore::clear_database(database, &directory)
+    ProfileStore::clear_database(catalog, &directory)
         .await
         .map_err(error)
 }

@@ -1,11 +1,11 @@
-use library::{Database, Freshness, ReadCancellation};
+use library::{Catalog, Freshness, ReadCancellation};
 
 async fn track(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     favorite: Option<bool>,
     play_count: Option<i64>,
 ) {
-    catalog
+    observation
         .apply_catalog(
             &library::CatalogBatch {
                 tracks: vec![library::TrackObservation {
@@ -45,27 +45,27 @@ async fn track(
         .unwrap();
 }
 
-async fn fixture() -> (tempfile::TempDir, Database) {
+async fn fixture() -> (tempfile::TempDir, Catalog) {
     let directory = tempfile::tempdir().unwrap();
-    let database = Database::open(directory.path().join("library.sqlite3"))
+    let catalog = Catalog::open(directory.path().join("library.sqlite3"))
         .await
         .unwrap();
 
-    let mut scan_catalog = async {
-        if (&database)
+    let mut scan_observation = async {
+        if (&catalog)
             .source_identity_key(&library::SourceId::new("source"))
             .await?
             .is_none()
         {
-            (&database)
+            (&catalog)
                 .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
                 .await?;
         }
-        database.catalog("source", None).await
+        catalog.observe("source", None).await
     }
     .await
     .unwrap();
-    let scan = scan_catalog.start_observation().await.unwrap();
+    let scan = scan_observation.start_observation().await.unwrap();
     {
         let write = library::CatalogBatch {
             albums: vec![library::AlbumObservation {
@@ -86,7 +86,7 @@ async fn fixture() -> (tempfile::TempDir, Database) {
             ..Default::default()
         };
 
-        scan_catalog.apply_catalog(&write, true).await.unwrap();
+        scan_observation.apply_catalog(&write, true).await.unwrap();
     };
     {
         let write = library::CatalogBatch {
@@ -107,9 +107,9 @@ async fn fixture() -> (tempfile::TempDir, Database) {
             ..Default::default()
         };
 
-        scan_catalog.apply_catalog(&write, true).await.unwrap();
+        scan_observation.apply_catalog(&write, true).await.unwrap();
     };
-    track(&mut scan_catalog, Some(true), None).await;
+    track(&mut scan_observation, Some(true), None).await;
     {
         let write = library::CatalogBatch {
             folders: vec![library::FolderObservation {
@@ -125,11 +125,11 @@ async fn fixture() -> (tempfile::TempDir, Database) {
             ..Default::default()
         };
 
-        scan_catalog.apply_catalog(&write, true).await.unwrap();
+        scan_observation.apply_catalog(&write, true).await.unwrap();
     };
     {
         let update = {
-            scan_catalog
+            scan_observation
                 .complete_source_observation(
                     scan,
                     &[
@@ -140,7 +140,7 @@ async fn fixture() -> (tempfile::TempDir, Database) {
                 .await
                 .unwrap();
 
-            scan_catalog
+            scan_observation
                 .complete_source_observation(
                     scan,
                     &[],
@@ -149,16 +149,16 @@ async fn fixture() -> (tempfile::TempDir, Database) {
                 .await
                 .unwrap();
 
-            scan_catalog.into_changes()
+            scan_observation.into_changes()
         };
-        (&database).publish_catalog_update("source", update).await;
+        (&catalog).publish_catalog_update("source", update).await;
     };
-    (directory, database)
+    (directory, catalog)
 }
 
 #[tokio::test]
 async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
-    let (directory, database) = fixture().await;
+    let (directory, catalog) = fixture().await;
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
     sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,indexed,metadata,normalized_search) SELECT source_key,'unknown',?1,0,jsonb(json_object()),lower(COALESCE(json_extract(jsonb(json_object()),'$.title'),'')||' '||COALESCE(json_extract(jsonb(json_object()),'$.artist'),'')||' '||COALESCE(json_extract(jsonb(json_object()),'$.album'),'')||' '||COALESCE(json_extract(jsonb(json_object()),'$.comment'),'')) FROM sources WHERE object_id='source'")
         .bind(library::source_entity_uri(&library::SourceId::new("source"), "track", "unknown"))
@@ -169,7 +169,7 @@ async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
         (true, 2, false, true),
         (false, 2, true, false),
     ] {
-        let mut scan_catalog = database.catalog("source", None).await.unwrap();
+        let mut scan_observation = catalog.observe("source", None).await.unwrap();
         {
             for (kind, id, state) in &[
                 (
@@ -191,7 +191,7 @@ async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
                     },
                 ),
             ] {
-                scan_catalog
+                scan_observation
                     .write_native_user_data(
                         kind,
                         &[
@@ -234,13 +234,13 @@ async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
             (favorite, Some(plays), Some(80))
         );
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
+        catalog.observe_catalog(move |_, update| {
             let _ = updates_tx.send(update);
             std::future::ready(())
         });
         {
-            let update = scan_catalog.into_changes();
-            (&database).publish_catalog_update("source", update).await;
+            let update = scan_observation.into_changes();
+            (&catalog).publish_catalog_update("source", update).await;
         };
         let publication = updates
             .try_recv()
@@ -256,11 +256,11 @@ async fn favorite_and_play_count_changes_do_not_report_new_tracks() {
 
 #[tokio::test]
 async fn point_metadata_preserves_folders_and_complete_memberships_can_clear_them() {
-    let (directory, database) = fixture().await;
+    let (directory, catalog) = fixture().await;
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
     for replace in [false, true] {
-        let mut scan_catalog = database.catalog("source", None).await.unwrap();
-        track(&mut scan_catalog, None, None).await;
+        let mut scan_observation = catalog.observe("source", None).await.unwrap();
+        track(&mut scan_observation, None, None).await;
         if replace {
             {
                 let write = library::CatalogBatch {
@@ -272,18 +272,18 @@ async fn point_metadata_preserves_folders_and_complete_memberships_can_clear_the
                     ..Default::default()
                 };
 
-                scan_catalog.apply_catalog(&write, true).await.unwrap();
+                scan_observation.apply_catalog(&write, true).await.unwrap();
             };
-            track(&mut scan_catalog, None, None).await;
+            track(&mut scan_observation, None, None).await;
         }
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
+        catalog.observe_catalog(move |_, update| {
             let _ = updates_tx.send(update);
             std::future::ready(())
         });
         {
-            let update = scan_catalog.into_changes();
-            (&database).publish_catalog_update("source", update).await;
+            let update = scan_observation.into_changes();
+            (&catalog).publish_catalog_update("source", update).await;
         };
         let outcome = updates
             .try_recv()
@@ -305,16 +305,16 @@ async fn point_metadata_preserves_folders_and_complete_memberships_can_clear_the
 
 #[tokio::test]
 async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_freshness() {
-    let (directory, database) = fixture().await;
+    let (directory, catalog) = fixture().await;
     let path = directory.path().join("library.sqlite3");
     let mut raw = super::support::connection(&path).await;
     let uri = library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
-    database
+    catalog
         .set_favorite(&library::FavoriteTarget::Track(uri.clone()), true)
         .await
         .unwrap();
     for (favorite, changed) in [(false, true), (false, false), (true, true)] {
-        let mut scan_catalog = database.catalog("source", None).await.unwrap();
+        let mut scan_observation = catalog.observe("source", None).await.unwrap();
         let ids = |id: &str| {
             if favorite {
                 vec![id.to_string()]
@@ -323,7 +323,7 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
             }
         };
         for kind in ["track", "album", "artist"] {
-            scan_catalog
+            scan_observation
                 .replace_source_favorites(kind, &ids(kind))
                 .await
                 .unwrap();
@@ -341,13 +341,13 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
             );
         }
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
+        catalog.observe_catalog(move |_, update| {
             let _ = updates_tx.send(update);
             std::future::ready(())
         });
         {
-            let update = scan_catalog.into_changes();
-            (&database).publish_catalog_update("source", update).await;
+            let update = scan_observation.into_changes();
+            (&catalog).publish_catalog_update("source", update).await;
         };
         let outcome = updates
             .try_recv()
@@ -358,13 +358,13 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
             .unwrap_or_default();
         assert_eq!(outcome.metadata, changed);
         assert!(
-            database
+            catalog
                 .favorite(&library::FavoriteTarget::Track(uri.clone()))
                 .await
                 .unwrap()
         );
         assert!(
-            (&database)
+            (&catalog)
                 .accept_freshness(
                     "source",
                     &Freshness::new(b"catalog".to_vec()).unwrap(),
@@ -387,7 +387,7 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
 
 #[tokio::test]
 async fn home_sections_refresh_and_clear_without_replacing_their_entities() {
-    let (directory, database) = fixture().await;
+    let (directory, catalog) = fixture().await;
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
     for (populated, title, changed) in [
         (true, Some("Played"), true),
@@ -395,7 +395,7 @@ async fn home_sections_refresh_and_clear_without_replacing_their_entities() {
         (true, Some("Popular"), true),
         (false, None, true),
     ] {
-        let mut scan_catalog = database.catalog("source", None).await.unwrap();
+        let mut scan_observation = catalog.observe("source", None).await.unwrap();
         let entries = if populated {
             vec![library::HomeEntryInput {
                 position: 0,
@@ -408,7 +408,7 @@ async fn home_sections_refresh_and_clear_without_replacing_their_entities() {
             vec![]
         };
 
-        scan_catalog
+        scan_observation
             .replace_source_home_section("most-played", title, &entries)
             .await
             .unwrap();
@@ -427,13 +427,13 @@ async fn home_sections_refresh_and_clear_without_replacing_their_entities() {
             },
         );
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
+        catalog.observe_catalog(move |_, update| {
             let _ = updates_tx.send(update);
             std::future::ready(())
         });
         {
-            let update = scan_catalog.into_changes();
-            (&database).publish_catalog_update("source", update).await;
+            let update = scan_observation.into_changes();
+            (&catalog).publish_catalog_update("source", update).await;
         };
         let update = updates
             .try_recv()
@@ -459,7 +459,7 @@ async fn home_sections_refresh_and_clear_without_replacing_their_entities() {
             "Album"
         );
         assert!(
-            (&database)
+            (&catalog)
                 .accept_freshness(
                     "source",
                     &Freshness::new(b"catalog".to_vec()).unwrap(),
@@ -473,10 +473,10 @@ async fn home_sections_refresh_and_clear_without_replacing_their_entities() {
 
 #[tokio::test]
 async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
-    let (directory, database) = fixture().await;
+    let (directory, catalog) = fixture().await;
 
-    let mut scan_catalog = database.catalog("source", None).await.unwrap();
-    scan_catalog
+    let mut scan_observation = catalog.observe("source", None).await.unwrap();
+    scan_observation
         .replace_source_home_section(
             "most-played",
             None,
@@ -491,25 +491,25 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
         .await
         .unwrap();
     {
-        let update = scan_catalog.into_changes();
-        (&database).publish_catalog_update("source", update).await;
+        let update = scan_observation.into_changes();
+        (&catalog).publish_catalog_update("source", update).await;
     };
 
-    let mut scan_catalog = async {
-        if (&database)
+    let mut scan_observation = async {
+        if (&catalog)
             .source_identity_key(&library::SourceId::new("source"))
             .await?
             .is_none()
         {
-            (&database)
+            (&catalog)
                 .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
                 .await?;
         }
-        database.catalog("source", None).await
+        catalog.observe("source", None).await
     }
     .await
     .unwrap();
-    scan_catalog.start_observation().await.unwrap();
+    scan_observation.start_observation().await.unwrap();
     {
         let write = library::CatalogBatch {
             albums: vec![library::AlbumObservation {
@@ -530,9 +530,9 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
             ..Default::default()
         };
 
-        scan_catalog.apply_catalog(&write, true).await.unwrap();
+        scan_observation.apply_catalog(&write, true).await.unwrap();
     };
-    scan_catalog
+    scan_observation
         .replace_source_home_section(
             "newly-added",
             None,
@@ -548,8 +548,8 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
         .unwrap();
 
     {
-        let update = scan_catalog.into_changes();
-        (&database).publish_catalog_update("source", update).await;
+        let update = scan_observation.into_changes();
+        (&catalog).publish_catalog_update("source", update).await;
     };
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
     assert_eq!(
@@ -568,7 +568,7 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
 
 #[tokio::test]
 async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
-    let (directory, database) = fixture().await;
+    let (directory, catalog) = fixture().await;
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
     let mut original = std::collections::HashMap::new();
     for ids in [
@@ -577,7 +577,7 @@ async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
         &["b", "a"][..],
         &[][..],
     ] {
-        let mut scan_catalog = database.catalog("source", None).await.unwrap();
+        let mut scan_observation = catalog.observe("source", None).await.unwrap();
         {
             let write = library::CatalogBatch {
                 playlists: vec![library::PlaylistObservation {
@@ -589,7 +589,7 @@ async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
                 ..Default::default()
             };
 
-            scan_catalog.apply_catalog(&write, true).await.unwrap();
+            scan_observation.apply_catalog(&write, true).await.unwrap();
         };
         let entries = ids
             .iter()
@@ -598,18 +598,18 @@ async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
                 track_id: "track".into(),
             })
             .collect::<Vec<_>>();
-        scan_catalog
+        scan_observation
             .write_source_playlist_page("playlist", 0, &entries, true)
             .await
             .unwrap();
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
+        catalog.observe_catalog(move |_, update| {
             let _ = updates_tx.send(update);
             std::future::ready(())
         });
         {
-            let update = scan_catalog.into_changes();
-            (&database).publish_catalog_update("source", update).await;
+            let update = scan_observation.into_changes();
+            (&catalog).publish_catalog_update("source", update).await;
         };
         let update = updates.try_recv().unwrap();
         assert!(update.playlists && !update.metadata && !update.home);
@@ -631,22 +631,22 @@ async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
 
 #[tokio::test]
 async fn unchanged_point_reads_do_not_rewrite_tracks_or_albums() {
-    let (directory, database) = fixture().await;
+    let (directory, catalog) = fixture().await;
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
     sqlx::raw_sql("CREATE TRIGGER no_track_rewrite BEFORE UPDATE OF metadata,native_artwork,source_path,cue_path,cue_start_millis,cue_end_millis ON tracks BEGIN SELECT RAISE(FAIL,'unchanged track rewritten'); END;
         CREATE TRIGGER no_album_rewrite BEFORE UPDATE OF metadata,native_artwork ON albums BEGIN SELECT RAISE(FAIL,'unchanged album rewritten'); END;")
         .execute(&mut raw).await.unwrap();
 
-    let mut scan_catalog = database.catalog("source", None).await.unwrap();
-    track(&mut scan_catalog, None, None).await;
+    let mut scan_observation = catalog.observe("source", None).await.unwrap();
+    track(&mut scan_observation, None, None).await;
     let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-    database.observe_catalog(move |_, update| {
+    catalog.observe_catalog(move |_, update| {
         let _ = updates_tx.send(update);
         std::future::ready(())
     });
     {
-        let update = scan_catalog.into_changes();
-        (&database).publish_catalog_update("source", update).await;
+        let update = scan_observation.into_changes();
+        (&catalog).publish_catalog_update("source", update).await;
     };
     let update = updates
         .try_recv()
@@ -660,18 +660,18 @@ async fn unchanged_point_reads_do_not_rewrite_tracks_or_albums() {
 
 #[tokio::test]
 async fn first_activity_observation_publishes_without_invalidating_catalog_freshness() {
-    let (_directory, database) = fixture().await;
+    let (_directory, catalog) = fixture().await;
     for changed in [true, false] {
-        let mut scan_catalog = database.catalog("source", None).await.unwrap();
-        track(&mut scan_catalog, None, Some(5)).await;
+        let mut scan_observation = catalog.observe("source", None).await.unwrap();
+        track(&mut scan_observation, None, Some(5)).await;
         let (updates_tx, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
+        catalog.observe_catalog(move |_, update| {
             let _ = updates_tx.send(update);
             std::future::ready(())
         });
         {
-            let update = scan_catalog.into_changes();
-            (&database).publish_catalog_update("source", update).await;
+            let update = scan_observation.into_changes();
+            (&catalog).publish_catalog_update("source", update).await;
         };
         let update = updates
             .try_recv()
@@ -685,7 +685,7 @@ async fn first_activity_observation_publishes_without_invalidating_catalog_fresh
         let cancellation = ReadCancellation::new();
         let uri = library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
         assert_eq!(
-            database
+            catalog
                 .tracks_by_uris(&([(&uri).to_string()]), &cancellation)
                 .await
                 .map(|rows| {
@@ -699,7 +699,7 @@ async fn first_activity_observation_publishes_without_invalidating_catalog_fresh
             5
         );
         assert!(
-            (&database)
+            (&catalog)
                 .accept_freshness(
                     "source",
                     &Freshness::new(b"catalog".to_vec()).unwrap(),
@@ -713,14 +713,14 @@ async fn first_activity_observation_publishes_without_invalidating_catalog_fresh
 
 #[tokio::test]
 async fn absent_favorites_preserve_known_state_and_explicit_false_clears_it() {
-    let (directory, database) = fixture().await;
+    let (directory, catalog) = fixture().await;
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
     for (favorite, expected) in [(None, true), (Some(false), false), (None, false)] {
-        let mut scan_catalog = database.catalog("source", None).await.unwrap();
-        track(&mut scan_catalog, favorite, None).await;
+        let mut scan_observation = catalog.observe("source", None).await.unwrap();
+        track(&mut scan_observation, favorite, None).await;
         {
-            let update = scan_catalog.into_changes();
-            (&database).publish_catalog_update("source", update).await;
+            let update = scan_observation.into_changes();
+            (&catalog).publish_catalog_update("source", update).await;
         };
         assert_eq!(
             sqlx::query_scalar::<_, bool>("SELECT COALESCE((SELECT favorite FROM native_media_state WHERE media_uri=tracks.media_uri),0) FROM tracks")

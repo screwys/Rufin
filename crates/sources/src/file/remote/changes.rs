@@ -125,14 +125,14 @@ impl FileSource {
 
     pub(crate) async fn acquire_paths(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         paths: &[String],
         rename: Option<&(String, String)>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let database = catalog.database;
-        let source_id = catalog.source_id;
-        let stamp = catalog.observed;
+        let catalog = observation.catalog;
+        let source_id = observation.source_id;
+        let stamp = observation.observed;
         let mut affected = Vec::new();
         for path in paths {
             let relative = self.relative(path).ok();
@@ -180,7 +180,7 @@ impl FileSource {
         prefixes.extend(image_directories);
         let mut after = None;
         loop {
-            let page = database
+            let page = catalog
                 .source_component_page(source_id, &seeds, &prefixes, after.as_deref())
                 .await?;
             if page.is_empty() {
@@ -201,19 +201,19 @@ impl FileSource {
             }
             .await;
             check_cancelled(cancelled)?;
-            catalog
+            observation
                 .write_file_observations(&observations, Vec::new(), true)
                 .await?;
             result?;
             check_cancelled(cancelled)?;
-            catalog
+            observation
                 .remove_source_files(&missing, stamp.expect("file observation"))
                 .await?;
         }
         let workers: [_; 4] =
             std::array::from_fn(|_| Arc::new(Mutex::new(crate::file::media::Worker::default())));
         self.acquire_cues(
-            catalog,
+            observation,
             None,
             Arc::clone(&workers[0]),
             &|_| {},
@@ -223,14 +223,14 @@ impl FileSource {
         .await?;
         let mut after = None;
         loop {
-            let Some(directory) = database
+            let Some(directory) = catalog
                 .source_next_directory(source_id, stamp, after.as_deref(), &self.location("")?)
                 .await?
             else {
                 break;
             };
             self.acquire_directory(
-                catalog,
+                observation,
                 &input,
                 &directory,
                 Arc::clone(&workers[0]),
@@ -241,10 +241,17 @@ impl FileSource {
             .await?;
             after = Some(directory);
         }
-        self.acquire_media_files(catalog, &workers, &|_| {}, cancelled, rename.as_ref(), 0)
-            .await?;
+        self.acquire_media_files(
+            observation,
+            &workers,
+            &|_| {},
+            cancelled,
+            rename.as_ref(),
+            0,
+        )
+        .await?;
         crate::file::artwork::ArtworkFiles::Remote(self)
-            .acquire(catalog, cancelled)
+            .acquire(observation, cancelled)
             .await?;
         Ok(())
     }

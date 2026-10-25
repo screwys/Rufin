@@ -30,7 +30,7 @@ impl CollectionTargets {
     }
     pub async fn collections(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
     ) -> Result<Vec<library::Collection>, String> {
         match self {
             Self::Ready(targets) => targets
@@ -43,19 +43,19 @@ impl CollectionTargets {
             Self::Parents(reads) => {
                 let mut collections = Vec::new();
                 for (read, ranges) in reads {
-                    collections.extend(selected_parent_collections(database, read, ranges).await?);
+                    collections.extend(selected_parent_collections(catalog, read, ranges).await?);
                 }
                 Ok(collections)
             }
         }
     }
-    pub async fn resolve(&self, database: &library::Database) -> Result<Vec<PlayRequest>, String> {
+    pub async fn resolve(&self, catalog: &library::Catalog) -> Result<Vec<PlayRequest>, String> {
         match self {
             Self::Ready(targets) => Ok(targets.clone()),
             Self::Parents(reads) => {
                 let mut targets = Vec::new();
                 for (read, ranges) in reads {
-                    let collections = selected_parent_collections(database, read, ranges).await?;
+                    let collections = selected_parent_collections(catalog, read, ranges).await?;
                     targets.extend(collections.into_iter().map(|collection| {
                         if let library::Collection::Smart { key, .. } = collection {
                             let mut members = library::MemberRead::new(collection);
@@ -79,12 +79,12 @@ impl CollectionTargets {
 }
 
 async fn selected_parent_collections(
-    database: &library::Database,
+    catalog: &library::Catalog,
     read: &library::ListRead,
     ranges: &[Range<usize>],
 ) -> Result<Vec<library::Collection>, String> {
     let cancel = library::ReadCancellation::new();
-    database
+    catalog
         .selected_collections(read, ranges, &cancel)
         .await
         .map_err(|error| error.to_string())
@@ -535,7 +535,7 @@ fn compact_playlist_drag_icon(cover: Option<gtk::Widget>, title: &str) -> gtk::W
 impl MediaDragSource {
     pub async fn track_selection(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
     ) -> Result<library::MemberSelection, String> {
         match self {
             Self::Targets {
@@ -554,7 +554,7 @@ impl MediaDragSource {
                 media_uris: uris, ..
             } => Ok(library::MemberSelection::Uris((uris.to_vec()).into())),
             _ => Ok(self
-                .play_request(database)
+                .play_request(catalog)
                 .await?
                 .selection()
                 .expect("song-backed collection drag")),
@@ -563,31 +563,31 @@ impl MediaDragSource {
 
     pub async fn playlist_input(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
     ) -> Result<(library::MemberSelection, String, Vec<String>), String> {
-        let selection = self.track_selection(database).await?;
+        let selection = self.track_selection(catalog).await?;
         let title = match self {
             Self::Target { .. } | Self::LiveCollection { .. } => selection_title(Some(&selection)),
             Self::PlaylistEntries(_) => localization::tr("Playlist"),
             _ => localization::tr("Selection"),
         };
-        let preview = database
+        let preview = catalog
             .selected_track_uris(&selection, Some(4), &library::ReadCancellation::new())
             .await
             .map_err(|error| error.to_string())?;
         Ok((selection, title, preview))
     }
 
-    pub async fn play_request(&self, database: &library::Database) -> Result<PlayRequest, String> {
+    pub async fn play_request(&self, catalog: &library::Catalog) -> Result<PlayRequest, String> {
         let placement = rufin_core::playback::QueuePlacement::Now;
         Ok(match self {
             Self::LiveCollection {
                 media_uri,
                 operations,
-            } => prepare_live_collection(database, operations, media_uri).await?,
+            } => prepare_live_collection(catalog, operations, media_uri).await?,
             Self::Target { target } => target.clone(),
             Self::Targets { targets } => {
-                PlayRequest::group(targets.resolve(database).await?, placement)
+                PlayRequest::group(targets.resolve(catalog).await?, placement)
             }
             Self::Selection(selection) => {
                 PlayRequest::ordered(selection.input.clone(), 0, placement, false)
@@ -604,7 +604,7 @@ impl MediaDragSource {
 
     pub async fn resolve(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
     ) -> Result<(Vec<String>, DownloadSubject), String> {
         let mut prepared = None;
         let uris = match self {
@@ -613,10 +613,10 @@ impl MediaDragSource {
                 media_uris: uris, ..
             } => uris.to_vec(),
             _ => {
-                let request = self.play_request(database).await?;
+                let request = self.play_request(catalog).await?;
                 let selection = request.selection().expect("song-backed collection drag");
                 prepared = Some(request);
-                database
+                catalog
                     .selected_track_uris(&selection, None, &library::ReadCancellation::new())
                     .await
                     .map_err(|error| error.to_string())?
@@ -664,7 +664,7 @@ fn selection_title(selection: Option<&library::MemberSelection>) -> String {
 }
 
 async fn prepare_live_collection(
-    database: &library::Database,
+    catalog: &library::Catalog,
     operations: &rufin_core::runtime::source::SourceHandle,
     media_uri: &str,
 ) -> Result<PlayRequest, String> {
@@ -678,12 +678,12 @@ async fn prepare_live_collection(
         .map(|(_, kind, _)| kind)
         .as_deref()
     {
-        Some("album") => database
+        Some("album") => catalog
             .album(media_uri, false, &cancellation)
             .await
             .map_err(|error| error.to_string())?
             .map(|row| library::Collection::Album(row.album_key)),
-        Some("artist") => database
+        Some("artist") => catalog
             .catalog_identity(library::CatalogKind::Artist, media_uri, &cancellation)
             .await
             .map_err(|error| error.to_string())?

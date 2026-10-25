@@ -36,7 +36,7 @@ impl AndroidBrowseQuery {
         let folders = if offset < page.folder_count {
             page.projection
                 .child_page(
-                    &self.database,
+                    &self.catalog,
                     self.selected().source_key,
                     &page.read,
                     offset..offset.saturating_add(limit),
@@ -55,7 +55,7 @@ impl AndroidBrowseQuery {
             self.member_rows(
                 page.read
                     .rows(
-                        &self.database,
+                        &self.catalog,
                         offset.saturating_sub(page.folder_count),
                         limit.saturating_sub(rows.len()),
                         &cancel,

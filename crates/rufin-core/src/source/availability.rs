@@ -11,7 +11,7 @@ impl SourceOwner {
     }
 
     pub(crate) async fn missing_media(&self, uris: &[String]) -> Result<HashSet<String>, String> {
-        let database = &self.shared.database;
+        let catalog = &self.shared.catalog;
         let mut missing = HashSet::new();
         let source_uris: Vec<_> = uris
             .iter()
@@ -21,13 +21,13 @@ impl SourceOwner {
                     .map(|(source, _, _)| (uri.clone(), source))
             })
             .collect();
-        let catalog_missing: std::collections::HashSet<_> = database
+        let catalog_missing: std::collections::HashSet<_> = catalog
             .catalog_missing_media(&source_uris)
             .await
             .map_err(string_error)?
             .into_iter()
             .collect();
-        let paths = database
+        let paths = catalog
             .local_media_locations(uris)
             .await
             .map_err(string_error)?;
@@ -77,7 +77,7 @@ impl SourceOwner {
             {
                 continue;
             }
-            let Some(file) = database
+            let Some(file) = catalog
                 .observed_media_file(uri)
                 .await
                 .map_err(string_error)?

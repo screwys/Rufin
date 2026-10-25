@@ -1,5 +1,5 @@
 //! Canonical observations and concrete source membership writes.
-use crate::{Database, LibraryError, LibraryResult, ReadCancellation, SourceId, SourceKey};
+use crate::{Catalog, LibraryError, LibraryResult, ReadCancellation, SourceId, SourceKey};
 use sqlx::{Connection, FromRow, SqliteConnection};
 use std::sync::Arc;
 pub(crate) mod artwork;
@@ -60,8 +60,8 @@ impl CatalogUpdate {
     }
 }
 
-pub struct Catalog<'a> {
-    pub database: &'a Database,
+pub struct Observation<'a> {
+    pub catalog: &'a Catalog,
     pub source_id: &'a str,
     pub observed: Option<i64>,
     pub source: SourceKey,
@@ -82,7 +82,7 @@ pub(crate) fn keep_local_membership(kind: &str, incoming: bool) -> String {
     format!(" AND NOT((SELECT kind FROM sources WHERE source_key=?1)='local' AND({member}))")
 }
 
-impl Catalog<'_> {
+impl Observation<'_> {
     pub fn changes(&self) -> &CatalogUpdate {
         &self.changes
     }
@@ -114,18 +114,18 @@ pub struct LocalArtworkCandidate {
     pub sort_text: String,
 }
 
-impl Database {
-    pub async fn catalog<'a>(
+impl Catalog {
+    pub async fn observe<'a>(
         &'a self,
         source_id: &'a str,
         observed: Option<i64>,
-    ) -> LibraryResult<Catalog<'a>> {
+    ) -> LibraryResult<Observation<'a>> {
         let source = self
             .source_identity_key(&SourceId::new(source_id))
             .await?
             .ok_or_else(|| LibraryError::InvalidRequest("source is no longer configured".into()))?;
-        Ok(Catalog {
-            database: self,
+        Ok(Observation {
+            catalog: self,
             source_id,
             source,
             observed,

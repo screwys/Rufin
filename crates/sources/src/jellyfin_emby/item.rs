@@ -491,16 +491,16 @@ mod tests {
     #[tokio::test]
     async fn emby_import_preserves_distinct_alternate_album_covers() {
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("emby"), "emby", "Emby")
             .await
             .unwrap();
         let catalog_source_id = ("emby").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
         let albums: Vec<Value> =
             serde_json::from_str(include_str!("fixtures/alternate-album-covers.json")).unwrap();
         for album in &albums {
@@ -520,21 +520,21 @@ mod tests {
             (async {
                 let mut batch = library::CatalogBatch::default();
                 let result = batch.albums.extend_from_slice(&[(mapped).clone()]);
-                catalog.apply_catalog(&batch, true).await?;
+                observation.apply_catalog(&batch, true).await?;
                 Ok::<_, library::LibraryError>(result)
             })
             .await
             .unwrap();
         }
         {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+            catalog
+                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                 .await;
             Ok::<_, crate::SourceError>(())
         }
         .unwrap();
         let catalog_source_id = ("emby").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
         for album in &albums {
             (async {
                 let mut batch = library::CatalogBatch::default();
@@ -546,15 +546,15 @@ mod tests {
                 .unwrap()
                 .unwrap())
                 .clone()]);
-                catalog.apply_catalog(&batch, true).await?;
+                observation.apply_catalog(&batch, true).await?;
                 Ok::<_, library::LibraryError>(result)
             })
             .await
             .unwrap();
         }
         {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+            catalog
+                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                 .await;
             Ok::<_, crate::SourceError>(())
         }
@@ -562,7 +562,7 @@ mod tests {
         for album in albums {
             let object = format!("emby:album:{}", album["Id"].as_str().unwrap());
             let uri = library::source_entity_uri(&crate::SourceId::new("emby"), "album", &object);
-            let row = database
+            let row = catalog
                 .album(&(&uri), false, &library::ReadCancellation::new())
                 .await
                 .unwrap()

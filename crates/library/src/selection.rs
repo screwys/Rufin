@@ -208,7 +208,7 @@ fn explicit_query(selection: &MemberSelection) -> LibraryResult<crate::query::Or
     })
 }
 
-impl Database {
+impl Catalog {
     pub async fn selected_collections(
         &self,
         read: &ListRead,

@@ -6,7 +6,7 @@ use futures_util::TryStreamExt;
 use sqlx::{Connection, SqliteConnection};
 
 use crate::{
-    Database, LibraryResult, LyricsSnippet, LyricsSnippetPart, ReadCancellation, SearchRequest,
+    Catalog, LibraryResult, LyricsSnippet, LyricsSnippetPart, ReadCancellation, SearchRequest,
     SearchResults, TrackKey,
 };
 
@@ -99,7 +99,7 @@ pub(crate) async fn initialize(
     Ok(())
 }
 
-impl Database {
+impl Catalog {
     pub async fn search_tracks_by_lyrics(
         &self,
         request: &SearchRequest,

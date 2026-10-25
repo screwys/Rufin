@@ -349,11 +349,11 @@ mod tests {
     #[tokio::test]
     async fn artist_title_sort_survives_full_import_and_album_track_refresh() {
         let directory = tempfile::tempdir().unwrap();
-        let database = library::Database::open(directory.path().join("library.sqlite"))
+        let catalog = library::Catalog::open(directory.path().join("library.sqlite"))
             .await
             .unwrap();
         let (sender, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        database.observe_catalog(move |_, update| {
+        catalog.observe_catalog(move |_, update| {
             let _ = sender.send(update);
             std::future::ready(())
         });
@@ -369,13 +369,13 @@ mod tests {
             json!({"ratingKey":"track-608","type":"track","title":"Friday I'm in Love","parentRatingKey":"album-608","parentTitle":"Wish","grandparentRatingKey":"608","grandparentTitle":"The Cure"}),
             json!({"ratingKey":"track-609","type":"track","title":"Rio","parentRatingKey":"album-609","parentTitle":"Rio","grandparentRatingKey":"609","grandparentTitle":"Duran Duran"}),
         ];
-        database
+        catalog
             .reconcile_source(&library::SourceId::new("plex"), "plex", "Plex")
             .await
             .unwrap();
         let catalog_source_id = ("plex").to_string();
-        let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
-        catalog.start_observation().await.unwrap();
+        let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
+        observation.start_observation().await.unwrap();
 
         (async {
             for batch in read_items(
@@ -386,7 +386,7 @@ mod tests {
                     .chain(&tracks)
                     .map(|item| (item, ItemResponse::Complete)),
             )? {
-                catalog.apply_catalog(&batch, true).await?;
+                observation.apply_catalog(&batch, true).await?;
             }
             Ok::<_, crate::SourceError>(())
         })
@@ -394,8 +394,8 @@ mod tests {
         .unwrap();
 
         {
-            database
-                .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+            catalog
+                .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                 .await;
             Ok::<_, crate::SourceError>(())
         }
@@ -405,7 +405,7 @@ mod tests {
         for refresh in [false, true] {
             if refresh {
                 let catalog_source_id = ("plex").to_string();
-                let mut catalog = database.catalog(&catalog_source_id, None).await.unwrap();
+                let mut observation = catalog.observe(&catalog_source_id, None).await.unwrap();
 
                 (async {
                     for batch in read_items(
@@ -415,7 +415,7 @@ mod tests {
                             .chain(&tracks)
                             .map(|item| (item, ItemResponse::Complete)),
                     )? {
-                        catalog.apply_catalog(&batch, true).await?;
+                        observation.apply_catalog(&batch, true).await?;
                     }
                     Ok::<_, crate::SourceError>(())
                 })
@@ -423,8 +423,8 @@ mod tests {
                 .unwrap();
 
                 {
-                    database
-                        .publish_catalog_update(&catalog_source_id, catalog.changes().clone())
+                    catalog
+                        .publish_catalog_update(&catalog_source_id, observation.changes().clone())
                         .await;
                     Ok::<_, crate::SourceError>(())
                 }
@@ -436,7 +436,7 @@ mod tests {
                     album_artist: false,
                 },
                 source: Some(
-                    database
+                    catalog
                         .source_identity_key(&library::SourceId::new(&catalog_source_id))
                         .await
                         .unwrap()
@@ -451,7 +451,7 @@ mod tests {
                 activity: false,
             }
             .page_artists(
-                &database,
+                &catalog,
                 library::RouteSeedWindow::top(),
                 &library::ReadCancellation::new(),
             )

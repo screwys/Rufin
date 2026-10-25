@@ -1,8 +1,8 @@
-use crate::{Database, LibraryResult, LocalArtworkCandidate, LocalFileKind, LocalFileWrite};
+use crate::{Catalog, LibraryResult, LocalArtworkCandidate, LocalFileKind, LocalFileWrite};
 
 const FILE_FIELDS: &str = "file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.native_id,file.revision,file.picture_index,file.artist_pictures,file.parse_version,file.state";
 
-impl Database {
+impl Catalog {
     pub async fn equivalent_local_file_uris(
         &self,
         files: &[(String, String, Option<i64>, Option<i64>)],
@@ -251,9 +251,9 @@ impl Database {
     }
 }
 
-impl super::Catalog<'_> {
+impl super::Observation<'_> {
     pub async fn clear_partial_file_image_observations(&mut self) -> LibraryResult<()> {
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         sqlx::query("UPDATE local_files SET artist_pictures=NULL WHERE local_file_key IN(SELECT local_file_key FROM observed_local_files WHERE source_key=?1 AND kind='media' AND picture_index IS NULL AND artist_pictures IS NOT NULL AND path NOT LIKE 'rufin-document://%' AND path NOT LIKE 'content://%')")
             .bind(self.source).execute(&mut *writer).await?;
         Ok(())
@@ -268,7 +268,7 @@ impl super::Catalog<'_> {
         if rows.is_empty() {
             return Ok(());
         }
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         sqlx::query("UPDATE local_files SET picture_index=json_extract(item.value,'$[1]'),artist_pictures=json_extract(item.value,'$[2]') FROM json_each(?2) item JOIN observed_local_files observed ON observed.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND observed.path=json_extract(item.value,'$[0]') WHERE local_files.local_file_key=observed.local_file_key AND(local_files.picture_index,local_files.artist_pictures) IS NOT(json_extract(item.value,'$[1]'),json_extract(item.value,'$[2]'))").bind(source_id).bind(serde_json::to_string(rows)?).execute(&mut *writer).await?;
         Ok(())
     }
@@ -276,7 +276,7 @@ impl super::Catalog<'_> {
         let source_id = self.source_id;
         let stamp = self.observed;
 
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         let parsed = serde_json::to_string(&(
             file.size_bytes,
             file.mtime_ns,
@@ -295,7 +295,7 @@ impl super::Catalog<'_> {
         let source_id = self.source_id;
         let stamp = self.observed;
 
-        let mut writer = self.database.writer().await?;
+        let mut writer = self.catalog.writer().await?;
         sqlx::query("UPDATE local_file_observations SET observed_stamp=coalesce(?3,observed_stamp) WHERE local_file_key IN(SELECT local_file_key FROM local_files WHERE source_key=(SELECT source_key FROM sources WHERE object_id=?1)) AND parent_path=?2 AND observed_stamp>=(SELECT coalesce(json_extract(parsed_stamp,'$[4]'),observed_stamp) FROM observed_local_files parent WHERE parent.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND rtrim(parent.path,'/'||char(92))=?2 AND parent.kind='directory' LIMIT 1)")
             .bind(source_id).bind(super::files::directory_locator(path)).bind(stamp).execute(&mut *writer).await?;
         Ok(())

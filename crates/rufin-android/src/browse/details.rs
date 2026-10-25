@@ -126,7 +126,7 @@ impl AndroidBrowseQuery {
         favorite_total: u64,
     ) -> Result<AndroidDetailSummary, AndroidError> {
         use rufin_core::browse::DetailSummary;
-        let db = &self.database;
+        let catalog = &self.catalog;
         let folder = self
             .selected
             .as_ref()
@@ -213,7 +213,7 @@ impl AndroidBrowseQuery {
                 .as_ref()
                 .is_some_and(|source| source.is_local());
         let folder_uri = if local_folder_link {
-            match db
+            match catalog
                 .collection_source_path_bounds(&uri, album_artist, folder)
                 .await
                 .map_err(error)?

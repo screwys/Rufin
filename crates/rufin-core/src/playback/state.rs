@@ -821,7 +821,7 @@ impl Player {
 
     fn play_radio(&mut self, request: crate::playback::RadioPlayRequest) {
         let owner = self.owner();
-        let database = owner.database.clone();
+        let catalog = owner.catalog.clone();
         let source = owner
             .source
             .lock()
@@ -830,7 +830,7 @@ impl Player {
         let selected = source.upgrade().and_then(|owner| owner.selected_library());
         self.start_candidates(request.placement, Provenance::Radio, async move {
             crate::radio::radio_candidates(
-                &database,
+                &catalog,
                 source,
                 selected,
                 request.seed,
@@ -849,7 +849,7 @@ impl Player {
         else {
             return;
         };
-        let database = owner.database.clone();
+        let catalog = owner.catalog.clone();
         let excluded = self
             .sequence
             .selected()
@@ -857,7 +857,7 @@ impl Player {
             .into_iter()
             .collect::<Vec<_>>();
         self.start_candidates(request.placement, Provenance::Random, async move {
-            database
+            catalog
                 .random_candidates(
                     selected.source_key,
                     selected.music_folder_key,
@@ -1454,12 +1454,12 @@ impl Player {
         self.queue_loading = true;
         self.cancel_queue_read();
         let owner = self.owner();
-        let database = owner.database.clone();
+        let catalog = owner.catalog.clone();
         let playback = self.playback.clone();
         let shuffled = self.sequence.shuffle_enabled();
         let task = owner.runtime.spawn(async move {
             let result = request
-                .prepare(&database, shuffled, super::random_u64())
+                .prepare(&catalog, shuffled, super::random_u64())
                 .await
                 .map_err(super::string_error);
             playback.post(move |player, sample| {
@@ -1485,7 +1485,7 @@ impl Player {
             return;
         };
         let owner = self.owner();
-        let database = owner.database.clone();
+        let catalog = owner.catalog.clone();
         let playback = self.playback.clone();
         self.pending_hydration = Some(owner.runtime.spawn(async move {
             let requested = entries
@@ -1493,7 +1493,7 @@ impl Player {
                 .enumerate()
                 .map(|(position, (_, entry))| (position, entry.clone()))
                 .collect::<Vec<_>>();
-            let result = database
+            let result = catalog
                 .queue_rows_for_entries(&requested, &library::ReadCancellation::new())
                 .await
                 .map(|rows| {

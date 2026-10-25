@@ -415,9 +415,9 @@ fn enqueue_media_drop(
         queue.reorder(selection, target);
         return true;
     }
-    let database = shell.database.clone();
+    let catalog = shell.catalog.clone();
     shell.runtime.spawn(async move {
-        let Ok(input) = source.track_selection(&database).await else {
+        let Ok(input) = source.track_selection(&catalog).await else {
             return;
         };
         queue.insert(input, target);

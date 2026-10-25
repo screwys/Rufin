@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use library::{Database, ReadCancellation};
+use library::{Catalog, ReadCancellation};
 use sqlx::{Connection, Row};
 
 use super::{Implementation, Source};
@@ -415,12 +415,12 @@ impl PreparedFile {
         Ok(self)
     }
 
-    pub(crate) async fn preserve_fingerprint(&self, database: &Database) -> Result<(), Error> {
+    pub(crate) async fn preserve_fingerprint(&self, catalog: &Catalog) -> Result<(), Error> {
         let previous = self.target.analysis_key(self.revision.as_deref());
         let current = self
             .target
             .analysis_key(self.target.revision().await?.as_deref());
-        database
+        catalog
             .preserve_fingerprint(&self.target.media_uri, &previous, &current)
             .await
             .map_err(failure)
@@ -429,11 +429,11 @@ impl PreparedFile {
     async fn read_catalog(
         &self,
         source: &Source,
-        catalog: &library::Catalog<'_>,
+        observation: &library::Observation<'_>,
     ) -> Result<SavedFile, Error> {
-        self.preserve_fingerprint(catalog.database).await?;
-        let previous = catalog
-            .database
+        self.preserve_fingerprint(observation.catalog).await?;
+        let previous = observation
+            .catalog
             .audio_analysis_key(&self.target.media_uri)
             .await
             .map_err(failure)?;
@@ -444,7 +444,7 @@ impl PreparedFile {
                     let input = files.input().await.map_err(failure)?;
                     let (observation, facts) = files
                         .read_saved_file(
-                            catalog.database,
+                            observation.catalog,
                             &self.target.media_uri,
                             &files.relative(path).map_err(failure)?,
                             &input,
@@ -454,14 +454,16 @@ impl PreparedFile {
                         .map_err(failure)?;
                     (Some(observation), facts)
                 }
-                FileLocation::Native(path) => {
-                    crate::file::local::scan::read_saved_file(catalog, &self.target.media_uri, path)
-                        .await
-                        .map_err(failure)?
-                }
+                FileLocation::Native(path) => crate::file::local::scan::read_saved_file(
+                    observation,
+                    &self.target.media_uri,
+                    path,
+                )
+                .await
+                .map_err(failure)?,
                 FileLocation::Document { uri, .. } => {
                     crate::file::local::scan::read_saved_document(
-                        catalog,
+                        observation,
                         &self.target.media_uri,
                         uri,
                         &self.file,
@@ -487,10 +489,10 @@ impl PreparedFile {
     async fn write_catalog(
         &self,
         source: &Source,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
     ) -> Result<(), Error> {
-        let saved = self.read_catalog(source, catalog).await?;
-        publish_saved_files(catalog, &mut vec![saved]).await
+        let saved = self.read_catalog(source, observation).await?;
+        publish_saved_files(observation, &mut vec![saved]).await
     }
 }
 
@@ -502,7 +504,7 @@ struct SavedFile {
 }
 
 async fn publish_saved_files(
-    catalog: &mut library::Catalog<'_>,
+    observation: &mut library::Observation<'_>,
     pending: &mut Vec<SavedFile>,
 ) -> Result<(), Error> {
     if pending.is_empty() {
@@ -520,13 +522,13 @@ async fn publish_saved_files(
         }
         tracks.push(saved.facts);
     }
-    catalog
+    observation
         .write_file_observations(&files, tracks, true)
         .await
         .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
     for (uri, previous) in analysis {
-        catalog
-            .database
+        observation
+            .catalog
             .preserve_audio_analysis(&uri, &previous)
             .await
             .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
@@ -615,15 +617,15 @@ impl FileEditSession {
 
     pub async fn save_lyrics(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         text: &str,
         sidecar: bool,
     ) -> Result<Option<String>, Error> {
         if let Some(source) = &self.source {
             source
-                .write_lyrics(database, &self.media_uri, text, sidecar)
+                .write_lyrics(catalog, &self.media_uri, text, sidecar)
                 .await?;
-            source.refresh_written_lyrics(database);
+            source.refresh_written_lyrics(catalog);
             return self
                 .single
                 .as_ref()
@@ -633,9 +635,9 @@ impl FileEditSession {
         }
         let file = self.single.as_ref().ok_or(Error::Unavailable)?;
         if let Some(saved) = file.save_lyrics(text, sidecar, || false).await? {
-            saved.preserve_fingerprint(database).await?;
+            saved.preserve_fingerprint(catalog).await?;
         }
-        file.publish_direct(database).await?;
+        file.publish_direct(catalog).await?;
         file.revision().await
     }
 
@@ -645,14 +647,14 @@ impl FileEditSession {
 
     pub async fn open(
         source: Option<Arc<Source>>,
-        database: &Database,
+        catalog: &Catalog,
         media_uri: String,
         kind: SourceEntityKind,
     ) -> Result<(Self, MetadataDraft), Error> {
         let cancel = ReadCancellation::new();
         let (base, mut binding, previous_artist, single) = match kind {
             SourceEntityKind::Track => {
-                let row = database
+                let row = catalog
                     .track(&(&media_uri), &cancel)
                     .await
                     .map_err(failure)?;
@@ -660,7 +662,7 @@ impl FileEditSession {
                     let binding = if row.artwork_binding.is_some() {
                         row.artwork_binding.clone()
                     } else if let Some(album) = &row.links.album_media_uri {
-                        database
+                        catalog
                             .album(&(album), false, &cancel)
                             .await
                             .map_err(failure)?
@@ -675,7 +677,7 @@ impl FileEditSession {
                             row.access.source_path.as_deref(),
                             row.metadata.source_format.as_deref(),
                             row.access.cue_path.is_some(),
-                            database.original_file(&media_uri).await.map_err(failure)?,
+                            catalog.original_file(&media_uri).await.map_err(failure)?,
                         )?
                     } else {
                         NativeFile::direct(&media_uri)?
@@ -691,7 +693,7 @@ impl FileEditSession {
                 (base, binding, String::new(), Some(file))
             }
             SourceEntityKind::Album => {
-                let row = database
+                let row = catalog
                     .album(&(&media_uri), false, &cancel)
                     .await
                     .map_err(failure)?
@@ -704,7 +706,7 @@ impl FileEditSession {
                 )
             }
             SourceEntityKind::Artist => {
-                let row = database
+                let row = catalog
                     .artist(&(&media_uri), false, false, &cancel)
                     .await
                     .map_err(failure)?
@@ -783,13 +785,13 @@ impl FileEditSession {
         Ok((session, draft))
     }
 
-    pub async fn save(&self, database: &Database, edit: MetadataEdit) -> Result<(), Error> {
+    pub async fn save(&self, catalog: &Catalog, edit: MetadataEdit) -> Result<(), Error> {
         if edit.changes.is_empty() && edit.artwork.is_none() {
             return Ok(());
         }
         let file = self.single.as_ref().ok_or(Error::Unavailable)?;
         self.save_tracks(
-            database,
+            catalog,
             None,
             vec![file.media_uri.clone()],
             |_| {
@@ -803,7 +805,7 @@ impl FileEditSession {
 
     pub async fn save_tracks<F, Fut, C, Done>(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         edit: Option<MetadataEdit>,
         tracks: Vec<String>,
         mut extra: F,
@@ -835,10 +837,10 @@ impl FileEditSession {
         }) {
             return Err(Error::Unavailable);
         }
-        let mut catalog = match &self.source {
+        let mut observation = match &self.source {
             Some(source) => Some(
-                database
-                    .catalog(source.source_id().as_str(), None)
+                catalog
+                    .observe(source.source_id().as_str(), None)
                     .await
                     .map_err(failure)?,
             ),
@@ -894,7 +896,7 @@ impl FileEditSession {
                         ))
                     } else if let Some(source) = &self.source {
                         source
-                            .resolved_track(database, uri)
+                            .resolved_track(catalog, uri)
                             .await
                             .map(|(file, row)| (file, row.object_id))
                     } else {
@@ -967,7 +969,7 @@ impl FileEditSession {
                                         let source = self.source.as_ref().unwrap();
                                         let refresh = source
                                             .acquire_paths(
-                                                catalog.as_mut().unwrap(),
+                                                observation.as_mut().unwrap(),
                                                 &[path],
                                                 None,
                                                 &|| false,
@@ -986,7 +988,7 @@ impl FileEditSession {
                                     if self.source.is_none() {
                                         return crate::finish_metadata_save(
                                             Err(error),
-                                            file.publish_direct(database).await,
+                                            file.publish_direct(catalog).await,
                                             true,
                                         )
                                         .map(|()| None);
@@ -997,20 +999,23 @@ impl FileEditSession {
                             };
                             saved = true;
                             if mapped || self.source.is_none() {
-                                committed.preserve_fingerprint(database).await?;
+                                committed.preserve_fingerprint(catalog).await?;
                             }
                             if !mapped && let Some(source) = &self.source {
                                 pending.push(
                                     committed
-                                        .read_catalog(source, catalog.as_ref().unwrap())
+                                        .read_catalog(source, observation.as_ref().unwrap())
                                         .await?,
                                 );
                                 if pending.len() == 128 {
-                                    publish_saved_files(catalog.as_mut().unwrap(), &mut pending)
-                                        .await?;
+                                    publish_saved_files(
+                                        observation.as_mut().unwrap(),
+                                        &mut pending,
+                                    )
+                                    .await?;
                                 }
                             } else if self.source.is_none() {
-                                file.publish_direct(database).await.map_err(|error| {
+                                file.publish_direct(catalog).await.map_err(|error| {
                                     Error::SavedRefreshFailed(error.to_string())
                                 })?;
                             }
@@ -1047,7 +1052,7 @@ impl FileEditSession {
                                     return Err(crate::SourceError::Cancelled.into());
                                 }
                                 let paths = match file
-                                    .write_folder_artwork(database, edit, hint.as_deref(), artist)
+                                    .write_folder_artwork(catalog, edit, hint.as_deref(), artist)
                                     .await
                                 {
                                     Ok(paths) => paths,
@@ -1057,7 +1062,7 @@ impl FileEditSession {
                                             let source = self.source.as_ref().unwrap();
                                             let refresh = source
                                                 .acquire_paths(
-                                                    catalog.as_mut().unwrap(),
+                                                    observation.as_mut().unwrap(),
                                                     &[directory],
                                                     None,
                                                     &|| false,
@@ -1083,7 +1088,7 @@ impl FileEditSession {
                                         .as_ref()
                                         .unwrap()
                                         .acquire_paths(
-                                            catalog.as_mut().unwrap(),
+                                            observation.as_mut().unwrap(),
                                             &paths,
                                             None,
                                             &|| false,
@@ -1120,7 +1125,7 @@ impl FileEditSession {
         }
         .await;
         let publication = if !pending.is_empty() {
-            publish_saved_files(catalog.as_mut().unwrap(), &mut pending).await
+            publish_saved_files(observation.as_mut().unwrap(), &mut pending).await
         } else {
             Ok(())
         };
@@ -1128,14 +1133,14 @@ impl FileEditSession {
             self.source
                 .as_ref()
                 .unwrap()
-                .refresh_metadata_after_write(database, work.take());
+                .refresh_metadata_after_write(catalog, work.take());
         }
         if let Some(source) = &self.source
             && !source.is_retired()
-            && let Some(catalog) = catalog
+            && let Some(observation) = observation
         {
-            database
-                .publish_catalog_update(source.source_id().as_str(), catalog.into_changes())
+            catalog
+                .publish_catalog_update(source.source_id().as_str(), observation.into_changes())
                 .await;
         }
         crate::finish_metadata_save(result, publication, saved)
@@ -1177,10 +1182,10 @@ impl FileEditSession {
 impl Source {
     async fn resolved_track(
         self: &Arc<Self>,
-        database: &Database,
+        catalog: &Catalog,
         uri: &str,
     ) -> Result<(NativeFile, library::TrackView), Error> {
-        let row = database
+        let row = catalog
             .track(&(uri), &ReadCancellation::new())
             .await
             .map_err(failure)?
@@ -1191,24 +1196,24 @@ impl Source {
             row.access.source_path.as_deref(),
             row.metadata.source_format.as_deref(),
             row.access.cue_path.is_some(),
-            database.original_file(uri).await.map_err(failure)?,
+            catalog.original_file(uri).await.map_err(failure)?,
         )?;
         Ok((file, row))
     }
 
     fn refresh_metadata_after_write(
         self: &Arc<Self>,
-        database: &Database,
+        catalog: &Catalog,
         mut work: Option<SaveWork>,
     ) {
         if !matches!(self.implementation, Implementation::OpenSubsonic(_)) {
             return;
         }
         let source = self.clone();
-        let database = database.clone();
+        let catalog = catalog.clone();
         tokio::spawn(async move {
             let result: Result<(), Error> = source
-                .catalog_operation(&database, async |catalog| {
+                .catalog_operation(&catalog, async |observation| {
                     let Implementation::OpenSubsonic(provider) = &source.implementation else {
                         unreachable!()
                     };
@@ -1226,7 +1231,7 @@ impl Source {
                             }
                             after = rows.last().unwrap().get(0);
                             let ids = rows.into_iter().map(|row| source.item_request_id("track", row.get::<&str,_>(1))).collect();
-                            source.acquire_items(catalog, ids, Vec::new()).await?;
+                            source.acquire_items(observation, ids, Vec::new()).await?;
                         }
                     }
                     Ok(())
@@ -1238,13 +1243,13 @@ impl Source {
         });
     }
 
-    pub fn refresh_written_lyrics(self: &Arc<Self>, database: &Database) {
-        self.refresh_metadata_after_write(database, None);
+    pub fn refresh_written_lyrics(self: &Arc<Self>, catalog: &Catalog) {
+        self.refresh_metadata_after_write(catalog, None);
     }
 
     pub async fn write_file_track_rating(
         self: &Arc<Self>,
-        database: &Database,
+        catalog: &Catalog,
         source: library::SourceKey,
         uri: &str,
         rating: Option<u8>,
@@ -1255,8 +1260,8 @@ impl Source {
         ) {
             return Ok(());
         }
-        self.catalog_operation(database, async |catalog| {
-            let (file, row) = self.resolved_track(database, uri).await?;
+        self.catalog_operation(catalog, async |observation| {
+            let (file, row) = self.resolved_track(catalog, uri).await?;
             if row.source_key != Some(source) {
                 return Err(Error::Unavailable);
             }
@@ -1268,7 +1273,7 @@ impl Source {
             prepared
                 .commit(&|| self.is_retired())
                 .await?
-                .write_catalog(self, catalog)
+                .write_catalog(self, observation)
                 .await
         })
         .await
@@ -1276,10 +1281,10 @@ impl Source {
 
     pub async fn lyrics_storage(
         self: &Arc<Self>,
-        database: &Database,
+        catalog: &Catalog,
         uri: &str,
     ) -> Vec<crate::LyricsStorage> {
-        let Ok(Some(row)) = database.track(&(uri), &ReadCancellation::new()).await else {
+        let Ok(Some(row)) = catalog.track(&(uri), &ReadCancellation::new()).await else {
             return Vec::new();
         };
         if row.access.cue_path.is_some() {
@@ -1294,7 +1299,7 @@ impl Source {
                 Vec::new()
             };
         }
-        let Ok(original) = database.original_file(uri).await else {
+        let Ok(original) = catalog.original_file(uri).await else {
             return Vec::new();
         };
         let Ok(file) = NativeFile::resolve(
@@ -1312,11 +1317,11 @@ impl Source {
 
     pub async fn lyrics_writable(
         self: &Arc<Self>,
-        database: &Database,
+        catalog: &Catalog,
         uri: &str,
         sidecar: bool,
     ) -> bool {
-        self.lyrics_storage(database, uri)
+        self.lyrics_storage(catalog, uri)
             .await
             .into_iter()
             .any(|storage| {
@@ -1332,13 +1337,13 @@ impl Source {
 
     pub async fn write_lyrics(
         self: &Arc<Self>,
-        database: &Database,
+        catalog: &Catalog,
         uri: &str,
         lyrics: &str,
         sidecar: bool,
     ) -> Result<(), Error> {
-        self.catalog_operation(database, async |catalog| {
-            let row = database
+        self.catalog_operation(catalog, async |observation| {
+            let row = catalog
                 .track(&(uri), &ReadCancellation::new())
                 .await
                 .map_err(failure)?
@@ -1363,18 +1368,18 @@ impl Source {
                     row.access.source_path.as_deref(),
                     row.metadata.source_format.as_deref(),
                     row.access.cue_path.is_some(),
-                    database.original_file(uri).await.map_err(failure)?,
+                    catalog.original_file(uri).await.map_err(failure)?,
                 )?;
                 if let Some(committed) = file
                     .save_lyrics(lyrics, sidecar, || self.is_retired())
                     .await?
                 {
-                    committed.preserve_fingerprint(database).await?;
+                    committed.preserve_fingerprint(catalog).await?;
                     if matches!(
                         self.implementation,
                         Implementation::Local(_) | Implementation::Files(_)
                     ) {
-                        committed.write_catalog(self, catalog).await?;
+                        committed.write_catalog(self, observation).await?;
                         return Ok(());
                     }
                 }
@@ -1391,12 +1396,12 @@ impl Source {
                 let input = self
                     .file_source(row.access.source_path.as_deref())
                     .map_or([0; 32], |source| source.lyrics_input());
-                let mut bundle = self.read_lyrics(database, uri).await.map_err(failure)?;
-                super::cache_native_lyrics(database, uri, input, &mut bundle)
+                let mut bundle = self.read_lyrics(catalog, uri).await.map_err(failure)?;
+                super::cache_native_lyrics(catalog, uri, input, &mut bundle)
                     .await
                     .map_err(failure)?;
             } else {
-                database
+                catalog
                     .remove_track_lyrics_by_authority(uri, "source")
                     .await
                     .map_err(|error| Error::SavedRefreshFailed(error.to_string()))?;
@@ -1408,23 +1413,24 @@ impl Source {
 
     pub async fn write_file_r128_tags(
         self: &Arc<Self>,
-        database: &Database,
+        catalog: &Catalog,
         source: library::SourceKey,
         measurements: &[(library::TrackKey, Option<f64>, Option<f64>)],
     ) -> Result<(), Error> {
-        self.catalog_operation(database, async |catalog| {
-            self.write_r128_values(catalog, source, measurements).await
+        self.catalog_operation(catalog, async |observation| {
+            self.write_r128_values(observation, source, measurements)
+                .await
         })
         .await
     }
 
     async fn write_r128_values(
         self: &Arc<Self>,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         source: library::SourceKey,
         measurements: &[(library::TrackKey, Option<f64>, Option<f64>)],
     ) -> Result<(), Error> {
-        let database = catalog.database;
+        let catalog = observation.catalog;
         if !matches!(
             self.implementation,
             Implementation::Local(_) | Implementation::Files(_)
@@ -1432,14 +1438,14 @@ impl Source {
             return Err(Error::Unavailable);
         }
         for page in measurements.chunks(64) {
-            let rows = database
+            let rows = catalog
                 .tracks(
                     &page.iter().map(|row| row.0).collect::<Vec<_>>(),
                     &ReadCancellation::new(),
                 )
                 .await
                 .map_err(failure)?;
-            let mut originals = database
+            let mut originals = catalog
                 .original_files(
                     &rows
                         .iter()
@@ -1496,7 +1502,7 @@ impl Source {
                     Err(error) => return Err(error),
                 };
                 let committed = prepared.commit(&|| self.is_retired()).await?;
-                committed.write_catalog(self, catalog).await?;
+                committed.write_catalog(self, observation).await?;
             }
         }
         Ok(())
@@ -1504,10 +1510,10 @@ impl Source {
 
     pub async fn backfill_file_r128_tags(
         self: &Arc<Self>,
-        database: &Database,
+        catalog: &Catalog,
         source: library::SourceKey,
     ) -> Result<(), Error> {
-        self.catalog_operation(database, async |catalog| {
+        self.catalog_operation(catalog, async |observation| {
             if !matches!(
                 self.implementation,
                 Implementation::Local(_) | Implementation::Files(_)
@@ -1516,7 +1522,7 @@ impl Source {
             }
             let mut after = None;
             loop {
-                let page = database
+                let page = catalog
                     .r128_tag_write_page(source, after, 64, &ReadCancellation::new())
                     .await
                     .map_err(failure)?;
@@ -1528,7 +1534,7 @@ impl Source {
                     .into_iter()
                     .map(|row| (row.track_key, row.track_lufs, row.album_lufs))
                     .collect::<Vec<_>>();
-                self.write_r128_values(catalog, source, &values).await?;
+                self.write_r128_values(observation, source, &values).await?;
             }
         })
         .await
@@ -1571,30 +1577,30 @@ fn write_native_bytes(path: &Path, bytes: &[u8], permissions_from: &Path) -> Res
 }
 
 impl NativeFile {
-    async fn publish_direct(&self, database: &Database) -> Result<(), Error> {
+    async fn publish_direct(&self, catalog: &Catalog) -> Result<(), Error> {
         let FileLocation::Native(path) = &self.location else {
             return Err(Error::Unavailable);
         };
-        if let Some(source_id) = database
+        if let Some(source_id) = catalog
             .track_source_by_uri(&self.media_uri, &ReadCancellation::new())
             .await
             .map_err(failure)?
         {
-            let mut catalog = database
-                .catalog(source_id.as_str(), None)
+            let mut observation = catalog
+                .observe(source_id.as_str(), None)
                 .await
                 .map_err(failure)?;
-            let (observation, track) =
-                crate::file::local::scan::read_saved_file(&catalog, &self.media_uri, path)
+            let (file, track) =
+                crate::file::local::scan::read_saved_file(&observation, &self.media_uri, path)
                     .await
                     .map_err(failure)?;
-            let files = observation.into_iter().collect::<Vec<_>>();
-            catalog
+            let files = file.into_iter().collect::<Vec<_>>();
+            observation
                 .write_file_observations(&files, vec![track], true)
                 .await
                 .map_err(failure)?;
-            database
-                .publish_catalog_update(source_id.as_str(), catalog.into_changes())
+            catalog
+                .publish_catalog_update(source_id.as_str(), observation.into_changes())
                 .await;
         } else {
             let path = path.clone();
@@ -1610,11 +1616,11 @@ impl NativeFile {
             let crate::file::media::MediaRead::Accepted(track) = &mut track else {
                 return Err(Error::Write("Saved media could not be read".into()));
             };
-            database
+            catalog
                 .write_direct_track_metadata(&self.media_uri, &track.track.metadata)
                 .await
                 .map_err(failure)?;
-            super::cache_native_lyrics(database, &self.media_uri, [0; 32], &mut track.lyrics)
+            super::cache_native_lyrics(catalog, &self.media_uri, [0; 32], &mut track.lyrics)
                 .await
                 .map_err(failure)?;
         }
@@ -1729,7 +1735,7 @@ impl NativeFile {
 
     async fn write_folder_artwork(
         &self,
-        _database: &Database,
+        _catalog: &Catalog,
         edit: &MetadataEdit,
         hint: Option<&str>,
         previous_artist: &str,

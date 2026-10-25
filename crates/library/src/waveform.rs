@@ -1,5 +1,5 @@
 //! Completed waveforms are reusable for the same source audio revision.
-use crate::{Database, LibraryError, LibraryResult};
+use crate::{Catalog, LibraryError, LibraryResult};
 use serde::{Deserialize, Serialize};
 use sqlx::{Connection, Row, SqliteConnection};
 
@@ -10,7 +10,7 @@ pub struct WaveformCacheRow {
     pub peaks: Vec<(f64, f64)>,
 }
 
-impl Database {
+impl Catalog {
     pub async fn clear_source_waveform_cache(&self, source: &crate::SourceId) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
         sqlx::query("DELETE FROM waveform_cache WHERE media_uri IN (SELECT track.media_uri FROM tracks track JOIN sources source USING(source_key) WHERE source.object_id=?1)")

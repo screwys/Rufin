@@ -42,10 +42,10 @@ pub fn add_drag_to_playlist(
     playlist_name: String,
     source: gtk_widgets::media_drag::MediaDragSource,
 ) -> bool {
-    let database = Arc::clone(&menus.library);
+    let catalog = Arc::clone(&menus.library);
     let task = menus
         .runtime
-        .spawn(async move { source.playlist_input(&database).await });
+        .spawn(async move { source.playlist_input(&catalog).await });
     let menus = Rc::downgrade(menus);
     glib::spawn_future_local(async move {
         let Some((selection, title, preview_uris)) = task.await.ok().and_then(Result::ok) else {
@@ -83,7 +83,7 @@ pub struct MediaMenus {
     pub current_route: Rc<dyn Fn() -> Route>,
     pub present_dialog: Rc<dyn Fn(&adw::Dialog)>,
     pub artwork: Rc<gtk_widgets::artwork::ArtworkState>,
-    pub library: Arc<library::Database>,
+    pub library: Arc<library::Catalog>,
     pub runtime: tokio::runtime::Handle,
     pub source: rufin_core::runtime::SourceHandle,
     pub playback: std::sync::Arc<rufin_core::playback::PlaybackOwner>,
@@ -551,9 +551,9 @@ fn collection_selection_surface(
     surface.add_action("edit-metadata", move || {
         let targets = metadata_targets.clone();
         let menus = Rc::clone(&metadata_menus);
-        let database = menus.library.clone();
+        let catalog = menus.library.clone();
         let task = menus.runtime.spawn(async move {
-            targets.resolve(&database).await.map(|targets| {
+            targets.resolve(&catalog).await.map(|targets| {
                 library::MemberSelection::Concat(
                     targets
                         .into_iter()
@@ -577,10 +577,10 @@ fn collection_selection_surface(
         let payload = payload.clone();
         surface.add_action(action, move || {
             let payload = payload.clone();
-            let database = menus.library.clone();
+            let catalog = menus.library.clone();
             let task = menus
                 .runtime
-                .spawn(async move { payload.play_request(&database).await });
+                .spawn(async move { payload.play_request(&catalog).await });
             let menus = Rc::clone(&menus);
             glib::spawn_future_local(async move {
                 match task.await {
@@ -618,9 +618,9 @@ fn present_playlist_selection_menu(
         let dialog = gtk_widgets::playlists::delete_playlists_dialog(targets.count(), move || {
             let targets = targets.clone();
             let source = menus.source.clone();
-            let database = Arc::clone(&menus.library);
+            let catalog = Arc::clone(&menus.library);
             let task = menus.runtime.spawn(async move {
-                let targets = targets.collections(&database).await?;
+                let targets = targets.collections(&catalog).await?;
                 let mut smart = Vec::new();
                 let mut failure = None;
                 for collection in targets {
@@ -659,10 +659,10 @@ fn present_playlist_selection_menu(
         });
         dialog.present(Some(&target));
     });
-    let database = menus.library.clone();
+    let catalog = menus.library.clone();
     let task = menus
         .runtime
-        .spawn(async move { folder_targets.collections(&database).await });
+        .spawn(async move { folder_targets.collections(&catalog).await });
     let menus = Rc::clone(menus);
     glib::spawn_future_local(async move {
         match task.await {
@@ -748,12 +748,12 @@ pub fn remove_playlist_entry_selection(
                 .collect::<Vec<_>>()
                 .into(),
         };
-        let database = menus.library.clone();
+        let catalog = menus.library.clone();
         let preview = songs.clone();
         let artwork = menus
             .runtime
             .spawn(async move {
-                database
+                catalog
                     .selected_track_uris(&preview, Some(4), &library::ReadCancellation::new())
                     .await
             })
@@ -1282,12 +1282,12 @@ pub fn present_playlist_context_menu(
     position: Option<(f64, f64)>,
     current: Option<String>,
 ) {
-    let database = menus.library.clone();
+    let catalog = menus.library.clone();
     let member = library::PlaylistFolderMember::Playlist {
         key: playlist.playlist_key,
     };
     let task = menus.runtime.spawn(async move {
-        database
+        catalog
             .playlist_member_folder(&member, &library::ReadCancellation::new())
             .await
     });
@@ -1477,12 +1477,12 @@ pub fn present_smart_playlist_context_menu(
     play: Option<CollectionPlay>,
     position: Option<(f64, f64)>,
 ) {
-    let database = menus.library.clone();
+    let catalog = menus.library.clone();
     let member = library::PlaylistFolderMember::SmartPlaylist {
         key: playlist.smart_playlist_key,
     };
     let task = menus.runtime.spawn(async move {
-        database
+        catalog
             .playlist_member_folder(&member, &library::ReadCancellation::new())
             .await
     });

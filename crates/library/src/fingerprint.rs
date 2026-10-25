@@ -1,7 +1,7 @@
-use crate::{Database, LibraryResult};
+use crate::{Catalog, LibraryResult};
 use sqlx::Connection;
 
-impl Database {
+impl Catalog {
     pub async fn fingerprint_cache(
         &self,
         uri: &str,

@@ -61,13 +61,13 @@ where
     let stored = settings.load();
     let secrets = Arc::new(SwitchableSecretStore::new(platform_secret_store(&settings)));
     let store_path = paths.store_file();
-    let (database, temporary_store) = match library::Database::open_installation(
+    let (catalog, temporary_store) = match library::Catalog::open_installation(
         &store_path,
         &paths.catalog_file(),
     )
     .await
     {
-        Ok(database) => (database, false),
+        Ok(catalog) => (catalog, false),
         Err(error) if error.is_store_unavailable() => {
             warn!(%error, path=%store_path.display(), "could not access the durable Store; startup will continue with temporary storage");
             let directory = tempfile::Builder::new()
@@ -76,7 +76,7 @@ where
                 .map_err(string_error)?
                 .keep();
             (
-                library::Database::open(directory.join("store.sqlite"))
+                library::Catalog::open(directory.join("store.sqlite"))
                     .await
                     .map_err(string_error)?,
                 true,
@@ -84,7 +84,7 @@ where
         }
         Err(error) => return Err(string_error(error)),
     };
-    let library = Arc::new(database);
+    let library = Arc::new(catalog);
     library
         .set_distinct_track_covers(stored.ui.application.prefer_distinct_track_covers)
         .await
@@ -150,7 +150,7 @@ where
             discovery: discovery_events,
         },
     );
-    artwork.install_database(Arc::clone(&library));
+    artwork.install_catalog(Arc::clone(&library));
     if !stored.ui.recent_search_results.is_empty() {
         let uris = stored
             .ui

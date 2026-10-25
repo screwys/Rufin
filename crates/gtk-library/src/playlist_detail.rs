@@ -257,17 +257,17 @@ impl CatalogUi {
         ));
         let item_navigation = entries.item_navigation();
         let tracks_widget = entries.widget();
-        let database = Arc::clone(&self.library);
+        let catalog = Arc::clone(&self.library);
         let runtime = self.runtime.clone();
         let load = Arc::new(
             move |request: crate::playlist_entry_model::PlaylistEntryProjectionRequest,
                   cancellation: ReadCancellation| {
-                let database = Arc::clone(&database);
+                let catalog = Arc::clone(&catalog);
                 Box::pin(async move {
                     let page = request
                         .query
                         .page(
-                            &database,
+                            &catalog,
                             library::RouteSeedWindow::position(request.first_row_position),
                             &cancellation,
                         )
@@ -531,14 +531,14 @@ impl CatalogUi {
                     apply_owner.replace(next);
                 },
             );
-            let database = Arc::clone(&self.library);
+            let catalog = Arc::clone(&self.library);
             let load = Arc::new(
                 move |owner_key: PlaylistDetailOwner, cancellation: ReadCancellation| {
-                    let database = Arc::clone(&database);
+                    let catalog = Arc::clone(&catalog);
                     Box::pin(async move {
                         match owner_key {
                             PlaylistDetailOwner::Saved { key, .. } => {
-                                let summary = database
+                                let summary = catalog
                                     .playlists(&[key], &cancellation)
                                     .await
                                     .map_err(|error| error.to_string())?
@@ -549,7 +549,7 @@ impl CatalogUi {
                                 let now = SystemTime::now()
                                     .duration_since(UNIX_EPOCH)
                                     .map_or(0, |duration| duration.as_secs() as i64);
-                                database
+                                catalog
                                     .smart_playlist_rows(&[key], now, &cancellation)
                                     .await
                                     .map_err(|error| error.to_string())?

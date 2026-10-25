@@ -615,17 +615,17 @@ impl ArtistReleaseProjections {
         } = page;
         let query = Rc::new(RefCell::new(query));
         let counts = Rc::new(Cell::new(counts));
-        let database = Arc::clone(&shell.library);
+        let catalog = Arc::clone(&shell.library);
         let load_query = Rc::clone(&query);
         let load = Rc::new(
             move |_: Vec<library::AlbumKey>,
                   range: std::ops::Range<usize>,
                   cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&database);
+                let catalog = Arc::clone(&catalog);
                 let query = load_query.borrow().clone();
                 Box::pin(async move {
                     query
-                        .albums(&database, range.start, range.len(), &cancellation)
+                        .albums(&catalog, range.start, range.len(), &cancellation)
                         .await
                         .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>

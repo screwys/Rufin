@@ -1599,11 +1599,11 @@ mod tests {
             peer.open_profile(&profile, false, Vec::new())
                 .await
                 .unwrap();
-            let database = library::Database::open(&directory.path().join("host.sqlite"))
+            let catalog = library::Catalog::open(&directory.path().join("host.sqlite"))
                 .await
                 .unwrap();
             let documents = Arc::new(
-                ProfileStore::open(database.clone(), 1, KEY.parse().unwrap())
+                ProfileStore::open(catalog.clone(), 1, KEY.parse().unwrap())
                     .await
                     .unwrap(),
             );
@@ -1611,7 +1611,7 @@ mod tests {
                 .bind_profile(&profile, &host.identity())
                 .await
                 .unwrap();
-            database.connect_set_active(true).await.unwrap();
+            catalog.connect_set_active(true).await.unwrap();
             for value in 0..80 {
                 documents
                     .write_records(&[library::ConnectRecord {
@@ -1623,11 +1623,11 @@ mod tests {
                     .unwrap();
             }
             host.attach_documents(documents.clone()).await.unwrap();
-            let receiving_database = library::Database::open(&directory.path().join("peer.sqlite"))
+            let receiving_catalog = library::Catalog::open(&directory.path().join("peer.sqlite"))
                 .await
                 .unwrap();
             let receiving_documents = Arc::new(
-                ProfileStore::open(receiving_database.clone(), 2, KEY.parse().unwrap())
+                ProfileStore::open(receiving_catalog.clone(), 2, KEY.parse().unwrap())
                     .await
                     .unwrap(),
             );
@@ -1662,7 +1662,7 @@ mod tests {
                 "track",
                 "after-snapshot",
             );
-            database
+            catalog
                 .record_listen(
                     &library::ListenWrite {
                         external_id: Some("after-snapshot".into()),
@@ -1688,7 +1688,7 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            database
+            catalog
                 .create_playlist(
                     None,
                     "Saved",
@@ -1697,13 +1697,13 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-            database
+            catalog
                 .reconcile_source(&library::SourceId::new("remote"), "webdav", "Files")
                 .await
                 .unwrap();
             let path = "https://files.example.test/music/after-snapshot.flac";
-            database
-                .catalog("remote", None)
+            catalog
+                .observe("remote", None)
                 .await
                 .unwrap()
                 .write_file_observations(
@@ -1740,9 +1740,9 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let current = library::Database::connect_record_on(
+            let current = library::Catalog::connect_record_on(
                 &mut SqliteConnection::connect_with(
-                    &sqlx::sqlite::SqliteConnectOptions::new().filename(database.path()),
+                    &sqlx::sqlite::SqliteConnectOptions::new().filename(catalog.path()),
                 )
                 .await
                 .unwrap(),
@@ -1818,10 +1818,10 @@ mod tests {
                     .any(|value| value.name == format!("reference:{uri}"))
             );
             assert_eq!(
-                library::Database::connect_record_on(
+                library::Catalog::connect_record_on(
                     &mut SqliteConnection::connect_with(
                         &sqlx::sqlite::SqliteConnectOptions::new()
-                            .filename(receiving_database.path()),
+                            .filename(receiving_catalog.path()),
                     )
                     .await
                     .unwrap(),
@@ -1927,7 +1927,7 @@ mod tests {
             peer.accept_enrollment(&profile_id, &roster, host.endpoint.id()).await.unwrap();
             peer.open_profile(&profile_id, false, Vec::new()).await.unwrap();
             peer.remember_peer(&host.invitation().await.unwrap()).await.unwrap();
-            peer.attach_documents(Arc::new(ProfileStore::open(library::Database::open(&peer_dir.path().join("profile.sqlite")).await.unwrap(), 2, KEY.parse().unwrap()).await.unwrap())).await.unwrap();
+            peer.attach_documents(Arc::new(ProfileStore::open(library::Catalog::open(&peer_dir.path().join("profile.sqlite")).await.unwrap(), 2, KEY.parse().unwrap()).await.unwrap())).await.unwrap();
 
             // Hold the server's document attachment until the request has
             // arrived. Closing its profile must interrupt this active sync.

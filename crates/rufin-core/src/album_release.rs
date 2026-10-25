@@ -1,10 +1,10 @@
-//! Bounded Album release enrichment over exact Database candidates.
+//! Bounded Album release enrichment over exact Catalog candidates.
 
 use std::sync::Arc;
 
 use crate::runtime::{CatalogChange, CatalogPublication, SourceEvent};
 use async_channel::Sender;
-use library::{AlbumReleaseResult, Database, ReadCancellation, SourceKey};
+use library::{AlbumReleaseResult, Catalog, ReadCancellation, SourceKey};
 use tracing::{info, warn};
 
 use crate::settings::SettingsFile;
@@ -12,7 +12,7 @@ use crate::settings::SettingsFile;
 const LOOKUP_LIMIT: usize = 8;
 
 pub(crate) async fn run_selected_album_release_lookup(
-    database: Arc<Database>,
+    catalog: Arc<Catalog>,
     settings: SettingsFile,
     events: Sender<SourceEvent>,
     source_key: SourceKey,
@@ -24,7 +24,7 @@ pub(crate) async fn run_selected_album_release_lookup(
     if !settings.load().ui.allows_external_metadata_lookup() {
         return;
     }
-    let candidates = match database
+    let candidates = match catalog
         .album_release_candidates(source_key, LOOKUP_LIMIT, &ReadCancellation::new())
         .await
     {
@@ -72,7 +72,7 @@ pub(crate) async fn run_selected_album_release_lookup(
                 break;
             }
         };
-        match database
+        match catalog
             .accept_album_release_result(source_key, candidate.album_key, identity.as_str(), result)
             .await
         {

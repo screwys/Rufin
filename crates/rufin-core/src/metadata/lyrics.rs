@@ -59,12 +59,12 @@ impl MetadataEditor {
                     .map_err(|error| Error::Write(error.to_string()))?,
                 EditDestination::Server { .. } => {
                     if let Some(source) = session.source.clone() {
-                        let database = self.source.shared.database.clone();
+                        let catalog = self.source.shared.catalog.clone();
                         let uri = session.media_uri.clone();
                         self.source
                             .shared
                             .runtime
-                            .spawn(async move { source.lyrics_storage(&database, &uri).await })
+                            .spawn(async move { source.lyrics_storage(&catalog, &uri).await })
                             .await
                             .map_err(|error| Error::Write(error.to_string()))?
                     } else {
@@ -199,7 +199,7 @@ impl EditSession {
             EditDestination::Files(files) => {
                 files
                     .save_lyrics(
-                        &owner.shared.database,
+                        &owner.shared.catalog,
                         &text,
                         edit.storage == LyricsStorage::Sidecar,
                     )
@@ -209,13 +209,13 @@ impl EditSession {
                 let source = self.source.as_ref().ok_or(Error::Unavailable)?;
                 source
                     .write_lyrics(
-                        &owner.shared.database,
+                        &owner.shared.catalog,
                         &self.media_uri,
                         &text,
                         edit.storage == LyricsStorage::Sidecar,
                     )
                     .await?;
-                source.refresh_written_lyrics(&owner.shared.database);
+                source.refresh_written_lyrics(&owner.shared.catalog);
                 None
             }
         };

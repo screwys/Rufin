@@ -4,27 +4,27 @@ use crate::{LocalImageRef, SourceResult};
 impl FileSource {
     pub(crate) async fn directory_image(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
         source_id: &str,
         prefix: &str,
     ) -> SourceResult<Option<LocalImageRef>> {
-        directory_image_by_role(database, source_id, prefix, None).await
+        directory_image_by_role(catalog, source_id, prefix, None).await
     }
 
     pub(crate) async fn directory_artist_image_for(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
         source_id: &str,
         prefix: &str,
         artist: &str,
         allow_generic: bool,
     ) -> SourceResult<Option<LocalImageRef>> {
-        directory_image_by_role(database, source_id, prefix, Some((artist, allow_generic))).await
+        directory_image_by_role(catalog, source_id, prefix, Some((artist, allow_generic))).await
     }
 }
 
 pub(crate) async fn directory_image_by_role(
-    database: &library::Database,
+    catalog: &library::Catalog,
     source_id: &str,
     prefix: &str,
     artist: Option<(&str, bool)>,
@@ -33,7 +33,7 @@ pub(crate) async fn directory_image_by_role(
     let mut best = None;
     let mut count = 0;
     loop {
-        let page = database
+        let page = catalog
             .file_artwork_image_page(source_id, prefix, &after)
             .await?;
         if page.is_empty() {

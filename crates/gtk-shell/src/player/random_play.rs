@@ -34,13 +34,13 @@ pub(super) fn present_random_play_dialog(shell: &Rc<Shell>) {
     let Some(selected) = shell.selected_library().as_deref().cloned() else {
         return;
     };
-    let database = Arc::clone(&shell.products.library);
+    let catalog = Arc::clone(&shell.products.library);
     let source = selected.source_key;
     let folder = selected.music_folder_key;
     let cancellation = ReadCancellation::new();
     let runtime = shell.products.runtime.clone();
     let task =
-        runtime.spawn(async move { database.genre_choices(source, folder, &cancellation).await });
+        runtime.spawn(async move { catalog.genre_choices(source, folder, &cancellation).await });
     let shell = Rc::downgrade(shell);
     glib::spawn_future_local(async move {
         let Some(shell) = shell.upgrade() else {

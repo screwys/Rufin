@@ -5,7 +5,7 @@ use futures_util::TryStreamExt;
 use sqlx::{Connection, FromRow, Row};
 
 use crate::{
-    Database, LibraryError, LibraryResult, PlaylistEntryWrite, PlaylistIdentity, PlaylistKey,
+    Catalog, LibraryError, LibraryResult, PlaylistEntryWrite, PlaylistIdentity, PlaylistKey,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -315,7 +315,7 @@ pub struct PlaylistImportReport {
     pub changed: bool,
 }
 
-impl Database {
+impl Catalog {
     pub async fn import_playlist_file(
         &self,
         input: impl BufRead,
@@ -513,7 +513,7 @@ pub(crate) async fn import_playlist_on(
         records.extend(tombstones);
         let identity:String=sqlx::query_scalar("SELECT json_array((SELECT object_id FROM sources WHERE source_key=playlist.source_key),playlist.object_id) FROM playlists playlist WHERE playlist_key=?1")
             .bind(key).fetch_one(&mut *connection).await?;
-        records.push(Database::connect_record_on(connection, "playlist", &identity).await?);
+        records.push(Catalog::connect_record_on(connection, "playlist", &identity).await?);
         crate::profile::write_local_on(connection, &records).await?;
     }
     Ok(PlaylistImportReport {
@@ -985,17 +985,17 @@ mod tests {
     #[tokio::test]
     async fn targeted_refresh_keeps_unchanged_occurrences_and_applies_file_edits() {
         let directory = tempfile::tempdir().unwrap();
-        let database = crate::Database::open(directory.path().join("store.sqlite"))
+        let catalog = crate::Catalog::open(directory.path().join("store.sqlite"))
             .await
             .unwrap();
         let file = directory.path().join("music.m3u8");
         let content = "#EXTM3U\n#PLAYLIST:Music\nmissing.flac\nother.flac\nmissing.flac\n";
-        let first = database
+        let first = catalog
             .import_playlist_file(std::io::Cursor::new(content), &file, None, |_| None)
             .await
             .unwrap();
         assert!(first.changed);
-        let keys = database
+        let keys = catalog
             .playlist_edit_entries(
                 first.playlist,
                 &crate::MemberRead {
@@ -1014,7 +1014,7 @@ mod tests {
                     .collect::<Vec<_>>()
             })
             .unwrap();
-        let same = database
+        let same = catalog
             .import_playlist_file(
                 std::io::Cursor::new(content),
                 &file,
@@ -1026,7 +1026,7 @@ mod tests {
         assert!(!same.changed);
         assert_eq!(same.imported, 3);
         assert_eq!(
-            database
+            catalog
                 .playlist_edit_entries(
                     first.playlist,
                     &crate::MemberRead {
@@ -1046,7 +1046,7 @@ mod tests {
             keys
         );
         let renamed = content.replace("#PLAYLIST:Music", "#PLAYLIST:Renamed");
-        let rename = database
+        let rename = catalog
             .import_playlist_file(
                 std::io::Cursor::new(&renamed),
                 &file,
@@ -1057,7 +1057,7 @@ mod tests {
             .unwrap();
         assert!(rename.changed);
         assert_eq!(
-            database
+            catalog
                 .playlist_edit_entries(
                     first.playlist,
                     &crate::MemberRead {
@@ -1077,7 +1077,7 @@ mod tests {
             keys
         );
         let reordered = "#EXTM3U\n#PLAYLIST:Renamed\nmissing.flac\nmissing.flac\nother.flac\n";
-        let reorder = database
+        let reorder = catalog
             .import_playlist_file(
                 std::io::Cursor::new(reordered),
                 &file,
@@ -1089,7 +1089,7 @@ mod tests {
         assert!(reorder.changed);
         assert_eq!(reorder.imported, 3);
         let mut output = Vec::new();
-        database
+        catalog
             .export_playlist_file(
                 first.playlist,
                 &file,
@@ -1109,12 +1109,12 @@ mod tests {
         );
         let snapshot = roundtrip.entries[0].preserved.as_mut().unwrap();
         snapshot.object_id = "external-occurrence".into();
-        let private_only = database
+        let private_only = catalog
             .import_playlist_document(roundtrip, &file, Some(first.playlist), |_| None)
             .await
             .unwrap();
         assert!(!private_only.changed);
-        let unchanged = database
+        let unchanged = catalog
             .import_playlist_file(
                 std::io::Cursor::new(reordered),
                 &file,
@@ -1124,7 +1124,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!unchanged.changed);
-        let empty = database
+        let empty = catalog
             .import_playlist_file(
                 std::io::Cursor::new("#EXTM3U\n#PLAYLIST:Renamed\n"),
                 &file,
@@ -1135,18 +1135,18 @@ mod tests {
             .unwrap();
         assert!(empty.changed);
         assert_eq!(empty.imported, 0);
-        database.close().await.unwrap();
+        catalog.close().await.unwrap();
     }
     use super::*;
 
     #[tokio::test]
     async fn malformed_m3u_lines_leave_valid_entries_and_clear_pending_metadata() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let file = directory.path().join("mix.m3u");
-        let report = database
+        let report = catalog
             .import_playlist_file(
                 std::io::Cursor::new(
                     b"#EXTM3U\nfirst.flac\n#EXTINF:12,Wrong title\nbad\xff.flac\nlast.flac\n",
@@ -1159,7 +1159,7 @@ mod tests {
             .unwrap();
         assert_eq!((report.imported, report.skipped), (2, 1));
         let mut output = Vec::new();
-        database
+        catalog
             .export_playlist_file(
                 report.playlist,
                 &file,
@@ -1177,7 +1177,7 @@ mod tests {
     #[tokio::test]
     async fn formats_preserve_order_duplicates_identities_and_relative_siblings() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let file = directory.path().join("lists/mix.m3u8");
@@ -1185,14 +1185,14 @@ mod tests {
         let uri = url::Url::from_file_path(&song).unwrap().to_string();
         let provider = crate::source_entity_uri(&crate::SourceId::new("source"), "track", "one");
         let cue = crate::cue_media_uri("disc:1", &uri, 1000, 2000);
-        let original = database.import_playlist_file(std::io::Cursor::new(format!(
+        let original = catalog.import_playlist_file(std::io::Cursor::new(format!(
             "#EXTM3U\n#PLAYLIST:Mix & café\n#EXTINF:12.5,Track\n#EXTART:Earth - Wind\n../Artist/100% #1 & café.flac\n../Artist/100% #1 & café.flac\n{provider}\n{cue}\nhttps://example.test/stream\n"
         )), &file, None, |_| None).await.unwrap();
         for extension in ["m3u8", "pls", "xspf"] {
             let export = file.with_extension(extension);
             let mut output = Vec::new();
             assert_eq!(
-                database
+                catalog
                     .export_playlist_file(
                         original.playlist,
                         &export,
@@ -1213,13 +1213,13 @@ mod tests {
                 parsed.entries[0].to_entry(0).track.metadata.artist,
                 "Earth - Wind"
             );
-            let imported = database
+            let imported = catalog
                 .import_playlist_file(std::io::Cursor::new(output), &export, None, |_| None)
                 .await
                 .unwrap();
             assert_eq!(imported.playlist, original.playlist);
             assert_eq!(imported.imported, 5);
-            let (_permit, mut connection) = database
+            let (_permit, mut connection) = catalog
                 .acquire_general(&crate::ReadCancellation::new())
                 .await
                 .unwrap();
@@ -1243,7 +1243,7 @@ mod tests {
         }
         let destination = Path::new("content://documents.example/document/71");
         let mut output = Vec::new();
-        database
+        catalog
             .export_playlist_file_as(
                 original.playlist,
                 destination,
@@ -1265,7 +1265,7 @@ mod tests {
             ("download", "content://documents.example/document/download"),
             ("import", local_document),
         ] {
-            database
+            catalog
                 .upsert_local_locator(&crate::LocalLocatorWrite {
                     source_id: None,
                     media_uri: uri.clone(),
@@ -1284,7 +1284,7 @@ mod tests {
             crate::document_locator_fragment("native-track", provider_document)
         );
         {
-            let mut writer = database.writer().await.unwrap();
+            let mut writer = catalog.writer().await.unwrap();
             sqlx::query("UPDATE tracks SET source_path=?1 WHERE media_uri=?2")
                 .bind(&source_path)
                 .bind(&provider)
@@ -1299,7 +1299,7 @@ mod tests {
                 .bind(&source_path).execute(&mut *writer).await.unwrap();
         }
         assert_eq!(
-            database
+            catalog
                 .connect_track_reference(&provider)
                 .await
                 .unwrap()
@@ -1307,7 +1307,7 @@ mod tests {
             crate::document_media_uri("native-track")
         );
         assert_eq!(
-            database
+            catalog
                 .media_uris_for_document_ids(&[
                     "native-track".into(),
                     "missing".into(),
@@ -1324,7 +1324,7 @@ mod tests {
         ] {
             let mut output = Vec::new();
             assert_eq!(
-                database
+                catalog
                     .export_playlist_file_as(
                         original.playlist,
                         destination,
@@ -1376,11 +1376,11 @@ mod tests {
     #[tokio::test]
     async fn standard_edits_override_snapshots_and_target_overrides_file_identity() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let file = directory.path().join("mix.m3u8");
-        let first = database
+        let first = catalog
             .import_playlist_file(
                 std::io::Cursor::new(
                     "#EXTM3U\n#PLAYLIST:Old\n#EXTINF:12,Artist - Old track\nold.flac\n",
@@ -1391,7 +1391,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let second = database
+        let second = catalog
             .import_playlist_file(
                 std::io::Cursor::new("#EXTM3U\nother.flac\n"),
                 &file,
@@ -1401,7 +1401,7 @@ mod tests {
             .await
             .unwrap();
         let mut output = Vec::new();
-        database
+        catalog
             .export_playlist_file(
                 first.playlist,
                 &file,
@@ -1415,7 +1415,7 @@ mod tests {
             .replace("#PLAYLIST:Old", "#PLAYLIST:New")
             .replace("#EXTINF:12,Artist - Old track", "#EXTINF:30,New track")
             .replace("\nold.flac\n", "\nnew.flac\n");
-        let updated = database
+        let updated = catalog
             .import_playlist_file(
                 std::io::Cursor::new(text),
                 &file,
@@ -1426,7 +1426,7 @@ mod tests {
             .unwrap();
         assert_eq!(updated.playlist, second.playlist);
         let mut output = Vec::new();
-        database
+        catalog
             .export_playlist_file(
                 second.playlist,
                 &file,
@@ -1439,7 +1439,7 @@ mod tests {
         assert!(text.contains("#PLAYLIST:New\n"));
         assert!(text.contains("#EXTINF:30,New track\nnew.flac\n"));
         assert!(
-            database
+            catalog
                 .import_playlist_file(
                     std::io::Cursor::new("binary\0data"),
                     &file,
@@ -1455,7 +1455,7 @@ mod tests {
                 sort: Some(crate::CatalogSort::Position),
                 ..crate::MemberRead::new(crate::Collection::Playlist(second.playlist))
             })
-                .rows(&database, 0, 128, &crate::ReadCancellation::new())
+                .rows(&catalog, 0, 128, &crate::ReadCancellation::new())
                 .await
                 .map(|rows| rows
                     .into_iter()
@@ -1619,22 +1619,22 @@ mod tests {
     #[tokio::test]
     async fn smart_export_streams_large_direct_http_results_without_current() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let file = directory.path().join("large.m3u8");
         {
-            let mut writer = database.writer().await.unwrap();
+            let mut writer = catalog.writer().await.unwrap();
             sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'source');\n                WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<10000)\n                INSERT INTO tracks(source_key,object_id,media_uri,indexed,metadata) SELECT 1,CAST(i AS TEXT),'https://example.test/'||i,1,jsonb(json_object('title',COALESCE('Song '||i,''),'sort_text',COALESCE('song '||i,''),'duration_millis',COALESCE(12000,0))) FROM n;")
                 .execute(&mut *writer).await.unwrap();
         }
-        let key = database
+        let key = catalog
             .create_smart_playlist("All", &crate::SmartPlaylistDefinition::default(), None)
             .await
             .unwrap();
         let mut output = tempfile::tempfile().unwrap();
         assert_eq!(
-            database
+            catalog
                 .export_smart_playlist_file(key, 0, &file, PlaylistPathMode::Automatic, &mut output)
                 .await
                 .unwrap(),
@@ -1645,17 +1645,17 @@ mod tests {
     #[tokio::test]
     async fn native_export_imports_as_an_authored_copy_without_combining_entries() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         {
-            let mut writer = database.writer().await.unwrap();
+            let mut writer = catalog.writer().await.unwrap();
             sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (5,'source','Source','source',zeroblob(32));\n              INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,normalized_name,sort_text,position) VALUES(8,5,'source','native','Native','native','native',0);\n              INSERT INTO tracks(track_key,media_uri,metadata) VALUES (1,'https://example.test/song',jsonb(json_object('title',COALESCE('Song',''))));\n              INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(8,'one',1,0),(8,'two',1,1);")
               .execute(&mut *writer).await.unwrap();
         }
         let file = directory.path().join("native.m3u8");
         let mut output = Vec::new();
-        database
+        catalog
             .export_playlist_file(
                 PlaylistKey::from_raw(8),
                 &file,
@@ -1664,13 +1664,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let copy = database
+        let copy = catalog
             .import_playlist_file(std::io::Cursor::new(output), &file, None, |_| None)
             .await
             .unwrap();
         assert_eq!(copy.imported, 2);
         assert_eq!(
-            database
+            catalog
                 .playlist_access(copy.playlist, &crate::ReadCancellation::new())
                 .await
                 .unwrap()
@@ -1679,7 +1679,7 @@ mod tests {
         );
         let mut copied = Vec::new();
         assert_eq!(
-            database
+            catalog
                 .export_playlist_file(
                     copy.playlist,
                     &file,
@@ -1699,7 +1699,7 @@ mod tests {
         );
         let mut native = Vec::new();
         assert_eq!(
-            database
+            catalog
                 .export_playlist_file(
                     PlaylistKey::from_raw(8),
                     &file,
@@ -1715,13 +1715,13 @@ mod tests {
     #[tokio::test]
     async fn local_paths_import_without_a_configured_source() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let path = directory.path().join("café %.flac");
         let uri = url::Url::from_file_path(&path).unwrap().to_string();
         let input = format!("#EXTM3U\ncafé %.flac\n{}\n{uri}\n", path.display());
-        let report = database
+        let report = catalog
             .import_playlist_file(
                 std::io::Cursor::new(input),
                 &directory.path().join("mix.m3u8"),
@@ -1736,7 +1736,7 @@ mod tests {
             sort: Some(crate::CatalogSort::Position),
             ..crate::MemberRead::new(crate::Collection::Playlist(report.playlist))
         })
-            .rows(&database, 0, 128, &crate::ReadCancellation::new())
+            .rows(&catalog, 0, 128, &crate::ReadCancellation::new())
             .await
             .map(|rows| {
                 rows.into_iter()
@@ -1755,15 +1755,15 @@ mod tests {
     #[tokio::test]
     async fn ordinary_m3u_preserves_unicode_duplicates_missing_paths_and_exact_reimport() {
         let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("library.db"))
+        let catalog = Catalog::open(directory.path().join("library.db"))
             .await
             .unwrap();
         let file = directory.path().join("mix.m3u8");
-        let report = database.import_playlist_file(std::io::Cursor::new("#EXTM3U\n#PLAYLIST:Björk\n#EXTINF:12.5,Björk - Jóga\nmissing.flac\nmissing.flac\nhttps://example.test/song\nhttps://user:secret@example.test/song\nhttps://example.test/song?token=secret&signature=abc%2Bdef&token=other\nhttps://example.test/song?token=secret&signature=abc%2Bdef&token=other\nhttps:// bad\n"), &file, None, |_| None).await.unwrap();
+        let report = catalog.import_playlist_file(std::io::Cursor::new("#EXTM3U\n#PLAYLIST:Björk\n#EXTINF:12.5,Björk - Jóga\nmissing.flac\nmissing.flac\nhttps://example.test/song\nhttps://user:secret@example.test/song\nhttps://example.test/song?token=secret&signature=abc%2Bdef&token=other\nhttps://example.test/song?token=secret&signature=abc%2Bdef&token=other\nhttps:// bad\n"), &file, None, |_| None).await.unwrap();
         assert_eq!((report.imported, report.skipped), (6, 1));
         let mut output = Vec::new();
         assert_eq!(
-            database
+            catalog
                 .export_playlist_file(
                     report.playlist,
                     &file,
@@ -1785,13 +1785,13 @@ mod tests {
                 .count(),
             2
         );
-        let again = database
+        let again = catalog
             .import_playlist_file(std::io::Cursor::new(output), &file, None, |_| None)
             .await
             .unwrap();
         assert_eq!(again.playlist, report.playlist);
         assert_eq!(again.imported, 6);
-        let queued = database
+        let queued = catalog
             .queue_entries(
                 crate::QueueLoad::tracks(
                     crate::MemberRead::new(crate::Collection::Playlist(report.playlist))
@@ -1802,7 +1802,7 @@ mod tests {
             .await
             .unwrap();
         let requested = queued.entries.into_iter().enumerate().collect::<Vec<_>>();
-        let rows = database
+        let rows = catalog
             .queue_rows_for_entries(&requested, &crate::ReadCancellation::new())
             .await
             .unwrap();

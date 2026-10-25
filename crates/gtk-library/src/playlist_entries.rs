@@ -775,9 +775,9 @@ fn install_playlist_entry_drag(
         let after = after
             != (settings.descending
                 && settings.sort_key.catalog_sort() == library::CatalogSort::Position);
-        let database = Arc::clone(&shell.library);
+        let catalog = Arc::clone(&shell.library);
         let task = shell.runtime.spawn(async move {
-            database
+            catalog
                 .playlist_entries(&[entry], &library::ReadCancellation::new())
                 .await
         });

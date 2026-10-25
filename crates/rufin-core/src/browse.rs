@@ -4,7 +4,7 @@ use crate::route::{CollectionCategory, Route};
 use crate::runtime::SelectedLibrary;
 use crate::settings::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
 use library::{
-    Collection, Database, ListKind, ListRead, MemberRead, MemberRow, Page, ReadCancellation,
+    Catalog, Collection, ListKind, ListRead, MemberRead, MemberRow, Page, ReadCancellation,
 };
 
 #[derive(Clone, Debug)]
@@ -17,7 +17,7 @@ pub struct ArtistReleasePage {
 
 impl ArtistReleasePage {
     pub async fn load(
-        database: &Database,
+        catalog: &Catalog,
         query: ListRead,
         window: library::RouteSeedWindow,
         cancel: &ReadCancellation,
@@ -27,7 +27,7 @@ impl ArtistReleasePage {
         if let ListKind::ArtistAlbums { filters, .. } = &mut unfiltered.kind {
             *filters = None;
         }
-        let source_counts = unfiltered.artist_release_counts(database, cancel).await?;
+        let source_counts = unfiltered.artist_release_counts(catalog, cancel).await?;
         let filtered = match &query.kind {
             ListKind::ArtistAlbums {
                 filters: Some(filters),
@@ -36,13 +36,13 @@ impl ArtistReleasePage {
             _ => !query.filter.trim().is_empty(),
         };
         let counts = if filtered {
-            query.artist_release_counts(database, cancel).await?
+            query.artist_release_counts(catalog, cancel).await?
         } else {
             source_counts
         };
         let range = window.range(counts.iter().sum());
         let first_rows = query
-            .albums(database, range.start, range.len(), cancel)
+            .albums(catalog, range.start, range.len(), cancel)
             .await?;
         Ok(Self {
             query,
@@ -67,7 +67,7 @@ pub struct FolderEntry {
 impl crate::source::folders::FolderProjection {
     pub async fn child_page(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         source: library::SourceKey,
         query: &MemberRead,
         range: std::ops::Range<usize>,
@@ -87,7 +87,7 @@ impl crate::source::folders::FolderProjection {
                     .collect(),
             ),
             Self::Cached(folder) => {
-                let (count, rows) = database
+                let (count, rows) = catalog
                     .filtered_folder_page(
                         source,
                         *folder,
@@ -114,14 +114,14 @@ impl crate::source::folders::FolderProjection {
 
     pub async fn sections(
         &self,
-        database: &Database,
+        catalog: &Catalog,
         source: library::SourceKey,
         query: &MemberRead,
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<Vec<library::ScrollSection>> {
         let mut sections = match self {
             Self::Live { .. } => {
-                database
+                catalog
                     .ordered_name_sections(
                         self.live_folders(&query.filter, query.descending)
                             .map(|folder| folder.name.as_str()),
@@ -130,7 +130,7 @@ impl crate::source::folders::FolderProjection {
                     .await?
             }
             Self::Cached(folder) => {
-                database
+                catalog
                     .folder_section_positions(
                         source,
                         *folder,
@@ -142,10 +142,10 @@ impl crate::source::folders::FolderProjection {
             }
         };
         let folders = self
-            .child_page(database, source, query, 0..0, cancel)
+            .child_page(catalog, source, query, 0..0, cancel)
             .await?
             .0;
-        for mut section in query.sections(database, cancel).await? {
+        for mut section in query.sections(catalog, cancel).await? {
             section.index += folders as u64;
             if let Some(existing) = sections
                 .iter_mut()
@@ -239,14 +239,14 @@ pub struct MemberPage {
 
 impl MemberPage {
     pub async fn load(
-        database: &Database,
+        catalog: &Catalog,
         read: MemberRead,
         window: library::RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<Self> {
-        let page = read.page(database, window, cancel).await?;
+        let page = read.page(catalog, window, cancel).await?;
         let disc_sections = if matches!(read.collection, Collection::Album(_)) {
-            read.disc_sections(database, cancel).await?
+            read.disc_sections(catalog, cancel).await?
         } else {
             Vec::new()
         };
@@ -296,7 +296,7 @@ pub struct FolderPage {
 
 impl FolderPage {
     pub async fn load(
-        database: &Database,
+        catalog: &Catalog,
         source: library::SourceKey,
         projection: crate::source::folders::FolderProjection,
         read: MemberRead,
@@ -304,14 +304,14 @@ impl FolderPage {
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<Self> {
         let folder_count = projection
-            .child_page(database, source, &read, 0..0, cancel)
+            .child_page(catalog, source, &read, 0..0, cancel)
             .await?
             .0;
-        let track_count = read.count(database, cancel).await?;
+        let track_count = read.count(catalog, cancel).await?;
         let range = window.range(folder_count + track_count);
         let folders = if range.start < folder_count {
             projection
-                .child_page(database, source, &read, range.clone(), cancel)
+                .child_page(catalog, source, &read, range.clone(), cancel)
                 .await?
                 .1
         } else {
@@ -319,7 +319,7 @@ impl FolderPage {
         };
         let tracks = read
             .rows(
-                database,
+                catalog,
                 range.start.saturating_sub(folder_count),
                 range.len().saturating_sub(folders.len()),
                 cancel,
@@ -475,7 +475,7 @@ impl crate::source::SourceOwner {
         {
             return Ok(AlbumListPage {
                 content: AlbumListContent::Rows(
-                    read.page_albums(&self.shared.database, window, cancel)
+                    read.page_albums(&self.shared.catalog, window, cancel)
                         .await?,
                 ),
                 read,
@@ -496,7 +496,7 @@ impl crate::source::SourceOwner {
             Arc::clone(&prepared.index)
         } else {
             let index = read
-                .album_detail_index(&self.shared.database, cancel)
+                .album_detail_index(&self.shared.catalog, cancel)
                 .await?;
             *retained = Some(PreparedAlbums {
                 revision,
@@ -506,7 +506,7 @@ impl crate::source::SourceOwner {
             index
         };
         drop(retained);
-        let page = index.page(&self.shared.database, window, cancel).await?;
+        let page = index.page(&self.shared.catalog, window, cancel).await?;
         Ok(AlbumListPage {
             read,
             content: AlbumListContent::Detail { index, page },
@@ -521,7 +521,7 @@ impl crate::source::SourceOwner {
         window: library::RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<OpenedCollection> {
-        let database = &self.shared.database;
+        let catalog = &self.shared.catalog;
         let settings = self.shared.settings.load();
         let key = library_list_key(route, options.category);
         let display = settings.ui.library_list(key);
@@ -565,7 +565,7 @@ impl crate::source::SourceOwner {
             read
         };
         let summary_and_members = match route {
-            Route::AlbumDetail(uri) => database.album(uri, activity, cancel).await?.map(|row| {
+            Route::AlbumDetail(uri) => catalog.album(uri, activity, cancel).await?.map(|row| {
                 let read = member(Collection::Album(row.album_key));
                 (DetailSummary::Album(Box::new(row)), read)
             }),
@@ -584,7 +584,7 @@ impl crate::source::SourceOwner {
                         | Route::AlbumArtistTracks(_)
                         | Route::AlbumArtistFavoriteTracks(_)
                 );
-                let Some(row) = database.artist(uri, role, activity, cancel).await? else {
+                let Some(row) = catalog.artist(uri, role, activity, cancel).await? else {
                     return Ok(OpenedCollection::Detail(None));
                 };
                 let read = member(Collection::Artist {
@@ -613,7 +613,7 @@ impl crate::source::SourceOwner {
                         query.descending = options.descending.unwrap_or(albums.descending);
                     }
                     let page =
-                        Box::new(ArtistReleasePage::load(database, query, window, cancel).await?);
+                        Box::new(ArtistReleasePage::load(catalog, query, window, cancel).await?);
                     let favorites =
                         if matches!(route, Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)) {
                             let tracks = settings.ui.library_list(LibraryListKey::ArtistTracks);
@@ -623,7 +623,7 @@ impl crate::source::SourceOwner {
                             read.favorites_only = true;
                             Some(
                                 MemberPage::load(
-                                    database,
+                                    catalog,
                                     read,
                                     library::RouteSeedWindow::top(),
                                     cancel,
@@ -641,14 +641,14 @@ impl crate::source::SourceOwner {
                 Some((DetailSummary::Artist(Box::new(row)), read))
             }
             Route::PlaylistDetail(key) => {
-                database.playlists(&[*key], cancel).await?.pop().map(|row| {
+                catalog.playlists(&[*key], cancel).await?.pop().map(|row| {
                     (
                         DetailSummary::Playlist(Box::new(row)),
                         member(Collection::Playlist(*key)),
                     )
                 })
             }
-            Route::SmartPlaylistDetail(key) => database
+            Route::SmartPlaylistDetail(key) => catalog
                 .smart_playlist_rows(&[*key], now, cancel)
                 .await?
                 .pop()
@@ -658,7 +658,7 @@ impl crate::source::SourceOwner {
                         member(Collection::Smart { key: *key, now }),
                     )
                 }),
-            Route::GenreDetail(key) => database
+            Route::GenreDetail(key) => catalog
                 .genres(&[*key], folder, cancel)
                 .await?
                 .pop()
@@ -669,7 +669,7 @@ impl crate::source::SourceOwner {
                         member(Collection::Genre(*key)),
                     )
                 }),
-            Route::MoodDetail(key) => database
+            Route::MoodDetail(key) => catalog
                 .moods(&[*key], folder, cancel)
                 .await?
                 .pop()
@@ -700,11 +700,9 @@ impl crate::source::SourceOwner {
                 }
                 .max(0) as usize;
                 let range = window.range(count);
-                let rows = read
-                    .rows(database, range.start, range.len(), cancel)
-                    .await?;
+                let rows = read.rows(catalog, range.start, range.len(), cancel).await?;
                 let disc_sections = if matches!(read.collection, Collection::Album(_)) {
-                    read.disc_sections(database, cancel).await?
+                    read.disc_sections(catalog, cancel).await?
                 } else {
                     Vec::new()
                 };
@@ -718,7 +716,7 @@ impl crate::source::SourceOwner {
                     disc_sections,
                 }
             } else {
-                MemberPage::load(database, read, window, cancel).await?
+                MemberPage::load(catalog, read, window, cancel).await?
             };
             return Ok(OpenedCollection::Detail(Some(DetailPage {
                 summary,
@@ -737,7 +735,7 @@ impl crate::source::SourceOwner {
             {
                 OpenedCollection::Tracks(
                     MemberPage::load(
-                        database,
+                        catalog,
                         member(Collection::Source(require_source()?)),
                         window,
                         cancel,
@@ -747,7 +745,7 @@ impl crate::source::SourceOwner {
             }
             Route::History => OpenedCollection::Tracks(
                 MemberPage::load(
-                    database,
+                    catalog,
                     member(Collection::History {
                         source: options
                             .history_current_only
@@ -773,19 +771,19 @@ impl crate::source::SourceOwner {
                 require_source()?;
                 let role = matches!(route, Route::AlbumArtists);
                 let read = list(ListKind::Artists { album_artist: role });
-                let page = read.page_artists(database, window, cancel).await?;
+                let page = read.page_artists(catalog, window, cancel).await?;
                 OpenedCollection::Artists { read, page }
             }
             Route::Genres => {
                 require_source()?;
                 let read = list(ListKind::Genres);
-                let page = read.page_genres(database, window, cancel).await?;
+                let page = read.page_genres(catalog, window, cancel).await?;
                 OpenedCollection::Genres { read, page }
             }
             Route::Moods => {
                 require_source()?;
                 let read = list(ListKind::Moods);
-                let page = read.page_moods(database, window, cancel).await?;
+                let page = read.page_moods(catalog, window, cancel).await?;
                 OpenedCollection::Moods { read, page }
             }
             Route::Playlists | Route::PlaylistFolder { smart: false, .. } => {
@@ -796,7 +794,7 @@ impl crate::source::SourceOwner {
                     }
                     _ => library::PlaylistScope::Root,
                 };
-                let page = read.page_playlist_items(database, window, cancel).await?;
+                let page = read.page_playlist_items(catalog, window, cancel).await?;
                 OpenedCollection::Playlists { read, page }
             }
             Route::SmartPlaylists | Route::PlaylistFolder { smart: true, .. } => {
@@ -807,7 +805,7 @@ impl crate::source::SourceOwner {
                     }
                     _ => library::PlaylistScope::Root,
                 };
-                let page = read.page_playlist_items(database, window, cancel).await?;
+                let page = read.page_playlist_items(catalog, window, cancel).await?;
                 OpenedCollection::SmartPlaylists { read, page }
             }
             Route::Folders { path } => {
@@ -816,7 +814,7 @@ impl crate::source::SourceOwner {
                 })?;
                 let projection = crate::source::folders::resolve_folder(
                     self,
-                    database,
+                    catalog,
                     selected,
                     path.last().map(|item| item.id.as_str()),
                     cancel,
@@ -829,7 +827,7 @@ impl crate::source::SourceOwner {
                 read.activity = activity;
                 OpenedCollection::Folders(
                     FolderPage::load(
-                        database,
+                        catalog,
                         selected.source_key,
                         projection,
                         read,
@@ -842,7 +840,7 @@ impl crate::source::SourceOwner {
             Route::Home => {
                 let (showcase, explore) = self.home_variations();
                 OpenedCollection::Home(Box::new(
-                    database
+                    catalog
                         .home_page(
                             require_source()?,
                             folder,
@@ -857,7 +855,7 @@ impl crate::source::SourceOwner {
             Route::Search => OpenedCollection::Search(
                 crate::source::search::acquire_search(
                     self,
-                    database,
+                    catalog,
                     selected,
                     options.search_mode,
                     options.filter.clone(),

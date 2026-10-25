@@ -48,11 +48,11 @@ impl Shell {
             self.present_smart_playlist_dialog(playlist, RuleValueSuggestions::default());
             return;
         };
-        let database = std::sync::Arc::clone(&self.products.library);
+        let catalog = std::sync::Arc::clone(&self.products.library);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         let task = self.products.runtime.spawn(async move {
-            database
+            catalog
                 .smart_playlist_value_suggestions(source, folder, &library::ReadCancellation::new())
                 .await
         });

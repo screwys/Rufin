@@ -7,7 +7,7 @@ use tokio::io::AsyncReadExt;
 impl FileSource {
     pub(crate) async fn read_track_lyrics(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
         relative: &str,
         track: &mut crate::file::media::ScannedTrack,
     ) -> SourceResult<()> {
@@ -22,7 +22,7 @@ impl FileSource {
             .collect::<SourceResult<_>>()?;
         let input = self.input().await?;
         if self.document_access().is_none() && track.track.cue_path.is_none() {
-            let available = database
+            let available = catalog
                 .source_files(self.source_id.as_str(), &track.lyrics_paths)
                 .await?;
             candidates.retain(|relative| {
@@ -66,7 +66,7 @@ impl FileSource {
 
     pub(crate) async fn observe_lyrics_dependencies(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         paths: &[String],
     ) -> SourceResult<()> {
         let input = self.input().await?;
@@ -88,18 +88,18 @@ impl FileSource {
                 Err(error) => tracing::warn!(%error, "Could not inspect lyrics sidecar"),
             }
         }
-        catalog
+        observation
             .write_file_observations(&observations, Vec::new(), true)
             .await?;
-        let missing = catalog
-            .database
-            .source_files(catalog.source_id, &missing)
+        let missing = observation
+            .catalog
+            .source_files(observation.source_id, &missing)
             .await?
             .into_iter()
             .map(|file| file.path)
             .collect::<Vec<_>>();
-        catalog
-            .remove_source_files(&missing, catalog.observed.unwrap_or(i64::MAX))
+        observation
+            .remove_source_files(&missing, observation.observed.unwrap_or(i64::MAX))
             .await?;
         Ok(())
     }
@@ -295,7 +295,7 @@ impl FileSource {
 
     pub(crate) async fn lyrics(
         &self,
-        database: &library::Database,
+        catalog: &library::Catalog,
         media_uri: &str,
     ) -> SourceResult<Option<String>> {
         if library::source_entity_parts(media_uri)
@@ -303,11 +303,11 @@ impl FileSource {
         {
             return Err(SourceError::NotFound);
         }
-        let track = database
+        let track = catalog
             .track(&(media_uri), &library::ReadCancellation::new())
             .await?
             .ok_or(SourceError::NotFound)?;
-        let file = database
+        let file = catalog
             .observed_media_file(media_uri)
             .await?
             .ok_or(SourceError::NotFound)?;

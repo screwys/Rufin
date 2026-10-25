@@ -4,7 +4,7 @@
 use sqlx::{QueryBuilder, Sqlite};
 
 use crate::{
-    AlbumKey, ArtistKey, Database, FolderKey, GenreKey, LibraryError, LibraryResult, PlaylistKey,
+    AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, LibraryError, LibraryResult, PlaylistKey,
     ReadCancellation, SourceKey, TrackKey,
 };
 
@@ -50,7 +50,7 @@ pub struct RandomCriteria {
     pub variation: i64,
 }
 
-impl Database {
+impl Catalog {
     /// Resolve the seed's catalog owner independently of the selected browse source.
     pub async fn radio_source(
         &self,

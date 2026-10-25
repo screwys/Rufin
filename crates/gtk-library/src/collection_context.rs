@@ -14,9 +14,9 @@ pub fn present_track_context_menu(
         present_track_selection_menu(target, &shell.media_menus, selection, position);
         return;
     }
-    let database = shell.library.clone();
+    let catalog = shell.library.clone();
     let task = shell.runtime.spawn(async move {
-        database
+        catalog
             .track(&media_uri, &library::ReadCancellation::new())
             .await
     });

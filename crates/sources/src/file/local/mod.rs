@@ -198,20 +198,20 @@ impl LocalSource {
 
     pub(crate) async fn acquire_catalog(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
         reuse_unchanged: bool,
     ) -> SourceResult<()> {
-        catalog
+        observation
             .update_source_file_membership(&self.configured_file_roots()?, &self.excluded_folders)
             .await?;
         let mut completed =
-            scan::acquire_catalog(catalog, self, progress, cancelled, reuse_unchanged).await?;
+            scan::acquire_catalog(observation, self, progress, cancelled, reuse_unchanged).await?;
         for source in &self.documents {
             completed += source
                 .acquire_catalog(
-                    catalog,
+                    observation,
                     &|mut update| {
                         if update.stage == crate::SourceReadStage::Tracks {
                             update.completed += completed;
@@ -223,7 +223,7 @@ impl LocalSource {
                 .await?;
         }
         scan::acquire_imported_paths(
-            catalog,
+            observation,
             self,
             None,
             &|count| {
@@ -236,33 +236,33 @@ impl LocalSource {
             cancelled,
         )
         .await?;
-        if catalog.changes().metadata {
-            catalog.record_imported_files(None).await?;
+        if observation.changes().metadata {
+            observation.record_imported_files(None).await?;
         }
         check_cancelled(cancelled)?;
         crate::file::artwork::ArtworkFiles::Local
-            .acquire(catalog, cancelled)
+            .acquire(observation, cancelled)
             .await?;
         Ok(())
     }
 
     pub(crate) async fn import_playlist_files(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         playlist: library::PlaylistKey,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        catalog.start_observation().await?;
-        scan::acquire_imported_paths(catalog, self, Some(playlist), &|_| {}, cancelled).await?;
-        catalog.record_imported_files(Some(playlist)).await?;
+        observation.start_observation().await?;
+        scan::acquire_imported_paths(observation, self, Some(playlist), &|_| {}, cancelled).await?;
+        observation.record_imported_files(Some(playlist)).await?;
         crate::file::artwork::ArtworkFiles::Local
-            .acquire(catalog, cancelled)
+            .acquire(observation, cancelled)
             .await
     }
 
     pub(crate) async fn acquire_paths(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         paths: &[PathBuf],
         rename: Option<&(PathBuf, PathBuf)>,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
@@ -280,7 +280,7 @@ impl LocalSource {
                     ))
                 });
                 documents
-                    .acquire_paths(catalog, &relative, renamed.as_ref(), cancelled)
+                    .acquire_paths(observation, &relative, renamed.as_ref(), cancelled)
                     .await?;
             }
         }
@@ -289,37 +289,37 @@ impl LocalSource {
             .filter(|path| self.document_source(&path.to_string_lossy()).is_none())
             .cloned()
             .collect::<Vec<_>>();
-        scan::acquire_paths(catalog, self, &native, rename, &|_| {}, cancelled).await?;
+        scan::acquire_paths(observation, self, &native, rename, &|_| {}, cancelled).await?;
         Ok(())
     }
 
     pub(crate) async fn catch_up(
         &self,
-        catalog: &mut library::Catalog<'_>,
+        observation: &mut library::Observation<'_>,
         progress: &(dyn Fn(crate::SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let database = catalog.database;
+        let catalog = observation.catalog;
         let expected = self
             .configured_file_roots()?
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>();
-        let stored = database
-            .local_file_roots(catalog.source)
+        let stored = catalog
+            .local_file_roots(observation.source)
             .await?
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>();
         if !expected.is_subset(&stored) || !self.documents.is_empty() {
-            catalog.start_observation().await?;
+            observation.start_observation().await?;
             let result = self
-                .acquire_catalog(catalog, progress, cancelled, true)
+                .acquire_catalog(observation, progress, cancelled, true)
                 .await;
             return result;
         }
-        catalog
+        observation
             .update_source_file_membership(&self.configured_file_roots()?, &self.excluded_folders)
             .await?;
-        scan::catch_up(catalog, self, progress, cancelled).await?;
+        scan::catch_up(observation, self, progress, cancelled).await?;
         check_cancelled(cancelled)?;
         Ok(())
     }

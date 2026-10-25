@@ -3,7 +3,7 @@ pub mod catalog;
 use std::path::PathBuf;
 
 use library::{
-    AlbumKey, ArtistKey, Database, FolderKey, GenreKey, HomeEntryInput, HomeEntryKind, MoodKey,
+    AlbumKey, ArtistKey, Catalog, FolderKey, GenreKey, HomeEntryInput, HomeEntryKind, MoodKey,
     QueueRepeatMode, QueueTransferRow, SourceKey, TrackKey,
 };
 use sqlx::Connection;
@@ -12,7 +12,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 pub struct Fixture {
     pub _directory: tempfile::TempDir,
     pub path: PathBuf,
-    pub database: Database,
+    pub catalog: Catalog,
     pub source: SourceKey,
     pub tracks: Vec<TrackKey>,
     pub track_uris: Vec<String>,
@@ -26,14 +26,14 @@ pub struct Fixture {
 }
 
 pub async fn persist_queue(
-    database: &Database,
+    catalog: &Catalog,
     occurrences: &[QueueTransferRow],
     current: Option<usize>,
     progress_millis: i64,
     repeat_mode: QueueRepeatMode,
     shuffled: bool,
 ) {
-    let captured = database
+    let captured = catalog
         .queue_entries(
             library::QueueLoad::items(
                 occurrences
@@ -62,7 +62,7 @@ pub async fn persist_queue(
         shuffled,
         ..Default::default()
     };
-    database
+    catalog
         .save_queue(&state)
         .await
         .expect("persist Queue records");
@@ -71,18 +71,18 @@ pub async fn persist_queue(
 pub async fn fixture() -> Fixture {
     let directory = tempfile::tempdir().expect("temporary Library directory");
     let path = directory.path().join("library.sqlite3");
-    let database = Database::open(&path).await.expect("open Library");
+    let catalog = Catalog::open(&path).await.expect("open Library");
     sqlx::query("DELETE FROM smart_playlists")
         .execute(&mut connection(&path).await)
         .await
         .expect("start fixture with no Smart Playlists");
-    let source = database
+    let source = catalog
         .reconcile_source(&library::SourceId::new("source"), "subsonic", "Source")
         .await
         .unwrap()
         .source;
-    let mut catalog = database.catalog("source", None).await.unwrap();
-    let observed = catalog.start_observation().await.unwrap();
+    let mut observation = catalog.observe("source", None).await.unwrap();
+    let observed = observation.start_observation().await.unwrap();
     let mut batch = library::CatalogBatch::default();
     for (id, title, artist, sort, date) in [
         ("album-a", "Album A", "Artist A", "album a", "2024-01-02"),
@@ -234,9 +234,9 @@ pub async fn fixture() -> Fixture {
             ..Default::default()
         });
     }
-    catalog.apply_catalog(&batch, true).await.unwrap();
+    observation.apply_catalog(&batch, true).await.unwrap();
 
-    catalog
+    observation
         .replace_source_home_section(
             "featured",
             None,
@@ -251,7 +251,7 @@ pub async fn fixture() -> Fixture {
         .await
         .unwrap();
 
-    catalog
+    observation
         .complete_source_observation(
             observed,
             &["track", "album", "artist", "genre", "mood", "folder"],
@@ -259,8 +259,8 @@ pub async fn fixture() -> Fixture {
         )
         .await
         .unwrap();
-    let publication = catalog.into_changes();
-    database
+    let publication = observation.into_changes();
+    catalog
         .publish_catalog_update("source", publication.clone())
         .await;
     assert!(publication.metadata);
@@ -307,7 +307,7 @@ pub async fn fixture() -> Fixture {
     Fixture {
         _directory: directory,
         path,
-        database,
+        catalog,
         source,
         tracks,
         track_uris,
@@ -333,13 +333,13 @@ pub async fn connection(path: &std::path::Path) -> SqliteConnection {
 
 /// Capture complete membership with a bounded metadata projection.
 pub async fn resolve_queue(
-    database: &Database,
+    catalog: &Catalog,
     input: library::QueueLoad,
     anchor_index: usize,
 ) -> library::QueueRestore {
-    let page = database.queue_entries(input, None).await.unwrap();
+    let page = catalog.queue_entries(input, None).await.unwrap();
     let start = anchor_index.saturating_sub(10);
-    let rows = database
+    let rows = catalog
         .queue_rows_for_entries(
             &page
                 .entries
