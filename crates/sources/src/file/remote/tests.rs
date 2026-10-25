@@ -174,6 +174,77 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
 }
 
 #[tokio::test]
+async fn dav_refresh_reads_collections_whose_hrefs_escape_names_differently() {
+    // Like hacdias/webdav, hrefs escape the `(`, `[` and `!` that requests carry as typed.
+    // The collection name is Latin-1 and its children are UTF-8.
+    const ESCAPED: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'/')
+        .remove(b'.')
+        .remove(b'-');
+    let server = MockServer::start().await;
+    let audio = wave();
+    Mock::given(any()).respond_with(move |request: &Request| {
+        let path: Vec<u8> = percent_encoding::percent_decode_str(request.url.path()).collect();
+        let entry = |path: &[u8]| {
+            let href = percent_encoding::percent_encode(path, ESCAPED);
+            let properties = if path.ends_with(b"/") { "<d:resourcetype><d:collection/></d:resourcetype>".into() } else { format!("<d:resourcetype/><d:getcontentlength>{}</d:getcontentlength>", audio.len()) };
+            format!("<d:response><d:href>{href}</d:href><d:propstat><d:prop>{properties}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>")
+        };
+        match request.method.as_str() {
+            "PROPFIND" => {
+                let collection = [path.strip_suffix(b"/").unwrap_or(&path), b"/"].concat();
+                let mut entries = if path.ends_with(b".wav") { entry(&path) } else { entry(&collection) };
+                if request.headers.get("depth").unwrap() == "1" && collection.ends_with(b"/Album (2014) [FLAC]/") {
+                    entries += &entry(&[&collection[..], b"01 Intro!.wav"].concat());
+                }
+                ResponseTemplate::new(207).set_body_string(format!("<d:multistatus xmlns:d=\"DAV:\">{entries}</d:multistatus>"))
+            }
+            "GET" if path.ends_with(b"/01 Intro!.wav") => ResponseTemplate::new(200).set_body_bytes(audio.clone()),
+            _ => ResponseTemplate::new(404),
+        }
+    }).mount(&server).await;
+    let settings = FileSourceSettings {
+        excluded_folders: Vec::new(),
+        url: format!("{}/M%FAsica [Lossless]/", server.uri()),
+        alternate_urls: vec![],
+        folders: vec!["Album (2014) [FLAC]".into()],
+        username: String::new(),
+        domain: String::new(),
+        authentication: FileAuthentication::Anonymous,
+        trust_invalid_certificate: false,
+        certificate_pem: None,
+        require_smb_encryption: false,
+    };
+    let config = settings
+        .configuration(SourceId::new("webdav:escaped"), "webdav", "DAV".into())
+        .unwrap();
+    let source = crate::Source::open(config, None, None).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let catalog = Catalog::open(directory.path().join("library.sqlite3"))
+        .await
+        .unwrap();
+    catalog
+        .reconcile_source(source.source_id(), "webdav", "DAV")
+        .await
+        .unwrap();
+    source
+        .acquire_catalog(&catalog, &|_| {}, Arc::new(false.into()), true)
+        .await
+        .unwrap();
+    let publication = catalog
+        .cached_source(source.source_id().as_str(), &ReadCancellation::new())
+        .await
+        .unwrap()
+        .unwrap()
+        .source;
+    let tracks = catalog
+        .mapping_track_page(publication, None, None, 10, &ReadCancellation::new())
+        .await
+        .unwrap();
+    assert_eq!(tracks.len(), 1);
+}
+
+#[tokio::test]
 async fn nextcloud_refresh_skips_unchanged_branches_and_keeps_selected_folder_identity() {
     const ROOT: &str = "/remote.php/dav/files/%E8%81%B4/";
     let server = MockServer::start().await;

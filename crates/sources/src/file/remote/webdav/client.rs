@@ -73,7 +73,7 @@ impl WebDavClient {
                 .map_err(|_| SourceError::InvalidConfig("Invalid WebDAV collection URL".into()))?
                 .push("");
         }
-        root.set_path(&normalized_path(&root));
+        canonical_path(&mut root);
         let mut http = Client::builder()
             .user_agent(concat!("Rufin/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(20))
@@ -131,7 +131,7 @@ impl WebDavClient {
         let mut url = collection
             .join(href)
             .map_err(|e| SourceError::Other(e.to_string()))?;
-        url.set_path(&normalized_path(&url));
+        canonical_path(&mut url);
         let root = self.root.path().trim_end_matches('/');
         if url.origin() != self.root.origin()
             || !(url.path() == root
@@ -180,9 +180,7 @@ impl WebDavClient {
         self.list(url, 0, |entry: dav::Entry| {
             std::future::ready((|| {
                 let location = self.resolve_href(url, &entry.href)?;
-                if location.path().trim_end_matches('/')
-                    != normalized_path(url).trim_end_matches('/')
-                {
+                if location.path().trim_end_matches('/') != url.path().trim_end_matches('/') {
                     return Ok(());
                 }
                 if let Some(status) = entry.status.filter(|status| !(200..300).contains(status)) {
@@ -442,18 +440,33 @@ impl WebDavClient {
     }
 }
 
-// DAV servers can return lowercase percent escapes for the same requested path.
-fn normalized_path(url: &Url) -> String {
-    let mut path = url.path().as_bytes().to_vec();
-    for index in 0..path.len().saturating_sub(2) {
-        if path[index] == b'%'
-            && path[index + 1].is_ascii_hexdigit()
-            && path[index + 2].is_ascii_hexdigit()
-        {
-            path[index + 1..=index + 2].make_ascii_uppercase();
-        }
-    }
-    String::from_utf8(path).expect("URL paths are UTF-8")
+// DAV servers escape names their own way, such as `%28` for `(` or a lowercase `%e8`.
+// The root and hrefs re-escape each segment's decoded bytes with url's SPECIAL_PATH_SEGMENT
+// set, which `push` gives request URLs, so they match and non-UTF-8 names keep their bytes.
+fn canonical_path(url: &mut Url) {
+    const SEGMENT: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'<')
+        .add(b'>')
+        .add(b'`')
+        .add(b'#')
+        .add(b'?')
+        .add(b'{')
+        .add(b'}')
+        .add(b'/')
+        .add(b'%')
+        .add(b'\\');
+    let path = url
+        .path()
+        .split('/')
+        .map(|segment| {
+            let bytes = std::borrow::Cow::from(percent_encoding::percent_decode_str(segment));
+            percent_encoding::percent_encode(&bytes, SEGMENT).to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    url.set_path(&path);
 }
 
 fn xml_headers() -> HeaderMap {
