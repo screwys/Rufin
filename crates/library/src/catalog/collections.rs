@@ -219,8 +219,7 @@ impl super::Catalog<'_> {
         last: bool,
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut tx = connection.begin().await?;
+        let mut tx = writer.begin().await?;
         let update = write_home_on(
             &mut tx,
             self.source.raw(),
@@ -244,8 +243,7 @@ impl super::Catalog<'_> {
     ) -> LibraryResult<()> {
         let source_id = self.source_id;
         let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut tx = connection.begin().await?;
+        let mut tx = writer.begin().await?;
         let source = self.source.raw();
         let playlist:i64=sqlx::query_scalar("SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=?2 AND owner='source'").bind(source).bind(id).fetch_one(&mut *tx).await?;
         let mut update = CatalogUpdate::default();
@@ -299,8 +297,7 @@ impl super::Catalog<'_> {
         rows: &[(String, NativeUserState)],
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut tx = connection.begin().await?;
+        let mut tx = writer.begin().await?;
         let source = self.source.raw();
         let update = super::cache::users(
             &mut tx,
@@ -323,8 +320,7 @@ impl super::Catalog<'_> {
         ids: &[String],
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut tx = connection.begin().await?;
+        let mut tx = writer.begin().await?;
         let source = self.source.raw();
         let (table, _) = super::cache::table(kind);
         let mut update = CatalogUpdate::default();
@@ -336,8 +332,7 @@ impl super::Catalog<'_> {
     pub async fn remove_source_items(&mut self, kind: &str, ids: &[String]) -> LibraryResult<()> {
         for page in ids.chunks(128) {
             let mut writer = self.database.writer().await?;
-            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-            let mut tx = connection.begin().await?;
+            let mut tx = writer.begin().await?;
             let update =
                 remove_items_on(&mut tx, self.source.raw(), kind, page, self.observed, false)
                     .await?;
@@ -354,11 +349,7 @@ impl super::Catalog<'_> {
         let mut update = CatalogUpdate::default();
         loop {
             let mut writer = self.database.writer().await?;
-            let mut tx = writer
-                .as_mut()
-                .ok_or(LibraryError::WriterUnavailable)?
-                .begin()
-                .await?;
+            let mut tx = writer.begin().await?;
             let source = self.source.raw();
             let result = &mut update;
             let keys:Vec<i64>=sqlx::query_scalar("SELECT track_key FROM tracks WHERE source_key=?1 AND album_key=(SELECT album_key FROM albums WHERE source_key=?1 AND object_id=?2) AND observed_stamp<?3 ORDER BY track_key LIMIT 128").bind(source).bind(id).bind(observed).fetch_all(&mut *tx).await?;
@@ -391,8 +382,7 @@ impl super::Catalog<'_> {
         valid_until: Option<i64>,
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut tx = connection.begin().await?;
+        let mut tx = writer.begin().await?;
         let source = self.source.raw();
         sqlx::query("UPDATE playlists SET provider_revision=?3,valid_until=?4 WHERE source_key=?1 AND object_id=?2 AND(provider_revision,valid_until) IS NOT(?3,?4)").bind(source).bind(id).bind(revision).bind(valid_until).execute(&mut *tx).await?;
         tx.commit().await?;
@@ -404,11 +394,7 @@ impl super::Catalog<'_> {
         name: &str,
     ) -> LibraryResult<crate::PlaylistKey> {
         let mut writer = self.database.writer().await?;
-        let mut tx = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut tx = writer.begin().await?;
         let source = self.source.raw();
         let (key, _) = crate::playlists::create_playlist_identity(&mut tx, None, name).await?;
         sqlx::query("INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) SELECT ?1,'rufin:entry:'||lower(hex(randomblob(16))),track_key,row_number() OVER(ORDER BY coalesce(cue_path,source_path),disc_number,track_number,object_id)-1 FROM tracks WHERE source_key=?2 AND local_file_key IN(SELECT local_file_key FROM local_files WHERE source_key=?2 AND observed_stamp=?3)").bind(key).bind(source).bind(observed).execute(&mut *tx).await?;
@@ -424,8 +410,7 @@ impl super::Catalog<'_> {
         observed: i64,
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut tx = connection.begin().await?;
+        let mut tx = writer.begin().await?;
         let source = self.source.raw();
         let tracks:Vec<i64>=sqlx::query_scalar("DELETE FROM track_folders WHERE folder_key=(SELECT folder_key FROM folders WHERE source_key=?1 AND object_id=?2) AND observed_stamp<?3 RETURNING track_key").bind(source).bind(id).bind(observed).fetch_all(&mut *tx).await?;
         tx.commit().await?;
@@ -442,10 +427,7 @@ impl crate::Catalog<'_> {
         retained_prefixes: &[String],
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let connection = writer
-            .as_mut()
-            .ok_or(crate::LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let source = self.source;
         let removed = sqlx::query("DELETE FROM home_entries WHERE source_key=?1 AND substr(section_id,1,length(?2))=?2 AND section_id NOT IN(SELECT value FROM json_each(?3)) AND NOT EXISTS(SELECT 1 FROM json_each(?4) retained WHERE substr(section_id,1,length(retained.value))=retained.value)")
             .bind(source).bind(prefix).bind(serde_json::to_string(sections)?).bind(serde_json::to_string(retained_prefixes)?)

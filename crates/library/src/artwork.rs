@@ -695,7 +695,6 @@ impl Database {
         activity_only: bool,
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         for table in ["playlists", "smart_playlists"] {
             if (activity_only && table == "playlists")
                 || (playlist.is_some() && table == "smart_playlists")
@@ -720,7 +719,7 @@ impl Database {
             let mut after = 0;
             loop {
                 let rows: Vec<(i64,Vec<u8>,Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT rowid,artwork_binding,{definition} FROM {table} WHERE rowid>?2 AND(?1 IS NULL OR rowid=?1) {has_members} AND EXISTS(SELECT 1 FROM json_each(artwork_binding) candidate WHERE json_extract(candidate.value,'$.image.automatic.pending')=0 AND (json_array_length(json_extract(candidate.value,'$.image.automatic.chosen'))<4 {emptied})) ORDER BY rowid LIMIT 128")))
-                    .bind(playlist).bind(after).fetch_all(&mut *connection).await?;
+                    .bind(playlist).bind(after).fetch_all(&mut *writer).await?;
                 let Some(last) = rows.last() else { break };
                 after = last.0;
                 for (key, binding, definition) in rows {
@@ -751,7 +750,7 @@ impl Database {
                     let mut candidates: Vec<ArtworkCandidate> = serde_json::from_slice(&binding)?;
                     for candidate in &mut candidates {
                         if candidate.is_automatic_playlist() {
-                            refresh_automatic_playlist_artwork_on(connection, key, candidate)
+                            refresh_automatic_playlist_artwork_on(&mut *writer, key, candidate)
                                 .await?;
                         }
                     }
@@ -759,7 +758,7 @@ impl Database {
                     if next == binding {
                         continue;
                     }
-                    let mut transaction = connection.begin().await?;
+                    let mut transaction = writer.begin().await?;
                     sqlx::query(sqlx::AssertSqlSafe(format!(
                         "UPDATE {table} SET artwork_binding=?2 WHERE rowid=?1"
                     )))
@@ -805,9 +804,8 @@ impl Database {
         refresh: bool,
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         sqlx::query("INSERT INTO artwork_previews(family,hash) VALUES(?1,?2) ON CONFLICT(family) DO UPDATE SET hash=excluded.hash WHERE ?3 AND hash IS NOT excluded.hash")
-            .bind(family).bind(hash).bind(refresh).execute(connection).await?;
+            .bind(family).bind(hash).bind(refresh).execute(&mut *writer).await?;
         Ok(())
     }
 
@@ -947,8 +945,7 @@ impl Database {
             drop(connection);
             {
                 let mut writer = self.writer().await?;
-                let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-                let mut transaction = connection.begin().await?;
+                let mut transaction = writer.begin().await?;
                 let path = format!(
                     "(SELECT '$['||key||']' FROM json_each(artwork_binding) WHERE {automatic} LIMIT 1)"
                 );

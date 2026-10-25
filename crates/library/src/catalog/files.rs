@@ -566,16 +566,15 @@ impl Database {
         files: &[LocalFileWrite],
     ) -> LibraryResult<Vec<crate::LocalFileRow>> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let source = super::cache::source_key(connection, source_id).await?;
+        let source = super::cache::source_key(&mut *writer, source_id).await?;
         let mut rows = crate::local::local_file_reuse_candidates_on(
-            connection,
+            &mut *writer,
             SourceKey::from_raw(source),
             files,
         )
         .await?;
         let stamps:std::collections::HashMap<String,String>=sqlx::query_as::<_,(String,String)>("SELECT path,parsed_stamp FROM observed_local_files WHERE source_key=?1 AND parsed_stamp IS NOT NULL AND path IN(SELECT value FROM json_each(?2))")
-            .bind(source).bind(serde_json::to_string(&rows.iter().map(|row|&row.path).collect::<Vec<_>>())?).fetch_all(&mut *connection).await?.into_iter().collect();
+            .bind(source).bind(serde_json::to_string(&rows.iter().map(|row|&row.path).collect::<Vec<_>>())?).fetch_all(&mut *writer).await?.into_iter().collect();
         for row in &mut rows {
             if let Some(stamp) = stamps.get(&row.path) {
                 let (size, mtime, revision, version): (
@@ -795,8 +794,7 @@ impl super::Catalog<'_> {
         admit: bool,
     ) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut tx = connection.begin().await?;
+        let mut tx = writer.begin().await?;
         let update = write_file_observations_on(
             &mut tx,
             (self.source.raw(), self.source_id),
@@ -856,11 +854,7 @@ impl super::Catalog<'_> {
             let mut after = 0_i64;
             loop {
                 let mut writer = self.database.writer().await?;
-                let mut tx = writer
-                    .as_mut()
-                    .ok_or(LibraryError::WriterUnavailable)?
-                    .begin()
-                    .await?;
+                let mut tx = writer.begin().await?;
                 let tracks: Vec<i64> = sqlx::query_scalar("SELECT track.track_key FROM tracks track JOIN local_track_access location USING(track_key) WHERE track.source_key=?1 AND indexed=?2 AND track.track_key>?3 AND coalesce(location.cue_path,location.source_path) IS NOT NULL AND CASE WHEN ?4 THEN location.local_file_key IS NOT NULL AND EXISTS(SELECT 1 FROM observed_local_files file WHERE file.local_file_key=location.local_file_key AND file.state='accepted') ELSE 1 END AND (track.object_id IS NOT NULL AND (EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=track.media_uri AND locator.origin='import') OR(EXISTS(SELECT 1 FROM json_each(?5) root WHERE coalesce(location.cue_path,location.source_path)=json_extract(root.value,'$[0]') OR(coalesce(location.cue_path,location.source_path)>=json_extract(root.value,'$[1]') AND coalesce(location.cue_path,location.source_path)<json_extract(root.value,'$[1]')||char(1114111))) AND NOT EXISTS(SELECT 1 FROM json_each(?6) excluded WHERE coalesce(location.cue_path,location.source_path)=json_extract(excluded.value,'$[0]') OR(coalesce(location.cue_path,location.source_path)>=json_extract(excluded.value,'$[1]') AND coalesce(location.cue_path,location.source_path)<json_extract(excluded.value,'$[1]')||char(1114111))))))=?4 ORDER BY track_key LIMIT 128")
                 .bind(self.source).bind(!indexed).bind(after).bind(indexed).bind(&roots).bind(&excluded).fetch_all(&mut *tx).await?;
                 let Some(last) = tracks.last() else {
@@ -884,8 +878,7 @@ impl super::Catalog<'_> {
         for path in paths {
             loop {
                 let mut writer = self.database.writer().await?;
-                let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-                let mut tx = connection.begin().await?;
+                let mut tx = writer.begin().await?;
                 let (update, done) =
                     remove_files_page_on(&mut tx, self.source.raw(), path, observed).await?;
                 tx.commit().await?;
@@ -908,8 +901,7 @@ impl super::Catalog<'_> {
             return Ok(());
         }
         let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let update = merge_local_file_uris_on(&mut transaction, aliases).await?;
         transaction.commit().await?;
         self.changes.merge(update);

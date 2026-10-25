@@ -1,5 +1,5 @@
 //! Fixed semantic data export and transactional restore.
-use crate::{Database, LibraryError, LibraryResult, PlaylistKey};
+use crate::{Database, LibraryResult, PlaylistKey};
 use sqlx::Connection;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Write};
@@ -129,8 +129,7 @@ impl Database {
             Ok(BufReader::new(File::open(directory.join(name))?))
         };
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let mut report = BackupRestoreReport::default();
         sync_restore_on(&mut transaction, contents, true).await?;
         let receiving: bool =
@@ -316,13 +315,12 @@ mod tests {
     }
     async fn seed(database: &Database, rating: i64) {
         let mut writer = database.writer().await.unwrap();
-        let connection = writer.as_mut().unwrap();
-        sqlx::query("INSERT INTO user_media_state(media_uri,favorite,rating) VALUES('https://example.test/song',1,?1)").bind(rating).execute(&mut *connection).await.unwrap();
+        sqlx::query("INSERT INTO user_media_state(media_uri,favorite,rating) VALUES('https://example.test/song',1,?1)").bind(rating).execute(&mut *writer).await.unwrap();
     }
     async fn rating(database: &Database) -> i64 {
         let mut writer = database.writer().await.unwrap();
         sqlx::query_scalar("SELECT rating FROM user_media_state LIMIT 1")
-            .fetch_one(writer.as_mut().unwrap())
+            .fetch_one(&mut *writer)
             .await
             .unwrap()
     }
@@ -383,13 +381,13 @@ mod tests {
         seed(&target, 19).await;
         for (database, path) in [(&source, "/old/song.flac"), (&target, "/current/song.flac")] {
             let mut writer = database.writer().await.unwrap();
-            sqlx::query("INSERT INTO main.local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES('https://example.test/song','download',?1,'/','song.flac','file:///song.flac')").bind(path).execute(writer.as_mut().unwrap()).await.unwrap();
+            sqlx::query("INSERT INTO main.local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES('https://example.test/song','download',?1,'/','song.flac','file:///song.flac')").bind(path).execute(&mut *writer).await.unwrap();
         }
         let (staged, playlist_count) = exported(&source).await;
         {
             let mut writer = target.writer().await.unwrap();
             sqlx::query("CREATE TRIGGER reject_restore BEFORE INSERT ON user_media_state BEGIN SELECT RAISE(ABORT,'selected write failed'); END")
-                .execute(writer.as_mut().unwrap()).await.unwrap();
+                .execute(&mut *writer).await.unwrap();
         }
         assert!(
             target
@@ -401,7 +399,7 @@ mod tests {
         {
             let mut writer = target.writer().await.unwrap();
             sqlx::query("DROP TRIGGER reject_restore")
-                .execute(writer.as_mut().unwrap())
+                .execute(&mut *writer)
                 .await
                 .unwrap();
         }
@@ -415,13 +413,13 @@ mod tests {
         let pending: i64 = sqlx::query_scalar(
             "SELECT (SELECT count(*) FROM favorite_outbox)+(SELECT count(*) FROM listen_outbox)",
         )
-        .fetch_one(writer.as_mut().unwrap())
+        .fetch_one(&mut *writer)
         .await
         .unwrap();
         assert_eq!(pending, 0);
         let download: String =
             sqlx::query_scalar("SELECT path FROM main.local_locators WHERE origin='download'")
-                .fetch_one(writer.as_mut().unwrap())
+                .fetch_one(&mut *writer)
                 .await
                 .unwrap();
         assert_eq!(download, "/current/song.flac");
@@ -433,9 +431,9 @@ mod tests {
         let target = database(directory.path(), "target").await;
         {
             let mut writer = source.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'missing-source');INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,position) VALUES(1,1,'source','native',NULL,0),(2,NULL,'rufin','authored','Mine',1);INSERT INTO tracks(track_key,media_uri,metadata) VALUES(1,'https://example.test/song',jsonb(json_object('title','Saved')));INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(2,'a',1,0),(2,'b',1,1);INSERT INTO listens(listen_key,external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(7,NULL,'missing-source','https://example.test/song','Saved','Artist','Album',1,'2026-09',100,90);").execute(writer.as_mut().unwrap()).await.unwrap();
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'missing-source');INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,position) VALUES(1,1,'source','native',NULL,0),(2,NULL,'rufin','authored','Mine',1);INSERT INTO tracks(track_key,media_uri,metadata) VALUES(1,'https://example.test/song',jsonb(json_object('title','Saved')));INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(2,'a',1,0),(2,'b',1,1);INSERT INTO listens(listen_key,external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(7,NULL,'missing-source','https://example.test/song','Saved','Artist','Album',1,'2026-09',100,90);").execute(&mut *writer).await.unwrap();
             sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(2,'local');INSERT INTO playlists(playlist_key,source_key,object_id,name,position) VALUES(3,2,'local-authored','Local playlist',2);INSERT INTO tracks(track_key,media_uri,metadata) VALUES(2,'file:///music/song.flac',jsonb(json_object('title','Local saved')));INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(3,'c',2,0);")
-                .execute(writer.as_mut().unwrap()).await.unwrap();
+                .execute(&mut *writer).await.unwrap();
         }
         let smart = source
             .create_smart_playlist(
@@ -448,9 +446,8 @@ mod tests {
         let mut expected_artwork = Vec::new();
         {
             let mut writer = source.writer().await.unwrap();
-            let connection = writer.as_mut().unwrap();
             let owners: Vec<(String,Option<String>,String)> = sqlx::query_as("SELECT 'playlists',source.object_id,playlist.object_id FROM playlists playlist LEFT JOIN sources source USING(source_key) UNION ALL SELECT 'smart_playlists',NULL,object_id FROM smart_playlists WHERE smart_playlist_key=?1")
-                .bind(smart).fetch_all(&mut *connection).await.unwrap();
+                .bind(smart).fetch_all(&mut *writer).await.unwrap();
             for (table, source_id, object_id) in owners {
                 let binding = serde_json::to_vec(&[crate::ArtworkCandidate::new(
                     crate::ArtworkImage::Playlist {
@@ -474,7 +471,7 @@ mod tests {
                 )))
                 .bind(&binding)
                 .bind(&object_id)
-                .execute(&mut *connection)
+                .execute(&mut *writer)
                 .await
                 .unwrap();
                 expected_artwork.push((table, object_id, binding));
@@ -521,7 +518,7 @@ mod tests {
         assert_eq!(playlist_count, 2);
         {
             let mut writer = target.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'catalog','Catalog','catalog',zeroblob(32)); INSERT INTO tracks(source_key,object_id,media_uri,metadata,normalized_search,local_play_count,indexed,native_metadata) VALUES(1,'song','https://example.test/song',jsonb(json_object('title','Song','sort_text','song','duration_millis',100)),'song',7,1,1);").execute(writer.as_mut().unwrap()).await.unwrap();
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'catalog','Catalog','catalog',zeroblob(32)); INSERT INTO tracks(source_key,object_id,media_uri,metadata,normalized_search,local_play_count,indexed,native_metadata) VALUES(1,'song','https://example.test/song',jsonb(json_object('title','Song','sort_text','song','duration_millis',100)),'song',7,1,1);").execute(&mut *writer).await.unwrap();
         }
         target
             .restore_state(staged.path(), all_groups(), playlist_count)
@@ -580,19 +577,18 @@ mod tests {
             .unwrap(),
         );
         let mut writer = target.writer().await.unwrap();
-        let connection = writer.as_mut().unwrap();
         assert_eq!(
             sqlx::query_scalar::<_, i64>(
                 "SELECT local_play_count FROM tracks WHERE media_uri='https://example.test/song'"
             )
-            .fetch_one(&mut *connection)
+            .fetch_one(&mut *writer)
             .await
             .unwrap(),
             1
         );
         let identities: Vec<(String, Option<String>, i64)> =
             sqlx::query_as("SELECT object_id,name,position FROM main.playlists ORDER BY position")
-                .fetch_all(&mut *connection)
+                .fetch_all(&mut *writer)
                 .await
                 .unwrap();
         assert_eq!(
@@ -606,7 +602,7 @@ mod tests {
         let entries: Vec<(String, String)> = sqlx::query_as(
             "SELECT entry.object_id,track.title FROM playlist_entries entry JOIN tracks track USING(track_key) ORDER BY entry.playlist_key,entry.position",
         )
-        .fetch_all(&mut *connection)
+        .fetch_all(&mut *writer)
         .await
         .unwrap();
         assert_eq!(
@@ -619,7 +615,7 @@ mod tests {
         );
         let listen: (i64, Option<String>, String) =
             sqlx::query_as("SELECT listen_key,external_id,source_id FROM listens")
-                .fetch_one(&mut *connection)
+                .fetch_one(&mut *writer)
                 .await
                 .unwrap();
         assert_eq!(listen, (7, None, "missing-source".into()));
@@ -634,7 +630,7 @@ mod tests {
         {
             let mut writer = target.writer().await.unwrap();
             sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (83,'remote','Remote','remote',zeroblob(32));INSERT INTO main.playlists(object_id,name,position) VALUES('retained','Keep me',0);")
-                .execute(writer.as_mut().unwrap()).await.unwrap();
+                .execute(&mut *writer).await.unwrap();
         }
         let favorites = StateGroups {
             playlists: false,
@@ -652,17 +648,16 @@ mod tests {
         assert_eq!(rating(&target).await, 73);
         {
             let mut writer = target.writer().await.unwrap();
-            let connection = writer.as_mut().unwrap();
             assert_eq!(
                 sqlx::query_scalar::<_, String>("SELECT object_id FROM sources")
-                    .fetch_one(&mut *connection)
+                    .fetch_one(&mut *writer)
                     .await
                     .unwrap(),
                 "remote"
             );
             assert_eq!(
                 sqlx::query_scalar::<_, String>("SELECT name FROM main.playlists")
-                    .fetch_one(&mut *connection)
+                    .fetch_one(&mut *writer)
                     .await
                     .unwrap(),
                 "Keep me"
@@ -678,7 +673,7 @@ mod tests {
         let mut writer = target.writer().await.unwrap();
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT count(*) FROM user_media_state")
-                .fetch_one(writer.as_mut().unwrap())
+                .fetch_one(&mut *writer)
                 .await
                 .unwrap(),
             0

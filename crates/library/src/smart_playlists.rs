@@ -609,8 +609,7 @@ impl Database {
         let name = require_name(name)?;
         let definition = encode_definition(definition)?;
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let result = sqlx::query(
             "INSERT INTO smart_playlists(
                  object_id, name, normalized_name,definition_json, position
@@ -648,8 +647,7 @@ impl Database {
         let name = require_name(name)?;
         let definition = encode_definition(definition)?;
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let revision = artwork
             .flatten()
             .map(|bytes| blake3::hash(bytes).to_hex().to_string());
@@ -691,8 +689,7 @@ impl Database {
 
     pub async fn delete_smart_playlist(&self, key: SmartPlaylistKey) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let identity: Option<String> = sqlx::query_scalar(
             "DELETE FROM smart_playlists WHERE smart_playlist_key=?1 RETURNING object_id",
         )
@@ -853,23 +850,22 @@ mod source_window_tests {
             .await
             .unwrap();
         let mut writer = database.writer().await.unwrap();
-        let connection = writer.as_mut().unwrap();
         sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32));\n          INSERT INTO tracks(track_key,indexed,source_key,object_id,media_uri,metadata) VALUES (1,1,1,'one','track:1',jsonb(json_object('title',COALESCE('One',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('one',''),'duration_millis',COALESCE(1000,0))));\n          INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis)\n          VALUES('track:1','One','','',1000000,'1970-01',1000,1000),\n                ('https://example.test/missing','Missing','','',395200,'1970-01',1000,1000),\n                ('https://example.test/old','Old','','',395199,'1970-01',1000,1000),\n                ('https://example.test/future','Future','','',1000001,'1970-01',1000,1000);")
-            .execute(&mut *connection).await.unwrap();
+            .execute(&mut *writer).await.unwrap();
         for grow in [false, true] {
             if grow {
                 sqlx::raw_sql("WITH RECURSIVE n(x) AS (VALUES(2) UNION ALL SELECT x+1 FROM n WHERE x<10000)\n                  INSERT INTO tracks(track_key,indexed,source_key,object_id,media_uri,metadata) SELECT x,1,1,CAST(x AS TEXT),'track:'||x,jsonb(json_object('title',COALESCE('Title',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('title',''),'duration_millis',COALESCE(1000,0))) FROM n;")
-                    .execute(&mut *connection).await.unwrap();
+                    .execute(&mut *writer).await.unwrap();
             }
             let sql = format!(
                 "{} SELECT media_uri FROM selected ORDER BY {SMART_RESULT_ORDER}",
-                smart_membership_sql(connection, 1000000, Some(&[key]))
+                smart_membership_sql(&mut *writer, 1000000, Some(&[key]))
                     .await
                     .unwrap()
             );
             let work = Arc::new(AtomicUsize::new(0));
             let counter = work.clone();
-            connection
+            writer
                 .lock_handle()
                 .await
                 .unwrap()
@@ -878,10 +874,10 @@ mod source_window_tests {
                     true
                 });
             let order: Vec<String> = sqlx::query_scalar(AssertSqlSafe(sql))
-                .fetch_all(&mut *connection)
+                .fetch_all(&mut *writer)
                 .await
                 .unwrap();
-            connection
+            writer
                 .lock_handle()
                 .await
                 .unwrap()
@@ -899,12 +895,12 @@ mod source_window_tests {
             "INSERT INTO main.local_locators(media_uri,origin,path,root,relative_path,access_uri)
           SELECT media_uri,'download',object_id,'',object_id,media_uri FROM tracks;",
         )
-        .execute(&mut *connection)
+        .execute(&mut *writer)
         .await
         .unwrap();
         let work = Arc::new(AtomicUsize::new(0));
         let counter = work.clone();
-        connection
+        writer
             .lock_handle()
             .await
             .unwrap()
@@ -912,10 +908,10 @@ mod source_window_tests {
                 counter.fetch_add(100, Ordering::Relaxed);
                 true
             });
-        let rows = crate::tracks::load_track_rows(connection, &[crate::TrackKey::from_raw(1)])
+        let rows = crate::tracks::load_track_rows(&mut *writer, &[crate::TrackKey::from_raw(1)])
             .await
             .unwrap();
-        connection
+        writer
             .lock_handle()
             .await
             .unwrap()

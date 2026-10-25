@@ -12,7 +12,6 @@ use anyhow::{Context, Result, bail};
 use loro::{ExportMode, LoroDoc, ToJson, VersionVector};
 use serde::{Deserialize, Serialize};
 use sqlx::{Connection, QueryBuilder, Row, SqliteConnection};
-use tokio::sync::{MappedMutexGuard, MutexGuard};
 
 mod database;
 mod encryption;
@@ -70,7 +69,7 @@ impl ProfileStore {
         let mut writer = database.writer().await?;
         sqlx::query("UPDATE connect_profile SET actor=?1 WHERE singleton=1 AND actor IS NOT ?1")
             .bind(peer_id.to_string())
-            .execute(writer.as_mut().context("Library writer is closed")?)
+            .execute(&mut *writer)
             .await?;
         drop(writer);
         Ok(Self {
@@ -87,7 +86,7 @@ impl ProfileStore {
         Ok(
             sqlx::query_scalar("SELECT schema_version<?1 FROM connect_profile WHERE singleton=1")
                 .bind(SCHEMA_VERSION)
-                .fetch_one(writer.as_mut().context("Library writer is closed")?)
+                .fetch_one(&mut *writer)
                 .await?,
         )
     }
@@ -99,14 +98,12 @@ impl ProfileStore {
         Ok(())
     }
 
-    async fn writer(&self) -> Result<MappedMutexGuard<'_, SqliteConnection>> {
+    async fn writer(&self) -> Result<crate::db::WriterGuard<'_>> {
         let guard = self.database.writer().await?;
         if self.closed.load(Ordering::Acquire) {
             bail!("Connect profile is closed");
         }
-        Ok(MutexGuard::map(guard, |connection| {
-            connection.as_mut().unwrap()
-        }))
+        Ok(guard)
     }
 
     pub async fn device_name(&self, peer: &str) -> Result<Option<String>> {
@@ -375,11 +372,7 @@ impl ProfileStore {
             .context("The Connect directory is not absolute")?
             .to_string();
         let mut writer = database.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .context("Library writer is closed")?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         sqlx::raw_sql("DELETE FROM documents; DELETE FROM connect_versions; DELETE FROM sync_cursors; DELETE FROM history_peers; DELETE FROM history_acknowledgements; DELETE FROM history_pending; UPDATE file_revision SET revision=0 WHERE id=1;
             UPDATE connect_seed SET cursor=0,complete=0; UPDATE connect_playlist_seed SET playlist=0,position=-1; DELETE FROM queue_transfer_pages;")
             .execute(&mut *transaction).await?;

@@ -309,8 +309,7 @@ impl Database {
             ));
         }
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let Some(tracks) = playlist_tracks_on(&mut transaction, source, songs).await? else {
             return Ok(None);
         };
@@ -337,8 +336,7 @@ impl Database {
         let image = artwork.flatten();
         let revision = image.map(|(bytes, _)| blake3::hash(bytes).to_hex().to_string());
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let binding = if artwork.is_some() {
             let (source_id, object_id, previous): (Option<String>, String, Option<Vec<u8>>) = sqlx::query_as("SELECT source.object_id,playlist.object_id,playlist.artwork_binding FROM playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist_key=?1").bind(playlist).fetch_one(&mut *transaction).await?;
             let incoming = revision.as_ref().map(|revision| {
@@ -380,8 +378,7 @@ impl Database {
             return Ok(false);
         }
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let visible = sqlx::query_as::<_, (PlaylistKey, i64)>(
             "SELECT playlist_key,position FROM playlists
              WHERE name IS NOT NULL AND (owner='rufin' OR indexed) AND (?1 IS NULL OR source_key=?1 OR source_key IS NULL)
@@ -425,8 +422,7 @@ impl Database {
         playlist: PlaylistKey,
     ) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let identity:Option<String> = sqlx::query_scalar("DELETE FROM playlists WHERE source_key IS ?1 AND owner='rufin' AND playlist_key=?2 RETURNING json_array((SELECT object_id FROM sources WHERE source_key=playlists.source_key),object_id)")
             .bind(source).bind(playlist).fetch_optional(&mut *transaction).await?;
         if let Some(key) = &identity {
@@ -459,8 +455,7 @@ impl Database {
         skip_existing: bool,
     ) -> LibraryResult<usize> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         if !editable_playlist_exists(&mut transaction, source, playlist).await? {
             return Ok(0);
         }
@@ -509,8 +504,7 @@ impl Database {
         mut entries: impl Iterator<Item = LibraryResult<PlaylistEntryKey>> + Send,
     ) -> LibraryResult<usize> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         if !editable_playlist_exists(&mut transaction, source, playlist).await? {
             transaction.rollback().await?;
             return Ok(0);
@@ -584,8 +578,7 @@ impl Database {
         new_position: usize,
     ) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         if !editable_playlist_exists(&mut transaction, source, playlist).await? {
             transaction.rollback().await?;
             return Ok(false);
@@ -779,17 +772,16 @@ mod point_projection_tests {
             .await
             .unwrap();
         let mut writer = database.writer().await.unwrap();
-        let connection = writer.as_mut().unwrap();
         sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32));\n          INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,normalized_name,sort_text,position)\n          VALUES(1,1,'source','small','Small','small','small',0),(2,1,'source','large','Large','large','large',1);\n          WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<15)\n          INSERT INTO tracks(track_key,source_key,object_id,media_uri,native_artwork,metadata) SELECT x,1,CAST(x AS TEXT),'track:'||x,X'01',jsonb(json_object('title',COALESCE('Title',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('title',''),'duration_millis',COALESCE(1000,0))) FROM n;\n          INSERT INTO playlist_entries(playlist_key,object_id,track_key,position)\n          SELECT 1,object_id,track_key,track_key FROM tracks;")
-            .execute(&mut *connection).await.unwrap();
+            .execute(&mut *writer).await.unwrap();
         for grow in [false, true] {
             if grow {
                 sqlx::raw_sql("WITH RECURSIVE n(x) AS (VALUES(16) UNION ALL SELECT x+1 FROM n WHERE x<10000)\n                  INSERT INTO tracks(track_key,source_key,object_id,media_uri,native_artwork,metadata) SELECT x,1,CAST(x AS TEXT),'track:'||x,X'01',jsonb(json_object('title',COALESCE('Title',''),'album',COALESCE('',''),'artist',COALESCE('',''),'sort_text',COALESCE('title',''),'duration_millis',COALESCE(1000,0))) FROM n;\n                  INSERT INTO playlist_entries(playlist_key,object_id,track_key,position)\n                  SELECT 2,object_id,track_key,track_key FROM tracks;")
-                    .execute(&mut *connection).await.unwrap();
+                    .execute(&mut *writer).await.unwrap();
             }
             let work = Arc::new(AtomicUsize::new(0));
             let counter = work.clone();
-            connection
+            writer
                 .lock_handle()
                 .await
                 .unwrap()
@@ -797,28 +789,28 @@ mod point_projection_tests {
                     counter.fetch_add(100, Ordering::Relaxed);
                     true
                 });
-            let rows = Database::load_playlist_rows(connection, &[PlaylistKey::from_raw(1)])
+            let rows = Database::load_playlist_rows(&mut *writer, &[PlaylistKey::from_raw(1)])
                 .await
                 .unwrap();
             let entry: String = sqlx::query_scalar(
                 "SELECT media_uri FROM playlist_entries JOIN tracks USING(track_key) WHERE playlist_entry_key=1",
             )
-            .fetch_one(&mut *connection)
+            .fetch_one(&mut *writer)
             .await
             .unwrap();
             let order: Vec<i64> = sqlx::query_scalar("SELECT playlist_entry_key FROM playlist_entries WHERE playlist_key=1 ORDER BY position,playlist_entry_key")
-                .fetch_all(&mut *connection).await.unwrap();
+                .fetch_all(&mut *writer).await.unwrap();
             for sort in [CatalogSort::Artist, CatalogSort::AlbumArtist] {
                 let query = playlist_query(PlaylistKey::from_raw(1), None, sort, false, "");
                 let ordered = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(
                     query.select(&query.entry_key),
                 ))
-                .fetch_all(&mut *connection)
+                .fetch_all(&mut *writer)
                 .await
                 .unwrap();
                 assert_eq!(ordered.len(), 15);
             }
-            connection
+            writer
                 .lock_handle()
                 .await
                 .unwrap()

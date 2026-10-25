@@ -105,8 +105,7 @@ impl Database {
     ) -> LibraryResult<ListenKey> {
         validate_listen(listen, deliveries)?;
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let current: Option<(String, Option<crate::SourceKey>, Option<String>)> = if let Some(key) =
             current_track
         {
@@ -219,8 +218,7 @@ impl Database {
         input: impl BufRead,
     ) -> LibraryResult<ActivityImportReport> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let report = import_activity_jsonl_on(&mut transaction, input).await?;
         transaction.commit().await?;
         Ok(report)
@@ -251,10 +249,9 @@ impl Database {
 
     pub async fn complete_listen_delivery(&self, outbox: ListenOutboxKey) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(sqlx::query("DELETE FROM listen_outbox WHERE outbox_key=?1")
             .bind(outbox)
-            .execute(connection)
+            .execute(&mut *writer)
             .await?
             .rows_affected()
             == 1)
@@ -267,9 +264,8 @@ impl Database {
         last_error: Option<&str>,
     ) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(sqlx::query("UPDATE listen_outbox SET attempts=attempts+1,next_attempt_at=?2,last_error=?3 WHERE outbox_key=?1")
-            .bind(outbox).bind(next_attempt_at).bind(last_error).execute(connection).await?.rows_affected()==1)
+            .bind(outbox).bind(next_attempt_at).bind(last_error).execute(&mut *writer).await?.rows_affected()==1)
     }
 
     pub async fn block_listen_deliveries(
@@ -279,9 +275,8 @@ impl Database {
         last_error: &str,
     ) -> LibraryResult<u64> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(sqlx::query("UPDATE listen_outbox SET attempts=attempts+1,next_attempt_at=NULL,last_error=?3 WHERE service=?1 AND account_id=?2")
-            .bind(service).bind(account_id).bind(last_error).execute(connection).await?.rows_affected())
+            .bind(service).bind(account_id).bind(last_error).execute(&mut *writer).await?.rows_affected())
     }
 
     pub async fn remove_listen_deliveries(
@@ -290,12 +285,11 @@ impl Database {
         account_id: &str,
     ) -> LibraryResult<u64> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(
             sqlx::query("DELETE FROM listen_outbox WHERE service=?1 AND account_id=?2")
                 .bind(service)
                 .bind(account_id)
-                .execute(connection)
+                .execute(&mut *writer)
                 .await?
                 .rows_affected(),
         )
@@ -308,9 +302,8 @@ impl Database {
         now: i64,
     ) -> LibraryResult<u64> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(sqlx::query("UPDATE listen_outbox SET next_attempt_at=?3,last_error=NULL WHERE service=?1 AND account_id=?2 AND next_attempt_at IS NULL")
-            .bind(service).bind(account_id).bind(now).execute(connection).await?.rows_affected())
+            .bind(service).bind(account_id).bind(now).execute(&mut *writer).await?.rows_affected())
     }
 }
 

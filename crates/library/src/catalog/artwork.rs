@@ -288,11 +288,7 @@ impl super::Catalog<'_> {
     ) -> LibraryResult<()> {
         let observed = self.observed;
         let mut writer = self.database.writer().await?;
-        let mut tx = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut tx = writer.begin().await?;
         let source = self.source.raw();
         let observed = super::cache::observation_stamp(&mut tx, source, observed).await?;
         let mut update = CatalogUpdate::default();

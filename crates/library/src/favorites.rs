@@ -103,8 +103,7 @@ impl Database {
             ));
         }
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         sqlx::query(
             "INSERT INTO user_media_state(media_uri,rating) VALUES (?1,?2)
              ON CONFLICT(media_uri) DO UPDATE SET rating=excluded.rating",
@@ -124,8 +123,7 @@ impl Database {
         favorite: bool,
     ) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let changed = update_favorite(&mut transaction, target, Some(favorite)).await?;
         transaction.commit().await?;
         Ok(changed)
@@ -143,8 +141,7 @@ impl Database {
             ));
         }
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let previous = effective_favorite(&mut transaction, target).await?;
         sqlx::query(
             "INSERT INTO favorite_outbox(media_uri,favorite,previous_favorite,attempts,next_attempt_at)
@@ -171,8 +168,7 @@ impl Database {
         favorite: bool,
     ) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let current = sqlx::query_scalar::<_, i64>(
             "DELETE FROM favorite_outbox WHERE media_uri=?1 AND favorite=?2 RETURNING outbox_key",
         )
@@ -225,7 +221,6 @@ impl Database {
         next_attempt_at: i64,
     ) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(sqlx::query(
             "UPDATE favorite_outbox SET attempts=attempts+1,next_attempt_at=?3
              WHERE media_uri=?1 AND favorite=?2",
@@ -233,7 +228,7 @@ impl Database {
         .bind(target.media_uri())
         .bind(favorite)
         .bind(next_attempt_at)
-        .execute(connection)
+        .execute(&mut *writer)
         .await?
         .rows_affected()
             == 1)
@@ -245,8 +240,7 @@ impl Database {
         favorite: bool,
     ) -> LibraryResult<Option<bool>> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let previous = sqlx::query_scalar::<_, bool>(
             "DELETE FROM favorite_outbox WHERE media_uri=?1 AND favorite=?2
              RETURNING previous_favorite",
@@ -318,8 +312,7 @@ impl Database {
         input: impl std::io::BufRead,
     ) -> LibraryResult<u64> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let count = import_user_media_state_jsonl_on(&mut transaction, input).await?;
         transaction.commit().await?;
         Ok(count)

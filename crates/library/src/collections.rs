@@ -302,8 +302,7 @@ impl Database {
             ));
         }
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let identity=sqlx::query_as::<_,(Option<String>,Option<String>)>(sqlx::AssertSqlSafe(format!("SELECT {},release_lookup_identity FROM albums album WHERE source_key=?1 AND album_key=?2","album.release_identity"))).bind(source).bind(album).fetch_optional(&mut *transaction).await?;
         let Some((current, attempted)) = identity else {
             transaction.rollback().await?;

@@ -820,7 +820,7 @@ impl Database {
     ) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
         Ok(sqlx::query("INSERT INTO tracks(media_uri,metadata,normalized_search,native_metadata) VALUES(?1,jsonb(?2),?3,1) ON CONFLICT(media_uri) DO UPDATE SET metadata=excluded.metadata,normalized_search=excluded.normalized_search,native_metadata=1 WHERE tracks.source_key IS NULL AND(tracks.metadata IS NOT excluded.metadata OR tracks.native_metadata=0)")
-            .bind(uri).bind(serde_json::to_string(metadata)?).bind(track_search(metadata)).execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?.rows_affected()>0)
+            .bind(uri).bind(serde_json::to_string(metadata)?).bind(track_search(metadata)).execute(&mut *writer).await?.rows_affected()>0)
     }
 }
 
@@ -1090,8 +1090,7 @@ pub(crate) async fn apply_on(
 impl super::Catalog<'_> {
     pub async fn apply_catalog(&mut self, batch: &CatalogBatch, admit: bool) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut tx = connection.begin().await?;
+        let mut tx = writer.begin().await?;
         let update = apply_on(
             &mut tx,
             self.source.raw(),
@@ -1116,8 +1115,7 @@ impl super::Catalog<'_> {
             let mut after = 0_i64;
             loop {
                 let mut writer = self.database.writer().await?;
-                let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-                let mut tx = connection.begin().await?;
+                let mut tx = writer.begin().await?;
                 let source = self.source.raw();
                 let (table, key) = if *kind == "playlist" {
                     ("playlists", "playlist_key")
@@ -1180,8 +1178,7 @@ impl super::Catalog<'_> {
         }
         if kinds.is_empty() {
             let mut writer = self.database.writer().await?;
-            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-            let mut tx = connection.begin().await?;
+            let mut tx = writer.begin().await?;
             let share: Option<bool> = sqlx::query_scalar("UPDATE sources SET catalog_complete=1,freshness=?2 WHERE source_key=?1 AND(catalog_complete,freshness) IS NOT(1,?2) RETURNING coalesce(kind IN('local','webdav','smb'),0)")
                 .bind(self.source.raw()).bind(freshness.map(Freshness::as_bytes)).fetch_optional(&mut *tx).await?;
             if share == Some(true) {
@@ -1203,8 +1200,7 @@ impl super::Catalog<'_> {
 impl super::Catalog<'_> {
     pub async fn start_observation(&mut self) -> LibraryResult<i64> {
         let mut writer = self.database.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut tx = connection.begin().await?;
+        let mut tx = writer.begin().await?;
         let stamp = sqlx::query_scalar("UPDATE sources SET observation_stamp=observation_stamp+1 WHERE source_key=?1 RETURNING observation_stamp")
             .bind(self.source).fetch_one(&mut *tx).await?;
         tx.commit().await?;

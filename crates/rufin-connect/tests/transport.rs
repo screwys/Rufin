@@ -2,6 +2,7 @@ use library::ConnectRecord;
 use library::profile::{ProfileStore, SyncStream};
 use loro::{LoroDoc, ToJson, VersionVector};
 use rufin_connect::{ConnectNetwork, Credentials, NetworkConfig, NetworkEvent};
+use sqlx::Connection as _;
 use std::{path::Path, sync::Arc, time::Duration};
 
 const KEY: &str = "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33";
@@ -339,17 +340,18 @@ async fn enrollment_after_collection_publication() {
                 value: None,
             });
         }
-        let mut writer = a_database.writer().await.unwrap();
+        let mut connection = sqlx::SqliteConnection::connect_with(
+            &sqlx::sqlite::SqliteConnectOptions::new().filename(a_database.path()),
+        )
+        .await
+        .unwrap();
         for record in &mut records {
-            *record = library::Database::connect_record_on(
-                writer.as_mut().unwrap(),
-                &record.kind,
-                &record.key,
-            )
-            .await
-            .unwrap();
+            *record =
+                library::Database::connect_record_on(&mut connection, &record.kind, &record.key)
+                    .await
+                    .unwrap();
         }
-        drop(writer);
+        drop(connection);
         for (index, record) in records.iter().enumerate() {
             let value = record.value.as_ref().unwrap();
             assert_eq!(

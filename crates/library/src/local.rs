@@ -752,8 +752,7 @@ impl Database {
 
     pub async fn clear_mapping_access(&self, source: SourceKey) -> LibraryResult<u64> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         sqlx::query("DELETE FROM main.local_access_metadata WHERE access_uri IN (SELECT access_uri FROM local_access_files WHERE source_key=?1 AND origin='mapping') AND NOT EXISTS(SELECT 1 FROM local_locators other WHERE other.access_uri=local_access_metadata.access_uri AND (other.source_key IS NOT ?1 OR other.origin<>'mapping'))").bind(source).execute(&mut *transaction).await?;
         let removed =
             sqlx::query("DELETE FROM main.local_locators WHERE local_access_file_key IN (SELECT local_access_file_key FROM local_access_files WHERE source_key=?1 AND origin='mapping')")
@@ -844,8 +843,7 @@ impl Database {
             return Ok(());
         }
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         write_local_access_on(&mut transaction, source, records).await?;
         transaction.commit().await?;
         Ok(())
@@ -873,8 +871,7 @@ impl Database {
 
     pub async fn remove_local_access(&self, key: LocalAccessFileKey) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let removed_access = sqlx::query_scalar::<_, String>(
             "SELECT media_uri FROM local_access_files WHERE local_access_file_key=?1",
         )
@@ -1053,8 +1050,7 @@ impl Database {
         locator: &LocalLocatorWrite,
     ) -> LibraryResult<LocalAccessFileKey> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let key = write_local_locator(&mut transaction, locator).await?;
         transaction.commit().await?;
         Ok(key)
@@ -1065,8 +1061,7 @@ impl Database {
         input: impl std::io::BufRead,
     ) -> LibraryResult<u64> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let count = import_local_locators_jsonl_on(&mut transaction, input).await?;
         transaction.commit().await?;
         Ok(count)
@@ -1187,11 +1182,7 @@ impl crate::Catalog<'_> {
         let mut after = -1_i64;
         loop {
             let mut writer = self.database.writer().await?;
-            let mut tx = writer
-                .as_mut()
-                .ok_or(LibraryError::WriterUnavailable)?
-                .begin()
-                .await?;
+            let mut tx = writer.begin().await?;
             let (owner, cursor, references) = if playlist.is_some() {
                 (
                     "playlist_entries requested CROSS JOIN tracks track USING(track_key)",

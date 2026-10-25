@@ -1,5 +1,5 @@
 //! Device-local representations of shared collection entries.
-use crate::{Database, LibraryError, LibraryResult, LocalFileWrite, LocalMediaLocation};
+use crate::{Database, LibraryResult, LocalFileWrite, LocalMediaLocation};
 use serde::{Deserialize, Serialize};
 use sqlx::Connection;
 
@@ -371,11 +371,7 @@ impl Database {
 
     pub async fn connect_forget_media_file(&self, file: &ConnectMediaFile) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         let removed = sqlx::query("DELETE FROM connect_media_files WHERE media_uri=?1 AND encoding=?2 AND path=?3 AND revision=?4")
             .bind(&file.media_uri).bind(&file.encoding).bind(&file.path).bind(&file.revision).execute(&mut *transaction).await?.rows_affected()>0;
         if removed {
@@ -436,12 +432,7 @@ impl Database {
     pub async fn connect_save_media_file(&self, file: &ConnectMediaFile) -> LibraryResult<()> {
         let backing = self.connect_backing_id(&file.media_uri).await?;
         let mut writer = self.writer().await?;
-        save_download_on(
-            writer.as_mut().ok_or(LibraryError::WriterUnavailable)?,
-            file,
-            &backing,
-        )
-        .await
+        save_download_on(&mut *writer, file, &backing).await
     }
 
     pub async fn commit_download(
@@ -452,11 +443,7 @@ impl Database {
     ) -> LibraryResult<()> {
         let backing = self.connect_backing_id(&file.media_uri).await?;
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         crate::local::write_local_access_on(&mut transaction, source, &[access]).await?;
         save_download_on(&mut transaction, file, &backing).await?;
         transaction.commit().await?;

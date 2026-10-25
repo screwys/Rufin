@@ -157,8 +157,7 @@ impl Database {
         name: &str,
     ) -> LibraryResult<CachedSource> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let source = crate::db::write_source_identity(&mut transaction, source_id.as_str()).await?;
         let changed = sqlx::query("UPDATE sources SET kind=?2,display_name=?3,normalized_name=?4,distinct_track_covers=?5 WHERE source_key=?1 AND (kind,display_name,normalized_name,distinct_track_covers) IS NOT (?2,?3,?4,?5)")
             .bind(source).bind(kind).bind(name).bind(name.to_lowercase()).bind(self.distinct_track_covers()).execute(&mut *transaction).await?.rows_affected()>0;
@@ -205,7 +204,7 @@ impl Database {
     pub async fn invalidate_source_observation(&self, source_id: &SourceId) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
         sqlx::query("UPDATE sources SET observation_stamp=observation_stamp+1,freshness=NULL WHERE object_id=?1")
-            .bind(source_id.as_str()).execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
+            .bind(source_id.as_str()).execute(&mut *writer).await?;
         Ok(())
     }
 }

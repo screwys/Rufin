@@ -227,8 +227,7 @@ async fn write_analyzed_loudness(
     measurement: &LoudnessMeasurement,
 ) -> LibraryResult<bool> {
     let mut writer = database.writer().await?;
-    let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-    let mut transaction = connection.begin().await?;
+    let mut transaction = writer.begin().await?;
     let accepted = write_measurement_on(&mut transaction, source, kind, key, measurement).await?;
     transaction.commit().await?;
     drop(writer);

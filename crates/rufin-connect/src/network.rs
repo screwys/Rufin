@@ -1741,7 +1741,11 @@ mod tests {
                 .await
                 .unwrap();
             let current = library::Database::connect_record_on(
-                database.writer().await.unwrap().as_mut().unwrap(),
+                &mut SqliteConnection::connect_with(
+                    &sqlx::sqlite::SqliteConnectOptions::new().filename(database.path()),
+                )
+                .await
+                .unwrap(),
                 "catalog:file",
                 &serde_json::json!(["remote", path]).to_string(),
             )
@@ -1815,7 +1819,12 @@ mod tests {
             );
             assert_eq!(
                 library::Database::connect_record_on(
-                    receiving_database.writer().await.unwrap().as_mut().unwrap(),
+                    &mut SqliteConnection::connect_with(
+                        &sqlx::sqlite::SqliteConnectOptions::new()
+                            .filename(receiving_database.path()),
+                    )
+                    .await
+                    .unwrap(),
                     &current.kind,
                     &current.key,
                 )

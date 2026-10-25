@@ -139,7 +139,7 @@ mod tests {
         let database = Database::open(directory.path().join("store.sqlite")).await?;
         {
             let mut writer = database.writer().await?;
-            sqlx::query("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES(1,'files','Files','files',zeroblob(32))").execute(writer.as_mut().unwrap()).await?;
+            sqlx::query("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES(1,'files','Files','files',zeroblob(32))").execute(&mut *writer).await?;
         }
         let files = [
             (
@@ -685,8 +685,7 @@ impl Database {
         removed: &[(usize, std::path::PathBuf)],
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let mut removed = removed.iter().collect::<Vec<_>>();
         removed.sort_by_key(|(index, _)| std::cmp::Reverse(*index));
         for (index, root) in removed {
@@ -745,11 +744,7 @@ impl Database {
         files: &[(String, PlaylistKey)],
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         let mut changed = std::collections::BTreeMap::<i64, Vec<String>>::new();
         for (path, playlist) in files {
             let row: Option<(i64, String)> = sqlx::query_as("WITH target AS(SELECT json_array(source.object_id,playlist.object_id) identity FROM playlists playlist LEFT JOIN sources source USING(source_key) WHERE playlist.playlist_key=?3 AND playlist.owner='rufin' AND playlist.name IS NOT NULL) UPDATE local_files SET playlist_identity=(SELECT identity FROM target) WHERE local_file_key=(SELECT file.local_file_key FROM observed_local_files file JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2) AND EXISTS(SELECT 1 FROM target) AND playlist_identity IS NOT(SELECT identity FROM target) RETURNING source_key,path")
@@ -811,11 +806,7 @@ impl Database {
 
     pub async fn save_playlist_file_link(&self, link: &PlaylistFileLink) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        save_link_on(
-            writer.as_mut().ok_or(LibraryError::WriterUnavailable)?,
-            link,
-        )
-        .await
+        save_link_on(&mut *writer, link).await
     }
 
     pub async fn unlink_playlist_file(&self, playlist: PlaylistKey) -> LibraryResult<bool> {
@@ -823,7 +814,7 @@ impl Database {
         Ok(
             sqlx::query("DELETE FROM playlist_file_links WHERE playlist_key=?1")
                 .bind(playlist)
-                .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+                .execute(&mut *writer)
                 .await?
                 .rows_affected()
                 != 0,
@@ -832,11 +823,7 @@ impl Database {
 
     pub async fn mark_playlist_file_dirty(&self, playlist: PlaylistKey) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        mark_dirty_on(
-            writer.as_mut().ok_or(LibraryError::WriterUnavailable)?,
-            playlist,
-        )
-        .await
+        mark_dirty_on(&mut *writer, playlist).await
     }
 
     pub async fn mark_playlist_file_synced(
@@ -846,7 +833,7 @@ impl Database {
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
         sqlx::query("UPDATE playlist_file_links SET revision=?2,dirty=0,error=NULL WHERE playlist_key=?1 AND (revision IS NOT ?2 OR dirty<>0 OR error IS NOT NULL)")
-            .bind(playlist).bind(revision).execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
+            .bind(playlist).bind(revision).execute(&mut *writer).await?;
         Ok(())
     }
 
@@ -861,7 +848,7 @@ impl Database {
         )
         .bind(playlist)
         .bind(error)
-        .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+        .execute(&mut *writer)
         .await?;
         Ok(())
     }
@@ -875,7 +862,7 @@ impl Database {
         sqlx::query("INSERT OR IGNORE INTO playlist_file_ignored(source_id,path) VALUES(?1,?2)")
             .bind(location_source(source_id))
             .bind(path)
-            .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+            .execute(&mut *writer)
             .await?;
         Ok(())
     }
@@ -916,7 +903,7 @@ impl Database {
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
         sqlx::query("INSERT INTO playlist_file_settings(source_id,auto_save) VALUES(?1,?2) ON CONFLICT(source_id) DO UPDATE SET auto_save=excluded.auto_save WHERE auto_save<>excluded.auto_save")
-            .bind(location_source(source_id)).bind(enabled).execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
+            .bind(location_source(source_id)).bind(enabled).execute(&mut *writer).await?;
         Ok(())
     }
 }

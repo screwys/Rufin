@@ -89,8 +89,7 @@ impl Database {
     ) -> LibraryResult<PlaylistFolderKey> {
         let name = folder_name(name)?;
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(sqlx::query_scalar("INSERT INTO playlist_folders(object_id,name,smart) VALUES('rufin:playlist-folder:'||lower(hex(randomblob(16))),?1,?2) RETURNING folder_key").bind(name).bind(smart).fetch_one(connection).await?)
+        Ok(sqlx::query_scalar("INSERT INTO playlist_folders(object_id,name,smart) VALUES('rufin:playlist-folder:'||lower(hex(randomblob(16))),?1,?2) RETURNING folder_key").bind(name).bind(smart).fetch_one(&mut *writer).await?)
     }
     pub async fn rename_playlist_folder(
         &self,
@@ -99,11 +98,10 @@ impl Database {
     ) -> LibraryResult<()> {
         let name = folder_name(name)?;
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         sqlx::query("UPDATE playlist_folders SET name=?2 WHERE folder_key=?1")
             .bind(key)
             .bind(name)
-            .execute(connection)
+            .execute(&mut *writer)
             .await?;
         Ok(())
     }
@@ -112,12 +110,11 @@ impl Database {
         key: PlaylistFolderKey,
     ) -> LibraryResult<Option<(String, bool)>> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(sqlx::query_as(
             "DELETE FROM playlist_folders WHERE folder_key=?1 RETURNING object_id,smart",
         )
         .bind(key)
-        .fetch_optional(connection)
+        .fetch_optional(&mut *writer)
         .await?)
     }
     pub async fn playlist_member_folder(
@@ -143,8 +140,7 @@ impl Database {
         folder: Option<PlaylistFolderKey>,
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        move_to_folder_on(connection, member, folder).await
+        move_to_folder_on(&mut *writer, member, folder).await
     }
     pub async fn playlist_folder_choices(
         &self,

@@ -87,6 +87,23 @@ pub struct Database {
     inner: Arc<DatabaseInner>,
 }
 
+/// Holds the writer lock. `Database::writer` creates it only while the writer is open.
+pub(crate) struct WriterGuard<'a>(tokio::sync::MutexGuard<'a, Option<SqliteConnection>>);
+
+impl std::ops::Deref for WriterGuard<'_> {
+    type Target = SqliteConnection;
+
+    fn deref(&self) -> &SqliteConnection {
+        self.0.as_ref().expect("the writer stays open while locked")
+    }
+}
+
+impl std::ops::DerefMut for WriterGuard<'_> {
+    fn deref_mut(&mut self) -> &mut SqliteConnection {
+        self.0.as_mut().expect("the writer stays open while locked")
+    }
+}
+
 impl Database {
     pub fn path(&self) -> &Path {
         &self.inner.path
@@ -134,8 +151,7 @@ impl Database {
 
     pub async fn set_distinct_track_covers(&self, enabled: bool) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let changed:Vec<(crate::SourceKey,String)>=sqlx::query_as("UPDATE sources SET distinct_track_covers=?1 WHERE distinct_track_covers<>?1 RETURNING source_key,object_id").bind(enabled).fetch_all(&mut *transaction).await?;
         for (source, _) in &changed {
             let mut after = 0;
@@ -262,8 +278,7 @@ impl Database {
 
     pub async fn remove_source(&self, source_id: &crate::SourceId) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let source =
             sqlx::query_scalar::<_, i64>("SELECT source_key FROM sources WHERE object_id=?1")
                 .bind(source_id.as_str())
@@ -336,14 +351,12 @@ impl Database {
         Ok(removed)
     }
 
-    pub async fn writer(
-        &self,
-    ) -> LibraryResult<tokio::sync::MutexGuard<'_, Option<SqliteConnection>>> {
+    pub(crate) async fn writer(&self) -> LibraryResult<WriterGuard<'_>> {
         let writer = self.inner.writer.lock().await;
         if writer.is_none() {
             return Err(LibraryError::WriterUnavailable);
         }
-        Ok(writer)
+        Ok(WriterGuard(writer))
     }
 
     pub(crate) async fn acquire_general(
@@ -624,7 +637,6 @@ mod tests {
         );
 
         let mut writer = database.writer().await.expect("acquire fixed writer");
-        let writer = writer.as_mut().expect("writer remains available");
         let writer_options = sqlx::query_as::<_, (String, i64)>(
             "SELECT
                  (SELECT journal_mode FROM pragma_journal_mode),
@@ -653,7 +665,7 @@ mod tests {
         let (_directory, database) = database().await;
         let mut writer = database.writer().await.unwrap();
         sqlx::raw_sql("INSERT INTO sources(object_id,kind) VALUES('source','local'); INSERT INTO tracks(source_key,object_id,media_uri) SELECT source_key,'track','file:///point.flac' FROM sources WHERE object_id='source'")
-            .execute(writer.as_mut().unwrap()).await.unwrap();
+            .execute(&mut *writer).await.unwrap();
         drop(writer);
         let cancellation = ReadCancellation::new();
         let (permit, general) = database
@@ -774,7 +786,7 @@ mod tests {
             .expect("hold steady reader");
         let mut writer = database.writer().await.expect("acquire writer");
         sqlx::raw_sql("BEGIN IMMEDIATE")
-            .execute(writer.as_mut().expect("writer available"))
+            .execute(&mut *writer)
             .await
             .expect("hold writer transaction");
         let mut optional = database
@@ -789,7 +801,7 @@ mod tests {
             "wal"
         );
         sqlx::raw_sql("ROLLBACK")
-            .execute(writer.as_mut().expect("writer available"))
+            .execute(&mut *writer)
             .await
             .expect("release writer transaction");
         drop(writer);
@@ -825,7 +837,7 @@ mod tests {
         {
             let mut writer = database.writer().await.expect("acquire writer");
             sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('source','Source','source',zeroblob(32))")
-                .execute(writer.as_mut().expect("writer available"))
+                .execute(&mut *writer)
                 .await
                 .expect("insert idempotent read row");
         }

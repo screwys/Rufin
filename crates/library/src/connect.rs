@@ -440,11 +440,7 @@ impl Database {
     }
     pub async fn connect_initialize_profile(&self) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         sqlx::raw_sql("DELETE FROM connect_versions; UPDATE connect_seed SET cursor=0,complete=0; UPDATE connect_playlist_seed SET playlist=0,position=-1; UPDATE connect_profile SET enabled=1,receiving=0;").execute(&mut *transaction).await?;
         transaction.commit().await?;
         Ok(())
@@ -454,7 +450,7 @@ impl Database {
         let mut writer = self.writer().await?;
         sqlx::query("UPDATE connect_profile SET enabled=?1 WHERE singleton=1")
             .bind(enabled)
-            .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+            .execute(&mut *writer)
             .await?;
         Ok(())
     }
@@ -462,11 +458,7 @@ impl Database {
     /// Seeds one bounded page. Subsequent calls resume after interruption.
     pub async fn connect_seed_page(&self) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         let row = sqlx::query(
             "SELECT kind,cursor FROM connect_seed WHERE complete=0 ORDER BY kind<>'smart_order',rowid LIMIT 1",
         )
@@ -561,11 +553,7 @@ impl Database {
     /// Apply received values through the same canonical writers as source observations.
     pub async fn connect_apply(&self, records: &[ConnectRecord]) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         let changed = apply_records_on(&mut transaction, records).await?;
         transaction.commit().await?;
         Ok(changed)
@@ -1328,12 +1316,9 @@ mod tests {
             .unwrap();
         destination.connect_set_active(true).await.unwrap();
         // A different source keeps the imported source key independent of the sender.
-        crate::db::write_source_identity(
-            destination.writer().await.unwrap().as_mut().unwrap(),
-            "other",
-        )
-        .await
-        .unwrap();
+        crate::db::write_source_identity(&mut *destination.writer().await.unwrap(), "other")
+            .await
+            .unwrap();
         let art = serde_json::to_vec(&[crate::ArtworkCandidate::new(
             crate::ArtworkImage::Native {
                 source_id: crate::SourceId::new("server"),
@@ -1476,7 +1461,7 @@ mod tests {
             .await
             .unwrap();
         sqlx::query("UPDATE sources SET kind=NULL WHERE object_id='server'")
-            .execute(source.writer().await.unwrap().as_mut().unwrap())
+            .execute(&mut *source.writer().await.unwrap())
             .await
             .unwrap();
         source.connect_initialize_profile().await.unwrap();

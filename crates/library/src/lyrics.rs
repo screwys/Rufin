@@ -71,10 +71,9 @@ impl Database {
 
     pub async fn clear_lyrics_cache(&self, active_media_uris: &[String]) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         sqlx::query("DELETE FROM lyrics_cache WHERE NOT EXISTS(SELECT 1 FROM local_locators locator WHERE locator.media_uri=lyrics_cache.media_uri AND locator.origin='download') AND media_uri NOT IN (SELECT value FROM json_each(?1))")
             .bind(serde_json::to_string(active_media_uris)?)
-            .execute(connection).await?;
+            .execute(&mut *writer).await?;
         Ok(())
     }
 
@@ -84,11 +83,7 @@ impl Database {
         replace_stale_source: bool,
     ) -> LibraryResult<Vec<LyricsCacheRow>> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         let mut imported = Vec::new();
         for row in rows {
             if row.lyrics.len() > LYRICS_PAYLOAD_BYTES {
@@ -157,10 +152,9 @@ impl Database {
             ));
         }
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         sqlx::query("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(media_uri,authority,role,language,script) DO UPDATE SET cache_input_digest=excluded.cache_input_digest,lyrics=excluded.lyrics,updated_at=excluded.updated_at")
             .bind(media_uri).bind(authority).bind(role).bind(language).bind(script)
-            .bind(cache_input_digest.as_slice()).bind(lyrics).bind(updated_at).execute(connection).await?;
+            .bind(cache_input_digest.as_slice()).bind(lyrics).bind(updated_at).execute(&mut *writer).await?;
         Ok(())
     }
 
@@ -174,10 +168,9 @@ impl Database {
         script: &str,
     ) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1 AND authority=?2 AND role=?3 AND language=?4 AND script=?5")
             .bind(media_uri).bind(authority).bind(role).bind(language).bind(script)
-            .execute(connection).await?.rows_affected()==1)
+            .execute(&mut *writer).await?.rows_affected()==1)
     }
 
     pub async fn remove_track_lyrics_by_authority(
@@ -186,12 +179,11 @@ impl Database {
         authority: &str,
     ) -> LibraryResult<u64> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         Ok(
             sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1 AND authority=?2")
                 .bind(media_uri)
                 .bind(authority)
-                .execute(connection)
+                .execute(&mut *writer)
                 .await?
                 .rows_affected(),
         )

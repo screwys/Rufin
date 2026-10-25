@@ -1,6 +1,6 @@
 //! Usage and removal of disposable data stored with the library.
 
-use crate::{Database, LibraryError, LibraryResult};
+use crate::{Database, LibraryResult};
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 #[derive(Clone, Copy, Debug, Default)]
@@ -60,7 +60,7 @@ impl Database {
     async fn clear_cached_table(&self, table: &str) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
         sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table}")))
-            .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+            .execute(&mut *writer)
             .await?;
         Ok(())
     }

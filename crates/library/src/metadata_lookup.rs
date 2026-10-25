@@ -1,4 +1,4 @@
-use crate::{Database, LibraryError, LibraryResult};
+use crate::{Database, LibraryResult};
 use sqlx::Connection;
 
 impl Database {
@@ -24,11 +24,7 @@ impl Database {
         now: i64,
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         sqlx::query("DELETE FROM metadata_lookup_cache WHERE expires_at<=?1")
             .bind(now)
             .execute(&mut *transaction)
@@ -50,7 +46,7 @@ impl Database {
         )
         .bind(uri)
         .bind(key)
-        .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+        .execute(&mut *writer)
         .await?;
         Ok(())
     }

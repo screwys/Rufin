@@ -395,7 +395,7 @@ impl Database {
         let mut writer = self.writer().await?;
         sqlx::query("INSERT INTO queue_transfer_pages(transfer,page_offset,payload) VALUES(?1,?2,?3) ON CONFLICT(transfer,page_offset) DO UPDATE SET payload=excluded.payload")
             .bind(transfer).bind(page.offset as i64).bind(payload)
-            .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?).await?;
+            .execute(&mut *writer).await?;
         Ok(())
     }
 
@@ -403,7 +403,7 @@ impl Database {
         let mut writer = self.writer().await?;
         sqlx::query("DELETE FROM queue_transfer_pages WHERE transfer=?1")
             .bind(transfer)
-            .execute(writer.as_mut().ok_or(LibraryError::WriterUnavailable)?)
+            .execute(&mut *writer)
             .await?;
         Ok(())
     }
@@ -416,11 +416,7 @@ impl Database {
         current: usize,
     ) -> LibraryResult<QueueRestore> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         let mut entries = vec![None; total];
         let mut order = Vec::new();
         let mut rows = Vec::new();
@@ -498,11 +494,7 @@ impl Database {
         queue: &QueueRestore,
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         save_queue_on(&mut transaction, queue).await?;
         sqlx::query("DELETE FROM queue_transfer_pages WHERE transfer=?1")
             .bind(transfer)
@@ -540,11 +532,7 @@ impl Database {
         uris: &[String],
     ) -> LibraryResult<Vec<crate::TrackKey>> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         let mut keys = Vec::with_capacity(uris.len());
         for uri in uris {
             keys.push(
@@ -600,11 +588,7 @@ impl Database {
             }
             QueueLoad::Items(_) | QueueLoad::Uris(_, _) => {
                 let mut writer = self.writer().await?;
-                let mut transaction = writer
-                    .as_mut()
-                    .ok_or(LibraryError::WriterUnavailable)?
-                    .begin()
-                    .await?;
+                let mut transaction = writer.begin().await?;
                 match input {
                     QueueLoad::Items(items) => {
                         for (item, provenance) in items {
@@ -682,11 +666,7 @@ impl Database {
 
     pub async fn save_queue(&self, state: &QueueRestore) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         save_queue_on(&mut transaction, state).await?;
         transaction.commit().await?;
         Ok(())
@@ -694,11 +674,7 @@ impl Database {
 
     pub async fn apply_queue_update(&self, update: &QueueUpdate) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         apply_queue_update_on(&mut transaction, update).await?;
         transaction.commit().await?;
         Ok(())
@@ -735,11 +711,7 @@ impl Database {
 
     pub async fn import_queue_jsonl(&self, input: impl std::io::BufRead) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let mut transaction = writer
-            .as_mut()
-            .ok_or(LibraryError::WriterUnavailable)?
-            .begin()
-            .await?;
+        let mut transaction = writer.begin().await?;
         import_queue_jsonl_on(&mut transaction, input).await?;
         transaction.commit().await?;
         Ok(())

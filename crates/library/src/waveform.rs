@@ -13,9 +13,8 @@ pub struct WaveformCacheRow {
 impl Database {
     pub async fn clear_source_waveform_cache(&self, source: &crate::SourceId) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         sqlx::query("DELETE FROM waveform_cache WHERE media_uri IN (SELECT track.media_uri FROM tracks track JOIN sources source USING(source_key) WHERE source.object_id=?1)")
-            .bind(source.as_str()).execute(connection).await?;
+            .bind(source.as_str()).execute(&mut *writer).await?;
         Ok(())
     }
 
@@ -42,8 +41,7 @@ impl Database {
     }
     pub async fn write_waveform_cache(&self, row: &WaveformCacheRow) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let changed = write_on(&mut transaction, row).await?;
         transaction.commit().await?;
         drop(writer);

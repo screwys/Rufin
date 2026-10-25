@@ -1,4 +1,4 @@
-use crate::{Database, LibraryError, LibraryResult};
+use crate::{Database, LibraryResult};
 use sqlx::Connection;
 
 impl Database {
@@ -23,9 +23,8 @@ impl Database {
         duration: u64,
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         sqlx::query("INSERT INTO fingerprint_cache(media_uri,analysis_key,version,fingerprint,duration_seconds) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(media_uri) DO UPDATE SET analysis_key=excluded.analysis_key,version=excluded.version,fingerprint=excluded.fingerprint,duration_seconds=excluded.duration_seconds,lookup_key=''")
-            .bind(uri).bind(key.as_slice()).bind(version).bind(fingerprint).bind(duration as i64).execute(connection).await?;
+            .bind(uri).bind(key.as_slice()).bind(version).bind(fingerprint).bind(duration as i64).execute(&mut *writer).await?;
         drop(writer);
         self.cache_written();
         Ok(())
@@ -38,14 +37,13 @@ impl Database {
         current: &[u8; 32],
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         sqlx::query(
             "UPDATE fingerprint_cache SET analysis_key=?3 WHERE media_uri=?1 AND analysis_key=?2",
         )
         .bind(uri)
         .bind(previous.as_slice())
         .bind(current.as_slice())
-        .execute(connection)
+        .execute(&mut *writer)
         .await?;
         Ok(())
     }
@@ -56,8 +54,7 @@ impl Database {
         previous: &[u8; 32],
     ) -> LibraryResult<()> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         sqlx::query("UPDATE waveform_cache SET analysis_key=(SELECT loudness_analysis_key FROM tracks WHERE media_uri=?1) WHERE media_uri=?1 AND analysis_key=?2")
             .bind(uri).bind(previous.as_slice()).execute(&mut *transaction).await?;
         sqlx::query("UPDATE loudness_measurements AS measurement SET analysis_key=track.loudness_analysis_key FROM tracks track WHERE track.media_uri=?1 AND measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key AND measurement.analysis_key=?2")

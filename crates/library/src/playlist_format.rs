@@ -336,8 +336,7 @@ impl Database {
         recognize: impl Fn(&str) -> Option<String>,
     ) -> LibraryResult<PlaylistImportReport> {
         let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
+        let mut transaction = writer.begin().await?;
         let report = import_playlist_on(&mut transaction, parsed, file, target, recognize).await?;
         transaction.commit().await?;
         Ok(report)
@@ -1286,19 +1285,18 @@ mod tests {
         );
         {
             let mut writer = database.writer().await.unwrap();
-            let connection = writer.as_mut().unwrap();
             sqlx::query("UPDATE tracks SET source_path=?1 WHERE media_uri=?2")
                 .bind(&source_path)
                 .bind(&provider)
-                .execute(&mut *connection)
+                .execute(&mut *writer)
                 .await
                 .unwrap();
             sqlx::query("INSERT INTO local_files(source_key,path,root,root_id,relative_path,kind,mtime_ns,state) SELECT source_key,source_path,'root','root-id','Artist/one.flac','media',0,'accepted' FROM tracks WHERE media_uri=?1")
-                .bind(&provider).execute(&mut *connection).await.unwrap();
+                .bind(&provider).execute(&mut *writer).await.unwrap();
             sqlx::query("INSERT INTO local_file_access_roots(source_key,root,root_id) SELECT source_key,root,root_id FROM local_files WHERE path=?1")
-                .bind(&source_path).execute(&mut *connection).await.unwrap();
+                .bind(&source_path).execute(&mut *writer).await.unwrap();
             sqlx::query("INSERT INTO local_file_observations(local_file_key,path,root,relative_path,mtime_ns,native_id,state) SELECT local_file_key,path,root,relative_path,mtime_ns,'native-track',state FROM local_files WHERE path=?1")
-                .bind(&source_path).execute(&mut *connection).await.unwrap();
+                .bind(&source_path).execute(&mut *writer).await.unwrap();
         }
         assert_eq!(
             database
@@ -1628,7 +1626,7 @@ mod tests {
         {
             let mut writer = database.writer().await.unwrap();
             sqlx::raw_sql("INSERT INTO sources(source_key,object_id) VALUES(1,'source');\n                WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<10000)\n                INSERT INTO tracks(source_key,object_id,media_uri,indexed,metadata) SELECT 1,CAST(i AS TEXT),'https://example.test/'||i,1,jsonb(json_object('title',COALESCE('Song '||i,''),'sort_text',COALESCE('song '||i,''),'duration_millis',COALESCE(12000,0))) FROM n;")
-                .execute(writer.as_mut().unwrap()).await.unwrap();
+                .execute(&mut *writer).await.unwrap();
         }
         let key = database
             .create_smart_playlist("All", &crate::SmartPlaylistDefinition::default(), None)
@@ -1652,9 +1650,8 @@ mod tests {
             .unwrap();
         {
             let mut writer = database.writer().await.unwrap();
-            let connection = writer.as_mut().unwrap();
             sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (5,'source','Source','source',zeroblob(32));\n              INSERT INTO playlists(playlist_key,source_key,owner,object_id,name,normalized_name,sort_text,position) VALUES(8,5,'source','native','Native','native','native',0);\n              INSERT INTO tracks(track_key,media_uri,metadata) VALUES (1,'https://example.test/song',jsonb(json_object('title',COALESCE('Song',''))));\n              INSERT INTO playlist_entries(playlist_key,object_id,track_key,position) VALUES(8,'one',1,0),(8,'two',1,1);")
-              .execute(connection).await.unwrap();
+              .execute(&mut *writer).await.unwrap();
         }
         let file = directory.path().join("native.m3u8");
         let mut output = Vec::new();

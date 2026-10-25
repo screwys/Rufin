@@ -254,11 +254,8 @@ impl Database {
 impl super::Catalog<'_> {
     pub async fn clear_partial_file_image_observations(&mut self) -> LibraryResult<()> {
         let mut writer = self.database.writer().await?;
-        let connection = writer
-            .as_mut()
-            .ok_or(crate::LibraryError::WriterUnavailable)?;
         sqlx::query("UPDATE local_files SET artist_pictures=NULL WHERE local_file_key IN(SELECT local_file_key FROM observed_local_files WHERE source_key=?1 AND kind='media' AND picture_index IS NULL AND artist_pictures IS NOT NULL AND path NOT LIKE 'rufin-document://%' AND path NOT LIKE 'content://%')")
-            .bind(self.source).execute(connection).await?;
+            .bind(self.source).execute(&mut *writer).await?;
         Ok(())
     }
 
@@ -272,10 +269,7 @@ impl super::Catalog<'_> {
             return Ok(());
         }
         let mut writer = self.database.writer().await?;
-        let connection = writer
-            .as_mut()
-            .ok_or(crate::LibraryError::WriterUnavailable)?;
-        sqlx::query("UPDATE local_files SET picture_index=json_extract(item.value,'$[1]'),artist_pictures=json_extract(item.value,'$[2]') FROM json_each(?2) item JOIN observed_local_files observed ON observed.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND observed.path=json_extract(item.value,'$[0]') WHERE local_files.local_file_key=observed.local_file_key AND(local_files.picture_index,local_files.artist_pictures) IS NOT(json_extract(item.value,'$[1]'),json_extract(item.value,'$[2]'))").bind(source_id).bind(serde_json::to_string(rows)?).execute(connection).await?;
+        sqlx::query("UPDATE local_files SET picture_index=json_extract(item.value,'$[1]'),artist_pictures=json_extract(item.value,'$[2]') FROM json_each(?2) item JOIN observed_local_files observed ON observed.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND observed.path=json_extract(item.value,'$[0]') WHERE local_files.local_file_key=observed.local_file_key AND(local_files.picture_index,local_files.artist_pictures) IS NOT(json_extract(item.value,'$[1]'),json_extract(item.value,'$[2]'))").bind(source_id).bind(serde_json::to_string(rows)?).execute(&mut *writer).await?;
         Ok(())
     }
     pub async fn observe_cached_file_tree(&mut self, file: &LocalFileWrite) -> LibraryResult<bool> {
@@ -283,9 +277,6 @@ impl super::Catalog<'_> {
         let stamp = self.observed;
 
         let mut writer = self.database.writer().await?;
-        let connection = writer
-            .as_mut()
-            .ok_or(crate::LibraryError::WriterUnavailable)?;
         let parsed = serde_json::to_string(&(
             file.size_bytes,
             file.mtime_ns,
@@ -293,10 +284,10 @@ impl super::Catalog<'_> {
             file.parse_version,
         ))?;
         let reusable:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observed_local_files file JOIN local_file_access_roots access USING(source_key,root,root_id) JOIN sources source USING(source_key) WHERE source.object_id=?1 AND file.path=?2 AND file.state='accepted' AND json_remove(file.parsed_stamp,'$[4]')=?3)")
-            .bind(source_id).bind(&file.path).bind(parsed).fetch_one(&mut *connection).await?;
+            .bind(source_id).bind(&file.path).bind(parsed).fetch_one(&mut *writer).await?;
         if reusable {
             sqlx::query("WITH RECURSIVE accepted(local_file_key,path,listed) AS(SELECT local_file_key,path,coalesce(json_extract(parsed_stamp,'$[4]'),observed_stamp) FROM observed_local_files WHERE source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND path=?2 AND EXISTS(SELECT 1 FROM local_file_access_roots access WHERE access.source_key=observed_local_files.source_key AND access.root=observed_local_files.root) UNION ALL SELECT child.local_file_key,child.path,coalesce(json_extract(child.parsed_stamp,'$[4]'),child.observed_stamp) FROM accepted parent JOIN observed_local_files child ON child.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND child.parent_path=rtrim(parent.path,'/'||char(92)) AND child.observed_stamp>=parent.listed AND child.path<>parent.path AND EXISTS(SELECT 1 FROM local_file_access_roots access WHERE access.source_key=child.source_key AND access.root=child.root)) UPDATE local_file_observations SET parsed_stamp=CASE WHEN local_file_key IN(SELECT local_file_key FROM local_files WHERE kind='directory') AND parsed_stamp IS NOT NULL THEN json_set(parsed_stamp,'$[4]',coalesce(?3,observed_stamp)) ELSE parsed_stamp END,observed_stamp=coalesce(?3,observed_stamp) WHERE local_file_key IN(SELECT local_file_key FROM accepted)")
-                .bind(source_id).bind(&file.path).bind(stamp).execute(connection).await?;
+                .bind(source_id).bind(&file.path).bind(stamp).execute(&mut *writer).await?;
         }
         Ok(reusable)
     }
@@ -305,11 +296,8 @@ impl super::Catalog<'_> {
         let stamp = self.observed;
 
         let mut writer = self.database.writer().await?;
-        let connection = writer
-            .as_mut()
-            .ok_or(crate::LibraryError::WriterUnavailable)?;
         sqlx::query("UPDATE local_file_observations SET observed_stamp=coalesce(?3,observed_stamp) WHERE local_file_key IN(SELECT local_file_key FROM local_files WHERE source_key=(SELECT source_key FROM sources WHERE object_id=?1)) AND parent_path=?2 AND observed_stamp>=(SELECT coalesce(json_extract(parsed_stamp,'$[4]'),observed_stamp) FROM observed_local_files parent WHERE parent.source_key=(SELECT source_key FROM sources WHERE object_id=?1) AND rtrim(parent.path,'/'||char(92))=?2 AND parent.kind='directory' LIMIT 1)")
-            .bind(source_id).bind(super::files::directory_locator(path)).bind(stamp).execute(connection).await?;
+            .bind(source_id).bind(super::files::directory_locator(path)).bind(stamp).execute(&mut *writer).await?;
         Ok(())
     }
 }

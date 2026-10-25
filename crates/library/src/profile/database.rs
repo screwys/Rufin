@@ -78,8 +78,7 @@ impl ProfileStore {
             transaction.commit().await?;
             let mut connection = database.writer().await?;
             let (_export, _reader) = database.acquire_export().await?;
-            Database::connect_adopt_database_on(connection.as_mut().unwrap(), &mut incoming)
-                .await?;
+            Database::connect_adopt_database_on(&mut connection, &mut incoming).await?;
             Result::<()>::Ok(())
         }
         .await;
