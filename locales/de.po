@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-10-23 22:22+0000\n"
+"PO-Revision-Date: 2026-10-25 20:06+0000\n"
 "Last-Translator: Sebastian <sevachka@users.noreply.hosted.weblate.org>\n"
 "Language-Team: German <https://hosted.weblate.org/projects/rufin/app/de/>\n"
 "Language: de\n"
@@ -69,6 +69,8 @@ msgid ""
 "Do you want to cache all lyrics automatically? You can also enable this from "
 "Preferences -> Storage"
 msgstr ""
+"Möchtest du alle Liedtexte automatisch zwischenspeichern? Du kannst dies "
+"auch unter Einstellungen -> Speicher aktivieren"
 
 msgid ""
 "Downloads from this source will be removed, and automatic rules will be "
@@ -351,10 +353,8 @@ msgstr "Absolut"
 msgid "Accent color"
 msgstr "Akzentfarbe"
 
-#, fuzzy
-#| msgid "Access token"
 msgid "Access denied"
-msgstr "Zugriffstoken"
+msgstr "Zugriff verweigert"
 
 msgid "Access token"
 msgstr "Zugriffstoken"
@@ -599,10 +599,8 @@ msgstr "Sanftes Ein-/Ausblenden bei Play/Pause"
 msgid "Audio fingerprints"
 msgstr "Audio-Fingerabdrücke"
 
-#, fuzzy
-#| msgid "Audio output"
 msgid "Audio output failed"
-msgstr "Audioausgabe"
+msgstr "Audioausgabe fehlgeschlagen"
 
 msgid "Audio output"
 msgstr "Audioausgabe"
@@ -715,10 +713,8 @@ msgstr "Bittiefe"
 msgid "Bitrate"
 msgstr "Bitrate"
 
-#, fuzzy
-#| msgid "Playing stream"
 msgid "Bitstream"
-msgstr "Stream wird wiedergegeben"
+msgstr "Bitstream"
 
 msgid "Blue"
 msgstr "Blau"
@@ -729,15 +725,11 @@ msgstr "Helligkeit (%)"
 msgid "Browse"
 msgstr "Durchsuchen"
 
-#, fuzzy
-#| msgid "Lyrics"
 msgid "By Lyrics"
-msgstr "Liedtexte"
+msgstr "Von Liedtexten"
 
-#, fuzzy
-#| msgid "Title"
 msgid "By Title"
-msgstr "Titel"
+msgstr "Nach Titel"
 
 msgid "C"
 msgstr "C"
@@ -745,10 +737,8 @@ msgstr "C"
 msgid "CUE file"
 msgstr "CUE-Datei"
 
-#, fuzzy
-#| msgid "Cached"
 msgid "Cache"
-msgstr "Zwischengespeichert"
+msgstr "Cache"
 
 msgid "Cached data"
 msgstr "Zwischengespeicherte Daten"
@@ -910,10 +900,8 @@ msgstr "Liedtext-Cache leeren"
 msgid "Clear queue"
 msgstr "Warteschlange leeren"
 
-#, fuzzy
-#| msgid "Clear lyrics cache"
 msgid "Clear this cache?"
-msgstr "Liedtext-Cache leeren"
+msgstr "Diesen Cache leeren?"
 
 msgid "Clear title"
 msgstr "Titel entfernen"
@@ -1149,18 +1137,14 @@ msgstr "Rufin konnte nicht auf {version} aktualisiert werden"
 msgid "Could not update favorites"
 msgstr "Favoriten konnten nicht aktualisiert werden"
 
-#, fuzzy
-#| msgid "Couldn't connect to {service}"
 msgid "Couldn't connect to the server"
-msgstr "Verbindung mit {service} konnte nicht hergestellt werden"
+msgstr "Verbindung zum Server konnte nicht hergestellt werden"
 
 msgid "Couldn't connect to {service}"
 msgstr "Verbindung mit {service} konnte nicht hergestellt werden"
 
-#, fuzzy
-#| msgid "Could not play this track"
 msgid "Couldn't decode this track"
-msgstr "Dieser Titel konnte nicht abgespielt werden"
+msgstr "Dieser Titel konnte nicht dekodiert werden"
 
 msgid "Couldn't load this folder"
 msgstr "Dieser Ordner konnte nicht geladen werden"
@@ -1394,18 +1378,14 @@ msgstr "Spenden"
 msgid "Done"
 msgstr "Fertig"
 
-#, fuzzy
-#| msgid "Open automatically"
 msgid "Download Automatically"
-msgstr "Automatisch öffnen"
+msgstr "Automatisch herunterladen"
 
 msgid "Download Folder"
 msgstr "Download-Ordner"
 
-#, fuzzy
-#| msgid "Download quality"
 msgid "Download Lazily"
-msgstr "Downloadqualität"
+msgstr "Nur bei Bedarf herunterladen"
 
 msgid "Download Queue"
 msgstr "Download-Warteschlange"
@@ -1527,10 +1507,8 @@ msgstr "Automatische Sicherungen aktivieren"
 msgid "Enable background image"
 msgstr "Hintergrundbild aktivieren"
 
-#, fuzzy
-#| msgid "Fetching lyrics"
 msgid "Enable caching lyrics"
-msgstr "Liedtexte werden abgerufen"
+msgstr "Liedtexte zwischenspeichern aktivieren"
 
 msgid "Enable partial star ratings"
 msgstr "Teilbewertungen mit Sternen aktivieren"
@@ -1788,7 +1766,7 @@ msgid "Forget \"{name}\"?"
 msgstr "„{name}“ vergessen?"
 
 msgid "Format not supported"
-msgstr ""
+msgstr "Format nicht unterstützt"
 
 msgid "Format"
 msgstr "Format"
@@ -3907,10 +3885,8 @@ msgstr "Überspringungszähler"
 msgid "Skip same-album crossfade"
 msgstr "Überblendung bei gleichem Album überspringen"
 
-#, fuzzy
-#| msgid "Only unplayed tracks"
 msgid "Skip unplayable tracks"
-msgstr "Nur ungespielte Titel"
+msgstr "Nicht abspielbare Titel überspringen"
 
 msgid "Slate"
 msgstr "Schiefergrau"
@@ -4186,10 +4162,8 @@ msgstr "Titel-Peak"
 msgid "Track radio"
 msgstr "Titel-Radio"
 
-#, fuzzy
-#| msgid "Search unavailable"
 msgid "Track unavailable"
-msgstr "Suche nicht verfügbar"
+msgstr "Titel nicht verfügbar"
 
 msgid "Track"
 msgstr "Titel"
