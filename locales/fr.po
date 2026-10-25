@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-10-19 15:10+0000\n"
+"PO-Revision-Date: 2026-10-25 20:06+0000\n"
 "Last-Translator: Arnaud Constantin <ahc@users.noreply.hosted.weblate.org>\n"
 "Language-Team: French <https://hosted.weblate.org/projects/rufin/app/fr/>\n"
 "Language: fr\n"
@@ -69,17 +69,15 @@ msgid ""
 "Do you want to cache all lyrics automatically? You can also enable this from "
 "Preferences -> Storage"
 msgstr ""
+"Voulez-vous mettre en cache toutes les paroles automatiquement ? Vous pouvez "
+"également activer cela à partir de Préférences -> Stockage"
 
-#, fuzzy
-#| msgid ""
-#| "Downloads from this server will be removed, and automatic rules will be "
-#| "turned off"
 msgid ""
 "Downloads from this source will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
-"Les téléchargements de ce serveur seront supprimés et les règles "
-"automatiques arrêtées"
+"Les téléchargements de cette source seront supprimés, et les règles "
+"automatiques seront désactivées"
 
 msgid ""
 "If Discord is not installed as a flatpak, you need to give socket access to "
@@ -165,11 +163,16 @@ msgid ""
 "Remove all Rufin data and settings except saved connections and credentials? "
 "Rufin will restart after clearing the data."
 msgstr ""
+"Supprimer toutes les données et paramètres de Rufin à l'exception des "
+"connexions et les identifiants enregistrés ? Rufin redémarrera après avoir "
+"effacé les données."
 
 msgid ""
 "Remove all Rufin data, settings and saved logins? Rufin will restart after "
 "clearing the data."
 msgstr ""
+"Supprimer toutes les données, les paramètres et les identifiants enregistrés "
+"de Rufin ? Rufin redémarrera après la suppression des données."
 
 msgid ""
 "Replace the selected contents and remove these configured sources?\n"
@@ -291,7 +294,7 @@ msgid "1 hour"
 msgstr "1 heure"
 
 msgid "10 bands"
-msgstr ""
+msgstr "10 bandes"
 
 msgid "12 hours"
 msgstr "12 heures"
@@ -300,7 +303,7 @@ msgid "128 kbps"
 msgstr "128 kbps"
 
 msgid "18 bands"
-msgstr ""
+msgstr "18 bandes"
 
 msgid "192 kbps"
 msgstr "192 kbps"
@@ -312,7 +315,7 @@ msgid "256 kbps"
 msgstr "256 kbps"
 
 msgid "31 bands"
-msgstr ""
+msgstr "31 bandes"
 
 msgid "320 kbps"
 msgstr "320 kbps"
@@ -327,7 +330,7 @@ msgid "A new update is available, restart to apply"
 msgstr "Une nouvelle mise à jour est disponible, redémarrer pour l'appliquer"
 
 msgid "A"
-msgstr ""
+msgstr "A"
 
 msgid "API key (Subsonic)"
 msgstr "Clé API (Subsonic)"
@@ -347,10 +350,8 @@ msgstr "Absolu"
 msgid "Accent color"
 msgstr "Couleur de contraste"
 
-#, fuzzy
-#| msgid "Access token"
 msgid "Access denied"
-msgstr "Jeton d'accès"
+msgstr "Accès refusé"
 
 msgid "Access token"
 msgstr "Jeton d'accès"
@@ -382,16 +383,14 @@ msgstr "Ajouter une source de musique pour commencer l'écoute."
 msgid "Add a new source"
 msgstr "Ajouter une nouvelle source"
 
-#, fuzzy
-#| msgid "Add a server to configure downloads."
 msgid "Add a source to configure downloads."
-msgstr "Ajouter un serveur pour configurer les téléchargements."
+msgstr "Ajouter une source pour configurer les téléchargements."
 
 msgid "Add a title"
 msgstr "Ajouter un morceau"
 
 msgid "Add band"
-msgstr ""
+msgstr "Ajouter une bande"
 
 msgid "Add current"
 msgstr "Ajouter en court"
@@ -414,10 +413,8 @@ msgstr "Ajouter aux Pins"
 msgid "Add to Playlist"
 msgstr "Ajouter à une playlist"
 
-#, fuzzy
-#| msgid "Add folder"
 msgid "Add to folder"
-msgstr "Ajouter un dossier"
+msgstr "Ajouter au dossier"
 
 msgid "Add to library"
 msgstr "Ajouter à la bibliothèque"
@@ -443,15 +440,11 @@ msgstr "Artiste de l'album"
 msgid "Album artists"
 msgstr "Artistes de l'album"
 
-#, fuzzy
-#| msgid "Album title"
 msgid "Album details"
-msgstr "Titre de l'album"
+msgstr "Détails de l'album"
 
-#, fuzzy
-#| msgid "Album radio"
 msgid "Album gain"
-msgstr "Radio de l’album"
+msgstr "Gain de l’album"
 
 #, fuzzy
 #| msgid "Album tracks"
@@ -542,10 +535,8 @@ msgstr "Appliquer le modèle"
 msgid "Apply"
 msgstr "Appliquer"
 
-#, fuzzy
-#| msgid "Join profile"
 msgid "Applying profile"
-msgstr "Rejoindre le profil"
+msgstr "Appliquer le profil"
 
 msgid "Approve sign-in in your browser"
 msgstr "Approuver la connexion dans votre navigateur"
@@ -559,10 +550,8 @@ msgstr "Avril {year}"
 msgid "Artist albums"
 msgstr "albums de l’artiste"
 
-#, fuzzy
-#| msgid "Artist albums"
 msgid "Artist details"
-msgstr "albums de l’artiste"
+msgstr "Détails sur l’artiste"
 
 msgid "Artist name"
 msgstr "Nom de l'artiste"
@@ -585,10 +574,8 @@ msgstr "Artiste"
 msgid "Artists"
 msgstr "Artistes"
 
-#, fuzzy
-#| msgid "Artwork selected"
 msgid "Artwork cache cleared"
-msgstr "Illustration sélectionnée"
+msgstr "Cache des illustrations effacé"
 
 msgid "Artwork editing is no longer available"
 msgstr "L'édition des illustrations n'est plus disponible"
@@ -603,18 +590,16 @@ msgid "Artwork"
 msgstr "Illustration"
 
 msgid "Audio effects"
-msgstr ""
+msgstr "Effets audio"
 
 msgid "Audio fade on play/pause"
 msgstr "Fondu de l'audio lors de lecture/pause"
 
 msgid "Audio fingerprints"
-msgstr ""
+msgstr "Empreintes audio"
 
-#, fuzzy
-#| msgid "Audio output"
 msgid "Audio output failed"
-msgstr "Sortie audio"
+msgstr "La sortie audio a échoué"
 
 msgid "Audio output"
 msgstr "Sortie audio"
@@ -640,13 +625,11 @@ msgstr "Seuil de remplissage Auto DJ"
 msgid "Auto DJ"
 msgstr "Auto DJ"
 
-#, fuzzy
-#| msgid "Auto DJ"
 msgid "Auto"
-msgstr "Auto DJ"
+msgstr "Auto"
 
 msgid "AutoEQ / APO"
-msgstr ""
+msgstr "AutoEQ / APO"
 
 msgid "Automatic Backups"
 msgstr "Sauvegarde automatique"
@@ -656,10 +639,8 @@ msgstr "Sauvegarde automatique"
 msgid "Automatic headroom"
 msgstr "Automatique"
 
-#, fuzzy
-#| msgid "Automatic Backups"
 msgid "Automatic preamp"
-msgstr "Sauvegarde automatique"
+msgstr "Préamplificateur automatique"
 
 msgid "Automatic updates"
 msgstr "Mises à jour automatiques"
@@ -697,22 +678,20 @@ msgstr "Sauvegarde restaurée"
 msgid "Backups"
 msgstr "Sauvegarde"
 
-#, fuzzy
-#| msgid "Dance"
 msgid "Balance"
-msgstr "Dance"
+msgstr "Balance"
 
 msgid "Band layout"
-msgstr ""
+msgstr "Disposition des bandes"
 
 msgid "Band"
-msgstr ""
+msgstr "Bande"
 
 msgid "Bands"
-msgstr ""
+msgstr "Bandes"
 
 msgid "Bandwidth"
-msgstr ""
+msgstr "Largeur de bande"
 
 #, fuzzy
 #| msgid "Play count"
@@ -722,10 +701,8 @@ msgstr "Nombre de lectures"
 msgid "Bar spacing (px)"
 msgstr "Espacement des barres (px)"
 
-#, fuzzy
-#| msgid "Full Bass"
 msgid "Bass"
-msgstr "Basses au maximum"
+msgstr "Basse"
 
 msgid "Bearer token (WebDAV)"
 msgstr "Bearer token (WebDAV)"
@@ -748,38 +725,28 @@ msgid "Blue"
 msgstr "Bleu"
 
 msgid "Brightness (%)"
-msgstr ""
+msgstr "Luminosité (%)"
 
 msgid "Browse"
 msgstr "Parcourir"
 
-#, fuzzy
-#| msgid "Lyrics"
 msgid "By Lyrics"
-msgstr "Paroles"
+msgstr "Par paroles"
 
-#, fuzzy
-#| msgid "Title"
 msgid "By Title"
-msgstr "Morceau"
+msgstr "Par titre"
 
 msgid "C"
-msgstr ""
+msgstr "C"
 
-#, fuzzy
-#| msgid "New file"
 msgid "CUE file"
-msgstr "Nouveau fichier"
+msgstr "Fichier CUE"
 
-#, fuzzy
-#| msgid "Cached"
 msgid "Cache"
-msgstr "Mise en cache"
+msgstr "Cache"
 
-#, fuzzy
-#| msgid "Cached"
 msgid "Cached data"
-msgstr "Mise en cache"
+msgstr "Données en cache"
 
 msgid "Cached"
 msgstr "Mise en cache"
@@ -791,7 +758,7 @@ msgid "Caching local library..."
 msgstr "Mise en cache de la bibliothèque locale..."
 
 msgid "Calculating fingerprint..."
-msgstr ""
+msgstr "Calcule de l'empreinte..."
 
 msgid "Cancel download and clear downloaded items"
 msgstr "Annuler les téléchargements et effacer les éléments téléchargés"
@@ -802,16 +769,11 @@ msgstr "Annuler le téléchargement"
 msgid "Cancel"
 msgstr "Annuler"
 
-#, fuzzy
-#| msgid "Path format"
 msgid "Cast format"
-msgstr "Format du chemin"
+msgstr "Format de diffusion"
 
-#, fuzzy
-#| msgid "Changes apply to {count} track"
-#| msgid_plural "Changes apply to {count} tracks"
 msgid "Casting changes apply to the next stream"
-msgstr "Les modifications s'appliquent à {count} morceau"
+msgstr "Les changements de distribution s'appliquent à la prochaine diffusion"
 
 msgid "Casting network"
 msgstr "Réseau de distribution"
@@ -819,10 +781,8 @@ msgstr "Réseau de distribution"
 msgid "Casting"
 msgstr "Distribution"
 
-#, fuzzy
-#| msgid "Segmented bars"
 msgid "Centered bars"
-msgstr "Barres segmentées"
+msgstr "Barres centrées"
 
 msgid "Certificate authority (PEM)"
 msgstr "Autorité de certification (PEM)"
@@ -856,10 +816,8 @@ msgstr "Canaux"
 msgid "Check for updates"
 msgstr "Rechercher les mises à jour"
 
-#, fuzzy
-#| msgid "Receiving profile"
 msgid "Checking profile"
-msgstr "Réception du profil"
+msgstr "Contrôle du profil"
 
 msgid "Choose Folder"
 msgstr "Choisissez un dossier"
@@ -902,15 +860,11 @@ msgstr "Spectre circulaire"
 msgid "Classical"
 msgstr "Classique"
 
-#, fuzzy
-#| msgid "Search lyrics"
 msgid "Clear EBU R128 cache"
-msgstr "Rechercher des paroles"
+msgstr "Effacer le cache EBU R128"
 
-#, fuzzy
-#| msgid "Downloading Japanese dictionary..."
 msgid "Clear Japanese dictionary"
-msgstr "Téléchargement du dictionnaire japonais..."
+msgstr "Effacer le dictionnaire japonais"
 
 msgid "Clear Mapping"
 msgstr "Effacer le mappage"
@@ -918,67 +872,47 @@ msgstr "Effacer le mappage"
 msgid "Clear album"
 msgstr "Effacer l’album"
 
-#, fuzzy
-#| msgid "Search lyrics"
 msgid "Clear all cache"
-msgstr "Rechercher des paroles"
+msgstr "Effacer tous les caches"
 
-#, fuzzy
-#| msgid "Search lyrics"
 msgid "Clear all cache?"
-msgstr "Rechercher des paroles"
+msgstr "Effacer tous les caches ?"
 
-#, fuzzy
-#| msgid "Clear album"
 msgid "Clear all data"
-msgstr "Effacer l’album"
+msgstr "Supprimer toutes les données"
 
-#, fuzzy
-#| msgid "Clear album"
 msgid "Clear all data?"
-msgstr "Effacer l’album"
+msgstr "Effacer toutes les données ?"
 
 msgid "Clear artist"
 msgstr "Effacer l'artiste"
 
-#, fuzzy
-#| msgid "Search artwork"
 msgid "Clear artwork cache"
-msgstr "Rechercher l’illustration"
+msgstr "Effacer le cache des illustrations"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Effacer les paroles récupérées pour ce morceau"
 
-#, fuzzy
-#| msgid "Search lyrics"
 msgid "Clear fingerprint cache"
-msgstr "Rechercher des paroles"
+msgstr "Effacer le cache des empreintes"
 
-#, fuzzy
-#| msgid "Search lyrics"
 msgid "Clear lookup cache"
-msgstr "Rechercher des paroles"
+msgstr "Effacer le cache de recherche"
 
-#, fuzzy
-#| msgid "Search lyrics"
 msgid "Clear lyrics cache"
-msgstr "Rechercher des paroles"
+msgstr "Effacer le cache des paroles"
 
 msgid "Clear queue"
 msgstr "Effacer la file d'attente"
 
-#, fuzzy
-#| msgid "Search lyrics"
 msgid "Clear this cache?"
-msgstr "Rechercher des paroles"
+msgstr "Effacer ce cache ?"
 
 msgid "Clear title"
 msgstr "Effacer le titre"
 
-#, fuzzy
-#| msgid "Search artwork"
 msgid "Clear waveform cache"
-msgstr "Rechercher l’illustration"
+msgstr "Effacer le cache des waveform"
 
 msgid "Clear"
 msgstr "Effacer"
@@ -1167,7 +1101,7 @@ msgid "Copy link"
 msgstr "Copier le lien"
 
 msgid "Copy of {name}"
-msgstr ""
+msgstr "Copie de {nom}"
 
 msgid "Copy"
 msgstr "Copier"
@@ -1301,6 +1235,8 @@ msgstr "Sombre"
 
 msgid "Database sizes show stored data, excluding database overhead."
 msgstr ""
+"La taille de la base de données indique les données stockées, à l'exclusion "
+"des frais généraux de la base de données."
 
 msgid "Date added"
 msgstr "Date d'ajout"
@@ -1358,18 +1294,16 @@ msgstr "Supprimer le fichier de playlist"
 msgid "Delete preset"
 msgstr "Coller le préréglage"
 
-#, fuzzy
-#| msgid "Delete Playlist"
 msgid "Delete {count} playlist?"
 msgid_plural "Delete {count} playlists?"
-msgstr[0] "Supprimer la playlist"
-msgstr[1] "Supprimer la playlist"
+msgstr[0] "Supprimer {count} playlist ?"
+msgstr[1] "Supprimer {count} playlists ?"
 
 msgid "Delete"
 msgstr "Supprimer"
 
 msgid "Delivery"
-msgstr ""
+msgstr "Livraison"
 
 msgid "Descending"
 msgstr "Descendant"
@@ -1457,7 +1391,9 @@ msgstr "Ne pas chiffrer"
 msgid "Do you want to apply metadata changes to {count} track?"
 msgid_plural "Do you want to apply metadata changes to {count} tracks?"
 msgstr[0] ""
+"Voulez-vous appliquer les modifications de métadonnées sur {count}piste ?"
 msgstr[1] ""
+"Voulez-vous appliquer les modifications de métadonnées sur {count}pistes ?"
 
 msgid "Do you want to use the existing configuration?"
 msgstr "Voulez-vous utiliser la configuration existante ?"
@@ -1469,7 +1405,7 @@ msgid "Donate"
 msgstr "Donner"
 
 msgid "Done"
-msgstr ""
+msgstr "Fait"
 
 #, fuzzy
 #| msgid "Open automatically"
@@ -1546,10 +1482,8 @@ msgstr "Durée"
 msgid "Dynamic background"
 msgstr "Fonds dynamique"
 
-#, fuzzy
-#| msgid "Enable EBU R128 Analysis?"
 msgid "EBU R128 analysis"
-msgstr "Activer l'analyse EBU R128 ?"
+msgstr "Analyse EBU R128"
 
 msgid "EBU R128 reference level"
 msgstr "Niveau de référence EBU R128"
@@ -1564,7 +1498,7 @@ msgid "EPs"
 msgstr "EPs"
 
 msgid "ERB"
-msgstr ""
+msgstr "ERB"
 
 msgid "Edit Lyrics"
 msgstr "Modifier les paroles"
@@ -1634,7 +1568,7 @@ msgid "Enabled"
 msgstr "Activé"
 
 msgid "Encoding peak"
-msgstr ""
+msgstr "Pic d'encodage"
 
 #, fuzzy
 #| msgid "Downloading"
@@ -1662,7 +1596,7 @@ msgid "Entire Library"
 msgstr "Bibliothèque entière"
 
 msgid "Equalizer is controlled by the receiver"
-msgstr ""
+msgstr "L'égaliseur est contrôlé par le récepteur"
 
 msgid "Equalizer"
 msgstr "Égaliseur"
@@ -1738,7 +1672,7 @@ msgid "FFT size"
 msgstr "Fichiers"
 
 msgid "FLAC"
-msgstr ""
+msgstr "FLAC"
 
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Fondu audio lorsque la lecture est interrompue ou reprise"
@@ -1773,33 +1707,23 @@ msgstr "Février {year}"
 msgid "Fetching Home"
 msgstr ""
 
-#, fuzzy
-#| msgid "Artist albums"
 msgid "Fetching albums"
-msgstr "albums de l’artiste"
+msgstr "Récupération des albums"
 
 msgid "Fetching artists"
-msgstr ""
+msgstr "Récupération des artistes"
 
-#, fuzzy
-#| msgid "Search artwork"
 msgid "Fetching artwork"
-msgstr "Rechercher l’illustration"
+msgstr "Récupération de l'illustration"
 
-#, fuzzy
-#| msgid "Search genres"
 msgid "Fetching genres"
-msgstr "Rechercher des genres"
+msgstr "Récupération des genres"
 
-#, fuzzy
-#| msgid "Search lyrics"
 msgid "Fetching lyrics"
-msgstr "Rechercher des paroles"
+msgstr "Recherche des paroles"
 
-#, fuzzy
-#| msgid "Search artwork"
 msgid "Fetching metadata..."
-msgstr "Rechercher l’illustration"
+msgstr "Récupération des métadonnées..."
 
 #, fuzzy
 #| msgid "Search playlists"
@@ -1807,7 +1731,7 @@ msgid "Fetching playlists"
 msgstr "Rechercher des playlists"
 
 msgid "Field"
-msgstr ""
+msgstr "Champ"
 
 msgid "File connection"
 msgstr "Fichier de connexion"
@@ -1840,7 +1764,7 @@ msgid "Filled spectrum"
 msgstr "Spectre rempli"
 
 msgid "Filter type"
-msgstr ""
+msgstr "Type de filtre"
 
 msgid "Find shares"
 msgstr "Rechercher des partages"
@@ -1852,10 +1776,10 @@ msgid "Finding lyrics..."
 msgstr "Trouver les paroles..."
 
 msgid "Finishing setup"
-msgstr ""
+msgstr "Finalisation de la configuration"
 
 msgid "Fit to height"
-msgstr ""
+msgstr "Adapter à la hauteur"
 
 msgid "Fixed position"
 msgstr "Position fixe"
@@ -1899,7 +1823,7 @@ msgid "Forget \"{name}\"?"
 msgstr "Oublier \"{name}\" ?"
 
 msgid "Format not supported"
-msgstr ""
+msgstr "Format non supporté"
 
 msgid "Format"
 msgstr "Format"
@@ -1917,13 +1841,13 @@ msgid "Frames per second"
 msgstr "Images par seconde"
 
 msgid "Frequency · Hz"
-msgstr ""
+msgstr "Fréquence · Hz"
 
 msgid "Frequency scale"
-msgstr ""
+msgstr "Échelle de fréquence"
 
 msgid "Frequency"
-msgstr ""
+msgstr "Fréquence"
 
 msgid "Friday"
 msgstr "Vendredi"
@@ -1952,10 +1876,10 @@ msgid "Furigana"
 msgstr "Furigana"
 
 msgid "Gain · dB"
-msgstr ""
+msgstr "Gain · dB"
 
 msgid "Gain"
-msgstr ""
+msgstr "Gain"
 
 msgid "Gapless mode"
 msgstr "Mode sans interruption"
@@ -2006,7 +1930,7 @@ msgid "Gradient start"
 msgstr "Début du dégradé"
 
 msgid "Graphic"
-msgstr ""
+msgstr "Graphic"
 
 msgid "Green"
 msgstr "Vert"
@@ -2027,10 +1951,10 @@ msgid "Guest / public access"
 msgstr "Invité / accès public"
 
 msgid "Halo"
-msgstr ""
+msgstr "Halo"
 
 msgid "Height (%)"
-msgstr ""
+msgstr "Hauteur (%)"
 
 msgid "Help"
 msgstr "Aide"
@@ -2069,7 +1993,7 @@ msgid "Hours"
 msgstr "Heures"
 
 msgid "Hz"
-msgstr ""
+msgstr "Hz"
 
 msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
 msgstr "Si la page ne se charge pas, Libre.fm bloque sûrement votre IP/VPN"
@@ -2119,7 +2043,7 @@ msgstr ""
 "des dossiers ajoutés."
 
 msgid "Inactive at this sample rate"
-msgstr ""
+msgstr "Inactif à cette fréquence d’échantillonnage"
 
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Inclure des diagnostics détaillés dans cette session"
@@ -2143,7 +2067,7 @@ msgid "Invite"
 msgstr "Inviter"
 
 msgid "Item ID"
-msgstr ""
+msgstr "ID de l’élément"
 
 #, fuzzy
 #| msgid "Source is no longer available"
@@ -2153,10 +2077,8 @@ msgstr "La source n'est plus disponible"
 msgid "January {year}"
 msgstr "Janvier {year}"
 
-#, fuzzy
-#| msgid "Downloading Japanese dictionary..."
 msgid "Japanese dictionary"
-msgstr "Téléchargement du dictionnaire japonais..."
+msgstr "Dictionnaire japonais"
 
 msgid "Jellyfin"
 msgstr "Jellyfin"
@@ -2390,13 +2312,13 @@ msgid "Lock metadata"
 msgstr "Verrouiller les métadonnées"
 
 msgid "Logarithmic"
-msgstr ""
+msgstr "Logarithmique"
 
 msgid "Logs are copied"
 msgstr "Les journaux sont copiés"
 
 msgid "Lookup"
-msgstr ""
+msgstr "Chercher"
 
 msgid "Loudness normalization"
 msgstr "Normalisation du volume sonore"
@@ -2443,7 +2365,7 @@ msgid "Matched"
 msgstr "Mise en cache"
 
 msgid "Maximum frequency (Hz)"
-msgstr ""
+msgstr "Fréquence maximale (Hz)"
 
 #, fuzzy
 #| msgid "Maximum year"
@@ -2493,7 +2415,7 @@ msgid "Minimize overview"
 msgstr "Réduire l’aperçu"
 
 msgid "Minimum frequency (Hz)"
-msgstr ""
+msgstr "Fréquence minimale (Hz)"
 
 #, fuzzy
 #| msgid "Minimum year"
@@ -2517,13 +2439,13 @@ msgid "Mirrored"
 msgstr "Barres en miroir"
 
 msgid "Mode"
-msgstr ""
+msgstr "Mode"
 
 msgid "Monday"
 msgstr "Lundi"
 
 msgid "Mono"
-msgstr ""
+msgstr "Mono"
 
 msgid "Month"
 msgstr "Mois"
@@ -2915,7 +2837,7 @@ msgid "One path per line"
 msgstr "Un chemin par ligne"
 
 msgid "Only fill missing information"
-msgstr ""
+msgstr "Ne renseignez que les informations manquantes"
 
 msgid "Only played tracks"
 msgstr "Uniquement les morceaux déjà lus"
@@ -3015,13 +2937,13 @@ msgid "Outline bars"
 msgstr "Barres de contour"
 
 msgid "Output gain"
-msgstr ""
+msgstr "Gain de sortie"
 
 msgid "Overview"
 msgstr "Aperçu"
 
 msgid "Parametric"
-msgstr ""
+msgstr "Paramétrique"
 
 msgid "Password or token"
 msgstr "Mot de passe ou jeton"
@@ -3051,7 +2973,7 @@ msgid "Peak hold (seconds)"
 msgstr "Maintien des pics (secondes)"
 
 msgid "Peak"
-msgstr ""
+msgstr "Pic"
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -3214,7 +3136,7 @@ msgid "Position"
 msgstr "Position"
 
 msgid "Preamp"
-msgstr ""
+msgstr "Préamplificateur"
 
 msgid "Prefer distinct track covers"
 msgstr "Privilégier des pochettes distinctes pour les morceaux"
@@ -3301,7 +3223,7 @@ msgid "Profile PIN"
 msgstr "PIN du profil"
 
 msgid "Profile download is incomplete. Retry to continue."
-msgstr ""
+msgstr "Le téléchargement du profil est incomplet. Réessayez pour continuer."
 
 msgid "Profile up to date"
 msgstr "Profil à jour"
@@ -3319,7 +3241,7 @@ msgid "Purple"
 msgstr "Violet"
 
 msgid "Q"
-msgstr ""
+msgstr "Q"
 
 msgid "Queue a track to begin"
 msgstr "Mettre une piste en file d’attente pour commencer"
@@ -3444,10 +3366,8 @@ msgstr "Version"
 msgid "Release notifications"
 msgstr "Notifications de nouvelles versions"
 
-#, fuzzy
-#| msgid "Release date"
 msgid "Release type"
-msgstr "Date de sortie"
+msgstr "Type de sortie"
 
 msgid "Release"
 msgstr "Version"
@@ -3533,6 +3453,8 @@ msgstr "Supprimer la recherche"
 
 msgid "Remove the library database? Settings and saved logins will be kept."
 msgstr ""
+"Supprimer la base de données de la bibliothèque ? Les paramètres et les "
+"identifiants enregistrés seront conservés."
 
 msgid "Remove unavailable tracks"
 msgstr "Supprimer les morceaux non disponibles"
@@ -3599,15 +3521,11 @@ msgstr "Requière le chiffrement SMB"
 msgid "Reset appearance"
 msgstr "Réinitialiser l'apparence"
 
-#, fuzzy
-#| msgid "Release date"
 msgid "Reset database"
-msgstr "Date de sortie"
+msgstr "Réinitialiser la base de données"
 
-#, fuzzy
-#| msgid "Release date"
 msgid "Reset database?"
-msgstr "Date de sortie"
+msgstr "Réinitialiser la base de données ?"
 
 msgid "Reset to defaults"
 msgstr "Rétablir les valeurs par défaut"
@@ -3616,7 +3534,7 @@ msgid "Reset"
 msgstr "Réinitialiser"
 
 msgid "Response"
-msgstr ""
+msgstr "Réponse"
 
 msgid "Restart now"
 msgstr "Redémarrer maintenant"
@@ -3647,7 +3565,7 @@ msgid "Retry"
 msgstr "Réessayer"
 
 msgid "Ribbon"
-msgstr ""
+msgstr "Ruban"
 
 msgid "Rise speed (%)"
 msgstr "Vitesse de montée (%)"
@@ -3796,7 +3714,7 @@ msgid "Search Again"
 msgstr "Rechercher à nouveau"
 
 msgid "Search Lyrics"
-msgstr "Rechercher des paroles"
+msgstr "Rechercher les Paroles"
 
 #, fuzzy
 #| msgid "MusicBrainz"
@@ -3827,7 +3745,7 @@ msgid "Search library"
 msgstr "Rechercher dans la bibliothèque"
 
 msgid "Search lyrics"
-msgstr "Rechercher des paroles"
+msgstr "Rechercher les paroles"
 
 msgid "Search playlists"
 msgstr "Rechercher des playlists"
@@ -3985,7 +3903,7 @@ msgid "Settings"
 msgstr "Paramètres"
 
 msgid "Shadow"
-msgstr ""
+msgstr "Ombre"
 
 msgid "Share"
 msgstr "Partager"
@@ -4231,7 +4149,7 @@ msgid "Status display"
 msgstr "Affichage de l’état"
 
 msgid "Stereo for lossy formats"
-msgstr ""
+msgstr "Stéréo pour les formats avec perte"
 
 msgid "Stereo"
 msgstr "Stéréo"
@@ -4265,7 +4183,7 @@ msgid "Style"
 msgstr "Style"
 
 msgid "Suggested"
-msgstr ""
+msgstr "Suggéré"
 
 msgid "Sunday"
 msgstr "Dimanche"
@@ -4379,7 +4297,7 @@ msgid "Toggle Fullscreen"
 msgstr "Afficher en plein écran"
 
 msgid "Tone and channels"
-msgstr ""
+msgstr "Ton et canaux"
 
 msgid "Tools"
 msgstr "Outils"
@@ -4580,7 +4498,7 @@ msgid "Use folder"
 msgstr "Utiliser le dossier"
 
 msgid "Use for this output"
-msgstr ""
+msgstr "Utiliser pour cette sortie"
 
 msgid "Use listening activity"
 msgstr "Utiliser l’activité d’écoute"
