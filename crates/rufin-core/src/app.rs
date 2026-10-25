@@ -340,6 +340,11 @@ where
             warn!(%error, source_id=%configured.configuration.source_id, "could not reconcile configured source mapping");
         }
     }
+    if let Err(error) =
+        crate::connect::reset_earlier_state(paths.connect_dir(), &library, &settings_handle).await
+    {
+        warn!(%error, "could not reset Rufin Connect state from an earlier version");
+    }
     let connect = crate::connect::ConnectOwner::new(
         paths.connect_dir(),
         Arc::clone(&library),

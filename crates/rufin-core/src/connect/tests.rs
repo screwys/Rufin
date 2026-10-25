@@ -1,7 +1,6 @@
 use super::*;
 use crate::{app, diagnostics::Diagnostics, paths::Paths, runtime::RuntimeInputs};
 use playback::{BackendCommand, BackendError, BackendEvent, PlaybackBackend};
-use sources::DownloadQuality;
 
 fn diagnostics() -> Arc<Diagnostics> {
     static DIAGNOSTICS: std::sync::OnceLock<(
@@ -17,60 +16,6 @@ fn diagnostics() -> Arc<Diagnostics> {
         })
         .0
         .clone()
-}
-
-#[test]
-fn saved_settings_enable_only_remembered_legacy_profiles() {
-    assert!(!ConnectSettings::default().enabled);
-    let default_name = if cfg!(target_os = "android") {
-        "Rufin Android"
-    } else {
-        "Rufin Desktop"
-    };
-    assert_eq!(ConnectSettings::default().name, default_name);
-    for (saved, expected) in [
-        (r#"{}"#, false),
-        (r#"{"name":"Work Laptop"}"#, false),
-        (r#"{"profile":null}"#, false),
-        (r#"{"profile":"shared-profile"}"#, true),
-        (r#"{"profile":"shared-profile","enabled":false}"#, false),
-        (r#"{"enabled":true}"#, true),
-    ] {
-        let (config, encoding) = ConnectSettings::from_device_file(saved.as_bytes()).unwrap();
-        assert_eq!(config.enabled, expected, "{saved}");
-        assert_eq!(encoding, None, "{saved}");
-        assert_eq!(
-            config.name,
-            if saved.contains("Work Laptop") {
-                "Work Laptop"
-            } else {
-                default_name
-            }
-        );
-    }
-    for saved in [
-        DownloadQuality::Original,
-        DownloadQuality::Transcoded(library::AudioEncoding::mp3()),
-    ] {
-        let bytes = serde_json::to_vec(&serde_json::json!({"encoding": saved})).unwrap();
-        assert_eq!(
-            ConnectSettings::from_device_file(&bytes).unwrap().1,
-            Some(saved)
-        );
-    }
-    assert_eq!(
-        ConnectSettings::from_device_file(br#"{"encoding":"mp3"}"#)
-            .unwrap()
-            .1,
-        Some(DownloadQuality::Transcoded(library::AudioEncoding::mp3()))
-    );
-    assert_eq!(
-        ConnectSettings::from_device_file(br#"{"name":"Rufin"}"#)
-            .unwrap()
-            .0
-            .name,
-        "Rufin"
-    );
 }
 
 struct IdleBackend;

@@ -642,10 +642,6 @@ async fn connect_saved_playlist_replay_keeps_duplicate_media_and_source_catalog(
     .await
     .unwrap();
     assert_eq!(references, fixture.track_uris[..2]);
-    assert!(records.iter().all(|record| !matches!(
-        record.kind.as_str(),
-        "album" | "artist" | "genre" | "mood" | "folder" | "native_playlist" | "native_entry"
-    )));
     let path = fixture._directory.path().join("received.sqlite");
     let received = Database::open(&path).await.unwrap();
     let receiver_profile =

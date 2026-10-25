@@ -1894,9 +1894,6 @@ msgstr ""
 msgid "Import"
 msgstr ""
 
-msgid "Importing profile"
-msgstr ""
-
 msgid "Imports files into the library, and watches added folders for changes."
 msgstr ""
 

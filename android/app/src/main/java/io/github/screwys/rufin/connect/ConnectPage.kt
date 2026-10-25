@@ -225,7 +225,7 @@ private fun ConnectProgress(state: ConnectStatus) {
     val fraction = if (progress != null && total != null) (progress.completed.toDouble() / total.toDouble()).coerceIn(0.0, 1.0) else null
     val integer = remember { NumberFormat.getIntegerInstance() }
     val decimal = remember { NumberFormat.getNumberInstance().apply { minimumFractionDigits = 1; maximumFractionDigits = 1 } }
-    val bytes = progress?.stage == CollectionStage.RECEIVING || progress?.stage == CollectionStage.VALIDATING
+    val bytes = progress?.stage == CollectionStage.RECEIVING
     val counter = progress?.let {
         val current = if (bytes) decimal.format(it.completed.toDouble() / 1_048_576) else integer.format(it.completed.toLong())
         if (total != null && fraction != null) {

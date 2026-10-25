@@ -30,7 +30,6 @@ metadata-lookup.workspace = true
 async-channel.workspace = true
 blake3.workspace = true
 futures-util.workspace = true
-flate2.workspace = true
 artwork.workspace = true
 presence.workspace = true
 pulldown-cmark = { workspace = true, features = ["html"] }

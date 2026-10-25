@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use super::{SettingsOwner, StoredSettings};
 use crate::paths::Paths;
+use secrets::SecretStore;
 
 #[cfg_attr(feature = "bindings", derive(uniffi::Enum))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,6 +45,23 @@ impl SettingsOwner {
             stored: Box::new(stored),
             connect: Box::new(connect),
             secrets,
+        })
+    }
+
+    /// Remove an earlier version's Connect keys, files and shared settings
+    /// stamps. The keys are named in device.json, so they go first.
+    pub(crate) fn reset_connect(&self, directory: &Path) -> Result<(), String> {
+        let connect = fs::read(directory.join("device.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        for key in crate::connect::secret_keys(&connect) {
+            self.secrets.delete_secret(&key).map_err(error)?;
+        }
+        clear_directory(directory, &[])?;
+        self.file.update(|stored| {
+            stored.shared_settings = Default::default();
+            Ok(())
         })
     }
 }

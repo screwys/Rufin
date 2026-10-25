@@ -102,9 +102,6 @@ async fn reopening_without_statistics_preserves_library_order() {
         super::support::catalog::copy_before_index(&mut raw, &fixture.path).await;
         sqlx::raw_sql("CREATE VIEW local_access_files AS SELECT * FROM local_locators;
             CREATE VIEW local_track_access AS SELECT track_key,source_key,source_path,cue_path,local_file_key FROM tracks;
-            DROP TABLE connect_profile;
-            CREATE TABLE connect_profile(singleton INTEGER PRIMARY KEY CHECK(singleton=1),profile TEXT,publisher TEXT,schema_version INTEGER NOT NULL DEFAULT 1) STRICT;
-            INSERT INTO connect_profile VALUES(1,NULL,NULL,1);
             ALTER TABLE local_access_metadata ADD COLUMN title TEXT NOT NULL DEFAULT '';
             ALTER TABLE local_access_metadata ADD COLUMN normalized_title TEXT NOT NULL DEFAULT '';
             ALTER TABLE local_access_metadata ADD COLUMN album TEXT NOT NULL DEFAULT '';
@@ -173,7 +170,6 @@ async fn reopening_without_statistics_preserves_library_order() {
         INSERT INTO local_locators(media_uri,origin,path,root,relative_path,access_uri) VALUES('https://media.example/legacy-access.flac','download','/downloads/legacy.flac','/downloads','legacy.flac','file:///downloads/legacy.flac');
         INSERT INTO local_access_metadata(access_uri,size_bytes,mtime_ns,device_id,inode,parser_version,loudness_analysis_key,title,album,artist,disc_number,track_number,duration_millis)
         VALUES('file:///downloads/legacy.flac',111,222,3,4,17,zeroblob(32),'Legacy title','Legacy album','Legacy artist',1,4,1234);
-        UPDATE connect_profile SET profile='shared-profile',publisher='saved-publisher',schema_version=1;
         PRAGMA user_version=49;")
         .execute(&mut raw)
         .await
@@ -201,24 +197,6 @@ async fn reopening_without_statistics_preserves_library_order() {
         .await
         .unwrap(),
         7
-    );
-    let profile: (String, String, i64, String, i64, bool, bool) = sqlx::query_as(
-        "SELECT profile,publisher,schema_version,actor,clock,receiving,enabled FROM connect_profile WHERE singleton=1",
-    )
-    .fetch_one(&mut raw)
-    .await
-    .unwrap();
-    assert_eq!(
-        profile,
-        (
-            "shared-profile".into(),
-            "saved-publisher".into(),
-            1,
-            "0".into(),
-            0,
-            false,
-            false,
-        )
     );
     raw.close().await.unwrap();
     migrated.close().await.unwrap();
@@ -637,7 +615,7 @@ async fn released_store_imports_old_playlist_artwork_and_known_roots() {
             .fetch_all(&mut raw)
             .await
             .unwrap(),
-        vec![(root_id, "Music".into())]
+        vec![(root_id, String::new())]
     );
     assert_eq!(sqlx::query_scalar::<_, String>("SELECT json_extract(artwork_binding,'$[0].image.item_id') FROM playlists WHERE object_id='list'").fetch_one(&mut raw).await.unwrap(), "list-art");
     assert_eq!(

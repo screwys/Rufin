@@ -1112,10 +1112,7 @@ pub(super) fn page(shell: &Rc<Preferences>, connect_dialog: &adw::Dialog) -> gtk
 }
 
 fn collection_progress_text(progress: &CollectionProgress) -> String {
-    let bytes = matches!(
-        progress.stage,
-        CollectionStage::Receiving | CollectionStage::Validating
-    );
+    let bytes = progress.stage == CollectionStage::Receiving;
     let count = |count: u64| {
         if bytes {
             format!("{:.1}", count as f64 / 1_048_576.0)

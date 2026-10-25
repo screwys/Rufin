@@ -1,7 +1,6 @@
 //! Shared edits beside the working catalog. Ordered edits use Loro; completed
 //! file results and other current values use the catalog's change journal.
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::sync::{
     Arc,
@@ -10,7 +9,6 @@ use std::sync::{
 
 use crate::{CONNECT_PAGE_SIZE, ConnectRecord, Database};
 use anyhow::{Context, Result, bail};
-use flate2::bufread::MultiGzDecoder;
 use loro::{ExportMode, LoroDoc, ToJson, VersionVector};
 use serde::{Deserialize, Serialize};
 use sqlx::{Connection, QueryBuilder, Row, SqliteConnection};
@@ -28,7 +26,8 @@ const FORMAT: u32 = 1;
 const CURRENT_FORMAT: u32 = 4;
 pub const INCOMPATIBLE_PROFILE: &str =
     "Devices using Rufin Connect are no longer compatible. Please update Rufin.";
-const PROJECTION_ORDER: &str = "CASE kind WHEN 'source' THEN 0 WHEN 'integration' THEN 0 WHEN 'playlist' THEN 1 WHEN 'native_playlist' THEN 1 WHEN 'album' THEN 2 WHEN 'artist' THEN 2 WHEN 'genre' THEN 2 WHEN 'mood' THEN 2 WHEN 'folder' THEN 2 WHEN 'file' THEN 2 WHEN 'track' THEN 3 WHEN 'reference' THEN 3 WHEN 'home' THEN 6 WHEN 'entry' THEN 5 WHEN 'native_entry' THEN 5 WHEN 'playlist_order' THEN 7 WHEN 'smart_order' THEN 7 WHEN 'album_artists' THEN 6 WHEN 'album_genres' THEN 6 WHEN 'track_artists' THEN 6 WHEN 'track_genres' THEN 6 WHEN 'track_moods' THEN 6 WHEN 'track_folders' THEN 6 ELSE 4 END,CASE WHEN kind IN ('entry','native_entry') THEN json_extract(payload,'$.playlist') END,CASE WHEN kind IN ('entry','native_entry','playlist_order','smart_order') THEN json_extract(payload,'$.position') END,object_key";
+// Connect state saved by earlier versions is reset once instead of upgraded.
+pub(crate) const SCHEMA_VERSION: i64 = 3;
 
 pub struct ProfileStore {
     database: Database,
@@ -42,8 +41,6 @@ struct Update {
     version: u32,
     document: String,
     bytes: Vec<u8>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    author: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     current: Option<ConnectRecord>,
 }
@@ -70,45 +67,29 @@ impl ProfileStore {
         peer_id: u64,
         key: age::x25519::Identity,
     ) -> Result<Self> {
-        let identity = Arc::new(key);
         let mut writer = database.writer().await?;
-        let connection = writer.as_mut().context("Library writer is closed")?;
-        let mut transaction = connection.begin().await?;
-        let version: i64 =
-            sqlx::query_scalar("SELECT schema_version FROM connect_profile WHERE singleton=1")
-                .fetch_one(&mut *transaction)
-                .await?;
-        if version < 1 {
-            sqlx::raw_sql(
-                "DELETE FROM documents WHERE (name GLOB 'cache_artwork:*' OR name GLOB 'cache_lyrics:*');
-                DELETE FROM history_pending WHERE (name GLOB 'cache_artwork:*' OR name GLOB 'cache_lyrics:*');
-                DELETE FROM history_acknowledgements WHERE (peer,name) IN (
-                    SELECT peer,name FROM history_acknowledgements WHERE (name GLOB 'cache_artwork:*' OR name GLOB 'cache_lyrics:*')
-                );
-                UPDATE connect_profile SET schema_version=1 WHERE singleton=1;",
-            )
-            .execute(&mut *transaction)
-            .await?;
-        }
-        transaction.commit().await?;
         sqlx::query("UPDATE connect_profile SET actor=?1 WHERE singleton=1 AND actor IS NOT ?1")
             .bind(peer_id.to_string())
-            .execute(&mut *connection)
+            .execute(writer.as_mut().context("Library writer is closed")?)
             .await?;
-        if version < 2 {
-            index_documents(connection).await?;
-            migrate_pending_on(connection, peer_id, &identity).await?;
-            sqlx::query("UPDATE connect_profile SET schema_version=2 WHERE singleton=1")
-                .execute(&mut *connection)
-                .await?;
-        }
         drop(writer);
         Ok(Self {
             database,
             peer_id,
-            identity,
+            identity: Arc::new(key),
             closed: AtomicBool::new(false),
         })
+    }
+
+    /// Whether this Store still holds Connect state from an earlier version.
+    pub async fn reset_pending(database: &Database) -> Result<bool> {
+        let mut writer = database.writer().await?;
+        Ok(
+            sqlx::query_scalar("SELECT schema_version<?1 FROM connect_profile WHERE singleton=1")
+                .bind(SCHEMA_VERSION)
+                .fetch_one(writer.as_mut().context("Library writer is closed")?)
+                .await?,
+        )
     }
 
     pub async fn close(&self) -> Result<()> {
@@ -291,7 +272,6 @@ impl ProfileStore {
                         version: CURRENT_FORMAT,
                         document: version.name.clone(),
                         bytes: local.encode(),
-                        author: None,
                         current: Some(current_record(connection, kind, key).await?),
                     });
                 }
@@ -322,7 +302,6 @@ impl ProfileStore {
                 version: FORMAT,
                 document: version.name.clone(),
                 bytes,
-                author: None,
                 current: None,
             });
         }
@@ -338,9 +317,9 @@ impl ProfileStore {
         for page in updates.chunks(CONNECT_PAGE_SIZE) {
             let page = page
                 .iter()
-                .filter_map(|bytes| decode_update(bytes).transpose())
+                .map(|bytes| decode_update(bytes))
                 .collect::<Result<Vec<_>>>()?;
-            changed |= self.import_page_on(&mut transaction, page, false).await?.0;
+            changed |= self.import_page_on(&mut transaction, page).await?.0;
         }
         transaction.commit().await?;
         Ok(changed)
@@ -387,194 +366,40 @@ impl ProfileStore {
         Ok(output)
     }
 
-    /// Convert a legacy snapshot in one SQLite transaction. A corrupt or truncated
-    /// input leaves the staged profile unchanged.
-    pub async fn replace_snapshot<R: Read + Send + 'static>(
-        &self,
-        file: R,
-        progress: impl Fn(usize) + Send,
-    ) -> Result<bool> {
-        progress(0);
-        let mut input = tokio::task::spawn_blocking(move || snapshot_start(file)).await??;
-        let mut peer = None;
-        let mut connection = self.writer().await?;
-        let mut transaction = connection.begin().await?;
-        sqlx::raw_sql(
-            "DELETE FROM documents; DELETE FROM connect_versions; DELETE FROM sync_cursors; DELETE FROM history_peers; DELETE FROM history_acknowledgements; DELETE FROM history_pending;",
-        )
-        .execute(&mut *transaction)
-        .await?;
-        let mut changed = false;
-        let mut imported = 0;
-        loop {
-            // Only file and CPU work moves to the blocking pool. The caller
-            // retains the transaction so cancellation still rolls back the import.
-            let (reader, page, ended) =
-                tokio::task::spawn_blocking(move || read_update_page(input)).await??;
-            input = reader;
-            let count = page.len();
-            let mut page = page.into_iter().peekable();
-            while page.peek().is_some() {
-                let mut updates = Vec::new();
-                let mut acknowledgements = Vec::new();
-                // Device removal clears that peer's acknowledgements. Keep it
-                // separate so batching retains the snapshot's operation order.
-                while let Some(update) = page.next() {
-                    if let Some(author) = &update.author {
-                        peer = Some(author.clone());
-                    }
-                    let device = update.document.starts_with("device:");
-                    acknowledgements.push((peer.clone(), update.document.clone()));
-                    updates.push(update);
-                    if device
-                        || page
-                            .peek()
-                            .is_some_and(|next| next.document.starts_with("device:"))
-                    {
-                        break;
-                    }
-                }
-                let (imported, versions) =
-                    self.import_page_on(&mut transaction, updates, true).await?;
-                changed |= imported;
-                let acknowledgements = acknowledgements
-                    .into_iter()
-                    .zip(versions)
-                    .filter_map(|((peer, name), version)| peer.map(|peer| (peer, name, version)))
-                    .collect::<Vec<_>>();
-                history::acknowledge_page_on(&mut transaction, &acknowledgements).await?;
-            }
-            imported += count;
-            progress(imported);
-            if ended {
-                break;
-            }
-        }
-        let has_author = peer.is_some();
-        let mut members: Vec<String> = tokio::task::spawn_blocking(move || -> Result<_> {
-            let members = if has_author {
-                let mut line = String::new();
-                input.read_line(&mut line)?;
-                serde_json::from_str(&line).context("missing Connect snapshot membership")?
-            } else {
-                Vec::new()
-            };
-            // Finish gzip validation before committing any imported documents.
-            std::io::copy(&mut input, &mut std::io::sink())?;
-            Ok(members)
-        })
-        .await??;
-        if let Some(peer) = &peer {
-            members.push(peer.to_owned());
-            history::register_on(&mut transaction, &members).await?;
-        }
-        transaction.commit().await?;
-        Ok(changed)
-    }
-
-    #[cfg(test)]
-    async fn clear(&self) -> Result<()> {
-        Self::clear_database(&self.database).await
-    }
-
-    pub async fn clear_database(database: &Database) -> Result<()> {
+    /// Return Connect's tables to the state of a new install and remove the
+    /// Store records of files in the Connect directory. This also records that
+    /// Connect state from earlier versions has been reset.
+    pub async fn clear_database(database: &Database, directory: &Path) -> Result<()> {
+        let files = url::Url::from_directory_path(directory)
+            .ok()
+            .context("The Connect directory is not absolute")?
+            .to_string();
         let mut writer = database.writer().await?;
         let mut transaction = writer
             .as_mut()
             .context("Library writer is closed")?
             .begin()
             .await?;
-        let tables: Vec<String> = sqlx::query_scalar("SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('documents','connect_versions','connect_changes','projection','local_values','sync_cursors','history_peers','history_acknowledgements','history_pending','snapshot_revisions','connect_profile')")
-            .fetch_all(&mut *transaction).await?;
-        for table in tables
-            .iter()
-            .filter(|table| !matches!(table.as_str(), "snapshot_revisions" | "connect_profile"))
-        {
-            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table}")))
-                .execute(&mut *transaction)
-                .await?;
-        }
-        if tables.iter().any(|table| table == "snapshot_revisions") {
-            sqlx::query("UPDATE snapshot_revisions SET revision=0")
-                .execute(&mut *transaction)
-                .await?;
-        }
-        if tables.iter().any(|table| table == "connect_profile") {
-            sqlx::query("UPDATE connect_profile SET profile=NULL,publisher=NULL WHERE singleton=1")
-                .execute(&mut *transaction)
-                .await?;
-        }
-        sqlx::raw_sql("UPDATE file_revision SET revision=0 WHERE id=1; UPDATE connect_profile SET enabled=0,receiving=0 WHERE singleton=1;")
+        sqlx::raw_sql("DELETE FROM documents; DELETE FROM connect_versions; DELETE FROM sync_cursors; DELETE FROM history_peers; DELETE FROM history_acknowledgements; DELETE FROM history_pending; UPDATE file_revision SET revision=0 WHERE id=1;
+            UPDATE connect_seed SET cursor=0,complete=0; UPDATE connect_playlist_seed SET playlist=0,position=-1; DELETE FROM queue_transfer_pages;")
             .execute(&mut *transaction).await?;
+        sqlx::query("DELETE FROM connect_media_files WHERE substr(path,1,length(?1))=?1; DELETE FROM local_locators WHERE substr(access_uri,1,length(?1))=?1; DELETE FROM local_access_metadata WHERE substr(access_uri,1,length(?1))=?1;")
+            .bind(files).execute(&mut *transaction).await?;
+        sqlx::query("UPDATE connect_profile SET profile=NULL,publisher=NULL,actor='0',clock=0,enabled=0,receiving=0,schema_version=?1 WHERE singleton=1")
+            .bind(SCHEMA_VERSION).execute(&mut *transaction).await?;
         transaction.commit().await?;
         Ok(())
     }
 }
 
-fn snapshot_reader(file: impl Read + Send + 'static) -> Result<Box<dyn BufRead + Send>> {
-    let mut input = BufReader::new(file);
-    if input.fill_buf()?.starts_with(&[0x1f, 0x8b]) {
-        Ok(Box::new(BufReader::new(MultiGzDecoder::new(input))))
-    } else {
-        Ok(Box::new(input))
-    }
-}
-
-fn snapshot_start(file: impl Read + Send + 'static) -> Result<Box<dyn BufRead + Send>> {
-    let mut input = snapshot_reader(file)?;
-    let mut line = String::new();
-    input.read_line(&mut line)?;
-    validate_version(
-        line.trim()
-            .parse()
-            .context("invalid Connect snapshot header")?,
-    )?;
-    Ok(input)
-}
-
-fn read_update_page(
-    mut input: Box<dyn BufRead + Send>,
-) -> Result<(Box<dyn BufRead + Send>, Vec<Update>, bool)> {
-    let mut page = Vec::with_capacity(CONNECT_PAGE_SIZE);
-    let mut line = String::new();
-    for _ in 0..CONNECT_PAGE_SIZE {
-        line.clear();
-        if input.read_line(&mut line)? == 0 {
-            bail!("Connect snapshot is incomplete");
-        }
-        if line.trim_end() == "END" {
-            return Ok((input, page, true));
-        }
-        let Some(update) = decode_update(line.as_bytes())? else {
-            continue;
-        };
-        let image = update.document.starts_with("playlist_artwork:");
-        page.push(update);
-        if image {
-            break;
-        }
-    }
-    Ok((input, page, false))
-}
-
-fn decode_update(bytes: &[u8]) -> Result<Option<Update>> {
+fn decode_update(bytes: &[u8]) -> Result<Update> {
     let update: Update = serde_json::from_slice(bytes).context("invalid Connect update")?;
-    if update.document.starts_with("cache_artwork:") || update.document.starts_with("cache_lyrics:")
+    if !matches!(update.version, FORMAT | CURRENT_FORMAT)
+        || (update.version == CURRENT_FORMAT) != update.current.is_some()
     {
-        return Ok(None);
-    }
-    validate_version(update.version)?;
-    if (update.version == CURRENT_FORMAT) != update.current.is_some() {
         bail!(INCOMPATIBLE_PROFILE);
     }
-    Ok(Some(update))
-}
-
-fn validate_version(version: u32) -> Result<()> {
-    if !matches!(version, FORMAT | CURRENT_FORMAT) {
-        bail!(INCOMPATIBLE_PROFILE);
-    }
-    Ok(())
+    Ok(update)
 }
 
 fn current_identity(name: &str) -> Option<(&str, &str)> {
@@ -590,54 +415,6 @@ fn current_identity(name: &str) -> Option<(&str, &str)> {
 
 fn current_stamp(clock: &str) -> Result<crate::RecordStamp> {
     Ok(serde_json::from_str(clock)?)
-}
-
-fn scalar_snapshot(bytes: &[u8]) -> Result<Vec<crate::StampedRecord>> {
-    let document = LoroDoc::new();
-    let values = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let received = values.clone();
-    let _subscription = document.inner().subscribe_root(Arc::new(move |event| {
-        for event in event.events {
-            if let Some(map) = event.diff.as_map() {
-                for (key, value) in &map.updated {
-                    let Ok((kind, key)) = serde_json::from_str::<(String, String)>(key) else {
-                        continue;
-                    };
-                    let payload = value.value.as_ref().and_then(|value| {
-                        value
-                            .as_value()
-                            .and_then(|value| value.as_string())
-                            .map(|value| value.as_str().to_owned())
-                    });
-                    received.lock().unwrap().push((
-                        kind,
-                        key,
-                        payload,
-                        crate::RecordStamp {
-                            lamport: value.idlp.lamport as u64,
-                            actor: value.idlp.peer,
-                        },
-                    ));
-                }
-            }
-        }
-    }));
-    document.import(bytes)?;
-    std::mem::take(&mut *values.lock().unwrap())
-        .into_iter()
-        .map(|(kind, key, payload, stamp)| {
-            Ok(crate::StampedRecord {
-                record: ConnectRecord {
-                    kind,
-                    key,
-                    value: payload
-                        .map(|value| serde_json::from_str(&value))
-                        .transpose()?,
-                },
-                stamp,
-            })
-        })
-        .collect()
 }
 
 fn version_row(row: sqlx::sqlite::SqliteRow) -> Result<DocumentVersion> {
@@ -710,16 +487,11 @@ fn document_name(record: &ConnectRecord) -> Result<String> {
     if matches!(record.kind.as_str(), "playlist_order" | "smart_order") {
         return Ok(record.kind.clone());
     }
-    if matches!(record.kind.as_str(), "entry" | "native_entry") {
+    if record.kind == "entry" {
         let (source, playlist, _): (Option<String>, String, String) =
             serde_json::from_str(&record.key)?;
         return Ok(format!(
-            "{}:{}",
-            if record.kind == "entry" {
-                "playlist"
-            } else {
-                "native_playlist"
-            },
+            "playlist:{}",
             serde_json::to_string(&(source, playlist))?
         ));
     }
@@ -727,20 +499,6 @@ fn document_name(record: &ConnectRecord) -> Result<String> {
 }
 
 impl ProfileStore {
-    async fn remove_catalog_sources<'a>(
-        &self,
-        connection: &mut SqliteConnection,
-        sources: impl Iterator<Item = &'a str>,
-    ) -> Result<()> {
-        for source in sources {
-            sqlx::query("DELETE FROM connect_versions WHERE kind GLOB 'catalog:*' AND kind<>'catalog:source' AND json_extract(object_key,'$[0]')=?1")
-                .bind(source)
-                .execute(&mut *connection)
-                .await?;
-        }
-        Ok(())
-    }
-
     async fn load_document(
         &self,
         connection: &mut SqliteConnection,
@@ -922,262 +680,6 @@ async fn next_revision(connection: &mut SqliteConnection) -> Result<i64> {
     .await?)
 }
 
-async fn index_documents(connection: &mut SqliteConnection) -> Result<()> {
-    sqlx::raw_sql("DROP TRIGGER IF EXISTS file_revision_insert; DROP TRIGGER IF EXISTS file_revision_update;
-        DROP TRIGGER IF EXISTS documents_compressed_changed; DROP TRIGGER IF EXISTS snapshot_cache_insert;
-        DROP TRIGGER IF EXISTS snapshot_cache_update; DROP TRIGGER IF EXISTS snapshot_cache_delete;
-        DROP TRIGGER IF EXISTS snapshot_authored_insert; DROP TRIGGER IF EXISTS snapshot_authored_update; DROP TRIGGER IF EXISTS snapshot_authored_delete;
-        DROP TRIGGER IF EXISTS snapshot_revision_insert; DROP TRIGGER IF EXISTS snapshot_revision_update; DROP TRIGGER IF EXISTS snapshot_revision_delete;
-        DROP TABLE IF EXISTS outgoing; CREATE INDEX IF NOT EXISTS documents_revision ON documents(revision,name);")
-        .execute(&mut *connection).await?;
-    Ok(())
-}
-
-async fn migrate_pending_on(
-    connection: &mut SqliteConnection,
-    actor: u64,
-    identity: &age::x25519::Identity,
-) -> Result<()> {
-    let mut transaction = connection.begin().await?;
-    let old_capture: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='connect_capture')",
-    )
-    .fetch_one(&mut *transaction)
-    .await?;
-    if old_capture {
-        sqlx::query("UPDATE connect_profile SET enabled=coalesce((SELECT enabled FROM connect_capture WHERE singleton=1),enabled)").execute(&mut *transaction).await?;
-    }
-    let native_kinds = serde_json::to_string(history::OBSERVATION_KINDS)?;
-    let mut cursor = String::new();
-    loop {
-        let mut page: Vec<(String, Vec<u8>, i64, Vec<u8>)> = sqlx::query_as("SELECT name,snapshot,revision,version FROM documents WHERE name>?1 AND(revision=0 OR length(version)=0 OR substr(name,1,instr(name,':')-1) IN(SELECT value FROM json_each(?2))) ORDER BY name LIMIT ?3")
-            .bind(&cursor).bind(&native_kinds).bind(CONNECT_PAGE_SIZE as i64).fetch_all(&mut *transaction).await?;
-        let Some(last) = page.last() else { break };
-        cursor = last.0.clone();
-        for (name, bytes, revision, version) in &mut page {
-            if *revision == 0 || version.is_empty() {
-                if version.is_empty() {
-                    *version =
-                        LoroDoc::decode_import_blob_meta(&expose(name, bytes, identity)?, true)?
-                            .partial_end_vv
-                            .encode();
-                }
-                if *revision == 0 {
-                    *revision = next_revision(&mut transaction).await?;
-                }
-                sqlx::query("UPDATE documents SET revision=?2,version=?3 WHERE name=?1")
-                    .bind(name.as_str())
-                    .bind(*revision)
-                    .bind(&*version)
-                    .execute(&mut *transaction)
-                    .await?;
-            }
-            if history::retains_history(name) {
-                continue;
-            }
-            if let Some((kind, key)) = current_identity(name) {
-                let previous: Option<String> =
-                    sqlx::query_scalar("SELECT version FROM connect_versions WHERE name=?1")
-                        .bind(name.as_str())
-                        .fetch_optional(&mut *transaction)
-                        .await?;
-                let scalar = matches!(kind, "state" | "smart" | "reference")
-                    .then(|| scalar_snapshot(&expose(name, bytes, identity)?))
-                    .transpose()?
-                    .and_then(|values| {
-                        values
-                            .into_iter()
-                            .find(|cell| cell.record.kind == kind && cell.record.key == key)
-                    });
-                let clock = VersionVector::decode(version)?;
-                let baseline = crate::RecordStamp {
-                    lamport: clock
-                        .iter()
-                        .map(|(_, count)| *count as u64)
-                        .sum::<u64>()
-                        .max(1),
-                    actor: clock.iter().map(|(actor, _)| *actor).max().unwrap_or(actor),
-                };
-                let stamp = scalar.as_ref().map_or(baseline, |cell| cell.stamp);
-                if previous
-                    .map(|value| current_stamp(&value))
-                    .transpose()?
-                    .is_none_or(|previous| stamp > previous)
-                {
-                    let record = current_record(&mut transaction, kind, key).await?;
-                    save_current_version(&mut transaction, &record, stamp).await?;
-                }
-            } else if let Some(uri) = name.strip_prefix("track:") {
-                let needed: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT EXISTS(SELECT 1 FROM tracks track WHERE media_uri=?1 AND NOT EXISTS(SELECT 1 FROM sources source WHERE source.source_key=track.source_key AND source.kind IS NOT NULL) AND(track_key IN({}) OR EXISTS(SELECT 1 FROM user_media_state state WHERE state.media_uri=track.media_uri)))",crate::connect::NEEDED_TRACK_KEYS)))
-                    .bind(uri).fetch_one(&mut *transaction).await?;
-                if needed {
-                    let record = current_record(&mut transaction, "reference", uri).await?;
-                    let version = VersionVector::decode(version)?;
-                    save_current_version(
-                        &mut transaction,
-                        &record,
-                        crate::RecordStamp {
-                            lamport: version
-                                .iter()
-                                .map(|(_, count)| *count as u64)
-                                .sum::<u64>()
-                                .max(1),
-                            actor: version
-                                .iter()
-                                .map(|(actor, _)| *actor)
-                                .max()
-                                .unwrap_or(actor),
-                        },
-                    )
-                    .await?;
-                }
-            }
-        }
-        page.retain(|(name, _, _, _)| !history::retains_history(name));
-        if !page.is_empty() {
-            for table in ["history_acknowledgements", "history_pending", "documents"] {
-                let mut delete = QueryBuilder::new(format!("DELETE FROM {table} WHERE name IN("));
-                let mut names = delete.separated(",");
-                for (name, _, _, _) in &page {
-                    names.push_bind(name);
-                }
-                names.push_unseparated(")");
-                delete.build().execute(&mut *transaction).await?;
-            }
-        }
-    }
-    for table in ["projection", "legacy_connect_changes", "connect_changes"] {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1)",
-        )
-        .bind(table)
-        .fetch_one(&mut *transaction)
-        .await?;
-        if !exists {
-            continue;
-        }
-        loop {
-            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "SELECT kind,object_key,payload FROM {table} ORDER BY {PROJECTION_ORDER} LIMIT ?1"
-            )))
-            .bind(CONNECT_PAGE_SIZE as i64)
-            .fetch_all(&mut *transaction)
-            .await?;
-            if rows.is_empty() {
-                break;
-            }
-            let mut edits = Vec::new();
-            for row in rows {
-                let mut kind: String = row.get(0);
-                let key: String = row.get(1);
-                let payload: Option<String> = row.get(2);
-                let payload = if table == "projection" {
-                    expose_payload(&kind, payload, identity)?
-                } else {
-                    payload
-                };
-                if kind == "track" {
-                    kind = "reference".into();
-                }
-                let mut record = ConnectRecord {
-                    kind,
-                    key,
-                    value: payload
-                        .map(|value| serde_json::from_str(&value))
-                        .transpose()?,
-                };
-                if table == "projection" {
-                    if !crate::connect_current_kind(&record.kind) {
-                        let name = document_name(&record)?;
-                        let snapshot: Option<Vec<u8>> =
-                            sqlx::query_scalar("SELECT snapshot FROM documents WHERE name=?1")
-                                .bind(&name)
-                                .fetch_optional(&mut *transaction)
-                                .await?;
-                        if let Some(snapshot) = snapshot {
-                            let document =
-                                LoroDoc::from_snapshot(&expose(&name, &snapshot, identity)?)?;
-                            record.value = records(&document)?
-                                .remove(&(record.kind.clone(), record.key.clone()));
-                        }
-                    }
-                    crate::connect::apply_records_on(
-                        &mut transaction,
-                        std::slice::from_ref(&record),
-                    )
-                    .await?;
-                    if crate::connect_current_kind(&record.kind) {
-                        let version: Option<String> = sqlx::query_scalar(
-                            "SELECT version FROM connect_versions WHERE name=?1",
-                        )
-                        .bind(document_name(&record)?)
-                        .fetch_optional(&mut *transaction)
-                        .await?;
-                        let stamp = if let Some(version) = version {
-                            current_stamp(&version)?
-                        } else {
-                            let clock: i64 = sqlx::query_scalar(
-                                "SELECT clock FROM connect_profile WHERE singleton=1",
-                            )
-                            .fetch_one(&mut *transaction)
-                            .await?;
-                            crate::RecordStamp {
-                                lamport: clock as u64 + 1,
-                                actor,
-                            }
-                        };
-                        save_current_version(&mut transaction, &record, stamp).await?;
-                    }
-                } else {
-                    crate::connect::apply_records_on(
-                        &mut transaction,
-                        std::slice::from_ref(&record),
-                    )
-                    .await?;
-                    if crate::connect_current_kind(&record.kind) {
-                        let clock: i64 = sqlx::query_scalar(
-                            "SELECT clock FROM connect_profile WHERE singleton=1",
-                        )
-                        .fetch_one(&mut *transaction)
-                        .await?;
-                        save_current_version(
-                            &mut transaction,
-                            &record,
-                            crate::RecordStamp {
-                                lamport: clock as u64 + 1,
-                                actor,
-                            },
-                        )
-                        .await?;
-                    } else {
-                        edits.push(record.clone());
-                    }
-                }
-                sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "DELETE FROM {table} WHERE kind=?1 AND object_key=?2"
-                )))
-                .bind(&record.kind)
-                .bind(&record.key)
-                .execute(&mut *transaction)
-                .await?;
-                if record.kind == "reference" {
-                    sqlx::query(sqlx::AssertSqlSafe(format!(
-                        "DELETE FROM {table} WHERE kind='track' AND object_key=?1"
-                    )))
-                    .bind(&record.key)
-                    .execute(&mut *transaction)
-                    .await?;
-                }
-            }
-            write_records_on(&mut transaction, actor, Some(identity), &edits).await?;
-        }
-    }
-    sqlx::raw_sql("DROP TABLE IF EXISTS connect_changes; DROP TABLE IF EXISTS legacy_connect_changes; DROP TABLE IF EXISTS projection; DROP TABLE IF EXISTS connect_capture; DROP TABLE IF EXISTS snapshot_revisions;")
-        .execute(&mut *transaction).await?;
-    transaction.commit().await?;
-    Ok(())
-}
-
 fn edit(document: &LoroDoc, record: &ConnectRecord) -> Result<()> {
     let map = document.get_map("records");
     let map_key = serde_json::to_string(&(&record.kind, &record.key))?;
@@ -1195,10 +697,7 @@ fn edit(document: &LoroDoc, record: &ConnectRecord) -> Result<()> {
         }
         preserve_unknown_fields(value, &previous);
     }
-    if matches!(
-        record.kind.as_str(),
-        "playlist" | "native_playlist" | "device"
-    ) {
+    if matches!(record.kind.as_str(), "playlist" | "device") {
         document
             .get_map("lifecycle")
             .insert("deleted", record.value.is_none())?;
@@ -1223,7 +722,7 @@ fn edit(document: &LoroDoc, record: &ConnectRecord) -> Result<()> {
     }
     if matches!(
         record.kind.as_str(),
-        "entry" | "native_entry" | "playlist_order" | "smart_order"
+        "entry" | "playlist_order" | "smart_order"
     ) {
         let list = document.get_movable_list("occurrences");
         let values = list.get_deep_value().to_json_value();
@@ -1303,10 +802,7 @@ fn records(document: &LoroDoc) -> Result<BTreeMap<(String, String), serde_json::
         let (kind, key): (String, String) = serde_json::from_str(key)?;
         let mut value: serde_json::Value =
             serde_json::from_str(value.as_str().context("invalid Connect record")?)?;
-        if matches!(
-            kind.as_str(),
-            "entry" | "native_entry" | "playlist_order" | "smart_order"
-        ) {
+        if matches!(kind.as_str(), "entry" | "playlist_order" | "smart_order") {
             let Some(position) = positions.get(key.as_str()) else {
                 continue;
             };
@@ -1322,47 +818,13 @@ impl ProfileStore {
         &self,
         connection: &mut SqliteConnection,
         updates: Vec<Update>,
-        snapshot_input: bool,
     ) -> Result<(bool, Vec<VersionVector>)> {
         let mut versions = vec![VersionVector::default(); updates.len()];
         let mut changed = false;
         let mut authored = Vec::new();
         let mut positions = Vec::new();
         let mut accepted = Vec::new();
-        for (position, mut update) in updates.into_iter().enumerate() {
-            if update.current.is_none() && current_identity(&update.document).is_some() {
-                let document = LoroDoc::from_snapshot(&update.bytes)?;
-                let (kind, key) = current_identity(&update.document).unwrap();
-                let scalar = matches!(kind, "state" | "smart" | "reference")
-                    .then(|| scalar_snapshot(&update.bytes))
-                    .transpose()?
-                    .and_then(|values| {
-                        values
-                            .into_iter()
-                            .find(|cell| cell.record.kind == kind && cell.record.key == key)
-                    });
-                update.current = Some(ConnectRecord {
-                    kind: kind.into(),
-                    key: key.into(),
-                    value: records(&document)?.remove(&(kind.into(), key.into())),
-                });
-                let clock = document.oplog_vv();
-                let baseline = crate::RecordStamp {
-                    lamport: clock.iter().map(|(_, n)| *n as u64).sum(),
-                    actor: clock
-                        .iter()
-                        .map(|(peer, _)| *peer)
-                        .max()
-                        .unwrap_or_default(),
-                };
-                if let Some(scalar) = scalar {
-                    update.current = Some(scalar.record);
-                    update.bytes = scalar.stamp.encode();
-                } else {
-                    update.bytes = baseline.encode();
-                }
-                update.version = CURRENT_FORMAT;
-            }
+        for (position, update) in updates.into_iter().enumerate() {
             let Some(record) = update.current else {
                 positions.push(position);
                 authored.push(update);
@@ -1429,10 +891,10 @@ impl ProfileStore {
         }
         let smart_changed = accepted.iter().any(|record| record.kind == "smart");
         changed |= crate::connect::apply_records_on(connection, &accepted).await?;
-        for (position, result) in positions.into_iter().zip(
-            self.import_authored_page_on(connection, authored, snapshot_input)
-                .await?,
-        ) {
+        for (position, result) in positions
+            .into_iter()
+            .zip(self.import_authored_page_on(connection, authored).await?)
+        {
             changed |= result.0;
             versions[position] = result.1;
         }
@@ -1455,7 +917,6 @@ impl ProfileStore {
         &self,
         connection: &mut SqliteConnection,
         updates: Vec<Update>,
-        snapshot_input: bool,
     ) -> Result<Vec<(bool, VersionVector)>> {
         if updates.is_empty() {
             return Ok(Vec::new());
@@ -1476,126 +937,96 @@ impl ProfileStore {
             .collect();
         let identity = Arc::clone(&self.identity);
         let peer_id = self.peer_id;
-        let (results, changes, snapshots, removed_sources) =
-            tokio::task::spawn_blocking(move || -> Result<_> {
-                let mut results = Vec::with_capacity(updates.len());
-                let mut changes = BTreeMap::new();
-                let mut snapshots = Vec::new();
-                let mut deleted_sources = BTreeSet::new();
-                for update in updates {
-                    let name = update.document;
-                    let previous = saved.get(&name);
+        let (results, changes, snapshots) = tokio::task::spawn_blocking(move || -> Result<_> {
+            let mut results = Vec::with_capacity(updates.len());
+            let mut changes = BTreeMap::new();
+            let mut snapshots = Vec::new();
+            for update in updates {
+                let name = update.document;
+                let previous = saved.get(&name);
 
-                    if name.starts_with("catalog:") {
-                        bail!("Connect catalog update has no current value");
-                    }
-                    if let Some((version, snapshot)) = previous
-                        && !sensitive(&name)
-                        && *snapshot == update.bytes
-                    {
-                        results.push((false, VersionVector::decode(version)?));
+                if name.starts_with("catalog:") {
+                    bail!("Connect catalog update has no current value");
+                }
+                if let Some((version, snapshot)) = previous
+                    && !sensitive(&name)
+                    && *snapshot == update.bytes
+                {
+                    results.push((false, VersionVector::decode(version)?));
+                    continue;
+                }
+                let metadata = LoroDoc::decode_import_blob_meta(&update.bytes, true)?;
+                let reuse_snapshot =
+                    previous.is_none() && metadata.mode == loro::EncodedBlobMode::Snapshot;
+                let incoming = metadata.partial_end_vv;
+                if let Some((version, _)) = previous
+                    && VersionVector::decode(version)?.includes_vv(&incoming)
+                {
+                    results.push((false, incoming));
+                    continue;
+                }
+                let document = LoroDoc::new();
+                if let Some((_, snapshot)) = previous {
+                    document.import(&expose(&name, snapshot, &identity)?)?;
+                }
+                document.set_peer_id(peer_id)?;
+                let before = records(&document)?;
+                let version = document.oplog_vv();
+                document.import(&update.bytes)?;
+                if version == document.oplog_vv() {
+                    results.push((false, incoming));
+                    continue;
+                }
+                let after = records(&document)?;
+                for key in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
+                    if before.get(key) == after.get(key) {
                         continue;
                     }
-                    let (document, before, incoming, reuse_snapshot) =
-                        if snapshot_input && previous.is_none() {
-                            let document = LoroDoc::from_snapshot(&update.bytes)?;
-                            let incoming = document.oplog_vv();
-                            if incoming.is_empty() {
-                                results.push((false, incoming));
-                                continue;
-                            }
-                            document.set_peer_id(peer_id)?;
-                            let reuse_snapshot = !document.is_shallow();
-                            (document, BTreeMap::new(), incoming, reuse_snapshot)
-                        } else {
-                            let metadata = LoroDoc::decode_import_blob_meta(&update.bytes, true)?;
-                            let reuse_snapshot = previous.is_none()
-                                && metadata.mode == loro::EncodedBlobMode::Snapshot;
-                            let incoming = metadata.partial_end_vv;
-                            if let Some((version, _)) = previous
-                                && VersionVector::decode(version)?.includes_vv(&incoming)
-                            {
-                                results.push((false, incoming));
-                                continue;
-                            }
-                            let document = LoroDoc::new();
-                            if let Some((_, snapshot)) = previous {
-                                document.import(&expose(&name, snapshot, &identity)?)?;
-                            }
-                            document.set_peer_id(peer_id)?;
-                            let before = records(&document)?;
-                            let version = document.oplog_vv();
-                            document.import(&update.bytes)?;
-                            if version == document.oplog_vv() {
-                                results.push((false, incoming));
-                                continue;
-                            }
-                            (document, before, incoming, reuse_snapshot)
-                        };
-                    let after = records(&document)?;
-                    if let Some(source) = name.strip_prefix("source:")
-                        && !after.contains_key(&("source".into(), source.into()))
-                    {
-                        deleted_sources.insert(source.to_owned());
-                    }
-                    for key in before.keys().chain(after.keys()).collect::<BTreeSet<_>>() {
-                        if before.get(key) == after.get(key) {
-                            continue;
-                        }
-                        let record = ConnectRecord {
-                            kind: key.0.clone(),
-                            key: key.1.clone(),
-                            value: after.get(key).cloned(),
-                        };
-                        if document_name(&record)? != name {
-                            bail!("Connect document contains another object's records");
-                        }
-                        changes.insert(key.clone(), record);
-                    }
-                    let snapshot = if reuse_snapshot {
-                        update.bytes
-                    } else {
-                        document.export(ExportMode::Snapshot)?
+                    let record = ConnectRecord {
+                        kind: key.0.clone(),
+                        key: key.1.clone(),
+                        value: after.get(key).cloned(),
                     };
-                    let version = document.oplog_vv().encode();
-                    saved.insert(
-                        name.clone(),
-                        (
-                            version.clone(),
-                            protect(&name, &snapshot, &identity)?.into_owned(),
-                        ),
-                    );
-                    let removed_device = name.starts_with("device:") && after.is_empty();
-                    snapshots.push((name, snapshot, version, removed_device));
-                    results.push((before != after, incoming));
+                    if document_name(&record)? != name {
+                        bail!("Connect document contains another object's records");
+                    }
+                    changes.insert(key.clone(), record);
                 }
-                Ok((
-                    results,
-                    changes.into_values().collect::<Vec<_>>(),
-                    snapshots,
-                    deleted_sources,
-                ))
-            })
-            .await??;
+                let snapshot = if reuse_snapshot {
+                    update.bytes
+                } else {
+                    document.export(ExportMode::Snapshot)?
+                };
+                let version = document.oplog_vv().encode();
+                saved.insert(
+                    name.clone(),
+                    (
+                        version.clone(),
+                        protect(&name, &snapshot, &identity)?.into_owned(),
+                    ),
+                );
+                let removed_device = name.starts_with("device:") && after.is_empty();
+                snapshots.push((name, snapshot, version, removed_device));
+                results.push((before != after, incoming));
+            }
+            Ok((
+                results,
+                changes.into_values().collect::<Vec<_>>(),
+                snapshots,
+            ))
+        })
+        .await??;
         crate::connect::apply_records_on(connection, &changes).await?;
         save_snapshots_on(connection, Some(&self.identity), &snapshots).await?;
-        self.remove_catalog_sources(connection, removed_sources.iter().map(String::as_str))
-            .await?;
         Ok(results)
     }
 }
 
 #[cfg(test)]
-#[path = "../tests/support/catalog.rs"]
-mod catalog_fixture;
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
-    use flate2::{Compression, write::GzEncoder};
     use serde_json::json;
-    use std::io::Write;
 
     const KEY: &str = "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33";
 
@@ -1836,154 +1267,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn old_snapshots_gain_durable_revisions_without_rewriting_history() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("old.sqlite");
-        let options = sqlx::sqlite::SqliteConnectOptions::new()
-            .filename(&path)
-            .create_if_missing(true);
-        let mut old = SqliteConnection::connect_with(&options).await.unwrap();
-        sqlx::raw_sql("CREATE TABLE documents(name TEXT PRIMARY KEY,snapshot BLOB NOT NULL) STRICT;
-            CREATE TABLE file_revision(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL) STRICT;
-            INSERT INTO file_revision VALUES(1,7);
-            CREATE TRIGGER file_revision_update AFTER UPDATE ON documents BEGIN UPDATE file_revision SET revision=revision+1; END;")
-            .execute(&mut old).await.unwrap();
-        let count = 2 * CONNECT_PAGE_SIZE + 1;
-        let mut expected = BTreeMap::new();
-        let mut transaction = old.begin().await.unwrap();
-        for index in 0..count {
-            let key = format!("theme-{index:04}");
-            let document = LoroDoc::new();
-            for (peer, value) in [(1, "dark"), (2, "light")] {
-                document.set_peer_id(peer).unwrap();
-                edit(
-                    &document,
-                    &ConnectRecord {
-                        kind: "preference".into(),
-                        key: key.clone(),
-                        value: Some(json!(value)),
-                    },
-                )
-                .unwrap();
-                document.commit();
-            }
-            let name = format!("preference:{key}");
-            let bytes = document.export(ExportMode::Snapshot).unwrap();
-            sqlx::query("INSERT INTO documents VALUES(?1,?2)")
-                .bind(&name)
-                .bind(&bytes)
-                .execute(&mut *transaction)
-                .await
-                .unwrap();
-            expected.insert(name, (bytes, document.oplog_vv()));
-        }
-        sqlx::query("INSERT INTO documents VALUES('preference:zzz',X'00')")
-            .execute(&mut *transaction)
-            .await
-            .unwrap();
-        transaction.commit().await.unwrap();
-        old.close().await.unwrap();
-        let rejected = crate::Database::open(directory.path().join("rejected.sqlite"))
-            .await
-            .unwrap();
-        assert!(
-            ProfileStore::migrate_legacy_database(&rejected, &path, "profile")
-                .await
-                .unwrap()
-        );
-        assert!(
-            ProfileStore::open(rejected.clone(), 1, KEY.parse().unwrap())
-                .await
-                .is_err()
-        );
-        assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM documents WHERE revision<>0")
-                .fetch_one(rejected.writer().await.unwrap().as_mut().unwrap())
-                .await
-                .unwrap(),
-            0
-        );
-        let mut old = SqliteConnection::connect_with(&options).await.unwrap();
-        assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT revision FROM file_revision")
-                .fetch_one(&mut old)
-                .await
-                .unwrap(),
-            7
-        );
-        assert_eq!(sqlx::query_scalar::<_, i64>("SELECT count(*) FROM pragma_table_info('documents') WHERE name IN ('revision','version')")
-            .fetch_one(&mut old).await.unwrap(), 0);
-        sqlx::query("DELETE FROM documents WHERE name='preference:zzz'")
-            .execute(&mut old)
-            .await
-            .unwrap();
-        let base: i64 = sqlx::query_scalar("SELECT revision FROM file_revision")
-            .fetch_one(&mut old)
-            .await
-            .unwrap();
-        old.close().await.unwrap();
-        let canonical = directory.path().join("canonical.sqlite");
-        let database = crate::Database::open(&canonical).await.unwrap();
-        assert!(
-            ProfileStore::migrate_legacy_database(&database, &path, "profile")
-                .await
-                .unwrap()
-        );
-        let profile = ProfileStore::open(database, 1, KEY.parse().unwrap())
-            .await
-            .unwrap();
-        let versions = profile
-            .changes_in_stream(0, count, SyncStream::Authored)
-            .await
-            .unwrap();
-        assert_eq!(versions.len(), count);
-        for (offset, version) in versions.iter().enumerate() {
-            assert_eq!(version.revision, base + offset as i64 + 1);
-            assert_eq!(
-                VersionVector::decode(&version.version).unwrap(),
-                expected[&version.name].1
-            );
-        }
-        let saved = sqlx::query("SELECT name,snapshot FROM documents ORDER BY name")
-            .fetch_all(&mut *profile.writer().await.unwrap())
-            .await
-            .unwrap();
-        for row in saved {
-            assert_eq!(
-                row.get::<Vec<u8>, _>(1),
-                expected[&row.get::<String, _>(0)].0
-            );
-        }
-        profile
-            .acknowledge_sync_in("peer", SyncStream::Authored, 99)
-            .await
-            .unwrap();
-        drop(profile);
-        let profile = ProfileStore::open(
-            crate::Database::open(&canonical).await.unwrap(),
-            1,
-            KEY.parse().unwrap(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            profile
-                .changes_in_stream(0, count, SyncStream::Authored)
-                .await
-                .unwrap(),
-            versions
-        );
-        assert_eq!(profile.revision().await.unwrap(), base + count as i64);
-        assert_eq!(
-            profile
-                .sync_cursor_in("peer", SyncStream::Authored)
-                .await
-                .unwrap(),
-            99
-        );
-    }
-
-    #[tokio::test]
     async fn artwork_added_to_an_existing_profile_reaches_saved_tracks() {
         let directory = tempfile::tempdir().unwrap();
         let host = ProfileStore::open(
@@ -2058,7 +1341,6 @@ mod tests {
                 actor: 9,
             }
             .encode(),
-            author: None,
             current: Some(ConnectRecord {
                 kind: "reference".into(),
                 key: uri.clone(),
@@ -2188,7 +1470,6 @@ mod tests {
                 actor: 9,
             }
             .encode(),
-            author: None,
             current: Some(state(false, true)),
         })
         .unwrap()])
@@ -2287,23 +1568,6 @@ mod tests {
         assert_eq!(
             receiver
                 .import_updates(&[serde_json::to_vec(&incompatible).unwrap()])
-                .await
-                .unwrap_err()
-                .to_string(),
-            INCOMPATIBLE_PROFILE
-        );
-        let snapshot = directory.path().join("incompatible.jsonl");
-        std::fs::write(
-            &snapshot,
-            format!(
-                "{FORMAT}\n{}\nEND\n",
-                serde_json::to_string(&incompatible).unwrap()
-            ),
-        )
-        .unwrap();
-        assert_eq!(
-            receiver
-                .replace_snapshot(std::fs::File::open(&snapshot).unwrap(), |_| {})
                 .await
                 .unwrap_err()
                 .to_string(),
@@ -2774,35 +2038,24 @@ mod tests {
                 .unwrap(),
             expected
         );
-        a.write_records(&[
-            ConnectRecord {
-                kind: "preference".into(),
-                key: "theme".into(),
-                value: Some(json!("dark")),
-            },
-            ConnectRecord {
-                kind: "root".into(),
-                key: "music".into(),
-                value: Some(json!({"source_id":"local","root_id":"music","root_label":"Music"})),
-            },
-        ])
+        a.write_records(&[ConnectRecord {
+            kind: "preference".into(),
+            key: "theme".into(),
+            value: Some(json!("dark")),
+        }])
         .await
         .unwrap();
-        let documents = 2;
-        let names = ["preference:theme".to_owned(), "root:music".to_owned()];
+        let names = ["preference:theme".to_owned()];
         let updates = a.updates(&b.versions(&names).await.unwrap()).await.unwrap();
-        b.clear().await.unwrap();
+        ProfileStore::clear_database(&b.database, directory.path())
+            .await
+            .unwrap();
         b.import_updates(&updates).await.unwrap();
         let names: Vec<String> = sqlx::query_scalar("SELECT name FROM documents ORDER BY name")
             .fetch_all(&mut *b.writer().await.unwrap())
             .await
             .unwrap();
-        assert_eq!(names, ["preference:theme", "root:music"]);
-        assert_eq!(names.len(), documents);
-        let roots = db.connect_roots("local").await.unwrap();
-        assert_eq!(roots.len(), 1);
-        assert_eq!(roots[0].id, "music");
-        assert_eq!(roots[0].label, "Music");
+        assert_eq!(names, ["preference:theme"]);
     }
 
     #[tokio::test]
@@ -3080,7 +2333,6 @@ mod tests {
                             actor: 9,
                         }
                         .encode(),
-                        author: None,
                         current: Some(ConnectRecord {
                             kind: "reference".into(),
                             key: uri.clone(),
@@ -3352,7 +2604,6 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        let path = directory.path().join("delta.sqlite");
         let names = store
             .changes_in_stream(watermark, CONNECT_PAGE_SIZE, SyncStream::NativeCache)
             .await
@@ -3364,53 +2615,7 @@ mod tests {
             .updates(&peer.versions(&names).await.unwrap())
             .await
             .unwrap();
-        let mut carrier = SqliteConnection::connect_with(
-            &sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&path)
-                .create_if_missing(true),
-        )
-        .await
-        .unwrap();
-        sqlx::raw_sql("PRAGMA user_version=50;
-            CREATE TABLE updates(name TEXT PRIMARY KEY,kind TEXT,payload BLOB NOT NULL) STRICT;
-            CREATE TABLE connect_profile(singleton INTEGER PRIMARY KEY,profile TEXT,publisher TEXT,schema_version INTEGER NOT NULL) STRICT;
-            INSERT INTO connect_profile VALUES(1,NULL,NULL,2);")
-            .execute(&mut carrier).await.unwrap();
-        for bytes in updates {
-            let update: Update = serde_json::from_slice(&bytes).unwrap();
-            sqlx::query("INSERT INTO updates VALUES(?1,?2,?3)")
-                .bind(update.document)
-                .bind(update.current.map(|record| record.kind))
-                .bind(bytes)
-                .execute(&mut carrier)
-                .await
-                .unwrap();
-        }
-        carrier.close().await.unwrap();
-        ProfileStore::prepare_database(&path, &KEY.parse().unwrap(), &KEY.parse().unwrap())
-            .await
-            .unwrap();
-        let mut reader = SqliteConnection::connect_with(
-            &sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&path)
-                .read_only(true),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM updates")
-                .fetch_one(&mut reader)
-                .await
-                .unwrap(),
-            4
-        );
-        assert!(!sqlx::query_scalar::<_,bool>("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name IN('sources','local_values','projection','current_values','documents','connect_versions'))").fetch_one(&mut reader).await.unwrap());
-        reader.close().await.unwrap();
-        assert!(
-            peer.merge_database(&path, &KEY.parse().unwrap())
-                .await
-                .unwrap()
-        );
+        assert!(peer.import_updates(&updates).await.unwrap());
         assert_eq!(
             peer.current_records(&keys).await.unwrap()[0]
                 .value
@@ -3435,12 +2640,7 @@ mod tests {
         assert_eq!(received_waveform.analysis_key, waveform.analysis_key);
         assert_eq!(received_waveform.peaks, waveform.peaks);
         let revision = peer.revision().await.unwrap();
-        assert!(
-            !peer
-                .merge_database(&path, &KEY.parse().unwrap())
-                .await
-                .unwrap()
-        );
+        assert!(!peer.import_updates(&updates).await.unwrap());
         assert_eq!(peer.revision().await.unwrap(), revision);
         store
             .database
@@ -3731,34 +2931,6 @@ mod tests {
             .acknowledge_sync_in("peer", SyncStream::NativeCache, 24)
             .await
             .unwrap();
-        let retained: Vec<(String, Vec<u8>)> = {
-            let mut connection = profile.writer().await.unwrap();
-            let retained = sqlx::query_as("SELECT name,snapshot FROM documents ORDER BY name")
-                .fetch_all(&mut *connection)
-                .await
-                .unwrap();
-            sqlx::raw_sql(
-                "CREATE TABLE projection(kind TEXT NOT NULL,object_key TEXT NOT NULL,payload TEXT,PRIMARY KEY(kind,object_key)) STRICT;
-                CREATE TABLE local_values(kind TEXT NOT NULL,object_key TEXT NOT NULL,payload TEXT,PRIMARY KEY(kind,object_key)) STRICT;
-                INSERT OR IGNORE INTO history_pending SELECT name FROM documents;
-                INSERT INTO history_acknowledgements SELECT 'peer',name,version FROM documents;
-                INSERT INTO documents(name,snapshot,revision,version) VALUES('cache_artwork:old',X'00',1,X'');
-                INSERT INTO projection VALUES('cache_artwork','old','null');
-                INSERT INTO local_values VALUES('cache_artwork','old','null');
-                INSERT INTO history_pending VALUES('cache_artwork:old');
-                INSERT INTO history_acknowledgements VALUES('peer','cache_artwork:old',X'');
-                INSERT INTO documents(name,snapshot,revision,version) VALUES('cache_lyrics:old',X'00',1,X'');
-                INSERT INTO projection VALUES('cache_lyrics','old','null');
-                INSERT INTO local_values VALUES('cache_lyrics','old','null');
-                INSERT INTO history_pending VALUES('cache_lyrics:old');
-                INSERT INTO history_acknowledgements VALUES('peer','cache_lyrics:old',X'');
-                UPDATE connect_profile SET schema_version=0 WHERE singleton=1;",
-            )
-            .execute(&mut *connection)
-            .await
-            .unwrap();
-            retained
-        };
         drop(profile);
         let profile = ProfileStore::open(
             crate::Database::open(&path).await.unwrap(),
@@ -3767,26 +2939,6 @@ mod tests {
         )
         .await
         .unwrap();
-        profile.clear_legacy_settings().await.unwrap();
-        {
-            let mut connection = profile.writer().await.unwrap();
-            let saved: Vec<(String, Vec<u8>)> =
-                sqlx::query_as("SELECT name,snapshot FROM documents ORDER BY name")
-                    .fetch_all(&mut *connection)
-                    .await
-                    .unwrap();
-            assert_eq!(saved, retained);
-            assert!(!sqlx::query_scalar::<_,bool>("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name IN('projection','local_values'))").fetch_one(&mut *connection).await.unwrap());
-            for table in ["history_pending", "history_acknowledgements"] {
-                let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                    "SELECT count(*) FROM {table}"
-                )))
-                .fetch_one(&mut *connection)
-                .await
-                .unwrap();
-                assert_eq!(count, 2, "{table}");
-            }
-        }
         assert_eq!(
             profile
                 .sync_cursor_in("peer", SyncStream::Authored)
@@ -4038,30 +3190,6 @@ mod tests {
             .await
             .unwrap();
         let floor = recipient.revision().await.unwrap();
-        {
-            let legacy_path = directory.path().join("legacy.sqlite");
-            let mut incoming = SqliteConnection::connect_with(
-                &sqlx::sqlite::SqliteConnectOptions::new()
-                    .filename(&legacy_path)
-                    .create_if_missing(true)
-                    .foreign_keys(false),
-            )
-            .await
-            .unwrap();
-            catalog_fixture::copy_before_index(&mut incoming, &copied_path).await;
-            sqlx::raw_sql(
-                "PRAGMA user_version=49;
-                UPDATE connect_profile SET schema_version=1;
-                UPDATE connect_versions SET version=json_object(CAST(json_extract(version,'$.actor') AS TEXT),json_extract(version,'$.lamport'));
-                INSERT INTO connect_versions(name,kind,object_key,version,revision,deleted)
-                SELECT 'catalog:track:[\"server\",\"one\"]','catalog:track','[\"server\",\"one\"]','{\"1\":1}',revision,0 FROM file_revision WHERE id=1;",
-            )
-            .execute(&mut incoming)
-            .await
-            .unwrap();
-            incoming.close().await.unwrap();
-            std::fs::rename(legacy_path, &copied_path).unwrap();
-        }
         assert!(
             ProfileStore::prepare_database(&copied_path, &recipient_key, &recipient_key)
                 .await
@@ -4070,17 +3198,6 @@ mod tests {
         ProfileStore::prepare_database(&copied_path, &transport, &recipient_key)
             .await
             .unwrap();
-        {
-            let mut incoming = SqliteConnection::connect_with(
-                &sqlx::sqlite::SqliteConnectOptions::new()
-                    .filename(&copied_path)
-                    .read_only(true),
-            )
-            .await
-            .unwrap();
-            assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM connect_versions WHERE kind='catalog:track' OR json_type(version,'$.lamport') IS NULL").fetch_one(&mut incoming).await.unwrap(), 0);
-            incoming.close().await.unwrap();
-        }
         recipient
             .merge_database(&copied_path, &recipient_key)
             .await
@@ -4207,7 +3324,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalid_snapshot_rolls_back_every_document_and_stale_snapshot_keeps_newer_edits() {
+    async fn stale_profile_file_keeps_newer_edits() {
         let directory = tempfile::tempdir().unwrap();
         let a = ProfileStore::open(
             crate::Database::open(&directory.path().join("a.sqlite"))
@@ -4223,15 +3340,6 @@ mod tests {
                 .await
                 .unwrap(),
             2,
-            KEY.parse().unwrap(),
-        )
-        .await
-        .unwrap();
-        let staged = ProfileStore::open(
-            crate::Database::open(&directory.path().join("staged.sqlite"))
-                .await
-                .unwrap(),
-            3,
             KEY.parse().unwrap(),
         )
         .await
@@ -4253,65 +3361,8 @@ mod tests {
         )
         .await
         .unwrap();
-        let snapshot = directory.path().join("profile.jsonl");
-        let names = a
-            .changes_in_stream(0, CONNECT_PAGE_SIZE + 1, SyncStream::Authored)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|version| version.name)
-            .collect::<Vec<_>>();
-        let updates = a.updates(&b.versions(&names).await.unwrap()).await.unwrap();
-        let mut legacy = GzEncoder::new(Vec::new(), Compression::default());
-        writeln!(legacy, "{FORMAT}").unwrap();
-        for update in updates {
-            legacy.write_all(&update).unwrap();
-            legacy.write_all(b"\n").unwrap();
-        }
-        writeln!(legacy, "END").unwrap();
-        let complete = legacy.finish().unwrap();
-        std::fs::write(&snapshot, &complete).unwrap();
-        let mut decoded = String::new();
-        MultiGzDecoder::new(complete.as_slice())
-            .read_to_string(&mut decoded)
-            .unwrap();
-        let decoded = decoded.replace(
-            "\"document\":\"preference:theme\"",
-            "\"document\":\"preference:another\"",
-        );
-        let mut wrong_document = GzEncoder::new(Vec::new(), Compression::default());
-        wrong_document.write_all(decoded.as_bytes()).unwrap();
-        for invalid in [
-            complete[..complete.len() - 4].to_vec(),
-            wrong_document.finish().unwrap(),
-        ] {
-            assert!(
-                staged
-                    .replace_snapshot(std::io::Cursor::new(invalid), |_| {})
-                    .await
-                    .is_err()
-            );
-            assert!(
-                b.changes_in_stream(0, CONNECT_PAGE_SIZE, SyncStream::Authored)
-                    .await
-                    .unwrap()
-                    .is_empty()
-            );
-            assert_eq!(
-                sqlx::query_scalar::<_, i64>("SELECT count(*) FROM documents")
-                    .fetch_one(&mut *staged.writer().await.unwrap())
-                    .await
-                    .unwrap(),
-                0
-            );
-        }
-        staged
-            .replace_snapshot(std::io::Cursor::new(complete), |_| {})
-            .await
-            .unwrap();
         let converted = directory.path().join("converted.sqlite");
-        staged
-            .export_database(&converted, &KEY.parse().unwrap(), &[], &[])
+        a.export_database(&converted, &KEY.parse().unwrap(), &[], &[])
             .await
             .unwrap();
         ProfileStore::prepare_database(&converted, &KEY.parse().unwrap(), &KEY.parse().unwrap())

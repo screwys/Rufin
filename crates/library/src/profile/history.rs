@@ -8,20 +8,6 @@ pub(super) const OBSERVATION_KINDS: &[&str] = &[
     "state",
     "smart",
     "reference",
-    "track",
-    "album",
-    "artist",
-    "genre",
-    "mood",
-    "folder",
-    "native_playlist",
-    "native_entry",
-    "album_artists",
-    "album_genres",
-    "track_artists",
-    "track_genres",
-    "track_moods",
-    "track_folders",
 ];
 
 pub(super) fn retains_history(name: &str) -> bool {

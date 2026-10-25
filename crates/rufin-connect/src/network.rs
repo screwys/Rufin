@@ -31,10 +31,10 @@ use crate::{
 };
 
 pub(crate) const RPC_PROTOCOL: &[u8] = b"rufin/connect/rpc/1";
-pub(crate) const PAIR_PROTOCOL: &[u8] = b"rufin/connect/pair/2";
+pub(crate) const PAIR_PROTOCOL: &[u8] = b"rufin/connect/pair/3";
 const INVITE_PROTOCOL: &[u8] = b"rufin/connect/invite/1";
 const MEDIA_PROTOCOL: &[u8] = b"rufin/connect/media/1";
-const SYNC_PROTOCOL: &[u8] = b"rufin/connect/sync/2";
+const SYNC_PROTOCOL: &[u8] = b"rufin/connect/sync/3";
 const MAX_FRAME: usize = 16 * 1024 * 1024;
 const SYNC_PAGE: usize = 64;
 const PROFILE_CLOSED: &[u8] = b"profile closed";

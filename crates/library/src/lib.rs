@@ -143,8 +143,6 @@ use thiserror::Error;
 /// Failures at the Library persistence boundary.
 #[derive(Debug, Error)]
 pub enum LibraryError {
-    #[error("Connect catalog metadata is still arriving")]
-    ConnectPending,
     #[error("SQLite failed: {0}")]
     Sqlite(#[from] sqlx::Error),
     #[error("Library Store I/O failed: {0}")]

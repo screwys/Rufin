@@ -88,40 +88,6 @@ impl Default for ConnectSettings {
     }
 }
 
-impl ConnectSettings {
-    fn from_device_file(
-        bytes: &[u8],
-    ) -> serde_json::Result<(Self, Option<sources::DownloadQuality>)> {
-        let value: serde_json::Value = serde_json::from_slice(bytes)?;
-        let encoding = value
-            .get("encoding")
-            .map(|value| {
-                if value.as_str() == Some("mp3") {
-                    Ok(sources::DownloadQuality::Transcoded(
-                        library::AudioEncoding::mp3(),
-                    ))
-                } else {
-                    serde_json::from_value(value.clone())
-                }
-            })
-            .transpose()?;
-        let has_enabled = value.get("enabled").is_some();
-        let unfinished = value["adopting"].as_bool() == Some(true)
-            || value["setup_pending"].as_bool() == Some(true);
-        let mut config: Self = serde_json::from_value(value)?;
-        if !has_enabled {
-            config.enabled = config.profile.is_some();
-        }
-        if unfinished && config.pending_import.is_none() {
-            config.pending_import = config.profile.clone().map(|profile| PendingImport::Peer {
-                profile,
-                peer: None,
-            });
-        }
-        Ok((config, encoding))
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "bindings", derive(uniffi::Record))]
 pub struct Device {
@@ -159,7 +125,6 @@ pub enum CollectionStage {
     Receiving,
     Validating,
     SavingChanges,
-    Importing,
     Applying,
     Finalizing,
 }
@@ -171,7 +136,6 @@ impl CollectionStage {
             Self::Receiving => localization::tr("Receiving collection"),
             Self::Validating => localization::tr("Checking profile"),
             Self::SavingChanges => localization::tr("Saving changes"),
-            Self::Importing => localization::tr("Importing profile"),
             Self::Applying => localization::tr("Applying profile"),
             Self::Finalizing => localization::tr("Finishing setup"),
         }
@@ -486,64 +450,26 @@ impl ConnectOwner {
     ) -> Arc<Self> {
         if let Ok(files) = std::fs::read_dir(&directory) {
             for file in files.flatten() {
-                if file.file_name() == "transfers" {
-                    if let Err(error) = std::fs::remove_dir_all(file.path()) {
-                        tracing::warn!(%error, "Could not remove the old Connect transfer cache");
-                    }
-                } else if file
+                if file
                     .file_name()
                     .to_str()
                     .is_some_and(|name| name.starts_with("profile-transfer-"))
+                    && let Err(error) = std::fs::remove_file(file.path())
                 {
-                    if let Err(error) = std::fs::remove_file(file.path()) {
-                        tracing::warn!(%error, "Could not remove interrupted profile transfer");
-                    }
+                    tracing::warn!(%error, "Could not remove interrupted profile transfer");
                 }
             }
         }
-        let loaded = std::fs::read(directory.join("device.json"));
-        let (config, encoding, mut error) = match loaded {
-            Ok(bytes) => match ConnectSettings::from_device_file(&bytes) {
-                Ok((config, encoding)) => (config, encoding, None),
-                Err(error) => (ConnectSettings::default(), None, Some(error.to_string())),
+        let (config, error) = match std::fs::read(directory.join("device.json")) {
+            Ok(bytes) => match serde_json::from_slice(&bytes) {
+                Ok(config) => (config, None),
+                Err(error) => (ConnectSettings::default(), Some(error.to_string())),
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                (ConnectSettings::default(), None, None)
+                (ConnectSettings::default(), None)
             }
-            Err(error) => (ConnectSettings::default(), None, Some(error.to_string())),
+            Err(error) => (ConnectSettings::default(), Some(error.to_string())),
         };
-        if let Some(encoding) = encoding {
-            let migrated = settings_apply
-                .restore(
-                    |stored| {
-                        for source in &stored.sources.configured {
-                            let source = &source.configuration;
-                            if source.is_local()
-                                && !stored
-                                    .ui
-                                    .downloads
-                                    .iter()
-                                    .any(|entry| entry.source_id == source.source_id)
-                            {
-                                stored
-                                    .ui
-                                    .set_download_quality(source.source_id.clone(), encoding);
-                            }
-                        }
-                        Ok(())
-                    },
-                    false,
-                )
-                .and_then(|_| {
-                    crate::settings::write_private(
-                        &directory.join("device.json"),
-                        &serde_json::to_vec(&config).map_err(|cause| cause.to_string())?,
-                    )
-                });
-            if let Err(cause) = migrated {
-                error = Some(cause);
-            }
-        }
         let owner = Arc::new(Self {
             directory: directory.clone(),
             database,
@@ -670,26 +596,9 @@ impl ConnectOwner {
         self.runtime.spawn(async move {
             let _action = owner.actions.lock().await;
             let result = async {
-                if let Some(PendingImport::Peer { profile, .. }) =
-                    owner.status().settings.pending_import
-                {
-                    let path = owner.directory.join(format!(
-                        "{}.profile.sqlite",
-                        blake3::hash(profile.as_bytes()).to_hex()
-                    ));
-                    if tokio::fs::try_exists(&path).await.map_err(error)?
-                        && ProfileStore::database_profile(&path)
-                            .await
-                            .map_err(error)?
-                            .as_deref()
-                            == Some(&profile)
-                    {
-                        owner.save(|config| {
-                            config.pending_import = Some(PendingImport::Prepared { profile, path })
-                        })?;
-                    }
-                }
-                let working = owner.migrate_legacy_profile().await?;
+                let working = ProfileStore::database_profile(owner.database.path())
+                    .await
+                    .map_err(error)?;
                 let settings = owner.status().settings;
                 if settings.profile != working && settings.enabled {
                     owner.save(|config| {
@@ -822,10 +731,7 @@ impl ConnectOwner {
                 total,
             };
             if status.collection_progress.as_ref().is_some_and(|previous| {
-                let step = if matches!(
-                    stage,
-                    CollectionStage::Receiving | CollectionStage::Validating
-                ) {
+                let step = if stage == CollectionStage::Receiving {
                     1_048_576
                 } else {
                     1
@@ -971,22 +877,7 @@ impl ConnectOwner {
     async fn credentials(&self) -> Result<Credentials, String> {
         let key = identity_key(&self.identity_reference()?);
         match self.secret(key.clone()).await? {
-            Some(value) => {
-                let encoded: serde_json::Value = serde_json::from_str(&value).map_err(error)?;
-                // Preserve the existing Ed25519 identity when dropping the old
-                // encryption-key bundle. Device identity does not change.
-                if let Some(signing_key) = encoded
-                    .get("signing_key")
-                    .and_then(serde_json::Value::as_str)
-                {
-                    let credentials: Credentials = signing_key.parse().map_err(error)?;
-                    self.save_secret(key, serde_json::to_string(&credentials).map_err(error)?)
-                        .await?;
-                    Ok(credentials)
-                } else {
-                    serde_json::from_value(encoded).map_err(error)
-                }
-            }
+            Some(value) => serde_json::from_str(&value).map_err(error),
             None => {
                 let credentials = Credentials::generate();
                 self.save_secret(key, serde_json::to_string(&credentials).map_err(error)?)
@@ -1015,13 +906,6 @@ impl ConnectOwner {
             std::fs::create_dir_all(&self.directory).map_err(error)?;
             let credentials = self.credentials().await?;
             let settings = self.status().settings;
-            // Discard the preview's duplicate audio cache. Missing media uses
-            // the normal download path; existing library files remain usable.
-            match tokio::fs::remove_dir_all(self.directory.join("blobs")).await {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(cause) => return Err(error(cause)),
-            }
             let (network, mut events) = ConnectNetwork::spawn(
                 NetworkConfig {
                     database: self.directory.join("network.sqlite"),
@@ -1096,37 +980,6 @@ impl ConnectOwner {
         })
     }
 
-    async fn migrate_legacy_profile(&self) -> Result<Option<String>, String> {
-        let working = ProfileStore::database_profile(self.database.path())
-            .await
-            .map_err(error)?;
-        if working.is_some() {
-            return Ok(working);
-        }
-        let settings = self.status().settings;
-        let Some(profile) = settings.profile else {
-            return Ok(None);
-        };
-        if settings
-            .pending_import
-            .as_ref()
-            .is_some_and(|pending| pending.profile() == profile)
-        {
-            return Ok(None);
-        }
-        let path = self.directory.join(format!(
-            "{}.profile.sqlite",
-            blake3::hash(profile.as_bytes()).to_hex()
-        ));
-        if !ProfileStore::migrate_legacy_database(self.database.as_ref(), &path, &profile)
-            .await
-            .map_err(error)?
-        {
-            return Ok(None);
-        }
-        Ok(Some(profile))
-    }
-
     async fn open(self: &Arc<Self>, profile: String, create: bool) -> Result<(), String> {
         let identity = self.credentials().await?.public().to_string();
         self.status
@@ -1155,11 +1008,9 @@ impl ConnectOwner {
                 .try_into()
                 .unwrap(),
         );
-        let path = self.directory.join(format!(
-            "{}.profile.sqlite",
-            blake3::hash(profile.as_bytes()).to_hex()
-        ));
-        let working = self.migrate_legacy_profile().await?;
+        let working = ProfileStore::database_profile(self.database.path())
+            .await
+            .map_err(error)?;
         if working.as_deref() != Some(&profile) && !create {
             return Err(localization::tr(
                 "Profile download is incomplete. Retry to continue.",
@@ -1175,29 +1026,6 @@ impl ConnectOwner {
             .bind_profile(&profile, &identity)
             .await
             .map_err(error)?;
-        let (legacy_settings, baseline) =
-            documents.legacy_settings_records().await.map_err(error)?;
-        if !legacy_settings.is_empty() {
-            let settings = self.settings_apply.clone();
-            tokio::task::spawn_blocking(move || {
-                settings.migrate_legacy_settings(&legacy_settings, &baseline)
-            })
-            .await
-            .map_err(error)??;
-        }
-        documents.clear_legacy_settings().await.map_err(error)?;
-        if tokio::fs::try_exists(&path).await.map_err(error)?
-            && !matches!(&self.status().settings.pending_import, Some(PendingImport::Prepared { path: pending, .. }) if pending == &path)
-        {
-            for suffix in ["", "-wal", "-shm", "-journal"] {
-                let old = PathBuf::from(format!("{}{suffix}", path.display()));
-                match tokio::fs::remove_file(old).await {
-                    Ok(()) => {}
-                    Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(cause) => return Err(error(cause)),
-                }
-            }
-        }
         if let Some(previous) = self.session.write().await.replace(Arc::new(Session {
             profile: profile.clone(),
             documents: documents.clone(),
@@ -1388,15 +1216,14 @@ impl ConnectOwner {
         if let Some(session) = session {
             session.documents.close().await.map_err(error)?;
         }
-        ProfileStore::clear_database(&self.database)
+        ProfileStore::clear_database(&self.database, &self.directory)
             .await
             .map_err(error)?;
-        self.cleanup_profiles(None).await?;
+        self.cleanup_profiles().await?;
         inactive.and(closed)
     }
 
-    async fn cleanup_profiles(&self, keep: Option<&str>) -> Result<(), String> {
-        let keep = keep.map(|profile| blake3::hash(profile.as_bytes()).to_hex().to_string());
+    async fn cleanup_profiles(&self) -> Result<(), String> {
         let pending = match self.status().settings.pending_import {
             Some(PendingImport::Prepared { path, .. }) => Some(path),
             _ => None,
@@ -1417,20 +1244,9 @@ impl ConnectOwner {
                 || pending
                     .as_ref()
                     .is_some_and(|pending| pending == &file.path())
-                || keep.as_ref().is_some_and(|keep| {
-                    keep.eq_ignore_ascii_case(profile) && suffix.starts_with("profile.sqlite")
-                })
                 || !matches!(
                     suffix,
-                    "sqlite"
-                        | "sqlite-wal"
-                        | "sqlite-shm"
-                        | "sqlite-journal"
-                        | "profile.sqlite"
-                        | "profile.sqlite-wal"
-                        | "profile.sqlite-shm"
-                        | "profile.sqlite-journal"
-                        | "pending.sqlite"
+                    "pending.sqlite"
                         | "pending.sqlite-wal"
                         | "pending.sqlite-shm"
                         | "pending.sqlite-journal"
@@ -1640,9 +1456,7 @@ impl ConnectOwner {
                                 owner.create_profile().await?;
                             }
                             owner.synchronize().await?;
-                            owner
-                                .cleanup_profiles(owner.status().settings.profile.as_deref())
-                                .await?;
+                            owner.cleanup_profiles().await?;
                         }
                         Action::Create => {
                             if owner.status().settings.profile.is_some() {
@@ -1654,9 +1468,7 @@ impl ConnectOwner {
                                 owner.create_profile().await?;
                             }
                             owner.synchronize().await?;
-                            owner
-                                .cleanup_profiles(owner.status().settings.profile.as_deref())
-                                .await?;
+                            owner.cleanup_profiles().await?;
                         }
                         Action::Join { invitation, .. } => {
                             owner.begin_import(None);
@@ -3355,24 +3167,8 @@ impl ConnectOwner {
         if keys.is_empty() {
             return Err("Pair with a trusted device to obtain access to this Connect file".into());
         }
-        let owner = Arc::clone(self);
-        let cancelled = cancel.clone();
-        let (profile, staged, legacy) = self
-            .read_profile_input(
-                path,
-                &keys,
-                expected_profile,
-                move_input,
-                move |completed, total| {
-                    if !cancelled.is_cancelled() {
-                        owner.collection_progress(
-                            CollectionStage::Validating,
-                            completed,
-                            Some(total),
-                        );
-                    }
-                },
-            )
+        let (profile, staged) = self
+            .read_profile_input(path, expected_profile, move_input)
             .await?;
         if cancel.is_cancelled() {
             return Err("Transfer cancelled".into());
@@ -3407,16 +3203,7 @@ impl ConnectOwner {
             keys.insert(0, selected.clone());
         }
         let input_key = self
-            .prepare_profile_input(
-                &profile,
-                &staged,
-                legacy,
-                &keys,
-                local_key.as_ref(),
-                |count| {
-                    self.collection_progress(CollectionStage::Importing, count as u64, None);
-                },
-            )
+            .prepare_profile_input(&staged, &keys, local_key.as_ref())
             .await?;
         self.collection_progress(CollectionStage::SavingChanges, 0, None);
         if adoption {
@@ -3577,47 +3364,21 @@ impl ConnectOwner {
                 }
             });
         }
-        self.cleanup_profiles(Some(&profile)).await?;
+        self.cleanup_profiles().await?;
         Ok(())
     }
 
     async fn read_profile_input(
         &self,
         path: PathBuf,
-        keys: &[String],
         expected_profile: Option<&str>,
         move_input: bool,
-        progress: impl FnMut(u64, u64) + Send + 'static,
-    ) -> Result<(String, tempfile::NamedTempFile, Option<portable::Snapshot>), String> {
-        use std::io::Read;
-        let input = path.clone();
-        let sqlite = tokio::task::spawn_blocking(move || {
-            let mut header = [0; 16];
-            let mut input = std::fs::File::open(input).map_err(error)?;
-            Ok::<_, String>(
-                input.read(&mut header).map_err(error)? == header.len()
-                    && &header == b"SQLite format 3\0",
-            )
-        })
-        .await
-        .map_err(error)??;
-        let (profile, legacy) = if sqlite {
-            (
-                ProfileStore::database_profile(&path)
-                    .await
-                    .map_err(error)?
-                    .ok_or(library::profile::INCOMPATIBLE_PROFILE)?,
-                None,
-            )
-        } else {
-            let input = path.clone();
-            let keys = keys.to_vec();
-            let (profile, snapshot) =
-                tokio::task::spawn_blocking(move || portable::decrypt(&input, &keys, progress))
-                    .await
-                    .map_err(error)??;
-            (profile, Some(snapshot))
-        };
+    ) -> Result<(String, tempfile::NamedTempFile), String> {
+        let profile = ProfileStore::database_profile(&path)
+            .await
+            .ok()
+            .flatten()
+            .ok_or(library::profile::INCOMPATIBLE_PROFILE)?;
         if expected_profile.is_some_and(|expected| expected != profile) {
             return Err("The received profile does not match the verified device".into());
         }
@@ -3625,76 +3386,53 @@ impl ConnectOwner {
             .prefix("profile-transfer-")
             .tempfile_in(&self.directory)
             .map_err(error)?;
-        if sqlite {
-            if move_input {
-                tokio::fs::rename(path, staged.path())
-                    .await
-                    .map_err(error)?;
-            } else {
-                tokio::fs::copy(path, staged.path()).await.map_err(error)?;
-            }
+        if move_input {
+            tokio::fs::rename(path, staged.path())
+                .await
+                .map_err(error)?;
+        } else {
+            tokio::fs::copy(path, staged.path()).await.map_err(error)?;
         }
-        Ok((profile, staged, legacy))
+        Ok((profile, staged))
     }
 
     async fn prepare_profile_input(
         &self,
-        profile: &str,
         staged: &tempfile::NamedTempFile,
-        legacy: Option<portable::Snapshot>,
         keys: &[String],
         local_key: Option<&age::x25519::Identity>,
-        progress: impl Fn(usize) + Send,
     ) -> Result<age::x25519::Identity, String> {
-        if let Some(snapshot) = legacy {
-            let local_key = match local_key {
-                Some(key) => key.clone(),
-                None => self.local_key(profile, false).await?,
-            };
-            let identity = self.credentials().await?.public().to_string();
-            let peer = u64::from_le_bytes(
-                blake3::hash(identity.as_bytes()).as_bytes()[..8]
-                    .try_into()
-                    .unwrap(),
-            );
-            let database = library::Database::open(staged.path())
-                .await
-                .map_err(error)?;
-            let converted = async {
-                let documents = ProfileStore::open(database.clone(), peer, local_key.clone())
-                    .await
-                    .map_err(error)?;
-                let result = async {
-                    documents
-                        .replace_snapshot(snapshot.reader()?, progress)
-                        .await
-                        .map_err(error)?;
-                    documents
-                        .bind_profile(profile, &identity)
-                        .await
-                        .map_err(error)
-                }
-                .await;
-                let closed = documents.close().await.map_err(error);
-                result.and(closed)
+        let mut failure = None;
+        for key in keys {
+            let key = key.parse().map_err(error)?;
+            let prepared_key = local_key.unwrap_or(&key);
+            match ProfileStore::prepare_database(staged.path(), &key, prepared_key).await {
+                Ok(()) => return Ok(prepared_key.clone()),
+                Err(cause) => failure = Some(error(cause)),
             }
-            .await;
-            let closed = database.close().await.map_err(error);
-            converted.and(closed)?;
-            Ok(local_key)
-        } else {
-            let mut failure = None;
-            for key in keys {
-                let key = key.parse().map_err(error)?;
-                let prepared_key = local_key.unwrap_or(&key);
-                match ProfileStore::prepare_database(staged.path(), &key, prepared_key).await {
-                    Ok(()) => return Ok(prepared_key.clone()),
-                    Err(cause) => failure = Some(error(cause)),
-                }
-            }
-            Err(failure.unwrap_or_else(|| "The Connect file key is unavailable".into()))
         }
+        Err(failure.unwrap_or_else(|| "The Connect file key is unavailable".into()))
     }
+}
+
+/// Connect state from earlier versions is reset once instead of upgraded. The
+/// Store is marked last, so an interrupted reset runs again on the next start.
+pub(crate) async fn reset_earlier_state(
+    directory: PathBuf,
+    database: &library::Database,
+    settings: &SettingsOwner,
+) -> Result<(), String> {
+    if !ProfileStore::reset_pending(database).await.map_err(error)? {
+        return Ok(());
+    }
+    let settings = settings.clone();
+    let files = directory.clone();
+    tokio::task::spawn_blocking(move || settings.reset_connect(&files))
+        .await
+        .map_err(error)??;
+    ProfileStore::clear_database(database, &directory)
+        .await
+        .map_err(error)
 }
 
 pub(crate) fn write_device_config(

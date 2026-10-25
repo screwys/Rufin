@@ -531,71 +531,6 @@ impl SettingsOwner {
         Ok(source_changed)
     }
 
-    pub(crate) fn migrate_legacy_settings(
-        &self,
-        records: &[library::StampedRecord],
-        previous: &[ConnectRecord],
-    ) -> Result<(), String> {
-        if records.is_empty() {
-            return Ok(());
-        }
-        self.file.update(|_| Ok(()))?;
-        let mut incoming_stamp = library::RecordStamp::default();
-        self.file.update(|stored| {
-            let current = cells(stored, None, false)?;
-            let baseline = records
-                .iter()
-                .map(|record| record.stamp)
-                .chain(stored.shared_settings.stamps.values().copied())
-                .max()
-                .unwrap_or_default()
-                .next(stored.shared_settings.actor);
-            for name in current.keys().cloned().chain(
-                records
-                    .iter()
-                    .filter(|incoming| {
-                        incoming.record.kind != "preference"
-                            || shared_preference(&incoming.record.key)
-                    })
-                    .map(|incoming| cell_key(&incoming.record.kind, &incoming.record.key)),
-            ) {
-                stored.shared_settings.stamps.insert(name, baseline);
-            }
-            incoming_stamp = baseline.next(stored.shared_settings.actor);
-            Ok(())
-        })?;
-        let current = self
-            .shared_records()?
-            .into_iter()
-            .map(|value| {
-                (
-                    cell_key(&value.record.kind, &value.record.key),
-                    value.record.value,
-                )
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let previous = previous
-            .iter()
-            .map(|record| (cell_key(&record.kind, &record.key), record.value.as_ref()))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let accepted = records
-            .iter()
-            .filter(|incoming| {
-                let record = &incoming.record;
-                let name = cell_key(&record.kind, &record.key);
-                (record.kind != "preference" || shared_preference(&record.key))
-                    && current.get(&name).and_then(Option::as_ref)
-                        == previous.get(&name).copied().flatten()
-            })
-            .map(|incoming| library::StampedRecord {
-                record: incoming.record.clone(),
-                stamp: incoming_stamp,
-            })
-            .collect::<Vec<_>>();
-        self.merge_shared(&accepted, None)?;
-        Ok(())
-    }
-
     pub(crate) fn initial_preferences(&self) -> Result<Vec<ConnectRecord>, String> {
         Ok(shared_ui(&self.file.load().ui)?
             .into_iter()
@@ -904,55 +839,6 @@ mod tests {
                 .contains("future-service-secret")
         );
         assert!(!receiver.merge_shared(&records, None).unwrap());
-        let baseline = receiver
-            .shared_records()
-            .unwrap()
-            .into_iter()
-            .map(|value| value.record)
-            .collect::<Vec<_>>();
-        let mut pending = records.clone();
-        let incoming = pending
-            .iter_mut()
-            .find(|value| value.record.kind == "integration")
-            .unwrap()
-            .record
-            .value
-            .as_mut()
-            .unwrap();
-        incoming["configuration"]["name"] = "Received name".into();
-        incoming["credential"] = "received-login".into();
-        receiver
-            .migrate_legacy_settings(&pending, &baseline)
-            .unwrap();
-        let stored = receiver_file.load();
-        assert_eq!(
-            stored.sources.integrations[0].configuration.name,
-            "Received name"
-        );
-        assert_eq!(
-            load_provider_secret(
-                receiver_secrets.as_ref(),
-                stored.sources.integrations[0].credential.as_ref().unwrap()
-            )
-            .unwrap()
-            .as_deref(),
-            Some("received-login")
-        );
-        receiver_file
-            .update(|stored| {
-                stored.sources.integrations[0].configuration.name = "Local name".into();
-                Ok(())
-            })
-            .unwrap();
-        receiver
-            .migrate_legacy_settings(&pending, &baseline)
-            .unwrap();
-        assert_eq!(
-            receiver_file.load().sources.integrations[0]
-                .configuration
-                .name,
-            "Local name"
-        );
     }
 
     #[test]

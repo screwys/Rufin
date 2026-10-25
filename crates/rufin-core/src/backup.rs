@@ -134,6 +134,8 @@ impl BackupOwner {
             export.ui.sidebar.pins.clear();
             export.ui.sidebar.playlist_pin_imported_sources.clear();
             export.secret_scope_id.clear();
+            // Connect stamps belong to this device. Restore keeps the current ones.
+            export.shared_settings = Default::default();
             export.scrobbling_secrets_present = false;
             for descriptor in scrobbling::secret_descriptors() {
                 descriptor.value_mut(&mut export.scrobbling).clear();
