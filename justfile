@@ -407,6 +407,7 @@ i18n *args:
 test *args:
     @if [[ "$*" == "android" ]]; then \
         android/gradlew -p android -PandroidAbis=arm64-v8a testDevelopmentDebugUnitTest lintDevelopmentDebug; \
+        cargo run --locked -p xtask -- android clippy; \
     else \
         scripts/container run default none just _test "$@"; \
     fi

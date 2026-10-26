@@ -14,7 +14,7 @@ val metadata = JsonSlurper().parseText(providers.exec {
 }.standardOutput.asText.get()) as Map<*, *>
 val version = metadata["version"] as String
 val verifier = file(metadata["verifierManifest"]!!).parentFile
-val abis = providers.gradleProperty("androidAbis").orElse("arm64-v8a").get()
+val abis = providers.gradleProperty("androidAbis").orElse("arm64-v8a,armeabi-v7a,x86_64,x86").get()
 
 repositories {
     google()

@@ -20,7 +20,8 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
             native(&root, variant, distribution, abis)
         }
         ["install"] => install(&root),
-        _ => Err("Usage: xtask android build stable|development\n       xtask android install\n       xtask android native VARIANT stable|development ABIS".into()),
+        ["clippy"] => clippy(&root),
+        _ => Err("Usage: xtask android build stable|development\n       xtask android install\n       xtask android clippy\n       xtask android native VARIANT stable|development ABIS".into()),
     }
 }
 
@@ -93,7 +94,6 @@ fn build(root: &Path, distribution: &str) -> Result<()> {
         Command::new(android.join("gradlew"))
             .arg("-p")
             .arg(&android)
-            .arg("-PandroidAbis=arm64-v8a")
             .arg(format!("assemble{variant}")),
     )?;
     let metadata: serde_json::Value =
@@ -155,7 +155,21 @@ fn download_gstreamer(destination: &Path, architectures: &[&str]) -> Result<()> 
     Ok(())
 }
 
-fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<()> {
+struct Toolchain {
+    android: PathBuf,
+    ndk: PathBuf,
+    compiler_dir: PathBuf,
+    gst: PathBuf,
+}
+
+struct Target<'a> {
+    abi: &'a str,
+    rust: &'static str,
+    sdk_arch: &'static str,
+    compiler: &'static str,
+}
+
+fn toolchain<'a>(root: &Path, abis: &'a str) -> Result<(Toolchain, Vec<Target<'a>>)> {
     let android = root.join("android");
     let mut sdk = env::var_os("ANDROID_HOME")
         .map(PathBuf::from)
@@ -188,7 +202,7 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
     let targets = abis
         .split(',')
         .map(|abi| {
-            let (target, sdk_arch, compiler_target) = match abi {
+            let (rust, sdk_arch, compiler) = match abi {
                 "arm64-v8a" => ("aarch64-linux-android", "arm64", "aarch64-linux-android"),
                 "armeabi-v7a" => (
                     "armv7-linux-androideabi",
@@ -199,12 +213,17 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
                 "x86" => ("i686-linux-android", "x86", "i686-linux-android"),
                 _ => return Err(format!("Unknown Android ABI: {abi}")),
             };
-            Ok((abi, target, sdk_arch, compiler_target))
+            Ok(Target {
+                abi,
+                rust,
+                sdk_arch,
+                compiler,
+            })
         })
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let mut missing = targets
         .iter()
-        .map(|(_, _, arch, _)| *arch)
+        .map(|target| target.sdk_arch)
         .filter(|arch| {
             !gst.join(arch)
                 .join("lib/pkgconfig/gstreamer-1.0.pc")
@@ -226,16 +245,109 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
     }
     let ndk = sdk.join("ndk/29.0.14206865");
     let compiler_dir = ndk.join("toolchains/llvm/prebuilt").join(host).join("bin");
+    Ok((
+        Toolchain {
+            android,
+            ndk,
+            compiler_dir,
+            gst,
+        },
+        targets,
+    ))
+}
+
+impl Toolchain {
+    fn cargo(&self, target: &Target, subcommand: &str) -> Command {
+        let suffix = target.rust.replace('-', "_");
+        let compiler = self
+            .compiler_dir
+            .join(format!("{}24-clang", target.compiler));
+        let mut cargo = Command::new("cargo");
+        cargo
+            .args([
+                subcommand,
+                "--locked",
+                "--target",
+                target.rust,
+                "--jobs",
+                "4",
+            ])
+            .env("CARGO_TARGET_DIR", self.android.join("build/rust"))
+            .env(
+                format!("CARGO_TARGET_{}_LINKER", suffix.to_uppercase()),
+                &compiler,
+            )
+            .env(format!("CC_{suffix}"), &compiler)
+            .env(
+                format!("CXX_{suffix}"),
+                self.compiler_dir
+                    .join(format!("{}24-clang++", target.compiler)),
+            )
+            .env(format!("AR_{suffix}"), self.compiler_dir.join("llvm-ar"))
+            .env(
+                format!("PKG_CONFIG_{suffix}"),
+                self.android.join("native/pkg-config"),
+            )
+            .env(
+                "PKG_CONFIG_LIBDIR",
+                self.gst.join(target.sdk_arch).join("lib/pkgconfig"),
+            )
+            .env("PKG_CONFIG_PATH", "")
+            .env("PKG_CONFIG_ALLOW_CROSS", "1")
+            .env("RUFIN_GSTREAMER_LINK_DIR", self.native(target).join("libs"))
+            .env(
+                format!("CARGO_TARGET_{}_RUSTFLAGS", suffix.to_uppercase()),
+                "-C link-arg=-Wl,--no-undefined",
+            );
+        cargo
+    }
+
+    fn native(&self, target: &Target) -> PathBuf {
+        self.android.join("build/native").join(target.abi)
+    }
+}
+
+// Lints the Android build of every crate the desktop build skips or compiles differently.
+fn clippy(root: &Path) -> Result<()> {
+    let (toolchain, targets) = toolchain(root, "arm64-v8a")?;
+    execute(
+        toolchain
+            .cargo(&targets[0], "clippy")
+            .args([
+                "--workspace",
+                "--all-targets",
+                "--features",
+                "rufin-android/development",
+            ])
+            .args([
+                "--exclude",
+                "gtk-*",
+                "--exclude",
+                "rufin",
+                "--exclude",
+                "rufin-controller",
+                "--exclude",
+                "desktop-integration",
+                "--exclude",
+                "windows-updater",
+                "--exclude",
+                "xtask",
+            ]),
+    )
+}
+
+fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<()> {
+    let (toolchain, targets) = toolchain(root, abis)?;
+    let android = &toolchain.android;
     let generated = android.join("app/build/generated/rufin").join(variant);
-    let cargo_output = android.join("build/rust");
     let profile = if variant.ends_with("Release") {
         "android-release"
     } else {
         "android"
     };
-    for (abi, target, sdk_arch, compiler_target) in targets {
-        let gst_arch = gst.join(sdk_arch);
-        let native = android.join("build/native").join(abi);
+    for target in &targets {
+        let gst_arch = toolchain.gst.join(target.sdk_arch);
+        let native = toolchain.native(target);
         execute(
             Command::new("cmake")
                 .arg("-S")
@@ -244,9 +356,12 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
                 .arg(&native)
                 .arg(format!(
                     "-DCMAKE_TOOLCHAIN_FILE={}",
-                    ndk.join("build/cmake/android.toolchain.cmake").display()
+                    toolchain
+                        .ndk
+                        .join("build/cmake/android.toolchain.cmake")
+                        .display()
                 ))
-                .arg(format!("-DANDROID_ABI={abi}"))
+                .arg(format!("-DANDROID_ABI={}", target.abi))
                 .args([
                     "-DANDROID_PLATFORM=android-24",
                     "-DANDROID_STL=c++_shared",
@@ -260,60 +375,22 @@ fn native(root: &Path, variant: &str, distribution: &str, abis: &str) -> Result<
                 .arg(&native)
                 .args(["--parallel", "4"]),
         )?;
-        let suffix = target.replace('-', "_");
-        let mut cargo = Command::new("cargo");
-        cargo
-            .args([
-                "build",
-                "--locked",
-                "-p",
-                "rufin-android",
-                "--lib",
-                "--target",
-                target,
-                "--profile",
-                profile,
-                "--jobs",
-                "4",
-            ])
-            .env("CARGO_TARGET_DIR", &cargo_output)
-            .env(
-                format!("CARGO_TARGET_{}_LINKER", suffix.to_uppercase()),
-                compiler_dir.join(format!("{compiler_target}24-clang")),
-            )
-            .env(
-                format!("CC_{suffix}"),
-                compiler_dir.join(format!("{compiler_target}24-clang")),
-            )
-            .env(
-                format!("CXX_{suffix}"),
-                compiler_dir.join(format!("{compiler_target}24-clang++")),
-            )
-            .env(format!("AR_{suffix}"), compiler_dir.join("llvm-ar"))
-            .env(
-                format!("PKG_CONFIG_{suffix}"),
-                android.join("native/pkg-config"),
-            )
-            .env("PKG_CONFIG_LIBDIR", gst_arch.join("lib/pkgconfig"))
-            .env("PKG_CONFIG_PATH", "")
-            .env("PKG_CONFIG_ALLOW_CROSS", "1")
-            .env("RUFIN_GSTREAMER_LINK_DIR", native.join("libs"))
-            .env(
-                format!("CARGO_TARGET_{}_RUSTFLAGS", suffix.to_uppercase()),
-                "-C link-arg=-Wl,--no-undefined",
-            );
+        let mut cargo = toolchain.cargo(target, "build");
+        cargo.args(["-p", "rufin-android", "--lib", "--profile", profile]);
         if distribution == "development" {
             cargo.args(["--features", "development"]);
         }
         execute(&mut cargo)?;
-        let library = cargo_output
-            .join(target)
+        let library = android
+            .join("build/rust")
+            .join(target.rust)
             .join(profile)
             .join("librufin_android.so");
-        let output = generated.join("jniLibs").join(abi);
-        let cxx = compiler_dir
+        let output = generated.join("jniLibs").join(target.abi);
+        let cxx = toolchain
+            .compiler_dir
             .join("../sysroot/usr/lib")
-            .join(target.replace("armv7", "arm"))
+            .join(target.rust.replace("armv7", "arm"))
             .join("libc++_shared.so");
         for source in [&library, &native.join("libs/libgstreamer_android.so"), &cxx] {
             copy_file(source, &output.join(source.file_name().unwrap()))?;
