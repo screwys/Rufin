@@ -24,6 +24,7 @@ on:
       - '!**/resources/**'
       - '!crates/gtk-*/**'
       - crates/gtk-*/Cargo.toml
+      - xtask/**
       - android/**
       - .github/workflows/android.yml
   workflow_dispatch:
@@ -80,10 +81,10 @@ jobs:
             case "$1" in
               *.md|*.css|*.ui|locales/*|resources/*|*/resources/*)
                 ;;
-              android/*|*.kt|*.kts|Cargo.toml|Cargo.lock|justfile|.cargo/*|crates/xtask/src/android.rs|crates/xtask/src/main.rs|crates/xtask/src/process.rs|crates/xtask/Cargo.toml|.github/workflows/checks.yml|.github/workflows/android.yml)
+              android/*|*.kt|*.kts|Cargo.toml|Cargo.lock|justfile|.cargo/*|xtask/src/android.rs|xtask/src/main.rs|xtask/src/process.rs|xtask/Cargo.toml|.github/workflows/checks.yml|.github/workflows/android.yml)
                 add_jobs android
                 ;;
-              crates/gtk-*/*|crates/rufin/*|crates/rufin-controller/*|crates/desktop-integration/*|crates/windows-updater/*|crates/xtask/*)
+              crates/gtk-*/*|crates/rufin/*|crates/rufin-controller/*|crates/desktop-integration/*|crates/windows-updater/*|xtask/*)
                 ;;
               crates/*/Cargo.toml|crates/*/build.rs|crates/*/src/*.rs)
                 add_jobs android
@@ -108,7 +109,10 @@ jobs:
             while IFS= read -r -d '' path; do
               select_android "$path"
               case "$path" in
-                android/*|*.kt|*.kts|.github/workflows/android.yml)
+                android/*|*.kt|*.kts|crates/rufin-android/*|.github/workflows/android.yml)
+                  ;;
+                xtask/*)
+                  add_jobs source_checks workspace
                   ;;
                 *)
                   add_jobs source_checks "${workspace_jobs[@]}"
@@ -150,7 +154,7 @@ jobs:
               esac
 
               case "$path" in
-                android/*|*.kt|*.kts)
+                android/*|*.kt|*.kts|crates/rufin-android/*)
                   ;;
                 packaging/linux/*)
                   add_jobs source_checks

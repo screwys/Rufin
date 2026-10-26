@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "xtask"]
 resolver = "3"
 
 [workspace.package]
@@ -175,6 +175,10 @@ panic = "abort"
 
 [profile.dev]
 debug = "line-tables-only"
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
 
 [profile.test]
 debug = "line-tables-only"
@@ -182,10 +186,7 @@ debug = "line-tables-only"
 [profile.android]
 inherits = "dev"
 debug = 0
-opt-level = 1
-
-[profile.android.package."*"]
-opt-level = 2
+panic = "abort"
 
 [profile.android-release]
 inherits = "release"

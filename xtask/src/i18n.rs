@@ -12,7 +12,7 @@ use syn::{Expr, ExprCall, ExprLit, Lit, Token};
 use crate::Result;
 use crate::process::{collect_files_with_extension, read_to_string};
 
-#[path = "../../../web/gettext.rs"]
+#[path = "../../web/gettext.rs"]
 mod web_gettext;
 
 const TEMPLATE_HEADER: &str = "# Rufin translation template.\n\

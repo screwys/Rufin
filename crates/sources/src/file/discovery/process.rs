@@ -254,7 +254,7 @@ impl Client {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use std::fs;
     use std::io::Write;

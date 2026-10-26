@@ -77,13 +77,13 @@ pub(crate) fn flatpak_sources(check: bool) -> Result<()> {
 /// optional, development and other-target dependencies of its workspace crates.
 pub(crate) fn linux_workspace(root: &Path) -> Result<(String, String)> {
     let manifest = read_to_string(&root.join("Cargo.toml"))?;
-    let members = "members = [\"crates/*\"]";
+    let members = "members = [\"crates/*\", \"xtask\"]";
     if !manifest.contains(members) {
         return Err("Linux source generation requires the Rufin workspace member list".into());
     }
     let manifest = manifest.replacen(
         members,
-        "members = [\"crates/rufin\"]\nexclude = [\"crates/rufin-android\", \"crates/xtask\"]",
+        "members = [\"crates/rufin\"]\nexclude = [\"crates/rufin-android\", \"xtask\"]",
         1,
     );
     let temporary = tempfile::tempdir()?;
