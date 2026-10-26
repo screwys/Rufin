@@ -120,7 +120,7 @@ mod imp {
     impl AudioSinkImpl for AudioTrackSink {
         fn prepare(&self, spec: &mut audio::AudioRingBufferSpec) -> Result<(), gst::LoggableError> {
             let info = spec.audio_info();
-            let track = JavaVM::singleton()
+            let (track, frames) = JavaVM::singleton()
                 .and_then(|vm| {
                     vm.attach_current_thread(|env| {
                         let track = env.new_object(
@@ -137,11 +137,19 @@ mod imp {
                                 JValue::Int(spec.segsize() * spec.segtotal()),
                             ],
                         )?;
+                        let frames = env
+                            .call_method(&track, jni_str!("bufferFrames"), jni_sig!("()I"), &[])?
+                            .i()?;
                         env.call_method(&track, jni_str!("resume"), jni_sig!("()V"), &[])?;
-                        env.new_global_ref(track)
+                        Ok((env.new_global_ref(track)?, frames))
                     })
                 })
                 .map_err(|error| gst::loggable_error!(gst::CAT_RUST, "{error}"))?;
+            // GstAudioSink writes until the device blocks. A ring smaller than the
+            // AudioTrack runs past the decoded audio at start and drops it as late.
+            let segment_frames = spec.segsize() as u32 / info.bpf();
+            let segments = (frames as u32).div_ceil(segment_frames) as i32;
+            spec.set_segtotal(spec.segtotal().max(segments));
             *self.device.lock().unwrap() = Some(Arc::new(track));
             Ok(())
         }

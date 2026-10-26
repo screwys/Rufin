@@ -50,6 +50,8 @@ internal class AndroidAudioTrack(rate: Int, channels: Int, encoding: Int, buffer
             .build()
     }
 
+    fun bufferFrames(): Int = track.bufferSizeInFrames
+
     fun write(buffer: ByteBuffer, size: Int): Int {
         val writeEpoch = synchronized(accounting) {
             if (flushing) return 0
