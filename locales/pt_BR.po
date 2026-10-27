@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-10-27 15:58+0000\n"
+"PO-Revision-Date: 2026-10-28 21:51+0000\n"
 "Last-Translator: Daniel Arafat <arafat90@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Portuguese (Brazil) <https://hosted.weblate.org/projects/"
 "rufin/app/pt_BR/>\n"
@@ -585,7 +585,7 @@ msgid "Artwork storage"
 msgstr "Armazenamento de capas"
 
 msgid "Artwork"
-msgstr "Capa"
+msgstr "Capa de Álbum"
 
 msgid "Audio effects"
 msgstr "Efeitos de áudio"
@@ -1269,7 +1269,7 @@ msgstr "Excluir playlist"
 
 #, python-brace-format, rust-format
 msgid "Delete \"{name}\"?"
-msgstr "Excluir"
+msgstr "Excluir \"{name}\"?"
 
 msgid "Delete folder"
 msgstr "Excluir pasta"
@@ -1503,7 +1503,7 @@ msgid "Embed in track"
 msgstr "Incorporar na faixa"
 
 msgid "Emby Connect"
-msgstr "Emby Connect"
+msgstr "Emby conectado"
 
 msgid "Emby"
 msgstr "Emby"
@@ -1776,7 +1776,7 @@ msgstr "Esquecer fonte"
 
 #, rust-format
 msgid "Forget \"{name}\"?"
-msgstr "Esquecer"
+msgstr "Esquecer \"{name}\"?"
 
 msgid "Format not supported"
 msgstr "Formato não suportado"
@@ -2901,7 +2901,7 @@ msgstr ""
 "escala direta"
 
 msgid "Perceptual"
-msgstr "Perceptual"
+msgstr "Perceptivo"
 
 msgid "Performer"
 msgstr "Intérprete"
@@ -3258,7 +3258,7 @@ msgid "Relay address"
 msgstr "Endereço de relay"
 
 msgid "Relay"
-msgstr "Relay"
+msgstr "Retransmissão"
 
 msgid "Release date"
 msgstr "Data de lançamento"
@@ -3401,7 +3401,7 @@ msgid "ReplayGain tags"
 msgstr "Tags ReplayGain"
 
 msgid "ReplayGain"
-msgstr "ReplayGain"
+msgstr "Normalização do volume"
 
 #, rust-format
 msgid "Request failed ({status})"
@@ -3465,7 +3465,7 @@ msgid "Rock"
 msgstr "Rock"
 
 msgid "Romaji"
-msgstr "Romaji"
+msgstr "Romanização do japonês"
 
 msgid "Rounded bars"
 msgstr "Barras arredondadas"
@@ -3480,7 +3480,7 @@ msgid "Rows"
 msgstr "Linhas"
 
 msgid "Rufin Connect"
-msgstr "Rufin Connect"
+msgstr "Rufin conectado"
 
 msgid "Rufin JSON"
 msgstr "Rufin JSON"
@@ -4390,7 +4390,7 @@ msgid "Version History"
 msgstr "Histórico de versões"
 
 msgid "Via relay"
-msgstr "Via relay"
+msgstr "Via retransmissão"
 
 msgid "View all"
 msgstr "Ver tudo"
@@ -4655,8 +4655,9 @@ msgid ""
 "\n"
 "Click Finish to finalize Setup."
 msgstr ""
-"O Rufin foi instalado em seu computador. Clique em Concluir para finalizar a "
-"configuração."
+"O Rufin foi instalado em seu computador.\n"
+"\n"
+"Clique em Concluir para finalizar a configuração."
 
 #. Windows installer: WelcomeText.
 msgctxt "Windows installer"
@@ -4670,10 +4671,12 @@ msgid ""
 "Click Next to continue."
 msgstr ""
 "O Rufin é um player de música nativo para servidores Jellyfin, Navidrome/"
-"OpenSubsonic, Plex e Emby; pastas locais, WebDAV incluindo um caminho de "
-"login direto pelo navegador Nextcloud, compartilhamentos Samba e NAS. Esta "
-"configuração instalará o Rufin no seu computador. Clique em Avançar para "
-"continuar."
+"OpenSubsonic, Plex e Emby  pastas locais   WebDAV incluindo um caminho de "
+"login direto pelo navegador Nextcloud, compartilhamentos Samba e NAS.\n"
+"\n"
+"Esta configuração instalará o Rufin no seu computador.\n"
+"\n"
+"Clique em Avançar para continuar."
 
 #. Windows installer: CleanupFailed.
 msgctxt "Windows installer"
