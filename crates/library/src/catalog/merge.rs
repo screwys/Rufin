@@ -299,6 +299,9 @@ pub(crate) async fn index_credits(
                 .clone_from(&credit.musicbrainz_artist_id);
         }
     }
+    write
+        .read_objects::<Artist>(source, None, &names.keys().copied().collect::<Vec<_>>())
+        .await?;
     let mut inserted = Vec::new();
     for (object, credit) in names {
         match find::<Artist>(write, source, None, object).await? {
@@ -357,6 +360,13 @@ pub(crate) async fn index_tags(
     kind: TagKind,
     tags: &[&TagReference],
 ) -> LibraryResult<()> {
+    let objects = tags
+        .iter()
+        .map(|tag| tag.object_id.as_str())
+        .collect::<Vec<_>>();
+    write
+        .read_objects::<Tag>(source, Some(kind), &objects)
+        .await?;
     let mut inserted = Vec::<Tag>::new();
     for tag in tags {
         let metadata = TagMetadata {
@@ -541,9 +551,22 @@ async fn track_page(
         .iter()
         .map(|row| track_uri(source_id, row))
         .collect::<Vec<_>>();
+    let albums = page
+        .iter()
+        .filter_map(|row| row.album_object_id.as_deref())
+        .collect::<Vec<_>>();
+    write.read_objects::<Album>(source, None, &albums).await?;
+    let objects = page
+        .iter()
+        .map(|row| row.object_id.as_str())
+        .collect::<Vec<_>>();
+    write.read_objects::<Track>(source, None, &objects).await?;
+    write
+        .read_naturals::<Track>(&uris.iter().map(String::as_str).collect::<Vec<_>>())
+        .await?;
     let mut stubs = Vec::new();
     let mut named = HashSet::new();
-    for object in page.iter().filter_map(|row| row.album_object_id.as_deref()) {
+    for object in albums {
         if named.insert(object) && find::<Album>(write, source, None, object).await?.is_none() {
             let uri = entity_uri(source_id, "album", object);
             stubs.push((Album::new(source, object, uri), Map::new()));
@@ -1034,6 +1057,8 @@ async fn headers<R: Entity>(
         .map(|(_, row)| row)
         .collect::<Vec<_>>();
     for page in rows.chunks(PAGE) {
+        let objects = page.iter().map(|row| row.object).collect::<Vec<_>>();
+        write.read_objects::<R>(source, tag, &objects).await?;
         let mut current = Vec::new();
         for row in page {
             let record = find::<R>(write, source, tag, row.object).await?;
@@ -1172,6 +1197,9 @@ pub(crate) async fn resolve(write: &mut Write<'_>, touched: &mut Touched) -> Lib
         return Ok(());
     }
     let mut albums = touched.albums.clone();
+    write
+        .read_keys::<Track>(&touched.tracks.iter().copied().collect::<Vec<_>>())
+        .await?;
     for key in &touched.tracks {
         if let Some(album) = write
             .get::<Track>(*key)
@@ -1435,6 +1463,7 @@ async fn complete_kind(
         keys: &[i64],
     ) -> LibraryResult<Vec<R>> {
         let mut withdrawn = Vec::new();
+        write.read_keys::<R>(keys).await?;
         for key in keys {
             // A Write that committed since the keys were read may have seen the row.
             if write.saw(R::FAMILY, *key) {
@@ -1507,6 +1536,7 @@ async fn expire(write: &mut Write<'_>, source: SourceKey) -> LibraryResult<bool>
         BTreeSet::new(),
         BTreeSet::new(),
     );
+    write.read_keys::<Track>(&expired).await?;
     for key in &expired {
         if let Some(track) = write.get::<Track>(*key).await? {
             albums.extend(track.album.map(AlbumKey::raw));
@@ -1656,6 +1686,22 @@ impl Catalog {
         kind: &str,
         name: &str,
     ) -> LibraryResult<CachedSource> {
+        // A source whose row already matches needs no Write.
+        self.loaded().await;
+        if let Some(source) = self
+            .snapshot()
+            .sources
+            .values()
+            .find(|source| source.object == source_id.as_str())
+            .filter(|source| source.kind.as_deref() == Some(kind) && source.name == name)
+        {
+            return Ok(CachedSource {
+                source: source.key,
+                object_id: source.object.clone(),
+                display_name: source.name.clone(),
+                catalog_complete: source.complete,
+            });
+        }
         let mut write = self.write().await?;
         let key = write.source_identity(source_id.as_str()).await?;
         let mut source = write
@@ -1784,6 +1830,39 @@ impl Catalog {
 }
 
 impl Write<'_> {
+    /// Remembers these references, reading their tracks first in one statement per kind.
+    pub(crate) async fn put_references(
+        &mut self,
+        references: &[TrackReference],
+    ) -> LibraryResult<Vec<TrackKey>> {
+        let mut objects = BTreeMap::<String, Vec<String>>::new();
+        for reference in references {
+            if let Some((source, kind, object)) = crate::source_entity_parts(&reference.media_uri)
+                && kind == "track"
+            {
+                objects
+                    .entry(source.as_str().to_owned())
+                    .or_default()
+                    .push(object);
+            }
+        }
+        for (source, objects) in objects {
+            let source = self.source_identity(&source).await?;
+            let objects = objects.iter().map(String::as_str).collect::<Vec<_>>();
+            self.read_objects::<Track>(source, None, &objects).await?;
+        }
+        let uris = references
+            .iter()
+            .map(|reference| reference.media_uri.as_str())
+            .collect::<Vec<_>>();
+        self.read_naturals::<Track>(&uris).await?;
+        let mut keys = Vec::with_capacity(references.len());
+        for reference in references {
+            keys.push(self.put_reference(reference).await?);
+        }
+        Ok(keys)
+    }
+
     /// Remembers a track some other record names: a playlist entry, a queue item or a listen.
     /// It patches only tracks no source observed natively.
     pub(crate) async fn put_reference(
@@ -2036,6 +2115,7 @@ impl Observation<'_> {
                 return Ok(());
             }
             let mut touched = Touched::default();
+            write.read_keys::<Track>(&omitted).await?;
             for key in omitted {
                 let Some(mut track) = write.get::<Track>(key).await? else {
                     continue;
@@ -2070,10 +2150,12 @@ impl Observation<'_> {
             .memberships
             .remove(&folder.key.raw())
             .unwrap_or_default();
+        let members = members
+            .into_iter()
+            .filter(|key| !listed.contains(key) && !write.newer(Family::Track, *key))
+            .collect::<Vec<_>>();
+        write.read_keys::<Track>(&members).await?;
         for key in members {
-            if listed.contains(&key) || write.newer(Family::Track, key) {
-                continue;
-            }
             if let Some(mut track) = write.get::<Track>(key).await? {
                 track.folders.retain(|member| *member != folder.key);
                 write.put(track, Map::new());

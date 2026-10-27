@@ -96,6 +96,8 @@ pub struct QueueUpdate {
     pub removed: HashSet<u64>,
     /// Shuffle went off, so no entry keeps a shuffle rank.
     pub unshuffled: bool,
+    /// The current index, position, repeat and shuffle below are saved too.
+    pub state: bool,
     pub current_index: Option<usize>,
     pub progress_millis: i64,
     pub repeat_mode: QueueRepeatMode,
@@ -122,6 +124,7 @@ impl QueueUpdate {
             self.removed.remove(&id);
             self.entries.insert(id, entry);
         }
+        self.state |= newer.state;
         self.current_index = newer.current_index;
         self.progress_millis = newer.progress_millis;
         self.repeat_mode = newer.repeat_mode;
@@ -549,8 +552,12 @@ impl Catalog {
                 let mut write = self.write().await?;
                 match input {
                     QueueLoad::Items(items) => {
-                        for (item, provenance) in items {
-                            let track_key = write.put_reference(&item).await?;
+                        let references = items
+                            .iter()
+                            .map(|(item, _)| item.clone())
+                            .collect::<Vec<_>>();
+                        let keys = write.put_references(&references).await?;
+                        for ((_, provenance), track_key) in items.into_iter().zip(keys) {
                             entries.push(QueueEntry {
                                 track_key,
                                 provenance,
@@ -559,13 +566,15 @@ impl Catalog {
                         }
                     }
                     QueueLoad::Uris(uris, provenance) => {
-                        for (rank, uri) in uris.iter().enumerate() {
-                            let track_key = write
-                                .put_reference(&TrackReference {
-                                    media_uri: uri.clone(),
-                                    ..Default::default()
-                                })
-                                .await?;
+                        let references = uris
+                            .iter()
+                            .map(|uri| TrackReference {
+                                media_uri: uri.clone(),
+                                ..Default::default()
+                            })
+                            .collect::<Vec<_>>();
+                        let keys = write.put_references(&references).await?;
+                        for (rank, track_key) in keys.into_iter().enumerate() {
                             let mut provenance = provenance.clone();
                             if let QueueProvenance::Context { source_rank, .. } = &mut provenance {
                                 *source_rank += rank;
@@ -768,6 +777,7 @@ pub(crate) async fn save_queue_on(
                 .zip(state.entries.iter().cloned().zip(ranks))
                 .collect(),
             current_index,
+            state: true,
             progress_millis: state.progress_millis,
             repeat_mode: state.repeat_mode,
             shuffled: state.shuffled,
@@ -848,6 +858,9 @@ async fn apply_queue_update_on(
             SELECT value->>0,value->>1,value->>2,value->>3,value->>4,value->>5,unhex(value->>6),unhex(value->>7) FROM json_each(?1) WHERE true
             ON CONFLICT(entry_id) DO UPDATE SET track_key=excluded.track_key,rank=excluded.rank,shuffle_rank=excluded.shuffle_rank")
             .bind(serde_json::to_string(&rows)?).execute(&mut *connection).await?;
+    }
+    if !update.state {
+        return Ok(());
     }
     save_settings(
         connection,

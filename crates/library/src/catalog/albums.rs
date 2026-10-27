@@ -35,6 +35,7 @@ struct Stored {
 pub(crate) async fn resolve(write: &mut Write<'_>, keys: &BTreeSet<i64>) -> LibraryResult<()> {
     let keys = keys.iter().copied().collect::<Vec<_>>();
     for page in keys.chunks(PAGE) {
+        write.read_keys::<Album>(page).await?;
         let mut albums = Vec::new();
         for key in page {
             if let Some(album) = write.get::<Album>(*key).await? {
@@ -46,6 +47,7 @@ pub(crate) async fn resolve(write: &mut Write<'_>, keys: &BTreeSet<i64>) -> Libr
         }
         let mut members = members(write, page).await?;
         let mut stored = stored(write, &albums).await?;
+        read_credited(write, &albums, &members, &stored).await?;
         for album in albums {
             let key = album.key.raw();
             resolve_album(
@@ -90,6 +92,9 @@ async fn members(
         .bind(serde_json::to_string(albums)?)
         .fetch_all(write.connection().await?)
         .await?;
+    write
+        .read_keys::<Track>(&rows.iter().map(|row| row.1).collect::<Vec<_>>())
+        .await?;
     let mut members = HashMap::<i64, Vec<Member>>::new();
     for (album, key, release, group, album_tags) in rows {
         if let Some(track) = write.get::<Track>(key).await? {
@@ -105,6 +110,55 @@ async fn members(
         members.sort_by(|left, right| order(&left.track).cmp(&order(&right.track)));
     }
     Ok(members)
+}
+
+/// Reads the artists and genres these albums name, through their members or their headers,
+/// in one statement per kind and source.
+async fn read_credited(
+    write: &mut Write<'_>,
+    albums: &[Album],
+    members: &HashMap<i64, Vec<Member>>,
+    stored: &HashMap<i64, Stored>,
+) -> LibraryResult<()> {
+    let tracks = members.values().flatten().map(|member| &member.track);
+    let artists = tracks
+        .clone()
+        .flat_map(|track| track.album_artists.iter().map(|artist| artist.raw()))
+        .collect::<Vec<_>>();
+    let genres = tracks
+        .flat_map(|track| track.tags.iter())
+        .filter(|(kind, _)| *kind == TagKind::Genre)
+        .map(|(_, key)| *key)
+        .collect::<Vec<_>>();
+    write.read_keys::<Artist>(&artists).await?;
+    write.read_keys::<Tag>(&genres).await?;
+    let mut named = HashMap::<_, (Vec<String>, Vec<String>)>::new();
+    for album in albums.iter().filter(|album| album.input) {
+        let Some(input) = stored
+            .get(&album.key.raw())
+            .and_then(|stored| stored.input.as_ref())
+        else {
+            continue;
+        };
+        let header = parsed::<AlbumMetadata>(input);
+        let (artists, genres) = named.entry(album.source).or_default();
+        artists.extend(
+            header
+                .album_artists
+                .into_iter()
+                .map(|credit| credit.object_id),
+        );
+        genres.extend(header.genres.into_iter().map(|tag| tag.object_id));
+    }
+    for (source, (artists, genres)) in named {
+        let artists = artists.iter().map(String::as_str).collect::<Vec<_>>();
+        let genres = genres.iter().map(String::as_str).collect::<Vec<_>>();
+        write.read_objects::<Artist>(source, None, &artists).await?;
+        write
+            .read_objects::<Tag>(source, Some(TagKind::Genre), &genres)
+            .await?;
+    }
+    Ok(())
 }
 
 fn order(track: &Track) -> (Option<&str>, i64, i64, Option<&str>, i64) {

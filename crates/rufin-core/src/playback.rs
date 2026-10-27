@@ -534,8 +534,10 @@ impl PlaybackOwner {
                 &catalog,
                 request,
                 local.as_ref(),
+                // A track's file comes through Connect only while Connect is on.
                 connect
                     .as_deref()
+                    .filter(|connect| connect.status().settings.enabled)
                     .map(|connect| (connect, occurrence.as_ref())),
                 move |source_id| async move {
                     tokio::task::spawn_blocking(move || {

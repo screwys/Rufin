@@ -385,6 +385,7 @@ async fn occurrence_media_and_progress_follow_the_exact_uri() {
         fixture
             .catalog
             .apply_queue_update(&library::QueueUpdate {
+                state: true,
                 current_index: Some(position),
                 progress_millis: (position as i64 + 1) * 1_000,
                 ..Default::default()
@@ -944,6 +945,7 @@ async fn saved_membership_keeps_provenance_metadata_and_source_identity_across_f
     fixture
         .catalog
         .apply_queue_update(&library::QueueUpdate {
+            state: true,
             repeat_mode: QueueRepeatMode::One,
             ..Default::default()
         })

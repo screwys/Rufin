@@ -96,6 +96,24 @@ impl super::Observation<'_> {
             // Entry tracks the source has not described yet are remembered by identity.
             let mut keys = std::collections::HashMap::new();
             let mut stubs = Vec::new();
+            let objects = page
+                .iter()
+                .map(|entry| entry.track_id.as_str())
+                .collect::<Vec<_>>();
+            write
+                .read_objects::<super::records::Track>(source, None, &objects)
+                .await?;
+            let uris = page
+                .iter()
+                .map(|entry| {
+                    crate::source_entity_uri(&SourceId::new(source_id), "track", &entry.track_id)
+                })
+                .collect::<Vec<_>>();
+            write
+                .read_naturals::<super::records::Track>(
+                    &uris.iter().map(String::as_str).collect::<Vec<_>>(),
+                )
+                .await?;
             for entry in page {
                 if keys.contains_key(&entry.track_id) {
                     continue;
@@ -157,6 +175,7 @@ impl super::Observation<'_> {
             let (table, key) = (R::TABLE.name, R::TABLE.key);
             let keys: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT {key} FROM {table} WHERE source_key=?1 AND native_favorite IS NOT (object_id IN(SELECT value FROM json_each(?2)))")))
                 .bind(source).bind(serde_json::to_string(ids)?).fetch_all(write.connection().await?).await?;
+            write.read_keys::<R>(&keys).await?;
             for key in keys {
                 if let Some(mut record) = write.get::<R>(key).await? {
                     let favorite = record

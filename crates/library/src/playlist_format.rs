@@ -449,10 +449,11 @@ pub(crate) async fn import_playlist_on(
     let before = sqlx::query_scalar::<_, i64>("SELECT total_changes()")
         .fetch_one(write.connection().await?)
         .await?;
-    let mut tracks = Vec::with_capacity(entries.len());
-    for entry in &entries {
-        tracks.push(write.put_reference(&entry.track).await?);
-    }
+    let references = entries
+        .iter()
+        .map(|entry| entry.track.clone())
+        .collect::<Vec<_>>();
+    let tracks = write.put_references(&references).await?;
     changed |= sqlx::query_scalar::<_, i64>("SELECT total_changes()")
         .fetch_one(write.connection().await?)
         .await?

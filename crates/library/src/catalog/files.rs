@@ -354,6 +354,7 @@ async fn write_track_membership(
     }
     let mut albums = Vec::new();
     let mut changed = false;
+    write.read_keys::<Track>(tracks).await?;
     for key in tracks {
         let Some(mut track) = write.get::<Track>(*key).await? else {
             continue;
@@ -397,6 +398,7 @@ pub(crate) async fn delete_physical_files(
     .bind(&input)
     .fetch_all(write.connection().await?)
     .await?;
+    write.read_keys::<Track>(&linked).await?;
     for key in linked {
         if let Some(mut track) = write.get::<Track>(key).await? {
             track.local_file = None;
@@ -600,7 +602,7 @@ pub(crate) async fn write_file_observations_on(
     }
     super::merge::tracks(write, source_key, source_id, &songs, admit, true, touched).await?;
     if accessible && !files.is_empty() {
-        // Each observed file links the tracks it carries.
+        // Each observed file links the tracks it carries; only links that differ are read.
         let expected: Vec<(i64, crate::LocalFileKey)> = sqlx::query_as("WITH paths AS MATERIALIZED(
                 SELECT DISTINCT file.local_file_key,file.path FROM json_each(?2) input
                 JOIN local_file_observations access ON access.path=json_extract(input.value,'$[0].path')
@@ -608,13 +610,18 @@ pub(crate) async fn write_file_observations_on(
               SELECT track.track_key,file.local_file_key FROM paths file
                 JOIN track_details details ON details.source_path=file.path AND details.cue_path IS NULL
                 JOIN tracks track ON track.track_key=details.track_key AND track.source_key=?1
+                    AND track.local_file_key IS NOT file.local_file_key
               UNION ALL SELECT track.track_key,file.local_file_key FROM paths file
                 JOIN track_details details ON details.cue_path=file.path
-                JOIN tracks track ON track.track_key=details.track_key AND track.source_key=?1")
+                JOIN tracks track ON track.track_key=details.track_key AND track.source_key=?1
+                    AND track.local_file_key IS NOT file.local_file_key")
                 .bind(source)
                 .bind(serde_json::to_string(files)?)
                 .fetch_all(write.connection().await?)
                 .await?;
+        write
+            .read_keys::<Track>(&expected.iter().map(|(key, _)| *key).collect::<Vec<_>>())
+            .await?;
         for (key, file) in expected {
             if write.newer(Family::Track, key) {
                 continue;
@@ -828,13 +835,26 @@ async fn merge_local_file_uris_on(
     if aliases.is_empty() {
         return Ok(());
     }
-    let mut candidates = Vec::new();
-    for uri in aliases
+    let uris = aliases
         .iter()
-        .flat_map(|(previous, current, _)| [previous, current])
-    {
+        .flat_map(|(previous, current, _)| [previous.as_str(), current.as_str()])
+        .collect::<Vec<_>>();
+    write.read_naturals::<Track>(&uris).await?;
+    let mut candidates = Vec::new();
+    for uri in &uris {
         candidates.extend(write.by_natural::<Track>(uri).await?);
     }
+    // An old URI with no row that holds nothing moved on an earlier walk.
+    let previous = aliases
+        .iter()
+        .map(|(previous, _, _)| previous.as_str())
+        .collect::<Vec<_>>();
+    let held: HashSet<String> = sqlx::query_scalar("SELECT value FROM json_each(?1) WHERE EXISTS(SELECT 1 FROM user_state WHERE media_uri=value) OR EXISTS(SELECT 1 FROM listens WHERE media_uri=value) OR EXISTS(SELECT 1 FROM lyrics_cache WHERE media_uri=value) OR EXISTS(SELECT 1 FROM downloads WHERE media_uri=value) OR EXISTS(SELECT 1 FROM local_locators WHERE media_uri=value AND origin<>'import')")
+        .bind(serde_json::to_string(&previous)?)
+        .fetch_all(write.connection().await?)
+        .await?
+        .into_iter()
+        .collect();
     let mut merged = false;
     for (previous, current, object_id) in aliases {
         if previous == current {
@@ -842,6 +862,9 @@ async fn merge_local_file_uris_on(
         }
         let target = write.by_natural::<Track>(current).await?;
         let mut old = write.by_natural::<Track>(previous).await?;
+        if old.is_none() && !held.contains(previous) {
+            continue;
+        }
         let old_identity = match &old {
             Some(track) => track_identity(write, track).await?,
             None => None,

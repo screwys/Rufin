@@ -1015,6 +1015,9 @@ async fn refresh_access_audio(
     for page in tracks.chunks(128) {
         let changed: Vec<(i64, Vec<u8>, Vec<u8>, Option<i64>, Option<i64>)> = sqlx::query_as("SELECT track_key,chosen,source_loudness_analysis_key,cue_start_millis,cue_end_millis FROM(SELECT track.track_key,details.source_loudness_analysis_key,details.loudness_analysis_key,details.cue_start_millis,details.cue_end_millis,coalesce((SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.media_uri=track.media_uri ORDER BY CASE access.origin WHEN 'mapping' THEN 0 ELSE 1 END,access.local_access_file_key LIMIT 1),details.source_loudness_analysis_key) chosen FROM tracks track JOIN track_details details USING(track_key) WHERE track.track_key IN(SELECT value FROM json_each(?1))) WHERE loudness_analysis_key IS NOT chosen")
             .bind(serde_json::to_string(page)?).fetch_all(write.connection().await?).await?;
+        write
+            .read_keys::<Track>(&changed.iter().map(|row| row.0).collect::<Vec<_>>())
+            .await?;
         for (key, chosen, _, _, _) in changed {
             let Some(track) = write.get::<Track>(key).await? else {
                 continue;
@@ -1034,6 +1037,7 @@ async fn refresh_access_audio(
 /// Refreshes the loudness keys of the tracks with these URIs and has their albums analysed again.
 async fn refresh_uri_audio(write: &mut Write<'_>, uris: &[&str]) -> LibraryResult<()> {
     let mut tracks = Vec::new();
+    write.read_naturals::<Track>(uris).await?;
     for uri in uris {
         if let Some(track) = write.by_natural::<Track>(uri).await? {
             tracks.push(track.key.raw());

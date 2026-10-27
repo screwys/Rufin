@@ -37,6 +37,8 @@ pub(super) struct Sequence {
     revision: u64,
     progress_millis: u64,
     dirty: Option<library::QueueUpdate>,
+    /// The current index, repeat and shuffle last saved.
+    saved: Option<(Option<usize>, RepeatMode, bool)>,
     metadata_read: Option<MetadataRead>,
 }
 
@@ -55,6 +57,7 @@ impl Sequence {
             revision: 0,
             progress_millis: 0,
             dirty: None,
+            saved: None,
             metadata_read: Some(MetadataRead::Missing),
         }
     }
@@ -105,6 +108,7 @@ impl Sequence {
             revision,
             progress_millis: window.progress_millis.max(0) as u64,
             dirty: None,
+            saved: Some((window.current_index, window.repeat_mode, window.shuffled)),
             metadata_read: Some(MetadataRead::Missing),
         };
         if sequence
@@ -226,6 +230,11 @@ impl Sequence {
     }
     pub(super) fn take_persistence(&mut self) -> Option<library::QueueUpdate> {
         let mut update = self.dirty.take()?;
+        let settings = (self.selected_index, self.repeat_mode, self.shuffle_enabled);
+        update.state |= update.replace || self.saved != Some(settings);
+        if update.state {
+            self.saved = Some(settings);
+        }
         update.current_index = self.selected_index;
         update.progress_millis = self.progress_millis as i64;
         update.repeat_mode = self.repeat_mode;
@@ -304,8 +313,9 @@ impl Sequence {
         });
         self.changed(true);
     }
+    /// Saves the position with the rest: on pause, stop, track change, seek and exit.
     pub(super) fn persist_state(&mut self) {
-        self.dirty.get_or_insert_default();
+        self.dirty.get_or_insert_default().state = true;
     }
     pub(super) fn revision(&self) -> u64 {
         self.revision

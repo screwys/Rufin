@@ -6,7 +6,7 @@
 //! Catalog and publishes one Change before it releases the writer.
 //! The lock order is always the writer, then the Catalog.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use serde_json::{Map, Value};
@@ -222,6 +222,10 @@ pub(crate) struct Overlay<R> {
     fetched: HashMap<i64, R>,
     naturals: HashMap<String, i64>,
     objects: HashMap<(SourceKey, Option<TagKind>, String), i64>,
+    /// Keys, natural keys and object ids a batch read found no row for.
+    missing_keys: HashSet<i64>,
+    missing_naturals: HashSet<String>,
+    missing_objects: HashSet<(SourceKey, Option<TagKind>, String)>,
 }
 
 impl<R> Default for Overlay<R> {
@@ -232,6 +236,9 @@ impl<R> Default for Overlay<R> {
             fetched: HashMap::new(),
             naturals: HashMap::new(),
             objects: HashMap::new(),
+            missing_keys: HashSet::new(),
+            missing_naturals: HashSet::new(),
+            missing_objects: HashSet::new(),
         }
     }
 }
@@ -328,12 +335,13 @@ impl UserChanges {
 pub(crate) struct Write<'a> {
     catalog: &'a Catalog,
     writer: WriterGuard<'a>,
-    sources: Overlay<Source>,
-    folders: Overlay<Folder>,
-    artists: Overlay<Artist>,
-    tags: Overlay<Tag>,
-    albums: Overlay<Album>,
-    tracks: Overlay<Track>,
+    // Boxed: the futures of syncs and scans hold a Write, and they nest deeply.
+    sources: Box<Overlay<Source>>,
+    folders: Box<Overlay<Folder>>,
+    artists: Box<Overlay<Artist>>,
+    tags: Box<Overlay<Tag>>,
+    albums: Box<Overlay<Album>>,
+    tracks: Box<Overlay<Track>>,
     touched: Touched,
     /// The walk this Write belongs to, when an observation started one.
     pub(super) walk: Option<u64>,
@@ -369,12 +377,12 @@ impl Catalog {
         Ok(Write {
             catalog: self,
             writer,
-            sources: Overlay::default(),
-            folders: Overlay::default(),
-            artists: Overlay::default(),
-            tags: Overlay::default(),
-            albums: Overlay::default(),
-            tracks: Overlay::default(),
+            sources: Box::default(),
+            folders: Box::default(),
+            artists: Box::default(),
+            tags: Box::default(),
+            albums: Box::default(),
+            tracks: Box::default(),
             touched: Touched::default(),
             walk: None,
             seen: Vec::new(),
@@ -392,8 +400,12 @@ impl Catalog {
 impl<'a> Write<'a> {
     /// A row by key: staged, read before, or read from the Store now.
     pub(crate) async fn get<R: Resident>(&mut self, key: i64) -> LibraryResult<Option<R>> {
-        if let Some(known) = R::overlay(self).known(key) {
+        let overlay = R::overlay(self);
+        if let Some(known) = overlay.known(key) {
             return Ok(known.cloned());
+        }
+        if overlay.missing_keys.contains(&key) {
+            return Ok(None);
         }
         let condition = format!("{}.{}=?1", R::TABLE.name, R::TABLE.key);
         self.read::<R>(&condition, |query| query.bind(key)).await
@@ -410,6 +422,9 @@ impl<'a> Write<'a> {
             if let Some(record) = known.filter(|record| record.natural() == natural) {
                 return Ok(Some(record.clone()));
             }
+        }
+        if overlay.missing_naturals.contains(natural) {
+            return Ok(None);
         }
         let condition = format!("{}.{}=?1", R::TABLE.name, R::TABLE.natural);
         let record = self
@@ -433,6 +448,9 @@ impl<'a> Write<'a> {
         {
             return Ok(Some(record.clone()));
         }
+        if overlay.missing_objects.contains(&identity) {
+            return Ok(None);
+        }
         let record = self
             .read::<R>(R::TABLE.object, |query| {
                 query
@@ -442,6 +460,113 @@ impl<'a> Write<'a> {
             })
             .await?;
         Ok(record.filter(matches))
+    }
+
+    /// Reads the rows of these keys in one statement per page, so the per-item reads that
+    /// follow answer from memory, also for keys the Store holds no row for.
+    pub(crate) async fn read_keys<R: Resident>(&mut self, keys: &[i64]) -> LibraryResult<()> {
+        let condition = format!(
+            "{}.{} IN(SELECT value FROM json_each(?1))",
+            R::TABLE.name,
+            R::TABLE.key
+        );
+        for page in keys.chunks(READ_KEYS) {
+            let found = self
+                .read_all::<R>(&condition, serde_json::to_string(page)?, None)
+                .await?;
+            let overlay = R::overlay_mut(self);
+            for key in page {
+                if !found.contains(key) {
+                    overlay.missing_keys.insert(*key);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Reads the rows of these natural keys, as `read_keys` does.
+    pub(crate) async fn read_naturals<R: Resident>(
+        &mut self,
+        naturals: &[&str],
+    ) -> LibraryResult<()> {
+        let condition = format!(
+            "{}.{} IN(SELECT value FROM json_each(?1))",
+            R::TABLE.name,
+            R::TABLE.natural
+        );
+        for page in naturals.chunks(READ_KEYS) {
+            self.read_all::<R>(&condition, serde_json::to_string(page)?, None)
+                .await?;
+            let overlay = R::overlay_mut(self);
+            for natural in page {
+                if !overlay.naturals.contains_key(*natural) {
+                    overlay.missing_naturals.insert((*natural).to_owned());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Reads the rows of these object ids of a source, as `read_keys` does.
+    pub(crate) async fn read_objects<R: Resident>(
+        &mut self,
+        source: SourceKey,
+        tag: Option<TagKind>,
+        objects: &[&str],
+    ) -> LibraryResult<()> {
+        let condition = R::TABLE.object.replace(
+            "object_id=?2",
+            "object_id IN(SELECT value FROM json_each(?2))",
+        );
+        for page in objects.chunks(READ_KEYS) {
+            self.read_all::<R>(
+                &condition,
+                serde_json::to_string(page)?,
+                Some((source, tag)),
+            )
+            .await?;
+            let overlay = R::overlay_mut(self);
+            for object in page {
+                let identity = (source, tag, (*object).to_owned());
+                if !overlay.objects.contains_key(&identity) {
+                    overlay.missing_objects.insert(identity);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Reads rows by a condition over a JSON array, remembering each. Returns their keys.
+    async fn read_all<R: Resident>(
+        &mut self,
+        condition: &str,
+        values: String,
+        object: Option<(SourceKey, Option<TagKind>)>,
+    ) -> LibraryResult<HashSet<i64>> {
+        let select = R::TABLE.select(condition);
+        let query = sqlx::query(sqlx::AssertSqlSafe(select.as_str()));
+        let query = match object {
+            Some((source, tag)) => query
+                .bind(source)
+                .bind(values)
+                .bind(tag.map(|kind| kind as i64)),
+            None => query.bind(values),
+        };
+        let rows = query.fetch_all(&mut *self.writer).await?;
+        let snapshot = self.catalog.snapshot();
+        let mut found = HashSet::new();
+        for row in rows {
+            let mut record = R::read(&row)?;
+            found.insert(record.key());
+            if R::overlay(self).known(record.key()).is_some() {
+                continue;
+            }
+            record.links(&snapshot);
+            let overlay = R::overlay_mut(self);
+            overlay.remember(&record);
+            overlay.fetched.insert(record.key(), record);
+        }
+        Ok(found)
     }
 
     /// Reads one row. A row this Write staged answers from its staged version, so a row that

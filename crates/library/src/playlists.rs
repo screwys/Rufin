@@ -562,14 +562,14 @@ async fn remember_uris(
         match selection {
             MemberSelection::Concat(parts) => pending.extend(parts.iter().rev()),
             MemberSelection::Uris(uris) => {
-                for uri in uris.iter() {
-                    write
-                        .put_reference(&crate::TrackReference {
-                            media_uri: uri.clone(),
-                            ..Default::default()
-                        })
-                        .await?;
-                }
+                let references = uris
+                    .iter()
+                    .map(|uri| crate::TrackReference {
+                        media_uri: uri.clone(),
+                        ..Default::default()
+                    })
+                    .collect::<Vec<_>>();
+                write.put_references(&references).await?;
             }
             _ => {}
         }
