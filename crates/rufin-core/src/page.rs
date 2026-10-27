@@ -6,8 +6,9 @@ use library::{
 };
 
 use crate::browse::{
-    AlbumListContent, AlbumListPage, DetailContent, DetailPage, FolderEntry, OpenOptions,
-    OpenedCollection, library_list_key, uses_activity,
+    AlbumListContent, AlbumListPage, ArtistReleasePage, DetailContent, DetailPage, DetailSummary,
+    FolderEntry, MemberPage, OpenOptions, OpenedCollection, library_list_key, member_read,
+    release_query, uses_activity,
 };
 use crate::route::{CollectionCategory, Route};
 use crate::runtime::{CatalogChange, CatalogPublication, SelectedLibrary};
@@ -74,7 +75,14 @@ impl SourceOwner {
     ) -> library::LibraryResult<Page> {
         let settings = self.shared.settings.load().ui;
         let opened = self
-            .open_collection(&route, selected.as_ref(), &options, window, cancel)
+            .open_collection(
+                &route,
+                selected.as_ref(),
+                &options,
+                &settings,
+                window,
+                cancel,
+            )
             .await?;
         // Smart Playlists keep the members they opened with when the page reads again.
         options.smart_opened = match &opened {
@@ -102,6 +110,15 @@ impl SourceOwner {
     }
 }
 
+/// What a page reads again.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Reread {
+    /// The page, as [`Page::reread`] reads it.
+    Page,
+    /// An artist page's releases, as [`Page::reread_releases`] reads them.
+    Releases,
+}
+
 impl Page {
     pub fn opened(&self) -> &OpenedCollection {
         &self.opened
@@ -109,6 +126,10 @@ impl Page {
 
     pub fn route(&self) -> &Route {
         &self.route
+    }
+
+    pub fn selected(&self) -> Option<&SelectedLibrary> {
+        self.selected.as_ref()
     }
 
     pub fn options(&self) -> &OpenOptions {
@@ -121,59 +142,173 @@ impl Page {
             .library_list(library_list_key(&self.route, self.options.category))
     }
 
+    /// The track rows of a track page or a detail page.
+    pub fn tracks(&self) -> Option<&MemberPage> {
+        match &self.opened {
+            OpenedCollection::Tracks(page)
+            | OpenedCollection::Detail(Some(DetailPage {
+                content: DetailContent::Tracks(page),
+                ..
+            })) => Some(page),
+            _ => None,
+        }
+    }
+
     /// Reads the page again with `options` and current settings. A folder keeps the folder it
-    /// opened, so new child folders show when the route opens again.
+    /// opened, so new child folders show when the route opens again. Album, artist track, genre
+    /// and mood pages and Discography read their rows again by key and keep their header, so a
+    /// collection that is gone reads as empty.
     pub async fn reread(
         &self,
         options: OpenOptions,
         window: library::RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<Page> {
-        let (OpenedCollection::Folders(folders), Some(selected)) = (&self.opened, &self.selected)
-        else {
-            return self
-                .owner
-                .open_page(
-                    self.route.clone(),
-                    self.selected.clone(),
-                    options,
-                    window,
-                    cancel,
-                )
-                .await;
-        };
         let settings = self.owner.shared.settings.load().ui;
-        let opened = OpenedCollection::Folders(
-            self.owner
-                .folder_page(
-                    selected,
-                    folders.projection.clone(),
+        self.read_again(options, settings, window, cancel).await
+    }
+
+    /// Reads an artist page's releases again with `options` and current settings. The header
+    /// and favorite tracks are not read, so the new page has no favorites; a page whose track
+    /// order moved since it read reads again whole.
+    pub async fn reread_releases(
+        &self,
+        options: OpenOptions,
+        window: library::RouteSeedWindow,
+        cancel: &ReadCancellation,
+    ) -> library::LibraryResult<Page> {
+        let settings = self.owner.shared.settings.load().ui;
+        match &self.opened {
+            OpenedCollection::Detail(Some(DetailPage {
+                summary,
+                content: DetailContent::Releases { page, .. },
+            })) if self.settings_reread(&settings) != Some(Reread::Page) => {
+                self.releases(summary, page, options, settings, window, cancel)
+                    .await
+            }
+            _ => self.read_again(options, settings, window, cancel).await,
+        }
+    }
+
+    async fn read_again(
+        &self,
+        options: OpenOptions,
+        settings: Settings,
+        window: library::RouteSeedWindow,
+        cancel: &ReadCancellation,
+    ) -> library::LibraryResult<Page> {
+        let opened = match (&self.opened, &self.selected) {
+            (OpenedCollection::Folders(folders), Some(selected)) => OpenedCollection::Folders(
+                self.owner
+                    .folder_page(
+                        &self.route,
+                        selected,
+                        folders.projection.clone(),
+                        &options,
+                        &settings,
+                        window,
+                        cancel,
+                    )
+                    .await?,
+            ),
+            (
+                OpenedCollection::Detail(Some(DetailPage {
+                    summary,
+                    content: DetailContent::Tracks(tracks),
+                })),
+                _,
+            ) if !matches!(
+                self.route,
+                Route::PlaylistDetail(_) | Route::SmartPlaylistDetail(_)
+            ) =>
+            {
+                let read = member_read(
+                    &self.route,
+                    self.selected.as_ref(),
                     &options,
-                    window,
-                    cancel,
-                )
-                .await?,
-        );
-        Ok(Page {
+                    &settings,
+                    tracks.read.collection.clone(),
+                );
+                OpenedCollection::Detail(Some(DetailPage {
+                    summary: summary.clone(),
+                    content: DetailContent::Tracks(
+                        MemberPage::load(&self.owner.shared.catalog, read, window, cancel).await?,
+                    ),
+                }))
+            }
+            (
+                OpenedCollection::Detail(Some(DetailPage {
+                    summary,
+                    content: DetailContent::Releases { page, .. },
+                })),
+                _,
+            ) if matches!(
+                self.route,
+                Route::ArtistDiscography(_) | Route::AlbumArtistDiscography(_)
+            ) =>
+            {
+                return self
+                    .releases(summary, page, options, settings, window, cancel)
+                    .await;
+            }
+            _ => {
+                return self
+                    .owner
+                    .open_page(
+                        self.route.clone(),
+                        self.selected.clone(),
+                        options,
+                        window,
+                        cancel,
+                    )
+                    .await;
+            }
+        };
+        Ok(self.read_as(options, settings, opened))
+    }
+
+    async fn releases(
+        &self,
+        summary: &DetailSummary,
+        page: &ArtistReleasePage,
+        options: OpenOptions,
+        settings: Settings,
+        window: library::RouteSeedWindow,
+        cancel: &ReadCancellation,
+    ) -> library::LibraryResult<Page> {
+        let query = release_query(page.query.clone(), &options, &settings);
+        let page =
+            ArtistReleasePage::load(&self.owner.shared.catalog, query, window, cancel).await?;
+        let opened = OpenedCollection::Detail(Some(DetailPage {
+            summary: summary.clone(),
+            content: DetailContent::Releases {
+                page: Box::new(page),
+                favorites: None,
+            },
+        }));
+        Ok(self.read_as(options, settings, opened))
+    }
+
+    fn read_as(&self, options: OpenOptions, settings: Settings, opened: OpenedCollection) -> Page {
+        Page {
             owner: self.owner.clone(),
             route: self.route.clone(),
             selected: self.selected.clone(),
             options,
             settings,
             opened,
-        })
+        }
     }
 
-    /// Whether `current` settings change what the page reads. Named lists read again on every
+    /// What `current` settings make the page read again. Named lists read again on every
     /// settings change.
-    pub fn settings_changed(&self, current: &Settings) -> bool {
+    pub fn settings_reread(&self, current: &Settings) -> Option<Reread> {
         let lists = |key| (self.settings.library_list(key), current.library_list(key));
         let order = |key| {
             let (read, current) = lists(key);
             read.sort_key != current.sort_key || read.descending != current.descending
         };
-        match &self.opened {
-            OpenedCollection::Home(_) | OpenedCollection::Search(_) => false,
+        let changed = match &self.opened {
             OpenedCollection::Albums(_) => {
                 let (read, current) = lists(LibraryListKey::Albums);
                 (read.layout == LibraryLayout::Detail) != (current.layout == LibraryLayout::Detail)
@@ -192,10 +327,14 @@ impl Page {
                 Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)
             ) =>
             {
-                order(LibraryListKey::ArtistTracks) || order(LibraryListKey::ArtistAlbums)
+                if order(LibraryListKey::ArtistTracks) {
+                    return Some(Reread::Page);
+                }
+                return order(LibraryListKey::ArtistAlbums).then_some(Reread::Releases);
             }
             _ => order(library_list_key(&self.route, self.options.category)),
-        }
+        };
+        changed.then_some(Reread::Page)
     }
 
     /// Whether a favorite change can move or drop rows: the page lists only favorites or sorts
@@ -253,13 +392,8 @@ impl Page {
     /// The member read behind a track page, for selections and plays.
     pub fn members(&self) -> Option<&MemberRead> {
         match &self.opened {
-            OpenedCollection::Tracks(page)
-            | OpenedCollection::Detail(Some(DetailPage {
-                content: DetailContent::Tracks(page),
-                ..
-            })) => Some(&page.read),
             OpenedCollection::Folders(page) => Some(&page.read),
-            _ => None,
+            _ => self.tracks().map(|page| &page.read),
         }
     }
 

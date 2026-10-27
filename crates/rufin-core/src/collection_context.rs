@@ -64,9 +64,9 @@ impl CollectionTarget {
         }
     }
 
-    /// The whole collection a context id names. Ids decorated with a page's filter or order
-    /// name part of a collection and read as nothing.
-    pub fn parse(context_id: &str) -> Option<Self> {
+    /// The collection a context id names. A keyed id decorated with a page's filter or order
+    /// reads as nothing; an album or artist id keeps its decoration and so matches no row.
+    fn parse(context_id: &str) -> Option<Self> {
         let (kind, id) = context_id.split_once(':')?;
         let key = || id.parse::<i64>().ok();
         Some(match kind {

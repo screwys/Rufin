@@ -16,7 +16,7 @@ use localization::{album_count_text, msgid, track_count_text};
 use crate::CatalogUi;
 use crate::{LibraryLayout, LibraryListKey};
 use gtk_widgets::artwork::CoverGroupProjection;
-use gtk_widgets::mounted_route::MountedRoute;
+use gtk_widgets::mounted_route::{MountedRoute, PageReread};
 
 use super::collections::{
     LibraryCollectionProjection, LibraryPresentationProjection, collection_column_width,
@@ -74,11 +74,7 @@ impl CatalogUi {
         R: CollectionRow<Key = K>,
     {
         let (captured, initial) = R::opened(opened.opened()).expect("named collection page");
-        let library::Page {
-            count,
-            first_row_position,
-            rows: first_rows,
-        } = initial.clone();
+        let count = initial.count;
         let favorites_only = captured.favorites_only;
         let applied = Rc::new(RefCell::new(captured.clone()));
         let load_request = Rc::clone(&applied);
@@ -101,7 +97,7 @@ impl CatalogUi {
         gtk_widgets::media_drag::install_parent_selection(&sparse, Rc::clone(&applied), {
             move |row| row.playback(key)
         });
-        sparse.seed_matching_at(first_row_position, first_rows, {
+        sparse.seed_matching_at(initial.first_row_position, initial.rows.clone(), {
             let row_key = Rc::clone(&row_key);
             move |row| row_key(row)
         });
@@ -132,6 +128,9 @@ impl CatalogUi {
                 else {
                     return false;
                 };
+                if !(shell.is_current)() {
+                    return false;
+                }
                 applied.replace(read.clone());
                 let row_key = Rc::clone(&row_key);
                 if !sparse.replace_prepared_at(
@@ -151,7 +150,8 @@ impl CatalogUi {
                 true
             }
         };
-        let reread = self.page_reread(
+        let reread = PageReread::new(
+            self.runtime.clone(),
             "mounted named collection",
             opened,
             crate::routes::list_inputs(&search),

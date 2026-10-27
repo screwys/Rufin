@@ -1,4 +1,5 @@
 use super::*;
+use rufin_core::collection_context::CollectionTarget;
 
 #[uniffi::export]
 impl AndroidBrowseQuery {
@@ -14,16 +15,15 @@ impl AndroidBrowseQuery {
     }
 
     pub fn context_id(&self) -> String {
-        let context = rufin_core::collection_context::CollectionTarget::for_route(&self.route)
-            .map_or_else(
-                || {
-                    format!(
-                        "android:{}",
-                        serde_json::to_string(&self.route).expect("Route serialization")
-                    )
-                },
-                |target| target.context_id(),
-            );
+        let context = CollectionTarget::for_route(&self.route).map_or_else(
+            || {
+                format!(
+                    "android:{}",
+                    serde_json::to_string(&self.route).expect("Route serialization")
+                )
+            },
+            |target| target.context_id(),
+        );
         format!(
             "{context}|query={}|source={}|folder={:?}|sort={:?}|descending={}|favorites={}|downloaded={}",
             self.filter,
@@ -239,8 +239,9 @@ impl AndroidBrowseQuery {
                         None,
                         title,
                         format!(
-                            "album:{}|query=|sort={:?}|descending={}",
-                            album_media_uri.as_deref().unwrap_or_default(),
+                            "{}|query=|sort={:?}|descending={}",
+                            CollectionTarget::Album(album_media_uri.unwrap_or_default())
+                                .context_id(),
                             self.album_tracks.sort_key,
                             self.album_tracks.descending
                         ),

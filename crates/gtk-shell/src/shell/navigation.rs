@@ -16,6 +16,7 @@ use gtk_media_menus::media_menus::{
 };
 use gtk_widgets::cover_controls::cover_play_only_hover_controls;
 use gtk_widgets::selection::collection_play_request;
+use rufin_core::collection_context::CollectionTarget;
 use rufin_core::playback::PlayRequest;
 
 use crate::{SidebarPin, SidebarRouteItem};
@@ -1743,17 +1744,19 @@ fn sidebar_pin_transport_button(
     button
 }
 
+/// A pin's widget name. Collection pins use the collection's context id, which plays match.
 fn sidebar_pin_route_key(route: &Route) -> Option<String> {
-    match route {
-        Route::AlbumDetail(id) => Some(format!("sidebar-pin-album:{id}")),
-        Route::ArtistDetail(id) => Some(format!("sidebar-pin-artist:{id}")),
-        Route::AlbumArtistDetail(id) => Some(format!("sidebar-pin-album-artist:{id}")),
-        Route::GenreDetail(id) => Some(format!("sidebar-pin-genre:{id}")),
-        Route::PlaylistDetail(id) => Some(format!("sidebar-pin-playlist:{id}")),
-        Route::SmartPlaylistDetail(id) => Some(format!("sidebar-pin-smart-playlist:{id}")),
-        Route::PlaylistFolder { key, .. } => Some(format!("sidebar-pin-playlist-folder:{key}")),
-        _ => None,
-    }
+    let id = match route {
+        Route::AlbumDetail(_)
+        | Route::ArtistDetail(_)
+        | Route::AlbumArtistDetail(_)
+        | Route::GenreDetail(_)
+        | Route::PlaylistDetail(_)
+        | Route::SmartPlaylistDetail(_) => CollectionTarget::for_route(route)?.context_id(),
+        Route::PlaylistFolder { key, .. } => format!("playlist-folder:{key}"),
+        _ => return None,
+    };
+    Some(format!("sidebar-pin-{id}"))
 }
 
 pub(crate) fn sidebar_route_at_position(shell: &Shell, position: usize) -> Option<Route> {

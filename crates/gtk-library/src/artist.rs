@@ -1,11 +1,7 @@
 use rufin_core::browse::{DetailContent, DetailPage, DetailSummary, OpenOptions, OpenedCollection};
 use rufin_core::collection_context::CollectionTarget;
 use rufin_core::page::Page;
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-    sync::Arc,
-};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use adw::prelude::*;
 use artwork::ArtworkBinding;
@@ -146,35 +142,29 @@ impl CatalogUi {
             ARTIST_RELEASE_TITLES,
             *page,
         ));
-        // A release search reads only the releases again; other rereads show the whole page.
-        let whole = Rc::new(Cell::new(true));
         let apply = {
             let shell = Rc::downgrade(self);
             let favorite = favorite.clone();
             let favorite_scroller = favorite_scroller.clone();
             let releases = Rc::clone(&releases);
             let header = header.clone();
-            let whole = Rc::clone(&whole);
             move |page: &Page| {
                 let (
                     Some(shell),
                     OpenedCollection::Detail(Some(DetailPage {
                         summary: DetailSummary::Artist(summary),
-                        content:
-                            DetailContent::Releases {
-                                page,
-                                favorites: Some(favorite_tracks),
-                            },
+                        content: DetailContent::Releases { page, favorites },
                     })),
                 ) = (shell.upgrade(), page.opened())
                 else {
                     return false;
                 };
-                if !whole.get() {
+                // A release reread leaves the header and favorite tracks as they are.
+                let Some(favorite_tracks) = favorites else {
                     releases.replace_page(page.as_ref().clone());
                     shell.reapply_current_track();
                     return true;
-                }
+                };
                 header.replace(&shell, summary.as_ref().clone());
                 favorite.replace_page(favorite_tracks.clone());
                 let present = !favorite.source_is_empty();
@@ -196,7 +186,8 @@ impl CatalogUi {
         };
         let favorite_search = favorite.search();
         let filters = Rc::downgrade(&releases);
-        let reread = self.page_reread(
+        let reread = PageReread::new(
+            self.runtime.clone(),
             "mounted Artist route",
             opened,
             move |options| OpenOptions {
@@ -206,14 +197,10 @@ impl CatalogUi {
             },
             apply,
         );
-        connect_artist_release_requests(self, &releases, &reread, Some(Rc::clone(&whole)));
+        connect_artist_release_requests(self, &releases, &reread);
         let refresh = {
             let reread = Rc::clone(&reread);
-            let whole = Rc::clone(&whole);
-            Rc::new(move || {
-                whole.set(true);
-                reread.reread();
-            }) as Rc<dyn Fn()>
+            Rc::new(move || reread.reread()) as Rc<dyn Fn()>
         };
 
         let resume = {
@@ -235,15 +222,8 @@ impl CatalogUi {
                     .current
                     .borrow()
                     .library_list(LibraryListKey::ArtistAlbums);
-                let release_order_changed = releases.apply_library_list_settings(&album_settings);
-                if reread
-                    .page()
-                    .settings_changed(&shell.settings.current.borrow())
-                {
-                    // A new release order reads the releases; a new track order the whole page.
-                    whole.set(!release_order_changed);
-                    reread.reread();
-                }
+                releases.apply_library_list_settings(&album_settings);
+                reread.resume(&shell.settings.current.borrow());
             })
         };
         let download_rows = Rc::clone(&releases.sparse);
@@ -389,7 +369,8 @@ impl CatalogUi {
             }
         };
         let filters = Rc::downgrade(&releases);
-        let reread = self.page_reread(
+        let reread = PageReread::new(
+            self.runtime.clone(),
             "mounted Discography route",
             opened,
             move |options| OpenOptions {
@@ -398,7 +379,7 @@ impl CatalogUi {
             },
             apply,
         );
-        connect_artist_release_requests(self, &releases, &reread, None);
+        connect_artist_release_requests(self, &releases, &reread);
         let resume = {
             let releases = Rc::clone(&releases);
             let shell = Rc::downgrade(self);
@@ -533,12 +514,11 @@ impl CatalogUi {
     }
 }
 
-/// Release searches read the releases again; `whole` marks that the rest of the page stays.
+/// Release searches read the releases again.
 fn connect_artist_release_requests(
     shell: &Rc<CatalogUi>,
     releases: &Rc<ArtistReleaseProjections>,
     reread: &Rc<PageReread>,
-    whole: Option<Rc<Cell<bool>>>,
 ) {
     for index in 0..ARTIST_RELEASE_TITLES.len() {
         let Some(search) = releases.section_search(index) else {
@@ -547,7 +527,6 @@ fn connect_artist_release_requests(
         let weak_shell = Rc::downgrade(shell);
         let releases = Rc::downgrade(releases);
         let reread = Rc::downgrade(reread);
-        let whole = whole.clone();
         search.connect_search_changed(move |_| {
             let (Some(shell), Some(releases), Some(reread)) =
                 (weak_shell.upgrade(), releases.upgrade(), reread.upgrade())
@@ -561,10 +540,7 @@ fn connect_artist_release_requests(
                     .borrow()
                     .library_list(LibraryListKey::ArtistAlbums),
             );
-            if let Some(whole) = &whole {
-                whole.set(false);
-            }
-            reread.reread();
+            reread.reread_releases();
         });
     }
 }

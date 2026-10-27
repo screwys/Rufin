@@ -1,4 +1,4 @@
-use rufin_core::browse::{DetailContent, DetailPage, MemberPage, OpenOptions, OpenedCollection};
+use rufin_core::browse::{OpenOptions, OpenedCollection};
 use rufin_core::page::Page;
 use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
 
@@ -26,18 +26,6 @@ struct RootTrackRouteOptions {
     key: LibraryListKey,
     context: &'static str,
     empty_body: &'static str,
-}
-
-/// The track rows a track page or a detail page opened with.
-pub(crate) fn member_page(page: &Page) -> Option<&MemberPage> {
-    match page.opened() {
-        OpenedCollection::Tracks(tracks)
-        | OpenedCollection::Detail(Some(DetailPage {
-            content: DetailContent::Tracks(tracks),
-            ..
-        })) => Some(tracks),
-        _ => None,
-    }
 }
 
 pub struct SearchableTrackOptions {
@@ -130,8 +118,9 @@ impl TrackListProjection {
 }
 
 impl TrackListProjection {
-    /// The page's one reread, for this list's search and the inputs `scope` adds. A search
-    /// reads at once when it clears and after a pause while typing.
+    /// The page's rereads, for this list's search and the inputs `scope` adds. A search reads
+    /// at once when it clears and after a pause while typing. Rows read while the route is not
+    /// current are dropped.
     pub fn page_reread(
         &self,
         shell: &Rc<CatalogUi>,
@@ -142,7 +131,9 @@ impl TrackListProjection {
     ) -> Rc<PageReread> {
         let inputs = list_inputs(&self.search);
         let model = self.model.clone();
-        let reread = shell.page_reread(
+        let current = Rc::downgrade(shell);
+        let reread = PageReread::new(
+            shell.runtime.clone(),
             context,
             page,
             move |options| {
@@ -151,8 +142,10 @@ impl TrackListProjection {
                 options
             },
             move |page| {
-                let replaced =
-                    member_page(page).is_some_and(|tracks| model.replace_page(tracks.clone()));
+                let replaced = current.upgrade().is_some_and(|shell| (shell.is_current)())
+                    && page
+                        .tracks()
+                        .is_some_and(|tracks| model.replace_page(tracks.clone()));
                 if replaced {
                     changed(page);
                 }
@@ -209,64 +202,77 @@ pub(crate) fn connect_list_search(search: &gtk::SearchEntry, reread: &Rc<PageRer
 }
 
 impl CatalogUi {
-    pub fn opened_collection_view(
-        self: &Rc<Self>,
-        page: Page,
-        selected: Option<rufin_core::runtime::SelectedLibrary>,
-    ) -> MountedRoute {
+    pub fn opened_collection_view(self: &Rc<Self>, page: Page) -> MountedRoute {
         let route = page.route().clone();
-        match page.opened().clone() {
-            OpenedCollection::Tracks(tracks) => match route {
-                Route::History => self.history_route(page, tracks),
-                Route::Favorites => {
-                    self.favorites_route(page, tracks, selected.expect("source collection"))
+        let selected = page.selected().cloned();
+        match page.opened() {
+            OpenedCollection::Tracks(tracks) => {
+                let tracks = tracks.clone();
+                match route {
+                    Route::History => self.history_route(page, tracks),
+                    Route::Favorites => {
+                        self.favorites_route(page, tracks, selected.expect("source collection"))
+                    }
+                    _ => self.library_tracks_route(
+                        page,
+                        tracks,
+                        selected.expect("source collection"),
+                    ),
                 }
-                _ => self.library_tracks_route(page, tracks, selected.expect("source collection")),
-            },
-            OpenedCollection::Detail(detail) => match route {
-                Route::AlbumDetail(_) => self.album_detail_view(page, detail),
-                Route::ArtistDetail(_) | Route::AlbumArtistDetail(_) => self.artist_detail_view(
-                    matches!(route, Route::AlbumArtistDetail(_)),
-                    page,
-                    detail,
-                ),
-                Route::ArtistDiscography(_) | Route::AlbumArtistDiscography(_) => {
-                    self.artist_discography_view(page, detail)
-                }
-                Route::ArtistTracks(_) | Route::AlbumArtistTracks(_) => self.artist_tracks_view(
-                    matches!(route, Route::AlbumArtistTracks(_)),
-                    page,
-                    detail,
-                ),
-                Route::ArtistFavoriteTracks(_) | Route::AlbumArtistFavoriteTracks(_) => self
-                    .artist_favorite_tracks_view(
-                        matches!(route, Route::AlbumArtistFavoriteTracks(_)),
+            }
+            OpenedCollection::Detail(detail) => {
+                let detail = detail.clone();
+                match route {
+                    Route::AlbumDetail(_) => self.album_detail_view(page, detail),
+                    Route::ArtistDetail(_) | Route::AlbumArtistDetail(_) => self
+                        .artist_detail_view(
+                            matches!(route, Route::AlbumArtistDetail(_)),
+                            page,
+                            detail,
+                        ),
+                    Route::ArtistDiscography(_) | Route::AlbumArtistDiscography(_) => {
+                        self.artist_discography_view(page, detail)
+                    }
+                    Route::ArtistTracks(_) | Route::AlbumArtistTracks(_) => self
+                        .artist_tracks_view(
+                            matches!(route, Route::AlbumArtistTracks(_)),
+                            page,
+                            detail,
+                        ),
+                    Route::ArtistFavoriteTracks(_) | Route::AlbumArtistFavoriteTracks(_) => self
+                        .artist_favorite_tracks_view(
+                            matches!(route, Route::AlbumArtistFavoriteTracks(_)),
+                            page,
+                            detail,
+                        ),
+                    Route::PlaylistDetail(key) => self.playlist_detail_route(key, page, detail),
+                    Route::SmartPlaylistDetail(key) => {
+                        self.smart_playlist_detail_route(key, page, detail)
+                    }
+                    Route::GenreDetail(key) => self.named_detail_view(
+                        super::named_detail::NamedDetailId::Genre(key),
                         page,
                         detail,
                     ),
-                Route::PlaylistDetail(key) => self.playlist_detail_route(key, page, detail),
-                Route::SmartPlaylistDetail(key) => {
-                    self.smart_playlist_detail_route(key, page, detail)
+                    Route::MoodDetail(key) => self.named_detail_view(
+                        super::named_detail::NamedDetailId::Mood(key),
+                        page,
+                        detail,
+                    ),
+                    _ => unreachable!("detail renderer"),
                 }
-                Route::GenreDetail(key) => self.named_detail_view(
-                    super::named_detail::NamedDetailId::Genre(key),
-                    page,
-                    detail,
-                ),
-                Route::MoodDetail(key) => self.named_detail_view(
-                    super::named_detail::NamedDetailId::Mood(key),
-                    page,
-                    detail,
-                ),
-                _ => unreachable!("detail renderer"),
-            },
-            OpenedCollection::Albums(albums) => self.library_albums_route(page, albums),
-            OpenedCollection::Artists { read, .. } => self.library_artist_list_route(page, &read),
+            }
+            OpenedCollection::Albums(albums) => {
+                let albums = albums.clone();
+                self.library_albums_route(page, albums)
+            }
+            OpenedCollection::Artists { .. } => self.library_artist_list_route(page),
             OpenedCollection::Genres { .. } => self.library_genres_route(page),
             OpenedCollection::Moods { .. } => self.library_moods_route(page),
             OpenedCollection::Playlists { .. } => self.library_playlists_route(page),
             OpenedCollection::SmartPlaylists { .. } => self.library_smart_playlists_route(page),
             OpenedCollection::Folders(folders) => {
+                let folders = folders.clone();
                 let Route::Folders { path } = route else {
                     unreachable!("folder renderer")
                 };
@@ -277,24 +283,12 @@ impl CatalogUi {
                     Ok(folders),
                 )
             }
-            OpenedCollection::Home(home) => self.home_route(selected.expect("home source"), *home),
+            OpenedCollection::Home(home) => {
+                let home = home.as_ref().clone();
+                self.home_route(selected.expect("home source"), home)
+            }
             OpenedCollection::Search(_) => self.search_route(),
         }
-    }
-
-    /// The mounted page's one reread. `inputs` gives what the route wants read now, from the
-    /// options the page opened with; `apply` shows a new page and says whether it took it.
-    pub(crate) fn page_reread(
-        self: &Rc<Self>,
-        context: &'static str,
-        page: Page,
-        inputs: impl Fn(&OpenOptions) -> OpenOptions + 'static,
-        apply: impl Fn(&Page) -> bool + 'static,
-    ) -> Rc<PageReread> {
-        let shell = Rc::downgrade(self);
-        PageReread::new(self.runtime.clone(), context, page, inputs, move |page| {
-            shell.upgrade().is_some_and(|shell| (shell.is_current)()) && apply(page)
-        })
     }
 
     pub fn scrolling_track_projection(
@@ -372,6 +366,9 @@ impl CatalogUi {
                 else {
                     return false;
                 };
+                if !(shell.is_current)() {
+                    return false;
+                }
                 applied_query.replace(albums.read.clone());
                 let settings = shell.settings.current.borrow().library_list(key);
                 let current_models = models.borrow().clone();
@@ -401,7 +398,8 @@ impl CatalogUi {
                 true
             }
         };
-        let reread = self.page_reread(
+        let reread = PageReread::new(
+            self.runtime.clone(),
             "mounted Albums route",
             opened_page,
             list_inputs(&search),
@@ -572,18 +570,28 @@ impl CatalogUi {
         let page = self.track_page_shell(key, msgid("Nothing played yet"), &projection);
         let apply_page = page.clone();
         let apply_projection = projection.clone();
-        let current_only = Rc::new(std::cell::Cell::new(false));
-        let scope = Rc::clone(&current_only);
+        // The current source as the filter was picked; later source changes leave it.
+        let source = Rc::new(RefCell::new(None));
+        let scope = Rc::clone(&source);
         let reread = projection.page_reread(
             self,
             "History filter",
             opened,
-            move |options| options.history_current_only = scope.get(),
+            move |options| options.history_source.clone_from(&scope.borrow()),
             move |_| apply_page.set_empty(apply_projection.source_is_empty()),
         );
         let filter_reread = Rc::downgrade(&reread);
-        page.configure_history_filter(self.history_source_name.clone(), move |current| {
-            current_only.set(current);
+        let filter_shell = Rc::downgrade(self);
+        page.configure_history_filter(self.history_source_name.clone(), move |current_only| {
+            source.replace(
+                current_only
+                    .then(|| {
+                        filter_shell
+                            .upgrade()
+                            .and_then(|shell| (shell.history_source_id)())
+                    })
+                    .flatten(),
+            );
             if let Some(reread) = filter_reread.upgrade() {
                 reread.reread();
             }
@@ -591,22 +599,19 @@ impl CatalogUi {
         self.mount_track_page(key, projection, page, reread)
     }
 
-    pub fn library_artist_list_route(
-        self: &Rc<Self>,
-        page: Page,
-        captured: &library::ListRead,
-    ) -> MountedRoute {
-        let key = if matches!(
-            captured.kind,
-            library::ListKind::Artists { album_artist: true }
-        ) {
+    pub fn library_artist_list_route(self: &Rc<Self>, page: Page) -> MountedRoute {
+        let OpenedCollection::Artists { read, .. } = page.opened() else {
+            unreachable!("artist list renderer")
+        };
+        let key = if matches!(read.kind, library::ListKind::Artists { album_artist: true }) {
             LibraryListKey::AlbumArtists
         } else {
             LibraryListKey::Artists
         };
+        let favorites_only = read.favorites_only;
         self.collection_list_route(
             key,
-            if captured.favorites_only {
+            if favorites_only {
                 msgid("No favorite artists yet")
             } else {
                 msgid("Nothing here yet")

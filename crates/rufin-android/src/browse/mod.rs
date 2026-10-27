@@ -240,7 +240,11 @@ impl AndroidBrowseQuery {
             descending: Some(self.descending),
             favorites_only: self.favorites_only,
             downloaded_only: self.downloaded_only,
-            history_current_only: self.history_current_only,
+            history_source: self
+                .selected
+                .as_ref()
+                .filter(|_| self.history_current_only)
+                .map(|selected| selected.source_id.clone()),
             smart_opened: self.smart_opened,
             ..Default::default()
         }

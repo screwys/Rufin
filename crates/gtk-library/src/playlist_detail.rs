@@ -125,8 +125,8 @@ impl PlaylistDetailOwner {
         }
     }
 
-    /// The playlist a page read again shows; a page without it keeps what it shows.
-    fn reread(&self, page: &Page) -> Option<Self> {
+    /// The playlist as a page read again shows it; `None` when the page lacks it.
+    fn read_from(&self, page: &Page) -> Option<Self> {
         let OpenedCollection::Detail(Some(detail)) = page.opened() else {
             return None;
         };
@@ -316,12 +316,13 @@ impl CatalogUi {
             apply,
             move |apply_owner| {
                 let apply_entries = Rc::clone(&reread_entries);
-                let reread = shell.page_reread(
+                let reread = PageReread::new(
+                    shell.runtime.clone(),
                     "mounted Playlist route",
                     opened,
                     crate::routes::list_inputs(&reread_search),
                     move |page| {
-                        let Some(tracks) = crate::routes::member_page(page) else {
+                        let Some(tracks) = page.tracks() else {
                             return false;
                         };
                         apply_entries.replace_prepared(tracks, page.list_settings());
@@ -352,7 +353,9 @@ impl CatalogUi {
                     let page = reread.page();
                     // Read the shown entries again in place unless the search or order moved.
                     let window = if reread.wanted() == *page.options()
-                        && !page.settings_changed(&shell.settings.current.borrow())
+                        && page
+                            .settings_reread(&shell.settings.current.borrow())
+                            .is_none()
                     {
                         library::RouteSeedWindow::position(reread_entries.first_live_position())
                     } else {
@@ -380,7 +383,6 @@ impl CatalogUi {
         }))
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn shared_playlist_detail_route(
         self: &Rc<Self>,
         owner: PlaylistDetailOwner,
@@ -521,7 +523,7 @@ impl CatalogUi {
             let cover = cover.clone();
             Rc::new(move |page: &Page| {
                 let Some(shell) = shell.upgrade() else { return };
-                let Some(next) = owner.borrow().reread(page) else {
+                let Some(next) = owner.borrow().read_from(page) else {
                     return;
                 };
                 if *owner.borrow() == next {

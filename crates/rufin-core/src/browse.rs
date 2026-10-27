@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::route::{CollectionCategory, Route};
 use crate::runtime::SelectedLibrary;
+use crate::settings::app::Settings;
 use crate::settings::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
 use library::{
     Catalog, Collection, ListKind, ListRead, MemberRead, MemberRow, Page, ReadCancellation,
@@ -16,7 +17,7 @@ pub struct ArtistReleasePage {
 }
 
 impl ArtistReleasePage {
-    pub async fn load(
+    pub(crate) async fn load(
         catalog: &Catalog,
         query: ListRead,
         window: library::RouteSeedWindow,
@@ -210,7 +211,8 @@ pub struct OpenOptions {
     pub descending: Option<bool>,
     pub favorites_only: bool,
     pub downloaded_only: bool,
-    pub history_current_only: bool,
+    /// The one source History lists; every source when `None`.
+    pub history_source: Option<sources::SourceId>,
     pub release_filters: Option<[String; 6]>,
     /// When a Smart Playlist page first opened. Reopening the page with it keeps the members
     /// the page opened with; plays and syncs change them on the next visit.
@@ -227,7 +229,7 @@ impl Default for OpenOptions {
             descending: None,
             favorites_only: false,
             downloaded_only: false,
-            history_current_only: false,
+            history_source: None,
             release_filters: None,
             smart_opened: None,
         }
@@ -242,7 +244,7 @@ pub struct MemberPage {
 }
 
 impl MemberPage {
-    pub async fn load(
+    pub(crate) async fn load(
         catalog: &Catalog,
         read: MemberRead,
         window: library::RouteSeedWindow,
@@ -277,6 +279,8 @@ pub enum DetailContent {
     Tracks(MemberPage),
     Releases {
         page: Box<ArtistReleasePage>,
+        /// The artist's favorite tracks, when the read included them: an artist page reads
+        /// them, while Discography and a release reread do not.
         favorites: Option<MemberPage>,
     },
 }
@@ -299,7 +303,7 @@ pub struct FolderPage {
 }
 
 impl FolderPage {
-    pub async fn load(
+    pub(crate) async fn load(
         catalog: &Catalog,
         source: library::SourceKey,
         projection: crate::source::folders::FolderProjection,
@@ -422,7 +426,7 @@ pub fn supports_downloaded_filter(route: &Route, category: CollectionCategory) -
 
 /// Whether plays change what an open route shows. An open Smart Playlist keeps the list it
 /// opened with; plays change its members on the next visit.
-pub fn uses_activity(route: &Route, settings: &LibraryListSettings) -> bool {
+pub(crate) fn uses_activity(route: &Route, settings: &LibraryListSettings) -> bool {
     if matches!(route, Route::SmartPlaylistDetail(_)) {
         return false;
     }
@@ -447,21 +451,14 @@ pub fn uses_activity(route: &Route, settings: &LibraryListSettings) -> bool {
 }
 
 impl crate::source::SourceOwner {
-    pub async fn album_list_page(
+    async fn album_list_page(
         &self,
         read: ListRead,
+        settings: &Settings,
         window: library::RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<AlbumListPage> {
-        if self
-            .shared
-            .settings
-            .load()
-            .ui
-            .library_list(LibraryListKey::Albums)
-            .layout
-            != LibraryLayout::Detail
-        {
+        if settings.library_list(LibraryListKey::Albums).layout != LibraryLayout::Detail {
             return Ok(AlbumListPage {
                 content: AlbumListContent::Rows(
                     read.page_albums(&self.shared.catalog, window, cancel)
@@ -507,12 +504,12 @@ impl crate::source::SourceOwner {
         route: &Route,
         selected: Option<&SelectedLibrary>,
         options: &OpenOptions,
+        settings: &Settings,
         window: library::RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<OpenedCollection> {
         let catalog = &self.shared.catalog;
-        let settings = self.shared.settings.load();
-        let (sort, descending, activity) = read_order(route, options, &settings.ui);
+        let (sort, descending, activity) = read_order(route, options, settings);
         let folder = selected.and_then(|selected| selected.music_folder_key);
         let source = selected.map(|selected| selected.source_key);
         let require_source = || {
@@ -523,31 +520,13 @@ impl crate::source::SourceOwner {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |duration| duration.as_secs() as i64)
         });
-        let favorites = options.favorites_only && supports_favorite_filter(route, options.category)
-            || matches!(
-                route,
-                Route::Favorites
-                    | Route::ArtistFavoriteTracks(_)
-                    | Route::AlbumArtistFavoriteTracks(_)
-            );
-        let member = |collection| {
-            let mut read = MemberRead::new(collection);
-            read.sort = Some(sort);
-            read.descending = descending;
-            read.folder = folder;
-            read.filter.clone_from(&options.filter);
-            read.favorites_only = favorites;
-            read.downloaded_only =
-                options.downloaded_only && supports_downloaded_filter(route, options.category);
-            read.activity = activity;
-            read
-        };
+        let member = |collection| member_read(route, selected, options, settings, collection);
         let list = |kind| {
             let mut read = ListRead::new(kind, source, sort);
             read.folder = folder;
             read.filter.clone_from(&options.filter);
             read.descending = descending;
-            read.favorites_only = favorites;
+            read.favorites_only = favorites_only(route, options);
             read.activity = activity;
             read
         };
@@ -589,21 +568,15 @@ impl crate::source::SourceOwner {
                         artist: row.artist_key,
                         album_artist: role,
                         release_class: None,
-                        filters: options.release_filters.as_ref().map(|filters| {
-                            Arc::new(std::array::from_fn(|index| filters[index].clone()))
-                        }),
+                        filters: None,
                     });
                     query.source = Some(row.source_key);
-                    if options.sort.is_none() {
-                        let albums = settings.ui.library_list(LibraryListKey::ArtistAlbums);
-                        query.sort = albums.sort_key.catalog_sort();
-                        query.descending = options.descending.unwrap_or(albums.descending);
-                    }
+                    let query = release_query(query, options, settings);
                     let page =
                         Box::new(ArtistReleasePage::load(catalog, query, window, cancel).await?);
                     let favorites =
                         if matches!(route, Route::ArtistDetail(_) | Route::AlbumArtistDetail(_)) {
-                            let tracks = settings.ui.library_list(LibraryListKey::ArtistTracks);
+                            let tracks = settings.library_list(LibraryListKey::ArtistTracks);
                             let mut read = read;
                             read.sort = Some(tracks.sort_key.catalog_sort());
                             read.descending = tracks.descending;
@@ -734,12 +707,7 @@ impl crate::source::SourceOwner {
                 MemberPage::load(
                     catalog,
                     member(Collection::History {
-                        // History does not follow the selected source, so it may open without one.
-                        source: options
-                            .history_current_only
-                            .then(|| selected.cloned().or_else(|| self.shared.selected()))
-                            .flatten()
-                            .map(|selected| selected.source_id),
+                        source: options.history_source.clone(),
                     }),
                     window,
                     cancel,
@@ -752,7 +720,7 @@ impl crate::source::SourceOwner {
             {
                 require_source()?;
                 OpenedCollection::Albums(
-                    self.album_list_page(list(ListKind::Albums), window, cancel)
+                    self.album_list_page(list(ListKind::Albums), settings, window, cancel)
                         .await?,
                 )
             }
@@ -810,8 +778,10 @@ impl crate::source::SourceOwner {
                 )
                 .await?;
                 OpenedCollection::Folders(
-                    self.folder_page(selected, projection, options, window, cancel)
-                        .await?,
+                    self.folder_page(
+                        route, selected, projection, options, settings, window, cancel,
+                    )
+                    .await?,
                 )
             }
             Route::Home => {
@@ -823,7 +793,7 @@ impl crate::source::SourceOwner {
                             folder,
                             showcase,
                             explore,
-                            &settings.ui.application.home_blocks,
+                            &settings.application.home_blocks,
                             cancel,
                         )
                         .await?,
@@ -846,18 +816,18 @@ impl crate::source::SourceOwner {
         })
     }
 
-    /// Reads a folder that is already resolved, with current settings.
+    /// Reads a folder that is already resolved.
     pub(crate) async fn folder_page(
         &self,
+        route: &Route,
         selected: &SelectedLibrary,
         projection: crate::source::folders::FolderProjection,
         options: &OpenOptions,
+        settings: &Settings,
         window: library::RouteSeedWindow,
         cancel: &ReadCancellation,
     ) -> library::LibraryResult<FolderPage> {
-        let settings = self.shared.settings.load();
-        let (sort, descending, activity) =
-            read_order(&Route::Folders { path: Vec::new() }, options, &settings.ui);
+        let (sort, descending, activity) = read_order(route, options, settings);
         let mut read = projection.members(selected.source_key);
         read.sort = Some(sort);
         read.descending = descending;
@@ -879,7 +849,7 @@ impl crate::source::SourceOwner {
 fn read_order(
     route: &Route,
     options: &OpenOptions,
-    settings: &crate::settings::app::Settings,
+    settings: &Settings,
 ) -> (library::CatalogSort, bool, bool) {
     let display = settings.library_list(library_list_key(route, options.category));
     let sort = options.sort.unwrap_or(display.sort_key).catalog_sort();
@@ -889,4 +859,53 @@ fn read_order(
         descending,
         uses_activity(route, &display) || sort.activity_sensitive(),
     )
+}
+
+fn favorites_only(route: &Route, options: &OpenOptions) -> bool {
+    options.favorites_only && supports_favorite_filter(route, options.category)
+        || matches!(
+            route,
+            Route::Favorites | Route::ArtistFavoriteTracks(_) | Route::AlbumArtistFavoriteTracks(_)
+        )
+}
+
+/// How `route` reads the members of `collection`.
+pub(crate) fn member_read(
+    route: &Route,
+    selected: Option<&SelectedLibrary>,
+    options: &OpenOptions,
+    settings: &Settings,
+    collection: Collection,
+) -> MemberRead {
+    let (sort, descending, activity) = read_order(route, options, settings);
+    let mut read = MemberRead::new(collection);
+    read.sort = Some(sort);
+    read.descending = descending;
+    read.folder = selected.and_then(|selected| selected.music_folder_key);
+    read.filter.clone_from(&options.filter);
+    read.favorites_only = favorites_only(route, options);
+    read.downloaded_only =
+        options.downloaded_only && supports_downloaded_filter(route, options.category);
+    read.activity = activity;
+    read
+}
+
+/// An artist's releases, searched and ordered as `options` and the release list settings ask.
+pub(crate) fn release_query(
+    mut query: ListRead,
+    options: &OpenOptions,
+    settings: &Settings,
+) -> ListRead {
+    if let ListKind::ArtistAlbums { filters, .. } = &mut query.kind {
+        *filters = options
+            .release_filters
+            .as_ref()
+            .map(|filters| Arc::new(std::array::from_fn(|index| filters[index].clone())));
+    }
+    if options.sort.is_none() {
+        let albums = settings.library_list(LibraryListKey::ArtistAlbums);
+        query.sort = albums.sort_key.catalog_sort();
+        query.descending = options.descending.unwrap_or(albums.descending);
+    }
+    query
 }

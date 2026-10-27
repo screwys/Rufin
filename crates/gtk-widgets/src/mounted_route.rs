@@ -190,8 +190,8 @@ impl<T: Send + 'static, R: Send + 'static> Drop for LatestMountedRouteRead<T, R>
     }
 }
 
-/// A mounted route's open page and its one reread. The route says what it wants read and how a
-/// new page applies; a page the route rejects is not kept.
+/// A mounted route's open page and the reads that replace it; the latest request wins. The route
+/// says what it wants read and how a new page applies; a page the route rejects is not kept.
 pub struct PageReread {
     page: RefCell<Arc<rufin_core::page::Page>>,
     inputs: Box<dyn Fn(&rufin_core::browse::OpenOptions) -> rufin_core::browse::OpenOptions>,
@@ -201,6 +201,7 @@ pub struct PageReread {
 #[derive(Clone)]
 struct PageRequest {
     page: Arc<rufin_core::page::Page>,
+    read: rufin_core::page::Reread,
     options: rufin_core::browse::OpenOptions,
     window: library::RouteSeedWindow,
 }
@@ -231,11 +232,17 @@ impl PageReread {
             });
             let load = Arc::new(|request: PageRequest, cancel: library::ReadCancellation| {
                 Box::pin(async move {
-                    request
-                        .page
-                        .reread(request.options, request.window, &cancel)
-                        .await
-                        .map_err(|error| error.to_string())
+                    let page = &request.page;
+                    match request.read {
+                        rufin_core::page::Reread::Page => {
+                            page.reread(request.options, request.window, &cancel).await
+                        }
+                        rufin_core::page::Reread::Releases => {
+                            page.reread_releases(request.options, request.window, &cancel)
+                                .await
+                        }
+                    }
+                    .map_err(|error| error.to_string())
                 }) as Pin<Box<dyn Future<Output = _> + Send>>
             });
             Self {
@@ -261,17 +268,31 @@ impl PageReread {
     }
 
     pub fn reread_at(&self, window: library::RouteSeedWindow) {
+        self.request(rufin_core::page::Reread::Page, window);
+    }
+
+    /// Reads an artist page's releases again.
+    pub fn reread_releases(&self) {
+        self.request(
+            rufin_core::page::Reread::Releases,
+            library::RouteSeedWindow::top(),
+        );
+    }
+
+    fn request(&self, read: rufin_core::page::Reread, window: library::RouteSeedWindow) {
         self.read.request_with(PageRequest {
             page: self.page(),
+            read,
             options: self.wanted(),
             window,
         });
     }
 
-    /// Reads again when `settings` change what the page reads.
+    /// Reads again what `settings` change.
     pub fn resume(&self, settings: &rufin_core::settings::app::Settings) {
-        if self.page.borrow().settings_changed(settings) {
-            self.reread();
+        let read = self.page.borrow().settings_reread(settings);
+        if let Some(read) = read {
+            self.request(read, library::RouteSeedWindow::top());
         }
     }
 

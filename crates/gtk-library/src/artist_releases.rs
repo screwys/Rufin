@@ -863,11 +863,7 @@ impl ArtistReleaseProjections {
             .layout_cycle()
     }
 
-    pub fn apply_library_list_settings(&self, settings: &LibraryListSettings) -> bool {
-        let query_changed = self.sections.first().is_some_and(|section| {
-            let previous = section.applied_settings.borrow();
-            previous.sort_key != settings.sort_key || previous.descending != settings.descending
-        });
+    pub fn apply_library_list_settings(&self, settings: &LibraryListSettings) {
         let next_layout = normalized_artist_layout(settings.layout);
         let previous_fields = self.grid_fields.borrow().clone();
         self.layout.set(next_layout);
@@ -885,7 +881,6 @@ impl ArtistReleaseProjections {
             self.grid_fields.replace(settings.grid_fields.clone());
             (self.apply_grid_fields)(&settings.grid_fields);
         }
-        query_changed
     }
 }
 

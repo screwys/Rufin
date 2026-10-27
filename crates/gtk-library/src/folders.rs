@@ -8,7 +8,7 @@ use rufin_core::playback::QueuePlacement;
 
 use crate::{CatalogUi, LibraryField, LibraryListKey};
 use gtk_widgets::interactions::install_context_menu_openers;
-use gtk_widgets::mounted_route::MountedRoute;
+use gtk_widgets::mounted_route::{MountedRoute, PageReread};
 use rufin_core::browse::OpenedCollection;
 use rufin_core::page::Page;
 
@@ -312,7 +312,8 @@ fn folder_page(
             true
         }
     };
-    let reread = shell.page_reread(
+    let reread = PageReread::new(
+        shell.runtime.clone(),
         "mounted Folder route",
         opened,
         crate::routes::list_inputs(&search),
@@ -342,7 +343,8 @@ fn folder_page(
             let query_changed = *requested.borrow() != filter
                 || reread
                     .page()
-                    .settings_changed(&shell.settings.current.borrow());
+                    .settings_reread(&shell.settings.current.borrow())
+                    .is_some();
             requested.replace(filter);
             if refresh || query_changed {
                 let position = folder_sparse

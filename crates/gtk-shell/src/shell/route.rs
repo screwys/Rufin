@@ -261,7 +261,7 @@ impl Shell {
                 (OpenedCollection::Home(home), Some(apply)) => apply(home.as_ref().clone()),
                 _ => {
                     shell.replace_mounted_route(route, source_id, render_started, move |catalog| {
-                        catalog.opened_collection_view(page, selected)
+                        catalog.opened_collection_view(page)
                     })
                 }
             }
