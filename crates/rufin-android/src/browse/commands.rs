@@ -96,6 +96,7 @@ impl AndroidLibrary {
         descending: bool,
         favorites_only: bool,
         downloaded_only: bool,
+        smart_opened: Option<i64>,
     ) -> Result<Arc<AndroidBrowseQuery>, AndroidError> {
         let history_current_only = category == "current";
         let category = CollectionCategory::from_name(&category);
@@ -126,6 +127,7 @@ impl AndroidLibrary {
             route,
             home_snapshot: tokio::sync::OnceCell::new(),
             history_current_only,
+            smart_opened,
             favorites_only,
             downloaded_only,
             category,
@@ -500,6 +502,7 @@ impl AndroidLibrary {
         descending: bool,
         favorites_only: bool,
         downloaded_only: bool,
+        smart_opened: Option<i64>,
     ) -> Result<Arc<AndroidBrowseQuery>, AndroidError> {
         self.browse_query(
             route,
@@ -509,6 +512,7 @@ impl AndroidLibrary {
             descending,
             favorites_only,
             downloaded_only,
+            smart_opened,
         )
     }
 
@@ -783,6 +787,7 @@ impl AndroidLibrary {
             false,
             false,
             false,
+            None,
         )
     }
 }

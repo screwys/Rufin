@@ -488,6 +488,8 @@ pub(crate) struct Inputs {
     pub(crate) periods: HashMap<Option<i64>, HashMap<i64, Played>>,
     /// Release classes of albums by key.
     pub(crate) classes: HashMap<i64, AlbumReleaseClass>,
+    /// A smart playlist's members as of the time its page opened, by track key.
+    pub(crate) smart: Option<Arc<Vec<i64>>>,
 }
 
 /// A lowercase haystack matcher for list filters.
@@ -789,14 +791,13 @@ impl Context<'_> {
                     })
                     .collect()
             }
-            Collection::Smart { key, .. } => match snapshot.smart_playlists.get(&key.raw()) {
-                Some(smart) => self
-                    .evaluate(&smart.definition, inputs)
-                    .into_iter()
-                    .map(member)
-                    .collect(),
-                None => Vec::new(),
-            },
+            Collection::Smart { .. } => inputs
+                .smart
+                .as_deref()
+                .map_or_else(Vec::new, |tracks| self.listed_tracks(tracks))
+                .into_iter()
+                .map(member)
+                .collect(),
             Collection::History { .. } => Vec::new(),
         }
     }
@@ -1109,19 +1110,34 @@ impl Context<'_> {
     }
 
     /// Totals of a smart playlist's members.
+    /// A smart playlist's totals: of the members its open page holds, or evaluated now.
     pub(crate) fn smart_totals(
         &self,
         definition: &SmartPlaylistDefinition,
         inputs: &Inputs,
+        opened: Option<&[i64]>,
     ) -> Totals {
         let mut totals = Totals::default();
-        for slot in self.evaluate(definition, inputs) {
+        let slots = match opened {
+            Some(tracks) => self.listed_tracks(tracks),
+            None => self.evaluate(definition, inputs),
+        };
+        for slot in slots {
             totals.add(
                 &self.snapshot.tracks.records[slot as usize],
                 Played::default(),
             );
         }
         totals
+    }
+
+    /// Slots of the tracks still listed, in the given order.
+    fn listed_tracks(&self, keys: &[i64]) -> Vec<u32> {
+        let tracks = &self.snapshot.tracks;
+        keys.iter()
+            .filter_map(|key| tracks.slot(*key))
+            .filter(|slot| tracks.live(*slot).is_some_and(|record| record.indexed()))
+            .collect()
     }
 
     /// Whether a playlist is listed: it has a name and its source still lists it.
@@ -1150,7 +1166,7 @@ impl Context<'_> {
                     sort: playlist.name.to_lowercase(),
                     position: playlist.position,
                     totals: if totals {
-                        self.smart_totals(&playlist.definition, inputs)
+                        self.smart_totals(&playlist.definition, inputs, None)
                     } else {
                         Totals::default()
                     },
@@ -1805,7 +1821,20 @@ pub(crate) struct Views {
     derived: Vec<BuiltDerived>,
     /// Most recently used last.
     orders: Vec<CachedOrder>,
+    /// Members of the smart playlists pages opened most recently, oldest first.
+    opened: Vec<OpenedSmart>,
 }
+
+/// A smart playlist's members as of the time a page opened it. The page keeps that time, so
+/// plays and syncs while it stays open don't move its rows; the next visit evaluates again.
+struct OpenedSmart {
+    key: i64,
+    now: i64,
+    definition: SmartPlaylistDefinition,
+    tracks: Arc<Vec<i64>>,
+}
+
+const OPENED_SMART: usize = 8;
 
 struct BuiltDerived {
     revision: u64,
@@ -1943,6 +1972,34 @@ impl Catalog {
                         *now,
                     )
                     .await?;
+                    let tracks = match self.opened_smart(key.raw(), *now, &definition) {
+                        Some(tracks) => tracks,
+                        None => {
+                            let snapshot = self.snapshot();
+                            let tracks = Arc::new(
+                                Context::new(&snapshot, false)
+                                    .evaluate(&definition, &inputs)
+                                    .into_iter()
+                                    .filter_map(|slot| snapshot.tracks.key_of(slot))
+                                    .collect::<Vec<_>>(),
+                            );
+                            let mut views = self.views();
+                            views
+                                .opened
+                                .retain(|opened| opened.key != key.raw() || opened.now != *now);
+                            views.opened.push(OpenedSmart {
+                                key: key.raw(),
+                                now: *now,
+                                definition,
+                                tracks: tracks.clone(),
+                            });
+                            if views.opened.len() > OPENED_SMART {
+                                views.opened.remove(0);
+                            }
+                            tracks
+                        }
+                    };
+                    inputs.smart = Some(tracks);
                 }
             }
             _ => {}
@@ -1993,6 +2050,23 @@ impl Catalog {
             _ => {}
         }
         Ok(inputs)
+    }
+
+    /// The members a page that opened this smart playlist at `now` holds, while its rules
+    /// are unchanged.
+    pub(crate) fn opened_smart(
+        &self,
+        key: i64,
+        now: i64,
+        definition: &SmartPlaylistDefinition,
+    ) -> Option<Arc<Vec<i64>>> {
+        self.views()
+            .opened
+            .iter()
+            .find(|opened| {
+                opened.key == key && opened.now == now && opened.definition == *definition
+            })
+            .map(|opened| opened.tracks.clone())
     }
 
     /// Listens in the windows these smart playlists read, by track.

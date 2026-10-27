@@ -414,7 +414,13 @@ pub(crate) async fn smart_totals(
     let context = crate::catalog::views::Context::new(&snapshot, false);
     Ok(definitions
         .iter()
-        .map(|(key, definition)| (*key, context.smart_totals(definition, &inputs)))
+        .map(|(key, definition)| {
+            let opened = catalog.opened_smart(*key, now, definition);
+            (
+                *key,
+                context.smart_totals(definition, &inputs, opened.as_deref().map(Vec::as_slice)),
+            )
+        })
         .collect())
 }
 

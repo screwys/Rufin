@@ -182,7 +182,8 @@ internal class BrowsePage(
                 if (!pins && context.sourceId == null && kind !in listOf("Playlists", "PlaylistDetail", "SmartPlaylists", "SmartPlaylistDetail", "PlaylistFolder") &&
                     !(kind == "History" && context.category != "current")) return@mapLatest null
                 if (pins) library.importPlaylistPins()
-                val query = if (pins) null else library.browse(context.route, context.category, context.filter, context.sort, context.descending, context.favoritesOnly, context.downloadedOnly)
+                val query = if (pins) null else library.browse(context.route, context.category, context.filter, context.sort, context.descending, context.favoritesOnly, context.downloadedOnly,
+                    if (kind == "SmartPlaylistDetail") options.smartOpened ?: (System.currentTimeMillis() / 1000).also { options.smartOpened = it } else null)
                 val favoriteFilter = query?.supportsFavoriteFilter() == true
                 val downloadedFilter = query?.supportsDownloadedFilter() == true
                 val favoriteSeed = context.parentPage?.takeIf {

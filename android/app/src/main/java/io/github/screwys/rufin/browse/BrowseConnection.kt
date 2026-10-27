@@ -25,6 +25,8 @@ internal class BrowseOptions {
     var sort by mutableStateOf<io.github.screwys.rufin.shared.rufin_core.LibraryField?>(null)
     var descending by mutableStateOf(false)
     var displaySettings by mutableStateOf<AndroidBrowseDisplay?>(null)
+    /** When a Smart Playlist page opened: it keeps those members until the next visit. */
+    var smartOpened: Long? = null
 }
 
 internal data class BrowseLocation(

@@ -158,15 +158,9 @@ impl TrackCollectionModel {
     }
 
     pub fn query(&self) -> library::MemberRead {
-        let mut current = self.0.query.borrow_mut();
-        let TrackRead::Members(query) = &mut *current else {
+        let TrackRead::Members(query) = &*self.0.query.borrow() else {
             unreachable!("Related rows have no collection read")
         };
-        if let library::Collection::Smart { now, .. } = &mut query.collection {
-            *now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |duration| duration.as_secs() as i64);
-        }
         query.clone()
     }
 

@@ -1,7 +1,6 @@
 use rufin_core::browse::{DetailContent, DetailPage, DetailSummary};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use adw::prelude::*;
 use artwork::ArtworkBinding;
@@ -38,6 +37,8 @@ enum PlaylistDetailOwner {
     },
     Smart {
         key: SmartPlaylistKey,
+        /// When the page opened the playlist: its rows and totals stay as of then.
+        now: i64,
         summary: SmartPlaylistRow,
     },
 }
@@ -160,8 +161,12 @@ impl CatalogUi {
             ));
         };
         (self.update_smart_playlist_pin)(&summary);
+        let library::Collection::Smart { now, .. } = projection.read.collection else {
+            unreachable!("Smart Playlist pages read their playlist")
+        };
         let owner = PlaylistDetailOwner::Smart {
             key,
+            now,
             summary: *summary,
         };
         let list_key = owner.key();
@@ -545,17 +550,12 @@ impl CatalogUi {
                                     .pop();
                                 summary.map(|summary| PlaylistDetailOwner::Saved { key, summary })
                             }
-                            PlaylistDetailOwner::Smart { key, .. } => {
-                                let now = SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
-                                    .map_or(0, |duration| duration.as_secs() as i64);
-                                catalog
-                                    .smart_playlist_rows(&[key], now, &cancellation)
-                                    .await
-                                    .map_err(|error| error.to_string())?
-                                    .pop()
-                                    .map(|summary| PlaylistDetailOwner::Smart { key, summary })
-                            }
+                            PlaylistDetailOwner::Smart { key, now, .. } => catalog
+                                .smart_playlist_rows(&[key], now, &cancellation)
+                                .await
+                                .map_err(|error| error.to_string())?
+                                .pop()
+                                .map(|summary| PlaylistDetailOwner::Smart { key, now, summary }),
                         }
                         .ok_or_else(|| "Playlist no longer exists".to_string())
                     })

@@ -212,6 +212,9 @@ pub struct OpenOptions {
     pub downloaded_only: bool,
     pub history_current_only: bool,
     pub release_filters: Option<[String; 6]>,
+    /// When a Smart Playlist page first opened. Reopening the page with it keeps the members
+    /// the page opened with; plays and syncs change them on the next visit.
+    pub smart_opened: Option<i64>,
 }
 
 impl Default for OpenOptions {
@@ -226,6 +229,7 @@ impl Default for OpenOptions {
             downloaded_only: false,
             history_current_only: false,
             release_filters: None,
+            smart_opened: None,
         }
     }
 }
@@ -537,9 +541,11 @@ impl crate::source::SourceOwner {
         let require_source = || {
             source.ok_or_else(|| library::LibraryError::InvalidRequest("No source selected".into()))
         };
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_secs() as i64);
+        let now = options.smart_opened.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_secs() as i64)
+        });
         let favorites = options.favorites_only && supports_favorite_filter(route, options.category)
             || matches!(
                 route,

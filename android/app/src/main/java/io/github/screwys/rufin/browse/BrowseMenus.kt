@@ -681,7 +681,7 @@ internal class BrowseChoiceSource(
                     is Route.AlbumArtistDiscography -> Route.AlbumArtistTracks(route.v1)
                     else -> route
                 }
-                val query = library.browse(tracks, "tracks", filter, LibraryField.TITLE, false, false, false)
+                val query = library.browse(tracks, "tracks", filter, LibraryField.TITLE, false, false, false, null)
                 try {
                     val count = query.count().toInt()
                     val rows = query.page(offset.toULong(), params.loadSize.toUInt())

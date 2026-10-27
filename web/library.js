@@ -355,6 +355,9 @@ function query() {
   if (route === "favorites") params.set("favorites", "true");
   if (detail) params.set("id", detail.id);
   if (detail?.album_artists) params.set("album_artists", "true");
+  // An open Smart Playlist keeps the members it opened with until the next visit.
+  if (route === "smart-playlists" && detail)
+    params.set("opened", (detail.opened ??= Math.floor(Date.now() / 1000)));
   return params;
 }
 

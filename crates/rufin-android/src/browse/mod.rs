@@ -172,6 +172,7 @@ pub struct AndroidBrowseQuery {
     descending: bool,
     blocks: Vec<library::HomeBlockKind>,
     history_current_only: bool,
+    smart_opened: Option<i64>,
     favorites_only: bool,
     downloaded_only: bool,
     home_snapshot: tokio::sync::OnceCell<Vec<(AndroidBrowseRow, MemberSelection)>>,
@@ -255,6 +256,7 @@ impl AndroidBrowseQuery {
                             favorites_only: self.favorites_only,
                             downloaded_only: self.downloaded_only,
                             history_current_only: self.history_current_only,
+                            smart_opened: self.smart_opened,
                             ..Default::default()
                         },
                         library::RouteSeedWindow::top(),

@@ -40,7 +40,13 @@ pub(super) async fn track_query(
         "playlist" | "entries" => Collection::Playlist(key(parameters, "id")?),
         "smart-playlist" | "smart-tracks" => Collection::Smart {
             key: key(parameters, "id")?,
-            now: now(),
+            // The page's opening time: it keeps the members it opened with.
+            now: match parameters.get("opened") {
+                Some(opened) => opened
+                    .parse()
+                    .map_err(|_| bad_request("Invalid opened time"))?,
+                None => now(),
+            },
         },
         _ => return Err(bad_request("Unknown media kind")),
     };
